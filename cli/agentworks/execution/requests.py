@@ -166,6 +166,19 @@ class LoginShell(RequestOptions):
     """
 
 
+@dataclass(frozen=True)
+class TerminalCommand(RequestOptions):
+    """A literal argv on the operator's terminal, run with no shell. ``argv[0]`` is searched in the guest's ``PATH``.
+
+    Valid only for ``attach``, as :class:`LoginShell` is, and like it takes no
+    deadline. The launcher resets the terminal half as it does for a login
+    shell and then execs the argv; a command it cannot find exits 127, any
+    other ``exec`` failure 126 and a working directory it cannot enter 125.
+    """
+
+    argv: tuple[str, ...] = field(repr=False)
+
+
 def shell_command_line(args: Sequence[str]) -> str:
     """Several arguments as one shell command line, as ``shlex.join`` writes it.
 
@@ -217,8 +230,11 @@ class ToFile:
 OutputSink = CaptureOutput | DiscardOutput | ToFile
 """Where ``run`` puts one of the payload's streams."""
 
-Request = RunRequest | LoginShell
-"""Every request kind; ``LoginShell`` is the one ``attach`` takes."""
+TerminalRequest = LoginShell | TerminalCommand
+"""What ``attach`` takes: a request that runs on the operator's terminal."""
+
+Request = RunRequest | TerminalRequest
+"""Every request kind."""
 
 
 @dataclass(frozen=True)

@@ -33,15 +33,17 @@ those two attributes once (the `vm_access_recorder` fixture) and every manager f
 | --------------------------------------------- | ------------------------ | --------------------------------------------------------- |
 | `run(request, stdout=, stderr=, check=False)` | `Result`                 | Buffered, into each stream's sink                         |
 | `stream(request, stdin=, stdout=, stderr=)`   | the guest's status       | Live output; `stream_to_operator` wires the process stdio |
-| `attach(login_shell)`                         | the shell's exit status  | The operator's terminal, under `guarded_terminal`         |
+| `attach(request, clear_screen_on_exit=False)` | the exit status          | The operator's terminal, under `guarded_terminal`         |
 | `forward(forwards, verbose=False)`            | the client's exit status | Blocking `ssh -N -L`; the caller owns the interrupt       |
 
 A request is a `Command` (a literal argv, run with no shell), a `Script` (source text run by `sh`,
 `bash` or the identity's default shell), a `PythonProgram` (core's own Python source and its
-arguments) or a `LoginShell` (valid only for `attach`). Each takes `env` and `cwd` (absolute; `None`
-is the home directory); the first three also take `deadline` (seconds of local waiting; it never
-claims the guest command stopped). `vm exec` sends a `Script` under the identity's default shell,
-with several arguments shell-joined.
+arguments), a `LoginShell` (the identity's default shell as an interactive login shell) or a
+`TerminalCommand` (a literal argv on the operator's terminal, `argv[0]` searched in the guest's
+`PATH`); the last two are valid only for `attach`. Each takes `env` and `cwd` (absolute; `None` is
+the home directory); the first three also take `deadline` (seconds of local waiting; it never claims
+the guest command stopped). `vm exec` sends a `Script` under the identity's default shell, with
+several arguments shell-joined.
 
 `Script` and `PythonProgram` take `login` and `interactive`, for a payload that must see the
 environment the account's login or interactive startup builds, as a harness's own shell would. A
@@ -86,7 +88,7 @@ They also take `elevated`, which runs the whole operation as root under `sudo -n
 of the constant first-stage command (below), not part of the request message, and the launcher
 rebuilds the payload's environment from root's passwd entry. An agent-bound access refuses an
 elevated request with `PermissionDenied` before anything resolves, and the guest's `sudo -n` is the
-second layer. `LoginShell` has no such option, so an attach never elevates.
+second layer. `LoginShell` and `TerminalCommand` have no such option, so an attach never elevates.
 
 `reachability.wait(access, wording=)` is the one retry loop: it polls a fixed `true` probe (16
 attempts, 10 seconds each, 5 seconds apart, a second probe confirming an answer that followed a
@@ -274,12 +276,17 @@ ssh takes the window size and terminal modes from its own stdin, so the operator
 be the terminal half's stdin, but the request must still travel privately. `attach` therefore opens
 two connections. The first sends the request marked `park`: the launcher creates a private socket
 directory under `/tmp`, listens and waits. The second runs the terminal half, whose stage 0 connects
-to that socket, collects the launcher and the request, and execs the login shell on the terminal. No
-guest text reaches a command line, and the parked launcher removes its directory when the second
-connection is served, when the client closes its end, after 30 seconds, or on `SIGHUP` or `SIGTERM`.
-The client gives up on a parking connection that never reports `parked` within 60 seconds (its own
-bound for connecting and running the account's startup files; the 30 seconds above start only after
-`parked`), and raises before the terminal is touched.
+to that socket, collects the launcher and the request, and execs the login shell or the terminal
+command on the terminal. A terminal command that cannot be found exits 127, and one that cannot be
+executed 126; a working directory that cannot be entered is refused while parking, before the
+terminal is touched. No guest text reaches a command line, and the parked launcher removes its
+directory when the second connection is served, when the client closes its end, after 30 seconds, or
+on `SIGHUP` or `SIGTERM`. The client gives up on a parking connection that never reports `parked`
+within 60 seconds (its own bound for connecting and running the account's startup files; the 30
+seconds above start only after `parked`), and raises before the terminal is touched.
+`clear_screen_on_exit` clears the visible screen after the terminal is restored and before the
+notice about a dropped connection, for a full-screen attach on a terminal that does not restore
+cleanly (`[terminal] clear_on_detach`).
 
 ## Root scripts
 

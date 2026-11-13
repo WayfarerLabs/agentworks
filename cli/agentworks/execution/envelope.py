@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution.agw_launch import STDLIB_MISSING_STATUS
-from agentworks.execution.requests import Command, LoginShell, PythonProgram, Script
+from agentworks.execution.requests import Command, LoginShell, PythonProgram, Script, TerminalCommand
 from agentworks.execution.results import (
     REFUSAL_CODE,
     Completed,
@@ -95,21 +95,21 @@ def _text(value: str, what: str) -> bytes:
 def encode(request: Request, *, nonce: str, term: str | None = None, handover: str | None = None) -> bytes:
     """The envelope for ``request``, unframed.
 
-    A :class:`LoginShell` is the one request that travels as a handover, so it
-    needs the ``handover`` token and the operator's ``term``; every other
-    request runs in ``run`` mode and takes neither.
+    A :class:`LoginShell` or a :class:`TerminalCommand` travels as a handover,
+    so it needs the ``handover`` token and the operator's ``term``; every
+    other request runs in ``run`` mode and takes neither.
     """
-    if isinstance(request, LoginShell):
+    if isinstance(request, LoginShell | TerminalCommand):
         if handover is None or term is None:
-            raise ValueError("a login shell travels as a handover and needs its token and TERM")
-        mode, kind = "park", "shell"
+            raise ValueError("a terminal request travels as a handover and needs its token and TERM")
+        mode, kind = "park", "shell" if isinstance(request, LoginShell) else "argv"
     else:
         mode, kind = (
             "run",
             "argv" if isinstance(request, Command) else "python" if isinstance(request, PythonProgram) else "script",
         )
         if handover is not None or term is not None:
-            raise ValueError("only a login shell takes a handover or TERM")
+            raise ValueError("only a terminal request takes a handover or TERM")
     body: dict[str, object] = {
         "nonce": nonce,
         "mode": mode,
@@ -119,7 +119,7 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
         "term": None if term is None else _checked_term(term),
         "handover": handover,
     }
-    if isinstance(request, Command):
+    if isinstance(request, Command | TerminalCommand):
         body["argv"] = checked_argv(request.argv)
     elif isinstance(request, Script):
         _text(request.source, "script source")

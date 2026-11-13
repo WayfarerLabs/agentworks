@@ -10,7 +10,7 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution import envelope
 from agentworks.execution.envelope import MAX_STRING_BYTES, encode
-from agentworks.execution.requests import Bytes, Command, LoginShell, PythonProgram, Script, Shell
+from agentworks.execution.requests import Bytes, Command, LoginShell, PythonProgram, Script, Shell, TerminalCommand
 
 NONCE = "0" * 32
 
@@ -20,7 +20,7 @@ def decode_text(value: str) -> bytes:
     return value.encode("utf-8", "surrogateescape")
 
 
-def wire(request: Command | Script | PythonProgram | LoginShell, **extra: str) -> dict[str, object]:
+def wire(request: Command | Script | PythonProgram | LoginShell | TerminalCommand, **extra: str) -> dict[str, object]:
     body = encode(request, nonce=NONCE, **extra)
     assert body.isascii()
     return json.loads(body)  # type: ignore[no-any-return]
@@ -79,14 +79,22 @@ def test_a_login_shell_travels_as_a_handover_with_its_terminal_type() -> None:
     assert (body["mode"], body["kind"], body["term"], body["handover"]) == ("park", "shell", "xterm", "ab" * 8)
 
 
+def test_a_terminal_command_travels_as_a_handover_with_its_argv_and_terminal_type() -> None:
+    body = wire(TerminalCommand(("tmux", "attach", "-t", "=s1"), cwd="/srv/ws"), term="xterm", handover="ab" * 8)
+
+    assert (body["mode"], body["kind"], body["term"], body["handover"]) == ("park", "argv", "xterm", "ab" * 8)
+    assert body["argv"] == ["tmux", "attach", "-t", "=s1"]
+
+
 @pytest.mark.parametrize(
     "request_",
     [
         LoginShell(),
+        TerminalCommand(("tmux",)),
         Command(("true",)),
     ],
 )
-def test_only_a_login_shell_takes_a_handover(request_: Command | LoginShell) -> None:
+def test_only_a_terminal_request_takes_a_handover(request_: Command | LoginShell | TerminalCommand) -> None:
     extra = {"term": "xterm", "handover": "ab" * 8} if isinstance(request_, Command) else {}
     with pytest.raises(ValueError):
         encode(request_, nonce=NONCE, **extra)

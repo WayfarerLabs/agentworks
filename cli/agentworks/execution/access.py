@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.execution.requests import Forward, LoginShell, OutputSink, RunRequest
+    from agentworks.execution.requests import Forward, OutputSink, RunRequest, TerminalRequest
 
 
 SIGPIPE_STATUS = 128 + 13
@@ -185,8 +185,14 @@ class VMAccess:
                 return refusal_status(code)
             return result.require_completed(self.vm_name)
 
-    def attach(self, request: LoginShell) -> int:
-        """Attach the operator's terminal to a login shell and return its exit status."""
+    def attach(self, request: TerminalRequest, *, clear_screen_on_exit: bool = False) -> int:
+        """Attach the operator's terminal to a login shell or a terminal command and return its exit status.
+
+        ``clear_screen_on_exit`` clears the visible screen once the terminal
+        is restored and before any notice about the connection, for a
+        full-screen attach on a terminal that does not restore cleanly
+        (``terminal.clear_screen_on_detach``).
+        """
         ssh = client.resolve_ssh()
         policy, destination = self._policy(), self._destination()
         token, nonce = envelope.new_handover_token(), envelope.new_nonce()
@@ -206,7 +212,13 @@ class VMAccess:
             )
             with self._passphrase_hint_on_connection_failure():
                 return attach_module.attach(
-                    vm_name=self.vm_name, wire=wire, nonce=nonce, parking_argv=parking, terminal_argv=terminal, log=log
+                    vm_name=self.vm_name,
+                    wire=wire,
+                    nonce=nonce,
+                    parking_argv=parking,
+                    terminal_argv=terminal,
+                    log=log,
+                    clear_screen_on_exit=clear_screen_on_exit,
                 )
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:

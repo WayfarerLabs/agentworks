@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
+    from agentworks.execution.requests import TerminalRequest
+
 
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,7 +95,12 @@ def _patch_common(
     recorder = AccessRecorder()
     monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
     monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
-    recorder.access(Admin()).attach = lambda request: interactive_log.append(True) or 0  # type: ignore[method-assign]
+
+    def attach(request: TerminalRequest, *, clear_screen_on_exit: bool = False) -> int:
+        interactive_log.append(True)
+        return 0
+
+    recorder.access(Admin()).attach = attach  # type: ignore[method-assign]
 
 
 # -- Tailscale-host gate ------------------------------------------------------

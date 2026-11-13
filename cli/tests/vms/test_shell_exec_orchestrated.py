@@ -26,7 +26,7 @@ from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
-    from agentworks.execution.requests import LoginShell
+    from agentworks.execution.requests import TerminalRequest
     from tests.vm_access_support import AccessRecorder
 
 # A vm template with an env-block secret reference: a RUNTIME input
@@ -599,9 +599,9 @@ def test_shell_interactive_runs_inside_the_held_active_span(
     admin_access = vm_access_recorder.access(Admin())
     attach = admin_access.attach
 
-    def _tracking(request: LoginShell) -> int:
+    def _tracking(request: TerminalRequest, *, clear_screen_on_exit: bool = False) -> int:
         events.append("interactive")
-        return attach(request)
+        return attach(request, clear_screen_on_exit=clear_screen_on_exit)
 
     admin_access.attach = _tracking  # type: ignore[method-assign]
 

@@ -159,7 +159,8 @@ def main(f: int, g: bytes) -> None:
         signal.pthread_sigmask(signal.SIG_SETMASK, ())
 
     # -- tty: the terminal half of an attach. No check, no markers and no
-    # child: it becomes the shell, so the shell is the session leader.
+    # child: it becomes the login shell or the terminal command, which is
+    # then the session leader.
 
     if mode == "tty":
 
@@ -177,8 +178,11 @@ def main(f: int, g: bytes) -> None:
             if int(name) > 2:
                 with contextlib.suppress(OSError):
                     os.close(int(name))
-        flags = ["-l", "-i"] if os.isatty(0) else ["-l"]
         try:
+            if kind == "argv":
+                # A terminal command: its argv[0] is searched in the rebuilt PATH.
+                os.execvpe(arguments[0], arguments, environment)
+            flags = ["-l", "-i"] if os.isatty(0) else ["-l"]
             os.execve(shell, [shell, *flags], environment)
         except OSError as error:
             tty_refusal(exec_code(error))
@@ -260,13 +264,14 @@ def main(f: int, g: bytes) -> None:
     # -- park: wait for the terminal half to collect the request.
 
     if mode == "park":
-        try:
-            shell_info = os.stat(shell)
-        except OSError as error:
-            refuse(exec_code(error))
-        else:
-            if not stat.S_ISREG(shell_info.st_mode) or not os.access(shell, os.X_OK):
-                refuse("exec EACCES")
+        if kind == "shell":
+            try:
+                shell_info = os.stat(shell)
+            except OSError as error:
+                refuse(exec_code(error))
+            else:
+                if not stat.S_ISREG(shell_info.st_mode) or not os.access(shell, os.X_OK):
+                    refuse("exec EACCES")
 
         def stop(number: int, frame_: object) -> None:
             sys.exit(1)

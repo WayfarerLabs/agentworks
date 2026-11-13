@@ -5,7 +5,8 @@ operator's real terminal has to be the terminal half's stdin. The request still
 has to travel on a private stdin, so it goes on a first connection that parks:
 agw-launch creates a private socket directory on the guest and waits. The
 terminal half's stage 0 connects to that socket, collects the launcher and the
-request from it, and execs the login shell on the terminal. No guest text
+request from it, and execs the login shell or the terminal command on the
+terminal. No guest text
 reaches a command line, and the secret environment never touches the terminal
 connection's argv.
 """
@@ -19,7 +20,7 @@ from agentworks.execution import ssh_process
 from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.pump import Deadline, PipeSession, StopReason
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
-from agentworks.terminal import guarded_terminal
+from agentworks.terminal import emit_clear, guarded_terminal
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,6 +52,7 @@ def attach(
     parking_argv: Sequence[str],
     terminal_argv: Sequence[str],
     log: Path,
+    clear_screen_on_exit: bool = False,
 ) -> int:
     """Park the request, run the terminal half under the guard, and return its exit status.
 
@@ -71,6 +73,10 @@ def attach(
         with guarded_terminal() as guard:
             code = ssh_process.run_terminal(terminal_argv)
             guard.clean_exit = code == 0
+        # After the guard, whose mode resets clearing does not cover, and
+        # before the notice, so the notice lands on the cleared screen.
+        if clear_screen_on_exit:
+            emit_clear()
         # After the guard: its exit pass leaves the alternate screen, which
         # would wipe anything written before it closes (I6).
         if code == _SSH_STATUS_CONNECTION_ENDED:

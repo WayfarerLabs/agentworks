@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     import pytest
 
     from agentworks.execution.files import Files
-    from agentworks.execution.requests import Forward, LoginShell, OutputSink, RunRequest
+    from agentworks.execution.requests import Forward, OutputSink, RunRequest, TerminalRequest
 
 
 @dataclass(frozen=True)
@@ -151,8 +151,8 @@ class RecordingVMAccess(VMAccess):
         self.calls.append(Call(self.identity, "stream", request, {"stdin": stdin, "stdout": stdout, "stderr": stderr}))
         return self._status(self.stream_status)
 
-    def attach(self, request: LoginShell) -> int:
-        self.calls.append(Call(self.identity, "attach", request))
+    def attach(self, request: TerminalRequest, *, clear_screen_on_exit: bool = False) -> int:
+        self.calls.append(Call(self.identity, "attach", request, {"clear_screen_on_exit": clear_screen_on_exit}))
         return self._status(self.attach_status)
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:

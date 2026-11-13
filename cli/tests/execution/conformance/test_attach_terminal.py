@@ -10,7 +10,8 @@ import pytest
 
 from agentworks import output
 from agentworks.execution import attach as attach_module
-from agentworks.execution.requests import LoginShell
+from agentworks.execution.errors import RequestRefused
+from agentworks.execution.requests import LoginShell, TerminalCommand
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -32,6 +33,7 @@ def events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
             log.append(("exit", handle.clean_exit))
 
     monkeypatch.setattr(attach_module, "guarded_terminal", guard)
+    monkeypatch.setattr(attach_module, "emit_clear", lambda: log.append(("clear", None)))
     monkeypatch.setattr(output, "warn", lambda message: log.append(("warn", message)))
     monkeypatch.setattr(output, "detail", lambda message: log.append(("detail", message)))
     return log
@@ -96,3 +98,47 @@ def test_the_login_shell_gets_the_requested_environment_without_it_touching_a_co
     assert code == 0
     assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), b"home=/tmp"]
     assert not any(secret in argument for argument in terminal.argv)
+
+
+def test_a_requested_clear_follows_the_guard_and_precedes_the_notice(
+    local_lane: LocalLane, events: list[tuple[str, Any]]
+) -> None:
+    with local_lane.terminal(behavior=lambda argv, half: 255):
+        local_lane.access.attach(LoginShell(cwd=local_lane.workdir), clear_screen_on_exit=True)
+
+    assert [kind for kind, _ in events] == ["enter", "exit", "clear", "warn", "detail"]
+
+
+# -- T1: a terminal command --------------------------------------------------------------
+
+
+def test_a_terminal_command_runs_its_argv_from_path_with_the_requested_environment(local_lane: LocalLane) -> None:
+    secret = "sekrit-env-value-5e"
+    command = TerminalCommand(("sh", "-c", 'echo "token=$TOKEN"; pwd'), cwd=local_lane.workdir, env={"TOKEN": secret})
+    with local_lane.terminal() as terminal:
+        code = local_lane.access.attach(command)
+
+    assert code == 0
+    assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), local_lane.workdir.encode()]
+    assert not any(secret in argument for argument in terminal.argv)
+
+
+@pytest.mark.parametrize(
+    ("argv", "status", "code"),
+    [(("agw-no-such-command-5e",), 127, "exec ENOENT"), (("/dev/null",), 126, "exec EACCES")],
+)
+def test_a_terminal_command_that_cannot_run_exits_with_the_shell_status(
+    local_lane: LocalLane, argv: tuple[str, ...], status: int, code: str
+) -> None:
+    with local_lane.terminal() as terminal:
+        assert local_lane.access.attach(TerminalCommand(argv, cwd=local_lane.workdir)) == status
+
+    assert f"agw: refused: {code}".encode() in terminal.stderr
+
+
+def test_a_terminal_command_whose_directory_is_missing_is_refused_before_the_terminal(local_lane: LocalLane) -> None:
+    with local_lane.terminal() as terminal, pytest.raises(RequestRefused) as refused:
+        local_lane.access.attach(TerminalCommand(("true",), cwd="/nonexistent/agw-5e"))
+
+    assert refused.value.code == "cwd"
+    assert terminal.calls == 0
