@@ -166,20 +166,12 @@ def _output_tail(directory: str) -> bytes:
 
 
 def _read_spec() -> tuple[list[str], dict[str, str]] | None:
-    """The spec from stdin, or ``None`` when it is not an argv of strings and an environment of strings."""
+    """The spec from stdin, or ``None`` when it is not JSON with both fields; the client checked their content."""
     try:
         spec = json.loads(sys.stdin.buffer.read())
-        argv, env = spec["argv"], spec["env"]
+        return spec["argv"], spec["env"]
     except (ValueError, KeyError, TypeError):
         return None
-    if not isinstance(argv, list) or not argv or not isinstance(env, dict):
-        return None
-    strings = [*argv, *env.values(), *env]
-    if not all(isinstance(value, str) and "\0" not in value for value in strings):
-        return None
-    if any(not name or "=" in name for name in env):
-        return None
-    return argv, env
 
 
 def _make_base(base: str) -> None:
@@ -210,7 +202,7 @@ def _launch(base: str, directory: str) -> int:
 
     spec = _read_spec()
     if spec is None:
-        sys.stderr.write("the launch spec is not an argv and an environment of strings\n")
+        sys.stderr.write("the launch spec is not a JSON object of argv and env\n")
         return EXIT_INVALID
     _make_base(base)
     try:

@@ -113,12 +113,12 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
         "mode": mode,
         "kind": kind,
         "cwd": _checked_cwd(request.cwd),
-        "env": _checked_env(request.env),
+        "env": checked_env(request.env),
         "term": None if term is None else _checked_term(term),
         "handover": handover,
     }
     if isinstance(request, Command):
-        body["argv"] = _checked_argv(request.argv)
+        body["argv"] = checked_argv(request.argv)
     elif isinstance(request, Script):
         _text(request.source, "script source")
         body.update(
@@ -154,7 +154,12 @@ def _checked_term(term: str) -> str:
     return term
 
 
-def _checked_argv(argv: tuple[str, ...]) -> list[str]:
+def checked_argv(argv: tuple[str, ...]) -> list[str]:
+    """``argv`` as a list, once it has a program name and every argument is one an ``exec`` can take.
+
+    The envelope's rule for a ``Command``; detached work applies it to the
+    argv it sends on stdin, which no envelope encodes.
+    """
     if not argv or not argv[0]:
         raise ValidationError("a command needs a non-empty program name")
     return _checked_arguments(argv)
@@ -167,7 +172,8 @@ def _checked_arguments(arguments: tuple[str, ...]) -> list[str]:
     return list(arguments)
 
 
-def _checked_env(env: Mapping[str, str]) -> dict[str, str]:
+def checked_env(env: Mapping[str, str]) -> dict[str, str]:
+    """``env`` as a dict, once every name is a shell name and every entry one an ``exec`` can take."""
     checked: dict[str, str] = {}
     for name, value in env.items():
         if not _ENV_NAME.fullmatch(name):

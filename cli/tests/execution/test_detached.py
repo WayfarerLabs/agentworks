@@ -76,8 +76,12 @@ def test_each_new_launch_has_a_fresh_id_on_this_vm() -> None:
         Command(("tar",), elevated=True, cwd="/srv"),
         Command(("tar",), elevated=True, deadline=60),
         Script("tar", Shell.SH, elevated=True),
+        Command(("tar", "a\0b"), elevated=True),
+        Command(("",), elevated=True),
+        Command(("tar",), elevated=True, env={"BAD-NAME": "x"}),
+        Command(("tar",), elevated=True, env={"OK": "a\0b"}),
     ],
-    ids=["not-elevated", "stdin", "cwd", "deadline", "script"],
+    ids=["not-elevated", "stdin", "cwd", "deadline", "script", "nul-argument", "no-program", "env-name", "nul-env"],
 )
 def test_launch_refuses_a_request_detached_work_cannot_take_with_nothing_sent(command: Command) -> None:
     access = admin()

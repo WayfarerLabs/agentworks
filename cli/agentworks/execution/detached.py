@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution import detached_program, reachability
 from agentworks.execution.agw_launch import refusal_status
+from agentworks.execution.envelope import checked_argv, checked_env
 from agentworks.execution.errors import CommandFailed, DetachedRefused, ExecutionIncomplete, RequestRefused
 from agentworks.execution.requests import Bytes, Command, NoInput, PythonProgram
 from agentworks.execution.results import REFUSAL_CODE
@@ -134,7 +135,8 @@ class Detached:
             raise ValidationError("a detached launch is elevated, with no stdin and no working directory")
         if command.deadline is not None:
             raise ValidationError("a detached launch takes no deadline: its observer bounds it")
-        spec = json.dumps({"argv": list(command.argv), "env": dict(command.env)}, ensure_ascii=True)
+        # The envelope's own rules: the spec travels on stdin, where no envelope checks it.
+        spec = json.dumps({"argv": checked_argv(command.argv), "env": checked_env(command.env)}, ensure_ascii=True)
         result = self._access.run(
             self._program("launch", launch_id, LAUNCH_DEADLINE, stdin=Bytes(spec.encode("ascii")))
         )

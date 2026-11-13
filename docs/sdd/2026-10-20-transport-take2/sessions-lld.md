@@ -227,11 +227,12 @@ running launch at discard, and `CommandFailed` otherwise.
 
 `launch` takes a `Command` with `elevated=True`, `stdin=NoInput()`, no `cwd` and no `deadline`;
 anything else is a `ValidationError` before dispatch, since a plugin holding an admin access can
-reach it. Detached work runs as root under the root-only base, in its launch's `work/` directory,
-and is bounded by its observer, not by a deadline. It takes no input: backup passes its paths as
-arguments (below), so nothing is staged on the guest for it. Only `Command` is accepted because
-backup, the only caller, runs one argv. An agent's access refuses the elevated request with
-`PermissionDenied`, as for any request.
+reach it, and so are an argv or environment the envelope would refuse (`envelope.checked_argv` and
+`checked_env`), since the spec travels on stdin where no envelope checks it. Detached work runs as
+root under the root-only base, in its launch's `work/` directory, and is bounded by its observer,
+not by a deadline. It takes no input: backup passes its paths as arguments (below), so nothing is
+staged on the guest for it. Only `Command` is accepted because backup, the only caller, runs one
+argv. An agent's access refuses the elevated request with `PermissionDenied`, as for any request.
 
 ### The base directory
 
