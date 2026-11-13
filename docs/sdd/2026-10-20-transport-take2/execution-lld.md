@@ -499,11 +499,11 @@ The classifier combines both filters with ssh's own exit status:
    client closing its pipe) or the timeout it writes `end` and `refused handover`. In every case a
    `finally` removes the socket and the directory, so a failed second connection leaves nothing. The
    trailer lets the client tell a timeout from a drop.
-5. After the second connection returns, still inside the guard, `guard.clean_exit = code == 0`.
-   After the guard, a code of 255 prints the notice "connection ended or the command exited 255;
-   terminal restored" with the existing detail line (I6), reimplemented in `attach.py` because the
-   legacy helper is `transports/ssh.py:77`. The client then closes the parking connection's stdin,
-   pumps it for up to two seconds and ends it.
+5. After the second connection returns, the guard's exit pass restores the terminal. After the
+   guard, a code of 255 prints the notice "connection ended or the command exited 255; terminal
+   restored" with the existing detail line (I6), reimplemented in `attach.py` because the legacy
+   helper is `transports/ssh.py:77`. The client then closes the parking connection's stdin, pumps it
+   for up to two seconds and ends it.
 
 The parking connection fails first on a missing `python3`, a trust mismatch, a refusal or a refused
 connection, so `attach` raises `VMNotReady`, `TrustMismatch`, `RequestRefused` or
