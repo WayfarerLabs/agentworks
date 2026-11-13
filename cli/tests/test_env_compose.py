@@ -136,12 +136,15 @@ def test_secrets_bypass_substitution_and_escaping() -> None:
 
 
 @pytest.mark.parametrize("value", ["/srv/line\nbreak", "/srv/carriage\rreturn", "/srv/nul\0value"])
-def test_rendered_plaintext_is_checked_for_environment_delivery(value: str) -> None:
+@pytest.mark.parametrize("scope", ["vm", "session"])
+def test_rendered_plaintext_is_checked_for_environment_delivery(value: str, scope: str) -> None:
+    source = {"CONFIG": EnvEntry("${agw:workspace_dir}")}
     with pytest.raises(ValidationError) as caught:
         compose_env(
             values={},
             ctx=_ctx(workspace_dir=value),
-            vm={"CONFIG": EnvEntry("${agw:workspace_dir}")},
+            vm=source if scope == "vm" else {},
+            session=source if scope == "session" else None,
         )
     assert caught.value.entity_name == "env.CONFIG"
     assert value not in repr((caught.value.args, vars(caught.value)))

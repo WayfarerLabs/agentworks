@@ -281,6 +281,7 @@ def test_unreadable_overlay_preserves_other_session_health_checks() -> None:
 def test_configuration_fallback_reports_malformed_supported_shell_overlay(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    private_value = "private-malformed-overlay-command"
     config_path = write_cfg(
         tmp_path,
         ManifestDoc("vm-template", "default"),
@@ -294,7 +295,9 @@ def test_configuration_fallback_reports_malformed_supported_shell_overlay(
         database.insert_session("broken", "work", "default", SessionMode.ADMIN)
         database.insert_session("healthy", "work", "default", SessionMode.ADMIN)
         database.instance_state.put_desired_overlay(
-            "session", "broken", VersionedPayload(1, {"harness_integration": {"name": "shell", "command": 42}})
+            "session",
+            "broken",
+            VersionedPayload(1, {"harness_integration": {"name": "shell", "command": [private_value]}}),
         )
         database.instance_state.put_desired_overlay(
             "session",
@@ -311,3 +314,4 @@ def test_configuration_fallback_reports_malformed_supported_shell_overlay(
             ("session/healthy.command", Status.WARN),
         }
         assert any(check.name == "Live resource coverage" and check.status is Status.FAIL for check in group.checks)
+        assert private_value not in repr(group.checks)
