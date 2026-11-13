@@ -11,10 +11,10 @@ tmux session using the same wrapper pattern as the VM console.
 
 from __future__ import annotations
 
-import posixpath
 import shlex
 from typing import TYPE_CHECKING
 
+from agentworks.execution.files import normalized_guest_path
 from agentworks.execution.requests import Command
 from agentworks.sessions.multi_console import ADMIN_SHELL_WINDOW
 from agentworks.sessions.tmux import exact_tmux_target, tmux_cmd
@@ -39,11 +39,11 @@ def console_session_name(ws_name: str) -> str:
 def config_path(workspace_path: str) -> str:
     """The generated config in the workspace itself, normalized.
 
-    A stored workspace path can carry a trailing ``/`` or a ``.`` component
-    (a row from an earlier release, a ``paths.vm_workspaces`` written that
-    way), which the file operations refuse, so the path is normalized first.
+    A stored workspace path can carry a trailing ``/``, a ``.`` component or a
+    leading ``//`` (a row from an earlier release), which the file operations
+    refuse, so the path is normalized first.
     """
-    return f"{posixpath.normpath(workspace_path)}/.tmuxinator.yml"
+    return f"{normalized_guest_path(workspace_path)}/.tmuxinator.yml"
 
 
 def config_link(home: str, ws_name: str) -> str:

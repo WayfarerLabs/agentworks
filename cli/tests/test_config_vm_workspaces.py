@@ -103,9 +103,18 @@ def test_load_config_rejects_home_vm_workspaces(tmp_path: Path) -> None:
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("path", ["/srv/ws", "/srv/ws/", "/srv//ws/./"])
+@pytest.mark.parametrize("path", ["/srv/ws", "/srv/ws/", "/srv//ws/./", "//srv/ws", "///srv/ws"])
 def test_load_config_accepts_non_home_vm_workspaces(tmp_path: Path, path: str) -> None:
     """A valid data-volume path is stored in canonical guest form."""
     config_file = _write_config(tmp_path, path)
     cfg = load_config(config_file)
     assert cfg.paths.vm_workspaces == "/srv/ws"
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("path", ["workspaces", "./ws", "~/ws", "srv/ws", ""])
+def test_load_config_refuses_a_relative_vm_workspaces(tmp_path: Path, path: str) -> None:
+    """Every workspace path is built from the value, so a relative one is refused at load."""
+    config_file = _write_config(tmp_path, path)
+    with pytest.raises(ConfigError):
+        load_config(config_file)

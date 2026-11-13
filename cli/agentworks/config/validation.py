@@ -38,8 +38,14 @@ def validate_admin_username(admin_username: str) -> None:
         )
 
 
-def validate_vm_workspaces(path: str) -> None:
-    """Reject a ``paths.vm_workspaces`` value that lives at or under ``/home``.
+def validate_vm_workspaces(path: str) -> str:
+    """Return ``paths.vm_workspaces`` normalized, refusing a relative value or one at or under ``/home``.
+
+    The value names a directory on the VM, and every workspace path is built
+    from it, so it must be absolute; it is normalized once here
+    (``execution.files.normalized_guest_path``: ``//``, a trailing ``/`` and
+    ``.`` segments collapsed, a leading ``//`` made ``/``), so the paths built
+    from it have one spelling.
 
     ``/home`` is the Linux user-home namespace on the VM. The admin and agent
     users each own ``/home/<user>``, and those homes are locked to mode 0750
@@ -49,15 +55,11 @@ def validate_vm_workspaces(path: str) -> None:
     reach the shared workspace, defeating the isolation. Keeping workspaces
     outside ``/home`` is the single source of truth that makes the 0750 homes
     safe, so we reject the misconfiguration at load time rather than warn at
-    provisioning time.
-
-    The path is normalized first (``//`` collapsed, trailing slash and ``.``
-    segments removed) so ``/home``, ``/home/``, ``/home/foo``, and
-    ``/home/foo/bar`` are all rejected. The check is ``== "/home"`` or a
-    ``/home/`` prefix on the normalized path, NOT a bare ``/home`` prefix, so
-    sibling paths that merely start with those characters (``/homelab``,
-    ``/home2/ws``) are accepted. Raises ``ConfigError`` (the type ``_load_paths``
-    already raises) with a migration hint.
+    provisioning time. The check is ``== "/home"`` or a ``/home/`` prefix on the
+    normalized path, NOT a bare ``/home`` prefix, so sibling paths that merely
+    start with those characters (``/homelab``, ``/home2/ws``) are accepted.
+    Raises ``ConfigError`` (the type ``_load_paths`` already raises) with a
+    migration hint.
 
     Normalization uses ``posixpath`` explicitly, not ``os.path``. This value is
     always a VM-side POSIX path regardless of the operator's host OS, and
@@ -66,9 +68,14 @@ def validate_vm_workspaces(path: str) -> None:
     match neither branch below and silently accept every ``/home`` path.
     ``posixpath`` is the house choice for VM paths across the codebase.
     """
-    import posixpath
+    from agentworks.execution.files import normalized_guest_path
 
-    normalized = posixpath.normpath(path)
+    normalized = normalized_guest_path(path)
+    if not normalized.startswith("/"):
+        raise ConfigError(
+            f"paths.vm_workspaces must be an absolute path on the VM (got {path!r}), "
+            "such as the default '/opt/agentworks/workspaces'."
+        )
     if normalized == "/home" or normalized.startswith("/home/"):
         raise ConfigError(
             f"paths.vm_workspaces must not be at or under /home (got {path!r}, "
@@ -78,6 +85,7 @@ def validate_vm_workspaces(path: str) -> None:
             "bind-mount a directory there), rather than nesting workspaces under /home. "
             "A symbolic link will not do: workspace files are never written through one."
         )
+    return normalized
 
 
 _MISE_DURATION_RE = re.compile(r"^[1-9][0-9]*[dhwmy]$")

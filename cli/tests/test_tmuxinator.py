@@ -274,3 +274,10 @@ def test_the_generated_config_is_written_private_to_its_admin() -> None:
     assert isinstance(request, PythonProgram) and request.args[0] == "write"
     params = json.loads(request.args[1])
     assert (params["path"], params["mode"]) == ("/srv/ws/.tmuxinator.yml", 0o600)
+
+
+@pytest.mark.parametrize("stored", ["/data/ws", "/data/ws/", "//data/ws", "/data//./ws/"])
+def test_a_stored_workspace_path_names_its_config_in_one_spelling(stored: str) -> None:
+    from agentworks.workspaces.tmuxinator import config_path
+
+    assert config_path(stored) == "/data/ws/.tmuxinator.yml"
