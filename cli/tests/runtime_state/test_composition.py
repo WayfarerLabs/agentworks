@@ -255,21 +255,25 @@ def test_dry_run_has_no_native_guard_or_workload_sources(db, make_config, runtim
     assert not (db.path.parent / f".{db.path.name}.native-locks").exists()
 
 
-def unavailable_site() -> ManifestDoc:
+def proxmox_site(name: str, token_secret: str) -> ManifestDoc:
     return ManifestDoc(
         "vm-site",
-        "unavailable",
+        name,
         {
             "platform": {
                 "name": "proxmox",
-                "api_url": "https://unavailable:8006",
+                "api_url": f"https://{name}:8006",
                 "node": "pve1",
                 "token_id": "agw@pam!agw",
-                "token_secret": "shared-unavailable",
+                "token_secret": token_secret,
                 "template_vmids": {"trixie": 9001},
             }
         },
     )
+
+
+def unavailable_site() -> ManifestDoc:
+    return proxmox_site("unavailable", "shared-unavailable")
 
 
 def test_shared_failed_gate_is_attempted_once_and_isolates_unrelated_family(db, make_config, runtime, resolve_counter):
@@ -308,6 +312,57 @@ def test_failed_gate_overlap_blocks_complete_union_without_retry_or_other_lookup
     assert sum(call == ["shared-unavailable"] for call in resolve_counter) == 1
     assert not any("unused-lookup" in call for call in resolve_counter)
     assert not any(action == "session-start" for action, _ in runtime[2])
+
+
+@pytest.mark.parametrize("dry_run", [True, False], ids=["preview", "apply"])
+@pytest.mark.parametrize(
+    "provisioning", [ProvisioningStatus.PENDING, ProvisioningStatus.IN_PROGRESS], ids=["pending", "in-progress"]
+)
+def test_incomplete_provisioning_blocks_its_family_before_any_effect(
+    db, make_config, runtime, resolve_counter, monkeypatch, provisioning, dry_run
+):
+    """A trusted VM a killed create left unattested is refused before its provider, credential, hold or guest
+    is touched; the complete VM beside it still previews or converges."""
+    from agentworks.runtime_state._models import Outcome
+
+    powers, _, events = runtime
+    monkeypatch.setenv("AW_SECRET_INCOMPLETE_TOKEN", "would-resolve")
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, row, ctx: events.append(("status", row.name)) or powers.get(row.name, VMStatus.RUNNING),
+    )
+    rendered: list = []
+    monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
+    monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
+    seed_vm(db, "incomplete", site="incomplete-site")
+    seed_session(db, "work-incomplete", "incomplete")
+    db.update_vm_provisioning_status("incomplete", provisioning)
+    db.update_vm_init_status("incomplete", InitStatus.PENDING)
+    seed_vm(db, "healthy")
+    seed_session(db, "work-healthy", "healthy")
+    powers.update({"incomplete": VMStatus.STOPPED, "healthy": VMStatus.STOPPED})
+    original_vm = db.get_vm("incomplete")
+    original_session = db.get_session("work-incomplete")
+    config = make_config(manifests=[proxmox_site("incomplete-site", "incomplete-token")])
+
+    with pytest.raises(AgentworksError):
+        reconcile_vm(db, config, all_vms=True, dry_run=dry_run, interaction=REFUSE)
+
+    results = {(row.kind, row.name): row for row in rendered}
+    assert results[("vm", "incomplete")].outcome is Outcome.FAILED
+    assert results[("session", "work-incomplete")].outcome is Outcome.BLOCKED
+    assert all(name != "incomplete" for _, name in events)
+    assert not any("incomplete-token" in call for call in resolve_counter)
+    assert db.get_vm("incomplete") == original_vm
+    assert db.get_session("work-incomplete") == original_session
+    healthy = results[("vm", "healthy")]
+    assert (healthy.outcome, healthy.action) == (Outcome.CHANGED, "start")
+    if dry_run:
+        assert all(action == "status" for action, _ in events)
+    else:
+        assert ("vm-start", "healthy") in events
+        assert ("session-start", "work-healthy") in events
 
 
 def test_activation_precedes_unrelated_missing_workload_and_preserves_completed_effects(db, make_config, runtime):
