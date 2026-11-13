@@ -104,6 +104,7 @@ MIGRATED_FILES = (
     "vms/admin.py",
     "agents/template.py",
     "vms/home_layout.py",
+    "vms/backup.py",
 )
 
 

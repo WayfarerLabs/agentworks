@@ -856,12 +856,15 @@ if you would rather keep it.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
-disk, export, or other recovery artifact. On POSIX, its local timestamp directory is created with
-mode 0700 and its JSON files with mode 0600. Native Windows refuses backups containing instance
-specs until private access-control export is supported. Instance specs can contain plaintext
-environment values, so keep the configured backup path on a trusted local filesystem and protect any
-copies of the archive with equivalent access controls. Current archives use manifest version 5;
-their VM and session rows include the nullable latest-start observations.
+disk, export, or other recovery artifact. The workspace archive is built on the VM in a root-only
+directory under `/var/lib/agentworks/detached`, which the backup removes when it ends; it keeps
+running across a dropped connection, and the backup waits for it. On POSIX, the backup's local
+timestamp directory is created with mode 0700 and its JSON files with mode 0600. Native Windows
+refuses backups containing instance specs until private access-control export is supported. Instance
+specs can contain plaintext environment values, so keep the configured backup path on a trusted
+local filesystem and protect any copies of the archive with equivalent access controls. Current
+archives use manifest version 5; their VM and session rows include the nullable latest-start
+observations.
 
 `agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
