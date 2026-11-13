@@ -581,16 +581,19 @@ def _grant_server_access(
     run_command: RunCommand,
     socket_path: str,
 ) -> None:
-    """Grant tmux server-access to every member of the socket group.
+    """Ensure read/write tmux access for every member of the socket group.
 
     Called as the agent (the tmux server owner). No inner
     sudo is needed: the agent runs ``tmux server-access`` against its
-    own server.
+    own server. ``-w`` adds missing users and updates existing users, so
+    interrupted startup completion can safely repeat the grant.
     """
     q_sock = shlex.quote(socket_path)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     run_command(
-        f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do tmux -S {q_sock} server-access -a \"$u\"; done",
+        f"agw_socket_group=$(getent group {grp}) || exit $?; "
+        "for u in $(printf '%s' \"$agw_socket_group\" | cut -d: -f4 | tr ',' ' '); do "
+        f'tmux -S {q_sock} server-access -w "$u" || exit $?; done',
     )
 
 

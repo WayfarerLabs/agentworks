@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.errors import StateError
+from agentworks.errors import ConnectivityError, ExternalError, StateError
 from agentworks.sessions.tmux import (
     _pane_command,
     _tmux_env_flags,
@@ -841,20 +841,23 @@ def test_trim_captured_output_empty_input() -> None:
 
 
 @pytest.mark.parametrize("observation", ["0 ", ""])
+@pytest.mark.parametrize("stage", ["chmod", "server-access"])
+@pytest.mark.parametrize("failure_type", [ConnectivityError, ExternalError, OSError, subprocess.SubprocessError])
 def test_socket_sharing_failure_preserves_its_original_exception_when_death_is_not_observed(
-    spy_target: _SpyTarget, stub_agent_socket_setup: None, observation: str
+    spy_target: _SpyTarget, stub_agent_socket_setup: None, observation: str, stage: str, failure_type: type[Exception]
 ) -> None:
-    from agentworks.errors import ExternalError
-
-    failure = ExternalError("controlled sharing failure")
-    scripted = _ScriptedRunCommand(probe_answers=[observation, observation])
+    failure = failure_type("controlled sharing failure")
+    answers = [observation, observation]
+    if stage == "server-access":
+        answers.insert(0, "0 ")
+    scripted = _ScriptedRunCommand(probe_answers=answers)
 
     def run(command: str, **kwargs: object) -> _SpyResult:
-        if "chmod g+rwx" in command:
+        if (stage == "chmod" and "chmod g+rwx" in command) or (stage == "server-access" and "server-access" in command):
             raise failure
         return scripted(command, **kwargs)
 
-    with pytest.raises(ExternalError) as caught:
+    with pytest.raises(failure_type) as caught:
         finalize_session_start("s1", run_command=run, socket_path="/tmp/owned", is_admin=False)
     assert caught.value is failure
     assert not any("kill-server" in command for command in scripted.calls)
