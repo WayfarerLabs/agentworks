@@ -286,7 +286,8 @@ class VMAccess:
     ) -> Result:
         """Run ``request``; ``stdin`` is the operator's stream under ``stream`` and a ``FromFile``'s file under ``run``.
 
-        A ``FromFile``'s file must reach the payload whole, so a read error raises rather than ending its input.
+        A read error from a ``FromFile``'s file fails the request with that error instead of reporting the
+        guest's outcome; the payload still sees its input end where the read stopped.
         """
         # R3: only the admin elevates, whatever the guest's sudoers says.
         if request.elevated and not isinstance(self.identity, Admin):
@@ -311,7 +312,7 @@ class VMAccess:
                 request=wire,
                 nonce=nonce,
                 stdin=stdin,
-                stdin_is_whole_input=isinstance(request.stdin, FromFile),
+                fail_on_input_error=isinstance(request.stdin, FromFile),
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
                 deadline=pump.Deadline.after(request.deadline),

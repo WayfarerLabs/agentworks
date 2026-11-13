@@ -142,13 +142,13 @@ class _InputFeeder:
     exit. The queue is bounded so a slow consumer does not buffer the stream.
     """
 
-    def __init__(self, stream: BinaryIO, *, complete_input: bool = False) -> None:
+    def __init__(self, stream: BinaryIO, *, fail_on_error: bool = False) -> None:
         self._stream = stream
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=_STDIN_QUEUE_CHUNKS)
-        self._complete_input = complete_input
+        self._fail_on_error = fail_on_error
         self.exhausted = False
         self.error: OSError | None = None
-        """The read error that ended input the payload must get whole; set only with ``complete_input``."""
+        """The read error that stopped the input; set only with ``fail_on_error``."""
 
     def start(self) -> None:
         threading.Thread(target=self._run, daemon=True, name="agw-stdin").start()
@@ -164,8 +164,8 @@ class _InputFeeder:
                 if not chunk:
                     return
         except OSError as error:
-            if self._complete_input:
-                # No end of input is queued, so the guest never sees the input end cleanly.
+            if self._fail_on_error:
+                # The session raises it; the payload still sees its input end where the read stopped.
                 self.error = error
                 return
             self._queue.put(b"")
@@ -193,9 +193,11 @@ class PipeSession:
     half runs.
 
     A read error from the caller's input ends it as end of input, which suits
-    the operator's stdin; with ``stdin_is_whole_input`` (a file that must reach
-    the payload whole) it instead kills the client before the input's end is
-    sent and :meth:`pump` raises the error.
+    the operator's stdin. With ``fail_on_input_error`` (a file) :meth:`pump`
+    instead kills the client and raises the error, so the request fails rather
+    than reporting the guest's outcome. The payload still sees its input end
+    where the read stopped, once sshd closes its pipes, so a payload that must
+    not act on a truncated file detects truncation itself.
 
     The client's stdin closes once the request and the caller's input are sent,
     unless ``hold_stdin_open`` keeps it open for :meth:`close_stdin` (a parked
@@ -233,7 +235,7 @@ class PipeSession:
         request: bytes,
         nonce: str | None,
         stdin: BinaryIO | None = None,
-        stdin_is_whole_input: bool = False,
+        fail_on_input_error: bool = False,
         hold_stdin_open: bool = False,
         on_stdout: Sink,
         on_stderr: Sink,
@@ -241,7 +243,7 @@ class PipeSession:
     ) -> None:
         self._argv = list(argv)
         self._outbox = bytearray(request)
-        self._feeder = None if stdin is None else _InputFeeder(stdin, complete_input=stdin_is_whole_input)
+        self._feeder = None if stdin is None else _InputFeeder(stdin, fail_on_error=fail_on_input_error)
         self._sinks = {"out": on_stdout, "err": on_stderr}
         self._pending: dict[str, bytes | None] = {"out": None, "err": None}
         self._deadline = deadline or Deadline(None)
@@ -293,8 +295,8 @@ class PipeSession:
                 return self._stopped(StopReason.OUTPUT_LIMIT)
             progressed |= self._write()
             if self._feeder is not None and self._feeder.error is not None:
-                # Input that must arrive whole could not be read: end the client before the guest's
-                # input ends, and raise the read error instead of an outcome.
+                # The input could not be read: end the client and raise the read error instead of
+                # reporting an outcome. The payload sees its input end here when sshd closes its pipes.
                 self._killed = True
                 self._cleanup()
                 raise self._feeder.error

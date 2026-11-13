@@ -584,14 +584,14 @@ class _FailingReader(io.RawIOBase):
 ECHO_INPUT = "start(); out.write(sys.stdin.buffer.read()); finish()"
 
 
-def test_a_read_error_in_whole_input_raises_and_never_ends_the_guests_input() -> None:
+def test_a_read_error_in_file_input_ends_the_client_and_raises_the_error() -> None:
     out, err = Capture(), Capture()
     session = PipeSession(
         [sys.executable, "-c", PRELUDE + ECHO_INPUT],
         request=b"",
         nonce=NONCE,
         stdin=_FailingReader(b"partial"),  # type: ignore[arg-type]
-        stdin_is_whole_input=True,
+        fail_on_input_error=True,
         on_stdout=out,
         on_stderr=err,
         deadline=Deadline.after(10),
@@ -600,8 +600,7 @@ def test_a_read_error_in_whole_input_raises_and_never_ends_the_guests_input() ->
     with session, pytest.raises(OSError, match="Input/output error"):
         session.pump()
 
-    # The child never saw its input end, so it never echoed it and never finished.
-    assert bytes(out.data) == b""
+    # The pump raised instead of reporting the child's outcome, and ended the client.
     process = session._proc  # noqa: SLF001 - the point is that the client was ended
     assert process is not None and process.poll() is not None
 

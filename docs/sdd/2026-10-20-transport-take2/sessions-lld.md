@@ -587,9 +587,11 @@ removal (`:242`). It becomes two `run`s over an opaque stream, never extracted o
 2. **Destination.** `Command(("tar", "xzf", "-", "--no-same-owner", "-C", ws))`, elevated, with
    `stdin=FromFile(local)` and `check=True`, on the destination's admin access, no deadline. Nothing
    is staged on the destination VM, so the `mktemp`, the upload and the `rm -f` go. A file that
-   cannot be read to its end fails the request before the guest's input ends. Before it, the
-   destination path is refused when occupied and reserved with an exclusive `mkdir`, as create does;
-   after it, the directory's mode is put back to 2770, since the archive's `.` member sets it.
+   cannot be read to its end fails the request with the read error instead of the guest's outcome;
+   tar still sees its input end where the read stopped, and gzip's trailer makes it refuse the
+   truncated archive. Before it, the destination path is refused when occupied and reserved with an
+   exclusive `mkdir`, as create does; after it, the directory's mode is put back to 2770, since the
+   archive's `.` member sets it.
 
 **Extraction safety.** The archive comes from another VM, so the extraction relies on GNU tar's
 defaults and never passes `-P` (`--absolute-names`): member names lose a leading `/`, members with
