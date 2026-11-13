@@ -72,18 +72,20 @@ agw vm reconcile workstation
 
 Applying may start or stop the selected VM and its children according to their targets. A stopped VM
 target blocks children that request running; it does not discard their intent. If that VM should run
-again, explicitly start it with `agw vm start workstation`, then reconcile it to recover its
+again, explicitly start it with `agw vm start workstation`, then reconcile it to restore its
 children. VM start alone does not restore sessions or consoles. A focused `session reconcile NAME`
-or `console reconcile NAME` is available when only that resource should be recovered.
+or `console reconcile NAME` is available when only that resource should be restored.
 
 ### Lifecycle changes to account for
 
-- Explicit `vm start` now records `running` intent even when the VM is already running. Use
-  `agw vm set-desired-state NAME on-demand` to return to activation only when needed. Explicit
-  session start/stop commands also record intent, including accepted batch no-ops. Named-console
-  start/stop commands record intent for the console view.
+- Explicit `vm start` now records `running` intent even when the VM is already running, and
+  `vm recover` records it when it starts a stopped VM. Use `agw vm set-desired-state NAME on-demand`
+  to return to activation only when needed. Explicit session start/stop commands also record intent,
+  including accepted batch no-ops. Named-console start/stop commands record intent for the console
+  view.
 - A VM shutting down or suspending itself, a session exiting, or a console disappearing does not
-  clear intent. Recovery requires an explicit reconcile command; there is no background controller.
+  clear intent. Restoring intended state requires an explicit reconcile command; there is no
+  background controller.
 - On WSL2, a live VM with `stopped` intent receives no idle-shutdown protection during access or
   management commands and may stop mid-command. Select `on-demand` or `running` only when normal
   holds and future activation are both intended.
