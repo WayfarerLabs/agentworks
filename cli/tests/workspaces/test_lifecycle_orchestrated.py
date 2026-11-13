@@ -1630,6 +1630,35 @@ def test_rehome_refuses_a_target_inside_the_source_through_a_link(
     assert row is not None and row.workspace_path == "/data/ws/ws1"
 
 
+def test_rehome_resolves_both_paths_as_root() -> None:
+    """As the copy runs: an unsearchable component would otherwise come back unresolved."""
+    from agentworks.workspaces.manager.rehome import _resolved_paths
+    from tests.vm_access_support import Admin, RecordingVMAccess
+
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(0), b"/mnt/x/ws1\0/dst/ws1\0")
+
+    assert _resolved_paths(access, "/data/ws1", "/dst/ws1") == ("/mnt/x/ws1", "/dst/ws1")
+    [request] = access.requests()
+    assert request.elevated
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [b"/mnt/x/ws1\0", b"/mnt/x/ws1\0/dst/ws1\0/third\0", b"mnt/x/ws1\0/dst/ws1\0", b"/mnt/x/ws1\0/dst/ws1\0trailing"],
+    ids=["one-path", "three-paths", "not-absolute", "trailing-data"],
+)
+def test_rehome_refuses_a_resolution_that_is_not_two_absolute_paths(stdout: bytes) -> None:
+    from agentworks.workspaces.manager.rehome import _resolved_paths
+    from tests.vm_access_support import Admin, RecordingVMAccess
+
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(0), stdout)
+
+    with pytest.raises(StateError):
+        _resolved_paths(access, "/data/ws1", "/dst/ws1")
+
+
 @pytest.mark.parametrize("target_path", ["dst/ws1", "host:/dst/ws1", "/", "/dst/../ws1", "/dst//ws1", "/dst/./ws1"])
 def test_rehome_refuses_a_target_that_is_not_an_absolute_directory_before_anything_runs(
     db: Database,
