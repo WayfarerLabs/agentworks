@@ -306,8 +306,11 @@ VM"). Every other outcome raises its typed error at once, since the payload neve
    cleanup, recalled from its release notes, not measured), and never on Debian 12.
 4. Create `process.new`, take `flock(LOCK_EX)` on it, and rename it to `process`, all before the
    fork, so `process` is never visible unlocked while anything of the launch lives. Until the rename
-   the directory reads as `LOST`; a discard that removes it then makes the rename fail, and the
-   launch ends with a failure before anything forks.
+   the directory reads as `LOST`, so setup holds an exclusive `flock` on the launch directory itself
+   from just after its `mkdir` until the rename is done, and `discard` takes the same lock before it
+   reads the state and holds it through its removal. A discard that loses the race finds `RUNNING`
+   and refuses; one that wins removes the directory, and setup's next path operation fails, so the
+   launch ends with a setup failure before anything forks.
 5. Fork once. The child calls `setsid`, so it belongs to no session and no terminal, points its
    descriptors 0, 1 and 2 at `/dev/null` and closes every other one but the lock and a report pipe,
    so it holds nothing of the connection. It is the supervisor.
@@ -367,7 +370,8 @@ after `observe` reported `EXITED` with status 0, so the file is complete and not
 has no deadline: the archive takes as long as the link needs, the keepalives end a dead connection
 (I7), and Ctrl-C ends it.
 
-`discard(launch)` removes the launch directory, refusing a `RUNNING` one; an absent one is done.
+`discard(launch)` removes the launch directory under the directory lock setup holds (step 4),
+refusing a `RUNNING` one; an absent one is done.
 
 ## Session environment and the terminal handover
 
@@ -841,9 +845,11 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 - The program's states: `RUNNING` while the lock is held, from before the payload starts, `LOST`
   when it is released with no status, `EXITED` with a `process` after an `exec` failure, and the
   prune removing old `EXITED` and `LOST` directories, one with no `process` included, but no
-  `RUNNING` one. A discard that wins the race with setup leaves the launch failed and nothing
-  started. The read order: an observer stopped between its lock test and its `status` read while the
-  supervisor writes `status` and exits reports `RUNNING` or `EXITED`, never `LOST`.
+  `RUNNING` one. A discard racing setup, each held at its hold point (setup after its `mkdir`, the
+  discard before its removal), is either refused or leaves the launch failed with nothing started,
+  never a payload whose directory is gone. The read order: an observer stopped between its lock test
+  and its `status` read while the supervisor writes `status` and exits reports `RUNNING` or
+  `EXITED`, never `LOST`.
 - `interrupt` of a payload that ignores `SIGTERM` returns `EXITED` with 137 after the kill wait.
 - `park`: a split that raises closes the parking stdin at once; an uncollected handover reports
   `collected=False`; `Handover.command` puts `sudo -n -u` in front only for another account; a `cwd`

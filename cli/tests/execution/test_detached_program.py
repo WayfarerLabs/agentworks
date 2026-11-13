@@ -313,23 +313,38 @@ def test_a_launch_interrupted_before_its_payload_starts_is_stopped_once_it_does(
     assert (observed["state"], observed["status"]) == (detached_program.EXITED, 128 + signal.SIGTERM)
 
 
-def test_a_discard_that_wins_the_race_with_setup_leaves_the_launch_failed_and_nothing_started(guest: Guest) -> None:
-    release, marker = guest.root / "release", guest.root / "payload-ran"
+def test_a_discard_racing_setup_either_is_refused_or_leaves_the_launch_failed(guest: Guest) -> None:
+    setup_go, discard_go, marker = guest.root / "setup-go", guest.root / "discard-go", guest.root / "payload-ran"
     launch_id = secrets.token_hex(16)
-    spec = json.dumps({"argv": ["touch", str(marker)], "env": {}}).encode()
-    # Setup waits after creating the directory and before ``process`` exists, where the launch reads lost.
-    launching = guest.start("launch", launch_id, stdin=spec, patch=held_until(release, "detached_program._prune"))
+    spec = json.dumps({"argv": ["sh", "-c", f"touch {marker}; sleep 2"], "env": {}}).encode()
+    # Setup is held after its mkdir, where the launch reads lost, and the discard before its rmtree.
+    launching = guest.start(
+        "launch", launch_id, stdin=spec, patch=held_until(setup_go, "detached_program._directory_lock")
+    )
+    discarding = None
     try:
-        wait_for(guest.directory(launch_id) / "work")
-        assert guest.observe(launch_id).state == detached_program.LOST
-        assert guest.run("discard", launch_id).returncode == 0
+        wait_for(guest.directory(launch_id))
+        discarding = guest.start("discard", launch_id, patch=held_until(discard_go, "detached_program.shutil.rmtree"))
+        time.sleep(0.5)
+        setup_go.touch()
+        time.sleep(0.5)
     finally:
-        release.touch()
-
-    assert guest.finish(launching).returncode != 0
+        setup_go.touch()
+        discard_go.touch()
+    launched = guest.finish(launching)
+    assert discarding is not None
+    discarded = guest.finish(discarding)
     time.sleep(0.5)
-    assert not marker.exists()
-    assert guest.observe(launch_id).state == detached_program.ABSENT
+
+    if discarded.returncode == detached_program.EXIT_RUNNING:
+        assert launched.returncode == 0
+        assert guest.directory(launch_id).is_dir()
+    else:
+        # Never a payload whose launch directory is gone.
+        assert discarded.returncode == 0, discarded.stderr
+        assert launched.returncode != 0
+        assert not marker.exists()
+        assert guest.observe(launch_id).state == detached_program.ABSENT
 
 
 def test_a_killed_supervisor_leaves_its_payload_running_and_then_lost(guest: Guest) -> None:

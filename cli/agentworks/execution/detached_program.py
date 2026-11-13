@@ -34,6 +34,10 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 BASE = "/var/lib/agentworks/detached"
 """Where every launch lives: root-owned, mode 0700, under a root-owned 0755 parent."""
@@ -210,17 +214,19 @@ def _launch(base: str, directory: str) -> int:
     except FileExistsError:
         return EXIT_EXISTS
     try:
-        os.mkdir(os.path.join(directory, "work"), 0o700)
-        _prune(base, directory)
-        # Locked before it is visible, so no observer ever sees this launch's ``process`` unlocked
-        # without a status while anything of it lives.
-        partial = os.path.join(directory, "process.new")
-        lock = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        os.rename(partial, os.path.join(directory, "process"))
+        # Setup holds the directory's lock, which discard takes too: a discard that won it has
+        # removed the directory, and every path below then fails before anything forks.
+        with _directory_lock(directory):
+            os.mkdir(os.path.join(directory, "work"), 0o700)
+            _prune(base, directory)
+            # Locked before it is visible, so no observer ever sees this launch's ``process``
+            # unlocked without a status while anything of it lives.
+            partial = os.path.join(directory, "process.new")
+            lock = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            os.rename(partial, os.path.join(directory, "process"))
     except FileNotFoundError:
-        # A discard removed the directory, which read as lost until the rename: start nothing.
-        sys.stderr.write("the launch directory was removed while the launch was being set up\n")
+        sys.stderr.write("the launch directory was discarded while the launch was being set up\n")
         return 1
     report_read, report_write = os.pipe()
     if os.fork() == 0:
@@ -346,12 +352,28 @@ def _recorded_pid(directory: str) -> int | None:
 
 
 def _discard(directory: str) -> int:
-    state, _status = _state(directory)
-    if state == RUNNING:
-        return EXIT_RUNNING
-    if state != ABSENT:
-        shutil.rmtree(directory)
+    """Remove a launch that is not running, under the directory lock setup holds until ``process`` exists."""
+    try:
+        with _directory_lock(directory):
+            if _state(directory)[0] == RUNNING:
+                return EXIT_RUNNING
+            shutil.rmtree(directory)
+    except FileNotFoundError:
+        pass  # absent: nothing to remove
     return 0
+
+
+@contextlib.contextmanager
+def _directory_lock(directory: str) -> Iterator[None]:
+    """Hold an exclusive ``flock`` on the launch directory itself; ``FileNotFoundError`` when it is gone."""
+    import fcntl
+
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 if __name__ == "__main__":
