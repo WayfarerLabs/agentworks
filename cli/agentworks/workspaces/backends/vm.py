@@ -21,7 +21,6 @@ from agentworks.execution.errors import (
     PathRefused,
     RequestRefused,
 )
-from agentworks.execution.files import normalized_guest_path
 from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
 from agentworks.workspaces.acls import apply_workspace_acls
@@ -59,7 +58,7 @@ def default_workspace_path(config: Config, ws_name: str) -> str:
     (which must know the path before the row exists); the ROW stays the
     source of truth for a live workspace (``workspace rehome`` can move
     one anywhere)."""
-    return f"{normalized_guest_path(config.paths.vm_workspaces)}/{ws_name}"
+    return f"{config.paths.vm_workspaces}/{ws_name}"
 
 
 def admin_access(vm: VMRow, config: Config, logger: OperationLog | None) -> VMAccess:
