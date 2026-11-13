@@ -13,6 +13,7 @@ from agentworks import output
 from agentworks.errors import NotFoundError
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, CaptureOutput, Command
 from agentworks.execution.results import Completed
+from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
 from agentworks.workspaces.guest import FIND_DEADLINE, REQUEST_FAILURES, ensure_group, open_parent_traversal, root
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from agentworks.execution.results import Result
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.initializer.steps import InitLog
 
 INSTALL_DEADLINE = 60
 """Seconds the ``acl`` package install may take."""
@@ -96,6 +98,7 @@ def repair_workspace(
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import load_request_registry
+    from agentworks.vms.manager import operation_log
     from agentworks.workspaces.backends.vm import admin_access
 
     # build_registry runs first so framework miss-policies fire before
@@ -118,15 +121,18 @@ def repair_workspace(
             entity_name=ws.vm_name,
         )
 
-    with gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        scope=_workspace_scope(db, vm, name),
-        interaction=interaction,
+    with (
+        gated_vm_boundary(
+            db,
+            config,
+            registry,
+            vm,
+            scope=_workspace_scope(db, vm, name),
+            interaction=interaction,
+        ),
+        operation_log(vm.name, "workspace-repair") as log,
     ):
-        admin = admin_access(vm, config, None)
+        admin = admin_access(vm, config, log)
         ws_group = ws.linux_group
         ws_path = ws.workspace_path
         fixes = 0
@@ -136,14 +142,11 @@ def repair_workspace(
         # issues found" over an unverified step.
         indeterminate = 0
 
-        def status(request: Command) -> int:
-            return admin.run(request).require_completed(vm.name)
-
         output.info(f"Repairing workspace '{name}' on VM '{vm.name}'...")
 
         # 0. Ensure acl package is installed (needed for setfacl)
         try:
-            if status(root("which", "setfacl")) != 0:
+            if status(admin, root("which", "setfacl")) != 0:
                 admin.run(
                     Command(
                         ("apt-get", "install", "-y", "-qq", "acl"),
@@ -158,18 +161,18 @@ def repair_workspace(
             else:
                 output.detail("OK: acl package")
         except REQUEST_FAILURES as e:
-            output.warn(f"acl package check failed: {e}")
+            output.warn(f"acl package check failed: {describe_failure(e, log.sanitize)}")
 
         # 1. Ensure the workspace group recorded in the DB exists on the VM.
         try:
-            if status(root("getent", "group", ws_group)) != 0:
+            if status(admin, root("getent", "group", ws_group)) != 0:
                 admin.run(ensure_group(ws_group), check=True)
                 output.detail(f"Fixed: created group {ws_group}")
                 fixes += 1
             else:
                 output.detail(f"OK: group {ws_group} exists")
         except REQUEST_FAILURES as e:
-            output.warn(f"group check failed: {e}")
+            output.warn(f"group check failed: {describe_failure(e, log.sanitize)}")
 
         # 2. Ensure admin is in the group
         try:
@@ -181,7 +184,7 @@ def repair_workspace(
             else:
                 output.detail(f"OK: admin in {ws_group}")
         except REQUEST_FAILURES as e:
-            output.warn(f"admin group check failed: {e}")
+            output.warn(f"admin group check failed: {describe_failure(e, log.sanitize)}")
 
         # 3. Fix directory ownership, permissions, and SGID (recursive chgrp
         # so ACLs apply correctly). The -c (changes) flag makes chown/chmod
@@ -214,7 +217,7 @@ def repair_workspace(
             else:
                 output.detail("OK: directory ownership and permissions")
         except REQUEST_FAILURES as e:
-            output.warn(f"permission fix failed: {e}")
+            output.warn(f"permission fix failed: {describe_failure(e, log.sanitize)}")
 
         # 4. Fix ACLs
         # apply_workspace_acls applies the canonical workspace ACL, the SAME spec
@@ -251,7 +254,7 @@ def repair_workspace(
             else:
                 output.detail("OK: ACLs")
         except REQUEST_FAILURES as e:
-            output.warn(f"ACL fix failed: {e}")
+            output.warn(f"ACL fix failed: {describe_failure(e, log.sanitize)}")
 
         # 5. Fix parent directory traversal. The walk seeds from the PARENT of
         # the workspace, never the workspace dir itself: the workspace's own
@@ -270,7 +273,7 @@ def repair_workspace(
             else:
                 output.detail("OK: parent traversal")
         except REQUEST_FAILURES as e:
-            output.warn(f"parent traversal fix failed: {e}")
+            output.warn(f"parent traversal fix failed: {describe_failure(e, log.sanitize)}")
 
         # 5b. Converge the checkout's git identity. Repo-local config is
         # actor-agnostic and idempotent, so identity joins the repair
@@ -278,7 +281,7 @@ def repair_workspace(
         # after create lands here (detection-based, so an unchanged value
         # reports OK). Only meaningful when the workspace is a git repo; a
         # declared identity on a repo-less workspace is a no-op.
-        fixes += _repair_git_identity(db, admin, registry, ws)
+        fixes += _repair_git_identity(db, admin, registry, ws, log)
 
         # 6. Reconcile agent group membership
         # Get agents that SHOULD be in the group (have any grant)
@@ -309,14 +312,14 @@ def repair_workspace(
             # Remove agents that shouldn't be there
             to_remove = current_members - granted_agents
             for user in sorted(to_remove):
-                status(root("gpasswd", "-d", user, ws_group))
+                status(admin, root("gpasswd", "-d", user, ws_group))
                 output.detail(f"Fixed: removed {user} from {ws_group}")
                 fixes += 1
 
             if not to_add and not to_remove:
                 output.detail(f"OK: agent group membership ({len(current_members)} agent(s))")
         except REQUEST_FAILURES as e:
-            output.warn(f"agent membership check failed: {e}")
+            output.warn(f"agent membership check failed: {describe_failure(e, log.sanitize)}")
 
         # A step whose verification was indeterminate qualifies the closing
         # line either way: it must not read as a clean bill of health.
@@ -380,6 +383,7 @@ def _repair_git_identity(
     admin: VMAccess,
     registry: Registry,
     ws: WorkspaceRow,
+    log: InitLog,
 ) -> int:
     """Converge the checkout's repo-local git identity to its template.
 
@@ -438,7 +442,7 @@ def _repair_git_identity(
             else:
                 output.warn(
                     f"git identity skipped: could not probe {ws.workspace_path} "
-                    f"as a git repo ({stderr or 'unknown error'})"
+                    f"as a git repo ({log.sanitize(stderr) or 'unknown error'})"
                 )
             return 0
 
@@ -453,7 +457,7 @@ def _repair_git_identity(
             fixed += 1
         return fixed
     except REQUEST_FAILURES as e:
-        output.warn(f"git identity check failed: {e}")
+        output.warn(f"git identity check failed: {describe_failure(e, log.sanitize)}")
         return 0
 
 

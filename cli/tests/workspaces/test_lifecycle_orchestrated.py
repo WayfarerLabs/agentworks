@@ -51,6 +51,7 @@ from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from agentworks.workspaces import manager as workspace_manager
+from agentworks.workspaces.guest import path_occupied
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 from tests.vm_access_support import AccessRecorder, Call, install_access_recorder
 
@@ -209,6 +210,10 @@ class _FakeAdminTarget:
         if check and outcome.returncode:
             raise CommandFailed("box", outcome.returncode, result, streams_logged=True)
         return result
+
+
+_OCCUPIED_PROBE = path_occupied("/").source.split("\n", 1)[1]
+"""``path_occupied``'s script body, as :meth:`_FakeAdminTarget.answer` renders it to ``run``."""
 
 
 def _route(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRecorder:
@@ -1470,6 +1475,7 @@ def test_rehome_reads_a_target_with_a_trailing_slash_as_the_directory(
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
+
     class _Target(_FakeAdminTarget):
         """The target directory exists once it is made."""
 
@@ -1679,6 +1685,9 @@ def _wire_copy_fakes(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> _Fak
         def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
             if cmd.startswith("tar czf "):
                 events.append("pack")
+            if cmd.startswith(_OCCUPIED_PROBE):
+                self.commands.append(cmd)
+                return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")  # the destination is free
             return super().run(cmd, **kwargs)
 
     fake = _CopyTarget(events=events)
@@ -2170,6 +2179,8 @@ class _CopyThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[mis
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:  # type: ignore[override]  # recording run deliberately shadows SSHTransport.run
         self.commands.append(cmd)
         stdout = ""
+        if cmd.startswith(_OCCUPIED_PROBE):
+            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")  # the destination is free
         if "chmod -c 2770" in cmd:
             self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
         elif "chmod -c a+x" in cmd:

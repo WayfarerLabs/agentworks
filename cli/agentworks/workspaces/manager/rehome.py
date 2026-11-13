@@ -19,6 +19,7 @@ from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
+from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.guest import FIND_DEADLINE, PROBE_DEADLINE, REQUEST_FAILURES, open_parent_traversal, root
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
@@ -243,7 +244,6 @@ def _rehome_vm(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
                         entity_name=ws_name,
-                        hint=f"SSH log: {ssh_logger.display_path}",
                     )
 
                 # Fix ownership, permissions, and ACLs on the new path
@@ -264,7 +264,7 @@ def _rehome_vm(
                 try:
                     apply_workspace_acls(admin.files(), new_path)
                 except REQUEST_FAILURES as e:
-                    output.warn(f"ACL setup failed: {e}")
+                    output.warn(f"ACL setup failed: {describe_failure(e, ssh_logger.sanitize)}")
 
                 # Only true ancestors of the new path get a+x; its own mode is
                 # the canonical 2770 set above.
@@ -315,7 +315,10 @@ def _rehome_vm(
                     f"SSH log: {ssh_logger.display_path}"
                 )
                 raise
-            except AgentworksError:
+            except AgentworksError as e:
+                e.add_hint(
+                    f"SSH log: {ssh_logger.display_path}. {_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
+                )
                 raise
             except Exception as e:
                 raise ExternalError(
@@ -333,7 +336,7 @@ def _rehome_vm(
 
 def _is_directory(access: VMAccess, path: str) -> bool:
     """Whether a directory is at ``path``, as the admin sees it; an outcome that is not a completion raises."""
-    return access.run(Command(("test", "-d", path), deadline=PROBE_DEADLINE)).require_completed(access.vm_name) == 0
+    return status(access, Command(("test", "-d", path), deadline=PROBE_DEADLINE)) == 0
 
 
 def _target_directory(path: str, *, ws_name: str) -> str:

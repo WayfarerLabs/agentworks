@@ -186,8 +186,9 @@ def realize_workspace(
                 output.warn(f"Cancelling workspace create '{name}'... rolling back.")
                 _safe_cleanup()
                 raise
-            except AgentworksError:
+            except AgentworksError as e:
                 _safe_cleanup()
+                e.add_hint(f"SSH log: {ssh_logger.display_path}")
                 raise
             except Exception as e:
                 _safe_cleanup()

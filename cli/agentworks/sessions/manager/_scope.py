@@ -160,6 +160,7 @@ def _regenerate_tmuxinator(
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
     from agentworks.linux_users import managed_home
+    from agentworks.vms.initializer.steps import describe_failure
     from agentworks.workspaces.guest import FILE_FAILURES
     from agentworks.workspaces.templates import resolve_live_tmuxinator
     from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
@@ -179,7 +180,11 @@ def _regenerate_tmuxinator(
         config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
         write_config(admin, ws.workspace_path, config_text)
     except FILE_FAILURES as error:
-        output.warn(f"The tmuxinator config of workspace '{ws.name}' was not updated: {error}")
+        # Its requests carry no secret, so the stderr tail needs no redaction.
+        output.warn(
+            f"The tmuxinator config of workspace '{ws.name}' was not updated: "
+            f"{describe_failure(error, lambda text: text)}"
+        )
 
 
 def filter_sessions(

@@ -236,9 +236,15 @@ the VM once no backup is running.
   the file or any parent, so a workspace path below a link, or a linked `~/.config` or
   `~/.config/tmuxinator`, now fails `workspace create`, `workspace copy` and `workspace rehome`
   where it was followed. A failed `workspace create` removes what it created, as for any other
-  failure. The session commands regenerate the config as a convenience: a refusal there, or any
-  failed request, now warns and leaves the session command's result standing, where a failure of the
-  regeneration used to fail the command.
+  failure. A refused `workspace copy` leaves the extracted tree in the new directory and no
+  workspace row, so remove that directory before retrying. A refused `workspace rehome` leaves the
+  copied tree at the new path and the workspace where it was, its error naming both; remove the new
+  directory before retrying. The session commands regenerate the config as a convenience: a refusal
+  there, or any failed request, now warns and leaves the session command's result standing, where a
+  failure of the regeneration used to fail the command.
+- **`workspace copy` refuses an occupied destination.** A directory, file or link already at the new
+  workspace's path is refused before anything is extracted, as `workspace create` refuses it, where
+  the copy used to extract into it.
 - **`workspace copy` stages nothing on the VM.** The source tree travels through the workstation as
   a compressed tar stream that is never unpacked there, and the destination extracts it from the
   request's input as root instead of from a file in its `/var/tmp`. Extracted files are root's until
