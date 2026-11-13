@@ -562,11 +562,11 @@ routing remains unresolved. Preserve the existing ordinary claim and defer diffe
 no new ownership registry or dispatch repair workflow is needed. Integration I2 and Muntz's material
 item identify the same missing identifier-retention regression; the current guard remains correct.
 
-- [ ] Preserve protected ancestor ownership across equal reapplication, changed local inputs,
+- [x] Preserve protected ancestor ownership across equal reapplication, changed local inputs,
       withdrawal and retry; cover all three adapters and convergence after routing repair.
-- [ ] Add historical-alias conflict coverage with a withdrawn origin, all input deferrals,
+- [x] Add historical-alias conflict coverage with a withdrawn origin, all input deferrals,
       independent progress and repeat setup; prove it distinguishes the identifier guard.
-- [ ] Cover combined persona/MCP carrier-size reduction and raw literal-name overrides for equal
+- [x] Cover combined persona/MCP carrier-size reduction and raw literal-name overrides for equal
       inputs. Report saved adoption and correct the small naming/teaching nits.
 - [ ] Complete the bound private project, Muntz and generic correctness lanes, required gates and
       installed-package checks; retain original failures and verify owned cleanup.
@@ -586,3 +586,18 @@ did not establish a successful model conversation, model-mediated tool use or ge
 resume. The overlapping Codex create was a tester sequencing failure before invocation. No new
 Windows, WSL2 or cloud observations are claimed. Those limits, original fixture timeouts and
 separately verified cleanup remain part of that report; they are not promoted into passes here.
+
+The native correction was integrated as `6ff88cf4` from the isolated developer's `cab1de17`.
+Nine B1 cases failed before the behavior change; three historical-alias cases passed with the
+existing guard and failed when only that guard was deleted. The final native/dispatch selection
+passed 131 tests, with full mypy across 1,033 files and Ruff/format passing. Its final diagnostic-only
+wording correction received Ruff/format checks; the frozen combined gates below cover the exact
+integrated source. The lead's session selection passed 44 tests after correcting an initial
+read-only uv cache startup failure; these selections overlap the forthcoming full suite.
+
+An initial dispatch-test expectation also failed: generic unknown routing conservatively carries
+previous deferral IDs until routing recovery, while explicit unresolved route IDs permit pruning.
+The tests now preserve that existing contract and require carried deferrals to clear on recovery;
+no dispatch production behavior changed. Workspace fixture metadata failures and the successful
+owned `/tmp` replay remain recorded. The lead read the developer's complete report and independently
+checked removal of the reported fixtures, environment and caches before freezing the combined work.
