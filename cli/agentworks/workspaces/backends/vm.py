@@ -13,7 +13,14 @@ import agentworks.execution as execution
 from agentworks import output
 from agentworks.errors import AgentworksError, AlreadyExistsError
 from agentworks.execution.access import Admin
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
+from agentworks.execution.errors import (
+    CommandFailed,
+    ExecutionIncomplete,
+    FileContentMismatch,
+    FileLockTimeout,
+    PathRefused,
+    RequestRefused,
+)
 from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
 from agentworks.workspaces.acls import apply_workspace_acls
@@ -26,7 +33,7 @@ from agentworks.workspaces.guest import (
     root,
     script,
 )
-from agentworks.workspaces.tmuxinator import config_link, config_path, generate_config, publish_config
+from agentworks.workspaces.tmuxinator import config_link, config_path, generate_config, link_config, write_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -203,12 +210,17 @@ def create_vm_workspace(
         if template.tmuxinator:
             tmux_config = generate_config(ws_name, workspace_path)
             generated_config = (config_path(workspace_path), hashlib.sha256(tmux_config.encode()).hexdigest())
-            publish_config(
+            try:
+                write_config(admin, workspace_path, tmux_config)
+            except (PathRefused, FileLockTimeout, FileContentMismatch):
+                # Nothing was written, so there is nothing of this create's to remove.
+                generated_config = None
+                raise
+            link_config(
                 admin,
                 home=managed_home(vm.admin_username),
                 ws_name=ws_name,
                 workspace_path=workspace_path,
-                text=tmux_config,
                 replace_link=False,
             )
 

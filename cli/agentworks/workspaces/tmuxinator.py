@@ -58,7 +58,7 @@ def write_config(access: VMAccess, workspace_path: str, text: str) -> None:
     )
 
 
-def publish_config(
+def publish_tmuxinator_config(
     access: VMAccess, *, home: str, ws_name: str, workspace_path: str, text: str, replace_link: bool
 ) -> None:
     """Write the generated config and link it from the admin's tmuxinator directory under ``home``.
@@ -68,6 +68,14 @@ def publish_config(
     fails the link and is left as it is.
     """
     write_config(access, workspace_path, text)
+    link_config(access, home=home, ws_name=ws_name, workspace_path=workspace_path, replace_link=replace_link)
+
+
+def link_config(access: VMAccess, *, home: str, ws_name: str, workspace_path: str, replace_link: bool) -> None:
+    """Link the generated config from the admin's tmuxinator directory under ``home``, creating the directory.
+
+    ``replace_link`` is :func:`publish_tmuxinator_config`'s.
+    """
     access.files(deadline=PROBE_DEADLINE).ensure_directory(f"{home}/{TMUXINATOR_CONFIG_DIR}", mode=0o755)
     flags = "-sf" if replace_link else "-s"
     access.run(

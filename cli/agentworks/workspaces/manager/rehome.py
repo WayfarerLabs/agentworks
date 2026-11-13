@@ -23,7 +23,7 @@ from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.guest import FIND_DEADLINE, PROBE_DEADLINE, REQUEST_FAILURES, open_parent_traversal, root
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
-from agentworks.workspaces.tmuxinator import generate_config, publish_config, remove_config
+from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config, remove_config
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -274,7 +274,7 @@ def _rehome_vm(
                 # link to the old one.
                 home = managed_home(vm.admin_username)
                 if tmuxinator_enabled:
-                    publish_config(
+                    publish_tmuxinator_config(
                         admin,
                         home=home,
                         ws_name=ws_name,

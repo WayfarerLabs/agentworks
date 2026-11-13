@@ -237,9 +237,9 @@ def copy_workspace(
 
                 # Generate tmuxinator config and VS Code workspace
                 from agentworks.workspaces.backends.vm import generate_vscode_workspace
-                from agentworks.workspaces.tmuxinator import generate_config, publish_config
+                from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config
 
-                publish_config(
+                publish_tmuxinator_config(
                     dest,
                     home=managed_home(dest_vm.admin_username),
                     ws_name=dest_name,
