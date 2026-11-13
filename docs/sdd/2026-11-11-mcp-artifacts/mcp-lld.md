@@ -134,13 +134,21 @@ repair behavior. Use existing instance-state storage, not a SQL schema or parall
 
 ## Native names and smallest ownership unit
 
-Derive each server name from the original-owner/type/key identity, independent of content digest,
-bundle and receiving facet: `agentworks-<key-prefix>-<origin-digest-prefix>`. Use up to 24 key
-characters, trim a trailing hyphen, and use 20 digest characters; the full key participates in the
-existing `origin_identity` hash. This bounds names to 56 ASCII characters while keeping them
-readable and stable across content changes and workspace rehome. Validated per-owner/type maps keep
-logical keys unique. Inspection shows logical and native names. Source names need not match native
-names.
+Use the declared artifact key verbatim as the native server name. Its existing name validation and
+64-character bound apply without truncation. Original-owner/type/key hashes remain internal
+identity; they do not qualify the native name. Source selection, publication and inspection use the
+same key.
+
+Group pending inputs by name within one receiving destination. Equal rendered definitions share one
+entry and one receiving setup record's ordinary claim, with a representative original-owner source.
+Every input still receives a handled or deferred outcome. A remaining same-name input keeps the
+entry desired when another input disappears; normal equal-entry adoption can update the recorded
+representative when its origin is not protected by unresolved ancestor routing. A protected claim
+keeps its original source: equal local inputs do not replace it, differing replacements defer, and
+local withdrawal cannot retire it. Ordinary updates and cleanup resume once routing is known.
+Differing definitions defer every member and preserve affected prior claims and entries. No
+reference count or separate co-ownership mechanism is introduced. Separate native user/project roles
+retain the harness's normal loading and precedence rules.
 
 User/workspace registration edits the harness's fixed current native MCP role: Claude user
 `mcpServers`, Claude workspace `.mcp.json`, or the Codex/Grok `mcp_servers` table. Resolve actual
@@ -153,11 +161,11 @@ change as with current settings mapping; document that limitation. Use expected-
 detect concurrent edits. Never overwrite a whole config from a stored snapshot.
 
 Reuse ordinary `NativeClaim` and checkpoint storage: `role` is `artifact-mcp-server`, `identifier`
-is the derived native server name, `destination` is the current native config path, `source` is the
-stable original-owner identity, and `sha256` fingerprints canonical native-entry content. Update
-that field's current compatibility-only comment for its new MCP use; historical settings fields
-retain their read-compatibility meaning and settings ownership is not revived. No document or
-credential body enters claims, and there is no second receipt ledger.
+is the declared server name, `destination` is the current native config path, `source` is the stable
+original-owner identity, and `sha256` fingerprints canonical native-entry content. Update that
+field's current compatibility-only comment for its new MCP use; historical settings fields retain
+their read-compatibility meaning and settings ownership is not revived. No document or credential
+body enters claims, and there is no second receipt ledger.
 
 For each desired entry: absent creates; equal can be adopted; current content matching the recorded
 owned fingerprint can be updated. Other differing or externally modified content is retained and
@@ -172,7 +180,7 @@ session files instead use existing whole-file/run ownership and retirement.
 Mapped Codex settings, prior MCP claims and desired entries are prepared together from one live
 snapshot. Compute safe obsolete-entry retirements in a working document, then apply the mapping with
 its original file-existence decision and reconcile desired canonical entries. Compare actual
-policy-winning contributions at the derived native key before publication. Equal entries agree;
+policy-winning contributions at the declared native key before publication. Equal entries agree;
 conflicts leave that canonical entry unhandled. Publish the final document once with the observed
 file hash, then checkpoint claims. Never publish an intermediate deletion and rely on a second
 reinit to restore a mapped key.

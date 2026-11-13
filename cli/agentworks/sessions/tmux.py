@@ -581,16 +581,27 @@ def _grant_server_access(
     run_command: RunCommand,
     socket_path: str,
 ) -> None:
-    """Grant tmux server-access to every member of the socket group.
+    """Ensure read/write tmux access for every member of the socket group.
 
     Called as the agent (the tmux server owner). No inner
     sudo is needed: the agent runs ``tmux server-access`` against its
-    own server.
+    own server. Root and the owner already have intrinsic access. ``-w``
+    adds other missing users and updates existing users, so interrupted
+    startup completion can safely repeat the grant.
     """
     q_sock = shlex.quote(socket_path)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
+    # Command substitution applies comma splitting in both POSIX shells and zsh.
     run_command(
-        f"for u in $(getent group {grp} | cut -d: -f4 | tr ',' ' '); do tmux -S {q_sock} server-access -a \"$u\"; done",
+        f"agw_socket_group=$(getent group {grp}) || exit $?; "
+        "agw_socket_caller_uid=$(id -u) || exit $?; "
+        "agw_socket_members=${agw_socket_group##*:}; "
+        "set -o noglob || exit $?; IFS=,; "
+        "for u in $(printf '%s' \"$agw_socket_members\"); do "
+        'agw_socket_member_uid=$(id -u -- "$u") || exit $?; '
+        'if [ "$agw_socket_member_uid" = 0 ] || '
+        '[ "$agw_socket_member_uid" = "$agw_socket_caller_uid" ]; then continue; fi; '
+        f'tmux -S {q_sock} server-access -w -- "$u" || exit $?; done',
     )
 
 

@@ -1,9 +1,104 @@
 # Upgrading to 0.20
 
-Agentworks 0.20 verifies every connection to a VM against a host-key store of its own instead of
-trusting whatever it sees first. Existing VMs need a one-time import before most commands will
-connect to them. Third-party VM platform plugins must move to vm-platform contract version 2 (see
+Agentworks 0.20 adds stored runtime intent for VMs, sessions and named consoles. Existing sessions
+and consoles need explicit adoption before reconciliation can restore them. It also verifies every
+connection to a VM against a host-key store of its own instead of trusting whatever it sees first.
+Existing VMs need a one-time host-key import before most commands will connect to them. Third-party
+VM platform plugins must move to vm-platform contract version 2 (see
 [Third-party VM platforms](#third-party-vm-platforms)).
+
+## Adopt desired runtime state
+
+Keep a full database backup from before the upgrade. The normal database-open path offers a
+pre-migration snapshot; retain it. See `agw database --help` for backup and restore operations.
+
+Schema migration 39 replaces the old VM `operator_stopped` flag with a desired runtime state:
+
+| Existing VM policy                         | Migrated target |
+| ------------------------------------------ | --------------- |
+| Manually stopped (`operator_stopped=true`) | `stopped`       |
+| Automatic activation permitted (`false`)   | `on-demand`     |
+
+`on-demand` permits activation when another operation needs the VM, without requesting that it stay
+running. Migration does not infer `running` intent from the VM's observed power state. Existing
+sessions and named consoles have unset targets, preserving their definitions, console membership and
+runtime evidence. They need operator-selected `running` or `stopped` targets; reconciliation reports
+missing intent rather than guessing from old PIDs or timestamps. Newly created VMs, sessions and
+named consoles record `running` intent.
+
+### Inspect, adopt and preview
+
+Plain lists read local inventory and show stored intent without connecting to VMs:
+
+```console
+agw vm list
+agw session list
+agw console list
+```
+
+For each resource whose intended state is known, use its `set-desired-state` command. These commands
+change stored intent without starting or stopping anything. For example, substitute existing names
+and select only targets the operator intends:
+
+```console
+agw vm set-desired-state workstation on-demand
+agw session set-desired-state development running
+agw session set-desired-state retired-work stopped
+agw console set-desired-state daily running
+```
+
+Leave unknown targets unset until the operator decides. A named console's target controls its view;
+it does not set its member sessions' targets, so adopt those sessions separately.
+
+Complete the host-key import below before reconciling. Preview one VM and its stored sessions and
+named consoles first:
+
+```console
+agw vm reconcile workstation --dry-run
+```
+
+The preview observes reachable runtimes without changing them or booting a stopped VM. Selected
+sessions and named consoles with unset targets are reported as blocked. Both preview and apply exit
+nonzero while any remain. Apply may still recover other eligible resources, so a nonzero exit does
+not mean nothing changed.
+
+When the reported scope and targets match the intended recovery, apply them:
+
+```console
+agw vm reconcile workstation
+```
+
+Applying may start or stop the selected VM and its children according to their targets. A stopped VM
+target blocks children that request running; it does not discard their intent. If that VM should run
+again, explicitly start it with `agw vm start workstation`, then reconcile it to recover its
+children. VM start alone does not restore sessions or consoles. A focused `session reconcile NAME`
+or `console reconcile NAME` is available when only that resource should be recovered.
+
+### Lifecycle changes to account for
+
+- Explicit `vm start` now records `running` intent even when the VM is already running. Use
+  `agw vm set-desired-state NAME on-demand` to return to activation only when needed. Explicit
+  session start/stop commands also record intent, including accepted batch no-ops. Named-console
+  start/stop commands record intent for the console view.
+- A VM shutting down or suspending itself, a session exiting, or a console disappearing does not
+  clear intent. Recovery requires an explicit reconcile command; there is no background controller.
+- On WSL2, a live VM with `stopped` intent receives no idle-shutdown protection during access or
+  management commands and may stop mid-command. Select `on-demand` or `running` only when normal
+  holds and future activation are both intended.
+- Batch session start/restart and reconciliation collect all eligible workload secrets before
+  changing selected workload runtimes. One missing required workload secret blocks the entire
+  deferred batch. Required VM activation or repair may already have happened and is not rolled back.
+  Accepted intent survives a later failure or cancellation, so retry reconciliation after resolving
+  the failure.
+
+### Rollback
+
+An older binary refuses the newer schema. Rollback requires a full pre-migration database backup and
+a compatible Agentworks release; do not reconstruct the retired flag or downgrade the schema by
+hand. Restoring the database does not undo provider or guest changes made since the backup.
+
+See [Desired runtime state](desired-runtime-state.md) for scope, failure handling and JSON output
+compatibility. Refresh shell completions after upgrading with `agw completion install`.
 
 ## Import existing host keys
 

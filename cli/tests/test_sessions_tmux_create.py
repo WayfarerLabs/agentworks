@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.errors import StateError
+from agentworks.errors import ExternalError, StateError
 from agentworks.sessions.tmux import (
     _pane_command,
     _tmux_env_flags,
@@ -841,16 +841,18 @@ def test_trim_captured_output_empty_input() -> None:
 
 
 @pytest.mark.parametrize("observation", ["0 ", ""])
+@pytest.mark.parametrize("stage", ["chmod", "server-access"])
 def test_socket_sharing_failure_preserves_its_original_exception_when_death_is_not_observed(
-    spy_target: _SpyTarget, stub_agent_socket_setup: None, observation: str
+    spy_target: _SpyTarget, stub_agent_socket_setup: None, observation: str, stage: str
 ) -> None:
-    from agentworks.errors import ExternalError
-
     failure = ExternalError("controlled sharing failure")
-    scripted = _ScriptedRunCommand(probe_answers=[observation, observation])
+    answers = [observation, observation]
+    if stage == "server-access":
+        answers.insert(0, "0 ")
+    scripted = _ScriptedRunCommand(probe_answers=answers)
 
     def run(command: str, **kwargs: object) -> _SpyResult:
-        if "chmod g+rwx" in command:
+        if (stage == "chmod" and "chmod g+rwx" in command) or (stage == "server-access" and "server-access" in command):
             raise failure
         return scripted(command, **kwargs)
 

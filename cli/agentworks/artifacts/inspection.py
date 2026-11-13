@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.artifacts.bundle import resolve_bundle
-from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.names import is_artifact_name, mcp_native_name
+from agentworks.artifacts.names import is_artifact_name
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
@@ -97,7 +96,7 @@ class ArtifactMetadata:
     declared: bool
     input_id: str | None = None
     origin_id: str | None = None
-    native_name: str | None = None  # Canonical source name, or the derived MCP registration key.
+    native_name: str | None = None  # Canonical artifact name, also used for native MCP registration.
     source: str | None = None
     requested_ref: str | None = None
     revision: str | None = None
@@ -338,7 +337,7 @@ def _artifact_metadata(
                 declared,
                 item.identity,
                 item.origin_identity,
-                mcp_native_name(item) if item.content.type is ArtifactType.MCP_SERVER else item.content.name,
+                item.content.name,
                 item.provenance.source,
                 item.provenance.requested_ref or None,
                 item.provenance.commit or None,

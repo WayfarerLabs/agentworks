@@ -104,16 +104,19 @@ introducing deferrals. Session-only native registration is opt-in through `enabl
 preserves other sources, and must demonstrate isolation on start and resume before being advertised.
 Publishing into a shared home/project catalog is not session isolation.
 
-### R7. Independent managed entries
+### R7. Declared names and managed entries
 
-Managed native identities distinguish original owners and same-named definitions across scopes.
-Prevent silent shadowing among managed entries. Preserve unrelated entries and native policy in
-shared config documents. Adopt an identical unowned entry; skip a different unowned entry with a
-specific warning. Native trust, endpoint deduplication, authentication and connectivity remain
-separate from registration and must be disclosed rather than claimed as guarantees.
+Use the declared MCP artifact key verbatim as its native server name. Keep original-owner identity
+and content fingerprints in ordinary internal ownership state, without adding a native prefix or
+suffix. Adopt an identical unowned entry; skip a different unowned entry with a specific warning.
+Preserve unrelated entries and native policy in shared config documents.
 
-Native names include a readable logical-key component and a stable original-owner identity digest.
-Truncating the readable component must not discard the full key from the identity hash.
+When multiple original-owner inputs reach one native destination with the same name, equal native
+definitions share one entry and every input's outcome is retained. Different definitions remain
+unhandled with a warning; do not silently choose one. Distinct native user/project roles follow the
+harness's normal scope loading and precedence. Names do not promise independent connections across
+those roles. Native trust, endpoint deduplication, authentication and connectivity remain separate
+from registration and must be disclosed rather than claimed as guarantees.
 
 ### R8. Idempotency and cleanup
 

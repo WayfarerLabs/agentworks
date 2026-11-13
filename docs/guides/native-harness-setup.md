@@ -89,30 +89,43 @@ override, Claude's role is `~/.claude.json`, not `~/.claude/settings.json`. Code
 VM facets defer MCP to user; Shell publishes canonical JSON and an index at each scope without
 running clients or servers.
 
-Managed names include a readable logical-key prefix and an original-owner identity digest:
-`agentworks-<key-prefix>-<origin-digest-prefix>`. They distinguish equal keys from different scopes
-and remain stable across content/bundle changes and workspace rehome. Native endpoint deduplication
-and policy can still affect discovery. Use `agw artifact show` for the recorded native name and
-destination without querying a native MCP inventory or exposing connection values.
+The declared artifact key is the native server name, unchanged: `github` registers as `github`.
+Original-owner hashes remain internal provenance and do not rename the server. Separate native
+user/project configurations retain the harness's normal loading and precedence rules; use distinct
+names to address separate connections. Within one destination, equal same-name inputs share one
+entry; different definitions are all deferred with a warning. Use `agw artifact show` for recorded
+names and destinations without querying a native MCP inventory or exposing connection values.
 
 Application owns an entry, not the whole shared file. Missing entries are created; identical unowned
-entries can be adopted and become managed. Matching the recorded entry fingerprint permits an owned
-update. Different unowned or externally modified entries are retained and deferred individually.
-Removing a declaration or activation retires unchanged owned entries wherever safely possible;
-modified obsolete entries keep their claims and warn. Unrelated entries and settings remain unless
-an explicit settings mapping changes them. JSON/TOML serialization preserves values, not comments or
-formatting. Concurrent changes refuse publication rather than replacing them from a saved document
-snapshot.
+entries can be adopted and become managed, with a notice after ownership is saved. Matching the
+recorded entry fingerprint permits an owned update. Different unowned or externally modified entries
+are retained and deferred individually. Removing a declaration or activation retires unchanged owned
+entries wherever safely possible; modified obsolete entries keep their claims and warn. Unrelated
+entries and settings remain unless an explicit settings mapping changes them. JSON/TOML
+serialization preserves values, not comments or formatting. Concurrent changes refuse publication
+rather than replacing them from a saved document snapshot.
+
+When ancestor routing is unresolved, its existing entry and ownership are retained. An equal local
+declaration keeps that ownership; a different local definition is deferred until ancestor setup is
+repaired. Withdrawing only the local declaration does not remove the retained ancestor entry.
+
+When upgrading from generated MCP names, the next owning setup retires unchanged recorded aliases
+and creates or adopts the declared name. Modified aliases remain recorded with a warning; unclaimed
+entries remain foreign regardless of their spelling. A conflicting literal entry stays in place and
+leaves the requested artifact unhandled, while an unchanged obsolete alias still retires. Native
+credentials are retained, although native clients can bind credentials or approvals to a server name
+and require operator review after a rename. Private session carriers change on the next managed
+start/restart. This adds no automatic ancestor repair or workspace reinit operation.
 
 Codex settings mappings share `config.toml` with MCP. Setup computes safe obsolete-entry removal,
 the selected mapping policy and desired MCP entries in one document plan. An actual surviving mapped
-value that differs at a desired derived server name leaves that MCP artifact unhandled. Equal values
-can be adopted. If an unchanged MCP entry is withdrawn but the source mapping still supplies that
-key, `replace`, `merge-overwrite` and `merge-preserve` leave the source value and release the MCP
-claim in that same application. For `skip-existing`, the original file-existence decision still
-governs the mapping: an existing file skips the source while the withdrawn entry retires; a missing
-file is populated from the source. `skip-existing` does not disable separately declared MCP work.
-Removing only a settings mapping retains its current values as usual.
+value that differs at a declared server name leaves that MCP artifact unhandled. Equal values can be
+adopted. If an unchanged MCP entry is withdrawn but the source mapping still supplies that key,
+`replace`, `merge-overwrite` and `merge-preserve` leave the source value and release the MCP claim
+in that same application. For `skip-existing`, the original file-existence decision still governs
+the mapping: an existing file skips the source while the withdrawn entry retires; a missing file is
+populated from the source. `skip-existing` does not disable separately declared MCP work. Removing
+only a settings mapping retains its current values as usual.
 
 Untracked shared MCP config documents receive exact local Git exclusions. The exclusion covers the
 entire file, including unrelated values, because Git cannot hide individual entries. Already-tracked
