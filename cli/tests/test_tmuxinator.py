@@ -281,3 +281,10 @@ def test_a_stored_workspace_path_names_its_config_in_one_spelling(stored: str) -
     from agentworks.workspaces.tmuxinator import config_path
 
     assert config_path(stored) == "/data/ws/.tmuxinator.yml"
+
+
+def test_a_dotdot_component_in_a_stored_path_is_kept() -> None:
+    """Collapsing ``..`` would name another directory when the component before it is a link."""
+    from agentworks.workspaces.tmuxinator import config_path
+
+    assert config_path("/data/link/../ws/") == "/data/link/../ws/.tmuxinator.yml"

@@ -39,13 +39,16 @@ def validate_admin_username(admin_username: str) -> None:
 
 
 def validate_vm_workspaces(path: str) -> str:
-    """Return ``paths.vm_workspaces`` normalized, refusing a relative value or one at or under ``/home``.
+    """Return ``paths.vm_workspaces`` normalized, refusing a relative value, the root, a ``..`` component, or ``/home``.
 
     The value names a directory on the VM, and every workspace path is built
-    from it, so it must be absolute; it is normalized once here
-    (``execution.files.normalized_guest_path``: ``//``, a trailing ``/`` and
-    ``.`` segments collapsed, a leading ``//`` made ``/``), so the paths built
-    from it have one spelling.
+    from it, so it must be absolute and below the root. It is normalized once
+    here (``execution.files.normalized_guest_path``: empty and ``.``
+    components dropped, so a trailing ``/`` goes and a leading ``//`` is
+    ``/``), so the paths built from it have one spelling. A ``..`` component
+    is refused rather than collapsed, since collapsing it would name another
+    directory when the component before it is a symbolic link; this is the
+    rule ``workspace rehome --target`` applies too.
 
     ``/home`` is the Linux user-home namespace on the VM. The admin and agent
     users each own ``/home/<user>``, and those homes are locked to mode 0750
@@ -61,20 +64,19 @@ def validate_vm_workspaces(path: str) -> str:
     Raises ``ConfigError`` (the type ``_load_paths`` already raises) with a
     migration hint.
 
-    Normalization uses ``posixpath`` explicitly, not ``os.path``. This value is
-    always a VM-side POSIX path regardless of the operator's host OS, and
+    Normalization splits on ``/`` itself, never through ``os.path``. This value
+    is always a VM-side POSIX path regardless of the operator's host OS, and
     agentworks runs natively on Windows, where ``os.path`` is ``ntpath``:
     ``ntpath.normpath('/home/foo')`` returns ``'\\home\\foo'``, which would
     match neither branch below and silently accept every ``/home`` path.
-    ``posixpath`` is the house choice for VM paths across the codebase.
     """
     from agentworks.execution.files import normalized_guest_path
 
     normalized = normalized_guest_path(path)
-    if not normalized.startswith("/"):
+    if not normalized.startswith("/") or normalized == "/" or ".." in normalized.split("/"):
         raise ConfigError(
-            f"paths.vm_workspaces must be an absolute path on the VM (got {path!r}), "
-            "such as the default '/opt/agentworks/workspaces'."
+            f"paths.vm_workspaces must be an absolute directory path on the VM, below the root and "
+            f"with no '..' component (got {path!r}), such as the default '/opt/agentworks/workspaces'."
         )
     if normalized == "/home" or normalized.startswith("/home/"):
         raise ConfigError(

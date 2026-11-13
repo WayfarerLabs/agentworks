@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import posixpath
 from dataclasses import dataclass
 from enum import Enum
 from importlib import resources
@@ -76,14 +75,15 @@ def guest_path(path: str) -> str:
 
 
 def normalized_guest_path(path: str) -> str:
-    """``path`` as one spelling of the same guest path: ``posixpath.normpath``, then a leading ``//`` made ``/``.
+    """``path`` as one spelling of the same guest path: empty and ``.`` components dropped.
 
-    POSIX leaves a leading ``//`` implementation-defined, so ``normpath`` keeps
-    it; Linux reads it as ``/``. A relative path stays relative, for the caller
-    to refuse.
+    A leading ``//`` is ``/``, as Linux reads it. A ``..`` component is kept:
+    collapsing it lexically would name another directory when the component
+    before it is a symbolic link. A relative path stays relative, for the
+    caller to refuse.
     """
-    normalized = posixpath.normpath(path)
-    return "/" + normalized.lstrip("/") if normalized.startswith("//") else normalized
+    components = "/".join(part for part in path.split("/") if part not in ("", "."))
+    return "/" + components if path.startswith("/") else components or "."
 
 
 @dataclass(frozen=True)

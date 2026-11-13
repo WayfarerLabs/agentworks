@@ -59,12 +59,11 @@ def test_rejects_home_path_on_windows_style_host(monkeypatch: pytest.MonkeyPatch
     ``ntpath`` and ``ntpath.normpath('/home/foo')`` returns ``'\\home\\foo'``,
     which matches neither the ``== '/home'`` nor the ``/home/`` prefix check.
 
-    The validator must normalize with ``posixpath`` regardless of host, so we
-    simulate a Windows host by repointing ``os.path`` at ``ntpath`` (on Linux
-    CI, ``os.path is posixpath``, so a revert to ``os.path.normpath`` would pick
-    up the patched separator and silently accept the path) and assert
-    ``/home/foo`` is STILL rejected. This fails loudly if anyone swaps
-    ``posixpath`` back to ``os.path``. CI only runs Linux, so nothing else
+    The validator must normalize as POSIX regardless of host, so we simulate a
+    Windows host by repointing ``os.path`` at ``ntpath`` (on Linux CI,
+    ``os.path is posixpath``, so a switch to ``os.path.normpath`` would pick up
+    the patched separator and silently accept the path) and assert
+    ``/home/foo`` is STILL rejected. CI only runs Linux, so nothing else
     catches this."""
     import ntpath
 
@@ -115,6 +114,15 @@ def test_load_config_accepts_non_home_vm_workspaces(tmp_path: Path, path: str) -
 @pytest.mark.parametrize("path", ["workspaces", "./ws", "~/ws", "srv/ws", ""])
 def test_load_config_refuses_a_relative_vm_workspaces(tmp_path: Path, path: str) -> None:
     """Every workspace path is built from the value, so a relative one is refused at load."""
+    config_file = _write_config(tmp_path, path)
+    with pytest.raises(ConfigError):
+        load_config(config_file)
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("path", ["/", "//", "/./", "/srv/../ws", "/srv/ws/..", "/../srv/ws"])
+def test_load_config_refuses_the_root_or_a_dotdot_component(tmp_path: Path, path: str) -> None:
+    """The root would put workspaces at ``//<name>``; ``..`` is refused rather than collapsed past a link."""
     config_file = _write_config(tmp_path, path)
     with pytest.raises(ConfigError):
         load_config(config_file)
