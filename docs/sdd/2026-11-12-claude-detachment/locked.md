@@ -10,3 +10,9 @@ Ready-PR publication, CI monitoring, a separate PR-level review and up to three 
 feedback/fix rounds continue under the delivery workflow. This implementation closeout does not
 claim those operating duties have finished or authorize merge. Any pre-merge correction updates the
 validation record before its next handoff. The SDD lock takes effect when merged to main.
+
+Publication: [PR 905](https://github.com/WayfarerLabs/agentworks/pull/905), initially reviewed head
+`5991ce9c9`. The first authorized feedback round preserves the accepted requirements and updates
+warning clarity, unused metadata and behavioral coverage at implementation `835861d1d`. Its final
+validation and review evidence belongs in `validation.md`; ready handoff and approval remain the
+PR's operational record.

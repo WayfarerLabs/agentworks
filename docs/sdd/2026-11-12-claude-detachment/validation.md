@@ -50,7 +50,7 @@ skipped, 223 tests, and 419 tests respectively. Ruff, Mypy over 1,038 files, rep
 rulesync, locked-SDD protection, typer isolation, Python website tests (160 passed), Node website
 tests (103 passed), and both deterministic double builds pass. The fresh baseline full CLI run
 passed 13,217 tests with 35 skipped and 15 nested cases. The later existing-session correction has
-separate validation still in progress.
+separate validation below.
 
 A separate local tester drove actual Claude Code 2.1.319 through native print/create and
 print/resume against the repository's loopback provider fixture. Both calls exited zero with the
@@ -72,11 +72,12 @@ live parked-job recovery remain untested.
 A subsequent operator-path audit found that existing sessions have no supported way to set or remove
 an instance spec: `--spec` is creation-only, start/restart accept no spec, and `resource edit` edits
 YAML declarations rather than live session state. Earlier mechanism-level review results do not
-establish usable existing-session recovery. Ready publication is held until a supported editing
-surface is implemented. Independent review classified this as necessary within the existing recovery
-scope; the implementation follows agent reinit's retain/replace/clear semantics on named session
-start/restart. The operator's pending preference can still steer this choice. The unmerged local
-lock is removed while this requirement is open.
+establish usable existing-session recovery. Ready publication was temporarily held until a supported
+editing surface was implemented. Independent review classified this as necessary within the existing
+recovery scope; the implementation uses the retain/replace/clear model on named session
+start/restart. Unlike agent reinit's empty-string alias, this session surface requires a JSON object
+and clears only with `{}`. The operator's pending preference can still steer this choice. The
+unmerged local lock is removed while this requirement is open.
 
 ### Existing-session recovery completion
 
@@ -111,3 +112,52 @@ lanes and local tester is `ae99f67ca`; subsequent closeout changes update only t
 option-placement test and SDD records. The PR handoff carries the SDD label and monitoring
 allowance. Publication, CI and PR-level review remain operating duties tracked in the session goal
 and PR comments, rather than implementation-plan completion claims.
+
+## PR feedback round 1, 2026-11-13
+
+[PR 905](https://github.com/WayfarerLabs/agentworks/pull/905) was handed off ready at 19:52:58 UTC,
+head `5991ce9c9`, with all CI checks subsequently passing. The complete independent PR-level review
+passed 584 targeted tests and found no material issue, plus one optional warning-text assertion to
+remove. The published complexity review arrived during collection. The operator's existing allowance
+covers this first round, begun at 20:53:09 UTC after the one-hour collection interval; draft state
+was confirmed before any head changes. Main remained `3ad615680`.
+
+Implementation `835861d1d` clarifies that forced addressing disables detection until removed, and
+that absent history may simply mean no first prompt was submitted. The required suppression and
+ambiguous-history policies remain intact. It removes the unused JSON Schema extension and mapping
+scope hook while retaining the annotation, nested declaration enforcement, bounded tail fast path
+and both independently necessary preflight checks. The reference-marker consumer rule is restored.
+
+An isolated Claude Code 2.1.319 interactive UI reached its empty prompt through ordinary theme,
+confirmation of the public fixture key, security notice and workspace trust. The native registry
+held one matching interactive session with no parked link, while two observations found zero exact
+or other project transcripts and zero provider requests. Normal exit returned 0 with no transcript.
+Native resume of the same UUID returned 1 because no conversation existed. This proves successful
+startup does not establish native history; no managed-guest restart was exercised. The native
+processes exited, and the lead independently observed connection refusal on port 43625 and absence
+of the owned home/workspace. No real credentials, paid requests or operator state were used.
+
+Adversarial experiments verified the first session check prevents observing a replacement selected
+before guard acquisition, while the transaction check protects the later preparation interval.
+Direct harness start also needs its own force-new preflight even with existing transcript evidence.
+New regressions cover both, malformed host probe output, and real Claude conversation/native-probe
+failure stages. Warning frequency remains behavioral coverage; the authored-text comparison is gone.
+A measured 11,850,142-byte transcript required only 131,072 transcript bytes on the tail fast path,
+justifying its retention. No supported guest predating Python 3.9 was found: the managed release
+registry is Debian 12/13, with distro Python installed by initialization.
+
+The isolated real CLI accepted an ordinary template, rejected direct and inherited forced UUIDs, and
+rendered valid session-template schema after removal of the unused extension. Its temporary home was
+independently confirmed absent. Focused tests passed 212 cases; Mypy passed across 1,041 files. The
+complete suite passed 13,269 tests, with 35 skipped and 15 nested test cases, exit 0. All three
+private lanes cleared implementation `835861d1d`; each independently passed 212 affected tests. The
+complexity lane deleted the early session check, direct-start conflict check and host-output
+validation together: all 12 corresponding regressions failed. Restoring the exact source passed
+all 12. Ruff lint/format, configured Mypy, file lint, rulesync drift, locked-SDD protection and
+Typer isolation pass. Website Python/Node runs passed 160/103 tests, and both deterministic double
+builds passed.
+
+The initial ready head's separate integration-test lane withdrew without starting when the PR
+returned to draft; that report supplies no merge clearance. Its next ready transition starts a fresh
+cycle. Final closeout review, pushed-head handoff, CI, external validation and required team
+approval remain recorded by the PR workflow; these local results do not claim those duties finished.

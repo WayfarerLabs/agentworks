@@ -23,3 +23,7 @@ After publication, CI/review monitoring and any authorized feedback rounds are t
 handoff comments and the session goal under the standard delivery workflow. That operating duty
 continues after implementation closeout; any resulting code correction updates this effort's
 validation evidence before the next handoff.
+
+Round 1's warning/schema corrections and behavioral regressions were implemented at `835861d1d` and
+validated locally, including the full suite and all three private review lanes. Its ready handoff
+and remaining publication duties continue in the PR record above.
