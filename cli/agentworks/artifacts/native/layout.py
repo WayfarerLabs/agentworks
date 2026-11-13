@@ -69,8 +69,9 @@ def resolve_user_layout(
             deadline=30,
         )
     )
-    if result.require_completed(access.vm_name):
-        raise ExternalError("Native user configuration location could not be resolved")
+    status = result.require_completed(access.vm_name)
+    if status:
+        raise ExternalError(f"Native user configuration location could not be resolved (exit {status})")
     lines = [
         line.removeprefix("AGW_NATIVE_USER_LAYOUT=")
         for line in result.stdout.decode("utf-8", "replace").splitlines()
