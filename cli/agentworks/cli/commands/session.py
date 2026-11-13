@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
-import click
 import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_filter, parse_csv_sort
+from agentworks.db import DesiredRuntimeState  # noqa: TC001 (Typer resolves annotations at runtime)
 from agentworks.machine_output import OutputFormat
 
 session_app = typer.Typer(
@@ -17,8 +17,6 @@ session_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(session_app)
-
-_DESIRED_STATE_CHOICES = click.Choice(["running", "stopped"])
 
 
 @session_app.command("create")
@@ -385,8 +383,8 @@ def _launch_sessions(
 def session_set_desired_state(
     name: Annotated[str, typer.Argument(help="Session name")],
     state: Annotated[
-        str,
-        typer.Argument(help="Desired runtime state", click_type=_DESIRED_STATE_CHOICES),
+        Literal[DesiredRuntimeState.RUNNING, DesiredRuntimeState.STOPPED],
+        typer.Argument(help="Desired runtime state"),
     ],
 ) -> None:
     """Set the stored runtime target without changing the running state."""
@@ -535,7 +533,7 @@ def session_delete(
 @session_app.command("logs")
 def session_logs(
     name: Annotated[str, typer.Argument(help="Session name")],
-    lines: Annotated[int | None, typer.Option("--lines", "-n", help="Number of lines")] = None,
+    lines: Annotated[int | None, typer.Option("--lines", "-n", help="Number of lines", parser=int)] = None,
 ) -> None:
     """Dump the scrollback buffer for a session."""
     interaction = ordinary_tty_interaction_policy()

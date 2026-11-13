@@ -487,15 +487,17 @@ def _run_agent_install_commands(
         truncated = entry.command[:60]
         output.info(f"Agent install command {i}/{total} ({name}): {truncated}...")
         try:
-            # Run the install command in a login shell to source the agent's
-            # profile (provides AGENTWORKS_AGENT + PATH adds from earlier).
+            # The login shell sources identity and existing home/login state.
+            # Declared paths are written after the batch, so later installers
+            # must use absolute paths for tools absent from the existing PATH.
             agent_target.run(
                 f"{shell} -lc {shlex.quote(entry.command)}",
                 timeout=120,
             )
         except SSHError as e:
             output.warn(f"agent install command '{name}' failed: {e}")
-        path_additions.extend(entry.path)
+        else:
+            path_additions.extend(entry.path)
 
     # Rewrite the agent's profile fragment with identity + accumulated
     # PATH additions. The fragment was written with identity-only earlier
