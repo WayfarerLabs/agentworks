@@ -589,8 +589,10 @@ Definition of done: create and reinit run entirely on the new transport.
     `printf`, `chmod` and `mv` fragment), which writes a guest file outside `Files`;
   - agent delete's session teardown and console window cleanup
     (`agents/manager/lifecycle.py:389-398`, `:423-425`);
-  - `vm describe`'s live resources (`vms/manager/_helpers.py:306`), the last legacy caller outside
-    these modules.
+  - `vm describe`'s live resources (`vms/manager/_helpers.py:306`);
+  - desired runtime state's session teardown and console presence probes
+    (`runtime_state/_session_stop.py`, `_prepare.py`, `_preview.py`), which arrived with #885
+    ([`sessions-lld.md`](./sessions-lld.md), Delivery batches C and D).
 - [ ] Tests:
   - a fresh launch never matches an earlier one;
   - observation resumes across a dropped connection;
@@ -622,8 +624,8 @@ Definition of done: create and reinit run entirely on the new transport.
     workstations and on WSL2;
   - backup with a forced disconnect and with an interrupt, on WSL2 (idle shutdown) and Remote Lima.
 
-Definition of done: no workspace, session or backup module imports a legacy module, and
-`remote_exec.py` is deleted.
+Definition of done: no workspace, session, backup or desired runtime state module imports a legacy
+module, and `remote_exec.py` is deleted.
 
 ## Slice 8: Removal (PR C)
 
