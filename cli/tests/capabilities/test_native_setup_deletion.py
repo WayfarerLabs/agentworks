@@ -200,9 +200,9 @@ def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
 def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, deletion, monkeypatch, kind, name):
     _store_applied_state(db, kind, name, "claims")
     deletion.target.run.side_effect = SSHError("unreachable")
+    # The user delete and the workspace's own removal run on the admin's access.
+    install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
     if kind == "agent":
-        # The user delete runs on the admin's access.
-        install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
         monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
         delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         assert db.get_agent(name) is None

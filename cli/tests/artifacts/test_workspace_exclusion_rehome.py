@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import sys
 from contextlib import nullcontext
@@ -13,29 +14,42 @@ import pytest
 from agentworks.artifacts.application import OwnedArtifactFile
 from agentworks.artifacts.git_excludes import _pair
 from agentworks.db import Database, InitStatus
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHResult
+from agentworks.workspaces.guest import open_parent_traversal
 from agentworks.workspaces.manager import delete_workspace, rehome_workspace
 from tests.artifacts.test_git_excludes import Guest, apply, file, git
 from tests.capabilities.test_native_setup_deletion import deletion as deletion
+from tests.vm_access_support import Call
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
 
 class RehomeTransport(Guest):
-    """Keep actual copy/Git operations but suppress host ownership and ancestor changes."""
+    """Keep actual copy/Git operations but suppress host ownership and ancestor changes.
 
-    def run(self, command: str, **kwargs) -> SSHResult:
-        if command.startswith(("chown ", "p=$(dirname")):
-            self.commands.append(command)
-            return SSHResult(0, "", "")
-        if command == "which rsync":
-            self.commands.append(command)
-            return SSHResult(1, "", "")
-        return super().run(command, **kwargs)
+    ``commands`` holds every command and script the access was asked to run.
+    """
+
+    def answer(self, call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, Command | Script):
+            self.commands.append(shlex.join(request.argv) if isinstance(request, Command) else request.source)
+        if isinstance(request, Command) and request.argv[0] == "chown" or _is_traversal(request):
+            return Result(Completed(0))
+        if isinstance(request, Command) and request.argv == ("which", "rsync"):
+            return Result(Completed(1))
+        return super().answer(call)
+
+
+def _is_traversal(request: object) -> bool:
+    """Whether ``request`` is the parent traversal walk, for any path."""
+    walk = open_parent_traversal("/").source.split("\n", 1)[1]
+    return isinstance(request, Script) and request.source.endswith(walk)
 
 
 def save(db: Database, name: str, claims: tuple[NativeClaim, ...], files: tuple[OwnedArtifactFile, ...] = ()) -> None:

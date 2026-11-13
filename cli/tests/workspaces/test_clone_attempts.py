@@ -15,11 +15,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import AlreadyExistsError
-from agentworks.ssh import SSHError, SSHResult
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.workspaces.backends.vm import create_vm_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 from agentworks.workspaces.tmuxinator import console_session_name
-from tests.vm_access_support import local_files
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, run_file_program_locally
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,8 +33,17 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def lost(what: str) -> ExecutionIncomplete:
+    """A request whose response was lost: the guest may have run it."""
+    return ExecutionIncomplete("fixture", Result(Unknown(UnknownReason.CONNECTION), stderr=what.encode()))
+
+
 class LocalCommands:
-    """Execute filesystem/Git work locally; model only guest users and groups."""
+    """Answer the admin's access by running its requests locally; model only guest users and groups.
+
+    ``commands`` holds each command and script as a line (``shlex.join`` of a
+    command's argv, a script's source), which ``before`` and ``after`` see.
+    """
 
     def __init__(self, root: Path):
         self.root = root
@@ -60,34 +71,41 @@ class LocalCommands:
         self.interrupt: BaseException | None = None
         self.ready = root / "clone-ready"
         self.release = root / "clone-release"
-        self.orphans: list[subprocess.Popen[str]] = []
+        self.orphans: list[subprocess.Popen[bytes]] = []
         self.clone_destinations: list[Path] = []
         self.clone_parent_modes: list[int] = []
 
-    def run(self, command: str, **kwargs: object) -> SSHResult:
+    def access(self) -> RecordingVMAccess:
+        access = RecordingVMAccess([], Admin(), vm_name="fixture")
+        access.answer = self.answer
+        return access
+
+    def answer(self, call: Call) -> Result | None:
+        files = run_file_program_locally(call)
+        if files is not None:
+            return files
+        request = call.request
+        assert isinstance(request, Command | Script), request
+        argv = list(request.argv) if isinstance(request, Command) else ["sh", "-c", request.source]
+        command = shlex.join(request.argv) if isinstance(request, Command) else request.source
         self.commands.append(command)
         if self.before is not None:
             self.before(command)
         if "groupadd" in command:
             self.groups.add("ws-project")
-            return SSHResult(0, "", "")
+            return Result(Completed(0))
         if "groupdel" in command:
             self.groups.discard("ws-project")
-            return SSHResult(0, "", "")
+            return Result(Completed(0))
         if command.startswith(("usermod ", "chown ", "chgrp ")):
-            return SSHResult(0, "", "")
+            return Result(Completed(0))
         if command.startswith("git clone "):
-            destination = Path(shlex.split(command)[-1])
+            destination = Path(argv[-1])
             self.clone_destinations.append(destination)
             self.clone_parent_modes.append(destination.parent.stat().st_mode & 0o777)
             if self.interrupt is not None:
                 process = subprocess.Popen(
-                    ["bash", "-c", command],
-                    cwd=self.home,
-                    env=self.environment,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
+                    argv, cwd=self.home, env=self.environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE
                 )
                 self.orphans.append(process)
                 deadline = time.monotonic() + 20
@@ -96,24 +114,19 @@ class LocalCommands:
                         raise AssertionError("the real Git helper did not reach its wait point")
                     time.sleep(0.02)
                 raise self.interrupt
-        result = subprocess.run(
-            ["bash", "-c", command],
-            cwd=self.home,
-            env=self.environment,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if kwargs.get("check", True) and result.returncode:
-            raise SSHError(f"fixture command failed: {command}: {result.stderr}")
+        completed = subprocess.run(argv, cwd=self.home, env=self.environment, capture_output=True, timeout=30)
+        result = Result(Completed(completed.returncode), completed.stdout, completed.stderr)
+        if call.options["check"] and completed.returncode:
+            raise CommandFailed("fixture", completed.returncode, result, streams_logged=True)
         if self.after is not None:
             self.after(command)
-        return SSHResult(result.returncode, result.stdout, result.stderr)
+        return result
 
-    def write_file(self, path: str, content: str, **kwargs: object) -> None:
-        destination = Path(path)
-        assert destination.is_relative_to(self.root)
-        destination.write_text(content)
+    def run(self, command: str) -> subprocess.CompletedProcess[str]:
+        """Run ``command`` locally as the test's own setup, outside the access."""
+        return subprocess.run(
+            ["bash", "-c", command], cwd=self.home, env=self.environment, capture_output=True, text=True, check=True
+        )
 
     def finish_orphans(self) -> list[int]:
         self.release.touch()
@@ -133,8 +146,8 @@ class LocalCommands:
 @pytest.fixture
 def backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     target = LocalCommands(tmp_path)
-    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", lambda *args, **kwargs: target)
-    monkeypatch.setattr("agentworks.execution.vm_access", lambda *args, **kwargs: local_files().access)
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *args, **kwargs: target.access())
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.managed_home", lambda user: str(target.home))
     monkeypatch.setattr("agentworks.workspaces.backends.vm.apply_workspace_acls", lambda *args: None)
     vm = SimpleNamespace(name="fixture", tailscale_host="fixture", admin_username="fixture")
     config = SimpleNamespace(paths=SimpleNamespace(vm_workspaces=str(tmp_path / "workspaces")))
@@ -153,7 +166,7 @@ def source_repository(target: LocalCommands) -> Path:
         f"git -C {shlex.quote(str(source))} add .",
         f"git -C {shlex.quote(str(source))} commit -qm original",
     ):
-        assert target.run(command).ok
+        target.run(command)
     return source
 
 
@@ -170,7 +183,7 @@ def test_late_guest_clone_cannot_destroy_a_successful_retry(backend, cancel, rem
         + (f"exec git-upload-pack {shlex.quote(str(source))}\n" if remote_success else "exit 1\n")
     )
     helper.chmod(0o700)
-    error = KeyboardInterrupt("fixture controller cancelled") if cancel else SSHError("fixture controller timed out")
+    error = KeyboardInterrupt("fixture controller cancelled") if cancel else lost("fixture controller timed out")
     target.interrupt = error
     with pytest.raises(type(error)) as caught:
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="slow", repo=f"ext::{helper}"))
@@ -225,7 +238,7 @@ def test_existing_destination_is_never_adopted_or_removed(backend, kind):
 @pytest.mark.parametrize("lost_response", [False, True])
 def test_reservation_collision_or_lost_response_never_authorizes_cleanup(backend, lost_response):
     target, vm, config, final = backend
-    error = SSHError("fixture reservation response lost")
+    error = lost("fixture reservation response lost")
 
     def before(command: str) -> None:
         if command == f"mkdir -- {shlex.quote(str(final))}" and not lost_response:
@@ -237,7 +250,7 @@ def test_reservation_collision_or_lost_response_never_authorizes_cleanup(backend
             raise error
 
     target.before, target.after = before, after
-    with pytest.raises(SSHError):
+    with pytest.raises(ExecutionIncomplete if lost_response else CommandFailed):
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
     assert final.is_dir() and not target.groups
     if not lost_response:
@@ -266,10 +279,10 @@ def test_unconfirmed_publication_retains_final_content_and_group(backend, obstru
 
     def after(command: str) -> None:
         if command.startswith("mv -T ") and obstruction == "lost-response":
-            raise SSHError("fixture publication response lost")
+            raise lost("fixture publication response lost")
 
     target.before, target.after = before, after
-    with pytest.raises(SSHError):
+    with pytest.raises(ExecutionIncomplete if obstruction == "lost-response" else CommandFailed):
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="repo", repo=source.as_uri()))
     assert final.exists() and target.groups == {"ws-project"}
     if obstruction == "lost-response":
@@ -296,10 +309,10 @@ def test_unconfirmed_private_attempt_directory_is_not_removed(backend, monkeypat
 
     def after(command: str) -> None:
         if command.startswith("mkdir -m 700 ") and lost_response:
-            raise SSHError("fixture private reservation response lost")
+            raise lost("fixture private reservation response lost")
 
     target.before, target.after = before, after
-    with pytest.raises(SSHError):
+    with pytest.raises(ExecutionIncomplete if lost_response else CommandFailed):
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="repo", repo=source.as_uri()))
     assert candidate.is_dir() and candidate.stat().st_mode & 0o777 == 0o700
     assert not final.exists() and not target.groups
@@ -315,10 +328,10 @@ def test_failure_after_confirmed_publication_reclaims_its_checkout_and_group(bac
     def before(command: str) -> None:
         if "config --local" in command:
             assert (final / ".git").is_dir()
-            raise SSHError("fixture identity write failed")
+            raise lost("fixture identity write failed")
 
     target.before = before
-    with pytest.raises(SSHError):
+    with pytest.raises(ExecutionIncomplete):
         create_vm_workspace(
             vm,
             config,
@@ -333,7 +346,7 @@ def test_failure_after_confirmed_publication_reclaims_its_checkout_and_group(bac
 @pytest.mark.parametrize("cleanup_cancel", [False, True])
 def test_attempt_cleanup_failure_still_cleans_empty_reservation_and_group(backend, monkeypatch, cancel, cleanup_cancel):
     target, vm, config, final = backend
-    original = KeyboardInterrupt() if cancel else SSHError("clone failed")
+    original = KeyboardInterrupt() if cancel else lost("clone failed")
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.workspaces.backends.vm.output.warn", warnings.append)
 
@@ -344,7 +357,7 @@ def test_attempt_cleanup_failure_still_cleans_empty_reservation_and_group(backen
             raise (
                 KeyboardInterrupt()
                 if cleanup_cancel
-                else SSHError("cleanup transport failed with private provider details")
+                else lost("cleanup transport failed with private provider details")
             )
 
     target.before = before
@@ -361,7 +374,7 @@ def test_attempt_cleanup_failure_still_cleans_empty_reservation_and_group(backen
 @pytest.mark.parametrize("occupied", [False, True])
 def test_unpublished_nonrepo_failure_only_removes_empty_reservation(backend, occupied):
     target, vm, config, final = backend
-    original = SSHError("setup failed")
+    original = lost("setup failed")
 
     def before(command: str) -> None:
         if command.startswith("chmod 2770 "):
@@ -370,7 +383,7 @@ def test_unpublished_nonrepo_failure_only_removes_empty_reservation(backend, occ
             raise original
 
     target.before = before
-    with pytest.raises(SSHError) as caught:
+    with pytest.raises(ExecutionIncomplete) as caught:
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
     assert caught.value is original
     if occupied:
@@ -388,7 +401,7 @@ def test_late_nonrepo_failure_reclaims_only_unchanged_generated_files(
 ):
     target, vm, config, final = backend
     config = make_config(f'\n[paths]\nvm_workspaces = "{final.parent.as_posix()}{path_suffix}"\n')
-    original = KeyboardInterrupt() if cancel else SSHError("fixture ACL failure")
+    original = KeyboardInterrupt() if cancel else lost("fixture ACL failure")
     link = target.home / f".config/tmuxinator/{console_session_name('project')}.yml"
     preserved = target.root / "preserved"
     preserved.write_text("operator content\n")
@@ -436,7 +449,7 @@ def test_nonrepo_create_preserves_an_existing_tmuxinator_entry(backend):
     link = target.home / f".config/tmuxinator/{console_session_name('project')}.yml"
     link.parent.mkdir(parents=True)
     link.write_text("operator config\n")
-    with pytest.raises(SSHError):
+    with pytest.raises(CommandFailed):
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty", tmuxinator=True))
     assert link.read_text() == "operator config\n"
     assert not final.exists() and not target.groups
@@ -447,7 +460,8 @@ def test_nonrepo_create_preserves_an_existing_tmuxinator_entry(backend):
 )
 def test_clone_failure_has_safe_structured_context_without_changing_identity(backend, monkeypatch, repo):
     target, vm, config, final = backend
-    original = SSHError(f"git clone {repo}: fixture-provider-blob")
+    stderr = f"fatal: could not read from {repo}: fixture-provider-blob".encode()
+    original = CommandFailed("fixture", 128, Result(Completed(128), stderr=stderr), streams_logged=True)
     original.__cause__ = RuntimeError("fixture-provider-blob")
     messages: list[str] = []
     monkeypatch.setattr("agentworks.workspaces.backends.vm.output.info", messages.append)
@@ -457,12 +471,13 @@ def test_clone_failure_has_safe_structured_context_without_changing_identity(bac
             raise original
 
     target.before = before
-    with pytest.raises(SSHError) as caught:
+    with pytest.raises(CommandFailed) as caught:
         create_vm_workspace(vm, config, "project", ResolvedTemplate(name="repo", repo=repo))
     assert caught.value is original
     assert original.entity_kind == "workspace" and original.entity_name == "project"
     assert original.hint
     rendered = " ".join([str(original), original.hint, *messages])
     assert "fixture-secret" not in rendered and "fixture-provider-blob" not in rendered
+    assert original.result.stdout == original.result.stderr == b""
     assert original.__cause__ is None and original.__suppress_context__
     assert not final.exists() and not target.groups

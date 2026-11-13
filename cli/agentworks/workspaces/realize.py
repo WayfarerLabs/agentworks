@@ -80,7 +80,7 @@ def realize_workspace(
     ``setup_failures`` while the row and setup progress are committed.
     """
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
-    from agentworks.ssh import SSHLogger
+    from agentworks.vms.manager import operation_log
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
         delete_vm_workspace,
@@ -123,13 +123,12 @@ def realize_workspace(
 
     with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
         require_prepared_setup(db, "workspace", name, ("workspace",), () if setup_inputs is None else (setup_inputs,))
-        ssh_logger = SSHLogger(
+        # The log closes exactly once, AFTER any rollback requests have been
+        # logged. Closing earlier would write the "Finished" footer before the
+        # rollback section, making the log misleading.
+        with operation_log(
             vm.name, "workspace-create", redactions=tuple((setup_values or {}).values()) if setup_inputs else ()
-        )
-        # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
-        # any rollback commands have been logged. Closing earlier would write the
-        # "Finished" footer before the rollback section, making the log misleading.
-        try:
+        ) as ssh_logger:
             try:
                 output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
                 workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
@@ -207,8 +206,6 @@ def realize_workspace(
                 # (per-agent failures warn, they do not abort); the invariant,
                 # ordering rationale, and KI handling live with the helper.
                 materialize_grant_all_agents(db, config, vm, name, logger=ssh_logger)
-        finally:
-            ssh_logger.close()
 
         from agentworks.harness_setup.outcomes import setup_completion_suffix
 

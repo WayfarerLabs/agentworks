@@ -107,6 +107,14 @@ MIGRATED_FILES = (
     "agents/template.py",
     "vms/home_layout.py",
     "vms/backup.py",
+    "workspaces/guest.py",
+    "workspaces/tmuxinator.py",
+    "workspaces/backends/vm.py",
+    "workspaces/realize.py",
+    "workspaces/manager/copy.py",
+    "workspaces/manager/rehome.py",
+    "workspaces/manager/repair.py",
+    "agents/grants.py",
 )
 
 

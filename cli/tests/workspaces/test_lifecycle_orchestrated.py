@@ -22,6 +22,8 @@ fakes.
 from __future__ import annotations
 
 import contextlib
+import json
+import shlex
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -31,6 +33,7 @@ from agentworks.agents import grants as agent_grants
 from agentworks.capabilities.base import RunContext
 from agentworks.db import InitStatus, SessionMode, VMStatus
 from agentworks.errors import (
+    ConnectivityError,
     ExternalError,
     NotFoundError,
     StateError,
@@ -38,7 +41,9 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.execution import trust
-from agentworks.execution.errors import TrustMissing
+from agentworks.execution.errors import CommandFailed, TrustMissing
+from agentworks.execution.requests import Command, FromFile, PythonProgram, Script, ToFile
+from agentworks.execution.results import Completed, Result
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -47,7 +52,7 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from agentworks.workspaces import manager as workspace_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
-from tests.vm_access_support import route_vm_access_to_target
+from tests.vm_access_support import AccessRecorder, Call, install_access_recorder
 
 # Captured at import, before the autouse fixture stubs the SSH precondition.
 _REAL_SSH_BOUNDARY = require_vm_ssh_boundary
@@ -176,27 +181,50 @@ class _FakeAdminTarget:
         ok = not any(needle in cmd for needle in self._failing)
         return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
 
-    def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
-        self.written.append((remote_path, content))
+    def answer(self, call: Call) -> Result | None:
+        """Answer the admin's access as the guest :meth:`run` models.
 
-    def copy_to(self, local_path: object, remote_path: str, **kwargs: object) -> None:
-        self.commands.append(f"copy_to:{remote_path}")
+        A command is its ``shlex.join``, a script its source without the
+        ``set --`` line that carries its arguments; an elevated request gets
+        ``sudo=True``. A file operation is recorded as written and succeeds.
+        A failed request raises ``CommandFailed`` under ``check``, as the
+        access does.
+        """
+        request = call.request
+        if isinstance(request, PythonProgram):
+            if request.args[:1] == ("write",):
+                self.written.append((json.loads(request.args[1])["path"], ""))
+            return Result(Completed(0))
+        if isinstance(request, Command):
+            line = shlex.join(request.argv)
+        else:
+            assert isinstance(request, Script)
+            line = request.source.split("\n", 1)[1] if request.source.startswith("set -- ") else request.source
+        check = bool(call.options["check"])
+        try:
+            outcome = self.run(line, sudo=request.elevated, check=check)
+        except ConnectivityError as error:
+            raise CommandFailed("box", 1, Result(Completed(1)), streams_logged=True) from error
+        result = Result(Completed(outcome.returncode), outcome.stdout.encode(), outcome.stderr.encode())
+        if check and outcome.returncode:
+            raise CommandFailed("box", outcome.returncode, result, streams_logged=True)
+        return result
+
+
+def _route(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRecorder:
+    """Route the admin's transport and access to ``fake``: delete's session teardown still takes a transport."""
+    factory = lambda vm, config, **kwargs: fake  # noqa: E731
+    monkeypatch.setattr("agentworks.transports.transport", factory)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = fake.answer
+    return recorder
 
 
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
-    """One recording admin target behind the canonical transport
-    factory (the lifecycle bodies import ``transport``
-    function-locally) AND the workspace VM backend's eager module
-    import (pre-imported before patching so the module can never
-    first-import mid-patch and capture the fake as its original)."""
-    import agentworks.workspaces.backends.vm  # noqa: F401
-
+    """One recording admin target behind the canonical transport factory and the admin's access."""
     fake = _FakeAdminTarget()
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    route_vm_access_to_target(monkeypatch, fake)
-    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
+    _route(monkeypatch, fake)
     return fake
 
 
@@ -325,13 +353,8 @@ class _RevParseFailingTarget(_FakeAdminTarget):
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
 
-def _wire_target(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> None:
-    import agentworks.workspaces.backends.vm  # noqa: F401
-
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    route_vm_access_to_target(monkeypatch, fake)
-    monkeypatch.setattr("agentworks.workspaces.backends.vm.transport", factory)
+def _wire_target(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRecorder:
+    return _route(monkeypatch, fake)
 
 
 def test_repair_skips_git_identity_when_not_a_repo(
@@ -710,20 +733,17 @@ def test_repair_acls_indeterminate_when_getfacl_fails(
     assert any("-exec setfacl -m g::rwx" in c for c in fake.commands)
 
 
-def test_repair_parent_traversal_quotes_a_spaced_path(
+def test_repair_opens_traversal_above_a_spaced_path(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
-    """Regression for the traversal quoting fix: a workspace_path with a space
-    and a shell metacharacter is passed as the positional `$1` (shlex-quoted),
-    never interpolated raw into the sh -c script. Guards against a re-introduced
-    raw interpolation, which would split the path on the space and execute the
-    metacharacter."""
-    import shlex
-
+    """A workspace path with a space and a shell metacharacter reaches the
+    traversal walk as its argument (``test_guest.py`` proves the walk treats
+    it as one path and starts at its parent)."""
     from agentworks.db import InitStatus
+    from agentworks.workspaces.guest import open_parent_traversal
 
     spaced_path = "/srv/my ws;danger"
     db.insert_vm("box", site="proxmox", hostname="box")
@@ -737,20 +757,13 @@ def test_repair_parent_traversal_quotes_a_spaced_path(
         template="default",
         linux_group="ws-ws1",
     )
-    fake = _RepairProbeTarget()
-    _wire_target(monkeypatch, fake)
+    recorder = _wire_target(monkeypatch, _RepairProbeTarget())
     config = make_config()
     _reachable(monkeypatch, True)
 
     workspace_manager.repair_workspace(db, config, "ws1", interaction=TtyInteractionPolicy.REFUSE)
 
-    traversal = next(c for c in fake.commands if "chmod -c a+x" in c)
-    # The path rides in as the shlex-quoted positional arg after `_`, and the
-    # loop seeds from the PARENT of "$1" (dirname), so the raw path never
-    # touches the script body and the workspace dir itself is never a+x'd.
-    assert traversal.endswith(f"_ {shlex.quote(spaced_path)}")
-    assert 'p=$(dirname "$1")' in traversal
-    assert f"p={spaced_path}" not in traversal
+    assert open_parent_traversal(spaced_path) in recorder.requests("run")
 
 
 # -- the ACL intersect-compare helper (churn-robust change detection) ---------
@@ -964,7 +977,7 @@ def test_delete_reachable_vm_is_one_boundary_burst(
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
-    assert any("rm -rf /srv/ws1" in c for c in target.commands)
+    assert any("rm -rf -- /srv/ws1" in c for c in target.commands)
     assert db.get_workspace("ws1") is None
     assert "Workspace 'ws1' deleted" in captured_output.info
 
@@ -1036,7 +1049,7 @@ def test_delete_removes_the_workspace_group_after_the_directory(
 
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    dir_removed = next(i for i, c in enumerate(target.commands) if "rm -rf /srv/ws1" in c)
+    dir_removed = next(i for i, c in enumerate(target.commands) if "rm -rf -- /srv/ws1" in c)
     group_removed = next(i for i, c in enumerate(target.commands) if "groupdel ws-ws1" in c)
     assert group_removed > dir_removed
     assert db.get_workspace("ws1") is None
@@ -1218,8 +1231,6 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     group after the directory, mirroring delete), and no DB row survives.
     ``failing=('test -d', 'git clone')`` makes the existence probe report
     the directory absent (so create proceeds) and the clone raise."""
-    from agentworks.ssh import SSHError
-
     fake = _CheckAwareTarget(failing=("test -d", "git clone"))
     _wire_target(monkeypatch, fake)
 
@@ -1229,8 +1240,8 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     _seed_vm_only(db)
     _reachable(monkeypatch, True)
 
-    # Realize preserves the transport error type and workspace identity.
-    with pytest.raises(SSHError) as caught:
+    # Realize preserves the request's error type and gives it the workspace's identity.
+    with pytest.raises(CommandFailed) as caught:
         workspace_manager.create_workspace(
             db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
         )
@@ -1490,7 +1501,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
     assert resolve_counter == []  # nothing resolved beyond the caller's pass
     assert bound.holds == 1  # the hold was re-entered, nothing else
     assert db.get_workspace("ws1") is None
-    assert any("rm -rf /srv/ws1" in c for c in target.commands)
+    assert any("rm -rf -- /srv/ws1" in c for c in target.commands)
 
 
 def test_delete_nested_rejects_a_mismatched_vm_node(
@@ -1574,8 +1585,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
     fake = _FakeAdminTarget(events=events, failing=("test -d /dst/ws1",))
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
-    route_vm_access_to_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     def _decline(message: str, default: bool = False) -> bool:
         events.append("confirm")
@@ -1606,31 +1616,17 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
 
 
 def _wire_copy_fakes(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> _FakeAdminTarget:
-    """The copy command's fakes: a transport double that IS an
-    SSHTransport (the pack step asserts the concrete type to read the
-    raw ssh argv off it), a recording ``subprocess.run`` for the tar
-    pipe, and hold-span recording on the platform's ``vm_active``."""
-    import subprocess as subprocess_mod
+    """The copy command's fakes: an admin double that records ``pack`` for the
+    source read, and hold-span recording on the platform's ``vm_active``."""
 
-    from agentworks.transports import SSHTransport
+    class _CopyTarget(_FakeAdminTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd.startswith("tar czf "):
+                events.append("pack")
+            return super().run(cmd, **kwargs)
 
-    # The fake FIRST in the MRO so its recording run / write_file /
-    # copy_to win; SSHTransport supplies the concrete type (and the
-    # host / user / identity_file attributes the pack step reads).
-    class _FakeSSHTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
-        def __init__(self) -> None:
-            SSHTransport.__init__(self, "100.64.0.9", trust=HOST_TRUST, user="admin")
-            _FakeAdminTarget.__init__(self, events=events)
-
-    fake = _FakeSSHTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
-    route_vm_access_to_target(monkeypatch, fake)
-
-    def _fake_pack(args: object, **kwargs: object) -> SimpleNamespace:
-        events.append("pack")
-        return SimpleNamespace(returncode=0, stderr=b"")
-
-    monkeypatch.setattr(subprocess_mod, "run", _fake_pack)
+    fake = _CopyTarget(events=events)
+    _route(monkeypatch, fake)
 
     real_vm_active = ProxmoxPlatform.vm_active
 
@@ -1682,6 +1678,54 @@ def test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds(
     assert row is not None and row.vm_name == "box2" and row.template == "copied"
     assert any("tar xzf" in e for e in events if e.startswith("run:"))
     assert "Workspace 'ws1' copied to 'ws2'" in captured_output.info
+
+
+def test_copy_streams_the_source_tree_into_the_destination_with_nothing_staged(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The source's tar stream lands in a new workstation file and is the
+    destination extraction's input, root's and without the source's owners;
+    nothing is staged on the destination, and the local file is gone after."""
+    config = make_config()
+    _seed(db)
+    db.insert_vm("box2", site="proxmox", hostname="box2")
+    db.update_vm_tailscale("box2", "100.64.0.10")
+    db.update_vm_init_status("box2", InitStatus.COMPLETE)
+    _reachable(monkeypatch, True)
+    from agentworks.workspaces.backends.vm import default_workspace_path
+
+    fake = _wire_copy_fakes(monkeypatch, [])
+    archive = b"\x1f\x8b fixture archive \r\n\x00"
+    delivered: list[tuple[Path, bytes]] = []
+    source = Command(("tar", "czf", "-", "-C", "/srv/ws1", "."))
+
+    def answer(call: Call) -> Result | None:
+        request = call.request
+        if request == source:
+            assert isinstance(call.options["stdout"], ToFile)
+            return Result(Completed(0), archive)
+        if isinstance(request, Command) and isinstance(request.stdin, FromFile):
+            delivered.append((request.stdin.path, request.stdin.path.read_bytes()))
+            assert request == Command(
+                ("tar", "xzf", "-", "--no-same-owner", "-C", default_workspace_path(config, "ws2")),
+                elevated=True,
+                stdin=FromFile(request.stdin.path),
+            )
+        return fake.answer(call)
+
+    install_access_recorder(monkeypatch).answer = answer
+
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box2", interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    [(path, content)] = delivered
+    assert content == archive
+    assert not path.exists() and not path.parent.exists()
+    assert not any("/var/tmp" in command or "mktemp" in command for command in fake.commands)
 
 
 def test_copy_same_vm_reuses_the_source_composition(
@@ -1821,13 +1865,12 @@ def test_copy_closes_the_ssh_logger_exactly_once_on_cancellation(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The destination-VM mutation span holds an open ``SSHLogger``, and
+    """The destination-VM mutation span holds an open operation log, and
     ``materialize_grant_all_agents``'s sanctioned SIGINT arm re-raises
-    ``KeyboardInterrupt`` through it (every ``dest_target.run`` in the
-    span shares the exposure). The close sits in a ``finally`` (mirroring
-    realize.py's), so a cancellation mid-span still lands the footer and
-    exception section in the per-VM log, exactly once: ``close()`` is not
-    idempotent, each call appends a footer."""
+    ``KeyboardInterrupt`` through it (every request in the span shares the
+    exposure). A cancellation mid-span still lands the footer and exception
+    section in the per-VM log, exactly once: ``close()`` is not idempotent,
+    each call appends a footer. The source read's own log closed before."""
     from agentworks.ssh import SSHLogger
 
     config = make_config()
@@ -1855,7 +1898,8 @@ def test_copy_closes_the_ssh_logger_exactly_once_on_cancellation(
             db, config, "ws1", dest_name="ws2", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert len(closes) == 1  # the finally ran, and no second call site remains
+    # The source read's log, then the destination's, each closed once.
+    assert len(closes) == len(set(closes)) == 2
 
 
 # -- #263: copy and rehome route through the shared canonical ACL helper -------
@@ -1935,8 +1979,7 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     _seed(db)
     _reachable(monkeypatch, True)
     fake = _RehomeTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
-    route_vm_access_to_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
@@ -1950,7 +1993,7 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     # a future resequencing regression is caught here too.
     rsync_idx = next(i for i, c in enumerate(cmds) if c.startswith(("rsync", "cp -a")))
     acl_idx = next(i for i, c in enumerate(cmds) if "-exec setfacl -m g::rwx" in c)
-    walk_idx = next(i for i, c in enumerate(cmds) if "chmod a+x" in c and "dirname" in c)
+    walk_idx = next(i for i, c in enumerate(cmds) if "chmod -c a+x" in c and "dirname" in c)
     assert rsync_idx < acl_idx < walk_idx
     # The DB moved, confirming the rehome ran to completion (the ACL step is
     # non-fatal but here it succeeded).
@@ -1973,8 +2016,7 @@ def test_rehome_removes_tmuxinator_projections_when_live_overlay_disables_them(
     db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
     _reachable(monkeypatch, True)
     fake = _RehomeTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
-    route_vm_access_to_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
@@ -2034,8 +2076,7 @@ def test_first_repair_after_rehome_is_a_noop(
     ``acls.py``, ``rehome.py``, and the idempotency guide, so it is pinned for
     both paths."""
     fake = _RehomeThenRepairTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
-    route_vm_access_to_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed(db)
@@ -2100,12 +2141,8 @@ def test_first_repair_after_copy_is_a_noop(
     Copy applies the recursive spec (default ACL on dirs + recursive access with
     ``o::---``), not the old top-dir-only default. Composes the copy path with
     the #247/#254 repair detection."""
-    import subprocess as subprocess_mod
-
     fake = _CopyThenRepairTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
-    route_vm_access_to_target(monkeypatch, fake)
-    monkeypatch.setattr(subprocess_mod, "run", lambda args, **kwargs: SimpleNamespace(returncode=0, stderr=b""))
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed(db)

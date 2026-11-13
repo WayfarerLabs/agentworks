@@ -1,31 +1,47 @@
-"""VM workspace backend using SSH to a VM."""
+"""VM workspace backend: a workspace's directory, group, clone and tmuxinator projection on its VM."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import shlex
+from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.errors import AlreadyExistsError
+from agentworks.errors import AgentworksError, AlreadyExistsError
 from agentworks.execution.access import Admin
-from agentworks.ssh import SSHError
-from agentworks.transports import transport
-from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
+from agentworks.execution.requests import Command
+from agentworks.linux_users import managed_home
 from agentworks.workspaces.acls import apply_workspace_acls
-from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+from agentworks.workspaces.guest import (
+    FIND_DEADLINE,
+    PROBE_DEADLINE,
+    REQUEST_FAILURES,
+    ensure_group,
+    path_occupied,
+    root,
+    script,
+)
+from agentworks.workspaces.tmuxinator import config_link, config_path, generate_config, publish_config
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.ssh import SSHLogger
+    from agentworks.execution.access import VMAccess
+    from agentworks.vms.initializer.steps import InitLog
     from agentworks.workspaces.templates import ResolvedTemplate
+
+CLONE_DEADLINE = 300
+"""Seconds a workspace's ``git clone`` may take."""
+
+CLEANUP_DEADLINE = 30
+"""Seconds a failed create's or a delete's directory removal may take."""
 
 
 def default_workspace_path(config: Config, ws_name: str) -> str:
@@ -38,13 +54,43 @@ def default_workspace_path(config: Config, ws_name: str) -> str:
     return f"{config.paths.vm_workspaces}/{ws_name}"
 
 
+def admin_access(vm: VMRow, config: Config, logger: InitLog | None) -> VMAccess:
+    """The admin's access to ``vm``, recording into ``logger`` when there is one."""
+    return execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
+
+
+def _value_free_clone_failure(error: AgentworksError, *, ws_name: str, vm_name: str) -> None:
+    """Strip ``error`` of everything the guest returned, keeping its identity (I87).
+
+    Git's stderr and the command line can hold credentials in the repository
+    address, so the message, the hint and the result's streams are replaced
+    and the chained errors dropped.
+    """
+    error.args = (f"Repository clone failed for workspace {ws_name!r} on VM {vm_name!r}.",)
+    if isinstance(error, CommandFailed | ExecutionIncomplete | RequestRefused):
+        error.result = replace(error.result, stdout=b"", stderr=b"")
+    error.entity_kind = "workspace"
+    error.entity_name = ws_name
+    error.hint = (
+        "Inspect the SSH log for the clone's failure. A timed-out or interrupted guest Git process "
+        "may still be running in its private attempt directory. "
+        "Check the repository address, authentication and VM network access as appropriate. "
+        "For private repositories, declare the cloning admin's Git credential on the admin template "
+        "and reinitialize the VM. Managed Git credentials use HTTPS; "
+        "SSH URLs need separately configured SSH access."
+    )
+    error.__cause__ = None
+    error.__context__ = None
+    error.__suppress_context__ = True
+
+
 def create_vm_workspace(
     vm: VMRow,
     config: Config,
     ws_name: str,
     template: ResolvedTemplate,
     *,
-    logger: SSHLogger | None = None,
+    logger: InitLog | None = None,
 ) -> str:
     """Create a workspace on a VM. Returns the remote workspace path.
 
@@ -60,19 +106,14 @@ def create_vm_workspace(
     from agentworks.agents.grants import workspace_group
 
     assert vm.tailscale_host is not None
-    target = transport(vm, config, logger=logger)
+    admin = admin_access(vm, config, logger)
 
     workspace_path = default_workspace_path(config, ws_name)
-    quoted_workspace = shlex.quote(workspace_path)
     ws_group = workspace_group(ws_name)
+    owner = f"{vm.admin_username}:{ws_group}"
 
     # Refuse to create if directory already exists
-    exists = target.run(
-        f"test -d {quoted_workspace} || test -e {quoted_workspace} || test -L {quoted_workspace}",
-        check=False,
-        timeout=10,
-    )
-    if exists.ok:
+    if admin.run(path_occupied(workspace_path)).require_completed(vm.name) == 0:
         raise AlreadyExistsError(
             f"workspace path {workspace_path!r} already exists on the VM.",
             entity_kind="workspace",
@@ -82,10 +123,9 @@ def create_vm_workspace(
 
     # Reserve exclusively before the cleanup region: a raced-in path or a lost
     # response is not confirmation that the directory belongs to this attempt.
-    parent = shlex.quote(str(PurePosixPath(workspace_path).parent))
-    target.run(f"mkdir -p -- {parent}", sudo=True)
+    admin.run(root("mkdir", "-p", "--", str(PurePosixPath(workspace_path).parent)), check=True)
     try:
-        target.run(f"mkdir -- {quoted_workspace}", sudo=True)
+        admin.run(root("mkdir", "--", workspace_path), check=True)
     except BaseException:
         output.warn(
             f"Workspace directory reservation at {workspace_path!r} was not confirmed. "
@@ -97,10 +137,10 @@ def create_vm_workspace(
     generated_config: tuple[str, str] | None = None
     try:
         # Create workspace group (idempotent), add admin, and set up directory with setgid
-        target.run(f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", sudo=True)
-        target.run(f"usermod -aG {ws_group} {vm.admin_username}", sudo=True)
-        target.run(f"chown {vm.admin_username}:{ws_group} {quoted_workspace}", sudo=True)
-        target.run(f"chmod 2770 {quoted_workspace}", sudo=True)
+        admin.run(ensure_group(ws_group), check=True)
+        admin.run(root("usermod", "-aG", ws_group, vm.admin_username), check=True)
+        admin.run(root("chown", owner, workspace_path), check=True)
+        admin.run(root("chmod", "2770", workspace_path), check=True)
         # The canonical workspace ACL is applied at the end (apply_workspace_acls),
         # after any clone and other content is placed, so existing entries are
         # covered too. This is the same recursive spec workspace repair applies,
@@ -110,9 +150,8 @@ def create_vm_workspace(
         if template.repo:
             output.info(f"Cloning repository for workspace {ws_name!r}...")
             candidate = f"{workspace_path}.agentworks-clone-{uuid4().hex}"
-            quoted_attempt = shlex.quote(candidate)
             try:
-                target.run(f"mkdir -m 700 -- {quoted_attempt}", sudo=True)
+                admin.run(root("mkdir", "-m", "700", "--", candidate), check=True)
             except BaseException:
                 output.warn(
                     f"Private clone directory reservation at {candidate!r} was not confirmed. "
@@ -120,42 +159,27 @@ def create_vm_workspace(
                 )
                 raise
             attempt = candidate
-            target.run(f"chown {vm.admin_username}:{ws_group} {quoted_attempt}", sudo=True)
-            checkout = shlex.quote(f"{candidate}/checkout")
+            admin.run(root("chown", owner, candidate), check=True)
+            checkout = f"{candidate}/checkout"
             # `--` stops option parsing so a repo URL beginning with `-` can
-            # never be read as a git flag; both operands are quoted for spaces.
+            # never be read as a git flag.
             try:
-                target.run(
-                    f"git clone -- {shlex.quote(template.repo)} {checkout}",
-                    timeout=300,
-                )
-            except SSHError as error:
-                # Guest stderr and the command can contain URL credentials.
-                # Keep the error's identity while supplying safe operation context.
-                error.args = (f"Repository clone failed for workspace {ws_name!r} on VM {vm.name!r}.",)
-                error.entity_kind = "workspace"
-                error.entity_name = ws_name
-                error.hint = (
-                    "Inspect the SSH log for the clone's failure. A timed-out or interrupted guest Git process "
-                    "may still be running in its private attempt directory. "
-                    "Check the repository address, authentication and VM network access as appropriate. "
-                    "For private repositories, declare the cloning admin's Git credential on the admin template "
-                    "and reinitialize the VM. Managed Git credentials use HTTPS; "
-                    "SSH URLs need separately configured SSH access."
-                )
-                error.__cause__ = None
-                error.__context__ = None
-                error.__suppress_context__ = True
+                admin.run(Command(("git", "clone", "--", template.repo, checkout), deadline=CLONE_DEADLINE), check=True)
+            except REQUEST_FAILURES as error:
+                _value_free_clone_failure(error, ws_name=ws_name, vm_name=vm.name)
                 raise
-            target.run(f"chgrp -R {ws_group} {checkout}", sudo=True)
-            target.run(f"find {checkout} -type d -exec chmod g+s {{}} +", sudo=True, timeout=120)
-            target.run(f"chmod 2770 {checkout}", sudo=True)
+            admin.run(root("chgrp", "-R", ws_group, checkout), check=True)
+            admin.run(
+                root("find", checkout, "-type", "d", "-exec", "chmod", "g+s", "{}", "+", deadline=FIND_DEADLINE),
+                check=True,
+            )
+            admin.run(root("chmod", "2770", checkout), check=True)
             # -T never follows a destination symlink or merges with a newly
             # populated directory. Both paths share a filesystem; a failed
             # or unconfirmed rename does not establish final ownership.
-            target.run(f"mv -T -- {checkout} {quoted_workspace}", sudo=True)
+            admin.run(root("mv", "-T", "--", checkout, workspace_path), check=True)
             clone_published = True
-            target.run(f"rmdir -- {quoted_attempt}", sudo=True)
+            admin.run(root("rmdir", "--", candidate), check=True)
             attempt = None
 
             # Stamp the checkout with its configured git identity so commits
@@ -172,27 +196,26 @@ def create_vm_workspace(
                     # --local is explicit so the write can only ever land in
                     # the checkout's .git/config, never the admin's global
                     # ~/.gitconfig (git config defaults to global outside a repo).
-                    target.run(f"git -C {quoted_workspace} config --local {git_key} {shlex.quote(value)}")
+                    admin.run(Command(("git", "-C", workspace_path, "config", "--local", git_key, value)), check=True)
 
-        # Tmuxinator config (no tasks yet at workspace creation time)
+        # Tmuxinator config (no tasks yet at workspace creation time), linked
+        # so tmuxinator can find it by console session name.
         if template.tmuxinator:
             tmux_config = generate_config(ws_name, workspace_path)
-            config_path = f"{workspace_path}/.tmuxinator.yml"
-            target.write_file(config_path, tmux_config)
-            generated_config = (config_path, hashlib.sha256(tmux_config.encode()).hexdigest())
-            # Symlink so tmuxinator can find it by console session name
-            session = console_session_name(ws_name)
-            target.run(f"mkdir -p ~/{TMUXINATOR_CONFIG_DIR}", timeout=10)
-            target.run(
-                f"ln -s -- {shlex.quote(config_path)} ~/{TMUXINATOR_CONFIG_DIR}/{session}.yml",
-                timeout=10,
+            generated_config = (config_path(workspace_path), hashlib.sha256(tmux_config.encode()).hexdigest())
+            publish_config(
+                admin,
+                home=managed_home(vm.admin_username),
+                ws_name=ws_name,
+                workspace_path=workspace_path,
+                text=tmux_config,
+                replace_link=False,
             )
 
         # Canonical workspace ACL, applied last so every entry written above (a
         # clone, the tmuxinator config) is covered, and future entries inherit via
         # the default ACL. Shared with workspace repair so the two never drift and
         # a first repair of this workspace is a no-op.
-        admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
         apply_workspace_acls(admin.files(), workspace_path)
     except BaseException:
         # A guest clone may survive the controller's cancellation or timeout.
@@ -200,7 +223,7 @@ def create_vm_workspace(
         # is confirmed. Preserve an occupied or unconfirmed final directory.
         if attempt is not None:
             try:
-                target.run(f"rm -rf -- {shlex.quote(attempt)}", sudo=True, timeout=30)
+                admin.run(root("rm", "-rf", "--", attempt, deadline=CLEANUP_DEADLINE), check=True)
             except BaseException:
                 output.warn(
                     f"Private clone attempt {attempt!r} could not be removed. "
@@ -210,9 +233,7 @@ def create_vm_workspace(
         # prevent reclaiming an empty final reservation and its group.
         if not clone_published and generated_config is not None:
             try:
-                # The admin's own access, unelevated like the transport above.
-                access = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
-                access.files().remove_if(generated_config[0], expected=generated_config[1])
+                admin.files().remove_if(generated_config[0], expected=generated_config[1])
             except BaseException:
                 output.warn(
                     f"Generated workspace config {generated_config[0]!r} could not be safely removed. "
@@ -245,7 +266,7 @@ def delete_vm_workspace(
     workspace_path: str,
     linux_group: str,
     *,
-    logger: SSHLogger | None = None,
+    logger: InitLog | None = None,
     empty_only: bool = False,
 ) -> None:
     """Delete a workspace from a VM.
@@ -265,18 +286,19 @@ def delete_vm_workspace(
     regardless of remaining supplementary members (the admin's included).
     """
     assert vm.tailscale_host is not None
-    target = transport(vm, config, logger=logger)
+    admin = admin_access(vm, config, logger)
 
     try:
-        quoted = shlex.quote(workspace_path)
         if empty_only:
-            removed = target.run(
-                f"if test -e {quoted} || test -L {quoted}; then rmdir -- {quoted}; fi",
-                sudo=True,
-                check=False,
-                timeout=30,
+            removed = admin.run(
+                script(
+                    'if test -e "$1" || test -L "$1"; then rmdir -- "$1"; fi',
+                    workspace_path,
+                    elevated=True,
+                    deadline=CLEANUP_DEADLINE,
+                )
             )
-            if not removed.ok:
+            if removed.require_completed(vm.name) != 0:
                 output.warn(
                     f"Workspace directory {workspace_path!r} and group {linux_group!r} were retained because "
                     "workspace publication was not confirmed and the path could not be confirmed empty. "
@@ -284,21 +306,22 @@ def delete_vm_workspace(
                 )
                 return
         else:
-            target.run(f"rm -rf {quoted}", sudo=True, timeout=30)
-        session = console_session_name(ws_name)
-        link = f"~/{TMUXINATOR_CONFIG_DIR}/{session}.yml"
-        target.run(
-            f'if test -L {link} && test "$(readlink -- {link})" = '
-            f"{shlex.quote(workspace_path + '/.tmuxinator.yml')}; then rm -- {link}; fi",
-            check=False,
-            timeout=10,
-        )
-        # Remove the workspace's Linux group. check=False so a group that
-        # is already gone (or, defensively, one groupdel refuses to remove)
-        # is tolerated rather than failing the delete, mirroring the
+            admin.run(root("rm", "-rf", "--", workspace_path, deadline=CLEANUP_DEADLINE), check=True)
+        # The link only while it still points at this workspace's config.
+        admin.run(
+            script(
+                'if test -L "$1" && test "$(readlink -- "$1")" = "$2"; then rm -- "$1"; fi',
+                config_link(managed_home(vm.admin_username), ws_name),
+                config_path(workspace_path),
+                deadline=PROBE_DEADLINE,
+            )
+        ).require_completed(vm.name)
+        # Remove the workspace's Linux group. Its status is not checked, so a
+        # group that is already gone (or, defensively, one groupdel refuses to
+        # remove) is tolerated rather than failing the delete, mirroring the
         # best-effort group-membership teardown in agents/grants.py.
-        target.run(f"/usr/sbin/groupdel {linux_group}", sudo=True, check=False, timeout=10)
-    except SSHError:
+        admin.run(root("/usr/sbin/groupdel", linux_group, deadline=PROBE_DEADLINE)).require_completed(vm.name)
+    except REQUEST_FAILURES:
         output.warn(
             f"Remote cleanup of workspace directory {workspace_path!r} and group {linux_group!r} was not confirmed. "
             "Inspect them before retrying."

@@ -20,6 +20,7 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 from tests._runtime_probes import framed_runtime_result
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import install_access_recorder
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -176,6 +177,8 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     monkeypatch.setattr("agentworks.transports.transport", factory)
     # sessions.manager imports ``transport`` eagerly at module load.
     monkeypatch.setattr(session_manager, "transport", factory)
+    # The tmuxinator regeneration runs on the admin's access.
+    install_access_recorder(monkeypatch)
     return fake
 
 

@@ -133,7 +133,7 @@ def native(monkeypatch, tmp_path, vm_access_recorder):
         display_path = "fixture.log"
         closed = False
 
-        def __init__(self, *args, redactions=()):
+        def __init__(self, *args, redactions=(), path=None):
             self.redactions = redactions
             loggers.append(self)
 

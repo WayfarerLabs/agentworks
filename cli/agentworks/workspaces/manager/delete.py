@@ -85,7 +85,10 @@ def delete_workspace(
     with native_mutation_guard(
         db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard
     ) as guard:
-        # Create SSH logger for VM operations
+        # The operation's log. It is an SSHLogger, not vms.manager.operation_log,
+        # only because session teardown and kill_session_windows still take a
+        # legacy transport, which logs through one; they move in transport take
+        # 2's sessions batch.
         import contextlib
 
         from agentworks.ssh import SSHLogger

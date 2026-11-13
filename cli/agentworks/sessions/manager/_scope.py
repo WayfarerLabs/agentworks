@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
+    from agentworks.vms.initializer.phase_a import OperationLog
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -148,24 +148,27 @@ def _regenerate_tmuxinator(
     vm: VMRow,
     ws: WorkspaceRow,
     *,
-    logger: SSHLogger | None = None,
+    logger: OperationLog | None = None,
 ) -> None:
-    """Regenerate the workspace tmuxinator config from current session state."""
+    """Regenerate the workspace tmuxinator config from current session state, on the admin's access."""
+    import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
+    from agentworks.execution.access import Admin
+    from agentworks.linux_users import managed_home
     from agentworks.workspaces.templates import resolve_live_tmuxinator
-    from agentworks.workspaces.tmuxinator import generate_config, remove_config
+    from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
 
     registry = load_request_registry(config, live_database=db)
-    target = _mgr.transport(vm, config, logger=logger)
+    admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
     if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
-        remove_config(target, ws.name, ws.workspace_path)
+        remove_config(admin, home=managed_home(vm.admin_username), ws_name=ws.name, workspace_path=ws.workspace_path)
         return
 
     sessions = db.list_sessions(workspace_name=ws.name)
     # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
     socket_paths = {s.name: s.socket_path for s in sessions}
     config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    target.write_file(f"{ws.workspace_path}/.tmuxinator.yml", config_text)
+    write_config(admin, ws.workspace_path, config_text)
 
 
 def filter_sessions(

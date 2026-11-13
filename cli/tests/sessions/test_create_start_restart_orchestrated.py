@@ -18,6 +18,7 @@ are driven for real.
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -34,6 +35,8 @@ from agentworks.capabilities.harness_integration import HarnessLaunchIntent, Har
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
+from agentworks.execution.requests import Command, PythonProgram
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
@@ -66,7 +69,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.execution.results import Result
     from tests.vm_access_support import Call
 
 
@@ -101,9 +103,6 @@ class _Target:
         self._missing = missing or set()
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if cmd.startswith("rm -f ") and ".tmuxinator.yml" in cmd:
-            self._events.append("tmuxinator_remove")
-            return _Result()
         if "AGW_RUNTIME_STARTUP=" in cmd:
             result = _Result()
             result.stdout = "\nAGW_RUNTIME_STARTUP=off\n"
@@ -111,13 +110,17 @@ class _Target:
         return _Result()
 
     def answer(self, call: Call) -> Result | None:
-        if not is_command_check(call.request):
+        request = call.request
+        if isinstance(request, Command) and request.argv[:2] == ("rm", "-f") and ".tmuxinator.yml" in request.argv[-2]:
+            self._events.append("tmuxinator_remove")
+            return Result(Completed(0))
+        if isinstance(request, PythonProgram) and request.args[:1] == ("write",):
+            self._events.append(f"tmuxinator_write:{json.loads(request.args[1])['path']}")
+            return Result(Completed(0))
+        if not is_command_check(request):
             return None
         self._events.append("probe")
-        return check_result(call.request, 20 if presence_check(call.request) in self._missing else 0)
-
-    def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
-        self._events.append(f"tmuxinator_write:{remote_path}")
+        return check_result(request, 20 if presence_check(request) in self._missing else 0)
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -985,7 +988,6 @@ def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
     expected_event: str,
 ) -> None:
     from agentworks.instance_specs import parse_instance_spec
-    from agentworks.sessions import manager as session_manager
 
     events: list[str] = []
     db = _seed_db(tmp_path)
@@ -994,7 +996,7 @@ def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
     if workspace_spec is not None:
         overlay = parse_instance_spec("workspace", workspace_spec)
         db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target(events))
+    install_access_recorder(monkeypatch).answer = _Target(events).answer
     vm = db.get_vm("vm1")
     ws = db.get_workspace("ws1")
     assert vm is not None and ws is not None
