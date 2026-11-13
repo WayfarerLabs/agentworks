@@ -566,8 +566,8 @@ Definition of done: create and reinit run entirely on the new transport.
 ## Slice 7: Workspaces, sessions and backup (HLA D7; PR C)
 
 - [ ] Write [`sessions-lld.md`](./sessions-lld.md). It covers:
-  - `detached.py` (launch, observe, interrupt, download) with `FromFile` and `ToFile`, and the bound
-    of each read, each one dispatch;
+  - `detached.py` (launch, observe, interrupt, download) with `FromFile` and `ToFile`, and each
+    read's bound (one dispatch);
   - each workspace, session, console and backup request it moves, with its bound;
   - session environment in the request, and every pane path's terminal handover (HLA D8);
   - the env-newline refusals, the console's env carry across sudo and the legacy probe it deletes;
@@ -623,7 +623,7 @@ Definition of done: create and reinit run entirely on the new transport.
   - backup with a forced disconnect and with an interrupt, on WSL2 (idle shutdown) and Remote Lima.
 
 Definition of done: no workspace, session or backup module imports a legacy module, and
-`remote_exec.py` has no remaining callers.
+`remote_exec.py` is deleted.
 
 ## Slice 8: Removal (PR C)
 
