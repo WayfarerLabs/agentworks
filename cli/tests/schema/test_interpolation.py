@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from operator import or_
+from types import GenericAlias
 from typing import Annotated, ClassVar
 
 import pytest
 from pydantic import Field, create_model
+from typing_extensions import TypeAliasType as BackportTypeAliasType  # noqa: UP035
 
 from agentworks.env.entry import EnvEntry, PlaintextEnvEntry
 from agentworks.errors import StateError, ValidationError
@@ -137,3 +140,33 @@ def test_nested_shorthand_models_keep_one_interpolation_declaration() -> None:
     }
     scalar, table = Holder.model_json_schema()["$defs"]["Text"]["anyOf"]
     assert scalar["x-agw-interpolation"] is table["properties"]["value"]["x-agw-interpolation"] is True
+
+
+type RuntimeText = Annotated[str, Interpolated()]
+type RecursiveText = list[RecursiveText] | str
+type RecursiveRuntimeText = list[RecursiveRuntimeText] | Annotated[str, Interpolated()]
+
+
+def test_aliases_cannot_hide_interpolation_but_plain_recursive_aliases_still_work() -> None:
+
+    for alias in (
+        RuntimeText,
+        RecursiveRuntimeText,
+        BackportTypeAliasType("BackportRuntimeText", Annotated[str, Interpolated()]),
+        BackportTypeAliasType("ForwardRuntimeText", "Annotated[str, Interpolated()]"),
+    ):
+        for annotation in (alias, or_(alias, None), GenericAlias(list, alias)):
+            with pytest.raises(StateError):
+                create_model("UnsupportedAlias", __base__=AgwModel, value=(annotation, ...))
+
+    recursive = create_model("RecursiveAlias", __base__=AgwModel, value=(RecursiveText, ...))
+    source = recursive.model_validate({"value": ["${agw:user_name}"]})
+    assert source.model_dump()["value"] == ["${agw:user_name}"]
+    assert next(iter_field_docs(recursive)).interpolation is None
+    plain = create_model(
+        "PlainAlias",
+        __base__=AgwModel,
+        value=(BackportTypeAliasType("PlainText", "str"), ...),
+        other=(Annotated[str, Interpolated()], "unrelated"),
+    )
+    assert plain.model_validate({"value": "${agw:user_name}"}).model_dump()["value"] == "${agw:user_name}"

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, get_args, get_origin
+from typing import TYPE_CHECKING, ForwardRef, Literal, TypeAliasType, get_args, get_origin
+
+from pydantic import BaseModel
+
+# The backport remains a distinct runtime type on Python 3.12.
+from typing_extensions import TypeAliasType as BackportTypeAliasType  # noqa: UP035
 
 from agentworks.schema._shape import (
     element_metadata,
@@ -16,7 +21,8 @@ from agentworks.schema._shape import (
 from agentworks.schema.markers import Interpolated, RefMarker
 
 if TYPE_CHECKING:
-    from pydantic import BaseModel
+    from collections.abc import Iterator
+
     from pydantic.fields import FieldInfo
 
 InterpolationTarget = Literal["scalar", "items"]
@@ -47,10 +53,17 @@ def _model_error(model: type[BaseModel], visiting: tuple[type[BaseModel], ...]) 
     if fields is None:
         return None
     visiting = (*visiting, model)
+    schema: dict[str, object] | None = None
     for name, field in fields.items():
         error = _value_error(field.annotation, field.metadata, depth=0)
         if error is not None:
             return f"{model.__name__}.{name}: {error}"
+        if any(item is _OPAQUE_ALIAS for item in _declaration_metadata(field.annotation)):
+            if schema is None:
+                schema = model.model_json_schema(by_alias=False)
+            property_name = None if model.__pydantic_root_model__ else name
+            if _schema_has_interpolation(schema, schema, property_name=property_name):
+                return f"{model.__name__}.{name}: interpolation is hidden in an unsupported type alias"
         shape = shape_of(field)
         reachable = tuple(
             child
@@ -94,11 +107,78 @@ def _value_error(annotation: object, metadata: list[object], *, depth: int) -> s
     return None
 
 
+_OPAQUE_ALIAS = object()
+
+
 def _markers_in(annotation: object) -> bool:
+    return any(isinstance(item, Interpolated) for item in _declaration_metadata(annotation))
+
+
+def _declaration_metadata(
+    annotation: object, visiting: frozenset[int] = frozenset(), *, inside_alias: bool = False
+) -> Iterator[object]:
+    """Read alias contents for refusal, without resolving forward references."""
     base, metadata = split_annotated(annotation)
-    if any(isinstance(item, Interpolated) for item in metadata):
-        return True
-    return any(_markers_in(arg) for arg in get_args(base))
+    yield from metadata
+    if id(base) in visiting:
+        return
+    visiting = visiting | {id(base)}
+    alias = get_origin(base) or base
+    if isinstance(alias, TypeAliasType | BackportTypeAliasType):
+        try:
+            target = alias.__value__
+        except NameError:
+            yield _OPAQUE_ALIAS
+        else:
+            if isinstance(target, str | ForwardRef):
+                yield _OPAQUE_ALIAS
+            else:
+                yield from _declaration_metadata(target, visiting, inside_alias=True)
+    elif inside_alias and isinstance(base, type) and issubclass(base, BaseModel):
+        for field in (model_fields_of(base) or {}).values():
+            yield from field.metadata
+            yield from _declaration_metadata(field.annotation, visiting, inside_alias=True)
+    for arg in get_args(base):
+        yield from _declaration_metadata(arg, visiting, inside_alias=inside_alias)
+
+
+def _schema_has_interpolation(
+    node: object,
+    root: dict[str, object],
+    *,
+    property_name: str | None,
+    references: frozenset[str] = frozenset(),
+) -> bool:
+    """Inspect one completed field's schema only when an alias hides its source."""
+    if isinstance(node, list):
+        return any(
+            _schema_has_interpolation(child, root, property_name=property_name, references=references) for child in node
+        )
+    if not isinstance(node, dict):
+        return False
+    reference = node.get("$ref")
+    if isinstance(reference, str) and reference.startswith("#/") and reference not in references:
+        target: object = root
+        for part in reference[2:].split("/"):
+            target = target.get(part.replace("~1", "/").replace("~0", "~")) if isinstance(target, dict) else None
+        if _schema_has_interpolation(target, root, property_name=property_name, references=references | {reference}):
+            return True
+    if property_name is not None:
+        properties = node.get("properties", {})
+        if isinstance(properties, dict) and _schema_has_interpolation(
+            properties.get(property_name), root, property_name=None, references=references
+        ):
+            return True
+        children = (node.get(key) for key in ("anyOf", "oneOf", "allOf"))
+    else:
+        if node.get("x-agw-interpolation") is True:
+            return True
+        children = (
+            value for key, value in node.items() if key not in {"$defs", "$ref", "examples", "default", "enum", "const"}
+        )
+    return any(
+        _schema_has_interpolation(child, root, property_name=property_name, references=references) for child in children
+    )
 
 
 def _has_interpolation(model: type[BaseModel], visiting: tuple[type[BaseModel], ...]) -> bool:
