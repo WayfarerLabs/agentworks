@@ -6,7 +6,9 @@ ASCII decimal digits, zero padded, then that many bytes.
 
 The envelope is one JSON object, ASCII-only whatever the workstation's locale.
 ``encode`` is the one function that turns a request into bytes, so it is where
-operator-authored input is validated. Everything the guest prints for the
+operator-authored input is validated; ``Detached.launch`` applies the same
+``checked_argv`` and ``checked_env`` to the spec it sends on stdin, which no
+envelope carries. Everything the guest prints for the
 client is a marker line: ``0x1E``, the request's nonce, a space, a word and a
 newline. A :class:`StreamFilter` per stream finds the start marker, passes
 payload bytes through and stops at the closing line; :func:`classify` combines

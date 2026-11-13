@@ -142,9 +142,11 @@ class TrustMismatch(StateError):
 class RequestRefused(StateError):
     """The guest could not start the payload: a command, interpreter or directory it cannot use.
 
-    Raised for a ``refused`` trailer under ``run`` and for a refused terminal
-    handover. ``code`` is the guest's refusal, already checked against the
-    refusal grammar by the classifier.
+    Raised for a ``refused`` trailer under ``run``, for a refused terminal
+    handover, and for a detached launch whose command the guest could not
+    execute. ``code`` is the guest's refusal, already checked against the
+    refusal grammar (``results.REFUSAL_CODE``, or its ``exec`` part for a
+    detached launch).
     """
 
     def __init__(self, vm_name: str, code: str, result: Result) -> None:
