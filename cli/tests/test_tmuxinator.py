@@ -283,9 +283,10 @@ def test_a_stored_workspace_path_names_its_config_in_one_spelling(stored: str) -
     assert config_path(stored) == "/data/ws/.tmuxinator.yml"
 
 
-@pytest.mark.parametrize("stored", ["~/ws", "/data/link/../ws/"])
+@pytest.mark.parametrize("stored", ["~/ws", "/data/link/../ws/", "/data/w\ts"])
 def test_a_stored_path_the_file_operations_cannot_address_names_no_config(stored: str) -> None:
-    """A relative path names no one directory, and a ``..`` one names its directory only once the VM resolves it."""
+    """A relative path names no one directory, a ``..`` one names its directory only once the VM resolves it,
+    and the file operations refuse a character that is not printable."""
     from agentworks.errors import ValidationError
     from agentworks.workspaces.tmuxinator import config_path
 

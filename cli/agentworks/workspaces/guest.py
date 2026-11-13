@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import shlex
 
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
-from agentworks.execution.files import normalized_guest_path
+from agentworks.execution.files import guest_path, normalized_guest_path
 from agentworks.execution.requests import Script, Shell
 
 PROBE_DEADLINE = 10
@@ -58,19 +58,22 @@ def stored_workspace_path(path: str) -> str:
 def addressable_workspace_path(path: str) -> str:
     """A workspace row's path as the file operations address files under it, refusing one they cannot.
 
-    That is :func:`stored_workspace_path`'s path and refusal, and a path with
-    a ``..`` component is refused too: it names a directory only once the VM
-    resolves it, which the file operations never do
-    (``execution.files.guest_path``). An earlier release stored such a path as
-    typed, and rehome replaces it with a path that has none.
+    That is :func:`stored_workspace_path`'s path and refusal, then the file
+    operations' own check (``execution.files.guest_path``). What it refuses
+    in a normalized absolute path is a ``..`` component, which names a
+    directory only once the VM resolves it, or a character that is not
+    printable. An earlier release stored such a path as typed; rehome reads it
+    as a source and stores a target the file operations accept.
     """
     normalized = stored_workspace_path(path)
-    if ".." in normalized.split("/"):
+    try:
+        return guest_path(normalized)
+    except StateError:
         raise ValidationError(
-            f"workspace path {path!r} has a '..' component, which names a directory only once the VM resolves it",
-            hint="Move the workspace with 'agw workspace rehome', which stores its new path without one.",
-        )
-    return normalized
+            f"the file operations cannot address workspace path {path!r}: "
+            "it has a '..' component or a character that is not printable",
+            hint="Move the workspace with 'agw workspace rehome', which stores a path they can address.",
+        ) from None
 
 
 def script(source: str, *args: str, elevated: bool = False, deadline: float | None = None) -> Script:
