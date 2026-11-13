@@ -904,10 +904,10 @@ channel, then deletes the backend VM; it does not stop individual workloads firs
 the VM ends them. The logout is best effort: when it does not run or fails, delete goes on and, once
 the row is gone, names the node to remove in the Tailscale admin console. A VM that is stopped or
 deallocated is not logged out, since nothing reaches it (a stopped WSL2 distro is usually booted by
-the hold delete keeps on it, and is then logged out), and neither is a cloud VM whose host key was
-never recorded, since nothing could verify the VM that answered. When the node was logged out before
-a backend delete failed, the error says so, and `agw vm rekey <name>` puts the VM back on Tailscale
-if you would rather keep it.
+the hold delete keeps on it, and is then logged out, unless the VM's intent is stopped, which admits
+no hold), and neither is a cloud VM whose host key was never recorded, since nothing could verify
+the VM that answered. When the node was logged out before a backend delete failed, the error says
+so, and `agw vm rekey <name>` puts the VM back on Tailscale if you would rather keep it.
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,

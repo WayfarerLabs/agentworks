@@ -161,8 +161,10 @@ def delete_vm(
     holds, the node is logged out of the tailnet through the platform's root
     channel, best effort, and the provider delete follows: whoever deletes a
     VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
-    Deletion never starts the guest or tears down individual workloads, which
-    the provider delete ends.
+    Deletion never tears down individual workloads, which the provider delete
+    ends, and starts the guest only as a side effect of the logout's hold: a
+    WSL2 hold boots a stopped distro, unless the VM's intent is stopped, which
+    admits no hold.
 
     Without ``force``, a row is removed only once its backend VM is deleted,
     because a removed row would leave a surviving backend VM with nothing to
@@ -442,7 +444,9 @@ def rekey_vm(
         # The log has the key in its redaction set before its first write. The
         # activation gate converges power state (a race from the running check
         # above), then holds the VM for the rekey's duration (WSL2 anchors the
-        # distro against vmIdleTimeout through the script's pauses).
+        # distro against vmIdleTimeout through the script's pauses). A VM whose
+        # intent is stopped admits no hold, since a hold could boot it, so a
+        # running one is rekeyed unheld: on WSL2 it can idle out between calls.
         # Boundary-then-gate means the gate callback SERVES the boundary's cached
         # values, never resolves or seeds: the union covers the gate secrets, and
         # ``Resolver.get`` refuses anything outside it.

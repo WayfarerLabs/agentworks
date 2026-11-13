@@ -35,12 +35,13 @@ def _no_ssh_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
 
 
-def _seed(db: Database, *, site: str = "proxmox") -> None:
+def _seed(db: Database, *, site: str = "proxmox", target: Target = Target.STOPPED) -> None:
+    """A VM with a tailnet address; stopped intent by default, which must not matter: delete never gates."""
     db.insert_vm("dvm", site=site, hostname="dvm")
     db.update_vm_tailscale("dvm", "100.64.0.3")
     db.set_vm_desired_runtime_state(
-        "dvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "dvm")
-    )  # must not matter: delete never gates
+        "dvm", target, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "dvm")
+    )
 
 
 def _fake_backend(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
@@ -651,7 +652,7 @@ def test_agent_without_workspace_still_requires_cascade_opt_in(db: Database, mak
 
 
 def test_a_delete_refused_after_the_logout_keeps_the_row_and_says_how_to_finish(db: Database, make_config, monkeypatch):
-    _seed(db)
+    _seed(db, target=Target.ON_DEMAND)
     counts = _fake_backend(monkeypatch)
     failure = _failing_backend_delete(monkeypatch, counts)
     calls = []
@@ -665,8 +666,7 @@ def test_a_delete_refused_after_the_logout_keeps_the_row_and_says_how_to_finish(
         vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert caught.value is failure
-    # The seeded VM has stopped intent, which admits no hold: a hold could boot it.
-    assert calls == ["logout"]
+    assert calls == ["hold", "logout"]
     assert hints == [True]
     assert db.get_vm("dvm") is not None
 
@@ -675,13 +675,16 @@ def test_a_hold_that_fails_on_release_keeps_the_logouts_own_result(
     db: Database, make_config, monkeypatch, captured_output: CapturedOutput
 ):
     """The node was logged out, so the delete's warning must not say otherwise, nor drop the rekey aside."""
-    _seed(db)
+    _seed(db, target=Target.ON_DEMAND)
     counts = _fake_backend(monkeypatch)
     _failing_backend_delete(monkeypatch, counts)
+
+    released = []
 
     @contextlib.contextmanager
     def release_fails(self, row, *, config=None):
         yield
+        released.append(row.name)
         raise RuntimeError("the distro would not stop")
 
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", release_fails)
@@ -692,8 +695,32 @@ def test_a_hold_that_fails_on_release_keeps_the_logouts_own_result(
     with pytest.raises(AuthorizationError):
         vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
+    assert released == ["dvm"]
     assert hints == [True]
     assert warned == []
+
+
+@pytest.mark.parametrize("not_logged_out", [None, "the VM is stopped"])
+def test_a_vm_with_stopped_intent_is_logged_out_without_a_hold(
+    db: Database, make_config, monkeypatch, captured_output: CapturedOutput, not_logged_out: str | None
+):
+    """A hold could boot a VM whose intent is stopped, so delete holds nothing; the logout still runs and reports."""
+    _seed(db, target=Target.STOPPED)
+    _fake_backend(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        ProxmoxPlatform, "vm_active", lambda self, row, *, config=None: calls.append("hold") or contextlib.nullcontext()
+    )
+    monkeypatch.setattr(
+        vm_manager, "_tailscale_logout", lambda *args, **kwargs: calls.append("logout") or not_logged_out
+    )
+    warned = _not_logged_out_warnings(monkeypatch)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert calls == ["logout"]
+    assert warned == ([] if not_logged_out is None else ["dvm"])
+    assert db.get_vm("dvm") is None
 
 
 @pytest.mark.parametrize("failure", [ConfigError("site could not bind"), RuntimeError("unexpected boundary failure")])
