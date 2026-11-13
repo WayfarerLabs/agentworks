@@ -186,6 +186,8 @@ def _facts_of(entry: FieldEntry) -> str:
         facts.append(f"default {render_value(entry.doc.default)}")
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")
+    if entry.doc.interpolation is not None:
+        facts.append("interpolated elements" if entry.doc.interpolation == "items" else "interpolated")
     for key, value in entry.doc.constraints.items():
         if key == "pattern" and value == NON_BLANK_PATTERN:
             facts.append("non-blank")

@@ -44,6 +44,7 @@ from agentworks.schema._shape import (
     strip_markers,
     unwrap_optional,
 )
+from agentworks.schema.interpolation import InterpolationTarget, field_interpolation
 from agentworks.schema.markers import RefMarker
 
 if TYPE_CHECKING:
@@ -236,6 +237,9 @@ class FieldDoc:
     structure: the presenter decision ``union_arms`` leaves open is the
     one an element leaves open too."""
 
+    interpolation: InterpolationTarget | None = None
+    """Whether runtime interpolation applies to this scalar or its list elements."""
+
 
 def iter_field_docs(model_cls: type[BaseModel]) -> Iterator[FieldDoc]:
     """``model_cls``'s fields in declaration order, nested blocks expanded
@@ -387,6 +391,7 @@ def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> Fi
         examples=tuple(field.examples or ()),
         ref=marker,
         key_ref=shape.mapping_key_marker,
+        interpolation=field_interpolation(field),
         # The block a field OPENS, whether it always is one or only may
         # be, from the same pairing ``_expandable`` walks.
         nested_model=shape.block,
