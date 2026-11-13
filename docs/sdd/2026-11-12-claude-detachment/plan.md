@@ -14,7 +14,12 @@ The operator authorized rebasing onto current main, publishing a ready PR and mo
 to three PR feedback/fix rounds under the standard development process. A fix round collects
 feedback for at least one hour after its handoff before changing the ready head.
 
-- [ ] Rebase onto latest main and rerun gates, private reviews and isolated local validation.
-- [ ] Resolve the supported path to set and clear an existing session instance spec.
-- [ ] Publish the ready PR with exact-head evidence, the SDD label and monitoring authorization.
-- [ ] Monitor CI and review feedback, complete any needed authorized rounds, and report readiness.
+- [x] Rebase onto latest main and rerun gates, private reviews and isolated local validation.
+- [x] Resolve the supported path to set and clear an existing session instance spec.
+- [x] Prepare the complete PR handoff with exact-head evidence, the SDD label and monitoring
+      authorization.
+
+After publication, CI/review monitoring and any authorized feedback rounds are tracked in the PR
+handoff comments and the session goal under the standard delivery workflow. That operating duty
+continues after implementation closeout; any resulting code correction updates this effort's
+validation evidence before the next handoff.

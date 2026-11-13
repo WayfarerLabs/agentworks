@@ -77,3 +77,37 @@ surface is implemented. Independent review classified this as necessary within t
 scope; the implementation follows agent reinit's retain/replace/clear semantics on named session
 start/restart. The operator's pending preference can still steer this choice. The unmerged local
 lock is removed while this requirement is open.
+
+### Existing-session recovery completion
+
+`fd094a35c` added named start/restart `--spec`, with candidate validation before observation or
+consent, persistence after consent, identity checks surrounding that interval, and one VM-family
+guard reused through runtime composition. The CLI supports complete replacement, explicit `{}`
+clearing, and omitted-option retention. It rejects bulk replacement. Guides and the command
+reference describe setting and removing `force_uuid` while preserving other desired fields.
+
+Private review corrections require valid JSON rather than treating an empty string as a clear, and
+reject conflicting `force_uuid`/force-new intent before accepting any overlay or runtime target. The
+optional local launch-config preflight keeps this policy in the Claude integration. All three review
+lanes cleared `ae99f67ca`; their independent focused runs passed 118, 118 and 138 tests. The lead's
+policy regressions passed 123 tests and Mypy passed across 1,041 files.
+
+An independent real-CLI run at `ae99f67ca` passed 13 cases for set/retain/replace/clear and invalid
+requests, including empty/whitespace input and both force-new conflicts. Invalid requests preserved
+complete session snapshots. A stopped VM row without an address on unsupported WSL2 supplied an
+intentional local reconciliation barrier, so accepted configuration changes returned failure after
+saving desired state. No actual VM, transport or provider executable was used; all tripwires
+remained untouched. The final instance-state query was empty, and the lead independently checked
+absence of the owned home/baseline state. This proves configuration acceptance and refusal
+boundaries, not guest runtime convergence. The corrected implementation's full final suite passed:
+13,257 passed, 35 skipped and 15 nested test cases passed, exit 0. Its first run exposed an older
+structural CLI test that explicitly prohibited the new start/restart option. Updating that contract
+assertion required no production-code change; the focused 16-test run and complete rerun passed.
+
+Final Ruff lint/format, configured Mypy, repository lint, rulesync drift, locked-SDD protection and
+Typer isolation pass. Website Python and Node runs passed 160 and 103 tests respectively, and fresh
+deterministic double builds passed for both site bases. The code reviewed and exercised by the three
+lanes and local tester is `ae99f67ca`; subsequent closeout changes update only the existing CLI
+option-placement test and SDD records. The PR handoff carries the SDD label and monitoring
+allowance. Publication, CI and PR-level review remain operating duties tracked in the session goal
+and PR comments, rather than implementation-plan completion claims.
