@@ -88,10 +88,13 @@ def delete_workspace(
         )
 
     if not yes:
-        msg = (
-            f"Delete workspace '{name}' and its files? "
-            "Uncommitted changes, untracked files, stashes and commits not pushed elsewhere will be lost."
-        )
+        if path_known:
+            msg = (
+                f"Delete workspace '{name}' and its files? "
+                "Uncommitted changes, untracked files, stashes and commits not pushed elsewhere will be lost."
+            )
+        else:
+            msg = f"Delete workspace '{name}'? Its files on the VM are kept."
         if session_count > 0:
             msg += f" ({session_count} session(s) will also be deleted)"
         if not output.confirm(msg):
