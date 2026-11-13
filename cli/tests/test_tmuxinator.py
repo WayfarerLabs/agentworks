@@ -288,3 +288,11 @@ def test_a_dotdot_component_in_a_stored_path_is_kept() -> None:
     from agentworks.workspaces.tmuxinator import config_path
 
     assert config_path("/data/link/../ws/") == "/data/link/../ws/.tmuxinator.yml"
+
+
+def test_a_stored_path_that_is_not_absolute_names_no_config() -> None:
+    from agentworks.errors import ValidationError
+    from agentworks.workspaces.tmuxinator import config_path
+
+    with pytest.raises(ValidationError):
+        config_path("~/ws")

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import shlex
 
+from agentworks.errors import ValidationError
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
+from agentworks.execution.files import normalized_guest_path
 from agentworks.execution.requests import Script, Shell
 
 PROBE_DEADLINE = 10
@@ -29,6 +31,23 @@ A missing or mismatched host key, a VM that cannot run requests and an
 elevated request on an agent's access are not among them: every later
 request would fail the same way, so they propagate.
 """
+
+
+def stored_workspace_path(path: str) -> str:
+    """A workspace row's path, normalized, refusing one that is not absolute.
+
+    Boundary: the path is persisted state. The state migration anchors a
+    relative path in the admin's home, but one starting with ``~`` stays
+    relative, since which home it named is not recorded, so nothing is run
+    against it.
+    """
+    normalized = normalized_guest_path(path)
+    if not normalized.startswith("/"):
+        raise ValidationError(
+            f"workspace path {path!r} is not an absolute path on the VM",
+            hint="Recreate the workspace: which directory this stored path names is not recorded.",
+        )
+    return normalized
 
 
 def script(source: str, *args: str, elevated: bool = False, deadline: float | None = None) -> Script:

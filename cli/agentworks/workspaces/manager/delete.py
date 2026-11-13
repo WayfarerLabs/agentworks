@@ -8,6 +8,7 @@ from agentworks import output
 from agentworks.errors import NotFoundError, StateError, UserAbort
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.guest import stored_workspace_path
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
@@ -59,6 +60,8 @@ def delete_workspace(
             entity_kind="workspace",
             entity_name=name,
         )
+    # Nothing runs against a stored path that names no one directory.
+    stored_workspace_path(ws.workspace_path)
 
     # Check for sessions
     session_count = len(db.list_sessions(workspace_name=name))

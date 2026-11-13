@@ -14,12 +14,11 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
-from agentworks.execution.files import normalized_guest_path
 from agentworks.execution.requests import Command
 from agentworks.sessions.multi_console import ADMIN_SHELL_WINDOW
 from agentworks.sessions.tmux import exact_tmux_target, tmux_cmd
 from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
-from agentworks.workspaces.guest import PROBE_DEADLINE
+from agentworks.workspaces.guest import PROBE_DEADLINE, stored_workspace_path
 
 if TYPE_CHECKING:
     from agentworks.db import SessionRow
@@ -41,9 +40,10 @@ def config_path(workspace_path: str) -> str:
 
     A stored workspace path can carry a trailing ``/``, a ``.`` component or a
     leading ``//`` (a row from an earlier release), which the file operations
-    refuse, so the path is normalized first.
+    refuse, so the path is normalized first; one that is not absolute is a
+    ``ValidationError`` (``guest.stored_workspace_path``).
     """
-    return f"{normalized_guest_path(workspace_path)}/.tmuxinator.yml"
+    return f"{stored_workspace_path(workspace_path)}/.tmuxinator.yml"
 
 
 def config_link(home: str, ws_name: str) -> str:

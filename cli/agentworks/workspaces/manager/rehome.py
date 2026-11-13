@@ -13,14 +13,21 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.execution.files import guest_path, normalized_guest_path
+from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
-from agentworks.workspaces.guest import FIND_DEADLINE, PROBE_DEADLINE, REQUEST_FAILURES, open_parent_traversal, script
+from agentworks.workspaces.guest import (
+    FIND_DEADLINE,
+    PROBE_DEADLINE,
+    REQUEST_FAILURES,
+    open_parent_traversal,
+    script,
+    stored_workspace_path,
+)
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
 from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config, remove_config
@@ -72,8 +79,9 @@ def rehome_workspace(
     new_path = _target_directory(
         target_path if target_path is not None else default_workspace_path(config, name), ws_name=name
     )
-    # Compared normalized: a stored path can be spelled `/data//ws` or `/data/ws/`.
-    old_path = normalized_guest_path(ws.workspace_path)
+    # Compared normalized: a stored path can be spelled `/data//ws` or `/data/ws/`; one that
+    # is not absolute is refused here, before anything runs.
+    old_path = stored_workspace_path(ws.workspace_path)
 
     if old_path == new_path:
         output.info(f"Workspace '{name}' is already at {new_path}")

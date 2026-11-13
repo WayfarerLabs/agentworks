@@ -33,9 +33,16 @@ if TYPE_CHECKING:
     from agentworks.vms.initializer.phase_a import OperationLog
 
 
-_REGENERATION_FAILURES = (*REQUEST_FAILURES, PathRefused, FileConflict, FileContentMismatch, FileLockTimeout)
-"""What the tmuxinator regeneration tolerates: a failed request, or a file operation that was refused,
-conflicted, timed out or wrote nothing."""
+_REGENERATION_FAILURES = (
+    *REQUEST_FAILURES,
+    PathRefused,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+    ValidationError,
+)
+"""What the tmuxinator regeneration tolerates: a failed request, a file operation that was refused,
+conflicted, timed out or wrote nothing, or a stored workspace path that is not absolute."""
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:

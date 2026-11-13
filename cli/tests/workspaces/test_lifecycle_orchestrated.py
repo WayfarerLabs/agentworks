@@ -1487,6 +1487,35 @@ def test_rehome_refuses_a_target_inside_a_stored_path_spelled_with_a_double_slas
     assert target.commands == []
 
 
+@pytest.mark.parametrize("command", ["rehome", "delete"])
+def test_a_stored_path_that_is_not_absolute_is_refused_before_anything_runs(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    """A '~' row, which the state migration leaves relative, names no one directory to act on."""
+    config = make_config()
+    _seed(db)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '~/ws/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+    _reachable(monkeypatch, True)
+
+    with pytest.raises(ValidationError):
+        if command == "rehome":
+            workspace_manager.rehome_workspace(
+                db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+            )
+        else:
+            workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert target.commands == []
+    assert db.get_workspace("ws1") is not None
+
+
 def test_rehome_refuses_a_target_inside_the_source_through_a_link(
     db: Database,
     make_config,  # noqa: ANN001

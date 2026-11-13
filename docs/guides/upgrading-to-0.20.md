@@ -251,7 +251,8 @@ the VM once no backup is running.
   leading `//` reads as `/`. A workspace created under a relative value is rewritten, when the state
   database migrates, to the absolute path it already had on the VM, under the VM admin's home. One
   created under a value starting with `~` keeps its stored path, since which home it named is not
-  recorded; recreate that workspace.
+  recorded; recreate that workspace. `workspace rehome` and `workspace delete` refuse such a path
+  before anything runs, and the session commands warn instead of updating its tmuxinator config.
 - **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
   or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
   dropped. A target that is the workspace's directory, inside it, or around it once the VM resolves
