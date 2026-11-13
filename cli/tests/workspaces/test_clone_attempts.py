@@ -483,8 +483,8 @@ def test_clone_failure_has_safe_structured_context_without_changing_identity(bac
     assert not final.exists() and not target.groups
 
 
-@pytest.mark.parametrize("points_here", [True, False])
-def test_delete_of_a_legacy_row_with_a_trailing_slash_removes_only_its_own_link(backend, points_here):
+@pytest.mark.parametrize("points", ["here", "elsewhere", "here-relative-to-the-home"])
+def test_delete_of_a_legacy_row_with_a_trailing_slash_removes_only_its_own_link(backend, points):
     from agentworks.workspaces.backends.vm import delete_vm_workspace
 
     target, vm, config, final = backend
@@ -494,9 +494,16 @@ def test_delete_of_a_legacy_row_with_a_trailing_slash_removes_only_its_own_link(
     link = target.home / f".config/tmuxinator/{console_session_name('project')}.yml"
     link.parent.mkdir(parents=True)
     # An earlier release linked the config as spelled from the stored path.
-    link.symlink_to(f"{stored}/.tmuxinator.yml" if points_here else str(target.root / "other/.tmuxinator.yml"))
+    if points == "here":
+        link.symlink_to(f"{stored}/.tmuxinator.yml")
+    elif points == "elsewhere":
+        link.symlink_to(target.root / "other/.tmuxinator.yml")
+    else:
+        # Read from the link's own directory this is a dangling path, not the config; read from the
+        # request's directory (the home) it would name the config.
+        link.symlink_to(os.path.relpath(final / ".tmuxinator.yml", target.home))
 
     delete_vm_workspace(vm, config, "project", stored, "ws-project")
 
     assert not final.exists()
-    assert link.is_symlink() is not points_here
+    assert link.is_symlink() is (points != "here")

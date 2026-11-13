@@ -327,12 +327,15 @@ def delete_vm_workspace(
             admin.run(
                 Command(("rm", "-rf", "--", workspace_path), elevated=True, deadline=CLEANUP_DEADLINE), check=True
             )
-        # The link only while it still points at this workspace's config. The
-        # target is compared normalized without following links (realpath -s -m):
-        # an earlier release wrote it from the stored path as it was spelled.
+        # The link only while it still points at this workspace's config. Agentworks
+        # writes an absolute target, compared normalized without following links
+        # (realpath -s -m), since an earlier release wrote it from the stored path as
+        # spelled; a relative target is never ours, and realpath would read it from
+        # the request's directory rather than the link's.
         admin.run(
             script(
-                'if test -L "$1" && test "$(realpath -s -m -- "$(readlink -- "$1")")" = "$2"; then rm -- "$1"; fi',
+                'if test -L "$1"; then t=$(readlink -- "$1"); case $t in /*)\n'
+                '  if test "$(realpath -s -m -- "$t")" = "$2"; then rm -- "$1"; fi ;; esac; fi',
                 config_link(managed_home(vm.admin_username), ws_name),
                 config_path(workspace_path),
                 deadline=PROBE_DEADLINE,
