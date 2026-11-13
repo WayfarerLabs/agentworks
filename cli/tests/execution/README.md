@@ -29,6 +29,11 @@ returns canned outcomes without ssh.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
+- `test_detached_program.py`: the guest detached program against real processes and a temporary
+  base, under each interpreter: launch identity, every state and the read order, the prune,
+  interrupt, discard, and (under the sudo lane) the base's modes. Linux only.
+- `test_detached.py`: the detached client over the recording fake: each request, the follow-up after
+  a connection outcome, and the boundary checks.
 - `test_to_file.py`: the `ToFile` sink: an existing path refused before dispatch, bytes unchanged,
   and the file kept only for `Completed(0)`. Marked `windows`, where binary mode is what keeps CR
   LF.

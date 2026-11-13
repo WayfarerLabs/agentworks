@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, Agent, Identity, VMAccess
 from agentworks.execution.client import SSHClient
-from agentworks.execution.requests import CaptureOutput, DiscardOutput
+from agentworks.execution.requests import CaptureOutput, DiscardOutput, ToFile
 from agentworks.execution.results import Completed, Result
 from agentworks.execution.trust import TrustMode
 from tests.ssh_fixtures import fake_host_key
@@ -64,7 +64,9 @@ class RecordingVMAccess(VMAccess):
     every time it is asked. Any other ``run`` consumes ``run_outcomes`` in
     order, then gets ``default_outcome``, ``Completed(0)`` unless a test sets
     it. An outcome that is an exception is raised. A stream ``run`` was asked
-    to discard comes back empty, as it does from a real access.
+    to discard comes back empty, as it does from a real access; one it was
+    asked to write to a ``ToFile`` comes back empty too, its bytes written to
+    the new file, with one progress report, only for ``Completed(0)``.
     ``stream_status``, ``attach_status`` and ``forward_status`` are returned
     (or raised) by their operation.
     """
@@ -114,6 +116,13 @@ class RecordingVMAccess(VMAccess):
             outcome = self.run_outcomes.pop(0) if self.run_outcomes else self.default_outcome
         if isinstance(outcome, BaseException):
             raise outcome
+        if isinstance(stdout, ToFile):
+            if outcome.completion == Completed(0):
+                with stdout.path.open("xb") as written:
+                    written.write(outcome.stdout)
+                if stdout.on_progress is not None:
+                    stdout.on_progress(len(outcome.stdout))
+            outcome = replace(outcome, stdout=b"")
         if isinstance(stdout, DiscardOutput):
             outcome = replace(outcome, stdout=b"")
         if isinstance(stderr, DiscardOutput):

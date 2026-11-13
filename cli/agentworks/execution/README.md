@@ -192,6 +192,50 @@ absent (an `O_CREAT` open of another identity's file in the sticky `/run/lock` i
 Agentworks operations among themselves; a writer that ignores it is out of scope. Modes and
 placement policy (which directories root may write) belong to the caller.
 
+## Detached work
+
+`access.detached()` returns the admin's `Detached` (`detached.py`): a root payload that outlives the
+connection that started it. Every request is elevated, so an agent's access refuses each one with
+`PermissionDenied`. The guest side is `detached_program.py`, sent as a `PythonProgram` as the file
+program is.
+
+| Method                         | Does                                                                               | Deadline |
+| ------------------------------ | ---------------------------------------------------------------------------------- | -------- |
+| `new_launch()`                 | A fresh `Launch(vm_name, id)`, 32 hex digits chosen on the workstation; no request | none     |
+| `launch(launch, command)`      | Starts an elevated `Command` with no input, working directory or deadline          | 60       |
+| `observe(launch)`              | An `Observation`: state, status, `work/` file sizes, output tail                   | 30       |
+| `interrupt(launch)`            | `SIGTERM` to the payload's group, `SIGKILL` if it outlives 10 seconds; the state   | 30       |
+| `download(launch, name, sink)` | `cat` of `work/<name>` into a `ToFile`                                             | none     |
+| `discard(launch)`              | Removes the launch's directory; refuses a running one                              | 60       |
+
+Each launch lives in `/var/lib/agentworks/detached/<id>/`: the base is created root-owned, mode
+0700, under a 0755 `/var/lib/agentworks`, and the launch directory and its `work/` (the payload's
+working directory) are 0700. `launch` sends the argv and environment on stdin, so the environment
+reaches the payload and no file or log. The program forks once into a supervisor in its own session
+with every descriptor of the connection closed, which starts the payload in a session of its own
+with both streams in the launch's `output`, records its status (128 plus the signal for a signalled
+one) and exits. `launch` returns once the payload has started.
+
+The launch's `process` file is locked with `flock` while the supervisor or any process of the
+payload's tree lives, and that lock is the process identity: no pid is compared. `observe` tests the
+lock before it reads the status, since the supervisor writes the status before it releases its hold:
+
+| State      | Evidence                        |
+| ---------- | ------------------------------- |
+| `ABSENT`   | no launch directory             |
+| `STARTING` | the directory, no `process`     |
+| `RUNNING`  | `process` locked                |
+| `EXITED`   | `process` unlocked, a `status`  |
+| `LOST`     | `process` unlocked, no `status` |
+
+The guest refuses an id whose directory exists (`DetachedRefused`), so a launch never adopts an
+earlier one's files or status, and each new launch removes sibling launches that are not running and
+are older than seven days. `launch` is never dispatched again: after a connection outcome it makes
+one `observe`, and returns if the launch is there; otherwise it raises `ExecutionIncomplete` naming
+the id. Resuming after a dropped connection is the caller's polling loop, since `observe` changes
+nothing. A caller holds the id from `new_launch` before anything is sent, so its `finally` can
+discard by id whatever `launch` did.
+
 ## Client and policy
 
 `client.py` resolves the OpenSSH client once per process to an absolute path and a version, and

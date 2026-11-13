@@ -22,6 +22,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import refusal_status
+from agentworks.execution.detached import Detached
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
 from agentworks.execution.files import Files
 from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, NoInput, ToFile
@@ -227,6 +228,13 @@ class VMAccess:
         Building it connects to nothing; each operation is one ``run``.
         """
         return Files(self, deadline=deadline)
+
+    def detached(self) -> Detached:
+        """This identity's detached work on the VM (``detached.py``); every request is elevated.
+
+        Building it connects to nothing.
+        """
+        return Detached(self)
 
     def passphrase_hint(self) -> str | None:
         """:func:`client.agent_load_hint` for the operator's key; ask only after a connection failure."""

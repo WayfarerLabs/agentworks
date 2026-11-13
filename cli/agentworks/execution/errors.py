@@ -338,3 +338,22 @@ class FileLockTimeout(StateError):
             entity_name=vm_name,
             hint="Another Agentworks operation is writing files on this VM; retry once it has finished.",
         )
+
+
+class DetachedRefused(StateError):
+    """The detached program refused a launch: its id already exists at ``launch``, or it is running at ``discard``.
+
+    Nothing was changed on the VM.
+    """
+
+    def __init__(self, vm_name: str, launch_id: str, *, running: bool) -> None:
+        self.vm_name = vm_name
+        self.launch_id = launch_id
+        self.running = running
+        if running:
+            message = f"detached launch {launch_id} on VM '{vm_name}' is still running, so it was not discarded"
+            hint = "Interrupt it first, or discard it once it has ended."
+        else:
+            message = f"detached launch {launch_id} already exists on VM '{vm_name}', so nothing was started"
+            hint = "Each launch takes a fresh id from new_launch; never reuse one."
+        super().__init__(message, entity_kind="vm", entity_name=vm_name, hint=hint)
