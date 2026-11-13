@@ -144,8 +144,8 @@ def legacy_imports(source: str, *, module: str, is_package: bool = False, filena
         ("from ... import ssh", ["agentworks.ssh"]),
         ("from ...ssh import SSHError", ["agentworks.ssh.SSHError"]),
         ("from agentworks.transports import base", ["agentworks.transports.base"]),
-        ("def f():\n    from agentworks.remote_exec import x", ["agentworks.remote_exec.x"]),
-        ("if TYPE_CHECKING:\n    import agentworks.remote_exec", ["agentworks.remote_exec"]),
+        ("def f():\n    from agentworks.transports.ssh import x", ["agentworks.transports.ssh.x"]),
+        ("if TYPE_CHECKING:\n    import agentworks.ssh", ["agentworks.ssh"]),
     ],
 )
 def test_every_import_form_of_a_legacy_module_is_found(source: str, expected: list[str]) -> None:

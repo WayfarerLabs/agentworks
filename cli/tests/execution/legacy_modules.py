@@ -5,7 +5,6 @@ from __future__ import annotations
 LEGACY_MODULES = (
     "agentworks.transports",
     "agentworks.ssh",
-    "agentworks.remote_exec",
 )
 
 
