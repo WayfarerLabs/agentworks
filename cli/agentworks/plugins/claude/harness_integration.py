@@ -60,6 +60,8 @@ from agentworks.schema import AgwModel, InstanceOnly, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pydantic import BaseModel
 
     from agentworks.capabilities.base import RunContext
@@ -365,6 +367,13 @@ class ClaudeCodeIntegration(HarnessIntegration):
         return self._config_as(ClaudeCodeConfig)
 
     @classmethod
+    def validate_launch_config(cls, config: Mapping[str, object], *, intent: HarnessLaunchIntent) -> None:
+        if config.get("force_uuid") is not None and intent is HarnessLaunchIntent.FORCE_NEW:
+            raise StateError(
+                "force_uuid conflicts with force-new; remove force_uuid before requesting a new conversation."
+            )
+
+    @classmethod
     def hoist_legacy_state(cls, blob: dict[str, object]) -> None:
         """Compatibility (pre-namespacing harness_state): DELETE on the
         next major release, together with the base hook and its seam call.
@@ -465,10 +474,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 if stored_sid == forced
                 else f"Claude force_uuid: adopting exact conversation {forced}; remove this setting after adoption."
             )
-            if intent is HarnessLaunchIntent.FORCE_NEW:
-                raise StateError(
-                    "force_uuid conflicts with force-new; remove force_uuid before requesting a new conversation."
-                )
+        self.validate_launch_config(self.config.model_dump(), intent=intent)
         if resume_only and forced is None and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
         sid = forced or (stored_sid if not fresh and isinstance(stored_sid, str) and stored_sid else str(uuid.uuid4()))

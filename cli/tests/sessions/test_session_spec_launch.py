@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from agentworks.db import Database, SessionStatus, VersionedPayload, VMStatus
+from agentworks.db import Database, DesiredRuntimeState, SessionStatus, VersionedPayload, VMStatus
 from agentworks.db.instance_state import JsonObject
 from agentworks.errors import AgentworksError, StateError, UserAbort
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
@@ -249,4 +249,39 @@ def test_parent_or_runtime_change_during_consent_refuses_spec(db, make_config, r
             db, config, name="work", spec='{"env":{"NEW":"after"}}', interaction=TtyInteractionPolicy.ALLOW
         )
     assert _value(db) is None
+    assert runtime[2] == []
+
+
+@pytest.mark.parametrize("operation", ["start", "restart"])
+@pytest.mark.parametrize("replacement", [True, False])
+def test_force_new_conflict_preserves_overlay_runtime_and_target(
+    db, make_config, runtime, monkeypatch, operation, replacement
+):
+    _seed(db)
+    config = make_config()
+    config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "claude"))
+    forced = {"harness_integration": {"name": "claude-code", "force_uuid": SID}}
+    _put(db, '{"env":{"OLD":"retained"}}' if replacement else json.dumps(forced))
+    selected = db.get_session("work")
+    db.set_session_desired_runtime_state(
+        "work", DesiredRuntimeState.STOPPED, expected_session_uuid=selected.session_uuid
+    )
+    before = db.get_session("work")
+    prior = db.instance_state.get_desired_overlay("session", "work")
+    if replacement:
+        monkeypatch.setattr(manager, "observe_session_statuses", lambda *a, **k: pytest.fail("observed runtime"))
+    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: pytest.fail("asked for restart consent"))
+    options = {"yes": True} if operation == "restart" else {}
+    with pytest.raises(StateError):
+        getattr(manager, f"{operation}_session")(
+            db,
+            config,
+            name="work",
+            force_new=True,
+            spec=json.dumps(forced) if replacement else None,
+            interaction=REFUSE,
+            **options,
+        )
+    assert db.get_session("work") == before
+    assert db.instance_state.get_desired_overlay("session", "work") == prior
     assert runtime[2] == []

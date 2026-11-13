@@ -315,6 +315,14 @@ missing any of them, naming the plugin:
   config.
 - `name` / `description`: the registry row's identity.
 
+#### Launch Configuration Preflight
+
+`validate_launch_config(config, intent=...)` is an optional class method for local conflicts between
+validated, untagged config and a launch intent. The default accepts every combination. Core calls it
+before accepting desired runtime state. The spec-replacement path also calls it before runtime
+observation, restart consent or persisting the replacement. Implementations perform no target work
+or state mutation here. The launch operation also enforces its policy when called directly.
+
 #### Setup Binding
 
 VM, admin, agent, and workspace templates explicitly select native setup integrations through

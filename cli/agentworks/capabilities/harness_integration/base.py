@@ -230,6 +230,14 @@ class HarnessIntegration(Capability):
             raise StateError("harness config requires an explicit facet")
         return cls.config_model if facet == "session" else None
 
+    @classmethod
+    def validate_launch_config(cls, config: Mapping[str, object], *, intent: HarnessLaunchIntent) -> None:
+        """Reject local config/intent conflicts before accepting desired state.
+
+        Config shape is already validated. This optional preflight performs no
+        target work or state mutation; the default adds no policy.
+        """
+
     def __init__(
         self,
         owner_name: str,  # the session-template name (config owner)

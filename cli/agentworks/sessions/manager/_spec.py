@@ -43,9 +43,16 @@ def _current_session(db: Database, expected: SessionRow, vm: VMRow) -> SessionRo
     return current
 
 
-def _validate_candidate(db: Database, config: Config, session: SessionRow, overlay: InstanceOverlay[BaseModel]) -> None:
+def _validate_candidate(
+    db: Database,
+    config: Config,
+    session: SessionRow,
+    overlay: InstanceOverlay[BaseModel],
+    *,
+    intent: HarnessLaunchIntent,
+) -> None:
     from agentworks.bootstrap import load_request_registry
-    from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
+    from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
     from agentworks.instance_specs import ensure_effective_references_enabled
     from agentworks.resources.access import ensure_recipe_enabled
     from agentworks.resources.live_publish import project_session_live_resource
@@ -74,6 +81,9 @@ def _validate_candidate(db: Database, config: Config, session: SessionRow, overl
     ensure_effective_references_enabled(registry, pending.outbound)
     ensure_recipe_enabled(registry, "session-template", session.template)
     ensure_harness_integration_enabled(registry, layered.value.harness_integration)
+    harness_integration_for(layered.value.harness_integration).validate_launch_config(
+        layered.value.harness_integration_config, intent=intent
+    )
 
 
 def _persist_spec(db: Database, session: SessionRow, overlay: InstanceOverlay[BaseModel]) -> OverlayOutcome:
@@ -117,7 +127,7 @@ def launch_with_spec(
     vm = _mgr._require_vm_for_workspace(db, workspace)
     with native_mutation_guard(db.path, vm.name) as guard:
         session = _current_session(db, selected, vm)
-        _validate_candidate(db, config, session, overlay)
+        _validate_candidate(db, config, session, overlay, intent=intent)
         authorized = False
         if operation == "restart":
             status = _mgr.observe_session_statuses([session], db=db, config=config, include_legacy=True)
