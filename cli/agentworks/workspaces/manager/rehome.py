@@ -360,10 +360,10 @@ def _resolved_paths(access: VMAccess, old_path: str, new_path: str) -> tuple[str
     """The source and the target as the guest resolves them, every link followed.
 
     The source exists (``realpath -e``); the target need not yet (``realpath
-    -m``). It runs as root, as the copy does: ``realpath -m`` prints a
-    component it cannot search unresolved, and still succeeds. Boundary: the
-    paths are a guest process's output, so anything but two absolute paths is
-    a ``StateError``.
+    -m``). It runs as root, as the target's creation does (``mkdir -p``):
+    ``realpath -m`` prints a component it cannot search unresolved, and still
+    succeeds. Boundary: the paths are a guest process's output, so anything
+    but two absolute paths is a ``StateError``.
     """
     result = access.run(
         script(
