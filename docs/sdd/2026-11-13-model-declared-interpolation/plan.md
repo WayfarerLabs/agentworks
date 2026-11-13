@@ -8,9 +8,9 @@ cleanup in PR #896 and does not change that PR.
 
 - [x] Draft requirements, architecture, mechanism and migration strategy.
 - [x] Audit core and all shipped system plugins, tracing candidate fields to consumers.
-- [ ] Publish the migration inventory with recommendations, costs and explicit choices.
+- [x] Publish the migration inventory with recommendations, costs and explicit choices.
 - [ ] Discuss and record the operator's disposition of new field adoption.
-- [ ] Complete independent project and complexity reviews of the design checkpoint.
+- [x] Complete independent project and complexity reviews of the design checkpoint.
 
 Definition of done: the operator can select concrete field groups from the inventory; the design
 distinguishes established requirements from proposed adoption. New runtime support is not implied by
@@ -55,3 +55,16 @@ execution values, correct quoting, field-aware failures and useful examples.
 Candidate audit snapshot: `3ad615680ee8e1ef56c864170deaf62392578661`, 2026-11-13. Design-only
 checkpoints do not claim implementation or live validation results. Record checkpoint checks, review
 dispositions and later implementation evidence here as they occur.
+
+### 2026-11-13 design checkpoint
+
+Draft PR #903 publishes the six artifacts and the field list. Independent core and system-plugin
+audits traced the recommendations against the snapshot above. Project and complexity reviews of
+`fc5ac9f8d` found no material issues. Neither review approves new runtime fields before operator
+disposition. The complexity review calls out PATH serialization as an implementation-design
+prerequisite if group A is accepted.
+
+Local file quality, relative document links, typography inspection, locked-SDD protection and
+Rulesync checks passed. Exact-head CI results and the completed checkpoint signal are recorded in
+the PR handoff. No runtime code, tests, permanent documentation or locked artifacts change in this
+checkpoint.
