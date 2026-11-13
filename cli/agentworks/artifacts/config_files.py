@@ -26,9 +26,12 @@ def publish_config(
     rule. Without a group (``None`` or empty) a new file is 0600 under 0700
     parents; with one it is 0660 under setgid 2770 parents, in that group.
     ``preserve_metadata`` keeps an existing file's owner, group, mode and
-    extended attributes instead. Content equal to ``observed`` writes
-    nothing. A file changed since the read is ``FileConflict`` naming
-    ``operation``, and nothing is written.
+    extended attributes instead: MCP entries and Git exclusions pass it for
+    a file that exists. Settings publication never does, so a settings file,
+    which can carry secret-bearing environment, always gets the rule's
+    private or group mode. Content equal to ``observed`` writes nothing. A
+    file changed since the read is ``FileConflict`` naming ``operation``,
+    and nothing is written.
     """
     group = group or None
     try:
