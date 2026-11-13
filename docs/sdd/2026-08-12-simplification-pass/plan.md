@@ -7,46 +7,50 @@ effort. The pre-wave-1 measurements the reassessment compares against are in
 
 ## Wave 0: rule delivery, then the amendments (R1)
 
-- [x] Resolve rule delivery (R1.0, issue #511): probe fresh-session, no-file-tools, and
+- [x] Resolve rule delivery (R1.0, issue `#511`): probe fresh-session, no-file-tools, and
       isolated-worktree delivery per configured target (Claude, Codex, Copilot), confirm the
       Rulesync emission for a rule without `globs`, then drop the filter from the twelve broad
       always-on rules, keeping `cli-conventions.md` narrow. Done when, either branch (FRD R1.3): (a)
-      the probes are recorded on issue #511 and the twelve rules are delivered unconditionally, or
-      (b) the probe shows this shape cannot work and the operator's recorded disposition places the
-      full criteria text into every affected lane (charter-carried at minimum). Escalation alone
-      completes nothing: until one branch holds, wave 0 stays open and wave 1 does not start.
-      **Closed on branch (a), 2026-08-14**: the effort lead's own session, the first started after
-      #515 merged, carried all twelve rules with full text at launch before any tool use, and
-      correctly omitted `cli-conventions.md`; a worktree-isolated subagent then carried the same
-      twelve the same way. That answers the isolated-worktree sub-question, since delivery is
-      session-start `claudeMd` rather than path-triggered injection and worktree location decides
-      nothing. Issue #511 is closed on both observations, so R1.3's gate on wave 1 is satisfied.
+      the probes are recorded on issue `#511` and the twelve rules (a count `frd.md` states, which
+      the sweep inventory's open questions flag against its own eleven rule files, for the operator
+      to settle) are delivered unconditionally, or (b) the probe shows this shape cannot work and
+      the operator's recorded disposition places the full criteria text into every affected lane
+      (charter-carried at minimum). Escalation alone completes nothing: until one branch holds, wave
+      0 stays open and wave 1 does not start. **Closed on branch (a), 2026-08-14**: the effort
+      lead's own session, the first started after `#515` merged, carried all twelve rules with full
+      text at launch before any tool use, and correctly omitted `cli-conventions.md`; a
+      worktree-isolated subagent then carried the same twelve the same way. That answers the
+      isolated-worktree sub-question, since delivery is session-start `claudeMd` rather than
+      path-triggered injection and worktree location decides nothing. Issue `#511` is closed on both
+      observations, so R1.3's gate on wave 1 is satisfied.
 - [x] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
       trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
       counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization
       (~3 sentences), one PR. Done when: merged, and the wave 1 items below cite the amendments in
-      their delegation charters. **Merged in PR #515**; wave 1 charters carry both criteria in full
-      rather than by citation, so a dev that loses the rule channel still has them.
+      their delegation charters. **Merged in PR `#515`**; wave 1 charters carry both criteria in
+      full rather than by citation, so a dev that loses the rule channel still has them.
 
 ## Wave 1: deletion (R2)
 
-Nine work items, unordered by design: subtraction judged locally against the doctrines, full suite
+Ten work items, unordered by design: subtraction judged locally against the doctrines, full suite
 green, R2.1 provenance gate applied, no new production types or contract changes (R2.2). How many
 PRs they land as is the implementing lead's call; the saga lead's recommendation is to batch by
 domain to about three (cli core; guide and machine output; website and test scaffolding) so operator
 review rounds match the work rather than the item count. The website items coordinate with the
-in-flight continuous-lander effort (PR #486) before starting, since they touch test files it is
+in-flight continuous-lander effort (PR `#486`) before starting, since they touch test files it is
 actively changing.
 
 **Sequencing (effort lead, 2026-08-14).** Several facts constrain the "unordered by design" freedom,
 so the items run in four groups rather than all at once:
 
-1. **The `phase7` item goes first and alone on `cli/`.** `validate_interaction_policy` has 175
-   references across 45 files in 13 directories, so it is a repo-wide sweep that collides with every
-   other cli item. It lands before the contained items start.
+1. **The `phase7` item goes first and alone on `cli/`.** `validate_interaction_policy` reached
+   across dozens of files and directories, so it was a repo-wide sweep that collided with every
+   other cli item, and it landed before the contained items started. (Two counts of it were
+   recorded, 175 references here and 152 call sites on the item itself; neither was ever reconciled
+   and the symbol is gone from `cli/` at HEAD, so both are history now.)
 2. **Then the contained cli items run in parallel**, each in its own worktree, file-disjoint:
-   descriptor generality (C1, C5) in `schema/`; guide dead surface with `machine_output` (G8, G2,
-   G11, G6); and interior secrets validation (S2, S7).
+   descriptor generality (C1, C5) in `capabilities/`; guide dead surface with `machine_output` (G8,
+   G2, G11, G6); and interior secrets validation (S2, S7).
 3. **The prose-and-form sweep runs after those**, because its exclusion rule is defined against
    files the other items own; running it after they land means it inventories a settled tree. Its
    read-only decision inventory is produced up front and does not wait.
@@ -54,20 +58,23 @@ so the items run in four groups rather than all at once:
    in the same files P5 factors, and deletions rebase cleanly under a later extraction while an
    extraction does not rebase cleanly under later deletions of what it extracted.
 
-The sweep's decision inventory came in at **539 rows: 294 delete, 38 convert, 207 keep**, covering
-about 700 assertion sites and 3,900 to 4,100 lines. It recommends cutting the sweep into five PRs by
-**shape** rather than by domain, plus a sixth for the source-guard family that `hla.md` now settles:
-the mechanical `match=` narrowing first, then guide and migration topics, then report lines and
-hints (the judgment-heavy batch), then schema, manifests, capabilities and platforms, then
-authored-artifact form policing. Batching by domain instead would put a no-judgment mechanical
-change into the same review as the sweep's riskiest deletions.
+The sweep's decision inventory cuts the work by **shape** rather than by domain: the mechanical
+`match=` narrowing first, then report lines and hints (the judgment-heavy batch), then schema,
+manifests, capabilities and platforms, then authored-artifact form policing, plus one for the
+source-guard family that `hla.md` now settles. A guide-and-migration batch was part of that cut
+until the guide rework deleted its whole estate; the inventory has no row for it at all, because a
+row whose estate is gone leaves the ledger for the retired list rather than staying as a dead one.
+Batching by domain instead would put the lowest-judgment change into the same review as the sweep's
+riskiest deletions. [sweep-inventory.md](sweep-inventory.md) is the single source for the row
+counts, the per-group split and the PR topology, all of which it re-derives at HEAD; they are
+deliberately not restated here, because two copies of a count is how they drifted before.
 
-**Website work is deferred** until #486 merges (operator ruling 8). It lands as two PRs rather than
-one (effort lead, 2026-08-16): the website items themselves (W1, W4, W5, W6), and the sweep's
-website rows, which ride the sweep so it stays batched by shape rather than splitting one mechanical
-change across two reviews. Wave 1 does not close until both land. W8 has left this scope entirely,
-for the reasons its item records. The gcp fixture extraction (P5) does not wait on #486, since it
-shares no files with the website work; it waits on the sweep instead, per group 4 above.
+**Website work was deferred** until `#486` merged (operator ruling 8), and it landed as two PRs
+rather than one (effort lead, 2026-08-16). The first is done: W1, W4, W5 and W6 are all `[x]` below.
+What remains is the second, the sweep's own website rows, which ride the sweep so it stays batched
+by shape rather than splitting one mechanical change across two reviews. W8 has left this scope
+entirely, for the reasons its item records. The gcp fixture extraction (P5) does not wait on `#486`,
+since it shares no files with the website work; it waits on the sweep instead, per group 4 above.
 
 - [x] Delete the `phase7` corpus and `validate_interaction_policy` with its 152 call sites (S1).
       Keep `test_resolution_timeout_cleanup.py` (trim its two wording pins); rename kept fixtures
@@ -77,7 +84,7 @@ shares no files with the website work; it waits on the sweep instead, per group 
       interior deletion stands in full, but review found the value is not interior everywhere: the
       manifest services take `interaction` from callers outside our type checking, and a probe drove
       a non-enum `"refuse"` into real backend execution. That is the caller-supplied trust boundary
-      the doctrine gained in #533, after the wave 0 amendment above merged with four. The item
+      the doctrine gained in `#533`, after the wave 0 amendment above merged with four. The item
       therefore also added `require_exact_interaction_policy`, called in two places for two reasons.
       `ResolutionPolicy.__post_init__` calls it, so **no policy can be constructed from an unchecked
       `interaction`**, audited by `grep -rn "ResolutionPolicy(" cli/agentworks/`, which is six
@@ -87,11 +94,11 @@ shares no files with the website work; it waits on the sweep instead, per group 
       reaching a resolver at all, which buys position rather than presence, because a rejected
       policy must leave nothing behind and so the check runs before any state change. Those three
       are `delete_vm` (whose resolver sits inside a best-effort span that swallowed the rejection
-      and completed the delete with the backend delete skipped, the #329 orphaning), `reinit_agent`
-      (which persists a template re-point first), and `rehome_workspace` (which opens SSH transports
-      first). The deleted names survive in SDD prose only, and this is the whole list: both names in
-      this plan, in `findings.md`, and in the supersession note the work required on the locked
-      `2026-08-07-secret-sources` lock; `phase7` alone in `hla.md`; and
+      and completed the delete with the backend delete skipped, the `#329` orphaning),
+      `reinit_agent` (which persists a template re-point first), and `rehome_workspace` (which opens
+      SSH transports first). The deleted names survive in SDD prose only, and this is the whole
+      list: both names in this plan, in `findings.md`, and in the supersession note the work
+      required on the locked `2026-08-07-secret-sources` lock; `phase7` alone in `hla.md`; and
       `validate_interaction_policy` alone in that lock's `operator-surfaces-lld.md`, which the
       supersession note supersedes.
 - [x] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
@@ -148,27 +155,30 @@ shares no files with the website work; it waits on the sweep instead, per group 
       identified by its environment key, which is the machinery this round removed.
 
 - [ ] Prose/form-policing sweep across the estate (absorbed survey list plus G12, C10, D4, P6, and
-      the #470 manifesto pin). **This enumeration is the exclusion list and nothing else is
+      the `#470` manifesto pin). **This enumeration is the exclusion list and nothing else is
       excluded**: W1's workflow test, S1's corpus and wording-pin trims, W4/W6 in the contained
       website trims, the guide item's files `cli/tests/guide/test_contract_catalog.py` and
       `cli/tests/guide/test_assessment.py`, whose prose pins belong to that item so each file has
-      one owner, and `cli/tests/test_workflow_policy.py`, which W1 wrote and owns despite sitting
-      under `cli/tests/` (added 2026-08-16, since a path-keyed inventory would otherwise claim it).
-      Any other overlap the inventory turns up is an ordering question for the lead, not an
-      ownership one: a general rule keyed on what another item names or edits excluded the gcp
-      files, `test_schema_adapter.py`, and `test_view.py`, which `findings.md` names _for_ the
-      sweep. The sweep records each overlap it finds, keeps the file, and raises the ordering.
+      one owner (**neither is in the tree at 2026-09-06**, so those two exclusions now exclude
+      nothing; the entry stands as written because whether the guide item still needs them is that
+      item's question, not this sweep's), and `cli/tests/test_workflow_policy.py`, which W1 wrote
+      and owns despite sitting under `cli/tests/` (added 2026-08-16, since a path-keyed inventory
+      would otherwise claim it). Any other overlap the inventory turns up is an ordering question
+      for the lead, not an ownership one: a general rule keyed on what another item names or edits
+      excluded the gcp files, `test_schema_adapter.py`, and `test_view.py`, which `findings.md`
+      names _for_ the sweep. The sweep records each overlap it finds, keeps the file, and raises the
+      ordering.
 
       **Three website overlaps raised 2026-08-16 by the contained-trims work, recorded here rather
       than in a PR body so the sweep's executor finds them.** First, W5 is not on the exclusion list
       above, which names W4 and W6 only, yet `test_lander_404.py` is W5's file and carries sweep
       rows of its own; the W5 change rewrote about 90 lines of it by deleting duplicated fixtures,
-      so the sweep should re-read it rather than inventory it from the pre-#486 basis. Second,
+      so the sweep should re-read it rather than inventory it from the pre-`#486` basis. Second,
       `website/tests/test_site_documents.py` has two owners: the W4 palette rows and the W8 browser
-      row belong to the trims item, while the CSS declaration list and the four-word
-      `fake_terminal` blacklist in `test_shared_css_pins_tokens_reflow_focus_and_terminal_cues` are
-      sweep rows and were deliberately left untouched. That blacklist is the shape
-      `no-prose-policing-tests` calls worse than useless, so it is a delete row, not a convert row.
+      row belong to the trims item, and the rest of the file's rows are the sweep's. **Restated
+      2026-09-06**: the test and the blacklist this paragraph used to name are not in the tree, so
+      the split is recorded where it can be checked instead. `sweep-screen.py attribute` says which
+      row owns each site, so the boundary is verified on every run rather than described once here.
       Third, this plan expected the sweep's website rows in the same PR as the website work; they
       are not in it, so they remain wholly the sweep's.
 
@@ -176,26 +186,73 @@ shares no files with the website work; it waits on the sweep instead, per group 
       row per test or assertion group (a file mixing wholly-policing tests with embedded prose
       assertions gets multiple rows), each row marked delete, convert, or keep. Keep behavioral,
       structural, and security tests; delete the rest; convert to structural form only where a real
-      invariant would lose its only guard. Sentence-only observables are decided case by case,
+      invariant would lose its only guard. **That last clause is this plan's criterion for CONVERTING
+      an existing test, and is not `frd.md` R2.3**, which governs whether to ADD coverage a deletion
+      uncovered; the two ask different questions and the map's R2.3 item settles the second one.
+      Sentence-only observables are decided case by case,
       mostly by deletion (R2.4). May land as several PRs. Done when: delete rows are gone at HEAD,
       convert rows point at the landed structural replacement, and keep rows name the invariant that
       earns the assertion.
 
-      **Step one is done**: [sweep-inventory.md](sweep-inventory.md), 1,160 rows (642 delete, 191
-      convert, 327 keep), batched into six PRs by shape, with group 3 cut into four sub-batches by
-      subsystem because 377 rows is too big for one review round. That artifact is deleted when the
-      sweep closes; its header says so.
+      **Step one is done**: [sweep-inventory.md](sweep-inventory.md), which is the single source for
+      this item's counts and topology; nothing here restates them. Its Totals section carries the
+      executable set, the full ledger and the per-group split, and group 3 is cut into four
+      sub-batches by subsystem because one review round cannot hold it. That
+      artifact is deleted when the sweep closes; its header says so.
+
+      **Re-derived against HEAD on 2026-08-19**, after the post-`#573` audit and the operator's
+      re-scope. Three things the restart inherits, all recorded in the inventory rather than here:
+      the guide rework deleted group 2's whole estate, so that group has no live row and no PR to
+      cut; the 2026-08-19 re-scope subtraction has since been REVERSED, so those estates are back
+      in this sweep's scope and the section that recorded the move is gone from the inventory; and
+      the callee-side raise screen is now a mandatory step for every group's delete rows OVER A SITE
+      IT REACHES, which is the scope the inventory states and is narrower than all of them.
+
+      **Re-anchored on 2026-09-06**, so a row keys what it addresses by identity rather than by
+      line, and then **cut fresh at `c310d05b`** once `#747` merged, and rebased onto `b22cc49c`.
+      The map is a new document over
+      five groups, every count derived from the row markup and reported by `totals`, and every
+      anchor resolving at the basis. What the cut did is in the inventory's Basis and Totals
+      sections rather than here, and this is the whole of what it owed:
+
+      - **Four populations re-derived**: the mixed-basis files, the unsurveyed files, the files
+        whose anchors drifted between the previous basis and this one, and the rows whose estate is
+        gone. The inventory's Basis section carries what each came to.
+      - **The 2026-08-19 subtraction reversed**, its premise having failed: the rows returned to
+        their groups with their dispositions and the deletes among them were re-screened.
+        instance-model's seven files are back in this sweep's scope and the sequencing against its
+        open live-validation gate is an operator question, recorded in the inventory.
+      - **Group 1 regenerated** at the basis, and every stale claim anchor decided. Most of the
+        rows behind them left with the ledger, which is their answer; L-026 keeps its delete on the
+        anchors that remain.
+      - **`attribute`, `generate` and `totals` all exit 0**, which is the acceptance condition:
+        every `match=` site is owned by exactly one GROUP-1 row (sites addressed by rows in more
+        than one group are expected and reported, not refused), every batched site is one the
+        screens left alone, every
+        anchor resolves or is line-anchored, and the map carries no duplicate id, no citation of a
+        row that is neither present nor retired, and no test file the accounting leaves out.
 
       **Three corrections to this item's own enumeration, verified at HEAD 2026-08-16.** Two of the
       files it names for the sweep no longer exist: `test_schema_adapter.py` and
       `guide/test_view.py` were both deleted by PR `8043d438`, "remove command-owned fact views".
-      The same commit retired **the #470 manifesto pin** that the first line of this item lists as
+      The same commit retired **the `#470` manifesto pin** that the first line of this item lists as
       part of the estate, replacing the verbatim block-text comparison with a structural link
       assertion, so that part of the estate was already gone before the sweep started. The
       exclusion list itself is unaffected and still exhaustive; what changed is the inventory's
-      expected yield, and `findings.md` G12 carries the detail. The inventory found ten overlaps in
-      all, including the three website ones above, all recorded in its own overlaps section rather
-      than restated here.
+      expected yield, and `findings.md` G12 carries the detail. The overlaps the inventory found are
+      recorded in its own overlaps section rather than restated here.
+
+- [x] Retire `reanchor` and `carry`, with the `Tree(ref)` layer under them, in the PR that lands the
+      fresh cut. Both exist to move the 2026-08-19 map's evidence into that cut and neither has a
+      job after it: `reanchor` lifts line numbers, and the cut leaves none to lift; `carry` answers
+      whether an older map's row survives, and once the cut is the map, `resolve` answers survival
+      by identity on its own. Done when: the fresh cut is committed, neither command remains, and
+      reading a tree at a ref is gone with them. **Done, 2026-09-06**: both commands gone, `Tree`
+      reads the working tree only, and the eight that remain (`estate`, `attribute`, `injected`,
+      `screen`, `resolve`, `generate`, `restamp`, `totals`) all pass ruff, ruff format and mypy
+      --strict. `restamp` writes the map in place, the only one that does. **These gates are
+      manual**: CI lints `cli/` and this tooling lives under `docs/sdd/`, so nothing runs ruff, mypy
+      or the eight commands unless a person does. Whoever moves the map runs them.
 
 - [x] Delete guide dead surface and interior re-validation (G8's guide-module members and G2;
       `JsonScalar` lives in `machine_output.py` and belongs to the G6 item below); fix the vacuous
@@ -205,7 +262,7 @@ shares no files with the website work; it waits on the sweep instead, per group 
       tests the G8 surfaces this item deletes). Done when: suite green, `parse_topic_contribution`
       accepts only decoded data, the parity test fails on a synthetic new member, no reference to
       this item's deleted G8 members remains at HEAD, and the two owned files' prose pins carry the
-      same delete/convert/justified-keep outcomes the sweep requires. **Done** (PR #548): every G8
+      same delete/convert/justified-keep outcomes the sweep requires. **Done** (PR `#548`): every G8
       member gone with no remaining references, both halves of the G2 round trip gone
       (`parse_topic_contribution` and `_action_record_value`), and G11's vacuous monkeypatch
       replaced by a parity check that walks the real enums and fails on a synthetic member.
@@ -224,7 +281,7 @@ shares no files with the website work; it waits on the sweep instead, per group 
       accident.
 - [x] Delete inert descriptor generality (C1, C5): `RegistryPolicy`, `kind_strategy`, unreachable
       fallbacks, their pinning tests. **`contract_version` is not in this item and is not a deletion
-      target** (operator ruling 12): it is required, it is checked at registration, and PR #546
+      target** (operator ruling 12): it is required, it is checked at registration, and PR `#546`
       verified the check by mutation. Done when: suite green, four descriptors construct without the
       deleted fields, and `contract_version` still gates registration. **Done**: `RegistryPolicy`
       and both its consumer branches, `kind_strategy`, `manifest_section`'s optionality with the
@@ -232,10 +289,11 @@ shares no files with the website work; it waits on the sweep instead, per group 
       sites in the same family the inventory never named (`_declared_model`'s fallback, two
       conformance re-checks, and two of the four dead `config_schema.discriminator` branches), plus
       a reserved-field comment and two documentation claims that had outlived what they described.
-      `contract_version` still refuses a mismatched impl, re-verified by the mutation PR #546 used.
-      Collected tests 7361 to 7358 (`pytest --collect-only`; an earlier note in this item quoted the
-      selected count, so the reassessment should cite the collected one). Every site was controlled
-      individually before deletion, by removal or by an assertion proving the branch never entered.
+      `contract_version` still refuses a mismatched impl, re-verified by the mutation PR `#546`
+      used. Collected tests 7361 to 7358 (`pytest --collect-only`; an earlier note in this item
+      quoted the selected count, so the reassessment should cite the collected one). Every site was
+      controlled individually before deletion, by removal or by an assertion proving the branch
+      never entered.
 
       **C1 and C5 carry the corrections this item's classification produced**: on
       `discriminator`/`input_domain`, on `manifest_section`, and on the `config_for()` hook that is
@@ -261,7 +319,7 @@ shares no files with the website work; it waits on the sweep instead, per group 
       projections, identity comprehensions; `schema_version` becomes a named constant. This item
       owns `machine_output.py` wholesale, so G8's `JsonScalar` deletion lands here. Done when: suite
       green, JSON output byte-identical for a fixture corpus captured before the change, and no
-      reference to the deleted type remains at HEAD. **Done** (PR #548): the named constant, the
+      reference to the deleted type remains at HEAD. **Done** (PR `#548`): the named constant, the
       double projections, the identity comprehensions, and an unreachable trailing `raise` replaced
       by `assert_never`, byte-identical across the captured corpus. The item carries two corrections
       forward. **The stdout retry loop is struck from this item and from G6**, which named it as
@@ -273,13 +331,13 @@ shares no files with the website work; it waits on the sweep instead, per group 
       invariant never had. No later item deletes it. Second, `project_origin`'s variant guards and
       two nested defensive-copy assertions were deleted and restored: removing the guards made
       `project_origin` the lone undefended consumer of `Origin`'s variant contract, and the real
-      inconsistency (seven consumer files defending one contract three ways) is filed as #547 rather
-      than fixed in passing.
+      inconsistency (seven consumer files defending one contract three ways) is filed as `#547`
+      rather than fixed in passing.
 - [x] Delete clearly-interior secrets validation (per-call type checks on in-repo backend returns
       and the annotation-equality plus forbidden-override halves of conformance, S2; lookalike and
       re-scrub checks on our own parsers' outputs, S7), keeping the constructibility and call-shape
       checks at registration with their boundary named. Done when: suite green, every surviving
-      check's docstring names its boundary. **Done** (PR #546): suite green, and every surviving
+      check's docstring names its boundary. **Done** (PR `#546`): suite green, and every surviving
       check names its boundary. The per-call type checks around in-repo backend returns are gone,
       with conformance's annotation-equality and return-annotation comparisons and the `@final` MRO
       walk; what stays at registration is constructibility, contract version, and call shape, named
@@ -294,12 +352,13 @@ shares no files with the website work; it waits on the sweep instead, per group 
       operator-authored YAML tags, and `require_exact_json_value` is the only thing that rejects
       them. The re-scrub claim is false one layer down: `validate_name("envvar\n")` returns cleanly,
       because `NAME_RE` anchors with `$` under `re.match`, so the source scrubs were deleted and
-      restored with tests that fail when #542 retires the defect rather than passing silently. A
+      restored with tests that fail when `#542` retires the defect rather than passing silently. A
       pass finding disproved by running it is the evidence standard working against the pass itself.
 
       The classification also added two checks rather than removing them, because it found them
       missing: `preview_operation_resolution` and `predict_resolution` now check their own
-      interaction policy, which makes #523's rule total instead of true by the ordering of unrelated
+      interaction policy, which makes `#523`'s rule total instead of true by the ordering of
+      unrelated
       call sites. Two undeclared drops are recorded here so the reassessment does not have to
       rediscover them: the deleted containment tests included redaction guards, whose invariant now
       holds because a backend exception escapes `resolve_batch` and ends the command instead of
@@ -308,11 +367,11 @@ shares no files with the website work; it waits on the sweep instead, per group 
       which no producer can do today but is a fail-open direction change. The review round added the
       two R2.3 regression tests for the retained diagnostic-name screens on `ResolutionOutcome` and
       `ResolutionPreview`, which the integration tester showed nothing could detect the removal of.
-      Deferred root causes are #542, #544, and #545.
+      Deferred root causes are `#542`, `#544`, and `#545`.
 
 - [ ] Contained gcp test dedup (P5), after the sweep lands: a shared gcp test fixture module. Done
       when: suite green, the extended-operation fake and `_api_error` each defined once.
-- [x] Contained website test trims (W4, W5, W6), after PR #486 merges (ruling 8): shared fixture
+- [x] Contained website test trims (W4, W5, W6), after PR `#486` merges (ruling 8): shared fixture
       adoption in `test_lander_404.py`, exported status constant, threshold-not-exact contrast
       assertions. **W8 has left this item** and folds into W10's lander-scope decision for the
       reassessment (effort lead, 2026-08-16, accepting the evidence below): its premise did not
@@ -354,7 +413,7 @@ R3.2 requires the after number to be lower.
 - [x] Rules: delete the three principle-absorbed rules folding their concrete phrasings into the
       principles (PR4); merge the five collateral-sync rules into one (PR5); collapse the
       review-authority statement to its canonical home with pointers (PR3). Done when: net deletion,
-      always-on rule bytes reported and reduced. **PR #521**: seventeen rule files to ten, 33,863
+      always-on rule bytes reported and reduced. **PR `#521`**: seventeen rule files to ten, 33,863
       always-on bytes to 32,215 (-1,648). The two testing-trio restatements `findings.md` PR3 counts
       ride the skills item below, which owns those files.
 - [x] Skills: consolidate the testing trio's diverged and contradictory copies to one authoritative
@@ -368,7 +427,7 @@ R3.2 requires the after number to be lower.
 
       **The work is complete; the done-when is not, so the box stays open until the consistency
       review comes back.** Two of the item's three halves were already finished when this round
-      started. **The trio consolidation and both PR3 restatements landed in PR #538 on
+      started. **The trio consolidation and both PR3 restatements landed in PR `#538` on
       2026-08-15**: the model-tier vocabularies were unified onto `agentic-dev-process` section 4's
       names, both "a published review informs" restatements became pointers at 7a, PR10's
       three-times-stated placeholder policy became one statement with `inventory.local.md.example`
@@ -377,7 +436,7 @@ R3.2 requires the after number to be lower.
       lead's error rather than a gap in the delegated lane**, and it was caught by reading the
       target files at HEAD instead of trusting the brief's account of them, which is the same
       discipline wave 1 kept learning about deletion premises. The cost was one round of
-      re-deriving finished work. Nothing from #538 was redone.
+      re-deriving finished work. Nothing from `#538` was redone.
 
       What this round adds is the journey-and-register half (PR7, PR8, PR9) plus one contradiction
       the trio work did not reach. **Source `.rulesync/` 199,782 to 196,464 bytes (-3,318), and the
@@ -385,7 +444,7 @@ R3.2 requires the after number to be lower.
       surfaces.** Always-on
       rule bytes, which are the per-invocation figure R3.2 gates on, 33,449 to 32,421; against
       [baseline.md](baseline.md)'s 33,863 that is -1,442 for the wave, of which the rules item's
-      PR #521 carried -1,648 and later unrelated rule growth gave 1,234 back.
+      PR `#521` carried -1,648 and later unrelated rule growth gave 1,234 back.
 
       **The contradiction is between `integration-testing` and `saga-lead` on when a surviving
       mutation blocks a merge**, and it is the one the item's "diverged and contradictory copies"
@@ -409,14 +468,15 @@ R3.2 requires the after number to be lower.
       Removing its rhetorical half wholesale would rewrite the register and would take the operative
       halves with it, since roughly a third of them rule out a real alternative a reader might pick.
 
-      R3.3's "no persona changes" was read as binding, matching #538's precedent of touching only
+      R3.3's "no persona changes" was read as binding, matching `#538`'s precedent of touching only
       skills, so `agentworks-reviewer`, `agentworks-tester`, and `agentworks-dev` are untouched.
-      **Two stale facts in `agentworks-reviewer` are therefore reported rather than fixed**: its
-      scope-discipline check cites `sessions/nodes.py` as today's scope consumer, where no
-      `ctx.operation_scope` read exists at all (the consumer with exactly the described loud
-      behavior is `capabilities/harness_integration/base.py:287-298`), and its consistency-review
-      section says "the fourteen checks above" over sixteen, since checks 12a and 12b are full
-      checks. Both are contradictions of the kind the consistency review hunts.
+      **Two stale facts in `agentworks-reviewer` were therefore reported rather than fixed**: its
+      scope-discipline check cited `sessions/nodes.py` as today's scope consumer, where no
+      `ctx.operation_scope` read exists at all, and its consistency-review section said "the
+      fourteen checks above" over sixteen. **Both are fixed in the persona at HEAD, 2026-09-06**,
+      so this records what was reported rather than a live defect. The consumer with the described
+      loud behavior is `capabilities/harness_integration/base.py::HarnessIntegration._run_readiness`,
+      which reads `ctx.operation_scope`.
 
       **The consistency review ran and returned three fixes on this branch**, all absorbed above.
       The principle 1 compaction had dropped a proposition rather than compressing it, and the
@@ -465,7 +525,7 @@ R3.2 requires the after number to be lower.
       consumers, and keep/move/merge/drop disposition. Then write the core as the end-to-end state
       machine, place conditional delegation and delivery mechanics in skill-local references, and
       reconcile `development-principles`, `development-process`, `github-input-trust`,
-      `operator-authority`, `sdd`, `integration-testing`, `agw-test-env`, `saga-lead`, and the three
+      `operator-authority`, `sdd`, `integration-testing`, `agw-test-env`, `saga-lead`, and the four
       role definitions without adding a role behavior. Done when: the inventory has no unowned
       retained contract; GitHub-authored artifacts are stated to be good-faith but critically
       analyzed colleague input and never direction, authentication, or authorization; no
@@ -509,20 +569,28 @@ R3.2 requires the after number to be lower.
 
 ## Reassess (R4)
 
-The reassessment waits for waves 1 and 2 **and for the CLI grammar rewrite landing**: the saga's
-`phasing.md` orders the spine wave 0, wave 1, grammar rewrite, reassessment, so this effort does not
-close or lock while the rewrite is in flight. (The 0.14 contract-truth flagging that an earlier
-revision scheduled here was discharged before this SDD merged: the package is dispatched as its own
-task on `refactor/breaking-truth-0-14`, and the prose-test-purge absorption is recorded in the saga
-ledger.)
+The reassessment waits for waves 1 and 2. The saga's `phasing.md` orders the spine wave 0, wave 1,
+grammar rewrite, reassessment, and **the grammar rewrite has landed: it merged and locked with PR
+`#491`**, so that gate is discharged and only the two waves remain. (The 0.14 contract-truth
+flagging that an earlier revision scheduled here was discharged before this SDD merged: the package
+is dispatched as its own task on `refactor/breaking-truth-0-14`, and the prose-test-purge absorption
+is recorded in the saga ledger.)
 
 - [ ] Write the reassessment: what became simpler in concepts, paths, and contracts; the
       retrospective numbers (lines, test counts, suite wall time, always-on bytes); the surviving
       findings; and a per-subsystem proposal or an explicit drop for each. Done when: delivered to
-      the operator, after waves 1 and 2 are complete and the grammar rewrite has landed.
+      the operator, after waves 1 and 2 are complete.
+
+      **R3.2's measurable currently points the wrong way, and this item owns it.** R3.2 says
+      always-on rule bytes are reported before and after and must go DOWN. The reviewer of record
+      measured 33,920 bytes at HEAD against a 33,863 baseline, which is up rather than down. The
+      measurement basis is nowhere written down, and a byte count nobody can reproduce is not a
+      measurable, so the reassessment states the basis first and then reports against it. This
+      branch does not close R3.2.
 
       **Descriptor-generality residue**, surfaced by the C1/C5 item and left for this pass because
-      each needs a decision rather than a deletion. `impl_class` (`config.py:582`) is an identity
+      each needs a decision rather than a deletion. `impl_class`
+      (`capabilities/config.py::impl_class`) is an identity
       cast standing in for a type the registries do not declare; typing them `dict[str, type]` would
       delete it and its four call sites together, which is a signature change across the capability
       registries rather than a local subtraction. The `prepare`/`seat` split in
