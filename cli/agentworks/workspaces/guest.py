@@ -19,6 +19,9 @@ PROBE_DEADLINE = 10
 FIND_DEADLINE = 120
 """Seconds one recursive ``find`` or ``chown`` over a workspace tree may take."""
 
+TRAVERSAL_DEADLINE = 30
+"""Seconds the parent traversal walk may take."""
+
 REQUEST_FAILURES = (CommandFailed, ExecutionIncomplete, RequestRefused)
 """What a workspace step that tolerates a failed request catches: one that did not start, did not finish or failed.
 
@@ -42,10 +45,6 @@ def path_occupied(path: str) -> Script:
 def ensure_group(group: str) -> Script:
     """Creates the Linux group ``group`` unless it exists, as root."""
     return script('getent group "$1" >/dev/null 2>&1 || /usr/sbin/groupadd "$1"', group, elevated=True)
-
-
-TRAVERSAL_DEADLINE = 30
-"""Seconds the parent traversal walk may take."""
 
 
 def open_parent_traversal(path: str) -> Script:

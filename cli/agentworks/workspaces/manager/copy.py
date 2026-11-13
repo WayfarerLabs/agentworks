@@ -61,9 +61,9 @@ def copy_workspace(
     never extracted on the workstation, so modes and links survive any
     workstation; owners do not, since the destination extracts without them
     and then gives the tree to the admin and the workspace group. Nothing is
-    staged on the destination VM: it extracts from the request's input. The source read is logged to the source
-    VM's own operation log (``workspace-copy-source``), since the destination
-    is chosen only after it.
+    staged on the destination VM: it extracts from the request's input. The
+    source read is logged to the source VM's own operation log
+    (``workspace-copy-source``), since the destination is chosen only after it.
     """
     import contextlib
     import tempfile
