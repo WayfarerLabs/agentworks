@@ -446,7 +446,7 @@ def rekey_vm(
         # above), then holds the VM for the rekey's duration (WSL2 anchors the
         # distro against vmIdleTimeout through the script's pauses). A VM whose
         # intent is stopped admits no hold, since a hold could boot it, so a
-        # running one is rekeyed unheld: on WSL2 it can idle out between calls.
+        # running one is rekeyed without a hold: on WSL2 it can idle out between calls.
         # Boundary-then-gate means the gate callback SERVES the boundary's cached
         # values, never resolves or seeds: the union covers the gate secrets, and
         # ``Resolver.get`` refuses anything outside it.
