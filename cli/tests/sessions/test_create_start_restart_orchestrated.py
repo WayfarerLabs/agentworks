@@ -1229,15 +1229,17 @@ def test_regenerate_tmuxinator_writes_a_legacy_row_with_a_trailing_slash(
     db.close()
 
 
-@pytest.mark.parametrize("workspace_spec", [None, '{"tmuxinator":false}'])
 @pytest.mark.parametrize(
-    "failure",
+    ("workspace_spec", "failure"),
     [
-        PathRefused("vm1", "write", "/home/me/ws1/.tmuxinator.yml", PathRefusal.UNSUITABLE),
-        ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION))),
-        FileContentMismatch("vm1", "/home/me/ws1/.tmuxinator.yml"),
+        # The write: a file operation's failures, and a lost connection.
+        (None, PathRefused("vm1", "write", "/home/me/ws1/.tmuxinator.yml", PathRefusal.UNSUITABLE)),
+        (None, FileContentMismatch("vm1", "/home/me/ws1/.tmuxinator.yml")),
+        (None, ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION)))),
+        # The removal is a plain command, so only a request can fail it.
+        ('{"tmuxinator":false}', ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION)))),
     ],
-    ids=["link-refused", "connection-lost", "content-mismatch"],
+    ids=["write-link-refused", "write-content-mismatch", "write-connection-lost", "remove-connection-lost"],
 )
 def test_regenerate_tmuxinator_failure_warns_and_leaves_the_command_standing(
     tmp_path: Path,

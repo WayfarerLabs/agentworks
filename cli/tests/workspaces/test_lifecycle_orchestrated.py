@@ -366,10 +366,6 @@ class _RevParseFailingTarget(_FakeAdminTarget):
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
 
-def _wire_target(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRecorder:
-    return _route(monkeypatch, fake)
-
-
 def test_repair_skips_git_identity_when_not_a_repo(
     db: Database,
     make_config,  # noqa: ANN001
@@ -382,7 +378,7 @@ def test_repair_skips_git_identity_when_not_a_repo(
     fake = _RevParseFailingTarget(
         rev_parse_stderr="fatal: not a git repository (or any of the parent directories): .git"
     )
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config(manifests=[ManifestDoc("workspace-template", "default", {"git_user_name": "Ada Lovelace"})])
     _seed(db)
@@ -404,7 +400,7 @@ def test_repair_git_identity_warns_on_unexpected_probe_failure(
     broken checkout) warns rather than reporting a misleading OK, and still
     skips the config write."""
     fake = _RevParseFailingTarget(rev_parse_stderr="git: command not found")
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config(manifests=[ManifestDoc("workspace-template", "default", {"git_user_name": "Ada Lovelace"})])
     _seed(db)
@@ -559,7 +555,7 @@ def test_repair_healthy_workspace_reports_ok_for_every_step(
     'No issues found', and convergence still runs (the canonical commands
     execute even when they are no-ops)."""
     fake = _RepairProbeTarget()
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -587,7 +583,7 @@ def test_repair_fully_damaged_workspace_reports_fixed_per_step(
     the truthful 'Repaired 3 issue(s)' (ownership/permissions/SGID collapse
     to one category), and convergence still runs."""
     fake = _RepairProbeTarget(damaged=frozenset({"owner", "mode", "sgid", "acl", "traversal"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -612,7 +608,7 @@ def test_repair_partial_damage_reports_only_the_diverged_step(
     and parent traversal report OK, and the count is the truthful 'Repaired
     1 issue(s)' (no over-counting of the still-correct steps)."""
     fake = _RepairProbeTarget(damaged=frozenset({"acl"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -637,7 +633,7 @@ def test_repair_sgid_only_damage_reports_permissions_fixed(
     AND collapse the two silent (healthy) commands would force OK and this
     would fail."""
     fake = _RepairProbeTarget(damaged=frozenset({"sgid"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -660,7 +656,7 @@ def test_repair_mode_only_damage_reports_permissions_fixed(
     isolated case pinning the OR-collapse from a different member (again
     fails under an AND collapse, where owner's silence would force OK)."""
     fake = _RepairProbeTarget(damaged=frozenset({"mode"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -682,7 +678,7 @@ def test_repair_owner_only_damage_reports_permissions_fixed(
     collapse (fails under an AND collapse, where mode/sgid silence forces
     OK). Together the three isolated tests pin every sub-signal."""
     fake = _RepairProbeTarget(damaged=frozenset({"owner"}))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -705,7 +701,7 @@ def test_repair_acl_churn_does_not_report_false_fixed(
     spurious Fixed, keeping 'No issues found' truthful. A whole-output
     byte-compare would fail here."""
     fake = _RepairProbeTarget(acl_churn=True)
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -729,7 +725,7 @@ def test_repair_acls_indeterminate_when_getfacl_fails(
     only the verification is missing. Fails before the fix, where empty-vs-empty
     snapshots compared equal and printed a confirmed OK: ACLs."""
     fake = _RepairProbeTarget(getfacl_ok=False)
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -770,7 +766,7 @@ def test_repair_opens_traversal_above_a_spaced_path(
         template="default",
         linux_group="ws-ws1",
     )
-    recorder = _wire_target(monkeypatch, _RepairProbeTarget())
+    recorder = _route(monkeypatch, _RepairProbeTarget())
     config = make_config()
     _reachable(monkeypatch, True)
 
@@ -884,7 +880,7 @@ def test_first_repair_after_create_is_a_noop(
     from agentworks.workspaces.templates import ResolvedTemplate
 
     fake = _CreateThenRepairTarget()
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -959,7 +955,7 @@ def test_repair_hardens_other_bits_on_a_pre254_workspace(
     every other step reports OK. The setfacl commands carry ``o::---`` on both
     the default-on-dirs and recursive-access applications."""
     fake = _OtherStillGrantedTarget()
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
@@ -1126,7 +1122,7 @@ def test_delete_group_removal_failure_does_not_break_the_delete(
     non-zero exit never raises, the delete still finishes (row gone,
     success reported), and no 'remote cleanup failed' warning fires."""
     fake = _CheckAwareTarget(failing=("groupdel",))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed(db)
@@ -1178,7 +1174,7 @@ def test_create_rollback_removes_the_fresh_workspace_group(
     delete path. ``failing=(_OCCUPIED_PROBE,)`` makes the create-time
     existence probe report the directory absent so create proceeds."""
     fake = _FakeAdminTarget(failing=(_OCCUPIED_PROBE,))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed_vm_only(db)
@@ -1208,7 +1204,7 @@ def test_create_rollback_tolerates_a_groupdel_failure(
     raises. The original ``ExternalError`` propagates cleanly and no
     'rollback during workspace create' warning fires."""
     fake = _CheckAwareTarget(failing=(_OCCUPIED_PROBE, "groupdel"))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config()
     _seed_vm_only(db)
@@ -1245,7 +1241,7 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     ``failing=(_OCCUPIED_PROBE, 'git clone')`` makes the existence probe report
     the directory absent (so create proceeds) and the clone raise."""
     fake = _CheckAwareTarget(failing=(_OCCUPIED_PROBE, "git clone"))
-    _wire_target(monkeypatch, fake)
+    _route(monkeypatch, fake)
 
     config = make_config(
         manifests=[ManifestDoc("workspace-template", "default", {"repo": "https://example.com/repo.git"})]
@@ -1299,7 +1295,7 @@ def test_cancel_during_clone_cleans_directory_and_group_and_preserves_original_i
             return result
 
     target = Target(failing=(_OCCUPIED_PROBE,))
-    _wire_target(monkeypatch, target)
+    _route(monkeypatch, target)
     config = make_config(
         manifests=[ManifestDoc("workspace-template", "default", {"repo": "https://example.com/repo.git"})]
     )

@@ -257,3 +257,20 @@ def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) ->
     assert runner.sudo_calls[0] is True
     assert warnings == []
     assert len(runner.commands) == 1
+
+
+def test_the_generated_config_is_written_private_to_its_admin() -> None:
+    import json
+
+    from agentworks.execution.requests import PythonProgram
+    from agentworks.workspaces.tmuxinator import write_config
+    from tests.vm_access_support import Admin, RecordingVMAccess
+
+    access = RecordingVMAccess([], Admin())
+
+    write_config(access, "/srv/ws", "config\n")
+
+    [request] = access.requests()
+    assert isinstance(request, PythonProgram) and request.args[0] == "write"
+    params = json.loads(request.args[1])
+    assert (params["path"], params["mode"]) == ("/srv/ws/.tmuxinator.yml", 0o600)
