@@ -1,6 +1,6 @@
 # Plan
 
-Delivery vehicle: one feature branch, `feat/native-npm`, containing one coherent feature. The
+Delivery vehicle: one pull request from `feat/native-npm`, containing one coherent feature. The
 session lead owns these artifacts, architecture, and integration.
 
 - [x] Add validated npm fields to admin and agent declarations and resolved state; verify
@@ -13,12 +13,18 @@ session lead owns these artifacts, architecture, and integration.
       describe actual behavior and runtime provisioning.
 - [x] Verify npm against a local registry with old/new direct and transitive releases, explicit
       pins, reinitialization, and executable invocation.
-- [ ] Run appropriate repository checks and independent project, complexity, and generic correctness
+- [x] Run appropriate repository checks and independent project, complexity, and generic correctness
       reviews; resolve material findings.
-- [ ] Record the final validation evidence and any unavailable VM coverage before closeout. Do not
+- [x] Record the final validation evidence and any unavailable VM coverage before closeout. Do not
       claim unperformed checks or create a lockfile early.
 
-## Validation in progress
+## Validation
+
+Production head `6d6289f2672b29bda0b6b1aa28d5f5685eb69f26` passed the full non-integration suite:
+13,140 passed and 35 skipped. The clean rerun followed an initial run that found an outdated VM
+projection field expectation and a single cancellation watchdog timeout. The projection expectation
+was corrected, and the entire cancellation test group and clean full suite passed without a
+runtime-state code change.
 
 The real local registry suite passed with npm 11.16.0 (six passes, one exclusion case unavailable in
 that release) and npm 12.2.2 (seven passes). It verifies direct and transitive registry age
@@ -42,9 +48,13 @@ attach the managed profile to existing Bash startup files, and qualify age cover
 registry-resolved releases. The complexity pass removed the duplicate agent mise PATH writer by
 publishing package paths once before both installers. The second review caught missing newline
 separation when appending to existing shell files; the corrected append is covered by actual
-login-shell tests. An unused runner return value was also removed. Final correction review is
-pending.
+login-shell tests. An unused runner return value was also removed. Final project, complexity, and
+generic correctness reviews at the tested production head report no remaining material findings.
+Exact source-line matching also prevents a filename mentioned in a comment from suppressing managed
+profile setup.
 
-ruff, mypy, and the repository's file-quality lint pass. The complete non-integration suite and
-independent reviews remain in progress. No VM backend has been used for this effort, so the local
-registry evidence does not claim remote SSH or VM create/reinit coverage.
+ruff, mypy, formatting, file-quality lint, Typer isolation, locked-SDD checks, and Rulesync drift
+checks pass. Website verification passed 160 Python tests, 103 Node tests, and deterministic double
+builds for both site bases. Isolated-HOME CLI checks passed for resource explanation, samples,
+schemas, and `concept-npm` guide discovery. No VM backend has been used for this effort, so the
+local registry evidence does not claim remote SSH or VM create/reinit coverage.
