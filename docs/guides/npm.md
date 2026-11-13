@@ -80,6 +80,10 @@ custom user install commands in that order. Both package installers finish their
 custom commands start, and their managed executable paths are available to those commands on the
 first initialization.
 
+Agent dotfiles now run before custom user install commands, matching admin setup. Provision tools
+needed by a dotfiles installer through apt or system install commands, or make that installer
+self-contained; it cannot rely on a later custom user command to supply them on a fresh account.
+
 Mise is optional at VM scope. Set `mise_enabled: false` on the VM template to skip its repository,
 system package, per-user setup, activation, and managed shim PATH. This does not disable npm or
 remove an existing mise installation.

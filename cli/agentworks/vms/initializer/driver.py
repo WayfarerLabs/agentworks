@@ -769,7 +769,7 @@ def _phase_b_setup(
         # commands, including on the first initialization and after dotfiles.
         package_paths = system_path + mise_path
         if admin.npm_enabled and admin.npm_packages:
-            package_paths.append(f"{home}/.local/bin")
+            package_paths.append("~/.local/bin")
         _write_agentworks_profile(ts_target, package_paths, logger)
 
         if vm_template.mise_enabled:

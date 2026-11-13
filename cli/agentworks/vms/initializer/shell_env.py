@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 AGENTWORKS_PROFILE = ".agentworks-profile.sh"
 AGENTWORKS_RC = ".agentworks-rc.sh"
 
+# Startup files can source each other or retain an older managed source line.
+# Keep the guard unexported so child shells still load their own profile.
+PROFILE_SOURCE_GUARD = 'if [ "${_AGENTWORKS_PROFILE_PID:-}" = "$$" ]; then return; fi\n_AGENTWORKS_PROFILE_PID=$$'
+
 SKEL_BASHRC_PATH = "/etc/skel/.bashrc"
 SKEL_ZSHRC_PATH = "/etc/skel/.zshrc"
 
@@ -124,7 +128,8 @@ def _write_agentworks_profile(
     # Deduplicate paths while preserving order
     seen: set[str] = set()
     unique_paths: list[str] = []
-    for p in path_additions:
+    for path in path_additions:
+        p = path.replace("~", "$HOME", 1) if path.startswith("~") else path
         if p not in seen:
             seen.add(p)
             unique_paths.append(p)
@@ -133,7 +138,7 @@ def _write_agentworks_profile(
     output.info(f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})...")
 
     try:
-        lines = ["# Managed by agentworks -- do not edit"]
+        lines = ["# Managed by agentworks -- do not edit", PROFILE_SOURCE_GUARD]
         # Cross-agent isolation of the admin's files is enforced by the 0750
         # admin home + private primary group (see the "Admin home permissions"
         # step in driver._phase_b_setup): once agent users cannot search the
@@ -155,8 +160,7 @@ def _write_agentworks_profile(
             for key, value in identity_env.items():
                 lines.append(f"export {key}={shlex.quote(value)}")
         for p in unique_paths:
-            expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
-            lines.append(f'export PATH="{expanded}:$PATH"')
+            lines.append(f'export PATH="{p}:$PATH"')
         target.write_file(f"~/{AGENTWORKS_PROFILE}", "\n".join(lines) + "\n")
 
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)

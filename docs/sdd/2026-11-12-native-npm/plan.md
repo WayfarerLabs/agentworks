@@ -68,3 +68,27 @@ focused npm, profile, initialization, projection, and upstream tmux startup test
 formatting, and mypy passed as well. Full current-head CI and PR feedback are tracked on the pull
 request. The operator authorized up to three feedback and fix rounds under the standard delivery
 process.
+
+## PR feedback round 1 (2026-11-13)
+
+The operator's three-round allowance authorizes this batch. It began after the first handoff's
+one-hour feedback window, with PR #902 returned to draft before changing its head.
+
+- [x] Make the managed profile safe to source repeatedly, covering historical source spellings,
+      Bash startup chains, repeated final source repair, nested shells, and later profile rewrites.
+- [x] Use the same home-relative npm bin spelling as custom commands and normalize the admin
+      profile's home-relative paths before deduplication. Preserve existing lookup precedence.
+- [x] Resolve wrapper-provided npm to its CLI script and verify the isolated executable's version
+      before testing package behavior. Require npm's resolver error for the too-new exact pin.
+- [x] Replace the CodeQL false-positive URL assertion with repository setup behavior checks.
+- [x] Explain the agent dotfiles-before-custom-command compatibility change in the operator guide.
+- [ ] Complete the private project, complexity, and correctness reviews, then publish current-head
+      CI and the round handoff.
+
+Local verification passed 158 focused npm, declaration, initialization, and shell-profile cases,
+plus 13 mise and install-command cases. Native npm 11.16.0 passes six cases with one unavailable
+age-exclusion case, both through the host shim and with PATH selecting the runtime's npm shell
+wrapper directly. Native npm 12.2.2 passes all seven cases. The isolated fixture checks that its
+resolved CLI reports the selected version before any negative install case can run. ruff,
+formatting, full mypy, file-quality lint, and whitespace checks pass. Remote VM coverage remains
+unavailable; these results exercise the real local npm resolver and local shells.

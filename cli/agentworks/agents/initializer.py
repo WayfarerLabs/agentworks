@@ -371,7 +371,7 @@ def create_agent_on_vm(
     if mise_enabled and (agent_cfg.mise_packages or agent_cfg.mise_lockfile):
         package_paths.append(f"{home}/.local/share/mise/shims")
     if agent_cfg.npm_enabled and agent_cfg.npm_packages:
-        package_paths.append(f"{home}/.local/bin")
+        package_paths.append("~/.local/bin")
     _write_agent_profile(
         agent_target,
         home=home,
@@ -568,8 +568,9 @@ def _write_agent_profile(
 
     from agentworks.ssh import SSHError
     from agentworks.vms.initializer import AGENTWORKS_PROFILE
+    from agentworks.vms.initializer.shell_env import PROFILE_SOURCE_GUARD
 
-    lines = ["# Managed by agentworks -- do not edit"]
+    lines = ["# Managed by agentworks -- do not edit", PROFILE_SOURCE_GUARD]
     # Cross-agent isolation is enforced by the 0750 home + private primary
     # group (see create_agent_on_vm): once other agents cannot search the
     # home, files inside it are unreachable regardless of their own mode,

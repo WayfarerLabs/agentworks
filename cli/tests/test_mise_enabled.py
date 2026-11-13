@@ -15,6 +15,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.db import Database
 from agentworks.ssh import SSHResult
 from agentworks.transports import Transport
+from agentworks.vms.initializer.mise import MISE_SOURCE_FILE
 from agentworks.vms.initializer.packages import _install_system_packages
 from agentworks.vms.template import VMTemplate
 from agentworks.vms.templates import resolve_from_dict
@@ -47,7 +48,8 @@ def test_system_packages_only_install_mise_when_enabled(enabled: bool) -> None:
     commands = [call.args[0] for call in target.run.call_args_list]
     package_install = next(command for command in commands if "apt-get install" in command)
     assert ("mise" in shlex.split(package_install)) is enabled
-    assert any("https://mise.jdx.dev" in command for command in commands) is enabled
+    assert any(shlex.split(command)[0] == "curl" for command in commands) is enabled
+    assert any(MISE_SOURCE_FILE in command for command in commands) is enabled
     assert "python3" in shlex.split(package_install)
     assert all(call.kwargs["sudo"] for call in target.run.call_args_list)
 

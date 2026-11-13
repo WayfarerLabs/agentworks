@@ -75,7 +75,9 @@ def test_first_init_custom_commands_see_enabled_package_tools(
     target = MagicMock()
     target.run.side_effect = run
     target.write_file.side_effect = write_file
-    entry = UserInstallCommandEntry(name="custom", command="run-custom-probe")
+    entry = UserInstallCommandEntry(
+        name="custom", command="run-custom-probe", path=["~/.local/bin", "$HOME/.local/bin"]
+    )
     monkeypatch.setattr(
         "agentworks.resources.access.kind_dict",
         lambda registry, kind: {"custom": entry} if kind == "user-install-command" else {},
@@ -155,3 +157,11 @@ def test_first_init_custom_commands_see_enabled_package_tools(
     assert events == (["mise"] if mise_enabled else []) + (["npm"] if npm_enabled else []) + ["custom"]
     # The final profile preserves the same availability observed by the custom command.
     run("run-custom-probe")
+    result = subprocess.run(
+        ["/bin/sh", "-c", profile + '\nprintf "%s" "$PATH"'],
+        env={"HOME": home, "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.split(":").count(str(npm_bin)) == 1

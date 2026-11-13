@@ -144,7 +144,7 @@ def native_target(tmp_path: Path, registry: str):
         [node, "-p", "process.execPath"], capture_output=True, text=True, check=True
     ).stdout.strip()
     npm_script = Path(npm).resolve()
-    if npm_script.name in {"mise", "asdf"}:
+    if npm_script.suffix != ".js":
         global_root = subprocess.run(
             [npm, "root", "--global"], capture_output=True, text=True, check=True
         ).stdout.strip()
@@ -158,6 +158,14 @@ def native_target(tmp_path: Path, registry: str):
         f"export NPM_CONFIG_USERCONFIG={shlex.quote(str(npmrc))}\n"
     )
     child_env = {**os.environ, "HOME": str(tmp_path)}
+    selected_version = subprocess.run(
+        [str(provisioned / "npm"), "--version"],
+        env={**child_env, "PATH": f"{provisioned}:{child_env['PATH']}"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert selected_version == version
     target = MagicMock()
     target.npm_version = tuple(int(part) for part in version.split("."))
 
@@ -191,6 +199,7 @@ def test_native_npm_refuses_new_explicit_pin(native_target: MagicMock, tmp_path:
     logger = MagicMock()
     run_npm_install(native_target, ["agw-npm-tool@2.0.0"], "sh", str(tmp_path), 7, logger)
     logger.warning.assert_called()
+    assert "ETARGET" in logger.warning.call_args.args[0]
     assert not (tmp_path / ".local/bin/agw-npm-probe").exists()
 
 
