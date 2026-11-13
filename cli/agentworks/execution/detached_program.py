@@ -265,7 +265,10 @@ def _supervise(directory: str, spec: tuple[list[str], dict[str, str]], lock: int
     report it can no longer deliver is not a failure, and the operation's
     signal handlers are not its own. They go back to the default rather
     than to ignored: ``Popen`` would hand an ignored disposition on to the
-    payload, which would then ignore ``interrupt``'s ``SIGTERM``.
+    payload, which would then ignore ``interrupt``'s ``SIGTERM``. A signal to
+    the launching process's group in the instant between the fork and
+    ``setsid`` ends the child before anything starts, and the launch reads
+    ``lost``; that window is accepted rather than closed with signal masks.
     """
     import signal
 
