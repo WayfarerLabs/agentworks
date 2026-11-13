@@ -489,10 +489,10 @@ The classifier combines both filters with ssh's own exit status:
    starts only after `parked`). Past that it kills the connection and raises
    `ExecutionIncomplete(Unknown(DEADLINE))` with the terminal untouched; for an attach the message
    says no shell started, and names a startup file that reads stdin as the usual cause, since such a
-   file would otherwise hold the connection open forever. Then, inside
-   `with guarded_terminal() as guard:`, runs the terminal half. Its stage 0 gets the socket path as
-   `sys.argv[1]`, connects, reads the launcher frame and the envelope frame from the socket, and
-   runs agw-launch in `tty` mode. No guest text reaches a command line.
+   file would otherwise hold the connection open forever. Then, inside `with guarded_terminal():`,
+   runs the terminal half. Its stage 0 gets the socket path as `sys.argv[1]`, connects, reads the
+   launcher frame and the envelope frame from the socket, and runs agw-launch in `tty` mode. No
+   guest text reaches a command line.
 4. The parked launcher waits with `select` on the listener and on its own stdin, for at most 30
    seconds. On a connection it sends the launcher frame (`g`) and the envelope re-serialized with
    `mode: "tty"`, closes the connection, then writes `end` and `exit 0`. On stdin end of file (the
@@ -722,27 +722,27 @@ reorder.
 - **Incident inventory** gains a row (the audit of these entry points' fix history found one more
   behavior to re-prove):
 
-| Row | Behavior                                                                                                                  | Re-proved in |
-| --- | ------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`) | 2            |
+| Row | Behavior                                                                                                                                                                                                                           | Re-proved in |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach, with one payload that leaves the alternate screen without moving the cursor on the primary screen (`897248ead`, `80c813db4`, #889) | 2            |
 
 ## Incident rows slice 2 re-proves
 
-| Row | How                                                                                                                                                  |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| I1  | No `-n`; the client closes its own stdin pipe. Pump test for end of file; live Windows loop of 25 runs each of `true`, `sleep .001` and `echo -n ""` |
-| I2  | Binary pipes and raw or `.buffer` streams; the all-bytes vectors; the Windows-marked pump test; live from Windows                                    |
-| I3  | The V lane drives real guests from each workstation; the resolver refuses MSYS builds, so no Git for Windows tool is in the path                     |
-| I4  | No operation combines input with a terminal; value-free errors tested                                                                                |
-| I5  | Literal argv and the `--` before the destination; the dash-led vector                                                                                |
-| I6  | `attach` tests with a fake terminal check the notice comes after the guard; live                                                                     |
-| I7  | `ssh -G` shows the keepalive and connect options; one live cell drops the network under a `stream`                                                   |
-| I11 | The vector, with a pipe and a socket on stdin                                                                                                        |
-| I12 | `ssh -G` shows no multiplexing with the policy argv, and the live 8.5 and Windows cells repeat it                                                    |
-| I13 | `ssh -G` shows the explicit identity file; live with a key named other than the default on Windows                                                   |
-| I14 | `ssh -G` of the pipe-mode argv shows no pty even with `RequestTTY force` supplied                                                                    |
-| I19 | The agent probe (above)                                                                                                                              |
-| I21 | The terminal guard tests, and live attach killed mid-session                                                                                         |
+| Row | How                                                                                                                                                                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I1  | No `-n`; the client closes its own stdin pipe. Pump test for end of file; live Windows loop of 25 runs each of `true`, `sleep .001` and `echo -n ""`                                                                                                                                          |
+| I2  | Binary pipes and raw or `.buffer` streams; the all-bytes vectors; the Windows-marked pump test; live from Windows                                                                                                                                                                             |
+| I3  | The V lane drives real guests from each workstation; the resolver refuses MSYS builds, so no Git for Windows tool is in the path                                                                                                                                                              |
+| I4  | No operation combines input with a terminal; value-free errors tested                                                                                                                                                                                                                         |
+| I5  | Literal argv and the `--` before the destination; the dash-led vector                                                                                                                                                                                                                         |
+| I6  | `attach` tests with a fake terminal check the notice comes after the guard; live                                                                                                                                                                                                              |
+| I7  | `ssh -G` shows the keepalive and connect options; one live cell drops the network under a `stream`                                                                                                                                                                                            |
+| I11 | The vector, with a pipe and a socket on stdin                                                                                                                                                                                                                                                 |
+| I12 | `ssh -G` shows no multiplexing with the policy argv, and the live 8.5 and Windows cells repeat it                                                                                                                                                                                             |
+| I13 | `ssh -G` shows the explicit identity file; live with a key named other than the default on Windows                                                                                                                                                                                            |
+| I14 | `ssh -G` of the pipe-mode argv shows no pty even with `RequestTTY force` supplied                                                                                                                                                                                                             |
+| I19 | The agent probe (above)                                                                                                                                                                                                                                                                       |
+| I21 | The `guarded_terminal` tests, with the tmux pane tests for the cursor and a killed run; live attach killed mid-session; and on Windows Terminal, `vm shell` exiting 0 and non-zero with no cursor jump, a detach with `clear_on_detach = "never"`, and a non-ASCII prompt that renders intact |
 
 ## Live evidence
 
