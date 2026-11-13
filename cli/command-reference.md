@@ -310,8 +310,8 @@ reference or a retired harness activation list. `current` is the resolved shape 
 operation's configuration-snapshot slice and may include evidence that its corresponding work
 succeeded. Comparisons are `{key, state, differences?}`; differences are
 `{field, recorded, current}`. Unconsumed records carry only safe type, key, version, and timestamp
-metadata. An issue contains a closed `code` plus optional `slot` or `record_key`; malformed future
-record types use `record-malformed` rather than an applied-state issue code. These explicit
+metadata. An issue contains an enumerated `code` plus optional `slot` or `record_key`; malformed
+future record types use `record-malformed` rather than an applied-state issue code. These explicit
 inspection commands can show authored plaintext declaration values, but never resolved secret
 values; handle their human and JSON output as sensitive. Human describe renders instance specs,
 complete current specs, and lifecycle-evidence value objects as block YAML without the exhaustive
@@ -501,13 +501,16 @@ normal stderr message and nonzero exit status. Doctor is the exception: it conve
 failures into its complete report, emits that JSON document, then exits 1.
 
 JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
-A release may also add a value to an enumerated field, such as a reason or an issue code, or move a
-case from one such value to another, under the same schema version; it says so in a
-`BREAKING CHANGE:` footer and in its upgrade guide. Consumers must accept values they do not
-recognize. An enumeration this reference documents as frozen, such as the VM list's provisioning and
-initialization statuses, does not gain values. Changing the document's shape (removing a field,
-changing a type, changing collection order, or renaming a field or a value) requires a new schema
-version and an explicit compatibility period.
+Enumerated values come in two kinds. A frozen vocabulary is one this reference calls frozen or
+closes with an `unknown` sentinel: the VM list's provisioning and initialization statuses, the
+session mode, and the VM event names. It gains no values, and no case moves between its values.
+Every other enumerated value, including those this reference calls closed or lists as exactly a set,
+such as reasons, issue codes and doctor's check statuses, may gain values under the same schema
+version, and a release may move a case from one such value to another; a release that moves a case
+says so in a `BREAKING CHANGE:` footer and in its upgrade guide. Consumers must accept values they
+do not recognize. Changing the document's shape (removing a field, changing a type, changing
+collection order, or renaming a field or a value) requires a new schema version and an explicit
+compatibility period.
 
 ### Top-Level
 
