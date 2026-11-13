@@ -15,7 +15,7 @@ from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.bootstrap import build_registry
 from agentworks.debian import DebianRelease
 from agentworks.errors import ValidationError
-from agentworks.install_commands import UserInstallCommandEntry
+from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
 from agentworks.interpolation import context_values
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_b_setup
@@ -87,8 +87,14 @@ def test_skipped_install_does_not_render_its_unselected_command() -> None:
     assert [call.args[0] for call in target.run.call_args_list] == ["test -f /home/operator/installed"]
 
 
-def test_install_check_rejects_unavailable_setup_context_before_remote_work() -> None:
-    entry = UserInstallCommandEntry(name="tool", command="install-tool", test_dir="${agw:workspace_dir}")
+@pytest.mark.parametrize(
+    ("entry_type", "kind"),
+    [(SystemInstallCommandEntry, "system-install-command"), (UserInstallCommandEntry, "user-install-command")],
+)
+def test_install_check_rejects_unavailable_setup_context_before_remote_work(
+    entry_type: type[SystemInstallCommandEntry] | type[UserInstallCommandEntry], kind: str
+) -> None:
+    entry = entry_type(name="tool", command="install-tool", test_dir="${agw:workspace_dir}")
     target = MagicMock()
 
     with pytest.raises(ValidationError) as caught:
@@ -102,7 +108,7 @@ def test_install_check_rejects_unavailable_setup_context_before_remote_work() ->
             context=context_values(vm_name="box", user="operator"),
         )
 
-    assert caught.value.entity_name == "install-command/tool.test_dir"
+    assert caught.value.entity_name == f"{kind}/tool.test_dir"
     target.run.assert_not_called()
 
 
