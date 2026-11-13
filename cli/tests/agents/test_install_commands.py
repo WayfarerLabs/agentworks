@@ -113,7 +113,7 @@ def test_agent_profile_deduplicates_without_changing_path_precedence(
         Path(path).write_text(content)
 
     def run(command: str, **kwargs: object) -> MagicMock:
-        if "grep -q" in command:
+        if "grep " in command:
             subprocess.run(["/bin/sh", "-c", command], check=True, capture_output=True)
         return MagicMock(returncode=test_returncode)
 
@@ -139,7 +139,14 @@ def test_agent_profile_deduplicates_without_changing_path_precedence(
         assert result.stdout.splitlines() == [f"{tmp_path}/.local/bin:/opt/tools:/usr/bin:/bin", "dev"]
     rc_files = [".profile", ".bashrc"] + ([".zprofile"] if shell == "zsh" else [])
     for name in rc_files:
-        assert (tmp_path / name).read_text().splitlines() == [f". {profile}"]
+        loaded = subprocess.run(
+            [shell_path, "-c", f'. "{tmp_path / name}"; printf "%s" "$PATH"'],
+            env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert loaded.stdout == f"{tmp_path}/.local/bin:/opt/tools:/usr/bin:/bin"
     installs = [call.args[0] for call in target.run.call_args_list if "install-" in call.args[0]]
     assert len(installs) == (0 if test_returncode == 0 else 4)
 
@@ -196,7 +203,7 @@ def test_agent_failed_install_clears_its_path_on_reinit_and_continues(
     def run(command: str, **kwargs: object) -> MagicMock:
         if "install-broken" in command and fail_install:
             raise SSHError("installer exited 1")
-        if "grep -q" in command:
+        if "grep " in command:
             subprocess.run(["/bin/sh", "-c", command], check=True, capture_output=True)
         return MagicMock(returncode=0)
 

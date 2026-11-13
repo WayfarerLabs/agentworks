@@ -709,6 +709,7 @@ def reinit_agent(
                 try:
                     try:
                         from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+                        from agentworks.vms.templates import resolve_live_template as resolve_vm_template
 
                         create_agent_on_vm(
                             vm,
@@ -719,6 +720,7 @@ def reinit_agent(
                             agent_name=agent.name,
                             credential_requests=credential_ops,
                             logger=ssh_logger,
+                            mise_enabled=resolve_vm_template(db, registry, vm.name, vm.template).mise_enabled,
                             admin_git_force_safe_directory=resolve_admin_template(
                                 db,
                                 registry,

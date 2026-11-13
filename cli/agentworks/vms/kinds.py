@@ -123,8 +123,8 @@ class _AdminTemplateKind:
         title="Admin templates",
         overview="""
         An admin-template configures the operator's own user on a VM: its shell, the
-        dotfiles it clones, the per-user install commands it runs, the mise packages it
-        activates, and the git credentials it can use. It is applied during
+        dotfiles it clones, the per-user install commands it runs, the mise and npm
+        packages it installs, and the git credentials it can use. It is applied during
         `agw vm create` and re-applied by `agw vm reinit`, so every field should be safe
         to apply twice.
 

@@ -31,7 +31,6 @@ INIT_SYSTEM_PACKAGES = [
     "tmuxinator",
     "acl",
     "jq",
-    "mise",
     "zstd",
 ]
 

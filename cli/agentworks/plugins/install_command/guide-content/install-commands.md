@@ -9,8 +9,8 @@ owns the `user-install-command` kind, validation, idempotent execution, and admi
 initialization. Define an operator-owned YAML resource when the catalog does not own the command.
 
 Use `agw resource list --kind user-install-command --include-disabled --output json` to inspect its
-rows. Prefer apt, snap, or mise fields when they fit. Otherwise, select only a command whose check
-or operation is repeat-safe. If a selected template needs a shipped command, state that enabling the
-plugin edits only `[plugins].system` in the chosen config and preserves existing entries. If
-authorized, add `install-command`, then rerun the inventory. If declined, leave the config unchanged
-and use an operator-owned resource or omit the dependency.
+rows. Prefer apt, snap, mise, or npm fields when they fit. Otherwise, select only a command whose
+check or operation is repeat-safe. If a selected template needs a shipped command, state that
+enabling the plugin edits only `[plugins].system` in the chosen config and preserves existing
+entries. If authorized, add `install-command`, then rerun the inventory. If declined, leave the
+config unchanged and use an operator-owned resource or omit the dependency.

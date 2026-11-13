@@ -41,6 +41,7 @@ from .mise import (
     _run_mise_install,
     _write_mise_config,
 )
+from .npm import run_npm_install
 from .packages import (
     _configure_apt_sources,
     _install_apt_packages,
@@ -581,7 +582,7 @@ def _phase_b_setup(
         # consoles), never build-time install machinery.
 
         # Required system packages must succeed before dependent setup runs.
-        _install_system_packages(ts_target, logger)
+        _install_system_packages(ts_target, logger, mise_enabled=vm_template.mise_enabled)
 
         # Non-fatal: apt sources required by selected apt_packages
         _configure_apt_sources(
@@ -706,8 +707,8 @@ def _phase_b_setup(
         _setup_workspaces_directory(ts_target, config, logger)
 
         # Non-fatal: mise config (written before dotfiles so dotfiles can override)
-        mise_path: list[str] = _mise_shims_path(home)
-        if admin.mise_packages:
+        mise_path: list[str] = _mise_shims_path(home) if vm_template.mise_enabled else []
+        if vm_template.mise_enabled and admin.mise_packages:
             _write_mise_config(ts_target, admin.mise_packages, admin.mise_install_before, home, logger)
 
         # Non-fatal: git safe.directory wildcard (disables ownership checks for the
@@ -764,37 +765,55 @@ def _phase_b_setup(
                     logger.warning(msg)
                     output.warn(msg)
 
-        # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
-        if admin.mise_lockfile:
-            _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
+        # Publish package-manager paths before their installs and the custom
+        # commands, including on the first initialization and after dotfiles.
+        package_paths = system_path + mise_path
+        if admin.npm_enabled and admin.npm_packages:
+            package_paths.append("~/.local/bin")
+        _write_agentworks_profile(ts_target, package_paths, logger)
 
-        # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
-        prune = admin.mise_prune_on_reinit
-        if admin.mise_packages or admin.mise_lockfile:
-            _run_mise_install(
+        if vm_template.mise_enabled:
+            # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
+            if admin.mise_lockfile:
+                _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
+
+            # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
+            prune = admin.mise_prune_on_reinit
+            if admin.mise_packages or admin.mise_lockfile:
+                _run_mise_install(
+                    ts_target,
+                    admin_shell,
+                    home,
+                    admin.mise_allow_unlocked,
+                    logger,
+                    prune=prune,
+                )
+            else:
+                try:
+                    check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
+                    if check.ok:
+                        _run_mise_install(
+                            ts_target,
+                            admin_shell,
+                            home,
+                            admin.mise_allow_unlocked,
+                            logger,
+                            prune=prune,
+                        )
+                except SSHError:
+                    pass
+
+        if admin.npm_enabled:
+            run_npm_install(
                 ts_target,
+                admin.npm_packages,
                 admin_shell,
                 home,
-                admin.mise_allow_unlocked,
+                admin.npm_min_release_age_days,
                 logger,
-                prune=prune,
             )
-        else:
-            try:
-                check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
-                if check.ok:
-                    _run_mise_install(
-                        ts_target,
-                        admin_shell,
-                        home,
-                        admin.mise_allow_unlocked,
-                        logger,
-                        prune=prune,
-                    )
-            except SSHError:
-                pass
 
-        # Non-fatal: user install commands for admin user (may depend on mise tools)
+        # Non-fatal: custom user commands can use the installed mise/npm tools.
         user_path = _run_install_commands(
             ts_target,
             admin.user_install_commands,
@@ -806,11 +825,15 @@ def _phase_b_setup(
         )
 
         # Non-fatal: shell profile (PATH exports sourced at login)
-        all_paths = system_path + mise_path + user_path
+        all_paths = package_paths + user_path
         _write_agentworks_profile(ts_target, all_paths, logger)
 
         # Non-fatal: shell rc (interactive shell hooks like mise activate)
-        rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
+        rc_snippets = (
+            [MISE_ACTIVATE_LINES]
+            if vm_template.mise_enabled and admin.mise_activate
+            else ["# mise activation disabled"]
+        )
         _write_agentworks_rc(ts_target, rc_snippets, logger)
 
         # Defensive final step: re-ensure source lines in case any earlier

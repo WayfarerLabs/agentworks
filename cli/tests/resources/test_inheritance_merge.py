@@ -73,6 +73,7 @@ KINDS = {
         row=VMTemplate,
         resolve=resolve_vm,
         declared={
+            "mise_enabled": False,
             "cpus": 32,
             "memory": 64,
             "disk": 500,
@@ -103,6 +104,9 @@ KINDS = {
             "mise_allow_unlocked": True,
             "mise_install_before": "30d",
             "mise_prune_on_reinit": False,
+            "npm_enabled": False,
+            "npm_packages": ["typescript@latest"],
+            "npm_min_release_age_days": 14,
             "harness_integrations": {"shell": CapabilityConfig.model_validate({})},
             "env": _ENV,
             "artifacts": ArtifactsConfig(bundles=["team"]),

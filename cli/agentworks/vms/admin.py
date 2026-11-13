@@ -20,6 +20,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
+from agentworks.npm import NpmPackageSpec
 from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
 
 if TYPE_CHECKING:
@@ -147,6 +148,20 @@ class AdminConfig(DeclaredResource):
     mise_prune_on_reinit: bool = True
     """Whether re-running init removes mise tools no longer declared.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
+
+    npm_enabled: bool = True
+    """Whether to install declared npm packages and expose their executable directory.
+    False skips npm checks and installs without removing existing packages."""
+
+    npm_packages: list[NpmPackageSpec] = Field(default_factory=list)
+    """Registry CLI packages to install per user with native npm, such as
+    `typescript@latest` or `@scope/tool@1.2.3`. Node.js and npm must already be
+    installed; npm 11.10.0 or newer is required. Files, Git, URLs, and aliases
+    are not supported."""
+
+    npm_min_release_age_days: int = Field(default=7, ge=0)
+    """Minimum release age in days for npm packages and registry-resolved dependencies,
+    including explicitly pinned versions. Zero disables the age restriction."""
 
     git_force_safe_directory: bool = True
     """Whether to mark checkouts as git ``safe.directory`` for this user.

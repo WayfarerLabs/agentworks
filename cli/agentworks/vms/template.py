@@ -148,6 +148,10 @@ class VMTemplate(DeclaredResource):
     swap: int | None = Field(default=None, examples=[4])
     """Swap to configure, in GiB."""
 
+    mise_enabled: bool | None = None
+    """Whether VM init installs mise and configures it for admin and agent users.
+    Disabling it leaves existing mise installations and tool files in place."""
+
     apt: list[str] | None = Field(default=None, examples=[["zsh", "ripgrep"]])
     """Apt packages installed directly, without an ``apt-package`` row."""
 

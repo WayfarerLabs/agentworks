@@ -22,8 +22,28 @@ if TYPE_CHECKING:
 AGENTWORKS_PROFILE = ".agentworks-profile.sh"
 AGENTWORKS_RC = ".agentworks-rc.sh"
 
+# Startup files can source each other or retain an older managed source line.
+# Keep the guard unexported so child shells still load their own profile.
+PROFILE_SOURCE_GUARD = 'if [ "${_AGENTWORKS_PROFILE_PID:-}" = "$$" ]; then return; fi\n_AGENTWORKS_PROFILE_PID=$$'
+
 SKEL_BASHRC_PATH = "/etc/skel/.bashrc"
 SKEL_ZSHRC_PATH = "/etc/skel/.zshrc"
+
+
+def _source_existing_bash_login_files(target: Transport) -> None:
+    """Attach the managed profile to Bash's existing higher-priority startup files.
+
+    Do not create either file: creating one would prevent Bash from reading the
+    user's lower-priority login profile.
+    """
+    source_line = f'. "$HOME/{AGENTWORKS_PROFILE}"'
+    for filename in (".bash_profile", ".bash_login"):
+        path = f'"$HOME/{filename}"'
+        target.run(
+            f"if [ -f {path} ]; then grep -Fqx {shlex.quote(source_line)} {path} 2>/dev/null "
+            f"|| printf '\\n%s\\n' {shlex.quote(source_line)} >> {path}; fi",
+            check=False,
+        )
 
 
 def _ensure_agentworks_files_sourced(
@@ -48,9 +68,9 @@ def _ensure_agentworks_files_sourced(
     grep-or-append shape means this is a no-op when the source line is
     already present (the common case where nothing clobbered).
 
-    ``home`` is the literal home directory path (e.g.
-    ``/home/agentworks``). Admin and agent setup pass their respective
-    values; the helper does not assume ``$HOME`` shell expansion.
+    ``home`` selects the user's literal rc paths. Source statements use the
+    same canonical ``$HOME`` spelling as the profile writers so repeated setup
+    recognizes its existing statement.
 
     ``shell`` selects which zsh-specific files to ensure (``.zprofile``,
     ``.zshrc``). bash rc files are always checked because we always
@@ -58,13 +78,15 @@ def _ensure_agentworks_files_sourced(
     """
     logger.step("Ensure agentworks files sourced")
 
-    profile_source = f". {home}/{AGENTWORKS_PROFILE}"
+    profile_source = f'. "$HOME/{AGENTWORKS_PROFILE}"'
+    _source_existing_bash_login_files(target)
     profile_rcs = [f"{home}/.profile", f"{home}/.bashrc"]
     if shell == "zsh":
         profile_rcs.append(f"{home}/.zprofile")
     for rc in profile_rcs:
         target.run(
-            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{profile_source}' >> {rc}",
+            f"grep -Fqx {shlex.quote(profile_source)} {shlex.quote(rc)} 2>/dev/null "
+            f"|| printf '\\n%s\\n' {shlex.quote(profile_source)} >> {shlex.quote(rc)}",
             check=False,
         )
 
@@ -74,7 +96,7 @@ def _ensure_agentworks_files_sourced(
         rc_files.append(f"{home}/.zshrc")
     for rc in rc_files:
         target.run(
-            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{rc_source}' >> {rc}",
+            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '\\n%s\\n' '{rc_source}' >> {rc}",
             check=False,
         )
 
@@ -103,19 +125,20 @@ def _write_agentworks_profile(
     ``path_additions`` is empty) so that reinit can clear previously set
     paths or identity.
     """
-    # Deduplicate paths while preserving order
-    seen: set[str] = set()
-    unique_paths: list[str] = []
-    for p in path_additions:
-        if p not in seen:
-            seen.add(p)
-            unique_paths.append(p)
+    # Each export prepends, so retain the last equivalent path to preserve
+    # lookup precedence when declarations interleave paths such as A, B, A.
+    unique_paths = list(
+        dict.fromkeys(
+            path.replace("~", "$HOME", 1) if path.startswith("~") else path for path in reversed(path_additions)
+        )
+    )
+    unique_paths.reverse()
 
     logger.step("Shell profile")
     output.info(f"Writing agentworks profile ({output.count(len(unique_paths), 'PATH entry', 'PATH entries')})...")
 
     try:
-        lines = ["# Managed by agentworks -- do not edit"]
+        lines = ["# Managed by agentworks -- do not edit", PROFILE_SOURCE_GUARD]
         # Cross-agent isolation of the admin's files is enforced by the 0750
         # admin home + private primary group (see the "Admin home permissions"
         # step in driver._phase_b_setup): once agent users cannot search the
@@ -137,15 +160,16 @@ def _write_agentworks_profile(
             for key, value in identity_env.items():
                 lines.append(f"export {key}={shlex.quote(value)}")
         for p in unique_paths:
-            expanded = p.replace("~", "$HOME", 1) if p.startswith("~") else p
-            lines.append(f'export PATH="{expanded}:$PATH"')
+            lines.append(f'export PATH="{p}:$PATH"')
         target.write_file(f"~/{AGENTWORKS_PROFILE}", "\n".join(lines) + "\n")
 
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
-        source_line = f". $HOME/{AGENTWORKS_PROFILE}"
+        source_line = f'. "$HOME/{AGENTWORKS_PROFILE}"'
+        _source_existing_bash_login_files(target)
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             target.run(
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -Fqx {shlex.quote(source_line)} {rc} 2>/dev/null "
+                f"|| printf '\\n%s\\n' {shlex.quote(source_line)} >> {rc}",
             )
     except SSHError as e:
         msg = f"shell profile write failed: {e}"
@@ -606,7 +630,7 @@ def _write_agentworks_rc(
         source_line = f". $HOME/{AGENTWORKS_RC}"
         for rc in ("$HOME/.bashrc", "$HOME/.zshrc"):
             target.run(
-                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '\\n%s\\n' '{source_line}' >> {rc}",
             )
     except SSHError as e:
         msg = f"shell rc write failed: {e}"
