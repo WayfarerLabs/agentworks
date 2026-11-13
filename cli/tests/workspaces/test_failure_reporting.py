@@ -1,12 +1,11 @@
 """How workspace commands report a request that failed, and what they leave behind, over the recording access.
 
 The orchestration fixtures are the lifecycle tests' own: a real config and
-registry, and an admin double that models the guest by command line.
+registry, and a guest double that answers the admin's typed requests.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,43 +18,24 @@ from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces import manager as workspace_manager
 from agentworks.workspaces.backends.vm import default_workspace_path
-from tests.workspaces.test_lifecycle_orchestrated import (
-    _OCCUPIED_PROBE,
-    _FakeAdminTarget,
-    _reachable,
-    _RehomeTarget,
-    _route,
-    _seed,
-    _seed_vm_only,
+from tests.workspaces._lifecycle_support import (
+    FailingGuest,
+    Guest,
+    RehomeGuest,
+    argv,
+    reachable,
+    route,
+    seed,
+    seed_vm_only,
+    starts,
 )
-from tests.workspaces.test_lifecycle_orchestrated import _stub_ssh_identity as _stub_ssh_identity
-from tests.workspaces.test_lifecycle_orchestrated import make_config as make_config
+from tests.workspaces._lifecycle_support import make_config as make_config
+from tests.workspaces._lifecycle_support import stub_ssh_identity as stub_ssh_identity
 
 if TYPE_CHECKING:
     from agentworks.db import Database
     from tests.conftest import CapturedOutput
     from tests.vm_access_support import Call
-
-
-class _Guest(_FakeAdminTarget):
-    """The lifecycle double, with a copy destination that is free and chosen command lines that fail.
-
-    ``failures`` maps a command line's prefix to the stderr its non-zero exit carries.
-    """
-
-    def __init__(self, failures: dict[str, str] | None = None) -> None:
-        super().__init__()
-        self.failures = failures or {}
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        stderr = next((text for prefix, text in self.failures.items() if cmd.startswith(prefix)), None)
-        if stderr is not None:
-            self.commands.append(cmd)
-            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr=stderr)
-        if cmd.startswith(_OCCUPIED_PROBE):
-            self.commands.append(cmd)
-            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
-        return super().run(cmd, **kwargs)
 
 
 def _copy(db: Database, config: object) -> None:
@@ -70,8 +50,8 @@ def _copy(db: Database, config: object) -> None:
 
 
 def _ready(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    _seed(db)
-    _reachable(monkeypatch, True)
+    seed(db)
+    reachable(monkeypatch, True)
 
 
 # -- Failure detail and the operation log -------------------------------------------------------
@@ -84,8 +64,8 @@ def test_a_failed_repair_step_warns_with_the_guests_stderr_and_repair_keeps_a_lo
     captured_output: CapturedOutput,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _Guest({"which setfacl": "", "apt-get install": "E: fixture apt failure"})
-    recorder = _route(monkeypatch, guest)
+    guest = FailingGuest({("which", "setfacl"): "", ("apt-get", "install"): "E: fixture apt failure"})
+    recorder = route(monkeypatch, guest)
 
     workspace_manager.repair_workspace(db, make_config(), "ws1", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -99,8 +79,8 @@ def test_a_failed_rehome_names_its_log_and_where_the_workspace_now_is(
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _RehomeTarget(failing=("chmod 2770 /dst/ws1",))
-    _route(monkeypatch, guest)
+    guest = RehomeGuest(fails=(("chmod", "2770", "/dst/ws1"),))
+    route(monkeypatch, guest)
 
     with pytest.raises(CommandFailed) as caught:
         workspace_manager.rehome_workspace(
@@ -116,9 +96,9 @@ def test_a_failed_create_names_its_log(
     make_config,
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
-    _seed_vm_only(db)
-    _reachable(monkeypatch, True)
-    _route(monkeypatch, _Guest({_OCCUPIED_PROBE: "", "chmod 2770": "chmod: fixture failure"}))
+    seed_vm_only(db)
+    reachable(monkeypatch, True)
+    route(monkeypatch, FailingGuest({("chmod", "2770"): "chmod: fixture failure"}))
 
     with pytest.raises(CommandFailed) as caught:
         workspace_manager.create_workspace(
@@ -134,7 +114,7 @@ def test_a_failed_extraction_names_the_destinations_log_and_records_no_workspace
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    _route(monkeypatch, _Guest({"tar xzf": "tar: fixture truncated archive"}))
+    route(monkeypatch, FailingGuest({("tar", "xzf"): "tar: fixture truncated archive"}))
 
     with pytest.raises(CommandFailed) as caught:
         _copy(db, make_config())
@@ -151,8 +131,8 @@ def test_a_copy_that_fails_outside_a_request_names_the_log_of_the_side_that_fail
     side: str,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _Guest()
-    recorder = _route(monkeypatch, guest)
+    guest = FailingGuest()
+    recorder = route(monkeypatch, guest)
     failing = "czf" if side == "source" else "xzf"
 
     def answer(call: Call) -> Result | None:
@@ -178,8 +158,8 @@ def test_a_source_read_that_does_not_complete_names_its_log(
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _Guest()
-    recorder = _route(monkeypatch, guest)
+    guest = FailingGuest()
+    recorder = route(monkeypatch, guest)
     lost = ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION)))
 
     def answer(call: Call) -> Result | None:
@@ -206,13 +186,15 @@ def test_copy_refuses_an_occupied_destination_before_extracting(
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _FakeAdminTarget()  # every probe succeeds, so the destination is occupied
-    _route(monkeypatch, guest)
+    guest = Guest()  # every probe succeeds, so the destination is occupied
+    route(monkeypatch, guest)
 
     with pytest.raises(AlreadyExistsError):
         _copy(db, make_config())
 
-    assert not any(command.startswith(("tar xzf", "mkdir", "chown")) for command in guest.commands)
+    assert not any(
+        starts(*prefix)(request) for request in guest.requests for prefix in (("tar", "xzf"), ("mkdir",), ("chown",))
+    )
     assert db.get_workspace("ws2") is None
 
 
@@ -222,8 +204,8 @@ def test_copy_refused_at_its_tmuxinator_config_records_no_workspace(
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _Guest()
-    recorder = _route(monkeypatch, guest)
+    guest = FailingGuest()
+    recorder = route(monkeypatch, guest)
 
     def answer(call: Call) -> Result | None:
         request = call.request
@@ -245,15 +227,15 @@ def test_copy_restores_the_workspace_mode_after_extraction(
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = _Guest()
-    _route(monkeypatch, guest)
+    guest = FailingGuest()
+    route(monkeypatch, guest)
     config = make_config()
 
     _copy(db, config)
 
     path = default_workspace_path(config, "ws2")
-    extracted = next(i for i, command in enumerate(guest.commands) if command.startswith("tar xzf"))
-    assert f"chmod 2770 {path}" in guest.commands[extracted:]
+    extracted = guest.index(starts("tar", "xzf"))
+    assert ("chmod", "2770", path) in [argv(request) for request in guest.requests[extracted:]]
 
 
 # -- The tmuxinator link ---------------------------------------------------------------------------
@@ -273,14 +255,14 @@ def test_create_never_replaces_an_existing_link_and_copy_and_rehome_replace_thei
     monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
 ) -> None:
     config = make_config()
-    _seed_vm_only(db)
+    seed_vm_only(db)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
-    _reachable(monkeypatch, True)
-    created = _route(monkeypatch, _Guest({_OCCUPIED_PROBE: ""}))
+    reachable(monkeypatch, True)
+    created = route(monkeypatch, FailingGuest())
     workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
-    copied = _route(monkeypatch, _Guest())
+    copied = route(monkeypatch, FailingGuest())
     _copy(db, config)
-    rehomed = _route(monkeypatch, _RehomeTarget())
+    rehomed = route(monkeypatch, RehomeGuest())
     workspace_manager.rehome_workspace(
         db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
     )
@@ -293,7 +275,7 @@ def test_create_never_replaces_an_existing_link_and_copy_and_rehome_replace_thei
 # -- Repair's bounded output ----------------------------------------------------------------------
 
 
-def _over_the_limit(guest: _Guest, needle: str):  # noqa: ANN202
+def _over_the_limit(guest: Guest, needle: str):  # noqa: ANN202
     def answer(call: Call) -> Result | None:
         request = call.request
         if isinstance(request, Command) and needle in request.argv:
@@ -313,8 +295,8 @@ def test_repair_output_over_its_limit_is_never_read_as_ok_or_fixed(
 ) -> None:
     """Each repair step reports one OK or Fixed detail, or one warning; the limited step's is a warning."""
     _ready(db, monkeypatch)
-    guest = _Guest()
-    recorder = _route(monkeypatch, guest)
+    guest = FailingGuest()
+    recorder = route(monkeypatch, guest)
     workspace_manager.repair_workspace(db, make_config(), "ws1", interaction=TtyInteractionPolicy.REFUSE)
     details, warnings = len(captured_output.detail), len(captured_output.warnings)
 
