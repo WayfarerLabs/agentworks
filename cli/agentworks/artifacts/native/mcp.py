@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Literal, cast
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactInput, ArtifactInputs, ArtifactType
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.layout import NativeUserLayout, resolve_user_layout
 from agentworks.capabilities.harness_integration.settings import (
     SettingsFormat,
@@ -88,6 +87,27 @@ def render_mcp(item: ArtifactInput, tool: MCPTool) -> SettingsObject:
     return result
 
 
+def mcp_input_conflicts(inputs: ArtifactInputs, tool: MCPTool) -> dict[str, str]:
+    """Defer every original input when one declared name has different native definitions."""
+    items = tuple(item for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER)
+    definitions: dict[str, SettingsObject] = {}
+    conflicting_names: set[str] = set()
+    for item in items:
+        name = item.content.name
+        entry = render_mcp(item, tool)
+        if name in definitions and definitions[name] != entry:
+            conflicting_names.add(name)
+        else:
+            definitions[name] = entry
+    return {
+        item.identity: (
+            f"MCP server '{item.content.name}' has different requested native definitions; delivery is deferred."
+        )
+        for item in items
+        if item.content.name in conflicting_names
+    }
+
+
 def _user_mcp_path(layout: NativeUserLayout, home: str) -> str:
     if not layout.mcp_path.startswith(native_path(home).rstrip("/") + "/"):
         raise ConfigError("User MCP config placement outside HOME is unsupported")
@@ -161,7 +181,7 @@ def session_mcp_conflicts(
                         raise ConfigError("native MCP project config must use an object")
                     tables.append(_table(local, key))
                 for item in items:
-                    name = mcp_native_name(item)
+                    name = item.content.name
                     expected = render_mcp(item, tool)
                     if any(name in table and table[name] != expected for table in tables):
                         conflicts[item.identity] = (
@@ -225,28 +245,41 @@ def apply_mcp(
     destination = native_path(destination)
     previous = claims if claims is not None else invocation.prior.claims if invocation.prior else ()
     old = tuple(claim for claim in previous if claim.role == MCP_CLAIM_ROLE)
-    desired = {
-        mcp_native_name(item): item
-        for item in invocation.artifacts.items()
-        if item.content.type == ArtifactType.MCP_SERVER
-    }
+    grouped: dict[str, list[ArtifactInput]] = {}
+    for item in invocation.artifacts.items():
+        if item.content.type is ArtifactType.MCP_SERVER:
+            grouped.setdefault(item.content.name, []).append(item)
+    conflicts = mcp_input_conflicts(invocation.artifacts, tool)
+    ambiguous = {name: items for name, items in grouped.items() if items[0].identity in conflicts}
+    desired = {name: items for name, items in grouped.items() if name not in ambiguous}
     elsewhere = tuple(claim for claim in old if claim.destination != destination)
     old = tuple(claim for claim in old if claim.destination == destination)
     blocked = {
-        name: item
-        for name, item in desired.items()
-        if any(claim.identifier == name or claim.source == item.origin_identity for claim in elsewhere)
+        name: items
+        for name, items in desired.items()
+        if any(
+            claim.identifier == name or claim.source == item.origin_identity for claim in elsewhere for item in items
+        )
     }
     retained_location_reason = (
         "Recorded MCP ownership belongs to another config location; its entries are retained for explicit cleanup."
     )
     if elsewhere:
         invocation.report_incomplete(retained_location_reason)
-    blocked_deferrals = tuple(
-        ArtifactDeferral(input_id=item.identity, destination="session", reason=retained_location_reason)
-        for item in blocked.values()
+    blocked_deferrals = (
+        *tuple(
+            ArtifactDeferral(input_id=input_id, destination="session", reason=reason)
+            for input_id, reason in conflicts.items()
+        ),
+        *tuple(
+            ArtifactDeferral(input_id=item.identity, destination="session", reason=retained_location_reason)
+            for items in blocked.values()
+            for item in items
+        ),
     )
-    desired = {name: item for name, item in desired.items() if name not in blocked}
+    protected_names = ambiguous.keys() | blocked.keys()
+    protected_origins = {item.origin_identity for name in protected_names for item in grouped[name]}
+    desired = {name: items for name, items in desired.items() if name not in blocked}
     if not desired and not old and map_document is None:
         return ArtifactApplication(deferred=blocked_deferrals)
     format: SettingsFormat = "json" if tool == "claude" else "toml"
@@ -262,7 +295,8 @@ def apply_mcp(
                 *blocked_deferrals,
                 *tuple(
                     ArtifactDeferral(input_id=item.identity, destination="session", reason=reason)
-                    for item in desired.values()
+                    for items in desired.values()
+                    for item in items
                 ),
             ),
             shared_paths=_shared_paths(invocation, old, destination=destination),
@@ -311,7 +345,12 @@ def apply_mcp(
         absent: set[str] = set()
         modified: list[NativeClaim] = []
         for claim in old:
-            if claim.identifier in desired or claim.source in invocation.retain_artifact_origins:
+            if (
+                claim.identifier in desired
+                or claim.identifier in protected_names
+                or claim.source in protected_origins
+                or claim.source in invocation.retain_artifact_origins
+            ):
                 retained.append(claim)
             elif claim.identifier not in current:
                 retired.append(claim.identifier)
@@ -342,7 +381,8 @@ def apply_mcp(
                 )
         deferred: list[ArtifactDeferral] = list(blocked_deferrals)
         confirmed = {claim.identifier: claim for claim in retained}
-        for name, item in desired.items():
+        for name, items in desired.items():
+            item = items[0]
             entry = render_mcp(item, tool)
             owned_claim = confirmed.get(name)
             observed = table.get(name)
@@ -353,7 +393,9 @@ def apply_mcp(
                     f"MCP server '{name}' conflicts with a mapped or externally managed native entry; "
                     "that entry was retained."
                 )
-                deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=reason))
+                deferred.extend(
+                    ArtifactDeferral(input_id=item.identity, destination="session", reason=reason) for item in items
+                )
                 continue
             if key not in document:
                 document[key] = table
