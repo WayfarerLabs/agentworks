@@ -18,6 +18,7 @@ from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
@@ -226,15 +227,19 @@ def _init_log_hint(vm_name: str) -> str:
 
 
 @contextlib.contextmanager
-def _operation_log(vm_name: str, command_stem: str, *, redactions: tuple[str, ...]) -> Iterator[OperationLog]:
+def operation_log(
+    vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = (), path: Path | None = None
+) -> Iterator[OperationLog]:
     """An operation log for ``command_stem``, closed on exit, with ``redactions`` registered before its first write.
 
-    Typed by the small ``OperationLog`` protocol, never as ``SSHLogger``, so a
-    manager module that imports nothing legacy can use it.
+    The log is written under the log directory, or to ``path`` when given
+    (backup keeps its log beside the archive). Typed by the small
+    ``OperationLog`` protocol, never as ``SSHLogger``, so a manager module
+    that imports nothing legacy can use it.
     """
     from agentworks.ssh import SSHLogger
 
-    log = SSHLogger(vm_name, command_stem, redactions=redactions)
+    log = SSHLogger(vm_name, command_stem, redactions=redactions, path=path)
     try:
         yield log
     finally:

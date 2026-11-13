@@ -294,3 +294,17 @@ def test_a_failed_request_is_recorded_before_its_error_is_raised(
         access.run(Command(("true",)), check=True)
 
     assert [line for line in logger.path.read_text().splitlines() if "request (" in line] != []
+
+
+def test_an_operation_log_given_a_path_writes_all_of_it_there(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Backup keeps its log beside the archive: the header, every record and the footer, none under the log dir."""
+    from agentworks.vms.manager import operation_log
+
+    log_dir, destination = tmp_path / "logs", tmp_path / "backup" / "backup.log"
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", log_dir)
+
+    with operation_log("vm1", "vm-backup", path=destination) as log:
+        log.step("Archive")
+
+    assert destination.stat().st_size > 0
+    assert not log_dir.exists() or list(log_dir.iterdir()) == []

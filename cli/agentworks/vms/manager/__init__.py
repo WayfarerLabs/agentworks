@@ -41,6 +41,7 @@ from ._helpers import (
     _vm_scope,
     _vm_secret_target,
     _VmAdminEnvScopes,
+    operation_log,
     validate_slug,
 )
 from .boundary import (
@@ -98,6 +99,7 @@ __all__ = [
     "gated_vm_boundary",
     "gated_vm_platform_channel_boundary",
     "list_vms",
+    "operation_log",
     "port_forward_vm",
     "recover_vm",
     "reinit_vm",

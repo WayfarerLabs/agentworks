@@ -278,7 +278,7 @@ def test_a_read_alone_that_runs_out_points_at_the_log_that_recorded_every_read(
     def _recording_log(*_args: object, **_kwargs: object):  # noqa: ANN202
         yield _Log()
 
-    monkeypatch.setattr(recover, "_operation_log", _recording_log)
+    monkeypatch.setattr(recover, "operation_log", _recording_log)
     _seed(db)
     guest = _guest(monkeypatch, address=Answer(status=1))
     _waits(monkeypatch)

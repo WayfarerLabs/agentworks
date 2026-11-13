@@ -136,6 +136,7 @@ class SSHLogger:
         command_stem: str,
         *,
         redactions: tuple[str, ...] = (),
+        path: Path | None = None,
     ) -> None:
         from datetime import UTC, datetime
 
@@ -143,7 +144,7 @@ class SSHLogger:
 
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         self.vm_name = vm_name
-        self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
+        self.path = path or LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._active_handler: _PropagatingFileHandler | None = None
         self._secrets = tuple(dict.fromkeys(secret for secret in redactions if secret))
