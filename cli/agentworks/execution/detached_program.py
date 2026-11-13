@@ -300,7 +300,14 @@ def _supervise(directory: str, spec: tuple[list[str], dict[str, str]], lock: int
             os.write(report, f"exec {errno.errorcode.get(error.errno or 0, 'EIO')}".encode("ascii"))
         return
     os.close(output)
-    os.write(lock, f"{payload.pid}\n".encode("ascii"))
+    try:
+        os.write(lock, f"{payload.pid}\n".encode("ascii"))
+    except OSError:
+        # Without its pid nothing could interrupt the payload, so it does not run on.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(payload.pid, signal.SIGKILL)
+        payload.wait()
+        raise
     with contextlib.suppress(OSError):  # the launching process may be gone; the payload runs on
         os.write(report, b"started")
         os.close(report)

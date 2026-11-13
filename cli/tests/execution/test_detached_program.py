@@ -274,6 +274,39 @@ def test_a_launching_process_that_dies_after_the_fork_leaves_the_payload_to_fini
     assert (observed.state, observed.status) == (detached_program.EXITED, 7)
 
 
+def processes_with(marker: str) -> list[int]:
+    """The live processes whose environment holds ``marker``."""
+    found = []
+    for entry in Path("/proc").iterdir():
+        if entry.name.isdigit():
+            with contextlib.suppress(OSError):
+                if marker.encode() in (entry / "environ").read_bytes():
+                    found.append(int(entry.name))
+    return found
+
+
+def test_a_payload_whose_pid_cannot_be_recorded_does_not_run_on(guest: Guest) -> None:
+    marker = "AGW_UNRECORDED_" + secrets.token_hex(8)
+    # The supervisor's write of the pid fails, as a full disk would make it.
+    patch = (
+        "import errno, os\n"
+        "_write = os.write\n"
+        "def write(descriptor, data):\n"
+        "    if data.rstrip(b'\\n').isdigit():\n"
+        "        raise OSError(errno.ENOSPC, 'No space left on device')\n"
+        "    return _write(descriptor, data)\n"
+        "os.write = write\n"
+    )
+
+    _, launched = guest.launch(("sleep", "600"), env={marker: "1"}, patch=patch)
+
+    assert launched.returncode != 0
+    deadline = time.monotonic() + 5
+    while processes_with(marker):
+        assert time.monotonic() < deadline, "the payload ran on without a recorded pid"
+        time.sleep(0.05)
+
+
 # -- States ------------------------------------------------------------------------------
 
 
