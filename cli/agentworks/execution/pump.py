@@ -142,10 +142,13 @@ class _InputFeeder:
     exit. The queue is bounded so a slow consumer does not buffer the stream.
     """
 
-    def __init__(self, stream: BinaryIO) -> None:
+    def __init__(self, stream: BinaryIO, *, complete_input: bool = False) -> None:
         self._stream = stream
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=_STDIN_QUEUE_CHUNKS)
+        self._complete_input = complete_input
         self.exhausted = False
+        self.error: OSError | None = None
+        """The read error that ended input the payload must get whole; set only with ``complete_input``."""
 
     def start(self) -> None:
         threading.Thread(target=self._run, daemon=True, name="agw-stdin").start()
@@ -160,7 +163,13 @@ class _InputFeeder:
                 self._queue.put(chunk)
                 if not chunk:
                     return
-        except (OSError, ValueError):
+        except OSError as error:
+            if self._complete_input:
+                # No end of input is queued, so the guest never sees the input end cleanly.
+                self.error = error
+                return
+            self._queue.put(b"")
+        except ValueError:  # the stream was closed under the thread
             self._queue.put(b"")
 
     def poll(self) -> bytes | None:
@@ -182,6 +191,11 @@ class PipeSession:
     payload bytes to the sinks. :meth:`pump` can be called more than once, which
     is how a terminal handover keeps its parking connection while the terminal
     half runs.
+
+    A read error from the caller's input ends it as end of input, which suits
+    the operator's stdin; with ``stdin_is_whole_input`` (a file that must reach
+    the payload whole) it instead kills the client before the input's end is
+    sent and :meth:`pump` raises the error.
 
     The client's stdin closes once the request and the caller's input are sent,
     unless ``hold_stdin_open`` keeps it open for :meth:`close_stdin` (a parked
@@ -219,6 +233,7 @@ class PipeSession:
         request: bytes,
         nonce: str | None,
         stdin: BinaryIO | None = None,
+        stdin_is_whole_input: bool = False,
         hold_stdin_open: bool = False,
         on_stdout: Sink,
         on_stderr: Sink,
@@ -226,7 +241,7 @@ class PipeSession:
     ) -> None:
         self._argv = list(argv)
         self._outbox = bytearray(request)
-        self._feeder = None if stdin is None else _InputFeeder(stdin)
+        self._feeder = None if stdin is None else _InputFeeder(stdin, complete_input=stdin_is_whole_input)
         self._sinks = {"out": on_stdout, "err": on_stderr}
         self._pending: dict[str, bytes | None] = {"out": None, "err": None}
         self._deadline = deadline or Deadline(None)
@@ -277,6 +292,12 @@ class PipeSession:
             except OutputLimitExceeded:
                 return self._stopped(StopReason.OUTPUT_LIMIT)
             progressed |= self._write()
+            if self._feeder is not None and self._feeder.error is not None:
+                # Input that must arrive whole could not be read: end the client before the guest's
+                # input ends, and raise the read error instead of an outcome.
+                self._killed = True
+                self._cleanup()
+                raise self._feeder.error
             waiting = any(held is not None for held in self._pending.values())
             if self.stdout.done and self.stderr.done and not waiting:
                 return StopReason.DONE

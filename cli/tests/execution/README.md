@@ -35,8 +35,8 @@ returns canned outcomes without ssh.
 - `test_detached.py`: the detached client over the recording fake: each request, the follow-up after
   a connection outcome, and the boundary checks.
 - `test_from_file.py`: the `FromFile` input: a file that cannot be opened and a path that is not a
-  `Path` refused before dispatch, `stream` refusing it, and every byte reaching the payload on the L
-  lane.
+  `Path` refused before dispatch, `stream` refusing it, every byte reaching the payload on the L
+  lane, and a file that fails part way failing the request.
 - `test_to_file.py`: the `ToFile` sink: an existing path refused before dispatch, bytes unchanged,
   and the file kept only for `Completed(0)`. Marked `windows`, where binary mode is what keeps CR
   LF.

@@ -284,6 +284,10 @@ class VMAccess:
         on_stdout: pump.Sink,
         on_stderr: pump.Sink,
     ) -> Result:
+        """Run ``request``; ``stdin`` is the operator's stream under ``stream`` and a ``FromFile``'s file under ``run``.
+
+        A ``FromFile``'s file must reach the payload whole, so a read error raises rather than ending its input.
+        """
         # R3: only the admin elevates, whatever the guest's sudoers says.
         if request.elevated and not isinstance(self.identity, Admin):
             raise PermissionDenied(self.vm_name, self._user)
@@ -307,6 +311,7 @@ class VMAccess:
                 request=wire,
                 nonce=nonce,
                 stdin=stdin,
+                stdin_is_whole_input=isinstance(request.stdin, FromFile),
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
                 deadline=pump.Deadline.after(request.deadline),

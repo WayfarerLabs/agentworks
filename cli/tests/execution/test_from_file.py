@@ -82,3 +82,34 @@ def test_every_byte_of_the_file_reaches_the_payload_unchanged(monkeypatch: pytes
 
     assert result.completion == Completed(0)
     assert result.stdout == content
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the L lane runs agw-launch, a Linux guest program, here")
+def test_a_file_that_fails_partway_fails_the_request(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import contextlib
+    import io
+
+    class FailingFile(io.RawIOBase):
+        def __init__(self) -> None:
+            self.sent = False
+
+        def readable(self) -> bool:
+            return True
+
+        def read(self, size: int = -1) -> bytes:
+            if self.sent:
+                raise OSError(5, "Input/output error")
+            self.sent = True
+            return b"partial"
+
+    @contextlib.contextmanager
+    def failing_input(stdin: object):  # noqa: ANN202
+        yield FailingFile()
+
+    lane = local_vm_access(monkeypatch, home=tmp_path, shell=account_shell(tmp_path))
+    monkeypatch.setattr("agentworks.execution.access._input_file", failing_input)
+    source = tmp_path / "archive"
+    source.write_bytes(b"unused")
+
+    with pytest.raises(OSError, match="Input/output error"):
+        lane.run(Command(("cat",), stdin=FromFile(source), deadline=60))
