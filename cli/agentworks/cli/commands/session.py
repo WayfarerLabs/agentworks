@@ -292,6 +292,7 @@ def _launch_sessions(
     resume_only: bool,
     replace_running: bool,
     yes: bool = False,
+    spec: str | None = None,
 ) -> None:
     """Validate and execute one canonical session launch operation."""
     from agentworks.config import load_config
@@ -301,6 +302,9 @@ def _launch_sessions(
         start_all_sessions,
         start_session,
     )
+
+    if all_sessions and spec is not None:
+        raise typer.BadParameter("--spec requires one named session and cannot be used with --all")
 
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
@@ -359,6 +363,7 @@ def _launch_sessions(
                 get_db(),
                 load_config(),
                 name=name,
+                spec=spec,
                 force=force,
                 force_new=force_new,
                 resume_only=resume_only,
@@ -370,6 +375,7 @@ def _launch_sessions(
                 get_db(),
                 load_config(),
                 name=name,
+                spec=spec,
                 force=force,
                 force_new=force_new,
                 resume_only=resume_only,
@@ -414,6 +420,12 @@ def session_reconcile(
 @session_app.command("start")
 def session_start(
     name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option(
+            "--spec", help="Replace the complete instance spec with inline JSON; '{}' clears it (one session only)"
+        ),
+    ] = None,
     all_sessions: Annotated[
         bool,
         typer.Option("--all", help="Start matching stopped sessions by default"),
@@ -437,6 +449,7 @@ def session_start(
     """Start one session; --all starts matching stopped sessions by default."""
     _launch_sessions(
         name,
+        spec=spec,
         all_sessions=all_sessions,
         vm=vm,
         workspace=workspace,
@@ -454,6 +467,12 @@ def session_start(
 @session_app.command("restart")
 def session_restart(
     name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    spec: Annotated[
+        str | None,
+        typer.Option(
+            "--spec", help="Replace the complete instance spec with inline JSON; '{}' clears it (one session only)"
+        ),
+    ] = None,
     all_sessions: Annotated[bool, typer.Option("--all", help="Restart all sessions")] = False,
     vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Filter by workspace (with --all)")] = None,
@@ -475,6 +494,7 @@ def session_restart(
     """Restart a session, or all sessions with --all."""
     _launch_sessions(
         name,
+        spec=spec,
         all_sessions=all_sessions,
         vm=vm,
         workspace=workspace,

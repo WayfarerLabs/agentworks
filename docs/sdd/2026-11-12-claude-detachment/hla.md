@@ -16,5 +16,13 @@ checks the actual field declarer's kind through provenance, while standalone mod
 remains owner-free. Emitted schema retains the annotation for tooling. No core code names Claude.
 
 Migration is additive: existing pins remain unchanged unless the operator explicitly adopts a UUID.
-Automatic traversal and human-prompt recency are deferred. One coherent implementation is intended
-for one reviewable change; this session prepares a local branch without publishing it.
+Automatic traversal and human-prompt recency are deferred. One coherent PR contains the
+implementation, collateral and validation. The operator authorized rebasing onto latest main,
+publishing the PR, and monitoring up to three feedback/fix rounds on 2026-11-13.
+
+Existing sessions receive an optional `--spec` on named start/restart. Omission retains the current
+instance overlay, supplied JSON replaces it completely, and `{}` clears it. Validate the candidate
+through the ordinary pending-session registry publication before prompts or state changes. Hold the
+VM-family mutation guard across confirmation, desired-overlay persistence and runtime composition;
+reconciliation reuses that same guard. A valid accepted overlay remains desired state if later
+runtime work fails. No bulk spec replacement or direct database editing is exposed.

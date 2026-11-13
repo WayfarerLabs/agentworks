@@ -100,7 +100,9 @@ class ClaudeCodeConfig(AgwModel):
         pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
     )
     """Adopt this exact existing Claude conversation on creation or start.
-    Session instance only; templates cannot set it. Requires a transcript or
+    Session instance only; templates cannot set it. Named start/restart
+    ``--spec`` replaces the complete instance spec; preserve other desired fields.
+    Requires a transcript or
     live background job on the launch target. Suppresses detachment detection
     and warns on every use; remove after adoption to restore detection.
     An explicit force-new launch conflicts with this setting."""
@@ -493,7 +495,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             if forced is None:
                 if observed.candidates:
                     settings = "; or ".join(
-                        f'harness_integration: {{name: claude-code, force_uuid: "{candidate}"}}'
+                        json.dumps({"harness_integration": {"name": self.name, "force_uuid": candidate}})
                         for candidate in observed.candidates
                     )
                     raise StateError(
@@ -501,7 +503,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
                         f"{', '.join(observed.candidates)}; refusing to resume the pinned conversation.",
                         entity_kind="session",
                         entity_name=self._session_name,
-                        hint=f"Set this on the session instance spec: {settings}. "
+                        hint=f"Use named session start/restart --spec with a complete JSON spec containing {settings}. "
+                        "--spec replaces all instance overrides; retain other desired fields. "
                         "Choose the intended conversation, then remove force_uuid after adoption.",
                     )
                 if observed.parked_job_ids:

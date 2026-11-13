@@ -78,6 +78,7 @@ class RuntimeInvocation:
     force: bool = False
     intent: HarnessLaunchIntent
     authorized_running: frozenset[str] = frozenset()
+    held_native_guard: NativeMutationGuard | None = None
     guards: dict[str, NativeMutationGuard] = field(default_factory=dict)
     vms: dict[str, VMRow] = field(default_factory=dict)
     sessions: dict[str, SessionRow] = field(default_factory=dict)

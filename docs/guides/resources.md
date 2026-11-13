@@ -438,14 +438,30 @@ refuses and prints the pinned UUID, candidates, and a recovery setting. It never
 recency or follows a continuation automatically. An explicit `--force-new` still requests a new
 conversation without inspecting the old pin.
 
-To adopt a known conversation, set this on the **session instance's** `spec`, keeping its other
-fields. Do not put it on a session template:
+To adopt a known conversation on an existing session, replace its instance spec with the recovery
+setting. `--spec` takes inline JSON and is supported only for one named session:
 
-```yaml
-harness_integration:
-  name: claude-code
-  force_uuid: "af0980f9-1111-4222-8333-444444444444"
+```sh
+agw session restart work --spec \
+  '{"harness_integration":{"name":"claude-code","force_uuid":"af0980f9-1111-4222-8333-444444444444"}}'
 ```
+
+Supplied `--spec` replaces the **complete instance spec**, rather than merging into its previous
+values. Inspect `agw session describe work --output json` and retain any other desired instance
+fields in the replacement. The selected session template continues to supply inherited defaults. Do
+not set `force_uuid` on a template: the shared instance-only rule rejects it there.
+
+After adoption, remove `force_uuid` by supplying the complete instance spec without that field. If
+recovery was the only instance override, clear the entire instance spec on the next restart:
+
+```sh
+agw session restart work --spec '{}'
+```
+
+`{}` clears all instance overrides, including any environment or artifact selections. To keep those
+overrides, include them in the replacement instead. Omitting `--spec` retains the stored instance
+spec; `session start work --spec ...` supports the same replacement and clearing rules. A new
+session can adopt an existing conversation through `session create ... --spec ...` as well.
 
 Use a UUID from the refusal or inspect `claude agents --json` on the launch target as the launch
 user. `force_uuid` requires an existing transcript or a live background record for that exact UUID.
