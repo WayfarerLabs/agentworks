@@ -1050,17 +1050,22 @@ no longer use them. The departures from the tables above, each recorded where it
   reaches them; only the `test_exec` check runs interactively (`-lic`). What reaches them is the
   profile, so each account's profile is written complete before anything that runs a login shell
   (lead ruling on Q3): its entries are declarations (`packages.install_command_paths`, every named
-  command's `path` whatever its outcome, plus `_mise_shims_path`), so a first create gives the
-  dotfiles installer, mise and the install commands mise's shims and every declared path, as a
-  reinit does. A dotfiles installer can replace `~/.profile` or an rc file, so the source lines are
-  ensured again before the user install commands, and once more after them. Mise's shims come after
-  the system install commands' paths and before the user install commands' paths, so a user install
-  command's directory takes precedence over a shim and a shim over a system install command's.
-  `_run_install_commands` returns nothing. Through v0.19.0 the admin's profile was written after its
-  user install commands, so on a first create they had neither the shims nor their declared paths,
-  and an agent's install commands, which ran after an identity-only profile write, had neither on
-  create or reinit. The system install commands, which run earlier in the VM section, still see no
-  profile on a first create.
+  command's `path`, plus `_mise_shims_path`), so a first create gives the dotfiles installer, mise
+  and the install commands mise's shims and every declared path, as a reinit does. While an
+  account's user install commands run, each of their declared paths counts whatever that command's
+  outcome. Once they finish, a failed command's paths leave the profile (#892): the admin's profile
+  is written again without them (`driver.py:533-545`, `:602-613`), as is the agent's
+  (`agents/initializer.py:258-264`, `:343-354`), and a failed system install command, which runs
+  before the admin's profile is written, contributes none to it (`driver.py:471`). A dotfiles
+  installer can replace `~/.profile` or an rc file, so the source lines are ensured again before the
+  user install commands, and once more after them. Mise's shims come after the system install
+  commands' paths and before the user install commands' paths, so a user install command's directory
+  takes precedence over a shim and a shim over a system install command's. `_run_install_commands`
+  returns the names of the commands that failed. Through v0.19.0 the admin's profile was written
+  after its user install commands, so on a first create they had neither the shims nor their
+  declared paths, and an agent's install commands, which ran after an identity-only profile write,
+  had neither on create or reinit. The system install commands, which run earlier in the VM section,
+  still see no profile on a first create.
 - A stored overlay that fails only on source reference fields this release refuses (every
   `errors.SourceRefFormError`, raised by `sources.check_source_ref`, which `sources` re-exports)
   decodes to `instance_specs.StoredSourceReferenceRefused`, whose `fields` names them and never a
