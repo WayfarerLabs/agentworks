@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, Agent, Identity, VMAccess
 from agentworks.execution.client import SSHClient
+from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import CaptureOutput, DiscardOutput, ToFile
 from agentworks.execution.results import Completed, Result
 from agentworks.execution.trust import TrustMode
@@ -60,10 +61,13 @@ class RecordingVMAccess(VMAccess):
 
     ``answer``, when a test sets it, is asked first with each recorded call
     and may return the outcome, which suits a stateful double that answers
-    several probes. A request given an answer with :meth:`respond` gets it
-    every time it is asked. Any other ``run`` consumes ``run_outcomes`` in
-    order, then gets ``default_outcome``, ``Completed(0)`` unless a test sets
-    it. An outcome that is an exception is raised. A stream ``run`` was asked
+    several probes; since it models the guest, a non-zero status it answers
+    under ``check`` raises ``CommandFailed``, as a real access does. A request
+    given an answer with :meth:`respond` gets it every time it is asked. Any
+    other ``run`` consumes ``run_outcomes`` in order, then gets
+    ``default_outcome``, ``Completed(0)`` unless a test sets it; a canned
+    non-zero outcome under ``check`` fails the test, which scripts the
+    exception instead. An outcome that is an exception is raised. A stream ``run`` was asked
     to discard comes back empty, as it does from a real access; one it was
     asked to write to a ``ToFile`` comes back empty too, its bytes written to
     the new file, with one progress report, only for ``Completed(0)``.
@@ -108,6 +112,7 @@ class RecordingVMAccess(VMAccess):
         )
         self.calls.append(call)
         answer = self.answer(call) if self.answer is not None else None
+        modeled = answer is not None
         if answer is None:
             answer = next((outcome for known, outcome in self.responses if known == request), None)
         if answer is not None:
@@ -132,6 +137,11 @@ class RecordingVMAccess(VMAccess):
             # What accept-new does when a connection reaches sshd and none is recorded.
             trust.write_records(self.vm_name, [fake_host_key()])
         if check and outcome.require_completed(self.vm_name) != 0:
+            if modeled:
+                assert isinstance(outcome.completion, Completed)
+                raise CommandFailed(
+                    self.vm_name, outcome.completion.status, outcome, streams_logged=request.log_streams
+                )
             raise AssertionError("a canned non-zero result under check=True; script an exception instead")
         return outcome
 
@@ -427,6 +437,7 @@ __all__ = [
     "Agent",
     "Call",
     "RecordingVMAccess",
+    "access_over_target",
     "account_shell",
     "answer_command_checks",
     "answer_destination_identity",
@@ -504,10 +515,12 @@ def answer_from_target(target: Any) -> Callable[[Call], Result | None]:
     For manager tests whose double models the guest as a legacy ``Transport``
     while a step they drive has moved onto ``VMAccess``: the double sees the
     same command it did, ``shlex.join`` of a command's argv or a script's
-    source, with ``sudo`` for an elevated request. Anything else is left to
-    the access's other outcomes.
+    source, with ``sudo`` for an elevated request, ``timeout`` for its
+    deadline, ``input_data`` for its ``Bytes`` input and ``env`` for its
+    environment when it has one. Anything else is left to the access's other
+    outcomes.
     """
-    from agentworks.execution.requests import Command, Script
+    from agentworks.execution.requests import Bytes, Command, Script
 
     def answer(call: Call) -> Result | None:
         request = call.request
@@ -517,26 +530,51 @@ def answer_from_target(target: Any) -> Callable[[Call], Result | None]:
             line = request.source
         else:
             return None
-        outcome = target.run(line, sudo=request.elevated, check=False, timeout=request.deadline)
+        options: dict[str, Any] = {"sudo": request.elevated, "check": False, "timeout": request.deadline}
+        if isinstance(request.stdin, Bytes):
+            options["input_data"] = request.stdin.data.decode()
+        if request.env:
+            options["env"] = dict(request.env)
+        outcome = target.run(line, **options)
         stdout, stderr = getattr(outcome, "stdout", "") or "", getattr(outcome, "stderr", "") or ""
-        return Result(
+        result = Result(
             Completed(getattr(outcome, "returncode", 0 if getattr(outcome, "ok", True) else 1)),
             stdout.encode() if isinstance(stdout, str) else stdout,
             stderr.encode() if isinstance(stderr, str) else stderr,
         )
+        return result
 
     return answer
 
 
-def route_vm_access_to_target(monkeypatch: pytest.MonkeyPatch, target: Any) -> AccessRecorder:
-    """Route ``execution.vm_access`` to a recording fake whose commands run on ``target`` (see answer_from_target)."""
+def route_vm_access_to_target(monkeypatch: pytest.MonkeyPatch, target: Any, agent: Any = None) -> AccessRecorder:
+    """Route ``execution.vm_access`` to a recording fake whose commands run on ``target`` (see answer_from_target).
+
+    An agent's requests run on ``agent`` when one is given. A double with
+    an ``answer(call)`` answers first; every required-command check
+    it leaves finds its command.
+    """
     recorder = install_access_recorder(monkeypatch)
-    recorder.answer = answer_from_target(target)
+
+    def answer(call: Call) -> Result | None:
+        double = target if agent is None or isinstance(call.identity, Admin) else agent
+        own = getattr(double, "answer", None)
+        result = own(call) if callable(own) else None
+        if result is None and is_command_check(call.request):
+            result = check_result(call.request, 0)
+        return result if result is not None else answer_from_target(double)(call)
+
+    recorder.answer = answer
     return recorder
+
+
+def access_over_target(target: Any, identity: Identity | None = None) -> RecordingVMAccess:
+    """A recording access whose commands run on ``target`` (see answer_from_target), the admin's by default."""
+    access = RecordingVMAccess([], identity or Admin())
+    access.answer = answer_from_target(target)
+    return access
 
 
 def files_over_target(target: Any, *, deadline: float | None = None) -> Files:
     """The admin's ``Files`` over a recording access whose commands run on ``target`` (see answer_from_target)."""
-    access = RecordingVMAccess([], Admin())
-    access.answer = answer_from_target(target)
-    return access.files(deadline=deadline)
+    return access_over_target(target).files(deadline=deadline)

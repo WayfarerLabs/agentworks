@@ -59,16 +59,22 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
     if row_kind == "uncertain":
         db.set_session_run_id("s1", str(uuid4()))
         db.update_session_runtime(
-            "s1", socket_path=native.socket, pid=None, boot_id=tmux.read_boot_id(native), tmux_server_start_ticks=None
+            "s1",
+            socket_path=native.socket,
+            pid=None,
+            boot_id=tmux.read_boot_id(native.run),
+            tmux_server_start_ticks=None,
         )
     launch(native, "sleep 30", is_admin=False)
     if native_name != "s1":
         native.native(f"rename-session -t '=s1' {native_name}")
     before = db.get_session("s1")
     assert before is not None
-    assert manager.check_session_status(before, target=native) is SessionStatus.UNKNOWN
-    assert manager.batch_check_status([replace(before, mode="admin")], target=native) == {"s1": SessionStatus.UNKNOWN}
-    fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+    assert manager.check_session_status(before, admin=native.access()) is SessionStatus.UNKNOWN
+    assert manager.batch_check_status([replace(before, mode="admin")], admin=native.access()) == {
+        "s1": SessionStatus.UNKNOWN
+    }
+    fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     events.clear()
     first = len(native.calls)
     try:
@@ -77,10 +83,15 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
         if operation == "stop_session" and row_kind == "stopped":
             with pytest.raises(StateError):
                 manager._teardown_session(
-                    before, target=native, target_owns_session=True, db=db, force=force, legacy_running_authorized=False
+                    before,
+                    access=native.access(),
+                    target_owns_session=True,
+                    db=db,
+                    force=force,
+                    legacy_running_authorized=False,
                 )
         assert_runtime_preserved(db, before, operation=operation)
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
         if operation in {"start_session", "restart_session"}:
             assert "resolve" not in events and "resolve_env" not in events
         assert not any(
@@ -151,7 +162,7 @@ def test_known_pre_spawn_failure_can_retry_in_same_boot(tmp_path, monkeypatch, n
         monkeypatch.setattr(native, "run", original_run)
         invoke(db, operation, **options)
         current = db.get_session("s1")
-        observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+        observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
         assert current is not None and observed is not None and current.pid == observed.pid
         assert sum("new-session" in command for command, _ in native.calls) == 1
     finally:
@@ -192,7 +203,7 @@ def test_unacknowledged_recovery_requires_exact_attempt_and_stable_server(tmp_pa
             monkeypatch.setattr(native, "run", replace_after_metadata)
         else:
             key = "_AGW_SESSION_UUID" if mutation == "uuid" else "_AGW_RUN_ID"
-            native.native(f"set-environment -t '=s1' {key} {uuid4()}")
+            native.native(f"set-environment -g {key} {uuid4()}")
         first = len(native.calls)
         with pytest.raises(StateError):
             invoke(db, "start_session")
@@ -275,7 +286,7 @@ def test_unknown_startup_observation_refuses_before_secrets_and_runtime_mutation
             invoke(db, "start_session")
         assert events == []
         assert db.get_session("s1") == before
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
         assert native.native("show-option -wAqv -t %0 remain-on-exit").stdout.strip() == "on"
         assert not any(
             mutation in command
@@ -341,7 +352,7 @@ def test_old_admin_null_address_requires_native_absence_before_repair(tmp_path, 
         monkeypatch.setattr(native, "run", unknown_default)
     try:
         with pytest.raises(AgentworksError):
-            manager._ensure_pid(before, target=native, db=db)
+            manager._ensure_pid(before, admin=native.access(), db=db)
         assert db.get_session("s1") == before
         if obstruction == "default":
             assert native.run("tmux has-session -t '=s1'", check=False).ok
@@ -444,7 +455,7 @@ def test_rejected_create_recovery_row_cannot_adopt_preexisting_server(tmp_path, 
     )
     launch(native, "sleep 30", is_admin=False)
     native.native("rename-session -t '=s1' preexisting")
-    observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+    observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
 
     def retain_artifacts(*args, **kwargs):
         raise StateError("artifact cleanup observation unavailable")
@@ -459,7 +470,7 @@ def test_rejected_create_recovery_row_cannot_adopt_preexisting_server(tmp_path, 
         with pytest.raises(StateError):
             invoke(db, operation, force=True)
         assert_runtime_preserved(db, before, operation=operation)
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == observed
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == observed
         assert native.native("has-session -t '=preexisting'").ok
         assert not any("kill-server" in command for command, _ in native.calls[first:])
     finally:
@@ -477,7 +488,7 @@ def test_recorded_native_runtime_keeps_running_and_residual_inventory(tmp_path, 
     assert row is not None
     expected = SessionStatus.RUNNING if native_name == "s1" else SessionStatus.RESIDUAL
     try:
-        assert manager.check_session_status(row, target=native) is expected
-        assert manager.batch_check_status([replace(row, mode="admin")], target=native) == {"s1": expected}
+        assert manager.check_session_status(row, admin=native.access()) is expected
+        assert manager.batch_check_status([replace(row, mode="admin")], admin=native.access()) == {"s1": expected}
     finally:
         db.close()

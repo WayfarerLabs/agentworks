@@ -24,9 +24,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
-    from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
     from agentworks.workspaces.template import WorkspaceTemplate
 
     from ._create_types import SessionGraph, SessionPlan
@@ -134,18 +131,6 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     return refreshed_vm
 
 
-def _build_live_transport(
-    vm: VMRow, config: Config, *, redactions: tuple[str, ...] = ()
-) -> tuple[Transport, RunCommand, SSHLogger]:
-    """Build the admin SSH transport for the live VM, its run command and the operation log they share."""
-    from agentworks.ssh import SSHLogger
-
-    logger = SSHLogger(vm.name, "session-create", redactions=redactions)
-    target = _mgr.transport(vm, config, logger=logger)
-    run_command: RunCommand = target.run
-    return target, run_command, logger
-
-
 def _preflight_and_resolve(
     db: Database,
     config: Config,
@@ -153,19 +138,17 @@ def _preflight_and_resolve(
     plan: SessionPlan,
     graph: SessionGraph,
     vm: VMRow,
-    target: Transport,
     interaction: TtyInteractionPolicy,
-) -> tuple[dict[str, str], Transport | None]:
+) -> dict[str, str]:
     """Run the Preflight sweep and the Resolving-Secrets boundary resolve.
 
     Both output sections are emitted here, in place. Names the resources
     this create touches (the session template, any ephemeral workspace /
     agent templates, the ephemeral agent's git credentials) in the same
     ``<kind>/<name>`` form vm/agent create use, then runs the readiness
-    sweep and the one boundary resolve. Returns the resolved secret
-    values and the existing-agent transport, which is probed here (before
-    any prompt or mutation, the earlier-failure win) and is ``None`` for
-    a pending or admin target.
+    sweep and the one boundary resolve. An existing agent's direct SSH is
+    probed here, before any prompt or mutation (the earlier-failure win).
+    Returns the resolved secret values.
     """
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.readiness import preflight_all
@@ -183,34 +166,28 @@ def _preflight_and_resolve(
 
             announce_git_credentials(graph.agent_tmpl_node.credentials)
 
+        # Preflight precedes secret resolution, so its accesses log nothing.
+        admin_access = _mgr._identity_access(vm, config, None, logger=None)
         # Probe direct agent SSH for an EXISTING agent before any prompt
         # or mutation: a pre-rollout agent surfaces as an actionable
         # StateError with nothing to roll back (the orchestrated flow
         # moves this probe, and the required-commands probe below, ahead
         # of the resolve boundary: the earlier-failure win). An ephemeral
         # agent's probe runs right after its realization in roll-forward.
-        agent_target: Transport | None = None
+        agent_access = None
         if graph.agent_node is not None and not plan.new_agent:
-            from agentworks.agents.manager import _assert_agent_ssh_works
-            from agentworks.transports import agent_transport
+            from agentworks.agents.manager.access import _assert_agent_access_works
 
             assert plan.existing_agent is not None
-            agent_target = agent_transport(vm, config, plan.existing_agent)
-            _assert_agent_ssh_works(agent_target, plan.existing_agent)
+            agent_access = _mgr._identity_access(vm, config, plan.existing_agent, logger=None)
+            _assert_agent_access_works(agent_access, admin_access, plan.existing_agent)
 
         # PREFLIGHT-ALL against the one command-start context: the
         # required-commands check probes a realized (existing) agent or
-        # the admin target NOW and defers on a pending one, and the sweep
+        # the admin NOW and defers on a pending one, and the sweep
         # predicts each node's declared secrets (the git-credential
         # tokens here) before that node's own preflight.
         # Then the boundary resolve: the walk-away point.
-        # Preflight precedes secret resolution, so its accesses log nothing.
-        admin_access = _mgr._identity_access(vm, config, None, logger=None)
-        agent_access = (
-            None
-            if plan.existing_agent is None or agent_target is None
-            else _mgr._identity_access(vm, config, plan.existing_agent, logger=None)
-        )
         preflight_all(
             graph.nodes,
             RunContext(
@@ -242,7 +219,7 @@ def _preflight_and_resolve(
 
     with output.section("Resolving Secrets"):
         graph.resolver.resolve()
-    return graph.resolver.values, agent_target
+    return graph.resolver.values
 
 
 def create_session(
@@ -437,19 +414,14 @@ def create_session(
         with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
             vm = _reload_vm(db, plan.target_vm_name)
             # Preflight precedes secret resolution and carries no workload values.
-            # Build the logged mutation target only once its redactions are known.
-            target = _mgr.transport(vm, config)
-
-            secret_values, agent_target = _preflight_and_resolve(
+            secret_values = _preflight_and_resolve(
                 db,
                 config,
                 plan=plan,
                 graph=graph,
                 vm=vm,
-                target=target,
                 interaction=interaction,
             )
-            target, run_command, logger = _build_live_transport(vm, config, redactions=tuple(secret_values.values()))
 
             # ===== Dependency-ordered roll-forward (S11) ========================
             #
@@ -457,20 +429,21 @@ def create_session(
             # the realized ephemerals on core failures. Required setup retains
             # completed owners for repair. The two-level rollback
             # (session-slice teardown, then ephemeral unwind) and the emit
-            # order live in _roll_forward.
+            # order live in _roll_forward. The operation log opens once its
+            # redactions are known.
             setup_failures: list[SetupFailure] = []
-            _roll_forward(
-                db,
-                config,
-                registry=registry,
-                plan=plan,
-                graph=graph,
-                vm=vm,
-                target=target,
-                logger=logger,
-                run_command=run_command,
-                agent_target=agent_target,
-                secret_values=secret_values,
-                setup_failures=setup_failures,
-            )
+            from agentworks.vms.manager import operation_log
+
+            with operation_log(vm.name, "session-create", redactions=tuple(secret_values.values())) as logger:
+                _roll_forward(
+                    db,
+                    config,
+                    registry=registry,
+                    plan=plan,
+                    graph=graph,
+                    vm=vm,
+                    logger=logger,
+                    secret_values=secret_values,
+                    setup_failures=setup_failures,
+                )
             raise_setup_failures(setup_failures)

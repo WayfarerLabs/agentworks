@@ -450,12 +450,18 @@ def remove_sessions(
 
         with _live_best_effort(f"remove-sessions from '{console_name}'", console_name=console_name):
             if live is not None:
-                _vm, target = live
+                import agentworks.execution as execution
+                from agentworks.execution.access import Admin
+
+                vm, _target = live
                 # kill_session_windows lives in .attach but is called through the
                 # package object here (not `from .attach import kill_session_windows`)
                 # so that tests monkeypatching `multi_console.kill_session_windows`
-                # intercept this call path.
-                _mc.kill_session_windows(target, pairs=[(console_name, n) for n in session_names])
+                # intercept this call path. It takes the admin's access, which is
+                # built beside this module's legacy target until consoles move.
+                _mc.kill_session_windows(
+                    execution.vm_access(vm, config, Admin()), pairs=[(console_name, n) for n in session_names]
+                )
 
         # Offer/report AFTER the removal (and its best-effort live sync) settle.
         # Routed through the package object so this shares the exact offer/report

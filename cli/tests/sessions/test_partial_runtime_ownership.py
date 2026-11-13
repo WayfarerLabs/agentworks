@@ -45,7 +45,7 @@ def partial_runtime(
         }
     )
     launch(native, "sleep 30", is_admin=False, launch_options=options)
-    observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+    observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     assert observed is not None
     # This represents a historical row whose PID was reused by the actual
     # native server, without inventing a historical process start time.
@@ -66,7 +66,7 @@ def partial_runtime(
     monkeypatch.setattr(
         manager,
         "observe_session_statuses",
-        lambda rows, **k: {row.name: manager.check_session_status(row, target=native) for row in rows},
+        lambda rows, **k: {row.name: manager.check_session_status(row, admin=native.access()) for row in rows},
     )
     monkeypatch.setattr(
         tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
@@ -78,10 +78,10 @@ def act(db: Database, native: NativeTarget, operation: str) -> None:
     row = db.get_session("s1")
     assert row is not None
     if operation == "repair":
-        _pids._repair_session_pid(row, target=native, db=db)
+        _pids._repair_session_pid(row, admin=native.access(), db=db)
     elif operation == "teardown":
         manager._teardown_session(
-            row, target=native, target_owns_session=True, db=db, force=True, legacy_running_authorized=False
+            row, access=native.access(), target_owns_session=True, db=db, force=True, legacy_running_authorized=False
         )
     else:
         invoke(db, operation, force=True)
@@ -98,9 +98,9 @@ def test_partial_fingerprint_never_relearns_or_kills_unproven_native_server(
     first = len(native.calls)
     try:
         assert not _pids._needs_repair(before)
-        assert _pids._ensure_pid(before, target=native, db=db) == before
-        assert manager.check_session_status(before, target=native) is SessionStatus.RUNNING
-        assert manager.batch_check_status([replace(before, mode="admin")], target=native) == {
+        assert _pids._ensure_pid(before, admin=native.access(), db=db) == before
+        assert manager.check_session_status(before, admin=native.access()) is SessionStatus.RUNNING
+        assert manager.batch_check_status([replace(before, mode="admin")], admin=native.access()) == {
             "s1": SessionStatus.RUNNING
         }
         assert not any("show-environment" in command for command, _ in native.calls[first:])
@@ -109,7 +109,7 @@ def test_partial_fingerprint_never_relearns_or_kills_unproven_native_server(
         if operation in {"repair", "teardown"}:
             assert caught.value.hint
         assert_runtime_preserved(db, before, operation=operation)
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == observed
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == observed
         assert native.native("has-session -t '=s1'").ok
         assert not any("kill-server" in command or "new-session" in command for command, _ in native.calls[first:])
     finally:
@@ -126,10 +126,10 @@ def test_partial_fingerprint_can_complete_with_matching_native_attempt(tmp_path,
             assert row is None
         elif operation == "repair":
             assert row is not None and row.tmux_server_start_ticks == observed.start_ticks
-            assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == observed
+            assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == observed
         elif operation == "restart_session":
             assert row is not None and row.tmux_server_start_ticks is not None
-            assert manager.check_session_status(row, target=native) is SessionStatus.RUNNING
+            assert manager.check_session_status(row, admin=native.access()) is SessionStatus.RUNNING
         else:
             assert row is not None and row.pid == PID_STOPPED
     finally:

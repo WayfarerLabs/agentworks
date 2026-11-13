@@ -91,7 +91,7 @@ def test_interrupted_native_start_recovers_existing_access_without_replacing_run
         before = db.get_session("s1")
         assert before is not None and before.pid is not None and before.pid > 0
         assert before.run_id is not None
-        fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+        fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
         assert fingerprint is not None
         assert (before.pid, before.boot_id, before.tmux_server_start_ticks) == (
             fingerprint.pid,
@@ -105,7 +105,7 @@ def test_interrupted_native_start_recovers_existing_access_without_replacing_run
         manager.start_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
 
         assert db.get_session("s1") == before
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
         assert tmux.startup_protection_enabled("s1", run_command=native.run, socket_path=native.socket) is False
         assert sum("new-session" in command for command, _ in native.calls) == 1
         assert not any("kill-server" in command for command, _ in native.calls)
@@ -136,7 +136,7 @@ def test_unacknowledged_native_launch_recovers_unknown_pid_and_ticks_with_access
         before = db.get_session("s1")
         assert before is not None and before.pid is None and before.tmux_server_start_ticks is None
         assert before.run_id is not None
-        fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+        fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
         assert fingerprint is not None
 
         manager.start_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
@@ -153,7 +153,7 @@ def test_unacknowledged_native_launch_recovers_unknown_pid_and_ticks_with_access
             fingerprint.boot_id,
             fingerprint.start_ticks,
         )
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
         assert tmux.startup_protection_enabled("s1", run_command=native.run, socket_path=native.socket) is False
         assert sum("new-session" in command for command, _ in native.calls) == 1
         assert not any("kill-server" in command for command, _ in native.calls)
@@ -169,13 +169,13 @@ def test_native_grants_ensure_read_write_access_and_can_repeat(monkeypatch, nati
     if initial_access != "absent":
         flag = "-r" if initial_access == "read-only" else "-w"
         assert native.native(f"server-access {flag} {shlex.quote(access_user)}").ok
-    fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+    fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     assert fingerprint is not None
 
     for _ in range(2):
         _GRANT_ACCESS(native.run, native.socket)
         assert f"{access_user} (W)" in native.native("server-access -l").stdout.splitlines()
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
 
 
 def test_failed_group_lookup_preserves_access_failure(monkeypatch, native, access_user):
@@ -236,7 +236,7 @@ def test_intrinsic_root_and_owner_access_converges_without_acl_errors(
     bind_access_group(monkeypatch, native, members, shell=shell)
     launch(native, "sleep 120", is_admin=False)
     before_access = native.native("server-access -l").stdout.splitlines()
-    fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+    fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     assert fingerprint is not None
 
     for _ in range(2):
@@ -247,7 +247,7 @@ def test_intrinsic_root_and_owner_access_converges_without_acl_errors(
             assert f"{access_user} (W)" in access
         else:
             assert access == before_access
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
 
 
 @pytest.mark.parametrize("failure", ["caller", "member"])
@@ -283,7 +283,7 @@ def test_unknown_member_is_a_literal_identity_without_acl_mutation(
     bind_access_group(monkeypatch, native, member, shell=shell)
     launch(native, "sleep 120", is_admin=False)
     before_access = native.native("server-access -l").stdout
-    fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+    fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     assert fingerprint is not None
     directory = native.root / "operands"
     directory.mkdir()
@@ -296,7 +296,7 @@ def test_unknown_member_is_a_literal_identity_without_acl_mutation(
         _GRANT_ACCESS(run, native.socket)
 
     assert native.native("server-access -l").stdout == before_access
-    assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+    assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
     assert tmux._probe_pane_liveness("s1", run_command=native.run, socket_path=native.socket)[0] == "alive"
 
 

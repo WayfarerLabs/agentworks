@@ -17,7 +17,8 @@ from agentworks.errors import AgentworksError, ExternalError, StateError, Valida
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _lifecycle, _pids, _teardown
-from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
+from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 from .test_create_start_restart_orchestrated import BOOT_ID, _patch_transports, _requiring_template, _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
@@ -86,18 +87,15 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
             )
         row = db.get_session("s1")
         assert row is not None and row.pid is None
-        assert row.boot_id == tmux.read_boot_id(native)
-        assert manager._status.check_session_status(row, target=native) is SessionStatus.RUNNING
-        assert manager.batch_check_status([replace(row, mode="admin")], target=native) == {"s1": SessionStatus.RUNNING}
+        assert row.boot_id == tmux.read_boot_id(native.run)
+        assert manager._status.check_session_status(row, admin=native.access()) is SessionStatus.RUNNING
+        assert manager.batch_check_status([replace(row, mode="admin")], admin=native.access()) == {
+            "s1": SessionStatus.RUNNING
+        }
         assert db.get_session("s1") == row
         proofs = [options for command, options in native.calls if "AGW_RUNTIME_LAUNCH=" in command]
-        assert proofs and all(
-            options.get("timeout") == GUEST_OBSERVATION_TIMEOUT_SECONDS
-            and options.get("retries") == GUEST_OBSERVATION_ATTEMPTS
-            and options.get("tty") is False
-            for options in proofs
-        )
-        observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+        assert proofs and all(options.get("timeout") == GUEST_OBSERVATION_TIMEOUT_SECONDS for options in proofs)
+        observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
         assert observed is not None
         original_pid = observed.pid
 
@@ -113,7 +111,9 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
             monkeypatch.setattr(
                 manager,
                 "observe_session_statuses",
-                lambda rows, **k: {row.name: manager._status.check_session_status(row, target=native) for row in rows},
+                lambda rows, **k: {
+                    row.name: manager._status.check_session_status(row, admin=native.access()) for row in rows
+                },
             )
             manager.start_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
         recovered = db.get_session("s1")
@@ -132,22 +132,22 @@ def test_unknown_launch_can_recover_after_reboot_without_destroying_vm(tmp_path,
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     socket = "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
     db.update_session_runtime("s1", socket_path=socket, pid=None, boot_id=None, tmux_server_start_ticks=None)
-    target = SimpleNamespace(run=lambda *a, **k: SimpleNamespace(returncode=0, ok=True, stdout="", stderr=""))
+    admin = RecordingVMAccess([], Admin())
     monkeypatch.setattr(
         tmux, "capture_tmux_server_fingerprint", lambda **k: tmux.FingerprintProbe(tmux.ProbeStatus.ABSENT)
     )
     try:
         row = db.get_session("s1")
         with pytest.raises(StateError):
-            _pids._repair_session_pid(row, target=target, db=db)
+            _pids._repair_session_pid(row, admin=admin, db=db)
         checkpoint = db.get_session("s1")
         assert checkpoint is not None and checkpoint.pid is None and checkpoint.boot_id == BOOT_ID
         with pytest.raises(StateError):
-            _pids._repair_session_pid(checkpoint, target=target, db=db)
+            _pids._repair_session_pid(checkpoint, admin=admin, db=db)
         unchanged = db.get_session("s1")
         assert unchanged is not None and unchanged.pid is None
         monkeypatch.setattr(manager, "_get_boot_id", lambda *a, **k: str(uuid4()))
-        assert _pids._repair_session_pid(checkpoint, target=target, db=db)
+        assert _pids._repair_session_pid(checkpoint, admin=admin, db=db)
         stopped = db.get_session("s1")
         assert stopped is not None and stopped.pid == PID_STOPPED
         assert db.get_vm("vm1") is not None and db.get_agent("a1") is not None
@@ -225,7 +225,7 @@ def test_boot_only_evidence_has_matching_readonly_status_projections(tmp_path, m
     checkpoint = replace(
         row,
         pid=None,
-        boot_id=tmux.read_boot_id(native) if same_boot else str(uuid4()),
+        boot_id=tmux.read_boot_id(native.run) if same_boot else str(uuid4()),
         socket_path=native.socket,
         mode="admin",
         tmux_server_start_ticks=None,
@@ -235,8 +235,8 @@ def test_boot_only_evidence_has_matching_readonly_status_projections(tmp_path, m
     from agentworks.sessions.manager._status import batch_check_status, check_session_status
 
     try:
-        assert check_session_status(checkpoint, target=native) is expected
-        assert batch_check_status([checkpoint], target=native) == {"s1": expected}
+        assert check_session_status(checkpoint, admin=native.access()) is expected
+        assert batch_check_status([checkpoint], admin=native.access()) == {"s1": expected}
         assert db.get_session("s1") == row
     finally:
         db.close()
@@ -290,7 +290,7 @@ def test_parent_cleanup_accepts_stopped_child_with_proven_server_absence(
         # stopped children. It does not take singular delete's status shortcut.
         _lifecycle._teardown_session(
             row,
-            target=native,
+            access=native.access(),
             target_owns_session=target_owns_session,
             db=db,
             force=True,
@@ -319,7 +319,7 @@ def test_parent_cleanup_does_not_treat_unknown_probe_as_stopped_absence(tmp_path
         with pytest.raises(StateError):
             _lifecycle._teardown_session(
                 row,
-                target=native,
+                access=native.access(),
                 target_owns_session=False,
                 db=db,
                 force=True,

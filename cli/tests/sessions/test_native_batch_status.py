@@ -17,17 +17,15 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from agentworks.db import SessionMode, SessionRow, SessionStatus
+from agentworks.execution.requests import Bytes, Script
+from agentworks.execution.results import Completed, Result
 from agentworks.sessions.manager._status import batch_check_status
-from agentworks.ssh import SSHResult
 from tests.execution.conformance.lanes import sudo_granted, unavailable
-
-if TYPE_CHECKING:
-    from agentworks.transports import Transport
+from tests.vm_access_support import Admin, Call, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux" or shutil.which("tmux") is None, reason="runs a real tmux server on Linux"
@@ -37,19 +35,25 @@ SESSION = "s1"
 BOOT_ID = "11111111-2222-3333-4444-555555555555"
 
 
-class RootTarget:
-    """Runs each probe as root with ``sudo -n /bin/sh -c``, its input on stdin."""
+def as_root(call: Call) -> Result:
+    """Run an elevated script as root with ``sudo -n /bin/sh -c``, its input on stdin, as the admin's access does."""
+    request = call.request
+    assert isinstance(request, Script) and request.elevated
+    completed = subprocess.run(
+        ["sudo", "-n", "/bin/sh", "-c", request.source],
+        input=request.stdin.data if isinstance(request.stdin, Bytes) else b"",
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
 
-    def run(self, command: str, *, check: bool = True, input_data: str | None = None, **_: Any) -> SSHResult:
-        completed = subprocess.run(
-            ["sudo", "-n", "/bin/sh", "-c", command],
-            input=input_data or "",
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        return SSHResult(completed.returncode, completed.stdout, completed.stderr)
+
+def root_admin() -> RecordingVMAccess:
+    """The admin's access, its elevated requests run as root here."""
+    access = RecordingVMAccess([], Admin())
+    access.answer = as_root
+    return access
 
 
 @pytest.fixture
@@ -85,12 +89,12 @@ def row(socket: str, *, name: str = SESSION, pid: int | None = 4242) -> SessionR
 
 
 def test_root_reads_a_server_the_admin_owns(server: str) -> None:
-    statuses = batch_check_status([row(server)], target=cast("Transport", RootTarget()))
+    statuses = batch_check_status([row(server)], admin=root_admin())
 
     assert statuses == {SESSION: SessionStatus.RUNNING}
 
 
 def test_root_reads_a_missing_session_on_that_server_as_its_absence(server: str) -> None:
-    statuses = batch_check_status([row(server, name="gone")], target=cast("Transport", RootTarget()))
+    statuses = batch_check_status([row(server, name="gone")], admin=root_admin())
 
     assert statuses == {"gone": SessionStatus.RESIDUAL}

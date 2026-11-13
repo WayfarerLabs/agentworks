@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,6 @@ from agentworks import output
 from agentworks.db import PID_STOPPED, DatabaseDriverError, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import StateConflictError, StateError, UserAbort
 from agentworks.sessions.manager._teardown import (
-    DEDICATED_TEARDOWN_ATTEMPTS,
     DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
     DedicatedTeardownPlan,
     execute_concurrent_dedicated_teardowns,
@@ -22,7 +22,8 @@ from ._models import Outcome
 from ._prepare import OFF, _guest_stop_failure
 
 if TYPE_CHECKING:
-    from agentworks.db import SessionRow
+    from agentworks.db import SessionRow, VMRow
+    from agentworks.execution.access import VMAccess
 
     from ._models import RuntimeInvocation
 
@@ -59,11 +60,31 @@ def _completed(invocation: RuntimeInvocation, name: str, *, changed: bool) -> No
 
 
 def execute_public_stops(invocation: RuntimeInvocation) -> None:
-    """Repair on the caller, then use named or bulk native teardown authority."""
-    from agentworks.vms.manager import require_vm_ssh_boundary
+    """Repair on the caller, then use named or bulk native teardown authority.
+
+    Stop-all writes one ``session-stop-all`` operation log per VM, which its
+    concurrent teardowns on that VM share.
+    """
+    with contextlib.ExitStack() as logs:
+        _execute_public_stops(invocation, logs)
+
+
+def _execute_public_stops(invocation: RuntimeInvocation, logs: contextlib.ExitStack) -> None:
+    from agentworks.vms.manager import operation_log, require_vm_ssh_boundary
 
     live = []
-    vm_targets = {}
+    vm_admins: dict[str, VMAccess] = {}
+
+    def admin_of(vm: VMRow) -> VMAccess:
+        if vm.name not in vm_admins:
+            log = (
+                logs.enter_context(operation_log(vm.name, "session-stop-all"))
+                if invocation.operation == "stop-all"
+                else None
+            )
+            vm_admins[vm.name] = sessions._identity_access(vm, invocation.config, None, logger=log)
+        return vm_admins[vm.name]
+
     unobserved: set[str] = set()
     for name, selected in invocation.sessions.items():
         parent = dict(invocation.selection.session_routes)[name]
@@ -80,8 +101,6 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
                 )
                 continue
             require_vm_ssh_boundary(invocation.db, invocation.config, context.vm)
-            if parent not in vm_targets:
-                vm_targets[parent] = sessions.transport(context.vm, invocation.config)
             workspace = sessions._require_workspace(invocation.db, current.workspace_name)
             invocation.stops[name] = sessions.PreparedSessionStop(
                 db=invocation.db,
@@ -89,8 +108,8 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
                 session=current,
                 workspace=workspace,
                 vm=context.vm,
-                admin_target=vm_targets[parent],
-                session_target=None,
+                admin_access=admin_of(context.vm),
+                session_access=None,
                 observed_status=SessionStatus.UNKNOWN,
                 parent_off=False,
                 force=invocation.force,
@@ -111,10 +130,10 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
         repaired = []
         for session in live:
             try:
-                target = invocation.stops[session.name].admin_target
-                assert target is not None
+                admin = invocation.stops[session.name].admin_access
+                assert admin is not None
                 repaired.append(
-                    sessions._ensure_pid(session, target=target, db=invocation.db)
+                    sessions._ensure_pid(session, admin=admin, db=invocation.db)
                     if sessions._needs_repair(session)
                     else session
                 )
@@ -220,14 +239,10 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
                         invocation.db,
                         current,
                         vm_name=prepared.vm.name,
-                        target=sessions.transport(
-                            prepared.vm,
-                            invocation.config,
-                            default_timeout=DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
-                            retries=DEDICATED_TEARDOWN_ATTEMPTS,
-                        ),
+                        access=admin_of(prepared.vm),
                         target_owns_session=current.mode == SessionMode.ADMIN.value,
                         force=invocation.force,
+                        deadline=DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
                     )
                 )
             else:
@@ -255,10 +270,10 @@ def execute_public_stops(invocation: RuntimeInvocation) -> None:
             if prepared.parent_off:
                 changed = sessions.execute_session_stop(prepared)
             else:
-                assert prepared.admin_target is not None
+                assert prepared.admin_access is not None
                 sessions._teardown_session(
                     current,
-                    target=prepared.admin_target,
+                    access=prepared.admin_access,
                     target_owns_session=current.mode == SessionMode.ADMIN.value,
                     db=invocation.db,
                     force=invocation.force,

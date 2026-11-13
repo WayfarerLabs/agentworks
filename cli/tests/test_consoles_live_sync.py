@@ -28,6 +28,7 @@ from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_regist
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
+from tests.vm_access_support import access_over_target
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -458,7 +459,7 @@ def test_kill_session_windows_kills_live_only(db: Database, fake_target: _FakeTa
     )
 
     kill_session_windows(
-        fake_target,  # type: ignore[arg-type]
+        access_over_target(fake_target),
         pairs=[("alive", "s"), ("dead", "s")],
     )
 
@@ -473,7 +474,7 @@ def test_kill_session_windows_empty_is_noop(
     from agentworks.sessions.multi_console import kill_session_windows
 
     kill_session_windows(
-        fake_target,  # type: ignore[arg-type]
+        access_over_target(fake_target),
         pairs=[],
     )
     assert fake_target.commands == []
@@ -489,7 +490,7 @@ def test_kill_session_windows_groups_by_console(
     fake_target.responses["has-session -t '=aw-console-c'"] = _FakeResult(returncode=0)
 
     kill_session_windows(
-        fake_target,  # type: ignore[arg-type]
+        access_over_target(fake_target),
         pairs=[("c", "a"), ("c", "b"), ("c", "d")],
     )
 
@@ -516,7 +517,7 @@ def test_kill_session_windows_transport_failure_warns(
     fake_target.run = boom  # type: ignore[assignment]
 
     kill_session_windows(
-        fake_target,  # type: ignore[arg-type]
+        access_over_target(fake_target),
         pairs=[("alpha", "s"), ("beta", "s")],
     )
 
@@ -538,7 +539,7 @@ def test_kill_session_windows_agentworks_error_propagates(
 
     with pytest.raises(ConnectivityError):
         kill_session_windows(
-            fake_target,  # type: ignore[arg-type]
+            access_over_target(fake_target),
             pairs=[("alpha", "s")],
         )
 

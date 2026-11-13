@@ -145,14 +145,10 @@ class _FakeAdminTarget:
 
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
-    """One recording admin target behind manager's eager ``transport``
-    import (its session kill) and the admin's access (grants' group ops,
-    initializer's user delete)."""
+    """One recording admin target behind the admin's access (its session
+    teardown, grants' group ops, initializer's user delete), whose commands
+    reach the double as their command lines."""
     fake = _FakeAdminTarget()
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.agents.manager.transport", factory)
-    # Grants' group operations and the user delete run on the admin's access,
-    # whose commands reach the same double as their command lines.
     route_vm_access_to_target(monkeypatch, fake)
     return fake
 

@@ -207,10 +207,10 @@ also every step of initialization, and `agent create` and `agent reinit` run all
 initialization, as the admin and then as the agent, through it (see
 [Initialization steps](#initialization-steps)). `agent delete` and the workspace group grants run
 through it. `workspace create`, `workspace repair`, `workspace rehome` and `workspace copy` run all
-their work on the VM through it (see [Workspaces](#workspaces)), and so do `workspace delete`'s own
-removal and the session commands' regeneration of a workspace's tmuxinator config; `session create`
-and the session launches set up the tmux socket directories through it. `vm backup` runs its checks,
-its workspace archive and the archive's download through it (see [Backups](#backups)). `vm describe`
+their work on the VM through it (see [Workspaces](#workspaces)), and so does `workspace delete`.
+Every session command runs all its work on the VM through it, and so does the session teardown of
+`agent delete` and `workspace delete` (see [Sessions](#sessions)). `vm backup` runs its checks, its
+workspace archive and the archive's download through it (see [Backups](#backups)). `vm describe`
 reads the VM's live resources through it, as one request bounded at 30 seconds where it made up to
 three attempts before. `vm start`, and the automatic start of a VM that stopped on its own, use it
 to wait for the VM to answer; `vm rekey` and `vm recover` use it for the same wait after their
@@ -240,13 +240,12 @@ refusing.
   directory before `PATH`, and on POSIX an empty or relative `PATH` entry means the current
   directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
   directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
-  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the requests that still use
-  the older SSH path (sessions). A program found only in the current directory counts as not
-  installed, so `agw doctor` and the 1Password backend's readiness no longer vouch for one. An
-  `EDITOR` given as a path is run as given. On Windows, `workspace create --open-vscode` does not
-  start VS Code: its `code` command is a batch file, which only `cmd.exe` can run, and `cmd.exe`
-  parses the workspace path by its own rules. The warning names the workspace file to open in VS
-  Code yourself.
+  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` of the requests that still use the older
+  SSH path (named consoles). A program found only in the current directory counts as not installed,
+  so `agw doctor` and the 1Password backend's readiness no longer vouch for one. An `EDITOR` given
+  as a path is run as given. On Windows, `workspace create --open-vscode` does not start VS Code:
+  its `code` command is a batch file, which only `cmd.exe` can run, and `cmd.exe` parses the
+  workspace path by its own rules. The warning names the workspace file to open in VS Code yourself.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
@@ -379,6 +378,33 @@ the VM once no backup is running.
   may have stopped part way, and running repair again continues it. A `getfacl` listing larger than
   that leaves the ACL comparison not verified, as a failed listing does.
 
+### Sessions
+
+`session create`, `start`, `restart`, `stop` (with `--all` too), `delete`, `attach`, `logs`,
+`describe` and `list --status`, the batch starts and session reconciliation, and the session
+teardown of `agent delete` and `workspace delete` reach the VM through the new layer, so they need
+what [What these commands need](#what-these-commands-need) lists and read no ssh configuration.
+Named consoles keep the older path for now.
+
+- **The session's environment is off the command line.** Its values, secrets included, travel in the
+  launch request's environment, which the session's own tmux server takes as its global environment
+  and every pane inherits, instead of as `tmux new-session -e` arguments. The operation log records
+  only their names.
+- **Every status read is one request with a 10-second deadline.** That covers the reads before a
+  start, restart, stop or delete and the PID repair, which waited for as long as the VM took before,
+  as well as the listings and `session describe`, which were bounded already. A read the VM does not
+  answer in time leaves a listing showing `unknown`, as before, and stops a lifecycle command with a
+  connection error instead of the refusal of an unknown runtime; nothing is torn down on a guess.
+  The batched read of `session list --status` runs as root as a whole, where it elevated only for
+  agent sessions.
+- **Launches are logged as the session's owner.** `session create`, `start` and `restart` write
+  every request of the launch, an agent session's requests as the agent included, to the command's
+  operation log by shape. `session stop --all` writes one `session-stop-all` log per VM. Status
+  reads write none.
+- **`session attach` runs `tmux attach` itself.** The connection starts `tmux` directly with its
+  arguments rather than through the admin's shell, and `[terminal] clear_on_detach` applies as
+  before.
+
 ## Create, reinit and the VM contract
 
 `vm create`, `vm reinit` and `vm confirm-release` reach the VM through the same connection layer.
@@ -409,7 +435,7 @@ the VM once no backup is running.
 - **The operation log** records each of these requests by its shape: the command's arguments, or a
   script's shell, with the working directory, the names of its environment variables and its
   deadline. A script's text and an environment variable's value are not written. Requests still on
-  the older SSH path (sessions) log as before.
+  the older SSH path (named consoles) log as before.
 
 ### Initialization steps
 

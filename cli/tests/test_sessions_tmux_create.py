@@ -158,7 +158,7 @@ class _FingerprintTarget:
 def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
     from agentworks.sessions.tmux import ProbeStatus
 
-    stable = capture_tmux_server_fingerprint(target=_FingerprintTarget(), socket_path="/run/s1.sock")  # type: ignore[arg-type]
+    stable = capture_tmux_server_fingerprint(run_command=_FingerprintTarget().run, socket_path="/run/s1.sock")
     assert stable.status is ProbeStatus.PRESENT
     assert stable.fingerprint is not None
     assert (stable.fingerprint.pid, stable.fingerprint.boot_id, stable.fingerprint.start_ticks) == (
@@ -167,43 +167,15 @@ def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
         98765,
     )
     changed_pid = capture_tmux_server_fingerprint(
-        target=_FingerprintTarget(second_pid=43),  # type: ignore[arg-type]
+        run_command=_FingerprintTarget(second_pid=43).run,
         socket_path="/run/s1.sock",
     )
     changed_ticks = capture_tmux_server_fingerprint(
-        target=_FingerprintTarget(second_ticks=98766),  # type: ignore[arg-type]
+        run_command=_FingerprintTarget(second_ticks=98766).run,
         socket_path="/run/s1.sock",
     )
     assert changed_pid.status is ProbeStatus.UNKNOWN
     assert changed_ticks.status is ProbeStatus.UNKNOWN
-
-
-def test_fingerprint_capture_elevates_agent_tmux_and_process_reads() -> None:
-    class _ElevatedTarget(_FingerprintTarget):
-        def __init__(self) -> None:
-            super().__init__()
-            self.calls: list[tuple[str, bool]] = []
-
-        def run(self, command: str, **kwargs: object) -> _SpyResult:
-            elevated = kwargs.get("sudo") is True
-            self.calls.append((command, elevated))
-            if ("display-message" in command or "/proc/42/stat" in command) and not elevated:
-                return _SpyResult(returncode=1)
-            return super().run(command, **kwargs)
-
-    target = _ElevatedTarget()
-    result = capture_tmux_server_fingerprint(  # type: ignore[arg-type]
-        target=target,
-        socket_path="/run/s1.sock",
-        sudo=True,
-    )
-
-    from agentworks.sessions.tmux import ProbeStatus
-
-    assert result.status is ProbeStatus.PRESENT
-    assert all(
-        elevated for command, elevated in target.calls if "display-message" in command or "/proc/42/stat" in command
-    )
 
 
 @pytest.mark.parametrize(
@@ -216,7 +188,7 @@ def test_fingerprint_capture_elevates_agent_tmux_and_process_reads() -> None:
 def test_fingerprint_capture_fails_closed_for_untrusted_boot_identity(target: _FingerprintTarget) -> None:
     from agentworks.sessions.tmux import ProbeStatus
 
-    result = capture_tmux_server_fingerprint(target=target, socket_path="/run/s1.sock")  # type: ignore[arg-type]
+    result = capture_tmux_server_fingerprint(run_command=target.run, socket_path="/run/s1.sock")
     assert result.status is ProbeStatus.UNKNOWN
     assert result.fingerprint is None
 
@@ -447,9 +419,8 @@ def test_admin_create_session_passes_env_to_run_command(
     spy_target: Files,
     managed_identity: bool,
 ) -> None:
-    """Admin-mode create_session: env reaches the SSH layer via run_command's
-    env kwarg (SetEnv on the wire) AND is embedded in the tmux new-session -e
-    flags."""
+    """Admin-mode create_session: env reaches the launch only as run_command's
+    env, which the new tmux server inherits, so no value is on its command line."""
     spy_run = _SpyRunCommand()
     env = {"AGENTWORKS_SESSION": "s1", "EDITOR": "nvim"}
     if managed_identity:
@@ -477,13 +448,8 @@ def test_admin_create_session_passes_env_to_run_command(
     new_session_calls = [c for c in spy_run.calls if "new-session" in c[0]]
     assert len(new_session_calls) == 1
     cmd, passed_env = new_session_calls[0]
-    # SetEnv side: env passed straight through to run_command.
     assert passed_env == expected
-    for name, value in expected.items():
-        assert f"-e {name}={value}" in cmd
-    # tmux -e side: per-pair flags embedded in the command.
-    assert " -e AGENTWORKS_SESSION=s1" in cmd
-    assert " -e EDITOR=nvim" in cmd
+    assert " -e " not in cmd and "nvim" not in cmd and "operator-override" not in cmd
     # Pane command wraps in login-interactive shell with cd && exec.
     assert "$SHELL -lic" in cmd
     assert "cd /workspace && exec claude" in cmd
@@ -493,8 +459,7 @@ def test_agent_create_session_uses_dedicated_socket_and_env(
     spy_target: Files,
     stub_agent_socket_setup: None,
 ) -> None:
-    """Agent-mode create_session keeps the agent socket path AND threads env
-    via the SSH layer + tmux -e flags."""
+    """Agent-mode create_session keeps the agent socket path and passes env as run_command's env."""
     spy_run = _SpyRunCommand()
     env = {"AGENTWORKS_SESSION": "s1"}
 
@@ -516,7 +481,7 @@ def test_agent_create_session_uses_dedicated_socket_and_env(
     assert len(new_session_calls) == 1
     cmd, passed_env = new_session_calls[0]
     assert passed_env == env
-    assert " -e AGENTWORKS_SESSION=s1" in cmd
+    assert " -e " not in cmd
 
 
 def test_admin_create_session_uses_admin_socket(
@@ -545,11 +510,10 @@ def test_admin_create_session_uses_admin_socket(
     assert sock in cmd
 
 
-def test_create_session_with_no_env_omits_e_flags(
+def test_create_session_with_no_env_sends_none(
     spy_target: Files,
 ) -> None:
-    """No env / empty env: behavior is unchanged from pre-pivot (no -e flags,
-    no SetEnv, plain pane command)."""
+    """No env: the launch carries no environment and a plain pane command."""
     spy_run = _SpyRunCommand()
 
     create_session(
@@ -566,7 +530,7 @@ def test_create_session_with_no_env_omits_e_flags(
 
     new_session_calls = [c for c in spy_run.calls if "new-session" in c[0]]
     cmd, passed_env = new_session_calls[0]
-    assert passed_env is None
+    assert not passed_env
     assert " -e " not in cmd
     # No command + no env: no pane command, tmux uses default-shell.
     assert "$SHELL" not in cmd

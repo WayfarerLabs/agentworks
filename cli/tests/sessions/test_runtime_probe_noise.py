@@ -26,8 +26,8 @@ def test_framed_native_observations_accept_preceding_login_output(noise):
             return result(noise + "\nAGW_RUNTIME_SESSION=")
 
     target = Target()
-    assert tmux.probe_tmux_server_pid(target=target).value == 42
-    assert tmux.read_boot_id(target) == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    assert tmux.probe_tmux_server_pid(run_command=target.run).value == 42
+    assert tmux.read_boot_id(target.run) == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     assert tmux.probe_tmux_session("s", run_command=target.run) is tmux.ProbeStatus.PRESENT
     assert tmux._probe_pane_liveness("s", run_command=target.run, socket_path="/tmp/owned") == ("dead", "23")
 
@@ -38,7 +38,7 @@ def test_framed_native_observations_accept_preceding_login_output(noise):
 )
 def test_unframed_duplicate_and_malformed_pid_results_remain_unknown(stdout):
     target = SimpleNamespace(run=lambda *a, **k: result(stdout))
-    assert tmux.probe_tmux_server_pid(target=target).status is tmux.ProbeStatus.UNKNOWN
+    assert tmux.probe_tmux_server_pid(run_command=target.run).status is tmux.ProbeStatus.UNKNOWN
 
 
 @pytest.mark.parametrize("payload", ["unexpected", "\nAGW_RUNTIME_SESSION=", "\x00"])

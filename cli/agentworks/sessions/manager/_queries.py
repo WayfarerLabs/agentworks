@@ -22,7 +22,6 @@ from agentworks.execution.errors import TrustMissing
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.runtime_time import derive_uptime_seconds, format_short_uptime, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
-from agentworks.sessions.tmux import exact_tmux_target
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
-    from agentworks.transports import Transport
 
 
 @dataclass(frozen=True)
@@ -181,13 +179,7 @@ def _delete_session_runtime(
         operation="session-delete",
         held_native_guard=held_native_guard,
         interaction=interaction,
-    ) as (
-        ws,
-        vm,
-        _run_command,
-        _run_as_root,
-        admin_target,
-    ):
+    ) as (ws, vm, admin, log):
         from agentworks.harness_setup.locking import native_mutation_guard
 
         with native_mutation_guard(db.path, vm.name, held=held_native_guard):
@@ -196,8 +188,8 @@ def _delete_session_runtime(
             if legacy:
                 status = SessionStatus.RUNNING
             else:
-                session = _mgr._ensure_pid(session, target=admin_target, db=db)
-                status = _mgr.check_session_status(session, target=admin_target)
+                session = _mgr._ensure_pid(session, admin=admin, db=db)
+                status = _mgr.check_session_status(session, admin=admin)
 
             if status == SessionStatus.UNKNOWN:
                 raise StateError(
@@ -214,13 +206,13 @@ def _delete_session_runtime(
                     hint="Use --force to delete.",
                 )
 
-            # Pick the destructive-op transport BEFORE prompting the operator.
-            # For agent sessions, ``_build_session_target`` probes direct agent
+            # Pick the destructive-op access BEFORE prompting the operator.
+            # For agent sessions, ``_session_owner_access`` probes direct agent
             # SSH; a pre-rollout agent surfaces here as an
             # actionable error rather than after the operator has already
-            # confirmed the delete. The helper returns a same-uid target, so
-            # no sudo is needed for the destructive ops below.
-            session_target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
+            # confirmed the delete. The access is the owner's, so nothing
+            # below elevates.
+            owner = _mgr._session_owner_access(session, vm=vm, config=config, db=db, admin=admin, logger=log)
 
             # Confirm before any destructive action
             if not yes and not output.confirm(f"Delete session '{name}'?"):
@@ -230,7 +222,7 @@ def _delete_session_runtime(
             if status != SessionStatus.STOPPED:
                 _mgr._teardown_session(
                     session,
-                    target=session_target,
+                    access=owner,
                     target_owns_session=True,
                     db=db,
                     force=force,
@@ -245,9 +237,7 @@ def _delete_session_runtime(
 
             from agentworks.artifacts.session import cleanup_session_artifacts
 
-            cleanup_session_artifacts(
-                db, session, _mgr._session_access(session, vm=vm, config=config, db=db, logger=admin_target.logger)
-            )
+            cleanup_session_artifacts(db, session, owner)
             _require_selected_session(db, name, selected_session_uuid)
             db.delete_session(name)
 
@@ -262,19 +252,19 @@ def _delete_session_runtime(
                     if agent:
                         remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
-            _mgr._regenerate_tmuxinator(db, config, vm, ws)
+            _mgr._regenerate_tmuxinator(db, config, admin, vm, ws)
 
             # Best-effort console cleanup runs after all DB / tmuxinator state has
             # settled. Stale tmux windows are recoverable cosmetic noise; if the
             # helper raises AgentworksError we skip the success message and any
-            # created_workspace / created_agent cleanup below -- those would re-use
-            # the same broken transport and just compound errors.
+            # created_workspace / created_agent cleanup below, which would reach
+            # the same broken VM and just compound errors.
             if member_consoles:
                 from agentworks.sessions.multi_console import kill_session_windows
 
                 # Consoles are admin-owned (carve-out): admin manages
-                # admin's tmux server. Use admin_target regardless of session mode.
-                kill_session_windows(admin_target, pairs=[(c, name) for c in member_consoles])
+                # admin's tmux server, whatever the session's mode.
+                kill_session_windows(admin, pairs=[(c, name) for c in member_consoles])
 
             output.info(f"Session '{name}' deleted")
 
@@ -492,23 +482,11 @@ def session_description(
             pass
         else:
             try:
-                target = _mgr.transport(vm, config)
+                status = _mgr.check_session_status(session, admin=_mgr._identity_access(vm, config, None, logger=None))
             except UserAbort:
                 raise
-            except (ConnectivityError, StateError):
+            except ConnectivityError:
                 pass
-            else:
-                from agentworks.sessions.manager._status import _BoundedStatusTarget
-
-                try:
-                    status = _mgr.check_session_status(
-                        session,
-                        target=cast("Transport", _BoundedStatusTarget(target)),
-                    )
-                except UserAbort:
-                    raise
-                except ConnectivityError:
-                    pass
     if status is SessionStatus.UNKNOWN:
         output.warn(f"Session '{name}' runtime status could not be determined.")
     return _session_structural_description(db, config, name, status)
@@ -938,7 +916,7 @@ def attach_session(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
-    from agentworks.sessions.tmux import tmux_cmd
+    from agentworks.execution.requests import TerminalCommand
 
     session = _mgr._require_session(db, name)
     with _mgr._prepare_vm(
@@ -947,14 +925,8 @@ def attach_session(
         session,
         operation="session-attach",
         interaction=interaction,
-    ) as (
-        _ws,
-        _vm,
-        _run_command,
-        _run_as_root,
-        target,
-    ):
-        status = _mgr.check_session_status(session, target=target)
+    ) as (_ws, _vm, admin, _log):
+        status = _mgr.check_session_status(session, admin=admin)
 
         if status == SessionStatus.STOPPED:
             raise StateError(
@@ -985,10 +957,11 @@ def attach_session(
 
         from agentworks.terminal import clear_screen_on_detach
 
-        q_session = exact_tmux_target(name)
+        # A legacy row's session is on the admin's default tmux server.
+        socket = ("-S", session.socket_path) if session.socket_path is not None else ()
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
-        return target.interactive(
-            tmux_cmd(f"attach -t {q_session}", session.socket_path),
+        return admin.attach(
+            TerminalCommand(("tmux", *socket, "attach", "-t", "=" + name)),
             clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )

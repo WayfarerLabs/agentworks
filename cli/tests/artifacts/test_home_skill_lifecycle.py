@@ -93,7 +93,7 @@ def test_deleting_one_same_user_session_preserves_the_other_home_packages(home_l
     current.restart()
     first = current.files()
     current.db.insert_agent_grant("a1", "ws1", "explicit")
-    monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: None)
     manager.create_session(
         current.db, current.config, name="s2", workspace="ws1", agent="a1", interaction=TtyInteractionPolicy.REFUSE

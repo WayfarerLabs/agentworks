@@ -181,9 +181,9 @@ def final_observations(invocation: RuntimeInvocation) -> None:
                 prepared = invocation.launches.get(name)
                 stopped = invocation.stops.get(name)
                 admin = (
-                    prepared.admin_target
+                    prepared.admin_access
                     if prepared is not None
-                    else stopped.admin_target
+                    else stopped.admin_access
                     if stopped is not None
                     else None
                 )
@@ -191,8 +191,8 @@ def final_observations(invocation: RuntimeInvocation) -> None:
                     raise StateError("guest stop is awaiting parent shutdown")
                 observed = sessions.observe_session_runtime(
                     current,
-                    admin_target=admin,
-                    session_target=prepared.session_target if prepared is not None and prepared.legacy else None,
+                    admin=admin,
+                    session_access=prepared.session_access if prepared is not None and prepared.legacy else None,
                 )
             else:
                 observed = SessionStatus.UNKNOWN

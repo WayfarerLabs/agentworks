@@ -10,8 +10,11 @@ from uuid import uuid4
 import pytest
 
 from agentworks.errors import ConnectivityError, ExternalError, StateError
-from agentworks.sessions.tmux import _raise_workload_died, capture_output
+from agentworks.execution.errors import CommandFailed
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.sessions.tmux import _raise_workload_died, access_run_command, capture_output
 from agentworks.ssh import SSHResult
+from tests.vm_access_support import Admin, Call, RecordingVMAccess
 
 
 @pytest.mark.parametrize("stage", ["main", "alternate", "cleanup"])
@@ -59,6 +62,33 @@ def test_dead_workload_falls_back_after_unsuccessful_main_capture():
     assert marker in str(caught.value) and "23" in str(caught.value)
     assert sum("capture-pane" in tokens for tokens in calls) == 2
     assert any("kill-server" in tokens for tokens in calls)
+
+
+@pytest.mark.parametrize("stage", ["main", "alternate", "cleanup"])
+@pytest.mark.parametrize("failure", ["unknown", "command-failed"])
+def test_dead_workload_over_an_access_keeps_status_when_a_request_does_not_complete_or_fails(stage, failure):
+    """I57 on the admin's access: a capture or kill that does not complete, or fails, is best effort."""
+    output = uuid4().hex
+    access = RecordingVMAccess([], Admin())
+
+    def answer(call: Call) -> Result | BaseException:
+        tokens = shlex.split(call.request.source)
+        operation = "cleanup" if "kill-server" in tokens else "alternate" if "-a" in tokens else "main"
+        if operation != stage:
+            return Result(Completed(0), output.encode() if operation == "alternate" else b"")
+        if failure == "unknown":
+            return Result(Unknown(UnknownReason.CONNECTION))
+        return CommandFailed("box", 1, Result(Completed(1)), streams_logged=True)
+
+    access.answer = answer
+    run = access_run_command(access, deadline=None, elevated=False)
+
+    with pytest.raises(StateError) as caught:
+        _raise_workload_died("probe", run_command=run, socket_path="/tmp/unused.sock", exit_status="23")
+
+    assert "23" in str(caught.value) and caught.value.entity_name == "probe"
+    assert (output in str(caught.value)) is (stage != "alternate")
+    assert sum("kill-server" in shlex.split(call.request.source) for call in access.calls) == 1
 
 
 @pytest.mark.parametrize("stage", ["main", "alternate", "cleanup"])

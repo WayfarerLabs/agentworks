@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, cast
 
-import agentworks.agents.manager as _mgr
 from agentworks import output
 from agentworks.errors import (
     AgentworksError,
@@ -39,14 +38,6 @@ if TYPE_CHECKING:
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
-
-# ``_mgr`` binds this module's own package object (safe: by the time
-# ``lifecycle`` is imported, ``agentworks.agents.manager`` is already in
-# ``sys.modules``, mid-initialization). ``delete_agent`` below reads
-# ``_mgr.transport`` at call time rather than importing ``transport``
-# directly, so ``tests/conftest.py`` and
-# ``tests/agents/test_delete_grant_revoke_orchestrated.py`` monkeypatching
-# ``agentworks.agents.manager.transport`` still reaches this call.
 
 
 def create_agent(
@@ -385,9 +376,12 @@ def delete_agent(
             with boundary:
                 # Kill running sessions for this agent (status-aware)
                 if agent_sessions:
+                    import agentworks.execution as execution
+                    from agentworks.execution.access import Admin
                     from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
 
-                    target = _mgr.transport(vm, config, logger=ssh_logger)
+                    # The admin tears the agent's sessions down as root and owns the console windows.
+                    admin = execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
                     agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
                     # Snapshot console memberships before db.delete_session cascades them.
                     console_pairs = [
@@ -398,7 +392,7 @@ def delete_agent(
                         try:
                             _teardown_session(
                                 session,
-                                target=target,
+                                access=admin,
                                 target_owns_session=False,
                                 db=db,
                                 force=True,
@@ -423,7 +417,7 @@ def delete_agent(
                     if console_pairs:
                         from agentworks.sessions.multi_console import kill_session_windows
 
-                        kill_session_windows(target, pairs=console_pairs)
+                        kill_session_windows(admin, pairs=console_pairs)
 
                 # Remove from all workspace groups
                 from agentworks.agents.grants import remove_from_workspace_group

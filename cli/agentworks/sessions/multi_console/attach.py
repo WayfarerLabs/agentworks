@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, ShellEntry, VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
@@ -305,30 +306,40 @@ def _teardown_console_staging(target: Transport, console_name: str) -> None:
 
 
 def kill_session_windows(
-    target: Transport,
+    admin: VMAccess,
     *,
     pairs: list[tuple[str, str]],
 ) -> None:
-    """Best-effort: kill each ``(console_name, session_name)`` window in live tmux.
+    """Best-effort: kill each ``(console_name, session_name)`` window in live tmux, on the admin's access.
 
     Used by every code path that removes a session from a console
     (``session delete``, ``workspace delete --force``, ``agent delete --force``,
     ``console remove-sessions``). Pairs are grouped by console so we probe
-    ``has-session`` once per console rather than once per pair. ``kill-window``
-    runs with ``check=False`` so a console that's live but lacks the window
-    (operator killed it manually) doesn't fail the cleanup.
+    ``has-session`` once per console rather than once per pair, one dispatch
+    within the observation deadline. ``kill-window`` runs with
+    ``check=False`` so a console that's live but lacks the window (operator
+    killed it manually) doesn't fail the cleanup.
 
-    AgentworksError propagates; transport-level surprises are warned and
-    swallowed because the DB has already settled by the time we reach here.
+    AgentworksError propagates, a request that does not complete included;
+    other surprises are warned and swallowed because the DB has already
+    settled by the time we reach here.
     """
+    from agentworks.sessions.tmux import _tmux_presence_from_result, access_run_command
+    from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
+
     if not pairs:
         return
     by_console: dict[str, list[str]] = {}
     for con, sess in pairs:
         by_console.setdefault(con, []).append(sess)
+    probe = access_run_command(admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False)
+    run = access_run_command(admin, deadline=None, elevated=False)
     try:
         for console_name, session_names in by_console.items():
-            presence = _mc._console_tmux_presence(target, console_name)
+            q_con = exact_tmux_target(tmux_session_name(console_name))
+            presence = _tmux_presence_from_result(
+                probe(f"tmux has-session -t {q_con}", check=False), missing_target_is_absent=True
+            )
             if presence is ProbeStatus.UNKNOWN:
                 raise StateError(
                     f"could not determine console '{console_name}' tmux state",
@@ -337,12 +348,8 @@ def kill_session_windows(
                 )
             if presence is ProbeStatus.ABSENT:
                 continue
-            q_con = exact_tmux_target(tmux_session_name(console_name))
             for session_name in session_names:
-                target.run(
-                    f"tmux kill-window -t {q_con}:{shlex.quote(session_name)}",
-                    check=False,
-                )
+                run(f"tmux kill-window -t {q_con}:{shlex.quote(session_name)}", check=False)
     except AgentworksError:
         raise
     except Exception as exc:

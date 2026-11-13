@@ -18,19 +18,19 @@ Status checking asks the stored dedicated server for the exact canonical session
 with a recorded positive PID, success is `RUNNING`. If that session is absent but the server still
 responds, the status is `RESIDUAL`: managed windows or panes remain but the canonical session cannot
 be attached. If the server does not respond, a changed VM boot ID or a provably absent fingerprint
-is `STOPPED`; a live matching fingerprint with an unreachable socket is `BROKEN`. An SSH transport
-failure or indeterminate identity is `UNKNOWN`, never evidence that the session stopped. A stopped
-row with a present unrecorded server is also `UNKNOWN`: a socket path locates a server but does not
-establish ownership.
+is `STOPPED`; a live matching fingerprint with an unreachable socket is `BROKEN`. A request that
+does not complete, or an indeterminate identity, is `UNKNOWN`, never evidence that the session
+stopped. A stopped row with a present unrecorded server is also `UNKNOWN`: a socket path locates a
+server but does not establish ownership.
 
 Inspection is read-only. Existing positive-PID rows retain their ordinary presence checks without
 eager identity repair. Batched checks combine the normal probes into one remote request per
 reachable VM. A pending launch with no recorded PID requires additional bounded reads to verify its
 native attempt identity and stable process fingerprint. These reads do not adopt the runtime or
-repair its row. Incomplete or indeterminate evidence stays `UNKNOWN`. Probes elevate only where
-needed to inspect agent-owned runtimes. Each guest call is non-interactive, makes one attempt, and
-has a 10-second timeout. Calls without fact input explicitly close stdin so Windows SSH does not
-retain the operator's console handle after returning the complete result.
+repair its row. Incomplete or indeterminate evidence stays `UNKNOWN`. Every read runs on the VM
+admin's access as one request, sent once, with a 10-second deadline. A single session's reads run as
+root only for an agent's runtime; the batched read runs as root, which reaches every session's
+server. Status reads write no operation log.
 
 Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
 them; the table adds `STATUS`, reports progress before SSH begins, and appends compact uptime to a
@@ -110,11 +110,13 @@ imply that a session is currently running or that process death was verified whi
 unreachable.
 
 `agw session stop --all` runs complete-fingerprint dedicated teardown operations concurrently, with
-a fixed ceiling of eight active sessions. Each worker owns one fresh transport and performs only
-remote identity validation, tmux teardown, absence proof, and exact socket cleanup. The invoking
-thread retains database and output ownership, persists verified results before announcing success,
-and runs incomplete dedicated or shared-server compatibility work serially after the concurrent
-lane. A failure in one session does not cancel its siblings.
+a fixed ceiling of eight active sessions. Each worker sends its requests on its VM's admin access,
+as root, each with a 10-second deadline, and performs only remote identity validation, tmux
+teardown, absence proof, and exact socket cleanup. The VM's requests from every worker are written
+to one `session-stop-all` operation log per VM. The invoking thread retains database and output
+ownership, persists verified results before announcing success, and runs incomplete dedicated or
+shared-server compatibility work serially after the concurrent lane. A failure in one session does
+not cancel its siblings.
 
 Before submission, an actionable unknown runtime refuses the entire destructive batch. Stopped
 intent accepted by the command remains recorded for retry. Safe PID repair and fresh observation
@@ -136,8 +138,9 @@ sibling is interrupted. Queued work that never ran remains blocked. During a qui
 it reports completed, active, and queued counts every five seconds.
 
 `--force` is intentionally narrow. It permits stale dedicated-socket cleanup only after the stored
-boot/PID/start-time fingerprint proves the old server process is absent. It does not turn unknown
-transport state, missing identity, PID reuse, or a matching live process into cleanup authority.
+boot/PID/start-time fingerprint proves the old server process is absent. It does not turn a request
+that did not complete, missing identity, PID reuse, or a matching live process into cleanup
+authority.
 
 The implementation is split between `cli/agentworks/sessions/manager/_status.py` (status
 derivation), `cli/agentworks/sessions/manager/_pids.py` (repair),

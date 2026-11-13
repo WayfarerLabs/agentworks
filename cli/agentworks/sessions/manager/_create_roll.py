@@ -27,9 +27,7 @@ if TYPE_CHECKING:
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.resources.registry import Registry
-    from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
+    from agentworks.vms.initializer.steps import InitLog
 
     from ._create_types import SessionGraph, SessionPlan
 
@@ -140,10 +138,7 @@ def _start_session_slice(
     plan: SessionPlan,
     graph: SessionGraph,
     vm: VMRow,
-    target: Transport,
-    logger: SSHLogger,
-    run_command: RunCommand,
-    agent_target: Transport | None,
+    logger: InitLog,
     secret_values: dict[str, str],
     setup_incomplete: bool,
     on_session_retained: Callable[[], None],
@@ -158,12 +153,8 @@ def _start_session_slice(
     """
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.secrets import ScopedSecrets
-    from agentworks.sessions.tmux import (
-        create_session as create_tmux_session,
-    )
-    from agentworks.sessions.tmux import (
-        deploy_restricted_config,
-    )
+    from agentworks.sessions.tmux import access_run_command, deploy_restricted_config
+    from agentworks.sessions.tmux import create_session as create_tmux_session
 
     name = plan.name
     workspace_name = plan.workspace_name
@@ -202,20 +193,18 @@ def _start_session_slice(
             )
         linux_user = agent_row.linux_user
         resolved_agent_name = agent_name
-        if agent_target is None:
-            # The ephemeral agent just realized: probe its direct
-            # SSH BEFORE any session mutation, same contract as
-            # the existing-agent probe above.
-            from agentworks.agents.manager import _assert_agent_ssh_works
-            from agentworks.transports import agent_transport
-
-            agent_target = agent_transport(vm, config, agent_row)
-            _assert_agent_ssh_works(agent_target, agent_row)
     else:
         mode = SessionMode.ADMIN
         linux_user = vm.admin_username
     admin_access = _mgr._identity_access(vm, config, None, logger=logger)
     agent_access = None if agent_row is None else _mgr._identity_access(vm, config, agent_row, logger=logger)
+    if agent_access is not None and agent_row is not None and plan.new_agent:
+        # The ephemeral agent just realized: probe its direct SSH BEFORE
+        # any session mutation, the same contract as an existing agent's
+        # probe at preflight.
+        from agentworks.agents.manager.access import _assert_agent_access_works
+
+        _assert_agent_access_works(agent_access, admin_access, agent_row)
 
     # Op-start runup: the required-commands check probes a
     # just-realized ephemeral agent here (it deferred at
@@ -398,25 +387,15 @@ def _start_session_slice(
                 prepared_artifacts,
                 artifact_application,
             )
-            deploy_restricted_config(run_command, history_limit=config.session.history_limit)
-            # Pick the SSH transport for tmux operations:
-            # - admin sessions: admin's run_command (unchanged)
-            # - agent sessions: agent's run_command (direct
-            #   target-user SSH). agent_target was built and probed above
-            #   so a pre-rollout agent never reaches this point. admin's
-            #   ``target`` is still passed for socket-root setup which
-            #   requires root.
-            session_run_command: RunCommand
-            if mode == SessionMode.AGENT:
-                assert agent_target is not None  # built in the agent branches above
-                session_run_command = agent_target.run
-            else:
-                session_run_command = run_command
+            deploy_restricted_config(admin_access.files(), history_limit=config.session.history_limit)
+            # The tmux requests run as the session's owner: the admin, or the
+            # agent over its own SSH, probed above so a pre-rollout agent never
+            # reaches this point. The admin's files still set up the socket
+            # roots, which needs root.
+            session_run_command = access_run_command(agent_access or admin_access, deadline=None, elevated=False)
             from agentworks.sessions.tmux import finalize_session_start
 
-            fingerprint_target = agent_target if mode == SessionMode.AGENT else target
-            assert fingerprint_target is not None
-            launch_boot = _mgr._get_boot_id(fingerprint_target)
+            launch_boot = _mgr._get_boot_id(session_run_command)
             if launch_boot is None:
                 raise ExternalError(
                     f"could not read the VM boot identity before launching session '{name}'",
@@ -448,7 +427,7 @@ def _start_session_slice(
             db.record_session_started(name)
             from agentworks.sessions.tmux import ProbeStatus, capture_tmux_server_fingerprint
 
-            fingerprint_probe = capture_tmux_server_fingerprint(target=fingerprint_target, socket_path=sock)
+            fingerprint_probe = capture_tmux_server_fingerprint(run_command=session_run_command, socket_path=sock)
             fingerprint = fingerprint_probe.fingerprint
             if (
                 fingerprint_probe.status is not ProbeStatus.PRESENT
@@ -487,7 +466,7 @@ def _start_session_slice(
                 if current is not None:
                     try:
                         retain_unknown_runtime = not _mgr._prove_stored_runtime_absent(
-                            current, target=agent_target or target
+                            current, run_command=session_run_command
                         )
                     except AgentworksError:
                         retain_unknown_runtime = True
@@ -541,7 +520,7 @@ def _start_session_slice(
         output.result(started)
 
     # Update the workspace's tmuxinator config.
-    _mgr._regenerate_tmuxinator(db, config, vm, ws)
+    _mgr._regenerate_tmuxinator(db, config, admin_access, vm, ws)
 
 
 def _roll_forward(
@@ -552,10 +531,7 @@ def _roll_forward(
     plan: SessionPlan,
     graph: SessionGraph,
     vm: VMRow,
-    target: Transport,
-    logger: SSHLogger,
-    run_command: RunCommand,
-    agent_target: Transport | None,
+    logger: InitLog,
     secret_values: dict[str, str],
     setup_failures: list[SetupFailure],
 ) -> None:
@@ -596,10 +572,7 @@ def _roll_forward(
             plan=plan,
             graph=graph,
             vm=vm,
-            target=target,
             logger=logger,
-            run_command=run_command,
-            agent_target=agent_target,
             secret_values=secret_values,
             setup_incomplete=bool(setup_failures),
             on_session_retained=retain_session,

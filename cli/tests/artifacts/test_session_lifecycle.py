@@ -133,7 +133,7 @@ def test_launch_environment_exposes_only_the_prepared_run_directory(lifecycle, m
     monkeypatch.setattr(tmux, "create_session", inspect)
     if operation == "create":
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
         manager.create_session(
             lifecycle.db,
             lifecycle.config,
@@ -335,7 +335,7 @@ def test_unhandled_session_inputs_warn_without_files_or_discovery_env(
     monkeypatch.setattr(tmux, "create_session", inspect)
     if operation == "create":
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
         manager.create_session(
             lifecycle.db,
             lifecycle.config,
@@ -433,7 +433,7 @@ def test_create_and_delete_keep_same_user_sessions_separate(lifecycle, monkeypat
     first_files = lifecycle.files()
     assert first is not None
     lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-    monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: lifecycle.events.append("delete-kill"))
     manager.create_session(
         lifecycle.db, lifecycle.config, name="s2", workspace="ws1", agent="a1", interaction=TtyInteractionPolicy.REFUSE
@@ -561,7 +561,7 @@ def test_uncaptured_ancestor_does_not_block_session_operations(lifecycle, monkey
         _stopped_until_launch(lifecycle, monkeypatch)
     if operation == "create":
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
     lifecycle.events.clear()
     if operation == "create":
         manager.create_session(

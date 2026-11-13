@@ -11,13 +11,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import SessionMode, SessionStatus, VMStatus
+from agentworks.execution.requests import Bytes, Script
+from agentworks.execution.results import Completed, Result
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions.multi_console import console_listing
 from agentworks.vms.manager import inspect
-from tests._runtime_probes import framed_runtime_result
+from tests.vm_access_support import Admin, Call, install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -171,41 +173,27 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     assert vm is not None
     name_key = base64.b64encode(b"work").decode("ascii")
 
-    class Target:
-        def run(self, _command: str, **kwargs: object) -> _Result:
-            input_data = kwargs.pop("input_data")
-            assert kwargs == {
-                "check": False,
-                "timeout": 10,
-                "retries": 1,
-                "tty": False,
-            }
-            assert isinstance(input_data, str)
-            assert input_data.endswith("\n")
-            lines = input_data.splitlines()
-            assert len(lines) == 1
-            encoded_name, encoded_socket, mode, pid = lines[0].split()
-            assert base64.b64decode(encoded_name, validate=True).decode() == "work"
-            assert base64.b64decode(encoded_socket, validate=True).decode() == "/tmp/work.sock"
-            assert (mode, pid) == ("u", "100")
-            events.append("transport-read")
-            return framed_runtime_result(_command, _Result(0, f"S:{name_key}:0::0::0::0:\n"))
-
-    def open_transport(*args: object, **kwargs: object) -> Target:
-        assert len(args) == 2
-        assert args[0] == vm
-        assert args[1] is config
-        assert kwargs == {}
-        events.append("transport-open")
-        return Target()
+    def read_status(call: Call) -> Result:
+        request = call.request
+        assert isinstance(request, Script)
+        assert (call.identity, request.elevated, request.deadline) == (Admin(), True, 10)
+        assert isinstance(request.stdin, Bytes)
+        lines = request.stdin.data.decode().splitlines()
+        assert len(lines) == 1
+        encoded_name, encoded_socket, pid = lines[0].split()
+        assert base64.b64decode(encoded_name, validate=True).decode() == "work"
+        assert base64.b64decode(encoded_socket, validate=True).decode() == "/tmp/work.sock"
+        assert pid == "100"
+        events.append("status-read")
+        return Result(Completed(0), f"\nAGW_RUNTIME_BATCH=S:{name_key}:0::0::0::0:\n".encode())
 
     def require_identity(*_args: object, **_kwargs: object) -> None:
         events.append("ssh-identity")
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _forbidden("provider status"))
     monkeypatch.setattr(Resolver, "resolve", _forbidden("secret resolution"))
-    monkeypatch.setattr(session_manager, "transport", open_transport)
-    monkeypatch.setattr("agentworks.transports.transport", open_transport)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = read_status
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require_identity)
     _guard_mutating_seams(monkeypatch)
 
@@ -221,7 +209,8 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
 
     assert status_writes == []
     assert observed.sessions[0].status == SessionStatus.RUNNING.value
-    assert events == ["ssh-identity", "transport-open", "transport-read"]
+    assert events == ["ssh-identity", "status-read"]
+    assert recorder.built == [("box", Admin())]
 
 
 def test_console_plain_and_status_lists_keep_their_distinct_safety_boundaries(

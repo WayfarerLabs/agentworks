@@ -33,7 +33,7 @@ def invocation(db, make_config):
     session = db.get_session("work")
     console = db.get_console("view")
     contexts = {"box": SimpleNamespace(vm=vm)}
-    stops = {"work": SimpleNamespace(admin_target=object())}
+    stops = {"work": SimpleNamespace(admin_access=object())}
     console_stops = {"view": SimpleNamespace()}
     with ExitStack() as stack:
         result = RuntimeInvocation(

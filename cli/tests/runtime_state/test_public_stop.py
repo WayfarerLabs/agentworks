@@ -53,13 +53,14 @@ def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_pe
     main_thread = threading.get_ident()
     created = []
 
-    def transport(vm, config, **kwargs):
-        target = SimpleNamespace(vm=vm.name, policy=kwargs)
-        created.append(target)
-        return target
+    def admin_access(vm, config, agent, *, logger):
+        assert agent is None and logger is not None
+        access = SimpleNamespace(vm=vm.name, log=logger)
+        created.append(access)
+        return access
 
-    monkeypatch.setattr(manager, "transport", transport)
-    monkeypatch.setattr(manager, "_build_session_target", lambda *a, **k: pytest.fail("unused direct-agent SSH"))
+    monkeypatch.setattr(manager, "_identity_access", admin_access)
+    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: pytest.fail("unused direct-agent SSH"))
     wave_ready = threading.Event()
     lock = threading.Lock()
     active = maximum = 0
@@ -68,13 +69,13 @@ def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_pe
 
     def execute(plan):
         nonlocal active, maximum
-        assert plan.target.policy == {"default_timeout": 10, "retries": 1}
-        assert plan.sudo == (plan.vm_name == "a")
+        assert (plan.access.vm, plan.deadline) == (plan.vm_name, 10)
+        assert plan.elevated == (plan.vm_name == "a")
         with lock:
             active += 1
             maximum = max(maximum, active)
             worker_threads.add(threading.get_ident())
-            worker_targets.append(plan.target)
+            worker_targets.append(plan.access)
             if active == 8:
                 wave_ready.set()
         assert wave_ready.wait(timeout=2)
@@ -96,7 +97,10 @@ def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_pe
     assert maximum == 8
     assert worker_threads and main_thread not in worker_threads
     assert set(persisted) == {main_thread}
-    assert len({id(target) for target in worker_targets}) == 12
+    # One admin access per VM, with its own stop-all log, serves every teardown on that VM.
+    assert sorted(access.vm for access in created) == ["a", "b"]
+    assert len({id(access.log) for access in created}) == 2
+    assert {id(access) for access in worker_targets} == {id(access) for access in created}
     assert all(
         row.pid == PID_STOPPED and row.desired_runtime_state is DesiredRuntimeState.STOPPED
         for row in db.list_sessions()
@@ -124,7 +128,7 @@ def test_filtered_one_bulk_uses_worker_while_named_stop_is_synchronous(db, make_
 
     monkeypatch.setattr(_teardown, "execute_dedicated_teardown", execute)
     monkeypatch.setattr(manager, "_teardown_session", teardown)
-    monkeypatch.setattr(manager, "_build_session_target", lambda *a, **k: manager.transport(db.get_vm("box"), object()))
+    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: k["admin"])
     if bulk:
         manager.stop_all_sessions(db, make_config(), workspace_name="ws-box", interaction=REFUSE)
         assert len(workers) == 1 and workers[0] != main_thread
@@ -202,7 +206,7 @@ def test_off_parent_explicit_stop_never_opens_transport_repairs_observes_guest_o
     _running(db, statuses, "work", "box")
     powers["box"] = VMStatus.STOPPED
     before = SessionRuntimeSnapshot.from_session(db.get_session("work"))
-    for method in ["transport", "ensure_pids_batch", "observe_session_statuses", "_build_session_target"]:
+    for method in ["_identity_access", "ensure_pids_batch", "observe_session_statuses", "_session_owner_access"]:
         monkeypatch.setattr(manager, method, lambda *a, **k: pytest.fail("off parent reached guest work"))
     if bulk:
         manager.stop_all_sessions(db, make_config(), interaction=REFUSE)
@@ -265,8 +269,8 @@ def test_live_public_stop_without_host_trust_keeps_intent_and_refuses_guest_work
     # Restore the production boundary to exercise the actual refusal here.
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require_vm_ssh_boundary)
     before = SessionRuntimeSnapshot.from_session(db.get_session("work"))
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport without trust"))
-    monkeypatch.setattr(manager, "_build_session_target", lambda *a, **k: pytest.fail("agent access without trust"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("guest transport without trust"))
+    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: pytest.fail("agent access without trust"))
     monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("teardown without trust"))
     with pytest.raises(StateError):
         if bulk:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -13,11 +13,10 @@ from agentworks.sessions.manager import _teardown as teardown_mod
 from agentworks.sessions.manager._teardown import DedicatedTeardownPlan
 from agentworks.sessions.tmux import ProbeStatus
 
-from .test_session_batch_stop_parallelism import BOOT_ID, _seed_session, _Target
+from .test_session_batch_stop_parallelism import BOOT_ID, _access, _seed_session
 
 if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow
-    from agentworks.transports import Transport
 
 
 @pytest.mark.parametrize("upgraded", [False, True])
@@ -59,7 +58,7 @@ def test_synchronous_completion_preserves_replaced_prepared_identity(
     monkeypatch.setattr(teardown_mod, "execute_dedicated_teardown", remote_success)
     with pytest.raises(StateError):
         teardown_mod.teardown_dedicated_session(
-            session, target=cast("Transport", _Target("serial")), target_owns_session=True, db=db, force=False
+            session, access=_access("serial"), target_owns_session=True, db=db, force=False
         )
     assert db.get_session(session.name) == changed_rows[0]
 
@@ -109,7 +108,7 @@ def test_incomplete_upgrade_refuses_replaced_identity_before_remote_execution(
     )
     with pytest.raises(StateError):
         teardown_mod.teardown_dedicated_session(
-            session, target=cast("Transport", _Target("serial")), target_owns_session=True, db=db, force=False
+            session, access=_access("serial"), target_owns_session=True, db=db, force=False
         )
     assert read(session.name) == changed_rows[0]
 
@@ -153,7 +152,7 @@ def test_incomplete_upgrade_preserves_changes_during_native_ownership_probe(
     )
     with pytest.raises(StateError):
         teardown_mod.teardown_dedicated_session(
-            session, target=cast("Transport", _Target("serial")), target_owns_session=True, db=db, force=False
+            session, access=_access("serial"), target_owns_session=True, db=db, force=False
         )
     assert db.get_session(session.name) == changed_rows[0]
 
@@ -167,7 +166,7 @@ def test_unreadable_runtime_recovery_preserves_state_in_both_lanes(
 
     socket_path = "/run/agentworks/admin-tmux-sockets/agentworks/session.sock"
     session = _seed_session(db, "session", socket_path=socket_path, pid=101, start_ticks=201)
-    target = cast("Transport", _Target("recovery"))
+    access = _access("recovery")
     monkeypatch.setattr(tmux_mod, "require_socket_path", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         tmux_mod, "capture_tmux_server_fingerprint", lambda **kwargs: tmux_mod.FingerprintProbe(ProbeStatus.ABSENT)
@@ -181,11 +180,11 @@ def test_unreadable_runtime_recovery_preserves_state_in_both_lanes(
     if mode == "serial":
         with pytest.raises(ConnectivityError if force else BrokenStateError):
             teardown_mod.teardown_dedicated_session(
-                session, target=target, target_owns_session=True, db=db, force=force
+                session, access=access, target_owns_session=True, db=db, force=force
             )
     else:
         plan = teardown_mod.prepare_dedicated_teardown(
-            db, session, vm_name="box", target=target, target_owns_session=True, force=force
+            db, session, vm_name="box", access=access, target_owns_session=True, force=force
         )
         failures = teardown_mod.execute_concurrent_dedicated_teardowns([plan], db=db)
         assert len(failures) == 1 and failures[0][0] == session.name

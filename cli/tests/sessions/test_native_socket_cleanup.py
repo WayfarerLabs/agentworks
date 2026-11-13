@@ -16,7 +16,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -28,11 +28,11 @@ from agentworks.sessions.manager._teardown import (
     _remove_stale_socket,
     execute_dedicated_teardown,
 )
-from agentworks.sessions.tmux import _cleanup_stale_sockets_under
+from agentworks.sessions.tmux import _cleanup_stale_sockets_under, access_run_command
 from tests.native_setup_fixtures import LocalFixtureTransport
 
 if TYPE_CHECKING:
-    from agentworks.transports import Transport
+    pass
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest socket and tmux commands")
 
@@ -92,8 +92,9 @@ def test_dedicated_worker_preserves_non_socket_paths(
             stored_pid=101,
             stored_boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             stored_start_ticks=201,
-            target=cast("Transport", target),
-            sudo=False,
+            access=target.access(),
+            elevated=False,
+            deadline=None,
             force=True,
         )
         with pytest.raises(StateError):
@@ -102,7 +103,9 @@ def test_dedicated_worker_preserves_non_socket_paths(
     else:
         with pytest.raises(ExternalError):
             _remove_stale_socket(
-                session_name="selected", socket_path=str(candidate), target=cast("Transport", target), sudo=False
+                session_name="selected",
+                socket_path=str(candidate),
+                run_command=access_run_command(target.access(), deadline=None, elevated=False),
             )
 
     assert outside.is_socket()

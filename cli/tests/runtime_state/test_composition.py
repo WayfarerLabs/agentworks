@@ -28,6 +28,7 @@ from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus, TmuxServerFingerprint
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 from tests.console_helpers import create_console_record
+from tests.vm_access_support import route_vm_access_to_target
 
 if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
@@ -123,9 +124,9 @@ def runtime(monkeypatch):
             pass
 
     target = Target()
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
-    monkeypatch.setattr(manager, "_get_boot_id", lambda target: BOOT)
+    route_vm_access_to_target(monkeypatch, target)
+    monkeypatch.setattr(manager, "_get_boot_id", lambda run_command: BOOT)
     monkeypatch.setattr(manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr(tmux, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux, "finalize_session_start", lambda *a, **k: None)
@@ -195,9 +196,7 @@ def test_workload_secret_failure_blocks_all_tmux_and_provider_stops(db, make_con
         return prepared
 
     monkeypatch.setattr(manager, "prepare_session_stop", prepare)
-    monkeypatch.setattr(
-        manager, "_build_session_target", lambda *a, **k: manager.transport(db.get_vm("launch"), object())
-    )
+    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: k["admin"])
     monkeypatch.setattr(
         manager, "_teardown_session", lambda *a, **k: pytest.fail("session stopped before shared secrets")
     )
@@ -235,7 +234,7 @@ def test_off_child_stop_never_enters_guest_or_hold(db, make_config, runtime, mon
     seed_vm(db, "box", target=DesiredRuntimeState.STOPPED)
     seed_session(db, "work", "box", target=DesiredRuntimeState.STOPPED)
     powers["box"] = VMStatus.STOPPED
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("off guest transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest transport"))
     reconcile_session(db, make_config(), name="work", interaction=REFUSE)
     assert not events
 

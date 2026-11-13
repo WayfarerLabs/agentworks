@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import base64
-from functools import partial
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
@@ -19,42 +18,37 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.execution.errors import TrustMissing
+from agentworks.execution.requests import Bytes, Script, Shell
 from agentworks.sessions.tmux import (
     ProbeStatus,
+    access_run_command,
     probe_tmux_server,
     probe_tmux_session,
     runtime_probe_command,
     runtime_probe_payload,
     runtime_probe_stderr,
 )
-from agentworks.status_observation import (
-    GUEST_OBSERVATION_ATTEMPTS,
-    GUEST_OBSERVATION_TIMEOUT_SECONDS,
-    cancelling_futures,
-)
+from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS, cancelling_futures
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
+    from agentworks.sessions.tmux import RunCommand
 
 _PID_PRESENT_FACT = "present"
 _PID_ABSENT_FACT = "absent"
 
 
-class _BoundedStatusTarget:
-    """Force singular inspection calls onto the batch probe's safe policy."""
+def observation_run_command(admin: VMAccess, session: SessionRow) -> RunCommand:
+    """The admin's bounded reads of ``session``'s runtime: each one dispatch within the observation deadline.
 
-    def __init__(self, target: Transport) -> None:
-        self._target = target
-
-    def run(self, command: str, **kwargs: Any) -> Any:
-        kwargs.update(
-            timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
-            retries=GUEST_OBSERVATION_ATTEMPTS,
-            tty=False,
-        )
-        return self._target.run(command, **kwargs)
+    An agent session's reads run as root, the admin's existing read boundary
+    over an agent-owned server, even before startup shared its socket.
+    """
+    return access_run_command(
+        admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=session.mode == SessionMode.AGENT.value
+    )
 
 
 def _pid_probe_script(pid: int) -> str:
@@ -72,27 +66,31 @@ def _pid_presence_from_fact(returncode: object, fact: object, *, stderr: object 
     return ProbeStatus.UNKNOWN
 
 
-def _pid_presence(pid: int, *, target: Transport, sudo: bool = False) -> ProbeStatus:
+def _pid_presence(pid: int, *, run_command: RunCommand) -> ProbeStatus:
     """Probe a PID without treating a transport failure as process absence."""
-    result = target.run(runtime_probe_command(_pid_probe_script(pid), "PRESENT"), sudo=sudo, check=False)
+    result = run_command(runtime_probe_command(_pid_probe_script(pid), "PRESENT"), check=False)
     stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "PRESENT")
     stderr = runtime_probe_stderr(getattr(result, "stderr", "") or "")
     return _pid_presence_from_fact(getattr(result, "returncode", None), stdout, stderr=stderr)
 
 
-def _get_boot_id(target: Transport) -> str | None:
+def _get_boot_id(run_command: RunCommand) -> str | None:
     """Read the current VM boot ID. Returns None on failure."""
     from agentworks.sessions.tmux import read_boot_id
 
-    return read_boot_id(target)
+    return read_boot_id(run_command)
 
 
 def check_session_status(
     session: SessionRow,
     *,
-    target: Transport | None = None,
+    admin: VMAccess | None = None,
 ) -> SessionStatus:
     """Determine session status. Dispatches by session type.
+
+    Every read runs on ``admin`` as one dispatch within the observation
+    deadline (``observation_run_command``); one that does not complete raises
+    its typed error, which callers read as an unknown state.
 
     No DB side effects. Raises ``StateError`` when the session row predates
     the per-session-socket model introduced by the env-and-secrets SDD
@@ -105,9 +103,9 @@ def check_session_status(
     operator restart.
     """
     if session.socket_path is not None:
-        if target is None:
-            raise TypeError("dedicated session status requires a transport")
-        return _check_dedicated_session(session, target=target)
+        if admin is None:
+            raise TypeError("dedicated session status requires the admin's access")
+        return _check_dedicated_session(session, admin=admin)
     if session.pid is None or session.boot_id is None:
         return SessionStatus.UNKNOWN
     raise _legacy_session_status_error(session)
@@ -127,22 +125,19 @@ def _legacy_session_status_error(session: SessionRow) -> StateError:
     )
 
 
-def _check_dedicated_session(session: SessionRow, *, target: Transport) -> SessionStatus:
+def _check_dedicated_session(session: SessionRow, *, admin: VMAccess) -> SessionStatus:
     """Sessions with their own tmux server and socket. Applies uniformly to
     admin and agent sessions after the env-and-secrets SDD migrated admin
     sessions to per-session sockets.
     """
     socket_path = session.socket_path
     assert socket_path is not None
-    # Match batch observation and fingerprint repair: admin inspection of an
-    # agent server uses the existing privileged read boundary, even before
-    # startup completed its shared socket permissions.
-    run_command = partial(target.run, sudo=session.mode == SessionMode.AGENT.value)
+    run_command = observation_run_command(admin, session)
     session_presence = probe_tmux_session(session.name, run_command=run_command, socket_path=socket_path)
     if session_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if session_presence is ProbeStatus.PRESENT:
-        if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, target=target):
+        if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, admin=admin):
             return SessionStatus.RUNNING
         return SessionStatus.UNKNOWN
 
@@ -160,7 +155,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     # has-session failed: STOPPED or BROKEN?
     if session.boot_id is None:
         return SessionStatus.UNKNOWN
-    current_boot = _mgr._get_boot_id(target)
+    current_boot = _mgr._get_boot_id(run_command)
     if current_boot is None:
         return SessionStatus.UNKNOWN  # can't verify boot cycle, unsafe to offer --force
     stored_boot_id = _mgr._validated_stored_boot_id(session)
@@ -168,11 +163,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
         return SessionStatus.STOPPED  # stale boot, PID is meaningless
     if session.pid is None or session.pid <= 0:
         return SessionStatus.UNKNOWN
-    pid_presence = _pid_presence(
-        session.pid,
-        target=target,
-        sudo=session.mode == SessionMode.AGENT.value,
-    )
+    pid_presence = _pid_presence(session.pid, run_command=run_command)
     if pid_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if pid_presence is ProbeStatus.ABSENT:
@@ -180,7 +171,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
 
 
-def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
+def _pending_launch_is_owned(session: SessionRow, *, admin: VMAccess) -> bool:
     """Observe a dispatched attempt without adopting its native identity."""
     from agentworks.sessions.tmux import (
         _matches_launch_attempt,
@@ -194,12 +185,11 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
     boot_id = canonical_boot_id(session.boot_id)
     if boot_id is None:
         return False
-    bounded = cast("Transport", _BoundedStatusTarget(target))
-    sudo = session.mode == SessionMode.AGENT.value
+    run_command = observation_run_command(admin, session)
     try:
         stored_ticks = _mgr._validated_stored_start_ticks(session)
-        require_socket_path(session.socket_path, run_command=partial(bounded.run, sudo=sudo))
-        probe = capture_tmux_server_fingerprint(target=bounded, socket_path=session.socket_path, sudo=sudo)
+        require_socket_path(session.socket_path, run_command=run_command)
+        probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=session.socket_path)
         observed = probe.fingerprint
         return (
             probe.status is ProbeStatus.PRESENT
@@ -207,13 +197,12 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
             and observed.boot_id == boot_id
             and (stored_ticks is None or stored_ticks == observed.start_ticks)
             and _matches_launch_attempt(
-                target=bounded,
+                run_command=run_command,
                 socket_path=session.socket_path,
                 session_name=session.name,
                 session_uuid=session.session_uuid,
                 run_id=session.run_id,
                 fingerprint=observed,
-                sudo=sudo,
             )
         )
     except UserAbort:
@@ -222,14 +211,27 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
         return False
 
 
+def batch_status_request(sessions: list[SessionRow]) -> Script:
+    """One VM's batch status probe: the loop program as root, the selected rows on its stdin."""
+    return Script(
+        runtime_probe_command(_batch_probe_command(), "BATCH"),
+        Shell.SH,
+        elevated=True,
+        deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+        stdin=Bytes(_batch_probe_data(sessions).encode()),
+    )
+
+
 def batch_check_status(
     sessions: list[SessionRow],
     *,
-    target: Transport,
+    admin: VMAccess,
 ) -> dict[str, SessionStatus]:
     """Probe session presence together, verifying pending launch candidates separately.
 
-    Returns {session_name: SessionStatus}. An unrecorded present server remains
+    The probe is one request as root on ``admin``, within the observation
+    deadline; one that does not complete raises its typed error. Returns
+    {session_name: SessionStatus}. An unrecorded present server remains
     ``UNKNOWN`` unless its exact native launch identity matches the pending
     attempt. Observation never adopts that identity into the persisted row.
     """
@@ -239,16 +241,9 @@ def batch_check_status(
     if not checkable:
         return {}
 
-    cmd = runtime_probe_command(_batch_probe_command(), "BATCH")
-    result = target.run(
-        cmd,
-        check=False,
-        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
-        retries=GUEST_OBSERVATION_ATTEMPTS,
-        tty=False,
-        input_data=_batch_probe_data(checkable),
-    )
-    stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "BATCH")
+    raw = admin.run(batch_status_request(checkable))
+    returncode = raw.require_completed(admin.vm_name)
+    stdout = runtime_probe_payload(raw.stdout.decode("utf-8", "replace"), "BATCH")
 
     status_map: dict[str, SessionStatus] = {
         session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
@@ -256,8 +251,8 @@ def batch_check_status(
     sessions_by_key = {_encoded_probe_field(session.name): session for session in checkable}
 
     if (
-        result.returncode != 0
-        or runtime_probe_stderr(result.stderr) != ""
+        returncode != 0
+        or runtime_probe_stderr(raw.stderr.decode("utf-8", "replace")) != ""
         or stdout is None
         or "\x00" in stdout
         or "\r" in stdout
@@ -286,7 +281,7 @@ def batch_check_status(
 
         has_presence = _batch_tmux_presence(fields[2], fields[3], missing_target_is_absent=True)
         if has_presence is ProbeStatus.PRESENT:
-            if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, target=target):
+            if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, admin=admin):
                 status_map[name] = SessionStatus.RUNNING
             continue
         if has_presence is ProbeStatus.UNKNOWN:
@@ -344,7 +339,6 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
     records = []
     for session in sessions:
         assert session.socket_path is not None
-        mode = "a" if session.mode == SessionMode.AGENT.value else "u"
         pid = (
             str(session.pid)
             if isinstance(session.pid, int) and not isinstance(session.pid, bool) and session.pid > 0
@@ -355,7 +349,6 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
                 (
                     _encoded_probe_field(session.name),
                     _encoded_probe_field(session.socket_path),
-                    mode,
                     pid,
                 )
             )
@@ -364,24 +357,19 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
 
 
 def _batch_probe_command() -> str:
-    """Build the constant-size loop program for a VM's session rows."""
+    """Build the constant-size loop program for a VM's session rows; it runs as root, so no row elevates."""
     return (
         "hex() { od -An -tx1 | tr -d ' \\n'; }; "
         'decode() { printf %s "$1" | base64 -d; }; '
         "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
         'BOOT_HEX=$(printf %s "$BOOT" | hex); '
-        "while read -r N64 S64 M PID; do "
+        "while read -r N64 S64 PID; do "
         'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; '
-        'run_tmux() { if [ "$M" = a ]; then sudo -n tmux -S "$SOCK" "$@"; '
-        'else tmux -S "$SOCK" "$@"; fi; }; '
-        'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
+        'HERR=$(tmux -S "$SOCK" has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
         'HHEX=$(printf %s "$HERR" | hex); '
-        "SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; "
+        'SERR=$(tmux -S "$SOCK" list-sessions 2>&1 >/dev/null); S=$?; '
         'SHEX=$(printf %s "$SERR" | hex); '
         'if [ "$PID" = - ]; then PFACT=; P=1; '
-        'elif [ "$M" = a ]; then '
-        'PFACT=$(sudo -n sh -c "if test -d /proc/$PID; then printf present; '
-        'else printf absent; fi" 2>/dev/null); P=$?; '
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
         'else printf absent; fi" 2>/dev/null); P=$?; fi; '
         'PHEX=$(printf %s "$PFACT" | hex); '
@@ -438,8 +426,8 @@ def observe_session_statuses(
 
     # Resolve each session's VM and group
     by_vm: dict[str, list[SessionRow]] = {}
-    vm_targets: dict[str, Transport] = {}
-    legacy_targets: dict[str, Transport] = {}
+    vm_admins: dict[str, VMAccess] = {}
+    legacy_owners: dict[str, VMAccess] = {}
     unavailable_vms: set[str] = set()
     result_map = {session.name: SessionStatus.UNKNOWN for session in sessions}
 
@@ -452,7 +440,7 @@ def observe_session_statuses(
             continue
         if ws.vm_name in unavailable_vms:
             continue
-        if ws.vm_name not in vm_targets:
+        if ws.vm_name not in vm_admins:
             if not vm.tailscale_host:
                 continue
             try:
@@ -470,22 +458,12 @@ def observe_session_statuses(
             except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
                 unavailable_vms.add(ws.vm_name)
                 continue
-            try:
-                vm_targets[ws.vm_name] = _mgr.transport(vm, config)
-            except UserAbort:
-                raise
-            except (ConnectivityError, StateError):
-                unavailable_vms.add(ws.vm_name)
-                continue
+            vm_admins[ws.vm_name] = _mgr._identity_access(vm, config, None, logger=None)
         by_vm.setdefault(ws.vm_name, []).append(s)
         if include_legacy and s.socket_path is None:
             try:
-                legacy_targets[s.name] = _mgr._build_session_target(
-                    s,
-                    vm=vm,
-                    config=config,
-                    db=db,
-                    admin_target=vm_targets[ws.vm_name],
+                legacy_owners[s.name] = _mgr._session_owner_access(
+                    s, vm=vm, config=config, db=db, admin=vm_admins[ws.vm_name], logger=None
                 )
             except UserAbort:
                 raise
@@ -496,15 +474,15 @@ def observe_session_statuses(
         return result_map
 
     def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
-        statuses = batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
+        statuses = batch_check_status(by_vm[vm_name], admin=vm_admins[vm_name])
         for session in by_vm[vm_name]:
-            target = legacy_targets.get(session.name)
-            if target is None:
+            owner = legacy_owners.get(session.name)
+            if owner is None:
                 continue
             try:
                 presence = probe_tmux_session(
                     session.name,
-                    run_command=_BoundedStatusTarget(target).run,
+                    run_command=access_run_command(owner, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False),
                     socket_path=None,
                 )
             except UserAbort:

@@ -132,7 +132,8 @@ class LocalFixtureTransport(Transport):
         a ``PythonProgram`` run here, in the request's working directory or the
         fixture's home, with the fixture's environment and the request's over
         it; a login program runs after the fixture's login shell reads its
-        ``.profile``. Each answered request's operation log record joins
+        ``.profile``. A command's line or a script's source joins
+        ``commands``, and each answered request's operation log record joins
         ``logged_output``.
         """
         request = call.request
@@ -142,8 +143,10 @@ class LocalFixtureTransport(Transport):
             return Result(Completed(0), str(self.home).encode())
         result = run_file_program_locally(call)
         if result is None and isinstance(request, Command):
+            self.commands.append(shlex.join(request.argv))
             result = self._spawn(list(request.argv), request)
         elif result is None and isinstance(request, Script) and request.shell in (Shell.BASH, Shell.SH):
+            self.commands.append(request.source)
             result = self._spawn([request.shell.value, "-c", request.source], request)
         elif result is None and isinstance(request, PythonProgram):
             program = shlex.join([sys.executable, "-I", "-S", "-c", request.source, *request.args])

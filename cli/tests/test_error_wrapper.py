@@ -20,6 +20,7 @@ from agentworks.ssh import SSHError
 
 from ._runtime_probes import framed_runtime_result
 from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
+from .vm_access_support import route_vm_access_to_target
 
 # Every access a command builds is the recording fake: these tests run no ssh.
 pytestmark = pytest.mark.usefixtures("vm_access_recorder")
@@ -439,11 +440,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
         def run(self, *args: object, **kwargs: object) -> _Result:
             return _Result()
 
-    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    # Patch both locations: manager imports ``transport`` eagerly at module
-    # load, so the agentworks.transports-side patch alone wouldn't take effect.
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
+    route_vm_access_to_target(monkeypatch, _Target())
     # deploy_restricted_config does its own SSH writes -- skip them.
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
@@ -510,9 +507,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
         def run(self, *args: object, **kwargs: object) -> _Result:
             return _Result()
 
-    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
+    route_vm_access_to_target(monkeypatch, _Target())
     # agent_transport is constructed in session_manager.create_session for
     # agent-mode sessions (FRD R1, direct target-user SSH). Stub it too so
     # the SimpleNamespace config doesn't need an `operator` attribute.
@@ -587,9 +582,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
         def run(self, *args: object, **kwargs: object) -> _Result:
             return _Result()
 
-    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
+    route_vm_access_to_target(monkeypatch, _Target())
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
@@ -645,7 +638,7 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     skip server-access grants for the dead pane. Drives the REAL tmux.create_session
     against a scripted agent transport whose pane_dead probe answers dead."""
     from agentworks.agents import grants as agent_grants
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents.manager import access as agent_access
     from agentworks.db import Database
     from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
@@ -707,10 +700,8 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
 
     agent_target = _DeadPaneAgentTarget()
 
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _AdminTarget())
-    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _AdminTarget())
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: agent_target)
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+    route_vm_access_to_target(monkeypatch, _AdminTarget(), agent_target)
+    monkeypatch.setattr(agent_access, "_assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(agent_grants, "remove_from_workspace_group", lambda *a, **k: None)

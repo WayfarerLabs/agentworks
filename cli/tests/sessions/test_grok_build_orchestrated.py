@@ -15,7 +15,7 @@ from agentworks.plugins.grok.harness_integration import session_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
-from tests.vm_access_support import check_result, install_access_recorder, is_command_check
+from tests.vm_access_support import check_result, is_command_check, route_vm_access_to_target
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -100,10 +100,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch, target: _GrokTarget) -> None:
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
-    factory = lambda vm, config, **kwargs: target  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
-    install_access_recorder(monkeypatch).answer = target.answer
+    route_vm_access_to_target(monkeypatch, target)
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)

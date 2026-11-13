@@ -9,14 +9,11 @@ Internal submodules reach cross-module helpers through this package object
 (``import agentworks.sessions.manager as _mgr`` then ``_mgr.NAME(...)``) rather
 than binding them with ``from ... import NAME``. The reads are deferred to call
 time, so the tests' monkeypatches on this namespace (for example
-``agentworks.sessions.manager.transport`` and
 ``agentworks.sessions.manager._require_workspace``) intercept the internal call
 paths, and the partially-initialized package during import is never a problem.
 """
 
 from __future__ import annotations
-
-from agentworks.transports import transport as transport
 
 from ._create import (
     create_session as create_session,
@@ -79,9 +76,6 @@ from ._logs import (
     session_logs as session_logs,
 )
 from ._pids import (
-    _build_session_target as _build_session_target,
-)
-from ._pids import (
     _ensure_pid as _ensure_pid,
 )
 from ._pids import (
@@ -101,6 +95,9 @@ from ._pids import (
 )
 from ._pids import (
     _session_access as _session_access,
+)
+from ._pids import (
+    _session_owner_access as _session_owner_access,
 )
 from ._pids import (
     _validated_observed_boot_id as _validated_observed_boot_id,
@@ -190,6 +187,9 @@ from ._status import (
     check_session_status as check_session_status,
 )
 from ._status import (
+    observation_run_command as observation_run_command,
+)
+from ._status import (
     observe_session_statuses as observe_session_statuses,
 )
 
@@ -220,7 +220,6 @@ __all__ = [
     "_session_secret_target",
     "_session_secret_target_pre_create",
     "_require_workspace",
-    "transport",
 ]
 
 from ._execute import execute_session_start as execute_session_start

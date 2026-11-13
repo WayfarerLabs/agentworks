@@ -672,23 +672,21 @@ def stub_vm_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) -> _FakeTarget:
-    """Route the transport layer through ``target`` and stub the VM gates.
+    """Route the transport layer and every ``VMAccess`` through ``target`` and stub the VM gates.
 
     Shared by the ``fake_target`` fixture (stateless) and the
     ``console_target_factory`` fixture (stateful, model-backed), so both
-    install the same transport seams and gate stubs. Returns ``target`` for
+    install the same seams and gate stubs. The console modules still build
+    the legacy transport (``agentworks.transports.transport``); every other
+    request reaches ``target`` through a recording access
+    (``vm_access_support.route_vm_access_to_target``). Returns ``target`` for
     the caller to keep a reference.
     """
-    # ``agentworks.transports.transport`` is the canonical admin-transport
-    # factory; ``agentworks.sessions.manager.transport`` covers manager's
-    # eager top-level import (used by observe_session_statuses and friends).
+    from tests.vm_access_support import route_vm_access_to_target
+
     fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    # ``sessions.manager`` and ``agents.manager`` import ``transport`` at
-    # module load (eager), so the agentworks.transports-side patch alone
-    # wouldn't take effect for callers that already captured the binding.
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.manager.transport", fake_factory)
+    route_vm_access_to_target(monkeypatch, target)
     stub_vm_gates(monkeypatch)
     # The interactive code path now lives on the transport itself; the
     # fake target exposes it as a no-op so attach flows return cleanly.

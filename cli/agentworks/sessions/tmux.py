@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
     from agentworks.execution.access import VMAccess
     from agentworks.execution.files import Files
-    from agentworks.transports import Transport
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
 DEFAULT_HISTORY_LIMIT = 50_000
@@ -65,10 +64,14 @@ _SESSION_SOCKET_OVERHEAD = len(AGENT_SOCKET_ROOT) + len("/") + LINUX_USERNAME_MA
 MAX_SESSION_NAME_LENGTH = (SUN_PATH_MAX - 1) - _SESSION_SOCKET_OVERHEAD  # 107 - 73 = 34
 
 # Admin tmux socket infrastructure (mirrors the agent pattern; per-session
-# sockets so each admin session creates a fresh tmux server that inherits the
-# SetEnv-delivered env from the SSH connection, preventing the prior shared-
-# server env-leak across admin sessions).
+# sockets so each admin session creates a fresh tmux server that starts with
+# the session's own environment from its launch request, preventing the prior
+# shared-server env-leak across admin sessions).
 ADMIN_SOCKET_ROOT = "/run/agentworks/admin-tmux-sockets"
+
+# The launch line runs the session's environment, which may set PATH, so it
+# names Debian's tmux rather than searching for one.
+TMUX_BINARY = "/usr/bin/tmux"
 
 
 class RunCommand(Protocol):
@@ -542,25 +545,26 @@ unbind :          # command-prompt (prevents arbitrary tmux commands)
 
 
 def deploy_restricted_config(
-    run_command: RunCommand,
+    files: Files,
     history_limit: int = DEFAULT_HISTORY_LIMIT,
 ) -> None:
-    """Write the restricted tmux config to the VM."""
-    config = generate_restricted_config(history_limit)
-    # Ensure directory exists and write config
-    run_command(f"sudo mkdir -p $(dirname {RESTRICTED_CONFIG_PATH})")
-    run_command(f"sudo tee {RESTRICTED_CONFIG_PATH} > /dev/null << 'TMUX_CONF'\n{config}TMUX_CONF")
+    """Write the restricted tmux config to the VM as root, in one file operation on the admin's ``files``."""
+    files.write(
+        RESTRICTED_CONFIG_PATH,
+        generate_restricted_config(history_limit).encode(),
+        mode=0o644,
+        parent_mode=0o755,
+        elevated=True,
+    )
 
 
-def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -> str:
-    """Build a tmux command string, optionally with ``-S`` and ``sudo``.
+def tmux_cmd(base: str, socket_path: str | None = None, *, binary: str = "tmux") -> str:
+    """Build a tmux command string, with ``-S`` for a dedicated server's socket.
 
-    Owner-targeted session commands do not need sudo because socket access goes
-    through group permissions. Admin-targeted batch operations use
-    ``sudo=True`` when inspecting agent-owned runtimes.
+    ``binary`` is the tmux to run: ``tmux`` from the request's ``PATH``, or
+    :data:`TMUX_BINARY` where the session's own environment is in effect.
     """
-    cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
-    return f"sudo -n {cmd}" if sudo else cmd
+    return f"{binary} -S {shlex.quote(socket_path)} {base}" if socket_path else f"{binary} {base}"
 
 
 def exact_tmux_target(name: str) -> str:
@@ -674,10 +678,10 @@ def _pane_command(command: str, q_path: str) -> str:
     ``cd ... && exec exec <cmd>``; that's harmless at runtime but visible
     in scrollback and confusing.)
 
-    Env injection is NOT part of this string. Env reaches the pane via
-    ``tmux new-session -e KEY=VAL`` (which seeds the session-environment
-    table) and via SSH SetEnv (which seeds the tmux server's process env
-    when the server starts).
+    Env injection is NOT part of this string. The session's environment is
+    in the launch request's own environment, which the tmux server inherits
+    when it starts and copies into the global environment every pane gets;
+    ``$SHELL`` is the passwd entry's, which the launcher sets.
     """
     if not command:
         return ""
@@ -882,21 +886,20 @@ def create_session(
 
     Both admin and agent modes use per-session sockets under
     ``/run/agentworks/<mode>-tmux-sockets/<user>/<name>.sock`` (per the env-
-    and-secrets SDD: each session gets a fresh tmux server, so the SetEnv-
-    delivered env from the SSH connection reaches the pane via the server
-    inheriting its own creation env).
+    and-secrets SDD: each session gets a fresh tmux server, which copies its
+    own starting environment into its global environment, so every pane gets
+    the session's environment).
 
-    For admin mode, ``run_command`` is admin's SSH connection. For agent
-    mode, ``run_command`` is the AGENT's SSH connection. ``admin_files`` is
-    the admin's ``Files``, whose access sets up the socket roots as root
-    (writing under ``/run/agentworks/``) in either mode.
+    For admin mode, ``run_command`` runs as the admin. For agent mode,
+    ``run_command`` runs as the AGENT. ``admin_files`` is the admin's
+    ``Files``, whose access sets up the socket roots as root (writing under
+    ``/run/agentworks/``) in either mode.
 
-    ``env`` flows to the pane via two channels (belt and suspenders):
-    1. ``run_command`` materializes ``-o SetEnv=K=V`` args on the SSH
-       command line so sshd injects the vars into the user's shell that
-       runs ``tmux new-session``; tmux inherits.
-    2. ``-e KEY=VAL`` on ``tmux new-session`` seeds the session-environment
-       table so per-session env stays scoped to this session.
+    ``env``, with the launch identity, travels in the launch request's own
+    environment: the shell that runs ``tmux new-session`` has it, and the
+    server it starts inherits it. No tmux argument carries a value, and the
+    launch line runs :data:`TMUX_BINARY`, since that environment may set
+    ``PATH``.
 
     The new server holds a dead pane with ``remain-on-exit`` so its diagnostics
     survive the caller's stable-identity checkpoint. This returns the acknowledged
@@ -926,7 +929,6 @@ def create_session(
             AGENTWORKS_SESSION_UUID=session_uuid,
             AGENTWORKS_RUN_ID=run_id,
         )
-    env_flags = _tmux_env_flags(launch_env)
 
     # Per-session socket setup. The admin path uses the simpler shape (no
     # cross-user group magic); the agent path keeps the existing group-shared
@@ -982,8 +984,8 @@ def create_session(
     # Keep the pane ID returned by new-session, since user config and the
     # workload itself can create or select other windows on this server.
     cmd = (
-        f"tmux -f {shlex.quote(RESTRICTED_CONFIG_PATH)} -S {q_sock}"
-        f" new-session -d -P -F '#{{pane_id}}' -s {q_session} -c {q_path}{env_flags}"
+        f"{TMUX_BINARY} -f {shlex.quote(RESTRICTED_CONFIG_PATH)} -S {q_sock}"
+        f" new-session -d -P -F '#{{pane_id}}' -s {q_session} -c {q_path}"
     )
     if pane_cmd:
         cmd += f" {shlex.quote(pane_cmd)}"
@@ -991,14 +993,14 @@ def create_session(
         f"agw_launch_pane=$({cmd}) || exit $?; "
         'case "$agw_launch_pane" in %*) ;; *) exit 1;; esac; '
         'case "${agw_launch_pane#%}" in ""|*[!0-9]*) exit 1;; esac; '
-        + tmux_cmd('set-option -g @agentworks-launch-pane "$agw_launch_pane"', sock)
+        + tmux_cmd('set-option -g @agentworks-launch-pane "$agw_launch_pane"', sock, binary=TMUX_BINARY)
         + " \\; set-option -t \"$agw_launch_pane\" remain-on-exit on \\; display-message -p '#{pid}'"
     )
     # Checkpoint only after all synchronous prechecks. Once dispatched, a lost
     # acknowledgement cannot establish whether the server was created.
     if before_spawn is not None:
         before_spawn()
-    result = run_command(cmd, env=launch_env if launch_env else env)
+    result = run_command(cmd, env=launch_env)
     try:
         pid = _parse_pid(getattr(result, "stdout", "") or "", context="after session create")
     except RuntimeError:
@@ -1195,21 +1197,23 @@ def _parse_pid(raw: str, context: str) -> int:
 
 def probe_tmux_server_pid(
     *,
-    target: Transport,
+    run_command: RunCommand,
     socket_path: str | None = None,
-    sudo: bool = False,
 ) -> IntegerProbe:
     """Probe the positive PID of a running tmux server."""
     cmd = runtime_probe_command(tmux_cmd("display-message -p '#{pid}'", socket_path), "PID")
-    result = target.run(cmd, sudo=True, check=False) if sudo else target.run(cmd, check=False)
-    payload = runtime_probe_payload(result.stdout, "PID")
+    result = run_command(cmd, check=False)
+    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "PID")
     if payload is None:
         return IntegerProbe(ProbeStatus.UNKNOWN)
     presence = _tmux_presence_from_result(result, missing_target_is_absent=False, stdout=payload)
     if presence is not ProbeStatus.PRESENT:
         return IntegerProbe(presence)
     pid_str = payload.strip()
-    if not re.fullmatch(r"[0-9]+", pid_str, re.ASCII) or runtime_probe_stderr(result.stderr) != "":
+    if (
+        not re.fullmatch(r"[0-9]+", pid_str, re.ASCII)
+        or runtime_probe_stderr(getattr(result, "stderr", "") or "") != ""
+    ):
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         pid = int(pid_str)
@@ -1237,21 +1241,16 @@ def parse_process_start_ticks(stat_line: str) -> int:
     return ticks
 
 
-def probe_process_start_ticks(
-    pid: int,
-    *,
-    target: Transport,
-    sudo: bool = False,
-) -> IntegerProbe:
+def probe_process_start_ticks(pid: int, *, run_command: RunCommand) -> IntegerProbe:
     """Probe one process start time without conflating failure with absence."""
-    result = target.run(runtime_probe_command(f"cat /proc/{pid}/stat", "TICKS"), sudo=sudo, check=False)
+    result = run_command(runtime_probe_command(f"cat /proc/{pid}/stat", "TICKS"), check=False)
     if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
         return IntegerProbe(ProbeStatus.UNKNOWN)
-    payload = runtime_probe_payload(result.stdout, "TICKS")
+    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "TICKS")
     if payload is None:
         return IntegerProbe(ProbeStatus.UNKNOWN)
     payload = payload.strip()
-    if "\n" in payload or "\r" in payload or runtime_probe_stderr(result.stderr) != "":
+    if "\n" in payload or "\r" in payload or runtime_probe_stderr(getattr(result, "stderr", "") or "") != "":
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         return IntegerProbe(ProbeStatus.PRESENT, parse_process_start_ticks(payload))
@@ -1259,31 +1258,26 @@ def probe_process_start_ticks(
         return IntegerProbe(ProbeStatus.UNKNOWN)
 
 
-def read_boot_id(target: Transport) -> str | None:
+def read_boot_id(run_command: RunCommand) -> str | None:
     """Read a canonical boot UUID from this command's own observation frame."""
-    result = target.run(runtime_probe_command("cat /proc/sys/kernel/random/boot_id", "BOOT"), check=False)
+    result = run_command(runtime_probe_command("cat /proc/sys/kernel/random/boot_id", "BOOT"), check=False)
     if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
         return None
-    if runtime_probe_stderr(result.stderr) != "":
+    if runtime_probe_stderr(getattr(result, "stderr", "") or "") != "":
         return None
     return canonical_boot_id(runtime_probe_payload(getattr(result, "stdout", "") or "", "BOOT"))
 
 
-def capture_tmux_server_fingerprint(
-    *,
-    target: Transport,
-    socket_path: str,
-    sudo: bool = False,
-) -> FingerprintProbe:
+def capture_tmux_server_fingerprint(*, run_command: RunCommand, socket_path: str) -> FingerprintProbe:
     """Capture a stable tmux PID, boot ID, and process start time."""
-    first_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
+    first_pid = probe_tmux_server_pid(run_command=run_command, socket_path=socket_path)
     if first_pid.status is not ProbeStatus.PRESENT:
         return FingerprintProbe(first_pid.status)
     assert first_pid.value is not None
-    first_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
-    boot_id = read_boot_id(target)
-    second_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
-    second_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
+    first_ticks = probe_process_start_ticks(first_pid.value, run_command=run_command)
+    boot_id = read_boot_id(run_command)
+    second_pid = probe_tmux_server_pid(run_command=run_command, socket_path=socket_path)
+    second_ticks = probe_process_start_ticks(first_pid.value, run_command=run_command)
     if second_pid.status is ProbeStatus.ABSENT:
         return FingerprintProbe(ProbeStatus.ABSENT)
     if (
@@ -1304,27 +1298,34 @@ def capture_tmux_server_fingerprint(
 
 def _matches_launch_attempt(
     *,
-    target: Transport,
+    run_command: RunCommand,
     socket_path: str,
     session_name: str,
     session_uuid: str,
     run_id: str | None,
     fingerprint: TmuxServerFingerprint,
-    sudo: bool = False,
 ) -> bool:
-    """Bind an unacknowledged launch to its exact native session and stable server."""
+    """Bind an unacknowledged launch to its exact native session and stable server.
+
+    The launch identity is in the server's global environment, which the
+    server copied from the launch request's environment when it started.
+    """
     if run_id is None:
         return False
     q_target = exact_tmux_target(session_name)
     commands = (
         tmux_cmd(f"display-message -p -t {q_target} '#{{pid}}'", socket_path),
-        tmux_cmd(f"show-environment -t {q_target} _AGW_SESSION_UUID", socket_path),
-        tmux_cmd(f"show-environment -t {q_target} _AGW_RUN_ID", socket_path),
+        tmux_cmd("show-environment -g _AGW_SESSION_UUID", socket_path),
+        tmux_cmd("show-environment -g _AGW_RUN_ID", socket_path),
     )
-    result = target.run(runtime_probe_command(" && ".join(commands), "LAUNCH"), sudo=sudo, check=False)
-    payload = runtime_probe_payload(result.stdout, "LAUNCH")
+    result = run_command(runtime_probe_command(" && ".join(commands), "LAUNCH"), check=False)
+    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "LAUNCH")
     expected = f"{fingerprint.pid}\n_AGW_SESSION_UUID={session_uuid}\n_AGW_RUN_ID={run_id}\n"
-    if result.returncode != 0 or runtime_probe_stderr(result.stderr) != "" or payload != expected:
+    if (
+        getattr(result, "returncode", None) != 0
+        or runtime_probe_stderr(getattr(result, "stderr", "") or "") != ""
+        or payload != expected
+    ):
         return False
-    verified = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
+    verified = capture_tmux_server_fingerprint(run_command=run_command, socket_path=socket_path)
     return verified.status is ProbeStatus.PRESENT and verified.fingerprint == fingerprint

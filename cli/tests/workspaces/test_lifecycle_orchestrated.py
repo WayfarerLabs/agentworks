@@ -238,9 +238,7 @@ def _hit(needle: str, cmd: str) -> bool:
 
 
 def _route(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRecorder:
-    """Route the admin's transport and access to ``fake``: delete's session teardown still takes a transport."""
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
+    """Route the admin's access to ``fake``."""
     recorder = install_access_recorder(monkeypatch)
     recorder.answer = fake.answer
     return recorder
@@ -248,7 +246,7 @@ def _route(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRec
 
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
-    """One recording admin target behind the canonical transport factory and the admin's access."""
+    """One recording admin target behind the admin's access."""
     fake = _FakeAdminTarget()
     _route(monkeypatch, fake)
     return fake

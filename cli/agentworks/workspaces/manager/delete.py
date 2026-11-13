@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
-from agentworks.vms.manager import gated_vm_boundary
+from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import stored_workspace_path
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
 
 
@@ -105,23 +105,16 @@ def delete_workspace(
     with native_mutation_guard(
         db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard
     ) as guard:
-        # The operation's log. It is an SSHLogger, not vms.manager.operation_log,
-        # only because session teardown and kill_session_windows still take a
-        # legacy transport, which logs through one; they move in transport take
-        # 2's sessions batch.
         import contextlib
 
-        from agentworks.ssh import SSHLogger
-
-        ssh_logger = SSHLogger(ws.vm_name, "workspace-delete")
-        try:
+        with operation_log(ws.vm_name, "workspace-delete") as log:
             output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
 
             # Kill running sessions (status-aware) and delete session records
             vm = db.get_vm(ws.vm_name)
-            # console_pairs is populated only when we have live SSH access; the
-            # post-delete cleanup is best-effort and skips when target is None.
-            target: Transport | None = None
+            # console_pairs is populated only when we reach the VM; the
+            # post-delete cleanup is best-effort and skips when admin is None.
+            admin: VMAccess | None = None
             console_pairs: list[tuple[str, str]] = []
             with contextlib.ExitStack() as _keepalive_stack:
                 if vm is not None:
@@ -171,12 +164,13 @@ def delete_workspace(
 
                 if vm is not None and vm.tailscale_host is not None:
                     from agentworks.sessions.manager import (
+                        _identity_access,
                         _teardown_session,
                         ensure_pids_batch,
                     )
-                    from agentworks.transports import transport
 
-                    target = transport(vm, config, logger=ssh_logger)
+                    # The admin tears an agent's session down as root and owns the console windows.
+                    admin = _identity_access(vm, config, None, logger=log)
                     sessions = db.list_sessions(workspace_name=name)
                     sessions = ensure_pids_batch(sessions, db=db, config=config)
                     # Snapshot console memberships before the FK cascade clears them.
@@ -186,7 +180,7 @@ def delete_workspace(
                         try:
                             _teardown_session(
                                 session,
-                                target=target,
+                                access=admin,
                                 target_owns_session=session.agent_name is None,
                                 db=db,
                                 force=True,
@@ -209,10 +203,10 @@ def delete_workspace(
                     cleanup_workspace_excludes(
                         db,
                         ws,
-                        lambda: _identity_access(vm, config, None, logger=ssh_logger),
-                        redactions=ssh_logger.redactions,
+                        lambda: _identity_access(vm, config, None, logger=log),
+                        redactions=log.redactions,
                     )
-                if vm is not None and target is not None:
+                if vm is not None and admin is not None:
                     from agentworks.artifacts.session import cleanup_session_artifacts
                     from agentworks.harness_setup.state import read_native_setup
                     from agentworks.sessions.manager import _session_access
@@ -225,7 +219,7 @@ def delete_workspace(
                             ):
                                 continue
                             cleanup_session_artifacts(
-                                db, session, _session_access(session, vm=vm, config=config, db=db, logger=ssh_logger)
+                                db, session, _session_access(session, vm=vm, config=config, db=db, logger=log)
                             )
                         except Exception:
                             output.warn(
@@ -236,12 +230,12 @@ def delete_workspace(
                 db.delete_sessions_for_workspace(name)
 
                 # Best-effort: take down dangling 'Waiting for session...' windows in any
-                # console that listed one of these sessions. Skips when we have no live
-                # target (VM down or never had a tailnet host).
-                if target is not None and console_pairs:
+                # console that listed one of these sessions. Skips when the VM was
+                # not reached (VM down or never had a tailnet host).
+                if admin is not None and console_pairs:
                     from agentworks.sessions.multi_console import kill_session_windows
 
-                    kill_session_windows(target, pairs=console_pairs)
+                    kill_session_windows(admin, pairs=console_pairs)
 
                 # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
                 if vm is not None:
@@ -252,11 +246,11 @@ def delete_workspace(
                 if vm is not None and path_known:
                     from agentworks.workspaces.backends.vm import delete_vm_workspace
 
-                    delete_vm_workspace(vm, config, name, ws.workspace_path, ws.linux_group, logger=ssh_logger)
+                    delete_vm_workspace(vm, config, name, ws.workspace_path, ws.linux_group, logger=log)
                 elif vm is not None:
                     from agentworks.workspaces.backends.vm import delete_vm_workspace_keeping_files
 
-                    delete_vm_workspace_keeping_files(vm, config, name, ws.linux_group, logger=ssh_logger)
+                    delete_vm_workspace_keeping_files(vm, config, name, ws.linux_group, logger=log)
 
                 # Remove .code-workspace file
                 vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"
@@ -264,5 +258,3 @@ def delete_workspace(
 
                 db.delete_workspace(name)
                 output.info(f"Workspace '{name}' deleted")
-        finally:
-            ssh_logger.close()

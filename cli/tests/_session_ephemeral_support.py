@@ -41,6 +41,7 @@ from agentworks import output
 from agentworks.db import Database, InitStatus
 
 from .conftest import stub_build_registry, stub_vm_gates
+from .vm_access_support import route_vm_access_to_target
 
 
 @pytest.fixture(autouse=True)
@@ -114,8 +115,7 @@ def _install_session_prep_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
 
     factory = lambda *a, **k: _Target()  # noqa: E731
     monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
-    monkeypatch.setattr("agentworks.transports.agent_transport", factory)
+    route_vm_access_to_target(monkeypatch, _Target())
     stub_session_resolvers(monkeypatch)
 
 

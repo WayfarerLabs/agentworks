@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, NamedTuple
 from agentworks.errors import (
     AuthorizationError,
     NotFoundError,
-    StateError,
     ValidationError,
 )
 
@@ -32,7 +31,6 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
-    from agentworks.transports import Transport
 
 AGENT_PREFIX = "agt-"
 
@@ -240,58 +238,6 @@ def _resolve_workspace_for_agent(
             hint=f"Run 'agent grant-workspaces {agent.name} {workspace_name}' to grant access.",
         )
     return ws
-
-
-def _assert_agent_ssh_works(target: Transport, agent: AgentRow) -> None:
-    """Probe direct agent SSH; raise an actionable error on auth rejection.
-
-    Probe over the legacy transport, kept for the session paths. Its successor
-    on the execution core is ``_assert_agent_access_works`` in ``access.py``.
-
-    The direct-target-user-SSH rollout populates each agent's
-    ``~/.ssh/authorized_keys`` with the operator's key set at agent create /
-    reinit. Agents that existed before this rollout have a home directory
-    with no ``.ssh/authorized_keys`` for the operator, so direct SSH as the
-    agent is rejected. Catch that specific case here and turn the otherwise-
-    opaque SSH transport failure into a clear "run ``agw agent reinit``"
-    instruction.
-
-    A probe round-trip is cheap relative to letting the failure surface
-    mid-operation with partial state.
-
-    Two failure shapes are distinguished:
-
-    - Non-zero exit (SSH_TRANSPORT_ERROR = 255 typically): SSH connected
-      and ``ssh`` itself reported an auth / transport failure. Treated as
-      the pre-rollout case and raised as ``StateError`` with a reinit hint.
-    - ``SSHError`` from ``target.run`` (timeout / unreachable host): the
-      VM itself isn't reachable. Re-raised as ``ConnectivityError`` so the
-      operator sees "VM unreachable" rather than "agent needs reinit."
-    """
-    from agentworks.errors import ConnectivityError
-    from agentworks.ssh import SSH_TRANSPORT_ERROR, SSHError
-
-    try:
-        probe = target.run("true", check=False)
-    except SSHError as e:
-        raise ConnectivityError(
-            f"direct SSH probe to agent '{agent.name}' failed: {e}",
-            entity_kind="agent",
-            entity_name=agent.name,
-            hint=f"Check that VM '{agent.vm_name}' is reachable.",
-        ) from e
-    if probe.ok:
-        return
-    # SSH transport failures (auth rejected, host unreachable, etc.) report
-    # SSH_TRANSPORT_ERROR (255). Combined with no other obvious signal, this
-    # is our best indication that direct agent SSH is not yet provisioned.
-    if probe.returncode == SSH_TRANSPORT_ERROR:
-        raise StateError(
-            f"agent '{agent.name}' rejected direct SSH (likely predates the direct-target-user-SSH rollout).",
-            entity_kind="agent",
-            entity_name=agent.name,
-            hint=f"Run 'agw agent reinit {agent.name}' to populate its authorized_keys.",
-        )
 
 
 def _require_vm(db: Database, vm_name: str) -> VMRow:

@@ -20,7 +20,7 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 from tests._runtime_probes import framed_runtime_result
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
-from tests.vm_access_support import install_access_recorder
+from tests.vm_access_support import route_vm_access_to_target
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -96,7 +96,7 @@ def _record_holds(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold)
 
 
-def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transport(
+def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_access(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -110,9 +110,8 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
-        session_manager,
-        "transport",
-        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+        "agentworks.execution.vm_access",
+        lambda *args, **kwargs: pytest.fail("access built after identity refusal"),
     )
 
     assert session_manager.observe_session_statuses([session], db=db, config=SimpleNamespace()) == {
@@ -121,7 +120,7 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
     assert session_manager.ensure_pids_batch([session], db=db, config=SimpleNamespace()) == [session]
 
 
-def test_list_status_reports_identity_refusal_as_unknown_without_transport(
+def test_list_status_reports_identity_refusal_as_unknown_without_access(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -136,9 +135,8 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
-        session_manager,
-        "transport",
-        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+        "agentworks.execution.vm_access",
+        lambda *args, **kwargs: pytest.fail("access built after identity refusal"),
     )
 
     listing = session_manager.session_listing(
@@ -156,7 +154,7 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
 
 
 class _FakeTarget:
-    """Transport double for the probe / kill / regenerate helpers."""
+    """Guest double for the probe / kill / regenerate helpers, its commands reached through the admin's access."""
 
     logger = None
 
@@ -173,12 +171,7 @@ class _FakeTarget:
 @pytest.fixture
 def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     fake = _FakeTarget()
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    # sessions.manager imports ``transport`` eagerly at module load.
-    monkeypatch.setattr(session_manager, "transport", factory)
-    # The tmuxinator regeneration runs on the admin's access.
-    install_access_recorder(monkeypatch)
+    route_vm_access_to_target(monkeypatch, fake)
     return fake
 
 
@@ -470,7 +463,7 @@ def test_batch_stop_under_stopped_parent_accepts_without_guest_probes(db, make_c
     row = db.get_vm("vm-a")
     db.set_vm_desired_runtime_state(row.name, DesiredRuntimeState.STOPPED, expected_vm_uuid=row.vm_uuid)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: VMStatus.STOPPED)
-    monkeypatch.setattr(session_manager, "transport", lambda *a, **k: pytest.fail("off guest probed"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest probed"))
     session_manager.stop_all_sessions(db, make_config(), interaction=TtyInteractionPolicy.REFUSE)
     assert db.get_session("s-a").desired_runtime_state is DesiredRuntimeState.STOPPED
     assert db.get_vm("vm-a").desired_runtime_state is DesiredRuntimeState.STOPPED
@@ -538,7 +531,7 @@ def test_single_stop_uses_prepared_teardown_and_preserves_runtime_identity(db, m
         "check_session_status",
         lambda *a, **k: SessionStatus.RUNNING if not stopped else SessionStatus.STOPPED,
     )
-    monkeypatch.setattr(session_manager, "_build_session_target", lambda *a, **k: target)
+    monkeypatch.setattr(session_manager, "_session_owner_access", lambda *a, **k: k["admin"])
     monkeypatch.setattr(session_manager, "_teardown_session", lambda session, **k: stopped.append(session.session_uuid))
     session_manager.stop_session(db, make_config(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
     assert stopped == [selected.session_uuid]
@@ -679,11 +672,11 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, target, db: session)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, admin, db: session)
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, admin: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -743,11 +736,11 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, target, db: session)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, admin, db: session)
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, admin: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -775,8 +768,8 @@ def test_describe_session_observes_without_a_vm_hold(
     events: list[str] = []
     _record_holds(monkeypatch, events)
 
-    def _probe(session: object, *, target: object) -> object:
-        del session, target
+    def _probe(session: object, *, admin: object) -> object:
+        del session, admin
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
         from agentworks.db import SessionStatus
@@ -929,7 +922,7 @@ def test_describe_session_preserves_malformed_stored_boot_error(
                 return SimpleNamespace(ok=True, returncode=0, stdout=f"AGW_RUNTIME_BOOT={BOOT_ID}\n", stderr="")
             raise AssertionError(cmd)
 
-    monkeypatch.setattr(session_manager, "transport", lambda *_args, **_kwargs: _AbsentTarget())
+    route_vm_access_to_target(monkeypatch, _AbsentTarget())
 
     with pytest.raises(StateError) as caught:
         session_manager.session_description(db, config, name="s1")
@@ -1044,7 +1037,7 @@ def test_no_tailscale_off_parent_stop_is_satisfied_without_guest_transport(
     _seed_vm(db, "box", None)
     _seed_session(db, "s1", "ws-box")
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: VMStatus.STOPPED)
-    monkeypatch.setattr(session_manager, "transport", lambda *a, **k: pytest.fail("off guest transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest transport"))
     session_manager.stop_session(db, make_config(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.STOPPED

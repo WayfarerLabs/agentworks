@@ -39,7 +39,7 @@ from agentworks.plugins.codex.harness_integration import discovery_probe, record
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
-from tests.vm_access_support import check_result, install_access_recorder, is_command_check
+from tests.vm_access_support import check_result, is_command_check, route_vm_access_to_target
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -151,10 +151,7 @@ def _harness_integration_template(monkeypatch: pytest.MonkeyPatch, config: dict[
 
 
 def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _CodexTarget) -> None:
-    admin_factory = lambda vm, config, **kwargs: target  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", admin_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
-    install_access_recorder(monkeypatch).answer = target.answer
+    route_vm_access_to_target(monkeypatch, target)
 
 
 def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:

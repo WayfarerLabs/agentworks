@@ -172,12 +172,3 @@ def test_host_trust_keeps_first_use_against_the_operators_configuration() -> Non
 
 
 # -- The loops that retry never retry a missing record ---------------------------------------
-
-
-def test_the_agent_probe_does_not_rewrap_a_missing_record_as_unreachable() -> None:
-    from agentworks.agents.manager._common import _assert_agent_ssh_works
-
-    agent = SimpleNamespace(name="a1", vm_name="web", linux_user="agt-a1")
-
-    with pytest.raises(TrustMissing):
-        _assert_agent_ssh_works(_vm_transport(), agent)  # type: ignore[arg-type]

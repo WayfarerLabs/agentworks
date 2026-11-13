@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor as PythonThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
@@ -17,18 +17,19 @@ from agentworks.sessions import manager as session_manager
 from agentworks.sessions.manager import _lifecycle as lifecycle_mod
 from agentworks.sessions.manager import _teardown as teardown_mod
 from agentworks.sessions.manager._teardown import (
-    DEDICATED_TEARDOWN_ATTEMPTS,
     DEDICATED_TEARDOWN_TIMEOUT_SECONDS,
     DedicatedTeardownPlan,
 )
 from agentworks.sessions.tmux import ProbeStatus
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.results import Result
     from tests.conftest import CapturedOutput
 
 
@@ -36,12 +37,15 @@ BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 SESSION_UUID = "11111111-1111-4111-8111-111111111111"
 
 
-class _Target:
-    def __init__(self, label: str) -> None:
-        self.label = label
+def _access(label: str) -> RecordingVMAccess:
+    """An admin access on which any request fails the test, naming ``label``."""
+    access = RecordingVMAccess([], Admin())
 
-    def run(self, command: str, **kwargs: object) -> object:
-        raise AssertionError(f"unexpected remote command on {self.label}: {command} {kwargs}")
+    def unexpected(call: Call) -> Result:
+        raise AssertionError(f"unexpected request on {label}: {call.request}")
+
+    access.answer = unexpected
+    return access
 
 
 class _RecordingDB:
@@ -59,7 +63,7 @@ def _plan(
     socket_path: str | None = None,
     pid: int | None = None,
     start_ticks: int | None = None,
-    target: _Target | None = None,
+    access: VMAccess | None = None,
 ) -> DedicatedTeardownPlan:
     ordinal = int(name.rsplit("-", 1)[-1]) if name.rsplit("-", 1)[-1].isdigit() else 1
     return DedicatedTeardownPlan(
@@ -71,8 +75,9 @@ def _plan(
         stored_pid=pid or 1000 + ordinal,
         stored_boot_id=BOOT_ID,
         stored_start_ticks=start_ticks or 2000 + ordinal,
-        target=cast("Transport", target or _Target(name)),
-        sudo=False,
+        access=access or _access(name),
+        elevated=False,
+        deadline=None,
         force=False,
     )
 
@@ -151,7 +156,7 @@ def test_concurrent_teardowns_overlap_under_fixed_bound_and_reconcile_on_main_th
     assert {thread_id for thread_id, _name in db.calls} == {main_thread}
     assert set(output_threads) == {main_thread}
     assert {name for _thread_id, name in db.calls} == {plan.session_name for plan in plans}
-    assert len({id(plan.target) for plan in plans}) == len(plans)
+    assert len({id(plan.access) for plan in plans}) == len(plans)
 
 
 @pytest.mark.parametrize("collision", ["socket", "process"])
@@ -252,14 +257,15 @@ def test_absence_proof_rechecks_process_after_unreadable_start_time(
     from agentworks.sessions.manager._pids import _prove_runtime_absent
 
     observations = iter((tmux_mod.ProbeStatus.PRESENT, last_presence))
-    privileges: list[bool] = []
+    run_command = object()
+    readers: list[object] = []
 
-    def presence(pid: int, *, target: Transport, sudo: bool = False) -> tmux_mod.ProbeStatus:
+    def presence(pid: int, *, run_command: object) -> tmux_mod.ProbeStatus:
         assert pid == 101
-        privileges.append(sudo)
+        readers.append(run_command)
         return next(observations)
 
-    monkeypatch.setattr(session_manager, "_get_boot_id", lambda target: BOOT_ID)
+    monkeypatch.setattr(session_manager, "_get_boot_id", lambda run_command: BOOT_ID)
     monkeypatch.setattr(session_manager, "_pid_presence", presence)
     monkeypatch.setattr(
         tmux_mod,
@@ -271,15 +277,14 @@ def test_absence_proof_rechecks_process_after_unreadable_start_time(
         "stored_pid": 101,
         "stored_boot_id": BOOT_ID,
         "stored_start_ticks": 201,
-        "target": _Target("absence"),
-        "sudo": True,
+        "run_command": run_command,
     }
     if last_presence is tmux_mod.ProbeStatus.ABSENT:
         assert _prove_runtime_absent(**arguments) is True
     else:
         with pytest.raises(StateError):
             _prove_runtime_absent(**arguments)
-    assert privileges == [True, True]
+    assert readers == [run_command, run_command]
 
 
 @pytest.mark.parametrize("observation", ["exits", "survives", "unknown"])
@@ -343,7 +348,7 @@ def test_invalid_complete_fingerprint_fails_preparation_closed(db: Database) -> 
             db,
             session,
             vm_name="box",
-            target=cast("Transport", _Target("bounded")),
+            access=_access("bounded"),
             target_owns_session=True,
             force=False,
         )
@@ -381,7 +386,7 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
 
     lifecycle_mod._teardown_session(
         session,
-        target=cast("Transport", _Target("serial")),
+        access=_access("serial"),
         target_owns_session=True,
         db=db,
         force=False,
@@ -394,7 +399,7 @@ def test_incomplete_synchronous_teardown_persists_fingerprint_before_kill(
     assert (stopped.pid, stopped.boot_id, stopped.tmux_server_start_ticks) == (PID_STOPPED, None, None)
 
 
-def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_distinct_targets(
+def test_batch_partitions_complete_work_before_serial_compatibility_on_the_vms_logged_admin_access(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
@@ -429,26 +434,13 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     monkeypatch.setattr(session_manager, "ensure_pids_batch", lambda sessions, **kwargs: sessions)
     monkeypatch.setattr(session_manager, "observe_session_statuses", lambda sessions, **kwargs: statuses)
 
-    transport_calls: list[tuple[int | None, int, _Target]] = []
-
-    def transport(
-        vm: object,
-        config: object,
-        *,
-        default_timeout: int | None = None,
-        retries: int = 1,
-    ) -> _Target:
-        target = _Target(f"target-{len(transport_calls)}")
-        transport_calls.append((default_timeout, retries, target))
-        return target
-
-    monkeypatch.setattr(session_manager, "transport", transport)
+    recorder = install_access_recorder(monkeypatch)
     events: list[str] = []
-    concurrent_targets: list[object] = []
+    concurrent_plans: list[DedicatedTeardownPlan] = []
 
     def concurrent(plans: list[DedicatedTeardownPlan], *, db: Database, on_outcome) -> list[tuple[str, str]]:
         events.append("concurrent")
-        concurrent_targets.extend(plan.target for plan in plans)
+        concurrent_plans.extend(plans)
         assert [plan.session_name for plan in plans] == ["complete-a", "complete-b"]
         for plan in plans:
             teardown_mod.reconcile_dedicated_teardown(db, plan)
@@ -456,12 +448,12 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
             statuses[plan.session_name] = SessionStatus.STOPPED
         return []
 
-    serial_targets: list[tuple[SessionRow, Transport, bool]] = []
+    serial_accesses: list[tuple[SessionRow, VMAccess, bool]] = []
 
-    def serial(session, *, target, target_owns_session, db, force, legacy_running_authorized):
-        if not serial_targets:
+    def serial(session, *, access, target_owns_session, db, force, legacy_running_authorized):
+        if not serial_accesses:
             events.append("serial")
-        serial_targets.append((session, target, target_owns_session))
+        serial_accesses.append((session, access, target_owns_session))
         db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(session))
         statuses[session.name] = SessionStatus.STOPPED
 
@@ -477,13 +469,16 @@ def test_batch_partitions_complete_work_before_serial_compatibility_and_uses_dis
     )
 
     assert events == ["concurrent", "serial"]
-    assert [session.name for session, _target, _owns in serial_targets] == ["incomplete", "legacy"]
-    assert serial_targets[0][1] is serial_targets[1][1]
-    assert [(timeout, retries) for timeout, retries, target in transport_calls if target in concurrent_targets] == [
-        (DEDICATED_TEARDOWN_TIMEOUT_SECONDS, DEDICATED_TEARDOWN_ATTEMPTS),
-        (DEDICATED_TEARDOWN_TIMEOUT_SECONDS, DEDICATED_TEARDOWN_ATTEMPTS),
+    assert [session.name for session, _access, _owns in serial_accesses] == ["incomplete", "legacy"]
+    admin = recorder.access(Admin())
+    # One admin access per VM, logging to its stop-all log, serves every teardown on it.
+    assert all(access is admin for _session, access, _owns in serial_accesses)
+    assert [(plan.access, plan.deadline) for plan in concurrent_plans] == [
+        (admin, DEDICATED_TEARDOWN_TIMEOUT_SECONDS),
+        (admin, DEDICATED_TEARDOWN_TIMEOUT_SECONDS),
     ]
-    assert len({id(target) for target in concurrent_targets}) == 2
+    assert recorder.built == [("box", Admin())]
+    assert recorder.logs[0] is not None
     assert not captured_output.warnings
 
 
@@ -502,7 +497,7 @@ def test_live_observation_for_stopped_sentinel_is_a_labeled_typed_failure(
         "observe_session_statuses",
         lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING},
     )
-    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target("read-only admin"))
+    install_access_recorder(monkeypatch).answer = lambda call: pytest.fail(f"unexpected request {call.request}")
     monkeypatch.setattr(
         teardown_mod, "execute_dedicated_teardown", lambda *args: pytest.fail("inconsistent runtime stopped")
     )

@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
 
 
 @contextmanager
@@ -108,21 +108,21 @@ def _mark_runtime_unknown(db: Database, session: SessionRow, *, socket_path: str
 def _teardown_legacy_session(
     session: SessionRow,
     *,
-    target: Transport,
+    access: VMAccess,
     target_owns_session: bool,
     db: Database,
     running_authorized: bool,
 ) -> None:
-    """Destroy one exact session on a reachable legacy shared tmux server."""
+    """Destroy one exact session on a reachable legacy shared tmux server, on ``access``, as root unless it owns it."""
     from agentworks.sessions.tmux import (
         ProbeStatus,
+        access_run_command,
         kill_session,
         probe_tmux_session,
         probe_tmux_session_after_teardown,
     )
 
-    def run_runtime(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
-        return target.run(command, sudo=not target_owns_session, check=check, env=env)
+    run_runtime = access_run_command(access, deadline=None, elevated=not target_owns_session)
 
     expected = SessionRuntimeSnapshot.from_session(session)
     presence = probe_tmux_session(session.name, run_command=run_runtime, socket_path=None)
@@ -154,19 +154,23 @@ def _teardown_legacy_session(
 def _teardown_session(
     session: SessionRow,
     *,
-    target: Transport,
+    access: VMAccess,
     target_owns_session: bool,
     db: Database,
     force: bool,
     legacy_running_authorized: bool,
 ) -> None:
-    """Destroy one managed session runtime and verify its absence."""
+    """Destroy one managed session runtime and verify its absence.
+
+    ``access`` is the session owner's, or the admin's with
+    ``target_owns_session=False``, whose requests then run as root.
+    """
     if session.socket_path is None:
         if session.pid == PID_STOPPED:
             return
         _teardown_legacy_session(
             session,
-            target=target,
+            access=access,
             target_owns_session=target_owns_session,
             db=db,
             running_authorized=legacy_running_authorized,
@@ -176,7 +180,7 @@ def _teardown_session(
 
     teardown_dedicated_session(
         session,
-        target=target,
+        access=access,
         target_owns_session=target_owns_session,
         db=db,
         force=force,

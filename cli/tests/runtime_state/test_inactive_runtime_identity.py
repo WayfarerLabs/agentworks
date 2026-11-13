@@ -12,12 +12,14 @@ import pytest
 
 from agentworks.db import PID_STOPPED, DesiredRuntimeState, SessionRuntimeSnapshot, SessionStatus, VMStatus
 from agentworks.errors import StateError
+from agentworks.execution.access import Admin
 from agentworks.runtime_state import reconcile_session
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _status
 from tests.runtime_state.test_composition import REFUSE, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 from tests.runtime_state.test_public_stop import _running
+from tests.vm_access_support import RecordingVMAccess, answer_from_target
 
 if TYPE_CHECKING:
     from agentworks.db import SessionRow
@@ -50,6 +52,11 @@ class _Target:
         elif "rm -f --" in command:
             resident = next(state for state in self.model.residents.values() if state.socket in command)
             resident.socket_exists = False
+        elif "boot_id" in command:
+            self.model.reads.append(f"boot:{self.vm}")
+            return SimpleNamespace(
+                returncode=0, ok=True, stdout=f"\nAGW_RUNTIME_BOOT={self.model.boots[self.vm]}\n", stderr=""
+            )
         elif command.startswith("test -e "):
             resident = self.model.by_socket(shlex.split(command)[2])
             code = 0 if resident.socket_exists else 1
@@ -70,7 +77,7 @@ class _Memory:
         self.residents: dict[str, _Resident] = {}
         self.boots: dict[str, str] = {}
         self.reads: list[str] = []
-        self.transports: list[str] = []
+        self.accesses: list[str] = []
         self.killed: list[str] = []
         self.spawned: list[str] = []
 
@@ -88,9 +95,9 @@ class _Memory:
     def by_socket(self, socket: str) -> _Resident:
         return next(resident for resident in self.residents.values() if resident.socket == socket)
 
-    def transport(self, vm, config, **kwargs) -> _Target:
-        self.transports.append(vm.name)
-        return _Target(self, vm.name)
+    def access(self, vm, config, identity, **kwargs) -> RecordingVMAccess:
+        self.accesses.append(vm.name)
+        return _access(self, vm.name)
 
     def session_presence(self, name, **kwargs) -> tmux.ProbeStatus:
         self.reads.append(f"session:{name}")
@@ -106,12 +113,6 @@ class _Memory:
         if not resident.present:
             return tmux.FingerprintProbe(tmux.ProbeStatus.ABSENT)
         return tmux.FingerprintProbe(tmux.ProbeStatus.PRESENT, resident.fingerprint)
-
-    def boot(self, target) -> str:
-        while hasattr(target, "_target"):
-            target = target._target
-        self.reads.append(f"boot:{target.vm}")
-        return self.boots[target.vm]
 
     def pid_presence(self, pid, **kwargs) -> tmux.ProbeStatus:
         self.reads.append(f"pid:{pid}")
@@ -130,6 +131,13 @@ class _Memory:
         return resident.socket, resident.fingerprint.pid
 
 
+def _access(model: _Memory, vm: str) -> RecordingVMAccess:
+    """The admin's access on ``vm``, its commands run on that VM's double."""
+    access = RecordingVMAccess([], Admin())
+    access.answer = answer_from_target(_Target(model, vm))
+    return access
+
+
 def _model(db, runtime, monkeypatch) -> _Memory:
     _, statuses, _ = runtime
     model = _Memory()
@@ -139,21 +147,20 @@ def _model(db, runtime, monkeypatch) -> _Memory:
         db.set_session_run_id(name, str(uuid4()))
         db.record_session_started(name)
         model.add(db.get_session(name), vm)
-    monkeypatch.setattr(manager, "transport", model.transport)
-    monkeypatch.setattr("agentworks.transports.transport", model.transport)
+    monkeypatch.setattr("agentworks.execution.vm_access", model.access)
     monkeypatch.setattr(_status, "probe_tmux_session", model.session_presence)
     monkeypatch.setattr(_status, "probe_tmux_server", model.server_presence)
     monkeypatch.setattr(tmux, "probe_tmux_session", model.session_presence)
     monkeypatch.setattr(tmux, "probe_tmux_server", model.server_presence)
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", model.capture)
     monkeypatch.setattr(tmux, "require_socket_path", lambda *args, **kwargs: None)
-    monkeypatch.setattr(manager, "_get_boot_id", model.boot)
+    monkeypatch.setattr(manager, "_get_boot_id", _status._get_boot_id)
     monkeypatch.setattr(manager, "_pid_presence", model.pid_presence)
     monkeypatch.setattr(manager, "check_session_status", _status.check_session_status)
 
     def observe_rows(rows, **kwargs):
         return {
-            row.name: manager.check_session_status(row, target=_Target(model, model.residents[row.name].vm))
+            row.name: manager.check_session_status(row, admin=_access(model, model.residents[row.name].vm))
             for row in rows
         }
 
@@ -192,14 +199,14 @@ def test_inactive_stop_retains_same_boot_memory_identity_for_later_safe_stop(
     )
     assert SessionRuntimeSnapshot.from_session(inactive) == SessionRuntimeSnapshot.from_session(before)
     assert model.residents["work"].present
-    assert model.reads == model.transports == model.killed == []
+    assert model.reads == model.accesses == model.killed == []
     assert not events
     reconcile_session(db, config, name="work", interaction=REFUSE)
     assert db.get_session("work") == inactive
-    assert model.reads == model.transports == model.killed == []
+    assert model.reads == model.accesses == model.killed == []
 
     powers["box"] = VMStatus.RUNNING
-    assert manager.check_session_status(inactive, target=_Target(model, "box")) is SessionStatus.RUNNING
+    assert manager.check_session_status(inactive, admin=_access(model, "box")) is SessionStatus.RUNNING
     rendered.clear()
     reconcile_session(db, config, name="work", interaction=REFUSE)
     result = next(row for row in rendered if row.kind == "session")

@@ -55,6 +55,8 @@ def deletion(db, tmp_path, monkeypatch):
     target.run.return_value = SSHResult(0, "native", "")
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    # Session teardown and console cleanup run on the admin's access.
+    install_access_recorder(monkeypatch)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a, **kw: "a" * 64)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
