@@ -86,8 +86,13 @@ def test_unverified_mode_pins_the_provisioning_file_and_sets_no_alias(tmp_path: 
 
 @needs_ssh
 @pytest.mark.windows
-def test_store_path_with_a_space_survives_quoting(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    store = tmp_path / "store with space"
+@pytest.mark.parametrize("store_name", ["store", "store with space"])
+def test_the_installed_client_reads_the_store_path_with_or_without_a_space(
+    store_name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The installed client may accept a quoted value without whitespace too, so this
+    cannot reproduce #898 alone; ``test_only_a_value_with_whitespace_is_quoted`` guards that."""
+    store = tmp_path / store_name
     monkeypatch.setattr(trust, "STORE_DIR", store)
     trust.write_records("web", [_KEY])
 
@@ -142,6 +147,42 @@ def test_a_store_directory_ssh_would_expand_is_a_config_error(
 
     with pytest.raises(ConfigError):
         trust.ssh_options(TrustBinding(TrustMode.VM, "web"))
+
+
+# -- Option values -------------------------------------------------------------------
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("C:/Users/operator/known_hosts/vm-web", "C:/Users/operator/known_hosts/vm-web"),
+        ("C:/Users/Op Erator/known_hosts/vm-web", '"C:/Users/Op Erator/known_hosts/vm-web"'),
+        ("/home/op\terator/vm-web", '"/home/op\terator/vm-web"'),
+    ],
+)
+def test_an_option_value_is_quoted_only_when_it_contains_whitespace(text: str, expected: str) -> None:
+    assert trust.option_value(text) == expected
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("store_name", ["store", "store with space"])
+def test_only_a_value_with_whitespace_is_quoted(
+    store_name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The ssh shipped with Git for Windows refuses a quoted value without whitespace (#898)."""
+    monkeypatch.setattr(trust, "STORE_DIR", tmp_path / store_name)
+    trust.write_records("web", [_KEY])
+
+    def value(path: Path) -> str:
+        return f'"{path.as_posix()}"' if " " in store_name else path.as_posix()
+
+    for mode in (TrustMode.VM, TrustMode.ENROLL):
+        assert f"UserKnownHostsFile={value(trust.store_file('web'))}" in trust.ssh_options(TrustBinding(mode, "web"))
+    with trust.provisioning_binding("web") as binding:
+        assert binding.provisioning_file is not None
+        assert f"UserKnownHostsFile={value(binding.provisioning_file)}" in trust.ssh_options(binding)
+    assert f"UserKnownHostsFile {value(trust.store_file('web'))}" in trust.entry_options("web")
 
 
 # -- Modes and the missing record --------------------------------------------------
@@ -348,7 +389,7 @@ def test_entry_options_exist_exactly_when_the_vm_has_a_record() -> None:
     options = trust.entry_options("web")
 
     assert "HostKeyAlias agentworks-vm-web" in options
-    assert f'UserKnownHostsFile "{trust.store_file("web").as_posix()}"' in options
+    assert f"UserKnownHostsFile {trust.store_file('web').as_posix()}" in options
     assert "StrictHostKeyChecking yes" in options
     assert "UpdateHostKeys no" in options
     assert "HashKnownHosts no" in options

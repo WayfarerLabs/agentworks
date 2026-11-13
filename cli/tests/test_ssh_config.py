@@ -479,7 +479,7 @@ def test_store_options_appear_exactly_for_vms_with_a_record(tmp_path: Path, rebu
     assert set(blocks) == {"awvm--known", "awagent--agent-known", "awvm--fresh", "awagent--agent-fresh"}
     for alias in ("awvm--known", "awagent--agent-known"):
         assert "    HostKeyAlias agentworks-vm-known\n" in blocks[alias]
-        assert f'    UserKnownHostsFile "{trust.store_file("known").as_posix()}"\n' in blocks[alias]
+        assert f"    UserKnownHostsFile {trust.store_file('known').as_posix()}\n" in blocks[alias]
         assert "    StrictHostKeyChecking yes\n" in blocks[alias]
         assert "    UpdateHostKeys no\n" in blocks[alias]
         assert "    HashKnownHosts no\n" in blocks[alias]
@@ -517,12 +517,13 @@ def test_an_entry_gains_and_loses_the_store_options_with_the_record(tmp_path: Pa
 
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+@pytest.mark.parametrize("store_name", ["store", "store with space"])
 def test_the_installed_client_resolves_the_managed_entry_against_the_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    store_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.execution import trust
 
-    store = tmp_path / "store with space"
+    store = tmp_path / store_name
     monkeypatch.setattr(trust, "STORE_DIR", store)
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()

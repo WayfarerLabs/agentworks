@@ -116,13 +116,13 @@ class VMPolicy:
         """
         identity = trust.literal_path(self.identity_file, "SSH identity file")
         values = [
-            f'IdentityFile="{identity}"',
+            f"IdentityFile={trust.option_value(identity)}",
             "IdentitiesOnly=yes",
             # OpenSSH 8.5 reads CertificateFile=none as a relative file name:
             # https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c#L2312-L2320
             # A child of the regular identity file cannot exist, so no certificate
             # loads, including the automatic .pub probe.
-            f'CertificateFile="{identity}/disabled-certificate"',
+            f"CertificateFile={trust.option_value(identity + '/disabled-certificate')}",
             "BatchMode=yes",
             "PreferredAuthentications=publickey",
             "SecurityKeyProvider=none",

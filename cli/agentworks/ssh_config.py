@@ -284,9 +284,7 @@ def _format_entry(
     A VM with a host-key record gets the options that make the operator's own
     ``ssh`` verify against the store; one without is left as it was.
     """
-    id_str = _to_ssh_path(identity_file)
-    if " " in id_str:
-        id_str = f'"{id_str}"'
+    id_str = trust.option_value(_to_ssh_path(identity_file))
     trust_lines = "".join(f"    {option}\n" for option in _trust_options(vm_name))
     return f"Host {alias}\n    HostName {hostname}\n    User {user}\n    IdentityFile {id_str}\n{trust_lines}"
 

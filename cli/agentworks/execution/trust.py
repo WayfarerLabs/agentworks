@@ -128,7 +128,8 @@ def literal_path(path: PurePath, what: str) -> str:
     OpenSSH expands tokens after parsing quotes. Refuse such a path rather
     than turning a configured file name into another file or an environment
     lookup. Shared by the store paths and the VM policy's identity file, so one
-    set of rules quotes every path ssh is given.
+    set of rules governs every path ssh is given. The result is bare; pass it
+    through :func:`option_value` to write it into an option.
     """
     value = path.as_posix()
     if (
@@ -141,6 +142,20 @@ def literal_path(path: PurePath, what: str) -> str:
             "absolute and free of '%', '$', quotes, backslashes and control characters",
         )
     return value
+
+
+def option_value(text: str) -> str:
+    """``text`` as an ``ssh`` option value: bare, or double-quoted when it contains whitespace.
+
+    ssh splits an option value at whitespace, so a value with a space needs its
+    quotes to stay one value (``UserKnownHostsFile`` takes a list of files). A
+    value without whitespace stays bare: quoting it gains nothing, and the ssh
+    shipped with Git for Windows rejects the quoted form with ``invalid quotes``.
+    Every value written into an option goes through here, for the ``-o``
+    arguments and the managed SSH config entries alike. ``text`` must hold no
+    double quote; :func:`literal_path` refuses one.
+    """
+    return f'"{text}"' if any(char in " \t" for char in text) else text
 
 
 def _store_error(action: str, path: Path, error: OSError, vm_name: str | None = None) -> StateError:
@@ -286,6 +301,10 @@ def provisioning_binding(vm_name: str) -> Iterator[TrustBinding]:
         path.unlink(missing_ok=True)
 
 
+def _store_value(path: Path) -> str:
+    return option_value(literal_path(path, "host-key store path"))
+
+
 def _pinned_options() -> tuple[tuple[str, str], ...]:
     """Settings every VM connection pins, whatever configuration says, as
     (name, value). Shared by the spawn-time ``-o`` arguments and the managed
@@ -315,7 +334,7 @@ def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
     if trust.mode is TrustMode.UNVERIFIED:
         assert trust.provisioning_file is not None  # TrustBinding.__post_init__
         values = [
-            f'UserKnownHostsFile="{literal_path(trust.provisioning_file, "host-key store path")}"',
+            f"UserKnownHostsFile={_store_value(trust.provisioning_file)}",
             "StrictHostKeyChecking=accept-new",
         ]
     else:
@@ -323,7 +342,7 @@ def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
             require_record(trust.vm_name)
         checking = "yes" if trust.mode is TrustMode.VM else "accept-new"
         values = [
-            f'UserKnownHostsFile="{literal_path(store_file(trust.vm_name), "host-key store path")}"',
+            f"UserKnownHostsFile={_store_value(store_file(trust.vm_name))}",
             f"HostKeyAlias={host_key_alias(trust.vm_name)}",
             f"StrictHostKeyChecking={checking}",
         ]
@@ -343,7 +362,7 @@ def entry_options(vm_name: str) -> tuple[str, ...]:
         return ()
     return (
         f"HostKeyAlias {host_key_alias(vm_name)}",
-        f'UserKnownHostsFile "{literal_path(store_file(vm_name), "host-key store path")}"',
+        f"UserKnownHostsFile {_store_value(store_file(vm_name))}",
         "StrictHostKeyChecking yes",
         *(f"{name} {value}" for name, value in _pinned_options()),
     )
