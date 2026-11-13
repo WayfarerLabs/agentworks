@@ -1055,7 +1055,12 @@ workspace file with VS Code's `code` command; on Windows `agw` does not start VS
 names the file to open.
 
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
-and destination can be the same VM (a clone) or different VMs.
+and destination can be the same VM (a clone) or different VMs. The tree travels through the
+workstation as a compressed tar stream that is never unpacked there, so modes and links survive any
+workstation, and nothing is staged on either VM. The destination extracts it as root without the
+source's owners and then gives it to the admin and the workspace group; an extraction that fails or
+is interrupted leaves the partial tree in the new directory and no workspace row, so remove the
+directory before retrying.
 
 `workspace list` accepts `--vm` to narrow the result set to one VM's workspaces. An unknown name in
 the filter is an error, not an empty result.
@@ -1425,9 +1430,11 @@ is the VM-boot behavior: the mutation commands (`add-sessions`, `remove-sessions
 Workspaces with tmuxinator enabled in their template (the default) carry a tmuxinator config
 (`.tmuxinator.yml` in the workspace root, symlinked as `~/.config/tmuxinator/ws-<name>-console.yml`)
 describing a `ws-<name>-console` session: an admin-shell window plus one window per session. It is
-regenerated whenever sessions change. The `agw workspace console` command that attached to it was
-removed (superseded by named consoles); the config remains usable directly on the VM via
-`tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
+regenerated whenever sessions change. Neither the config nor the link is written through a symbolic
+link: a link at the config, above the workspace, or at `~/.config` or `~/.config/tmuxinator` is
+refused. The `agw workspace console` command that attached to it was removed (superseded by named
+consoles); the config remains usable directly on the VM via `tmuxinator start ws-<name>-console`
+(e.g. inside VS Code's integrated terminal).
 
 #### Shells
 

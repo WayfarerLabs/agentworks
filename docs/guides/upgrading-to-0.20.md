@@ -109,17 +109,18 @@ VM (see [Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)
 also every step of initialization, and `agent create` and `agent reinit` run all of agent
 initialization, as the admin and then as the agent, through it (see
 [Initialization steps](#initialization-steps)). `agent delete` and the workspace group grants run
-through it. `workspace create`, `workspace repair`, `workspace rehome` and `workspace copy` apply
-the workspace ACLs through it, and `session create` and the session launches set up the tmux socket
-directories through it. `vm backup` runs its checks, its workspace archive and the archive's
-download through it (see [Backups](#backups)). `vm describe` reads the VM's live resources through
-it, as one request bounded at 30 seconds where it made up to three attempts before. `vm start`, and
-the automatic start of a VM that stopped on its own, use it to wait for the VM to answer; `vm rekey`
-and `vm recover` use it for the same wait after their scripts, which run through the platform's own
-channel (see [Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
-`vm shell --platform` uses the platform's own channel instead and needs no `python3`; on a cloud VM
-that channel is SSH to its public address under the same rules. Everything else keeps its current
-path for now.
+through it. `workspace create`, `workspace repair`, `workspace rehome` and `workspace copy` run all
+their work on the VM through it (see [Workspaces](#workspaces)), and so do `workspace delete`'s own
+removal and the session commands' regeneration of a workspace's tmuxinator config; `session create`
+and the session launches set up the tmux socket directories through it. `vm backup` runs its checks,
+its workspace archive and the archive's download through it (see [Backups](#backups)). `vm describe`
+reads the VM's live resources through it, as one request bounded at 30 seconds where it made up to
+three attempts before. `vm start`, and the automatic start of a VM that stopped on its own, use it
+to wait for the VM to answer; `vm rekey` and `vm recover` use it for the same wait after their
+scripts, which run through the platform's own channel (see
+[Start, recover, rekey and delete](#start-recover-rekey-and-delete)). `vm shell --platform` uses the
+platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to its
+public address under the same rules. Everything else keeps its current path for now.
 
 ### What these commands need
 
@@ -143,9 +144,9 @@ refusing.
   directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
   directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
   `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` and `scp` of the requests that still use
-  the older SSH path (sessions and workspaces). A program found only in the current directory counts
-  as not installed, so `agw doctor` and the 1Password backend's readiness no longer vouch for one.
-  An `EDITOR` given as a path is run as given. On Windows, `workspace create --open-vscode` does not
+  the older SSH path (sessions). A program found only in the current directory counts as not
+  installed, so `agw doctor` and the 1Password backend's readiness no longer vouch for one. An
+  `EDITOR` given as a path is run as given. On Windows, `workspace create --open-vscode` does not
   start VS Code: its `code` command is a batch file, which only `cmd.exe` can run, and `cmd.exe`
   parses the workspace path by its own rules. The warning names the workspace file to open in VS
   Code yourself.
@@ -228,6 +229,26 @@ killed part way may have left `/var/tmp/agentworks-backup-*`, `/var/tmp/_aw_deta
 `/var/tmp/_aw_paths_*.txt` on the VM; this release does not look for them, so remove them as root on
 the VM once no backup is running.
 
+### Workspaces
+
+- **Links are not followed.** A workspace's generated `.tmuxinator.yml` and the admin's
+  `~/.config/tmuxinator` directory are written by the file program, which refuses a symbolic link at
+  the file or any parent, so a workspace path below a link, or a linked `~/.config` or
+  `~/.config/tmuxinator`, now fails `workspace create`, `workspace copy` and `workspace rehome`
+  where it was followed, and the session commands' regeneration of the config. A failed
+  `workspace create` removes what it created, as for any other failure.
+- **`workspace copy` stages nothing on the VM.** The source tree travels through the workstation as
+  a compressed tar stream that is never unpacked there, and the destination extracts it from the
+  request's input as root instead of from a file in its `/var/tmp`. Extracted files are root's until
+  the copy gives the tree to the admin and the workspace group, rather than keeping the source's
+  owners in between. The extraction has no time limit, where the upload and the unpack were bounded
+  at 300 and 120 seconds. The source read is written to its own operation log on the source VM,
+  `workspace-copy-source`, beside the destination's `workspace-copy`.
+- **`workspace repair` reads up to 64 MiB of a recursive step's output.** On a tree so large or so
+  damaged that `chown -c` or `chmod -c` prints more, the ownership step stops reading and warns; it
+  may have stopped part way, and running repair again continues it. A `getfacl` listing larger than
+  that leaves the ACL comparison not verified, as a failed listing does.
+
 ## Create, reinit and the VM contract
 
 `vm create`, `vm reinit` and `vm confirm-release` reach the VM through the same connection layer.
@@ -258,7 +279,7 @@ the VM once no backup is running.
 - **The operation log** records each of these requests by its shape: the command's arguments, or a
   script's shell, with the working directory, the names of its environment variables and its
   deadline. A script's text and an environment variable's value are not written. Requests still on
-  the older SSH path (sessions and workspaces) log as before.
+  the older SSH path (sessions) log as before.
 
 ### Initialization steps
 
