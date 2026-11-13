@@ -222,9 +222,12 @@ refusing.
 the connection drops, and the backup says when it loses the connection and when it regains it, then
 downloads the archive once it is complete. Nothing is staged in `/var/tmp` any more: the archive is
 built in a root-only directory under `/var/lib/agentworks/detached`, which is removed when the
-backup ends. One that a killed backup left behind is removed by the first backup on that VM a week
-or more later. Ctrl-C stops the archive's whole process group on the VM, and an interrupted download
-leaves no partial file.
+backup ends. One that a killed backup left behind is removed, once its archive has ended, by the
+first backup on that VM a week or more later. Ctrl-C stops the archive's whole process group on the
+VM, and an interrupted download leaves no partial file. A backup by an earlier release that was
+killed part way may have left `/var/tmp/agentworks-backup-*`, `/var/tmp/_aw_detached_*` or
+`/var/tmp/_aw_paths_*.txt` on the VM; this release does not look for them, so remove them as root on
+the VM once no backup is running.
 
 ## Create, reinit and the VM contract
 

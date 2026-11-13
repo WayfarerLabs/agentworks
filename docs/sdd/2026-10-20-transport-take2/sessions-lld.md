@@ -336,10 +336,11 @@ Resuming is the caller's polling loop, not a mechanism: `observe` reads state an
 so a poll that fails with `ExecutionIncomplete` costs nothing and the next one after the connection
 returns reads the current state. Progress is `work/`'s file sizes; output is read once, as a tail,
 when the launch has ended. Backup's loop (below) now reports a lost connection once, a reminder
-every 30 seconds and the recovery; today it reports nothing (`quiet=True`, `vms/backup.py:372`), so
-this is new behavior. It polls until the launch leaves `RUNNING` or the operator interrupts, with no
-give-up bound, as today. Because the id names the launch, a later invocation could observe it the
-same way (R6); no command does, since no caller needs one.
+every 30 seconds and the recovery; today `quiet=True` (`vms/backup.py:372`) silences
+`run_detached`'s connection lines and leaves only its no-output warning after five minutes
+(`remote_exec.py:266-270`), so this is new behavior. It polls until the launch leaves `RUNNING` or
+the operator interrupts, with no give-up bound, as today. Because the id names the launch, a later
+invocation could observe it the same way (R6); no command does, since no caller needs one.
 
 ### Interrupt
 
@@ -353,8 +354,9 @@ lock (above). The supervisor is in its own session, outside the group, so it sur
 The pid is read only while the lock shows the launch alive, and again on each poll until the
 supervisor has written it, so a launch interrupted before its payload started is signalled once it
 does; the one residual window, a payload that exited while its supervisor writes `status`, signals a
-group that no longer exists. It is never dispatched again. Backup calls it from its
-`KeyboardInterrupt` handler, as it calls `kill -TERM -<pid>` today (`vms/backup.py:389-399`).
+group that no longer exists. It is never dispatched again. Backup calls it whenever it leaves before
+the archive is known to have ended, where today it sends `kill -TERM -<pid>` only for a Ctrl-C in
+its poll (`vms/backup.py:389-399`).
 
 ### Download and discard
 
@@ -693,10 +695,13 @@ access; the gate and the SSH boundary are as today, with the pane secrets as the
   the tail (`:407-411`). `LOST` raises `BackupError` saying the archive's process ended without
   recording a status, as the VM restarting would leave it; today a missing status reads as exit 1
   and raises the same error (`remote_exec.py:293-299`).
-- **Cleanup.** The `finally` discards by the launch's id, whatever `launch` did, since `new_launch`
-  chose it first: an `ABSENT` launch is done, and a discard that fails (the VM unreachable, or a
-  payload still running after an interrupt that could not reach it) warns naming the id, and the
-  prune removes the directory at the next launch on that VM seven days or more later.
+- **Cleanup.** Once `launch` was attempted, the `finally` first interrupts the archive unless it is
+  known to have ended (a Ctrl-C during the launch or the poll, a second Ctrl-C, or any error from a
+  poll), and then discards by the launch's id, whatever `launch` did, since `new_launch` chose it
+  first: an `ABSENT` launch is done, and a discard that fails (the VM unreachable, or a payload
+  still running after an interrupt that could not reach it) warns naming the id, and the prune
+  removes the directory at the first launch on that VM once it has ended and is seven days old.
+  Ctrl-C anywhere in the backup ends it as `UserAbort` with `backup_failed`.
 
 The `chown`, the staged path list, the thread and the assertion that the target is an `SSHTransport`
 (`:88`) go.
@@ -807,8 +812,9 @@ In the order they land, each with its tests:
 - `session stop`, `delete`, `attach` and pid repair bound each read of a session's state at 10
   seconds.
 - `vm backup` stages nothing in `/var/tmp`: its archive is under `/var/lib/agentworks/detached`,
-  removed when the backup ends; one a killed backup left is removed at the next backup on that VM a
-  week or more later. It now says when it loses and regains its connection.
+  removed when the backup ends; one a killed backup left is removed, once its archive has ended, at
+  the next backup on that VM a week or more later. It now says when it loses and regains its
+  connection.
 - `env show` escapes control characters and backslashes in values.
 
 ## Tests

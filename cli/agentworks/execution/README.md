@@ -218,8 +218,10 @@ one) and exits. `launch` returns once the payload has started.
 
 The launch's `process` file is locked with `flock` before it appears and stays locked while the
 launching process, the supervisor or any process of the payload's tree lives, and that lock is the
-process identity: no pid is compared. `observe` tests the lock before it reads the status, since the
-supervisor writes the status before it releases its hold:
+process identity: no pid is compared. A descendant that calls `setsid` leaves the group `interrupt`
+signals but keeps the lock, so it outlives the interrupt and keeps the launch `RUNNING`. `observe`
+tests the lock before it reads the status, since the supervisor writes the status before it releases
+its hold:
 
 | State     | Evidence                          |
 | --------- | --------------------------------- |
