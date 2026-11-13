@@ -12,6 +12,7 @@ from agentworks.execution.files import guest_path
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
+from agentworks.workspaces.guest import stored_workspace_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -82,8 +83,15 @@ def _workspace_excludes(
     new_path: str | None = None,
     redactions: tuple[str, ...],
 ) -> None:
+    """Retire, and on rehome re-establish, the workspace's Git exclusions.
+
+    The row's stored path is read normalized (``stored_workspace_path``), as
+    an earlier release may have stored it with a trailing ``/`` or a leading
+    ``//``; both callers have already refused one that is not absolute.
+    """
     operation = "workspace-rehome" if new_path is not None else "workspace-delete"
     action = "workspace rehome" if new_path is not None else "workspace deletion"
+    old_path = stored_workspace_path(workspace.workspace_path)
     try:
         state = read_native_setup(db, "workspace", workspace.name)
     except StateError:
@@ -135,7 +143,7 @@ def _workspace_excludes(
                 admin = access()
             reconcile_workspace_excludes(
                 admin,
-                workspace.workspace_path,
+                old_path,
                 record.integration,
                 (),
                 current.claims,
@@ -153,7 +161,7 @@ def _workspace_excludes(
         if new_path is not None:
             relocated = None
             try:
-                relocated = _relocated_record(record, workspace.workspace_path, new_path, record.destination_id)
+                relocated = _relocated_record(record, old_path, new_path, record.destination_id)
             except StateError as error:
                 incomplete(str(error))
             # The snapshot predates old-location retirement: a complete .git
@@ -171,7 +179,7 @@ def _workspace_excludes(
                     group=workspace.linux_group,
                     report_incomplete=incomplete,
                     redactions=redactions,
-                    prior_workspace=workspace.workspace_path,
+                    prior_workspace=old_path,
                     shared_paths=tuple(
                         claim.destination
                         for claim in (() if relocated is None else relocated.claims)
@@ -197,7 +205,7 @@ def _workspace_excludes(
                         if vm is None:
                             raise StateError("workspace VM is missing while relocating artifact evidence")
                         identity = destination_id(vm, admin, location=new_path)
-                    current = _relocated_record(current, workspace.workspace_path, new_path, identity)
+                    current = _relocated_record(current, old_path, new_path, identity)
                 except UserAbort:
                     raise
                 except AgentworksError as error:

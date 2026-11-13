@@ -111,6 +111,21 @@ def test_workspace_delete_retires_only_its_shared_exclusions(db, deletion, share
     )
 
 
+@pytest.mark.parametrize("spelling", ["{}/", "/{}"], ids=["trailing-slash", "leading-double-slash"])
+def test_workspace_delete_retires_the_exclusions_of_a_path_an_earlier_release_stored_unnormalized(
+    db, deletion, shared_workspace, spelling, captured_output
+):
+    target, first, second, exclude, prefix, first_claims, second_claims, removed = shared_workspace
+    db.update_workspace_path("project", spelling.format(first))
+
+    delete_workspace(db, deletion.config, "project", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert removed == ["project"]
+    assert first_claims[0].identifier.encode() not in exclude.read_bytes()
+    assert second_claims[0].identifier.encode() in exclude.read_bytes()
+    assert captured_output.warnings == []
+
+
 @pytest.mark.parametrize("force", [False, True])
 @pytest.mark.parametrize(
     "problem", ["modified", "duplicate", "unavailable", "missing-workspace", "unreachable", "trust"]

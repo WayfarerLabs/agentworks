@@ -174,6 +174,28 @@ def test_actual_rehome_rebinds_only_its_pairs_and_delete_retires_them(db, deleti
         assert db.instance_state.get_applied_slices("workspace", "survivor") == survivor_state
 
 
+@pytest.mark.parametrize("spelling", ["{}/", "/{}"], ids=["trailing-slash", "leading-double-slash"])
+def test_rehome_rebinds_the_pairs_of_a_path_an_earlier_release_stored_unnormalized(db, deletion, move_case, spelling):
+    target, group = move_case
+    old, new = target.home / "repository", target.home / "moved"
+    git("init", "-q", old)
+    item = file(old / ".agents/skills/policy/SKILL.md")
+    claims, _, _ = apply(target, old, (item,))
+    old_pair = _pair(claims[0], "codex")
+    exclude = Path(claims[0].destination)
+    save(db, "project", claims, (item,))
+    db.update_workspace_path("project", spelling.format(old))
+
+    rehome_workspace(
+        db, deletion.config, "project", target_path=str(new), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    current = read_native_setup(db, "workspace", "project").records[0]
+    assert current.complete and [claim.source for claim in current.claims] == [str(new)]
+    assert old_pair not in exclude.read_bytes()
+    assert _pair(current.claims[0], "codex") in Path(current.claims[0].destination).read_bytes()
+
+
 @pytest.mark.parametrize("remove_old", [False, True])
 def test_rehome_does_not_accept_another_owners_source(db, deletion, move_case, remove_old):
     target, group = move_case
