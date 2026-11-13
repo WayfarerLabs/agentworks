@@ -64,9 +64,9 @@ def _ensure_agentworks_files_sourced(
     grep-or-append shape means this is a no-op when the source line is
     already present (the common case where nothing clobbered).
 
-    ``home`` is the literal home directory path (e.g.
-    ``/home/agentworks``). Admin and agent setup pass their respective
-    values; the helper does not assume ``$HOME`` shell expansion.
+    ``home`` selects the user's literal rc paths. Source statements use the
+    same canonical ``$HOME`` spelling as the profile writers so repeated setup
+    recognizes its existing statement.
 
     ``shell`` selects which zsh-specific files to ensure (``.zprofile``,
     ``.zshrc``). bash rc files are always checked because we always
@@ -74,14 +74,15 @@ def _ensure_agentworks_files_sourced(
     """
     logger.step("Ensure agentworks files sourced")
 
-    profile_source = f". {home}/{AGENTWORKS_PROFILE}"
+    profile_source = f'. "$HOME/{AGENTWORKS_PROFILE}"'
     _source_existing_bash_login_files(target)
     profile_rcs = [f"{home}/.profile", f"{home}/.bashrc"]
     if shell == "zsh":
         profile_rcs.append(f"{home}/.zprofile")
     for rc in profile_rcs:
         target.run(
-            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '\\n%s\\n' '{profile_source}' >> {rc}",
+            f"grep -Fqx {shlex.quote(profile_source)} {shlex.quote(rc)} 2>/dev/null "
+            f"|| printf '\\n%s\\n' {shlex.quote(profile_source)} >> {shlex.quote(rc)}",
             check=False,
         )
 
@@ -159,11 +160,12 @@ def _write_agentworks_profile(
         target.write_file(f"~/{AGENTWORKS_PROFILE}", "\n".join(lines) + "\n")
 
         # Source from ~/.profile (bash/sh) and ~/.zprofile (zsh)
-        source_line = f". $HOME/{AGENTWORKS_PROFILE}"
+        source_line = f'. "$HOME/{AGENTWORKS_PROFILE}"'
         _source_existing_bash_login_files(target)
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             target.run(
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '\\n%s\\n' '{source_line}' >> {rc}",
+                f"grep -Fqx {shlex.quote(source_line)} {rc} 2>/dev/null "
+                f"|| printf '\\n%s\\n' {shlex.quote(source_line)} >> {rc}",
             )
     except SSHError as e:
         msg = f"shell profile write failed: {e}"

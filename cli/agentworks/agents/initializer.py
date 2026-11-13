@@ -596,7 +596,7 @@ def _write_agent_profile(
     try:
         profile_path = f"{home}/{AGENTWORKS_PROFILE}"
         agent_target.write_file(profile_path, content, mode="0644")
-        source_line = f". {profile_path}"
+        source_line = f'. "$HOME/{AGENTWORKS_PROFILE}"'
         from agentworks.vms.initializer.shell_env import _source_existing_bash_login_files
 
         _source_existing_bash_login_files(agent_target)
@@ -605,7 +605,8 @@ def _write_agent_profile(
             rc_files.append(f"{home}/.zprofile")
         for rc in rc_files:
             agent_target.run(
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '\\n%s\\n' '{source_line}' >> {rc}",
+                f"grep -Fqx {shlex.quote(source_line)} {shlex.quote(rc)} 2>/dev/null "
+                f"|| printf '\\n%s\\n' {shlex.quote(source_line)} >> {shlex.quote(rc)}",
             )
     except SSHError as e:
         output.warn(f"agent profile configuration failed: {e}")

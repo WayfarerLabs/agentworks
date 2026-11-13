@@ -426,7 +426,7 @@ def test_ensure_files_sourced_appends_profile_to_bash_rcs() -> None:
         logger=_SpyLogger(),
     )
     commands = [c for c, _ in target.runs]
-    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
+    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c]
     assert any("/home/me/.profile" in c for c in profile_appends)
     assert any("/home/me/.bashrc" in c for c in profile_appends)
     assert not any(".zprofile" in c for c in profile_appends), "bash shell should not touch .zprofile"
@@ -441,7 +441,7 @@ def test_ensure_files_sourced_adds_zprofile_when_shell_is_zsh() -> None:
         logger=_SpyLogger(),
     )
     commands = [c for c, _ in target.runs]
-    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
+    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c]
     assert any("/home/me/.zprofile" in c for c in profile_appends)
 
 

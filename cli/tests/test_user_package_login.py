@@ -37,7 +37,7 @@ def test_actual_bash_login_finds_package_tools_and_preserves_dotfiles(
     probe.write_text("#!/bin/sh\nprintf '%s' ready\n")
     probe.chmod(0o755)
     if startup is not None:
-        content = "# managed shell setup\nexport DOTFILE_MARKER=kept"
+        content = "# .agentworks-profile.sh is managed separately.\nexport DOTFILE_MARKER=kept"
         (tmp_path / startup).write_text(content + ("\n" if trailing_newline else ""))
     child_env = {**os.environ, "HOME": str(tmp_path)}
     target = MagicMock()
