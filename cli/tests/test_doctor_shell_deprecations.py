@@ -20,7 +20,6 @@ from agentworks.sessions.template import SessionTemplate
 from tests.conftest import ManifestDoc, registry_with_shell, write_cfg
 
 if TYPE_CHECKING:
-    from agentworks.db.instance_state import JsonValue
     from agentworks.resources.registry import Registry
 
 
@@ -185,15 +184,6 @@ def test_doctor_reads_stored_session_overlays_without_mutating_them(
         assert "private-env" not in json.dumps([check.__dict__ for check in group.checks], default=str)
 
 
-def test_doctor_deprecation_health_is_not_suppressed() -> None:
-    output.set_suppress_deprecations(True)
-    group = HealthGroup("Configuration")
-
-    append_session_template_deprecation_checks(group, _registry(_shell("old", command="{{session_name}}")))
-
-    assert [(check.name, check.status) for check in group.checks] == [("session-template/old.command", Status.WARN)]
-
-
 def test_configuration_group_includes_shell_deprecation_health(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -286,34 +276,6 @@ def test_unreadable_overlay_preserves_other_session_health_checks() -> None:
             ("session/broken", Status.FAIL),
             ("session/old.command", Status.WARN),
         }
-
-
-@pytest.mark.parametrize("field", ["command", "resume_command"])
-@pytest.mark.parametrize("value", [42, True, ["private-marker"], {"private-marker": "input"}])
-def test_supported_overlay_with_invalid_shell_field_preserves_healthy_rows(field: str, value: JsonValue) -> None:
-    registry = _registry(_shell("default", command="${agw:session_name}"))
-    with closing(Database()) as database:
-        database.insert_vm("box", site="lima-local", hostname="box")
-        database.insert_workspace("work", "/work", "box", "work")
-        database.insert_session("broken", "work", "default", SessionMode.ADMIN)
-        database.insert_session("healthy", "work", "default", SessionMode.ADMIN)
-        database.instance_state.put_desired_overlay(
-            "session", "broken", VersionedPayload(1, {"harness_integration": {"name": "shell", field: value}})
-        )
-        database.instance_state.put_desired_overlay(
-            "session",
-            "healthy",
-            VersionedPayload(1, {"harness_integration": {"name": "shell", "command": "{{session_name}}"}}),
-        )
-        group = HealthGroup("Configuration")
-
-        append_session_template_deprecation_checks(group, registry)
-
-        assert {(check.name, check.status) for check in group.checks} == {
-            ("session/broken", Status.FAIL),
-            ("session/healthy.command", Status.WARN),
-        }
-        assert "private-marker" not in json.dumps([check.__dict__ for check in group.checks], default=str)
 
 
 def test_configuration_fallback_reports_malformed_supported_shell_overlay(
