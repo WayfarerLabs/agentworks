@@ -179,7 +179,7 @@ class _FakeAdminTarget:
         self.commands.append(cmd)
         if self._events is not None:
             self._events.append(f"run:{cmd}")
-        ok = not any(needle in cmd for needle in self._failing)
+        ok = not any(_hit(needle, cmd) for needle in self._failing)
         return SimpleNamespace(ok=ok, returncode=0 if ok else 1, stdout="", stderr="")
 
     def answer(self, call: Call) -> Result | None:
@@ -214,6 +214,14 @@ class _FakeAdminTarget:
 
 _OCCUPIED_PROBE = path_occupied("/").source.split("\n", 1)[1]
 """``path_occupied``'s script body, as :meth:`_FakeAdminTarget.answer` renders it to ``run``."""
+
+
+def _hit(needle: str, cmd: str) -> bool:
+    """Whether a fake's failing ``needle`` names ``cmd``: the occupancy probe whole, any other needle within it.
+
+    The probe's body is also part of delete's empty-reservation removal, which must not fail with it.
+    """
+    return cmd == needle if needle == _OCCUPIED_PROBE else needle in cmd
 
 
 def _route(monkeypatch: pytest.MonkeyPatch, fake: _FakeAdminTarget) -> AccessRecorder:
@@ -845,7 +853,7 @@ class _CreateThenRepairTarget(_FakeAdminTarget):
         self.commands.append(cmd)
         stdout = ""
         ok = True
-        if cmd.startswith("test -d"):
+        if cmd.startswith(_OCCUPIED_PROBE):
             ok = False  # create's existence precheck must see "absent" to proceed
         elif "chmod -c 2770" in cmd:
             self._ws_mode = 0o2770  # repair step 3 stamps the canonical mode
@@ -1099,7 +1107,7 @@ class _CheckAwareTarget(_FakeAdminTarget):
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
-        failing = any(needle in cmd for needle in self._failing)
+        failing = any(_hit(needle, cmd) for needle in self._failing)
         if failing and kwargs.get("check", True):
             from agentworks.ssh import SSHError
 
@@ -1167,9 +1175,9 @@ def test_create_rollback_removes_the_fresh_workspace_group(
     removes the group create just made. The removed group carries the
     fresh ``ws-`` prefix (``workspace_group('ws1')``), and the
     ``groupdel`` runs after the directory ``rm -rf``, mirroring the
-    delete path. ``failing=('test -d',)`` makes the create-time
+    delete path. ``failing=(_OCCUPIED_PROBE,)`` makes the create-time
     existence probe report the directory absent so create proceeds."""
-    fake = _FakeAdminTarget(failing=("test -d",))
+    fake = _FakeAdminTarget(failing=(_OCCUPIED_PROBE,))
     _wire_target(monkeypatch, fake)
 
     config = make_config()
@@ -1199,7 +1207,7 @@ def test_create_rollback_tolerates_a_groupdel_failure(
     the removal is issued ``check=False``, so the non-zero exit never
     raises. The original ``ExternalError`` propagates cleanly and no
     'rollback during workspace create' warning fires."""
-    fake = _CheckAwareTarget(failing=("test -d", "groupdel"))
+    fake = _CheckAwareTarget(failing=(_OCCUPIED_PROBE, "groupdel"))
     _wire_target(monkeypatch, fake)
 
     config = make_config()
@@ -1234,9 +1242,9 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     exactly once. The original clone error type propagates with safe operation context, the
     directory ``rm -rf`` and the ``groupdel ws-ws1`` are both issued (the
     group after the directory, mirroring delete), and no DB row survives.
-    ``failing=('test -d', 'git clone')`` makes the existence probe report
+    ``failing=(_OCCUPIED_PROBE, 'git clone')`` makes the existence probe report
     the directory absent (so create proceeds) and the clone raise."""
-    fake = _CheckAwareTarget(failing=("test -d", "git clone"))
+    fake = _CheckAwareTarget(failing=(_OCCUPIED_PROBE, "git clone"))
     _wire_target(monkeypatch, fake)
 
     config = make_config(
@@ -1290,7 +1298,7 @@ def test_cancel_during_clone_cleans_directory_and_group_and_preserves_original_i
                     raise KeyboardInterrupt("fixture second interruption during cleanup")
             return result
 
-    target = Target(failing=("test -d",))
+    target = Target(failing=(_OCCUPIED_PROBE,))
     _wire_target(monkeypatch, target)
     config = make_config(
         manifests=[ManifestDoc("workspace-template", "default", {"repo": "https://example.com/repo.git"})]

@@ -35,8 +35,8 @@ def script(source: str, *args: str, elevated: bool = False, deadline: float | No
 
 
 def path_occupied(path: str) -> Script:
-    """Exits 0 when anything, a dangling link included, is at ``path``."""
-    return script('test -d "$1" || test -e "$1" || test -L "$1"', path, deadline=PROBE_DEADLINE)
+    """Exits 0 when anything, a dangling link included, is at ``path``: what create and copy refuse to reuse."""
+    return script('test -e "$1" || test -L "$1"', path, deadline=PROBE_DEADLINE)
 
 
 def ensure_group(group: str) -> Script:
