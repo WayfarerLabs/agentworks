@@ -208,11 +208,11 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
 
 **Argv shapes.** `<stage0>` is `/usr/bin/python3 -I -S -c '<program>'` (below).
 
-| Mode                              | Argv                                                                                                         |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                                      |
-| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`                                        |
-| Forward                           | `ssh -F none -N -n [-E <client log> or -v] <options> -o ExitOnForwardFailure=yes -L ... -l <user> -- <host>` |
+| Mode                              | Argv                                                                                                                                           |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                                                                        |
+| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`, led by `printf '\000';` on a Windows console (Terminal handover, below) |
+| Forward                           | `ssh -F none -N -n [-E <client log> or -v] <options> -o ExitOnForwardFailure=yes -L ... -l <user> -- <host>`                                   |
 
 - **No `-n` on request-bearing connections.** `-n` would replace the request's stdin with the null
   device. ADR 0020's measured alternative, a stdin pipe the client closes, was proven equivalent
@@ -241,16 +241,22 @@ stderr after the marker; the terminal half takes neither.
 **Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
 `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
 pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
-failure to start to `ClientUnsupported`. The pump lives in `pump.py`. The pump is the proof's
-single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python
-3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap,
-and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance suite run it
-against a local shell.
+failure to start to `ClientUnsupported`. A client that never uses the operator's terminal while
+another client does passes `share_console=False`, which on Windows starts it with `CREATE_NO_WINDOW`
+so it is not attached to the operator's console, and changes nothing elsewhere. Only the parking
+connection of an attach passes it: left on the console, it turned the terminal half's UTF-8 into
+code-page glyphs on Windows Terminal (issue #889). Clients that keep the console keep receiving its
+Ctrl-C. The pump lives in `pump.py`. The pump is the proof's single-threaded loop (`_io.py:32-205`):
+non-blocking pipes (supported on Windows pipes from Python 3.12), 64 KiB chunks, a 10 ms sleep when
+nothing moved, the deadline, then kill and a 0.5 s reap, and cleanup on `BaseException`. It is
+argv-agnostic, which is what lets the conformance suite run it against a local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
   terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
   connection sets `hold_stdin_open`, so the pump sends the request and leaves the pipe open: the
-  parked launcher reads end of file as the client giving up.
+  parked launcher reads end of file as the client giving up. It also sets `share_console=False`, so
+  on Windows a Ctrl-C before `parked` reaches only agw, whose interrupt ends the session and kills
+  the client.
 - **Deadline and output limit.** Either stops the pump and kills the client at once, then reaps for
   0.5 s; only a natural end waits for the client to exit.
 - **Operator stdin for `stream`.** The caller passes `sys.stdin.buffer.raw`. A daemon thread reads
@@ -483,21 +489,21 @@ The classifier combines both filters with ssh's own exit status:
    starts only after `parked`). Past that it kills the connection and raises
    `ExecutionIncomplete(Unknown(DEADLINE))` with the terminal untouched; for an attach the message
    says no shell started, and names a startup file that reads stdin as the usual cause, since such a
-   file would otherwise hold the connection open forever. Then, inside
-   `with guarded_terminal() as guard:`, runs the terminal half. Its stage 0 gets the socket path as
-   `sys.argv[1]`, connects, reads the launcher frame and the envelope frame from the socket, and
-   runs agw-launch in `tty` mode. No guest text reaches a command line.
+   file would otherwise hold the connection open forever. Then, inside `with guarded_terminal():`,
+   runs the terminal half. Its stage 0 gets the socket path as `sys.argv[1]`, connects, reads the
+   launcher frame and the envelope frame from the socket, and runs agw-launch in `tty` mode. No
+   guest text reaches a command line.
 4. The parked launcher waits with `select` on the listener and on its own stdin, for at most 30
    seconds. On a connection it sends the launcher frame (`g`) and the envelope re-serialized with
    `mode: "tty"`, closes the connection, then writes `end` and `exit 0`. On stdin end of file (the
    client closing its pipe) or the timeout it writes `end` and `refused handover`. In every case a
    `finally` removes the socket and the directory, so a failed second connection leaves nothing. The
    trailer lets the client tell a timeout from a drop.
-5. After the second connection returns, still inside the guard, `guard.clean_exit = code == 0`.
-   After the guard, a code of 255 prints the notice "connection ended or the command exited 255;
-   terminal restored" with the existing detail line (I6), reimplemented in `attach.py` because the
-   legacy helper is `transports/ssh.py:77`. The client then closes the parking connection's stdin,
-   pumps it for up to two seconds and ends it.
+5. After the second connection returns, the guard's exit pass restores the terminal. After the
+   guard, a code of 255 prints the notice "connection ended or the command exited 255; terminal
+   restored" with the existing detail line (I6), reimplemented in `attach.py` because the legacy
+   helper is `transports/ssh.py:77`. The client then closes the parking connection's stdin, pumps it
+   for up to two seconds and ends it.
 
 The parking connection fails first on a missing `python3`, a trust mismatch, a refusal or a refused
 connection, so `attach` raises `VMNotReady`, `TrustMismatch`, `RequestRefused` or
@@ -506,6 +512,17 @@ connection's pipes go unread; it writes a few lines, far below a pipe buffer. A 
 second connection returns its code; with the socket gone the operator sees Python's traceback on the
 terminal and code 1, which is accepted for that rare race. There is no `SO_PEERCRED` check: the
 directory is 0700, and the account's own processes can already read its processes (HLA D8).
+
+On a Windows console (stdin and stdout both on the terminal) the terminal half's remote command is
+led by a NUL: `printf '\000'; <stage0> <socket path>`
+(`ssh_process.nul_first_on_a_windows_console`). Before its first raw-mode console write,
+Win32-OpenSSH moves the console so the cursor is at the top of the window if that write contains
+`ESC[2J`, and under ConPTY the move deletes the lines above the cursor without passing them to
+scrollback. A tmux attach's first frame is such a write, and so is a `clear` in a startup file. The
+NUL ends that check's string search, and the terminal discards it. The search runs only in raw mode,
+which needs a pty and so a terminal on stdin; without one the client's console write stops at the
+first NUL, so no NUL is sent. The legacy `ssh -t` attaches (`transports/ssh.py`,
+`transports/remote_lima.py`) use the same helper.
 
 ## Forward
 
@@ -716,27 +733,27 @@ reorder.
 - **Incident inventory** gains a row (the audit of these entry points' fix history found one more
   behavior to re-prove):
 
-| Row | Behavior                                                                                                                  | Re-proved in |
-| --- | ------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`) | 2            |
+| Row | Behavior                                                                                                                                                                                                                           | Re-proved in |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach, with one payload that leaves the alternate screen without moving the cursor on the primary screen (`897248ead`, `80c813db4`, #889) | 2            |
 
 ## Incident rows slice 2 re-proves
 
-| Row | How                                                                                                                                                  |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| I1  | No `-n`; the client closes its own stdin pipe. Pump test for end of file; live Windows loop of 25 runs each of `true`, `sleep .001` and `echo -n ""` |
-| I2  | Binary pipes and raw or `.buffer` streams; the all-bytes vectors; the Windows-marked pump test; live from Windows                                    |
-| I3  | The V lane drives real guests from each workstation; the resolver refuses MSYS builds, so no Git for Windows tool is in the path                     |
-| I4  | No operation combines input with a terminal; value-free errors tested                                                                                |
-| I5  | Literal argv and the `--` before the destination; the dash-led vector                                                                                |
-| I6  | `attach` tests with a fake terminal check the notice comes after the guard; live                                                                     |
-| I7  | `ssh -G` shows the keepalive and connect options; one live cell drops the network under a `stream`                                                   |
-| I11 | The vector, with a pipe and a socket on stdin                                                                                                        |
-| I12 | `ssh -G` shows no multiplexing with the policy argv, and the live 8.5 and Windows cells repeat it                                                    |
-| I13 | `ssh -G` shows the explicit identity file; live with a key named other than the default on Windows                                                   |
-| I14 | `ssh -G` of the pipe-mode argv shows no pty even with `RequestTTY force` supplied                                                                    |
-| I19 | The agent probe (above)                                                                                                                              |
-| I21 | The terminal guard tests, and live attach killed mid-session                                                                                         |
+| Row | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| I1  | No `-n`; the client closes its own stdin pipe. Pump test for end of file; live Windows loop of 25 runs each of `true`, `sleep .001` and `echo -n ""`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| I2  | Binary pipes and raw or `.buffer` streams; the all-bytes vectors; the Windows-marked pump test; live from Windows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| I3  | The V lane drives real guests from each workstation; the resolver refuses MSYS builds, so no Git for Windows tool is in the path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| I4  | No operation combines input with a terminal; value-free errors tested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| I5  | Literal argv and the `--` before the destination; the dash-led vector                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| I6  | `attach` tests with a fake terminal check the notice comes after the guard; live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| I7  | `ssh -G` shows the keepalive and connect options; one live cell drops the network under a `stream`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| I11 | The vector, with a pipe and a socket on stdin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| I12 | `ssh -G` shows no multiplexing with the policy argv, and the live 8.5 and Windows cells repeat it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| I13 | `ssh -G` shows the explicit identity file; live with a key named other than the default on Windows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| I14 | `ssh -G` of the pipe-mode argv shows no pty even with `RequestTTY force` supplied                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| I19 | The agent probe (above)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| I21 | The `guarded_terminal` tests, with the tmux pane tests for the cursor and a killed run; the NUL-led terminal command run under each account shell; live attach killed mid-session; and on Windows Terminal, `vm shell` exiting 0 and non-zero with no cursor jump, a detach with `clear_on_detach = "never"`, and a non-ASCII prompt that renders intact. Also on Windows Terminal, for the round 2 retest (expected results from reading the Win32-OpenSSH source, not yet observed), with twelve numbered lines seeded below an `ESC 7` at the top of the screen: the content probe's B2 (`ssh -t` to a remote whose first write enters the alternate screen and clears it, no agw) and B4 (the same between agw's sanitize payloads), expected to lose every line, which would show the client behavior; B5 (the same led by a NUL), expected to keep all twelve with the cursor where it was; and the PR #893 round 1 F1 repro, a `session attach` with `clear_on_detach = "never"` detached with Ctrl-B d, expected to keep all twelve with Terminal Find locating line 6 |
 
 ## Live evidence
 

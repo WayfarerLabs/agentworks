@@ -12,18 +12,27 @@ often with echo off as well. To verify by hand:
 2. Click in the tab. No mouse escape sequences should appear, the shell
    prompt should be visible, and typing should echo.
 
-The tests here cover what is checkable without a real TTY: the payload's
-content and ordering, the stdout gate, the POSIX termios restore, and
-the Windows console-mode sequence against a stubbed kernel32. What no
-test can prove is that the Win32 calls behave as documented on a real
-console, since there is no Windows host here; the manual reproduction
-above is what covers that.
+The tests here cover the payload's content and ordering, the stdout
+gate, the POSIX termios restore, and the Windows console-mode sequence
+against a stubbed kernel32. Where tmux is installed, the guard also runs
+on a real pseudo-terminal under tmux, which shows where the cursor ends.
+The Windows CI job runs the ``windows``-marked tests against real handles,
+but it has no interactive console or terminal emulator, so the manual
+reproduction above is still what shows the Win32 calls restoring one.
 """
 
 from __future__ import annotations
 
+import contextlib
 import io
+import os
+import shlex
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
+from pathlib import Path
 
 import pytest
 
@@ -31,7 +40,6 @@ from agentworks.terminal import (
     MOUSE_TRACKING_DISABLE,
     TERMINAL_CLEAR,
     TERMINAL_SANITIZE,
-    TERMINAL_SANITIZE_CLEAN_EXIT,
     clear_screen_on_detach,
     emit_clear,
     ensure_cooked_input,
@@ -92,7 +100,7 @@ def test_sanitize_supersets_the_mouse_reset() -> None:
         ("\x1b[?1004l", "focus reporting"),
         ("\x1b[>4m", "modifyOtherKeys"),
         ("\x1b[<u", "the kitty keyboard stack"),
-        ("\x1b[?1049l", "alternate screen"),
+        ("\x1b[?1049h\x1b[?1049l", "alternate screen"),
         ("\x1b[?1047l", "legacy clearing alternate screen"),
         ("\x1b[?47l", "legacy alternate screen"),
         ("\x1b[?2026l", "synchronized output"),
@@ -116,10 +124,34 @@ def test_sanitize_grounds_the_parser_first() -> None:
     assert TERMINAL_SANITIZE.startswith("\x18")
 
 
+_ALT_SCREEN_LEAVES = ("\x1b[?1049l", "\x1b[?1047l", "\x1b[?47l")
+_NEUTRAL_1049_LEAVE = "\x1b[?1049h\x1b[?1049l"
+
+
 def test_sanitize_leaves_the_alternate_screen_before_resetting_margins() -> None:
     """The margin reset must land on the buffer the operator is left
     looking at, not on an alternate screen we are about to discard."""
-    assert TERMINAL_SANITIZE.index("\x1b[?1049l") < TERMINAL_SANITIZE.index("\x1b[r")
+    margins = TERMINAL_SANITIZE.index("\x1b[r")
+    assert all(TERMINAL_SANITIZE.rindex(leave) < margins for leave in _ALT_SCREEN_LEAVES)
+
+
+def test_every_1049_leave_is_the_cursor_neutral_pair() -> None:
+    """A bare ``?1049l`` restores a stale saved cursor even on the primary
+    screen, so each one is preceded by the ``?1049h`` that saves the cursor
+    it will restore, and nothing else enters the alternate screen."""
+    assert TERMINAL_SANITIZE.count("\x1b[?1049l") == TERMINAL_SANITIZE.count(_NEUTRAL_1049_LEAVE) == 1
+    assert TERMINAL_SANITIZE.count("\x1b[?1049h") == 1
+    assert "\x1b[?1047h" not in TERMINAL_SANITIZE
+    assert "\x1b[?47h" not in TERMINAL_SANITIZE
+
+
+def test_the_legacy_leaves_follow_the_neutral_pair() -> None:
+    """``?1047l`` and ``?47l`` leave without restoring the cursor. Sent first
+    on the alternate screen, they would make the pair save and keep the remote
+    program's cursor instead of the one saved when it entered."""
+    pair = TERMINAL_SANITIZE.index(_NEUTRAL_1049_LEAVE)
+    assert pair < TERMINAL_SANITIZE.index("\x1b[?1047l")
+    assert pair < TERMINAL_SANITIZE.index("\x1b[?47l")
 
 
 def test_sanitize_brackets_the_cursor_homing_resets() -> None:
@@ -150,42 +182,6 @@ def test_sanitize_does_not_hard_reset() -> None:
     most terminals, destroying what the operator most wants to read
     after a dropped attach."""
     assert "\x1bc" not in TERMINAL_SANITIZE
-
-
-# ---------------------------------------------------------------------------
-# the clean-exit sanitize variant
-# ---------------------------------------------------------------------------
-
-# The alt-screen buffer switches: the only sanitize sequences that move the
-# cursor, and the ones the clean-exit variant drops.
-_ALT_SCREEN_SWITCHES = ("\x1b[?47l", "\x1b[?1047l", "\x1b[?1049l")
-
-
-@pytest.mark.parametrize("switch", _ALT_SCREEN_SWITCHES)
-def test_clean_exit_variant_omits_the_alt_screen_switches(switch: str) -> None:
-    """A clean detach already left the alt screen; re-sending the switches
-    is redundant on a spec terminal and, on Windows Terminal, `?1049l`
-    restores a saved cursor and jerks the next prompt up. The clean-exit
-    payload drops them (while the full payload keeps them)."""
-    assert switch in TERMINAL_SANITIZE
-    assert switch not in TERMINAL_SANITIZE_CLEAN_EXIT
-
-
-@pytest.mark.parametrize(
-    ("escape", "what"),
-    [
-        (MOUSE_TRACKING_DISABLE, "the mouse reset"),
-        ("\x1b[?2004l", "bracketed paste"),
-        ("\x1b7", "the DECSC cursor save"),
-        ("\x1b8", "the DECRC cursor restore"),
-        ("\x1b[?25h", "cursor visibility"),
-        ("\x1b[0m", "colors and attributes"),
-    ],
-)
-def test_clean_exit_variant_keeps_the_cursor_safe_resets(escape: str, what: str) -> None:
-    """Dropping the alt-screen switches must not drop the idempotent,
-    cursor-safe resets: they still run on a clean exit."""
-    assert escape in TERMINAL_SANITIZE_CLEAN_EXIT, f"clean-exit payload dropped {what}"
 
 
 # ---------------------------------------------------------------------------
@@ -244,35 +240,11 @@ def test_guard_sanitizes_on_entry_and_on_exit(monkeypatch: pytest.MonkeyPatch) -
     """The entry pass is what recovers a terminal wrecked by an attach
     this process never saw end (the operator closed the tab, or
     agentworks was killed), so the next attach cleans up the last one's
-    mess."""
+    mess. The exit pass sends the same payload however the attach ended."""
     fake = _install_stdout(monkeypatch)
     with guarded_terminal():
         fake.write("body")
     assert fake.getvalue() == TERMINAL_SANITIZE + "body" + TERMINAL_SANITIZE
-
-
-def test_guard_uses_the_clean_variant_when_the_body_reports_a_clean_exit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Entry always emits the full reset (prior state unknown); a body that
-    sets clean_exit selects the alt-screen-free variant for the exit pass,
-    so the cursor is not jerked after a clean detach."""
-    fake = _install_stdout(monkeypatch)
-    with guarded_terminal() as guard:
-        guard.clean_exit = True
-    assert fake.getvalue() == TERMINAL_SANITIZE + TERMINAL_SANITIZE_CLEAN_EXIT
-
-
-def test_guard_defaults_to_the_full_reset_when_the_body_says_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A body that never sets clean_exit (or one that raised) is treated as
-    a drop: the exit pass keeps the alt-screen switches, since a drop is the
-    case that most needs them."""
-    fake = _install_stdout(monkeypatch)
-    with guarded_terminal():
-        pass
-    assert fake.getvalue() == TERMINAL_SANITIZE * 2
 
 
 def test_guard_sanitizes_when_the_body_raises(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -304,6 +276,94 @@ def test_guard_survives_a_terminal_that_cannot_be_snapshotted(monkeypatch: pytes
     with guarded_terminal():
         pass
     assert fake.getvalue() == TERMINAL_SANITIZE * 2
+
+
+# ---------------------------------------------------------------------------
+# guarded_terminal() on a real terminal (tmux): where the cursor ends
+# ---------------------------------------------------------------------------
+
+_TMUX = shutil.which("tmux")
+_SEEDS = 5
+_MARK = "AGW-GUARD-ENTERED"
+
+# The child seeds the pane, runs ``before``, then enters the real guard and
+# writes the mark, so the mark lands wherever the entry pass left the cursor.
+_PANE_SCRIPT = """
+import os, sys, time
+from agentworks.terminal import guarded_terminal
+write = lambda text: os.write(1, text.encode())
+for index in range(SEEDS):
+    write(f"seed {index}\\r\\n")
+write(BEFORE)
+with guarded_terminal():
+    write(MARK)
+    time.sleep(60)
+"""
+
+
+def _run_in_tmux(before: str) -> tuple[int, bool]:
+    """The pane row the mark landed on, and whether the pane is on the alternate screen."""
+    assert _TMUX is not None
+    script = _PANE_SCRIPT.replace("SEEDS", str(_SEEDS)).replace("BEFORE", repr(before)).replace("MARK", repr(_MARK))
+    # pytest's nested tmp_path can be longer than a socket path allows.
+    with tempfile.TemporaryDirectory(prefix="agw-terminal-", dir="/tmp") as root:
+        socket = str(Path(root) / "s")
+        environment = {key: value for key, value in os.environ.items() if key != "TMUX"}
+
+        def tmux(*args: str) -> str:
+            return subprocess.run(
+                [_TMUX, "-S", socket, "-f", os.devnull, *args],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10,
+                env=environment,
+            ).stdout
+
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+        tmux("new-session", "-d", "-x", "80", "-y", "40", command)
+        try:
+            deadline = time.monotonic() + 15
+            rows: list[str] = []
+            while time.monotonic() < deadline:
+                try:
+                    rows = tmux("capture-pane", "-p").splitlines()
+                except subprocess.CalledProcessError as error:
+                    # The pane command died and took the server with it.
+                    raise AssertionError(f"the pane exited before the mark: {rows!r} {error.stderr!r}") from error
+                marked = [index for index, row in enumerate(rows) if _MARK in row]
+                if marked:
+                    return marked[0], tmux("display-message", "-p", "#{alternate_on}").strip() == "1"
+                time.sleep(0.05)
+            raise AssertionError(f"the guard never entered: {rows!r}")
+        finally:
+            with contextlib.suppress(subprocess.SubprocessError):
+                tmux("kill-server")
+
+
+_needs_tmux = pytest.mark.skipif(_TMUX is None or os.name != "posix", reason="requires tmux on a POSIX host")
+
+
+@_needs_tmux
+def test_entry_leaves_the_cursor_alone_after_an_earlier_alternate_screen_visit() -> None:
+    """Issue #889: a program that entered and left the alternate screen
+    earlier in the tab (``less``, an earlier console attach) leaves a saved
+    cursor behind, and a bare ``?1049l`` on entry jumped back to it, so the
+    session wrote over the operator's scrollback."""
+    later = 10
+    row, on_alternate = _run_in_tmux("\x1b[?1049h\x1b[?1049l" + "".join(f"later {n}\r\n" for n in range(later)))
+
+    assert (row, on_alternate) == (_SEEDS + later, False)
+
+
+@_needs_tmux
+def test_entry_recovers_a_terminal_a_killed_run_left_on_the_alternate_screen() -> None:
+    """An agw killed while its remote program held the alternate screen
+    runs no exit pass, so the next attach's entry pass leaves that screen,
+    and the cursor returns to where the remote program entered it."""
+    row, on_alternate = _run_in_tmux("\x1b[?1049h" + "remote program output\r\n" * 3)
+
+    assert (row, on_alternate) == (_SEEDS, False)
 
 
 # ---------------------------------------------------------------------------

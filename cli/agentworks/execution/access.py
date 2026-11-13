@@ -144,7 +144,9 @@ class VMAccess:
                 policy,
                 destination,
                 ssh_process.ArgvMode.TERMINAL,
-                ssh_process.stage0_command(attach_module.socket_path(token)),
+                ssh_process.nul_first_on_a_windows_console(
+                    ssh_process.stage0_command(attach_module.socket_path(token))
+                ),
             )
             with self._passphrase_hint_on_connection_failure():
                 return attach_module.attach(

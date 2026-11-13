@@ -106,6 +106,7 @@
     "kubeconfig",
     "kwarg",
     "kwargs",
+    "lastlog",
     "libpam",
     "lifecycles",
     "limactl",

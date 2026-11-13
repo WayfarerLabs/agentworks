@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentworks.execution import ssh_process
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import RemoteLimaTransport
-from tests.conftest import requires_posix_shell
+from tests.conftest import pretend_windows_console, requires_posix_shell
 from tests.transports.conftest import fail_completed as _fail_completed
 from tests.transports.conftest import ok_completed as _ok_completed
 
@@ -137,6 +138,17 @@ def test_interactive_two_hops_with_login_shell_wrap() -> None:
         payload = argv[-1]
         assert payload.startswith("$SHELL -lc ")
         assert "limactl shell my-vm" in payload
+
+
+def test_interactive_leads_the_host_command_with_a_nul_on_a_windows_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    pretend_windows_console(monkeypatch)
+    t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
+    with patch("agentworks.transports.remote_lima.subprocess.call", return_value=0) as mock_call:
+        t._interactive("tmux attach -t s1")
+        t._interactive("")
+
+    for call in mock_call.call_args_list:
+        assert call.args[0][-1].startswith(ssh_process.nul_first_on_a_windows_console("$SHELL -lc "))
 
 
 def test_interactive_sets_client_keepalives() -> None:
