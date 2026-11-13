@@ -62,7 +62,6 @@ def start_vm(
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
-    _guard_incomplete_vm(selected)
     # The wait reaches the VM at its tailnet address through
     # agentworks.execution, so a workstation off Tailscale or an unsupported
     # client refuses before anything is resolved or started.
@@ -74,6 +73,7 @@ def start_vm(
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
         vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        # Before the intent write; prepared runtime's own check comes after it.
         _guard_incomplete_vm(vm_node.reload_row())
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)
@@ -113,10 +113,10 @@ def stop_vm(
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
-    _guard_incomplete_vm(selected)
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
         vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
+        # Before the intent write; prepared runtime's own check comes after it.
         _guard_incomplete_vm(vm_node.reload_row())
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)

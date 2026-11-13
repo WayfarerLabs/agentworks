@@ -241,13 +241,15 @@ def test_accepted_target_survives_credential_failure_or_cancellation(
     assert row.last_started_at is None
 
 
-def test_local_refusal_does_not_accept_target(db, make_config):
+@pytest.mark.parametrize("action", [manager.start_vm, manager.stop_vm])
+def test_local_refusal_does_not_accept_target(db, make_config, resolve_counter, action):
     config = make_config()
     vm = _seed(db)
     db.update_vm_provisioning_status("box", ProvisioningStatus.FAILED)
     with pytest.raises(StateError):
-        manager.start_vm(db, config, "box", interaction=Policy.REFUSE)
+        action(db, config, "box", interaction=Policy.REFUSE)
     assert db.get_vm("box").desired_runtime_state is vm.desired_runtime_state
+    assert resolve_counter == []
 
 
 @pytest.mark.parametrize("initial", [VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.DEALLOCATED])
