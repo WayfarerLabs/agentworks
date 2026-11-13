@@ -1448,6 +1448,32 @@ def test_rehome_overlapping_paths_fail_with_zero_resolves_and_zero_gate(
     assert target.commands == []
 
 
+def test_rehome_refuses_a_target_inside_a_stored_path_spelled_with_a_double_slash(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeAdminTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed(db)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/opt/agentworks/workspaces//ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+    _no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError):
+        workspace_manager.rehome_workspace(
+            db,
+            config,
+            "ws1",
+            target_path="/opt/agentworks/workspaces/ws1/inner",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert resolve_counter == []
+    assert target.commands == []
+
+
 @pytest.mark.parametrize("target_path", ["dst/ws1", "host:/dst/ws1", "/", "/dst/../ws1", "/dst//ws1", "/dst/./ws1"])
 def test_rehome_refuses_a_target_that_is_not_an_absolute_directory_before_anything_runs(
     db: Database,

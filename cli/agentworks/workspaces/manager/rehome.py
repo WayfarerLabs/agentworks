@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import posixpath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -14,7 +13,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.execution.files import guest_path
+from agentworks.execution.files import guest_path, normalized_guest_path
 from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
@@ -70,22 +69,18 @@ def rehome_workspace(
     # Determine target path
     from agentworks.workspaces.backends.vm import default_workspace_path
 
-    new_path = (
-        _target_directory(target_path, ws_name=name)
-        if target_path is not None
-        else posixpath.normpath(default_workspace_path(config, name))
+    new_path = _target_directory(
+        target_path if target_path is not None else default_workspace_path(config, name), ws_name=name
     )
+    # Compared normalized: a stored path can be spelled `/data//ws` or `/data/ws/`.
+    old_path = normalized_guest_path(ws.workspace_path)
 
-    old_path = ws.workspace_path
-
-    if posixpath.normpath(old_path) == new_path:
+    if old_path == new_path:
         output.info(f"Workspace '{name}' is already at {new_path}")
         return
 
     # Safety: detect overlapping paths
-    old_norm = old_path.rstrip("/") + "/"
-    new_norm = new_path.rstrip("/") + "/"
-    if new_norm.startswith(old_norm) or old_norm.startswith(new_norm):
+    if (new_path + "/").startswith(old_path + "/") or (old_path + "/").startswith(new_path + "/"):
         raise ValidationError(
             "source and target paths overlap",
             entity_kind="workspace",

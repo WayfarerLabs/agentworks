@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 from dataclasses import dataclass
 from enum import Enum
 from importlib import resources
@@ -72,6 +73,17 @@ def guest_path(path: str) -> str:
     ):
         raise StateError(f"guest file paths must be absolute and normalized: {path!r}")
     return str(PurePosixPath(path))
+
+
+def normalized_guest_path(path: str) -> str:
+    """``path`` as one spelling of the same guest path: ``posixpath.normpath``, then a leading ``//`` made ``/``.
+
+    POSIX leaves a leading ``//`` implementation-defined, so ``normpath`` keeps
+    it; Linux reads it as ``/``. A relative path stays relative, for the caller
+    to refuse.
+    """
+    normalized = posixpath.normpath(path)
+    return "/" + normalized.lstrip("/") if normalized.startswith("//") else normalized
 
 
 @dataclass(frozen=True)
