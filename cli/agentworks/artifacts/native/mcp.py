@@ -266,7 +266,7 @@ def apply_mcp(
     )
     if elsewhere:
         invocation.report_incomplete(retained_location_reason)
-    blocked_deferrals = (
+    preflight_deferrals = (
         *tuple(
             ArtifactDeferral(input_id=input_id, destination="session", reason=reason)
             for input_id, reason in conflicts.items()
@@ -281,7 +281,7 @@ def apply_mcp(
     protected_origins = {item.origin_identity for name in protected_names for item in grouped[name]}
     desired = {name: items for name, items in desired.items() if name not in blocked}
     if not desired and not old and map_document is None:
-        return ArtifactApplication(deferred=blocked_deferrals)
+        return ArtifactApplication(deferred=preflight_deferrals)
     format: SettingsFormat = "json" if tool == "claude" else "toml"
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     group = invocation.linux_group if isinstance(invocation, WorkspaceSetupInvocation) else ""
@@ -292,7 +292,7 @@ def apply_mcp(
             invocation.report_incomplete(reason)
         return ArtifactApplication(
             deferred=(
-                *blocked_deferrals,
+                *preflight_deferrals,
                 *tuple(
                     ArtifactDeferral(input_id=item.identity, destination="session", reason=reason)
                     for items in desired.values()
@@ -314,7 +314,7 @@ def apply_mcp(
                     group=group,
                     preserve_metadata=initial is not None,
                 )
-            return ArtifactApplication(deferred=blocked_deferrals)
+            return ArtifactApplication(deferred=preflight_deferrals)
         try:
             initial = files.read(destination)
         except (ConnectivityError, ExternalError, NativeFilePathError):
@@ -379,24 +379,35 @@ def apply_mcp(
                     f"Retained modified MCP server '{claim.identifier}'; "
                     "its current native entry differs from applied state."
                 )
-        deferred: list[ArtifactDeferral] = list(blocked_deferrals)
+        deferred: list[ArtifactDeferral] = list(preflight_deferrals)
+        adopted: list[str] = []
         confirmed = {claim.identifier: claim for claim in retained}
         for name, items in desired.items():
             item = items[0]
             entry = render_mcp(item, tool)
             owned_claim = confirmed.get(name)
             observed = table.get(name)
+            unresolved = owned_claim is not None and owned_claim.source in invocation.retain_artifact_origins
+            if unresolved and observed == entry:
+                # Equal descendants cannot replace an unresolved representative:
+                # their later withdrawal must still retain the ancestor's entry.
+                continue
             conflict = name in contributed and observed != entry
             owned = owned_claim is not None and name in current and _matches(owned_claim, current[name])
-            if conflict or (name in table and observed != entry and not owned):
+            if unresolved or conflict or (name in table and observed != entry and not owned):
                 reason = (
-                    f"MCP server '{name}' conflicts with a mapped or externally managed native entry; "
+                    f"MCP server '{name}' delivery is deferred until ancestor setup is repaired; "
+                    "recorded ownership is retained."
+                    if unresolved
+                    else f"MCP server '{name}' conflicts with a mapped or externally managed native entry; "
                     "that entry was retained."
                 )
                 deferred.extend(
                     ArtifactDeferral(input_id=item.identity, destination="session", reason=reason) for item in items
                 )
                 continue
+            if owned_claim is None and name in current and current[name] == entry:
+                adopted.append(name)
             if key not in document:
                 document[key] = table
             table[name] = entry
@@ -429,6 +440,8 @@ def apply_mcp(
         # an optional artifact skip or followed by more native mutations.
         if updated != previous:
             invocation.checkpoint(updated)
+        for name in adopted:
+            output.info(f"Adopted existing MCP server '{name}' into managed ownership.")
         for name in retired:
             action = (
                 "Released MCP ownership of native server"
