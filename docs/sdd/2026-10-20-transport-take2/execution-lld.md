@@ -208,11 +208,11 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
 
 **Argv shapes.** `<stage0>` is `/usr/bin/python3 -I -S -c '<program>'` (below).
 
-| Mode                              | Argv                                                                                                         |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                                      |
-| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`                                        |
-| Forward                           | `ssh -F none -N -n [-E <client log> or -v] <options> -o ExitOnForwardFailure=yes -L ... -l <user> -- <host>` |
+| Mode                              | Argv                                                                                                                                           |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                                                                        |
+| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`, led by `printf '\000';` on a Windows console (Terminal handover, below) |
+| Forward                           | `ssh -F none -N -n [-E <client log> or -v] <options> -o ExitOnForwardFailure=yes -L ... -l <user> -- <host>`                                   |
 
 - **No `-n` on request-bearing connections.** `-n` would replace the request's stdin with the null
   device. ADR 0020's measured alternative, a stdin pipe the client closes, was proven equivalent
