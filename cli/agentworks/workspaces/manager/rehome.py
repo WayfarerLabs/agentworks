@@ -20,7 +20,7 @@ from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
-from agentworks.workspaces.guest import FIND_DEADLINE, PROBE_DEADLINE, REQUEST_FAILURES, open_parent_traversal
+from agentworks.workspaces.guest import FIND_DEADLINE, PROBE_DEADLINE, REQUEST_FAILURES, open_parent_traversal, script
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
 from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config, remove_config
@@ -79,13 +79,8 @@ def rehome_workspace(
         output.info(f"Workspace '{name}' is already at {new_path}")
         return
 
-    # Safety: detect overlapping paths
-    if (new_path + "/").startswith(old_path + "/") or (old_path + "/").startswith(new_path + "/"):
-        raise ValidationError(
-            "source and target paths overlap",
-            entity_kind="workspace",
-            entity_name=name,
-        )
+    # As spelled here, before anything runs; as the guest resolves them, inside the span.
+    _refuse_overlap(old_path, new_path, ws_name=name)
 
     from agentworks.harness_setup.locking import native_mutation_guard
 
@@ -200,6 +195,9 @@ def _rehome_vm(
                 entity_kind="workspace",
                 entity_name=ws_name,
             )
+        # A link can make different spellings one directory, and the copy would
+        # then write into its own source before --remove-old removes it.
+        _refuse_overlap(*_resolved_paths(probe, old_path, new_path), ws_name=ws_name)
 
         if not yes:
             output.info(f"Rehome workspace '{ws_name}':")
@@ -338,6 +336,37 @@ def _rehome_vm(
                 ) from e
 
         output.result(f"Workspace '{ws_name}' rehomed to {new_path}")
+
+
+def _refuse_overlap(old_path: str, new_path: str, *, ws_name: str) -> None:
+    """Refuse a target that is the source, inside it, or contains it."""
+    if (new_path + "/").startswith(old_path + "/") or (old_path + "/").startswith(new_path + "/"):
+        raise ValidationError(
+            "source and target paths overlap",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
+
+
+def _resolved_paths(access: VMAccess, old_path: str, new_path: str) -> tuple[str, str]:
+    """The source and the target as the guest resolves them, every link followed.
+
+    The source exists (``realpath -e``); the target need not yet (``realpath
+    -m``). Boundary: the paths are a guest process's output, so anything but
+    two absolute paths is a ``StateError``.
+    """
+    result = access.run(
+        script('realpath -z -e -- "$1" && realpath -z -m -- "$2"', old_path, new_path, deadline=PROBE_DEADLINE),
+        check=True,
+    )
+    resolved = result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+    if len(resolved) != 3 or resolved[2] or not all(path.startswith("/") for path in resolved[:2]):
+        raise StateError(
+            f"cannot resolve {old_path} and {new_path} on VM '{access.vm_name}'",
+            entity_kind="vm",
+            entity_name=access.vm_name,
+        )
+    return resolved[0], resolved[1]
 
 
 def _is_directory(access: VMAccess, path: str) -> bool:

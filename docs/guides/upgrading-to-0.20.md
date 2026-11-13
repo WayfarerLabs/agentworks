@@ -251,7 +251,8 @@ the VM once no backup is running.
   leading `//` reads as `/`.
 - **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
   or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
-  dropped.
+  dropped. A target that is the workspace's directory, inside it, or around it once the VM resolves
+  symbolic links is refused before the confirmation, where the copy used to run into its own source.
 - **`workspace copy` refuses an occupied destination.** A directory, file or link already at the new
   workspace's path is refused before anything is extracted, as `workspace create` refuses it, where
   the copy used to extract into it.

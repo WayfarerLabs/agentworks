@@ -174,6 +174,8 @@ class _FakeAdminTarget:
         self.written: list[tuple[str, str]] = []
         self._events = events
         self._failing = failing
+        # Directory links the guest resolves: each link's path to its target.
+        self.links: dict[str, str] = {}
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
@@ -189,7 +191,8 @@ class _FakeAdminTarget:
         ``set --`` line that carries its arguments; an elevated request gets
         ``sudo=True``. A file operation is recorded as written and succeeds.
         A failed request raises ``CommandFailed`` under ``check``, as the
-        access does.
+        access does. Rehome's ``realpath`` probe prints its arguments with
+        ``links`` resolved.
         """
         request = call.request
         if isinstance(request, PythonProgram):
@@ -206,10 +209,20 @@ class _FakeAdminTarget:
             outcome = self.run(line, sudo=request.elevated, check=check)
         except ConnectivityError as error:
             raise CommandFailed("box", 1, Result(Completed(1)), streams_logged=True) from error
-        result = Result(Completed(outcome.returncode), outcome.stdout.encode(), outcome.stderr.encode())
+        stdout = outcome.stdout.encode()
+        if isinstance(request, Script) and line.startswith("realpath -z -e") and not outcome.returncode:
+            paths = shlex.split(request.source.split("\n", 1)[0])[2:]
+            stdout = b"".join(self._resolved(path).encode() + b"\0" for path in paths)
+        result = Result(Completed(outcome.returncode), stdout, outcome.stderr.encode())
         if check and outcome.returncode:
             raise CommandFailed("box", outcome.returncode, result, streams_logged=True)
         return result
+
+    def _resolved(self, path: str) -> str:
+        for link, target in self.links.items():
+            if path == link or path.startswith(link + "/"):
+                return target + path.removeprefix(link)
+        return path
 
 
 _OCCUPIED_PROBE = path_occupied("/").source.split("\n", 1)[1]
@@ -1474,6 +1487,37 @@ def test_rehome_refuses_a_target_inside_a_stored_path_spelled_with_a_double_slas
     assert target.commands == []
 
 
+def test_rehome_refuses_a_target_inside_the_source_through_a_link(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The spellings differ, but the guest resolves the target into the source: nothing is copied or removed."""
+    config = make_config()
+    _seed(db)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/data/ws/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+    _reachable(monkeypatch, True)
+    fake = _FakeAdminTarget(failing=("test -d /mnt/x/ws/ws1/inner",))
+    fake.links = {"/data/ws": "/mnt/x/ws"}
+    _route(monkeypatch, fake)
+
+    with pytest.raises(ValidationError):
+        workspace_manager.rehome_workspace(
+            db,
+            config,
+            "ws1",
+            target_path="/mnt/x/ws/ws1/inner",
+            remove_old=True,
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert [command.split()[0] for command in fake.commands] == ["test", "test", "realpath"]
+    row = db.get_workspace("ws1")
+    assert row is not None and row.workspace_path == "/data/ws/ws1"
+
+
 @pytest.mark.parametrize("target_path", ["dst/ws1", "host:/dst/ws1", "/", "/dst/../ws1", "/dst//ws1", "/dst/./ws1"])
 def test_rehome_refuses_a_target_that_is_not_an_absolute_directory_before_anything_runs(
     db: Database,
@@ -1653,8 +1697,9 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     """The order pin, which doubles as rehome's gate-prompt parity
     carry: on a stopped VM the gate's just-in-time token resolve is
     the ONLY backend pass (the boundary is fully seeded), then the
-    gate events, then the SSH directory existence checks, then the
-    confirm (which renders their results). A declined confirm raises
+    gate events, then the SSH directory existence checks and the
+    resolution of both paths, then the confirm (which renders their
+    results). A declined confirm raises
     UserAbort and leaves the DB path unchanged; by then the gate has
     already run, because the checks the prompt reports on need SSH
     (inherently post-gate)."""
@@ -1685,6 +1730,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
         "tailscale",
         "run:test -d /srv/ws1",
         "run:test -d /dst/ws1",
+        'run:realpath -z -e -- "$1" && realpath -z -m -- "$2"',
         "confirm",
     ]
     assert resolve_counter == [["proxmox-token"]]
