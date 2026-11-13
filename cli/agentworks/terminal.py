@@ -224,9 +224,8 @@ def clear_screen_on_detach(setting: ClearOnDetach) -> bool:
 
     ``"always"`` and ``"never"`` force the choice regardless of OS. ``"auto"``
     (the default) clears only on Windows, where the nested-tmux console path
-    proved unreliable on Windows Terminal (the outer tmux's own alt-screen
-    leave was enough to trigger a bad cursor restore), so full-screen attaches
-    clear as a deterministic fallback. Elsewhere it preserves. This is the
+    proved unreliable on Windows Terminal, so full-screen attaches clear as a
+    deterministic fallback. Elsewhere it preserves. This is the
     single place the platform check lives: a future terminal that needs the
     same treatment is a one-line change here.
     """

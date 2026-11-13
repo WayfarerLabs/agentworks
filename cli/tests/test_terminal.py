@@ -308,8 +308,7 @@ def _run_in_tmux(before: str) -> tuple[int, bool]:
     # pytest's nested tmp_path can be longer than a socket path allows.
     with tempfile.TemporaryDirectory(prefix="agw-terminal-", dir="/tmp") as root:
         socket = str(Path(root) / "s")
-        environment = {**os.environ, "TMUX_TMPDIR": root}
-        environment.pop("TMUX", None)
+        environment = {key: value for key, value in os.environ.items() if key != "TMUX"}
 
         def tmux(*args: str) -> str:
             return subprocess.run(
@@ -325,8 +324,13 @@ def _run_in_tmux(before: str) -> tuple[int, bool]:
         tmux("new-session", "-d", "-x", "80", "-y", "40", command)
         try:
             deadline = time.monotonic() + 15
+            rows: list[str] = []
             while time.monotonic() < deadline:
-                rows = tmux("capture-pane", "-p").splitlines()
+                try:
+                    rows = tmux("capture-pane", "-p").splitlines()
+                except subprocess.CalledProcessError as error:
+                    # The pane command died and took the server with it.
+                    raise AssertionError(f"the pane exited before the mark: {rows!r} {error.stderr!r}") from error
                 marked = [index for index, row in enumerate(rows) if _MARK in row]
                 if marked:
                     return marked[0], tmux("display-message", "-p", "#{alternate_on}").strip() == "1"

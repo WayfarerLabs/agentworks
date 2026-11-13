@@ -285,7 +285,7 @@ def spawn(
     into code-page glyphs (issue #889); the mechanism is not established, but
     Win32-OpenSSH opens ``CONIN$`` and ``CONOUT$`` itself whatever its stdio are.
     It also stops the console's Ctrl-C from reaching that client, which then
-    ends only when agw ends it. Elsewhere it changes nothing: with
+    ends when its remote command does, or when agw ends it. Elsewhere it changes nothing: with
     ``BatchMode=yes`` the client never opens the terminal.
     """
     console_free = not share_console and sys.platform == "win32"

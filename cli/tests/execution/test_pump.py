@@ -595,10 +595,7 @@ def test_clients_share_the_operators_console_by_default(
     assert popen_flags == [0, 0]
 
 
-@pytest.mark.parametrize("share_console", [None, True, False])
-def test_a_session_passes_its_console_choice_to_the_spawn(
-    monkeypatch: pytest.MonkeyPatch, share_console: bool | None
-) -> None:
+def test_a_session_shares_the_console_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     asked: list[bool] = []
 
     def spawn(*_args: object, share_console: bool, **_kwargs: object) -> None:
@@ -606,16 +603,11 @@ def test_a_session_passes_its_console_choice_to_the_spawn(
         raise ClientUnsupported("recorded")
 
     monkeypatch.setattr(ssh_process, "spawn", spawn)
-    if share_console is None:
-        session = PipeSession(["ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
-    else:
-        session = PipeSession(
-            ["ssh"], request=b"", nonce=NONCE, share_console=share_console, on_stdout=Capture(), on_stderr=Capture()
-        )
+    session = PipeSession(["ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
 
     with pytest.raises(ClientUnsupported):
         session.start()
-    assert asked == [share_console is not False]
+    assert asked == [True]
 
 
 @pytest.mark.parametrize("share_console", [True, False])
