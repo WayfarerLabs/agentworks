@@ -902,6 +902,16 @@ structure and adapts its rules as follows.
   `agw vm recover`), there are none to acquire: activation waits, and a VM that does not answer
   blocks its family with a failure naming recover. That SDD is locked, so the supersession is
   recorded here.
+- **Explicit start without a host-key record.** #885 refuses `vm start` on a VM with no host-key
+  record before it accepts intent or resolves a secret
+  ([plan.md:384-386](../2026-11-09-desired-runtime-state/plan.md)), and its
+  `test_start_without_host_key_refuses_before_intent_secrets_or_provider` pinned that refusal. This
+  slice reverses it deliberately: an explicit start boots the VM, and its wait then refuses for want
+  of the record, naming `agw vm recover`, which reads the keys through the platform (Start and
+  activation, above). The merge `a2dc144c7` replaced that test on purpose with
+  `test_a_stopped_vm_without_a_host_key_record_starts_then_fails_naming_recover_which_can_then_run`
+  (`tests/vms/test_lifecycle_orchestrated.py`). Activation keeps the refusal. This supersession is
+  recorded here for the same reason.
 
 ## Error mapping
 
