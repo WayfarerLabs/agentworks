@@ -90,6 +90,9 @@ def backup_vm(
             db.insert_vm_event(vm_name, "backup_started")
             try:
                 return _back_up(db, access, vm_name, timestamp, backup_dir)
+            except KeyboardInterrupt:
+                db.insert_vm_event(vm_name, "backup_failed")
+                raise UserAbort("backup interrupted") from None
             except Exception:
                 db.insert_vm_event(vm_name, "backup_failed")
                 raise
@@ -205,10 +208,10 @@ def _back_up(db: Database, access: VMAccess, vm_name: str, timestamp: str, backu
             )
         _write_json(backup_dir / "instance-applied-state.json", applied_state_data)
 
-        # 8. Workspace files -- single archive of all workspace paths.
-        # _archive_workspaces catches its own KeyboardInterrupt during the
-        # long tar phase and converts it to UserAbort (an AgentworksError),
-        # which the outer except below treats as a backup_failed event.
+        # 8. Workspace files -- single archive of all workspace paths. Ctrl-C
+        # anywhere in this body ends the backup as UserAbort with a
+        # backup_failed event (backup_vm); _archive_workspaces stops and
+        # discards the remote archive on its way out.
         archived_paths: list[str] = []
         skipped_paths: list[str] = []
         if workspaces:
@@ -257,16 +260,17 @@ def _archive_workspaces(
     The archive runs as detached work (``agentworks.execution.detached``) in
     its launch's root-only directory, so it survives a dropped connection;
     this polls it until it ends, reporting a lost connection once, a reminder
-    every 30 seconds and the recovery. Ctrl-C interrupts the archive's whole
-    process group. Whatever happens, the launch's directory is discarded by
-    its id, which ``new_launch`` chose before anything was sent.
+    every 30 seconds and the recovery. Leaving before the archive is known to
+    have ended, by Ctrl-C or any error, interrupts its whole process group
+    first. Whatever happens once the launch was attempted, its directory is
+    then discarded by the id ``new_launch`` chose before anything was sent.
 
     Returns (archived_paths, skipped_paths): the paths that were archived and
     those skipped because they do not exist on the VM.
     """
     detached = access.detached()
     launch = detached.new_launch()
-    launched = False
+    launched = ended = False
     try:
         valid: list[WorkspaceRow] = []
         skipped: list[str] = []
@@ -306,12 +310,8 @@ def _archive_workspaces(
         )
         launched = True
         detached.launch(launch, archive)
-        try:
-            observation = _wait_for_archive(detached, launch, access.vm_name)
-        except KeyboardInterrupt:
-            output.warn("Interrupted. Stopping the remote archive...")
-            _interrupt(detached, launch)
-            raise UserAbort("backup interrupted") from None
+        observation = _wait_for_archive(detached, launch, access.vm_name)
+        ended = True
 
         if observation.state is State.LOST:
             raise BackupError(
@@ -339,6 +339,8 @@ def _archive_workspaces(
         output.detail(f"Saved: {format_host_path(local_archive)} ({_fmt_size(local_archive.stat().st_size)})")
     finally:
         if launched:
+            if not ended:
+                _interrupt(detached, launch)
             _discard(detached, launch)
 
     return [ws.workspace_path for ws in valid], skipped
@@ -414,24 +416,25 @@ def _wait_for_archive(detached: Detached, launch: Launch, vm_name: str) -> Obser
 
 
 def _interrupt(detached: Detached, launch: Launch) -> None:
-    """Stop the archive's process group; a failure warns, since Ctrl-C is already ending the backup."""
+    """Stop the archive's process group; a failure, or a second Ctrl-C, warns, since the backup is already ending."""
+    output.warn("Stopping the remote archive...")
     try:
         observation = detached.interrupt(launch)
-    except AgentworksError as error:
-        output.warn(f"Could not stop the remote archive (launch {launch.id}): {error}")
+    except (AgentworksError, KeyboardInterrupt) as error:
+        output.warn(f"Could not stop the remote archive (launch {launch.id}): {str(error) or 'interrupted'}")
         return
     if observation.state is State.RUNNING:
         output.warn(f"The remote archive is still running (launch {launch.id}).")
 
 
 def _discard(detached: Detached, launch: Launch) -> None:
-    """Remove the launch's directory; a failure warns, and a later backup prunes it once it is a week old."""
+    """Remove the launch's directory; a failure, or a second Ctrl-C, warns."""
     try:
         detached.discard(launch)
-    except AgentworksError as error:
+    except (AgentworksError, KeyboardInterrupt) as error:
         output.warn(
-            f"Could not remove the archive's directory on the VM (launch {launch.id}): {error}."
-            " The first backup on this VM a week or more from now removes it."
+            f"Could not remove the archive's directory on the VM (launch {launch.id}): {str(error) or 'interrupted'}."
+            " A later backup on this VM removes it once the archive has ended and is a week old."
         )
 
 

@@ -13,12 +13,12 @@ from contextlib import contextmanager, nullcontext
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 
 from agentworks.db import AppliedStateKey, ProvisioningStatus, VersionedPayload
-from agentworks.errors import BackupError, StateError
+from agentworks.errors import BackupError, StateError, UserAbort
 from agentworks.execution.results import Completed, Result
 from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -486,3 +486,29 @@ def test_native_setup_export_and_database_restore_preserve_owner_tree(db, tmp_pa
         assert {(kind, name): read_native_setup(restored, kind, name) for kind, name in expected} == expected
     finally:
         restored.close()
+
+
+def test_ctrl_c_anywhere_in_the_backup_ends_it_as_an_abort_with_its_failure_recorded(
+    db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
+    db.update_vm_tailscale("bvm", "100.64.0.8")
+    db.insert_workspace("w", "/work/w", "bvm", "aw-w")
+    _install_metadata_only_backup_fakes(monkeypatch)
+
+    def interrupted(*_args: object) -> NoReturn:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(vm_backup, "_archive_workspaces", interrupted)
+
+    with pytest.raises(UserAbort):
+        vm_backup.backup_vm(
+            db,
+            SimpleNamespace(paths=SimpleNamespace(backups=tmp_path)),  # type: ignore[arg-type]
+            "bvm",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    events = [event.event for event in db.list_vm_events("bvm")]
+    assert events[-2:] == ["backup_started", "backup_failed"]

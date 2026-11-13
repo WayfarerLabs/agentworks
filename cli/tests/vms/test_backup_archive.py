@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.errors import BackupError, UserAbort
+from agentworks.errors import BackupError
 from agentworks.execution.access import Admin
-from agentworks.execution.errors import CommandFailed
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.output import Role
@@ -42,10 +42,11 @@ def observed(state: str, status: int | None = None, *, size: int = 0, tail: byte
 class Guest:
     """Answers backup's requests; ``observations`` are consumed one per ``observe``, the last repeating."""
 
-    def __init__(self, *observations: Result | BaseException, launch: Result = LAUNCHED) -> None:
+    def __init__(self, *observations: Result | BaseException, launch: Result | BaseException = LAUNCHED) -> None:
         self.observations = list(observations) or [observed("exited", 0, size=len(ARCHIVE_BYTES))]
         self.launch = launch
         self.missing: set[str] = set()
+        self.interrupt: Result | BaseException = observed("exited", 143)
         self.discard = Result(Completed(0))
 
     def answer(self, call: Call) -> Result | BaseException | None:
@@ -57,7 +58,7 @@ class Guest:
             if operation == "launch":
                 return self.launch
             if operation == "interrupt":
-                return observed("exited", 143)
+                return self.interrupt
             return self.discard
         if isinstance(request, Command) and request.argv[0] == "test":
             return Result(Completed(1 if request.argv[2] in self.missing else 0))
@@ -160,24 +161,52 @@ def test_an_archive_that_did_not_succeed_raises_and_is_discarded_without_a_downl
     assert not local.exists()
 
 
-def test_a_launch_that_raised_is_still_discarded_by_its_id(tmp_path: Path) -> None:
-    access = access_for(Guest(launch=Result(Completed(1))))
+@pytest.mark.parametrize(
+    ("guest", "raised", "tail"),
+    [
+        (Guest(launch=Result(Completed(1))), CommandFailed, ["launch", "interrupt", "discard"]),
+        (Guest(launch=KeyboardInterrupt()), KeyboardInterrupt, ["launch", "interrupt", "discard"]),
+        (Guest(observed("running"), KeyboardInterrupt()), KeyboardInterrupt, ["observe", "interrupt", "discard"]),
+        (Guest(observed("running"), Result(Completed(1))), CommandFailed, ["observe", "interrupt", "discard"]),
+    ],
+    ids=["launch-failed", "ctrl-c-in-launch", "ctrl-c-in-poll", "poll-failed"],
+)
+def test_leaving_before_the_archive_ended_interrupts_it_then_discards_it_by_its_id(
+    tmp_path: Path, guest: Guest, raised: type[BaseException], tail: list[str]
+) -> None:
+    access = access_for(guest)
 
-    with pytest.raises(CommandFailed):
+    with pytest.raises(raised):
         vm_backup._archive_workspaces(access, workspaces("/srv/a"), tmp_path / "archive")  # noqa: SLF001
 
-    assert operations(access)[-2:] == ["launch", "discard"]
+    assert operations(access)[-3:] == tail
     assert len(launch_ids(access)) == 1
 
 
-def test_ctrl_c_while_archiving_interrupts_the_archive_then_discards_it(tmp_path: Path) -> None:
-    access = access_for(Guest(observed("running", size=10), KeyboardInterrupt()))
+def test_a_second_ctrl_c_while_stopping_the_archive_still_discards_it(tmp_path: Path) -> None:
+    guest = Guest(observed("running"), KeyboardInterrupt())
+    guest.interrupt = KeyboardInterrupt()
+    access = access_for(guest)
 
-    with pytest.raises(UserAbort):
+    with pytest.raises(KeyboardInterrupt):
         vm_backup._archive_workspaces(access, workspaces("/srv/a"), tmp_path / "archive")  # noqa: SLF001
 
-    assert operations(access)[-4:] == ["observe", "observe", "interrupt", "discard"]
-    assert len(launch_ids(access)) == 1
+    assert operations(access)[-2:] == ["interrupt", "discard"]
+
+
+def test_an_archive_that_ended_is_not_interrupted_when_its_download_fails(tmp_path: Path) -> None:
+    guest = Guest()
+    access = access_for(guest)
+    access.answer = lambda call: (
+        Result(Unknown(UnknownReason.CONNECTION))
+        if isinstance(call.request, Command) and call.request.argv[0] == "cat"
+        else guest.answer(call)
+    )
+
+    with pytest.raises(ExecutionIncomplete):
+        vm_backup._archive_workspaces(access, workspaces("/srv/a"), tmp_path / "archive")  # noqa: SLF001
+
+    assert operations(access)[-2:] == ["cat", "discard"]
 
 
 def test_a_discard_that_cannot_reach_the_vm_warns_and_the_backup_stands(
