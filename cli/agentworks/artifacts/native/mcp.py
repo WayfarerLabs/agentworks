@@ -286,7 +286,7 @@ def apply_mcp(
     if not desired and not old:
         initial = files.read(destination)
         content, _ = map_document(initial) if map_document is not None else (initial, {})
-        if content is not None and content != initial:
+        if content is not None:
             publish(content, initial)
         return ArtifactApplication(deferred=blocked_deferrals)
     try:
@@ -379,7 +379,7 @@ def apply_mcp(
     if initial is not None and document == original_document:
         content = initial
     try:
-        if content != initial and (initial is not None or document):
+        if initial is not None or document:
             publish(content, initial)
     except (ConnectivityError, ExternalError, PathRefused):
         return unavailable()
