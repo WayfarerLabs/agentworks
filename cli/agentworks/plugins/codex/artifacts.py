@@ -11,7 +11,6 @@ import tomli_w
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.common import (
     MAX_CODEX_PERSONA_BYTES,
     NativeSessionArtifacts,
@@ -27,7 +26,7 @@ from agentworks.artifacts.native.common import (
     validate_native_argv,
 )
 from agentworks.artifacts.native.guidance import guidance_skills, session_skill_files
-from agentworks.artifacts.native.mcp import render_mcp
+from agentworks.artifacts.native.mcp import mcp_input_conflicts, render_mcp
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
@@ -213,20 +212,19 @@ def session_artifacts(
 
 def defer_session_mcp(plan: NativeSessionArtifacts, inputs: ArtifactInputs, reason: str) -> NativeSessionArtifacts:
     """Remove generated MCP overrides after measuring the complete selected command."""
-    keys = {
-        f"mcp_servers.{mcp_native_name(item)}": item.identity
-        for item in inputs.items()
-        if item.content.type is ArtifactType.MCP_SERVER
-    }
+    keys: dict[str, set[str]] = {}
+    for item in inputs.items():
+        if item.content.type is ArtifactType.MCP_SERVER:
+            keys.setdefault(f"mcp_servers.{item.content.name}", set()).add(item.identity)
     argv: list[str] = []
     omitted: set[str] = set()
     # Both persona and MCP overrides are generated flag/value pairs.
     for flag, value in zip(plan.argv[::2], plan.argv[1::2], strict=True):
-        identity = keys.get(value.partition("=")[0]) if flag == "-c" else None
-        if identity is None:
+        identities = keys.get(value.partition("=")[0]) if flag == "-c" else None
+        if identities is None:
             argv.extend((flag, value))
         else:
-            omitted.add(identity)
+            omitted.update(identities)
     if not omitted:
         return plan
     return replace(
@@ -308,13 +306,23 @@ def _session_mcp(
                 )
             )
         )
-    conflicts = _mcp_override_conflicts(extra_args, {mcp_native_name(item) for item in items})
-    inspect_inputs = select_inputs(inputs, {item.identity for item in items if mcp_native_name(item) not in conflicts})
+    conflicts = _mcp_override_conflicts(extra_args, {item.content.name for item in items})
+    input_conflicts = mcp_input_conflicts(inputs, "codex")
+    inspect_inputs = select_inputs(
+        inputs,
+        {
+            item.identity
+            for item in items
+            if item.content.name not in conflicts and item.identity not in input_conflicts
+        },
+    )
     native_conflicts = {} if inspect is None or not inspect_inputs else inspect(inspect_inputs, context)
+    native_conflicts = {**native_conflicts, **input_conflicts}
     deferred = []
     argv: list[str] = []
+    emitted: set[str] = set()
     for item in items:
-        name = mcp_native_name(item)
+        name = item.content.name
         if name in conflicts:
             deferred.append(
                 ArtifactDeferral(
@@ -329,5 +337,7 @@ def _session_mcp(
                 ArtifactDeferral(input_id=item.identity, destination="session", reason=native_conflicts[item.identity])
             )
             continue
-        argv.extend(("-c", f"mcp_servers.{name}={_toml_literal(render_mcp(item, 'codex'))}"))
+        if name not in emitted:
+            argv.extend(("-c", f"mcp_servers.{name}={_toml_literal(render_mcp(item, 'codex'))}"))
+            emitted.add(name)
     return NativeSessionArtifacts(ArtifactApplication(deferred=tuple(deferred)), tuple(argv))

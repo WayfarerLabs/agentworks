@@ -13,7 +13,6 @@ import pytest
 
 from agentworks.artifacts.mcp import content_from_definition, parse_definition
 from agentworks.artifacts.model import ArtifactComponent, ArtifactInput, ArtifactOrigin, ArtifactProvenance
-from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.mcp import MCP_CLAIM_ROLE, MCPTool, apply_mcp, render_mcp
 from agentworks.capabilities.harness_integration.settings import (
     SettingsMapping,
@@ -128,14 +127,14 @@ def test_create_adopt_update_and_entry_conflict_are_independent(transport, tool)
     assert adopted[-1] == claims[-1]
     assert path.read_bytes() == baseline
     document = read(path, tool)
-    table(table(document, key), mcp_native_name(first))["command"] = "operator-changed"
+    table(table(document, key), first.content.name)["command"] = "operator-changed"
     write(path, document, tool)
     updated_first, updated_second = server(command="new"), server("other", command="new")
     updated = replace(call, prior=record(claims[-1], "codex"), artifacts=received(updated_first, updated_second))
     result = apply_mcp(tool, updated, destination=str(path))
     assert [d.input_id for d in result.deferred] == [updated_first.identity]
-    assert table(table(read(path, tool), key), mcp_native_name(first))["command"] == "operator-changed"
-    assert table(table(read(path, tool), key), mcp_native_name(second))["command"] == "new"
+    assert table(table(read(path, tool), key), first.content.name)["command"] == "operator-changed"
+    assert table(table(read(path, tool), key), second.content.name)["command"] == "new"
     assert read(path, tool)["foreign"] == {"private": "fixture-secret-value"}
     assert "fixture-secret-value" not in "".join(transport.commands + transport.logged_output)
     assert not list((transport.root / "tmp").iterdir())
@@ -152,7 +151,7 @@ def test_retirement_retains_modified_and_unavailable_ancestor_entries(transport,
     prior = record(claims[-1], "codex")
     if modified:
         document = read(path)
-        table(table(document, "mcp_servers"), mcp_native_name(item))["command"] = "operator"
+        table(table(document, "mcp_servers"), item.content.name)["command"] = "operator"
         write(path, document)
     retire = replace(
         call,
@@ -161,7 +160,7 @@ def test_retirement_retains_modified_and_unavailable_ancestor_entries(transport,
         retain_artifact_origins=frozenset({item.origin_identity}) if unavailable else frozenset(),
     )
     apply_mcp("grok", retire, destination=str(path))
-    present = mcp_native_name(item) in table(read(path), "mcp_servers")
+    present = item.content.name in table(read(path), "mcp_servers")
     assert present is (modified or unavailable)
     assert bool(reasons) is modified
     assert bool(claims[-1]) is (modified or unavailable)
@@ -187,7 +186,7 @@ def test_workspace_shared_paths_include_retained_claims_without_file_ownership(t
     assert result.shared_paths == (str(path),)
     assert result.files == ()
     document = read(path)
-    table(table(document, "mcp_servers"), mcp_native_name(item))["command"] = "operator"
+    table(table(document, "mcp_servers"), item.content.name)["command"] = "operator"
     write(path, document)
     retained = setup_workspace(
         "codex", None, replace(call, prior=record(claims[-1], "codex"), report_incomplete=Mock())
@@ -205,7 +204,7 @@ def test_checkpoint_failure_and_expected_hash_conflict_escape(transport, monkeyp
     )
     with pytest.raises(ExternalError):
         apply_mcp("codex", call, destination=str(path))
-    assert mcp_native_name(item) in table(read(path), "mcp_servers")
+    assert item.content.name in table(read(path), "mcp_servers")
     path.unlink()
     publish = NativeFiles.publish
 
@@ -242,7 +241,7 @@ def test_checkpoint_failure_and_expected_hash_conflict_escape(transport, monkeyp
 @pytest.mark.parametrize("missing", [False, True])
 def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(transport, strategy, missing):
     item = server()
-    name = mcp_native_name(item)
+    name = item.content.name
     path = transport.home / ".codex/config.toml"
     claims: list[tuple[NativeClaim, ...]] = []
     call = replace(invocation(transport, claims), artifacts=received(item))
@@ -265,7 +264,7 @@ def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(transport,
 @pytest.mark.parametrize("existing", [False, True])
 def test_joint_codex_mapping_desired_key_obeys_actual_policy(transport, strategy, existing):
     item = server()
-    name = mcp_native_name(item)
+    name = item.content.name
     path = transport.home / ".codex/config.toml"
     claims: list[tuple[NativeClaim, ...]] = []
     call = replace(invocation(transport, claims), artifacts=received(item))
@@ -373,7 +372,7 @@ def test_skip_existing_still_installs_and_retires_mcp_entries(transport):
     call = replace(invocation(transport, claims), artifacts=received(item))
     setup_fixture_user("codex", config, call)
     assert read(path)["foreign"] is True and "source" not in read(path)
-    assert mcp_native_name(item) in table(read(path), "mcp_servers")
+    assert item.content.name in table(read(path), "mcp_servers")
     setup_fixture_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
     assert claims[-1] == ()
     assert read(path) == {"foreign": True, "mcp_servers": {}}
@@ -434,7 +433,7 @@ def test_explicit_replacement_can_repair_malformed_config_with_mcp_inputs(transp
     )
     assert result.deferred == ()
     assert read(path)["model"] == "mapped"
-    assert table(table(read(path), "mcp_servers"), mcp_native_name(item))["command"] == "server"
+    assert table(table(read(path), "mcp_servers"), item.content.name)["command"] == "server"
     assert claims[-1][0].source == item.origin_identity
 
 
@@ -444,7 +443,7 @@ def test_explicit_replacement_can_repair_malformed_config_with_mcp_inputs(transp
 def test_native_toml_typed_edits_never_match_prior_string_fingerprints(transport, value, missing_hash, operation):
     path = transport.home / ".codex/config.toml"
     item = server(command=str(value))
-    name = mcp_native_name(item)
+    name = item.content.name
     claims: list[tuple[NativeClaim, ...]] = []
     call = replace(invocation(transport, claims), artifacts=received(item))
     apply_mcp("codex", call, destination=str(path))
@@ -481,7 +480,7 @@ def test_explicit_mapping_takeover_releases_modified_obsolete_claim_in_one_pass(
 ):
     path = transport.home / ".codex/config.toml"
     item = server()
-    name = mcp_native_name(item)
+    name = item.content.name
     claims: list[tuple[NativeClaim, ...]] = []
     call = replace(invocation(transport, claims), artifacts=received(item))
     setup_fixture_user("codex", NativeUserConfig(), call)
