@@ -73,12 +73,14 @@ reads it from its first byte; or `FromFile(path)`, a workstation file `run` open
 before dispatch (one that cannot be opened is an `OSError` with nothing sent) and the pump copies to
 ssh as it reads it, until end of file. A read that fails part way fails the request with that
 `OSError` instead of reporting the guest's outcome, but the payload still sees its input end where
-the read stopped, so a payload that must not act on a truncated file detects truncation itself (gzip
-does, for `tar xzf`). `Bytes` is bounded only by memory and `FromFile` only by the file; the pump
-writes either to ssh in 64 KiB pieces, as fast as ssh takes them, and the request's `deadline`
-bounds how long that takes. `stream` takes the operator's stdin as its own argument instead, and
-refuses a request that carries input with a `ValidationError`. Input is never formatted into a log
-record or an error, and `Bytes` keeps `data` out of its `repr`.
+the read stopped and may already have acted on what came before it. A format with a trailer, such as
+gzip, makes the payload fail at the cut rather than finish cleanly; it does not undo what was done
+before the cut, so a caller keeps the payload's effects somewhere it can discard. `Bytes` is bounded
+only by memory and `FromFile` only by the file; the pump writes either to ssh in 64 KiB pieces, as
+fast as ssh takes them, and the request's `deadline` bounds how long that takes. `stream` takes the
+operator's stdin as its own argument instead, and refuses a request that carries input with a
+`ValidationError`. Input is never formatted into a log record or an error, and `Bytes` keeps `data`
+out of its `repr`.
 
 They also take `elevated`, which runs the whole operation as root under `sudo -n`: it is the prefix
 of the constant first-stage command (below), not part of the request message, and the launcher

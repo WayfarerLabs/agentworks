@@ -225,8 +225,11 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
     # no agent reaches the partial tree. Neither half of the copy has a
     # deadline: a tree takes as long as the link needs, and the connection's
     # keepalives end a stalled one.
-    # A local read error fails this request, but tar still sees its input end there: copy relies on
-    # gzip's trailer to make tar refuse a truncated archive.
+    # A local read error fails this request, but tar still sees its input end
+    # there and may already have written the members before the cut; gzip
+    # only makes it fail rather than finish. The copy then fails before it
+    # records a row or grants access, and the partial tree stays in the
+    # reserved 2770 directory.
     dest.run(
         Command(("tar", "xzf", "-", "--no-same-owner", "-C", workspace_path), elevated=True, stdin=FromFile(archive)),
         check=True,
