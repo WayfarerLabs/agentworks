@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.atomic_write import atomic_write_text
-from agentworks.errors import AgentworksError
+from agentworks.errors import AgentworksError, ConfigError
 from agentworks.execution import trust
 
 if TYPE_CHECKING:
@@ -103,6 +103,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     prefix = config.operator.ssh_host_prefix
     agent_prefix = config.operator.ssh_agent_host_prefix
 
+    identity = _identity_value(config.operator.ssh_private_key)
     host_blocks: list[str] = []
     for vm in db.list_vms():
         if not vm.tailscale_host:
@@ -112,7 +113,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
                 alias=ssh_host_alias(vm.name, prefix),
                 hostname=vm.tailscale_host,
                 user=vm.admin_username,
-                identity_file=config.operator.ssh_private_key,
+                identity=identity,
                 vm_name=vm.name,
             )
         )
@@ -123,7 +124,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
                     alias=ssh_agent_alias(agent.name, agent_prefix),
                     hostname=vm.tailscale_host,
                     user=agent.linux_user,
-                    identity_file=config.operator.ssh_private_key,
+                    identity=identity,
                     vm_name=vm.name,
                 )
             )
@@ -166,6 +167,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
+    identity = _identity_value(config.operator.ssh_private_key)
     host_entries: list[str] = []
     for vm in db.list_vms():
         if not vm.tailscale_host:
@@ -177,7 +179,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                 alias=vm_alias,
                 hostname=vm.tailscale_host,
                 user=vm.admin_username,
-                identity_file=config.operator.ssh_private_key,
+                identity=identity,
                 vm_name=vm.name,
             )
         )
@@ -192,7 +194,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
                     alias=ssh_agent_alias(agent.name, agent_prefix),
                     hostname=vm.tailscale_host,
                     user=agent.linux_user,
-                    identity_file=config.operator.ssh_private_key,
+                    identity=identity,
                     vm_name=vm.name,
                 )
             )
@@ -272,21 +274,42 @@ def _trust_options(vm_name: str) -> tuple[str, ...]:
         return ()
 
 
+def _identity_value(identity_file: Path) -> str | None:
+    """The operator's key as an ``IdentityFile`` value, ``~``-relative under the home directory.
+
+    The resolved path must pass :func:`trust.literal_path`, the rule the
+    execution core applies to the same key. A path with ``%``, ``$``, a double
+    quote, a backslash or a control character, which ssh would expand or
+    misread, is left out of the entries with a warning (``None``) rather than
+    written as a line that names another file. Computed once per rebuild, so the
+    warning appears once.
+    """
+    resolved = identity_file.resolve()
+    try:
+        trust.literal_path(resolved, "SSH identity file")
+    except ConfigError as e:
+        output.warn(f"IdentityFile left out of the SSH config entries: {e}")
+        return None
+    return trust.option_value(_to_ssh_path(resolved))
+
+
 def _format_entry(
     alias: str,
     hostname: str,
     user: str,
-    identity_file: Path,
+    identity: str | None,
     vm_name: str,
 ) -> str:
     """Format a single SSH config Host block for an entry on the VM ``vm_name``.
 
-    A VM with a host-key record gets the options that make the operator's own
-    ``ssh`` verify against the store; one without is left as it was.
+    ``identity`` is the ``IdentityFile`` value from :func:`_identity_value`;
+    ``None`` leaves the line out. A VM with a host-key record gets the options
+    that make the operator's own ``ssh`` verify against the store; one without
+    is left as it was.
     """
-    id_str = trust.option_value(_to_ssh_path(identity_file))
+    identity_line = f"    IdentityFile {identity}\n" if identity is not None else ""
     trust_lines = "".join(f"    {option}\n" for option in _trust_options(vm_name))
-    return f"Host {alias}\n    HostName {hostname}\n    User {user}\n    IdentityFile {id_str}\n{trust_lines}"
+    return f"Host {alias}\n    HostName {hostname}\n    User {user}\n{identity_line}{trust_lines}"
 
 
 def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
