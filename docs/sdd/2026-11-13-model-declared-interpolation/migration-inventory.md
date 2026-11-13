@@ -1,9 +1,9 @@
-# Proposed field adoption inventory
+# Field adoption inventory
 
 Snapshot: `3ad615680ee8e1ef56c864170deaf62392578661`, 2026-11-13. Core and all 10 shipped system
-plugins were inspected through their real consumers. This is a recommendation for operator
-discussion; new opt-ins are not yet approved or implemented. Line anchors below refer to this
-snapshot. Paths are relative to `cli/agentworks/`.
+plugins were inspected through their real consumers. The operator accepted groups A-D on
+2026-11-13 and deferred marketplace sources. Implementation is in progress. Line anchors
+below refer to this snapshot. Paths are relative to `cli/agentworks/`.
 
 ## Existing support to retain
 
@@ -19,10 +19,10 @@ annotations preserves behavior rather than adding new support.
 | `plugins/codex/harness_integration.py:248`, `extra_args[]`  | Same file, line 639; quoting at line 1088                                   | Bound session                                       |
 | `plugins/grok/harness_integration.py:123`, `extra_args[]`   | Same file, line 292; quoting at line 368                                    | Bound session                                       |
 
-## Recommended new opt-ins
+## Agreed new opt-ins
 
-Recommend the following eleven additional declarations, grouped by consumer contract. All use the
-existing context catalogue. The examples describe proposed support.
+The following eleven additional declarations are agreed, grouped by consumer contract. All
+use the existing context catalogue. The examples describe the implementation target.
 
 ### A. Install commands and their completion/profile fields
 
@@ -137,8 +137,9 @@ these source strings is worth that additional lifecycle work now.
 - Controller SSH, backup and VS Code paths. These already use workstation path semantics and have no
   consuming target user at config load.
 
-## Decision requested
+## Disposition
 
-Confirm or adjust groups A-D. Decide whether marketplace sources join this pass or stay deferred.
-The other holds are not proposed additions. Shipped manifests need no wholesale rewrite merely to
-adopt the annotations; ordinary shell variables and useful tilde paths remain valid.
+On 2026-11-13 the operator accepted groups A-D and the recommended marketplace
+deferral. The other holds remain outside this implementation. Shipped manifests need
+no wholesale rewrite merely to adopt the annotations; ordinary shell variables and
+useful tilde paths remain valid.

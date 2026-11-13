@@ -1,7 +1,7 @@
 # Model-declared runtime interpolation: plan
 
 Vehicle: one feature PR on `feat/model-declared-interpolation`, initially a draft `review-requested`
-design checkpoint. No implementation has started. This effort is independent of the test-only
+design checkpoint. The operator accepted groups A-D; implementation now continues on the same PR. This effort is independent of the test-only
 cleanup in PR #896 and does not change that PR.
 
 ## Design checkpoint
@@ -9,7 +9,7 @@ cleanup in PR #896 and does not change that PR.
 - [x] Draft requirements, architecture, mechanism and migration strategy.
 - [x] Audit core and all shipped system plugins, tracing candidate fields to consumers.
 - [x] Publish the migration inventory with recommendations, costs and explicit choices.
-- [ ] Discuss and record the operator's disposition of new field adoption.
+- [x] Discuss and record the operator's disposition of new field adoption.
 - [x] Complete independent project and complexity reviews of the design checkpoint.
 
 Definition of done: the operator can select concrete field groups from the inventory; the design
@@ -29,7 +29,7 @@ context-free, and existing lifecycle, secret and compatibility behavior is prese
 
 ## Agreed new consumers
 
-- [ ] Replace proposed inventory dispositions with the operator's agreed adoption list.
+- [x] Replace proposed inventory dispositions with the operator's agreed adoption list.
 - [ ] Implement only agreed fields, including context threading and destination handling.
 - [ ] Validate each new boundary and preserve existing path/merge conventions.
 - [ ] Review the shipped manifests; change examples only where the new language helps, without

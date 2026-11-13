@@ -1,8 +1,8 @@
 # Model-declared runtime interpolation: requirements
 
-Status: design checkpoint. The operator authorized this SDD and the opt-in model pattern on
-2026-11-13. New field adoption is proposed in the [migration inventory](migration-inventory.md) for
-discussion before implementation.
+Status: accepted scope, implementation in progress. On 2026-11-13 the operator accepted
+the opt-in model pattern and migration groups A-D in the
+[migration inventory](migration-inventory.md), with marketplace sources deferred.
 
 ## Purpose
 
@@ -82,3 +82,10 @@ interpolate arbitrary imported files, or rewrite every existing shell expression
   identifies the annotation as the opt-in.
 - 2026-11-13: audit core and system plugins for obvious migrations, assemble the list and discuss it
   before implementation.
+
+### 2026-11-13: field adoption
+
+The operator replied "Sounds good!" to the recommendation to include groups A-D
+(install command/check/PATH fields, admin/agent dotfiles destination/install commands,
+Codex writable directories and Shell required commands) and defer marketplace sources.
+These eleven new declarations join the six existing declarations in this effort.

@@ -1,7 +1,7 @@
 # Model declaration and rendering design
 
-Status: proposed mechanism; exact adapter signatures are finalized after the migration list is
-discussed. This document supplies the bounded implementation shape.
+Status: implementation design for accepted groups A-D. The public adapter surface and
+profile destination encoding are specified below.
 
 ## Marker and supported shapes
 
@@ -75,3 +75,27 @@ code-owned merge policy; `schema/fields.py` supplies the common documentation st
 substitution engine and compatibility adapter already exist in `interpolation.py` and
 `interpolation_compat.py`. No new external templating dependency or separate external prior-art
 research is proposed.
+
+## Adapter interface and profile source encoding
+
+Use `render_scalar_field(model, field_name, value, values, *, location,
+legacy_placeholders=None, encode_inserted=None)` for strings/nullable strings and
+`render_list_field(...)` for string lists. Scalar overloads preserve the caller's
+nullable type. Both read interpolation eligibility from the declaring model and
+leave unmarked values unchanged. Lists retain order and are rendered elementwise.
+
+For installer PATH additions, existing authored text is a double-quoted profile
+fragment: leading `~` and ordinary authored shell variables continue to expand.
+Only text inserted by Agentworks must be escaped for that double-quoted position.
+A small destination encoder escapes backslash, double quote, dollar and backtick.
+Apply it to context replacements and to the literal namespace prefix produced by
+the grammar's escape operation. Source chunks remain authored shell source.
+
+The pure renderer therefore accepts an optional `encode_inserted` callback with
+identity behavior by default. The marker has no destination-policy parameter;
+ordinary env values, command source and argv data keep their existing behavior.
+The model-aware adapters forward the callback for the profile consumer. This
+avoids a second lexer or a shell parser and prevents inserted dollar/backtick
+text from becoming profile expressions. Both profile writers use the same
+installer-produced fragments. Do not encode complete rendered paths, which
+would also disable existing authored `$HOME` expansion.
