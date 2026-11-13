@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-import click
 import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
 from agentworks.machine_output import OutputFormat
+from agentworks.resources.graph_query import GraphDirection
 
 graph_app = typer.Typer(
     name="graph",
@@ -17,8 +17,6 @@ graph_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(graph_app)
-
-_DIRECTION_CHOICES = click.Choice(["dependencies", "dependents", "both"])
 
 
 def parse_graph_depth(value: str) -> int | None:
@@ -41,13 +39,12 @@ def show(
         typer.Argument(help="Resource as KIND/NAME."),
     ],
     direction: Annotated[
-        str,
+        GraphDirection,
         typer.Option(
             "--direction",
             help="Relationship traversal direction. Default: both.",
-            click_type=_DIRECTION_CHOICES,
         ),
-    ] = "both",
+    ] = GraphDirection.BOTH,
     depth: Annotated[
         str,
         typer.Option(
@@ -68,14 +65,12 @@ def show(
     from agentworks.config import load_config
     from agentworks.resources.access import parse_resource_identity
     from agentworks.resources.graph_query import (
-        GraphDirection,
         graph_result_data,
         show_graph,
     )
 
     identity = parse_resource_identity(focus)
     depth_limit = parse_graph_depth(depth)
-    graph_direction = GraphDirection(direction)
     # Never reads the operator's SSH key files; see load_config's
     # workload_gated_issues_fatal doc.
     config = load_config(warn_issues=output_format is OutputFormat.HUMAN, workload_gated_issues_fatal=False)
@@ -89,7 +84,7 @@ def show(
     result = show_graph(
         registry,
         identity,
-        graph_direction,
+        direction,
         depth_limit,
     )
 

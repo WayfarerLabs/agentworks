@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.agents.initializer import _run_agent_install_commands
 from agentworks.install_commands import UserInstallCommandEntry
+from agentworks.ssh import SSHError
 from tests.conftest import CapturedOutput, requires_posix_shell
 
 
@@ -168,3 +169,54 @@ def test_agent_install_runs_with_zero_non_empty_tests() -> None:
     commands = [call.args[0] for call in target.run.call_args_list]
     assert not any("command -v" in command or "test -f" in command or "test -d" in command for command in commands)
     assert any("run-agent-install" in command for command in commands)
+
+
+@requires_posix_shell
+@pytest.mark.parametrize("shell", ["sh", "bash", "zsh"])
+def test_agent_failed_install_clears_its_path_on_reinit_and_continues(
+    tmp_path: Path, captured_output: CapturedOutput, shell: str
+) -> None:
+    shell_path = shutil.which(shell)
+    if shell_path is None:
+        pytest.skip(f"{shell} is unavailable")
+    entries = [
+        UserInstallCommandEntry(name="first", command="install-first", path=["~/.first/bin"]),
+        UserInstallCommandEntry(name="broken", command="install-broken", path=["~/.broken/bin"]),
+        UserInstallCommandEntry(
+            name="present", command="install-present", test_file="~/.present", path=["~/.present/bin"]
+        ),
+        UserInstallCommandEntry(name="last", command="install-last", path=["~/.last/bin"]),
+    ]
+    target = MagicMock()
+    fail_install = False
+
+    def write_file(path: str, content: str, **kwargs: object) -> None:
+        Path(path).write_text(content)
+
+    def run(command: str, **kwargs: object) -> MagicMock:
+        if "install-broken" in command and fail_install:
+            raise SSHError("installer exited 1")
+        if "grep -q" in command:
+            subprocess.run(["/bin/sh", "-c", command], check=True, capture_output=True)
+        return MagicMock(returncode=0)
+
+    target.write_file.side_effect = write_file
+    target.run.side_effect = run
+    for fail_install in (False, True):
+        target.run.reset_mock()
+        _run_commands(*entries, test_returncode=0, target=target, home=str(tmp_path), shell=shell)
+        result = subprocess.run(
+            [shell_path, "-c", '. "$HOME/.agentworks-profile.sh"; printf "%s\\n" "$PATH" "$AGENTWORKS_AGENT"'],
+            env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        expected = ["last", "present"] + ([] if fail_install else ["broken"]) + ["first"]
+        assert result.stdout.splitlines() == [
+            ":".join([*(f"{tmp_path}/.{name}/bin" for name in expected), "/usr/bin", "/bin"]),
+            "dev",
+        ]
+        installs = [call.args[0] for call in target.run.call_args_list if "install-" in call.args[0]]
+        assert installs == [f"{shell} -lc install-{name}" for name in ["first", "broken", "last"]]
+    assert len(captured_output.warnings) == 1
