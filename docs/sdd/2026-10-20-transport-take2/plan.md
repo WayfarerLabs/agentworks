@@ -609,8 +609,10 @@ Definition of done: create and reinit run entirely on the new transport.
       `_create_roll.py`, `_pids.py`) to `_assert_agent_access_works`, and delete the legacy probe.
 - [ ] Re-prove incident rows I6a and I8.
 - [ ] Supersede ADR 0017.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything. The audit
+      is in [`sessions-lld.md`](./sessions-lld.md); rows I80 to I89 landed in the HLA (`a456bb16a`)
+      before batch A deleted `remote_exec.py`.
 - [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
 - [x] Settle with the operator the commented post-bind resolve in
       `sessions/multi_console/restore.py` (it either runs or goes), and whether the workspace, agent
