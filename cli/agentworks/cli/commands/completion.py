@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated
 
-import click
 import typer
 
 from agentworks.cli._app import app
@@ -16,9 +16,14 @@ completion_app = typer.Typer(
 )
 app.add_typer(completion_app)
 
+
 # Accept the canonical `powershell` plus the `pwsh` alias users see in their
 # binary name.
-_SHELL_CHOICES = click.Choice(["bash", "zsh", "powershell", "pwsh"])
+class Shell(StrEnum):
+    BASH = "bash"
+    ZSH = "zsh"
+    POWERSHELL = "powershell"
+    PWSH = "pwsh"
 
 
 def _resolve_shell(shell: str | None) -> str:
@@ -42,8 +47,8 @@ def _resolve_shell(shell: str | None) -> str:
 @completion_app.command("show")
 def completion_show(
     shell: Annotated[
-        str | None,
-        typer.Option("--shell", help="Shell type (autodetected if omitted)", click_type=_SHELL_CHOICES),
+        Shell | None,
+        typer.Option("--shell", help="Shell type (autodetected if omitted)"),
     ] = None,
 ) -> None:
     """Print the completion script to stdout."""
@@ -55,8 +60,8 @@ def completion_show(
 @completion_app.command("install")
 def completion_install(
     shell: Annotated[
-        str | None,
-        typer.Option("--shell", help="Shell type (autodetected if omitted)", click_type=_SHELL_CHOICES),
+        Shell | None,
+        typer.Option("--shell", help="Shell type (autodetected if omitted)"),
     ] = None,
 ) -> None:
     """Install the completion script to the appropriate location."""
@@ -70,8 +75,8 @@ def completion_install(
 @completion_app.command("uninstall")
 def completion_uninstall(
     shell: Annotated[
-        str | None,
-        typer.Option("--shell", help="Shell type (autodetected if omitted)", click_type=_SHELL_CHOICES),
+        Shell | None,
+        typer.Option("--shell", help="Shell type (autodetected if omitted)"),
     ] = None,
 ) -> None:
     """Remove installed completion files for the given shell."""
