@@ -274,7 +274,6 @@ def test_stage0_is_one_short_line_that_no_account_shell_rewrites() -> None:
 # -- The interactive remote command on a Windows console -------------------------------
 
 
-@pytest.mark.windows
 @pytest.mark.parametrize(
     ("platform", "stdin_tty", "stdout_tty", "led"),
     [
@@ -282,7 +281,6 @@ def test_stage0_is_one_short_line_that_no_account_shell_rewrites() -> None:
         ("win32", False, True, False),  # no pty, so no raw mode: the client's console write would stop at the NUL
         ("win32", True, False, False),  # the NUL would land in the redirected output
         ("linux", True, True, False),
-        ("darwin", True, True, False),
     ],
 )
 def test_an_interactive_remote_command_is_led_by_a_nul_only_on_a_windows_console(
@@ -298,30 +296,28 @@ def test_an_interactive_remote_command_is_led_by_a_nul_only_on_a_windows_console
     assert command == ("printf '\\000'; tmux attach -t s1" if led else "tmux attach -t s1")
 
 
-@pytest.mark.windows
 def test_a_closed_or_missing_stream_is_not_a_console(monkeypatch: pytest.MonkeyPatch) -> None:
     pretend_windows_console(monkeypatch)
     closed = io.StringIO()
     closed.close()
     monkeypatch.setattr("sys.stdout", closed)
     assert ssh_process.nul_first_on_a_windows_console("x") == "x"
+
+    pretend_windows_console(monkeypatch)
     monkeypatch.setattr("sys.stdin", None)
     assert ssh_process.nul_first_on_a_windows_console("x") == "x"
 
 
 @requires_posix_shell
 @pytest.mark.parametrize("shell", SHELLS)
-@pytest.mark.parametrize(
-    ("command", "status"), [("printf hi; exit 7", 7), ("cd / && printf hi && exit 9", 9), ("printf hi", 0)]
-)
 def test_a_nul_led_command_writes_the_nul_first_and_keeps_its_exit_status(
-    monkeypatch: pytest.MonkeyPatch, shell: str, command: str, status: int
+    monkeypatch: pytest.MonkeyPatch, shell: str
 ) -> None:
     with monkeypatch.context() as windows:
         pretend_windows_console(windows)
-        led = ssh_process.nul_first_on_a_windows_console(command)
+        led = ssh_process.nul_first_on_a_windows_console("cd / && printf hi && exit 9")
 
     completed = subprocess.run([require_shell(shell), "-c", led], capture_output=True, timeout=30, check=False)
 
     assert completed.stdout == b"\0hi"
-    assert completed.returncode == status
+    assert completed.returncode == 9

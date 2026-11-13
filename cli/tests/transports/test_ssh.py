@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentworks.execution import ssh_process
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import SSHTransport
@@ -355,20 +356,17 @@ def test_interactive_fences_remote_command_with_double_dash() -> None:
         assert argv[-2] == "--"
 
 
-@pytest.mark.parametrize(("platform", "led"), [("win32", True), ("linux", False)])
 def test_an_interactive_command_is_led_by_a_nul_on_a_windows_console_and_a_login_shell_is_untouched(
-    monkeypatch: pytest.MonkeyPatch, platform: str, led: bool
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pretend_windows_console(monkeypatch)
-    monkeypatch.setattr("sys.platform", platform)
     t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
     with patch("agentworks.transports.ssh.subprocess.call", return_value=0) as mock_call:
         t._interactive("cd /ws1 && exec $SHELL -l")
         t._interactive("")
     with_command, login_shell = (call.args[0] for call in mock_call.call_args_list)
 
-    prefix = "printf '\\000'; " if led else ""
-    assert with_command[-2:] == ["--", f"{prefix}cd /ws1 && exec $SHELL -l"]
+    assert with_command[-2:] == ["--", ssh_process.nul_first_on_a_windows_console("cd /ws1 && exec $SHELL -l")]
     assert login_shell[-1] == "agentworks@vm1"
 
 

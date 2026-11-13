@@ -29,7 +29,6 @@ from agentworks.execution.results import Completion, Result, Unknown
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from typing import IO
 
     from agentworks.execution.client import SSHClient
     from agentworks.execution.pump import PipeSession, StopReason
@@ -103,15 +102,11 @@ def nul_first_on_a_windows_console(command: str) -> str:
     command line, compound ones included, and the result's exit status is
     ``command``'s. The account shell's startup files still run before it.
     """
-    on_console = sys.platform == "win32" and _is_a_terminal(sys.stdin) and _is_a_terminal(sys.stdout)
-    return _NUL_FIRST + command if on_console else command
-
-
-def _is_a_terminal(stream: IO[str] | None) -> bool:
     try:
-        return stream is not None and stream.isatty()
-    except (OSError, ValueError):  # a detached or closed stream
-        return False
+        on_console = sys.platform == "win32" and sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, OSError, ValueError):  # a missing, detached or closed stream
+        on_console = False
+    return _NUL_FIRST + command if on_console else command
 
 
 # -- Policy and argv ---------------------------------------------------------------------
