@@ -107,8 +107,7 @@ connection is served, when the client closes its end, after 30 seconds, or on `S
 The client gives up on a parking connection that never reports `parked` within 60 seconds (its own
 bound for connecting and running the account's startup files; the 30 seconds above start only after
 `parked`), and raises before the terminal is touched. On Windows the parking client starts off the
-operator's console (`CREATE_NO_WINDOW`): only the terminal half shares it, and the console's Ctrl-C
-never reaches the parked client.
+operator's console (`share_console=False`; `ssh_process.spawn` says why).
 
 On a Windows console (stdin and stdout both on the terminal) the terminal half's remote command is
 `printf '\000'; <stage 0> <socket path>` (`ssh_process.nul_first_on_a_windows_console`, whose

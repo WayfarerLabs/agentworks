@@ -184,9 +184,7 @@ class PipeSession:
     unless ``hold_stdin_open`` keeps it open for :meth:`close_stdin` (a parked
     launcher treats its closing as the client leaving).
 
-    ``share_console=False`` starts a client that never uses the operator's
-    terminal off the operator's console (see :func:`ssh_process.spawn`); a
-    parking connection passes it, because the terminal half runs beside it.
+    ``share_console`` is passed to :func:`ssh_process.spawn`, which says when to clear it.
 
     A write that fails to the client's stdin is the consumer ending early, not a
     failure: the session stops sending and keeps reading. A sink that raises

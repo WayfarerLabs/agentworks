@@ -62,8 +62,7 @@ def attach(
     touched. So is a parking connection that never reports ``parked`` (a
     startup file that reads stdin would hold it forever).
     """
-    # The parking connection never uses the terminal, and on Windows it must not
-    # share the console the terminal half runs on (issue #889).
+    # Off the operator's console: see ssh_process.spawn.
     with PipeSession(
         parking_argv,
         request=wire,
