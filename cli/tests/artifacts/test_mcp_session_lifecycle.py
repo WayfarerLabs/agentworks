@@ -19,10 +19,6 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux gue
 
 
 def select_claude_mcp(lifecycle, monkeypatch) -> None:
-    login = lifecycle.target.root / "login-shell"
-    login.write_text(
-        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
-    )
     lifecycle.template.harness_integration = "claude-code"
     lifecycle.template.harness_integration_config = {"enabled_workarounds": ["session-mcp-config"]}
     lifecycle.config.artifact_bundles["team"] = ArtifactBundle(

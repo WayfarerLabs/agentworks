@@ -10,7 +10,7 @@ import sys
 from dataclasses import replace
 from datetime import date, datetime, time
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 import pytest
 
@@ -33,7 +33,7 @@ from agentworks.plugins._harness_native.native import setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from tests.artifacts._fixtures import received
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record, setup_fixture_user
+from tests.native_setup_fixtures import LocalFixtureTransport, invocation, native_cli_double, record, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest file helpers")
 
@@ -340,9 +340,7 @@ def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(transport, monkeyp
     write(path, {"foreign": True})
     market = NativeMarket("fixture", identity({"source_type": "local", "source": "/fixture-market"}))
     installed: list[NativePlugin] = []
-    # The native CLI is a context manager; entering it yields the same double.
-    cli = MagicMock()
-    cli.__enter__.return_value = cli
+    cli = native_cli_double()
     cli.markets.return_value = (market,)
     cli.plugins.side_effect = lambda _markets: tuple(installed)
     cli.available.return_value = ("one@fixture",)

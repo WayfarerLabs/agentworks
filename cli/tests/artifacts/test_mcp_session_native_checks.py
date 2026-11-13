@@ -22,19 +22,14 @@ from agentworks.plugins.codex import artifacts as codex
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_mcp_session_delivery import mcp
 from tests.artifacts.test_native_delivery import artifact, context
-from tests.native_setup_fixtures import LocalFixtureTransport, setup_fixture_user
+from tests.native_setup_fixtures import LocalFixtureTransport, forbid_files, native_cli_double, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
 
 
 @pytest.fixture
 def target(tmp_path):
-    value = LocalFixtureTransport(tmp_path / "guest")
-    shell = value.root / "login-shell"
-    shell.write_text(
-        shell.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
-    )
-    return value
+    return LocalFixtureTransport(tmp_path / "guest")
 
 
 @pytest.mark.parametrize("override", [None, ".claude", "custom-native"])
@@ -350,11 +345,7 @@ def test_saved_mcp_only_retirement_never_opens_stored_path(target, monkeypatch):
     reported: list[str] = []
     retired = replace(call, prior=record((forged,), "codex"), artifacts=received(), report_incomplete=reported.append)
 
-    def forbid_io(*args, **kwargs):
-        pytest.fail("retirement opened a native file without a current-role claim")
-
-    for operation in ("read", "stat", "update", "write_if"):
-        monkeypatch.setattr(Files, operation, forbid_io)
+    forbid_files(monkeypatch, "retirement opened a native file without a current-role claim")
     result = apply_mcp("codex", retired, destination=str(current))
     assert reported and not result.files and not result.shared_paths and not result.deferred
     assert current.is_file() and not (target.root / "saved-sentinel").exists()
@@ -412,17 +403,13 @@ def test_unknown_retirement_role_skips_mcp_io_and_retains_claims(target, monkeyp
     destination, skip, deferred = user_mcp_location(layout, retired, retiring=True)
     assert destination is None and skip and not deferred and reported
 
-    def forbid_io(*args, **kwargs):
-        pytest.fail("unverified native MCP role attempted config I/O")
-
-    for operation in ("read", "stat", "update", "write_if"):
-        monkeypatch.setattr(Files, operation, forbid_io)
+    forbid_files(monkeypatch, "unverified native MCP role attempted config I/O")
     setup_fixture_user("codex", None, retired, mcp_destination=destination, skip_mcp=skip)
     assert current.exists() and checkpoints[-1] == old
 
 
 def test_unknown_mcp_role_preserves_confirmed_claims_through_plugin_progress_and_settings(target, monkeypatch):
-    from unittest.mock import MagicMock, Mock
+    from unittest.mock import Mock
 
     from agentworks.artifacts.native.mcp import apply_mcp
     from agentworks.capabilities.harness_integration.settings import SettingsMapping, parse_settings
@@ -441,9 +428,7 @@ def test_unknown_mcp_role_preserves_confirmed_claims_through_plugin_progress_and
     source.write_text('theme="operator"\n')
     market = NativeMarket("fixture", identity({"source_type": "local", "source": "/fixture-market"}))
     installed: list[NativePlugin] = []
-    # The native CLI is a context manager; entering it yields the same double.
-    cli = MagicMock()
-    cli.__enter__.return_value = cli
+    cli = native_cli_double()
     cli.markets.return_value = (market,)
     cli.plugins.side_effect = lambda _markets: tuple(installed)
     cli.available.return_value = ("one@fixture",)

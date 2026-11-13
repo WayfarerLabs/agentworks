@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from importlib import import_module
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 import pytest
 
@@ -18,13 +18,12 @@ from agentworks.artifacts.names import mcp_native_name
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.capabilities.harness_integration.settings import parse_settings, serialize_settings
 from agentworks.errors import ExternalError, StateConflictError, StateError, UserAbort
-from agentworks.execution.files import Files
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, owned
 from tests.artifacts.test_native_mcp import server
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record
+from tests.native_setup_fixtures import LocalFixtureTransport, forbid_files, invocation, native_cli_double, record
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux guest login and file helpers")
 TOOLS = [("claude", "ClaudeCodeIntegration"), ("codex", "CodexIntegration"), ("grok", "GrokBuildIntegration")]
@@ -46,19 +45,6 @@ def profile(target: LocalFixtureTransport, tool: str, root: Path) -> None:
 
 def forbid(*args: object, **kwargs: object) -> None:
     pytest.fail("operation outside this test's native capability boundary")
-
-
-def forbid_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail the test on any guest file operation."""
-    for operation in ("read", "stat", "write_if", "write", "update", "ensure_directory", "remove_if"):
-        monkeypatch.setattr(Files, operation, forbid)
-
-
-def native_cli_double() -> MagicMock:
-    """A native CLI double; entering it, as setup does, yields the same double."""
-    cli = MagicMock()
-    cli.__enter__.return_value = cli
-    return cli
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)

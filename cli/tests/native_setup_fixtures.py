@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -206,6 +207,22 @@ def invocation(
         home=str(transport.home),
         environment=env or {},
     )
+
+
+def forbid_files(monkeypatch: pytest.MonkeyPatch, reason: str = "a guest file operation was not expected") -> None:
+    """Fail the test on any guest file operation, every one of which is a ``Files._run``."""
+
+    def forbid(*args: object, **kwargs: object) -> None:
+        pytest.fail(reason)
+
+    monkeypatch.setattr(Files, "_run", forbid)
+
+
+def native_cli_double() -> MagicMock:
+    """A native CLI double; entering it, as setup does, yields the same double."""
+    cli = MagicMock()
+    cli.__enter__.return_value = cli
+    return cli
 
 
 def native_cli(

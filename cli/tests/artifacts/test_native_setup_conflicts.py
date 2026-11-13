@@ -176,10 +176,6 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     from tests.native_setup_fixtures import LocalFixtureTransport
 
     target = LocalFixtureTransport(tmp_path / "guest")
-    login = target.root / "login-shell"
-    login.write_text(
-        login.read_text().replace('[ "$1" = "-lc" ] || exit 9', 'case "$1" in -lc|-lic) ;; *) exit 9 ;; esac')
-    )
     workspace = target.home / "project"
     workspace.mkdir()
     owner = ArtifactOrigin("workspace", "workspace", "ws", entry="review")
