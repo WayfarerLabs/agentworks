@@ -445,3 +445,32 @@ def test_console_stop_requires_host_key_only_for_live_guest(db, make_config, mon
         original_console.vm_name,
         original_console.created_at,
     )
+
+
+def test_a_vm_that_does_not_answer_blocks_its_family_naming_recover_and_resolves_no_key(
+    db, make_config, runtime, resolve_counter, monkeypatch, captured_output
+):
+    """Activation waits for each VM to answer and never repairs: a silent VM blocks its own family with a
+    failure naming recover, the other family converges, and no Tailscale key resolves, whatever the source holds."""
+    from agentworks.vms.manager.tailscale import VMNotAnswering
+
+    powers, _, events = runtime
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "unused")
+    for name in ("silent", "healthy"):
+        seed_vm(db, name)
+        seed_session(db, f"work-{name}", name)
+        powers[name] = VMStatus.STOPPED
+
+    def wait(db_, config, vm, **kwargs):
+        if vm.name == "silent":
+            raise VMNotAnswering(vm.name, vm.tailscale_host)
+
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", wait)
+    with pytest.raises(AgentworksError):
+        reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
+
+    (silent,) = [line for _, _, line in captured_output.lines if line.startswith("vm 'silent'")]
+    assert "agw vm recover silent" in silent
+    assert ("session-start", "work-healthy") in events
+    assert ("session-start", "work-silent") not in events
+    assert not any("tailscale-auth-key" in call for call in resolve_counter)
