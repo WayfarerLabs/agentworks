@@ -16,13 +16,15 @@ import pytest
 from agentworks.apt import AptSourceEntry
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError
-from agentworks.install_commands import UserInstallCommandEntry
+from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
+from agentworks.ssh import SSHError
 from agentworks.vms.initializer import (
     _configure_apt_sources,
     _install_apt_packages,
     _run_install_commands,
 )
 from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_b_setup
+from tests.conftest import CapturedOutput
 
 from ._initializer_support import _make_entries, _make_target, _make_vm_template
 
@@ -239,6 +241,42 @@ def test_run_install_commands_returns_path() -> None:
     )
 
     assert result == ["~/.user-tool/bin"]
+
+
+@pytest.mark.parametrize("entry_type", [SystemInstallCommandEntry, UserInstallCommandEntry])
+def test_run_install_commands_excludes_failed_paths_and_continues(
+    entry_type: type[SystemInstallCommandEntry] | type[UserInstallCommandEntry],
+    captured_output: CapturedOutput,
+) -> None:
+    entries = {
+        name: entry_type(
+            name=name,
+            command=f"install-{name}",
+            path=[f"~/.{name}/bin"],
+            test_file="~/.present" if name == "present" else None,
+        )
+        for name in ["first", "broken", "present", "last"]
+    }
+    target = MagicMock()
+    logger = MagicMock()
+
+    def run(command: str, **kwargs: object) -> MagicMock:
+        if command == "zsh -lc install-broken":
+            raise SSHError("installer exited 1")
+        return MagicMock(returncode=0)
+
+    target.run.side_effect = run
+    paths = _run_install_commands(target, list(entries), entries, "zsh", "/home/agentworks", logger)
+
+    assert paths == ["~/.first/bin", "~/.present/bin", "~/.last/bin"]
+    assert [call.args[0] for call in target.run.call_args_list] == [
+        "zsh -lc install-first",
+        "zsh -lc install-broken",
+        "test -f /home/agentworks/.present",
+        "zsh -lc install-last",
+    ]
+    logger.warning.assert_called_once()
+    assert len(captured_output.warnings) == 1
 
 
 def test_run_install_commands_missing_entry() -> None:
