@@ -58,3 +58,13 @@ checks pass. Website verification passed 160 Python tests, 103 Node tests, and d
 builds for both site bases. Isolated-HOME CLI checks passed for resource explanation, samples,
 schemas, and `concept-npm` guide discovery. No VM backend has been used for this effort, so the
 local registry evidence does not claim remote SSH or VM create/reinit coverage.
+
+## Publication verification (2026-11-13)
+
+Before publication, the feature was rebased without conflicts onto main `3ad615680`. The npm and
+initialization implementation files are unchanged from the previously tested production state. The
+original full-suite evidence above belongs to the pre-rebase head. On rebased head `134dd9473`, 225
+focused npm, profile, initialization, projection, and upstream tmux startup tests passed; ruff,
+formatting, and mypy passed as well. Full current-head CI and PR feedback are tracked on the pull
+request. The operator authorized up to three feedback and fix rounds under the standard delivery
+process.

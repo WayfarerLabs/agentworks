@@ -13,3 +13,7 @@ publication timestamps; non-registry dependency sources have no age guarantee.
 
 Permanent operator guidance lives in `docs/guides/npm.md` and the resource field descriptions. No
 implementation work remains in this effort.
+
+2026-11-13: publication preparation rebased the completed feature onto current main without changing
+its implementation. The plan records fresh focused and static verification; the PR carries
+current-head CI and feedback-round evidence.
