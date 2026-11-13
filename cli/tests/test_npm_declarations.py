@@ -25,9 +25,7 @@ def test_npm_defaults_and_omitted_agent_values() -> None:
 
 def test_npm_settings_inherit_and_instance_overlay_can_disable() -> None:
     templates = {
-        "base": AgentTemplate(
-            name="base", npm_packages=["@scope/tool@^1.2.0"], npm_min_release_age_days=14
-        ),
+        "base": AgentTemplate(name="base", npm_packages=["@scope/tool@^1.2.0"], npm_min_release_age_days=14),
         "child": AgentTemplate(name="child", inherits=["base"]),
     }
     agent = resolve_from_dict(templates, "child")
@@ -68,5 +66,6 @@ def test_emitted_schema_exposes_npm_settings(kind: str) -> None:
     from agentworks.manifests.emit import document_schema
 
     schema = document_schema(kind)
-    properties = schema["properties"]["spec"]["properties"]
+    reference = next(arm["$ref"] for arm in schema["properties"]["spec"]["anyOf"] if "$ref" in arm)
+    properties = schema["$defs"][reference.rsplit("/", 1)[-1]]["properties"]
     assert {"npm_enabled", "npm_packages", "npm_min_release_age_days"} <= properties.keys()

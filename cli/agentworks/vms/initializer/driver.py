@@ -41,6 +41,7 @@ from .mise import (
     _run_mise_install,
     _write_mise_config,
 )
+from .npm import run_npm_install
 from .packages import (
     _configure_apt_sources,
     _install_apt_packages,
@@ -48,7 +49,6 @@ from .packages import (
     _resolve_apt_sources,
     _run_install_commands,
 )
-from .npm import run_npm_install
 from .shell_env import (
     _ensure_agentworks_files_sourced,
     _harden_admin_home,

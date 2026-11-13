@@ -126,16 +126,27 @@ def native_target(tmp_path: Path, registry: str):
         pytest.skip("minimum release age requires npm >= 11.10.0")
     provisioned = tmp_path / "runtime"
     provisioned.mkdir()
-    (provisioned / "npm").symlink_to(Path(npm).resolve())
-    (provisioned / "node").symlink_to(Path(node).resolve())
+    # Resolve through any host runtime-manager shim before isolating HOME.
+    # The actual probe then has no runtime-manager executable or configuration.
+    node_binary = subprocess.run(
+        [node, "-p", "process.execPath"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    npm_script = Path(npm).resolve()
+    if npm_script.name in {"mise", "asdf"}:
+        global_root = subprocess.run(
+            [npm, "root", "--global"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        npm_script = Path(global_root) / "npm/bin/npm-cli.js"
+    (provisioned / "npm").symlink_to(npm_script)
+    (provisioned / "node").symlink_to(node_binary)
     npmrc = tmp_path / ".npmrc"
     npmrc.write_text(f"registry={registry}\ncache={tmp_path / 'cache'}\naudit=false\nfund=false\n")
     (tmp_path / ".profile").write_text(
-        f"export PATH={shlex.quote(str(provisioned))}:\"$PATH\"\n"
-        f"export NPM_CONFIG_USERCONFIG={shlex.quote(str(npmrc))}\n"
+        f'export PATH={shlex.quote(str(provisioned))}:"$PATH"\nexport NPM_CONFIG_USERCONFIG={shlex.quote(str(npmrc))}\n'
     )
     child_env = {**os.environ, "HOME": str(tmp_path)}
     target = MagicMock()
+    target.npm_version = tuple(int(part) for part in version.split("."))
 
     def run(command: str, *, check: bool = True, timeout: int = 60, **kwargs: object) -> SSHResult:
         result = subprocess.run(
@@ -175,3 +186,22 @@ def test_native_npm_zero_age_allows_current_release(native_target: MagicMock, tm
     run_npm_install(native_target, ["agw-npm-tool@2.0.0"], "sh", str(tmp_path), 0)
     installed = native_target.run(f"sh -lc {shlex.quote(str(tmp_path / '.local/bin/agw-npm-probe'))}")
     assert installed.stdout.strip() == "2.0.0:2.0.0"
+
+
+def test_native_npm_reinit_with_stricter_age_reconciles_existing_install(
+    native_target: MagicMock, tmp_path: Path
+) -> None:
+    run_npm_install(native_target, ["agw-npm-tool@latest"], "sh", str(tmp_path), 0)
+    run_npm_install(native_target, ["agw-npm-tool@latest"], "sh", str(tmp_path), 7)
+    installed = native_target.run(f"sh -lc {shlex.quote(str(tmp_path / '.local/bin/agw-npm-probe'))}")
+    assert installed.stdout.strip() == "1.0.0:1.0.0"
+
+
+def test_native_npm_age_limit_overrides_inherited_exclusions(native_target: MagicMock, tmp_path: Path) -> None:
+    if native_target.npm_version < (11, 17, 0):
+        pytest.skip("this npm does not support age exclusions")
+    with (tmp_path / ".npmrc").open("a") as stream:
+        stream.write("min-release-age-exclude[]=*\nbefore=2999-01-01\n")
+    run_npm_install(native_target, ["agw-npm-tool@latest"], "sh", str(tmp_path), 7)
+    installed = native_target.run(f"sh -lc {shlex.quote(str(tmp_path / '.local/bin/agw-npm-probe'))}")
+    assert installed.stdout.strip() == "1.0.0:1.0.0"
