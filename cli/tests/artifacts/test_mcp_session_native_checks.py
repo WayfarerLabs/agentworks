@@ -9,10 +9,11 @@ from dataclasses import replace
 import pytest
 
 from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
+from agentworks.artifacts.native import mcp as mcp_module
 from agentworks.artifacts.native.mcp import render_mcp, resolve_mcp_user_path, session_mcp_conflicts
 from agentworks.capabilities.harness_integration.settings import SettingsObject, serialize_settings
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
-from agentworks.errors import StateConflictError, StateError, UserAbort
+from agentworks.errors import StateConflictError, StateError, UserAbort, ValidationError
 from agentworks.execution.files import Files
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.plugins.claude import artifacts as claude
@@ -145,7 +146,7 @@ def test_unnormalized_stored_workspace_spelling_is_checked_at_its_normalized_loc
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex"])
-@pytest.mark.parametrize("spelling", ["{}/../project", "{}/pro\tject"])
+@pytest.mark.parametrize("spelling", ["{}/../project", "{}/pro\tject", "~/project", "project"])
 def test_stored_workspace_the_file_operations_cannot_address_defers_without_reading(
     target, monkeypatch, tool, spelling
 ):
@@ -162,6 +163,23 @@ def test_stored_workspace_the_file_operations_cannot_address_defers_without_read
         workspace=spelling.format(target.home),
     )
     assert set(result) == {mcp().identity}
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex"])
+def test_malformed_request_raises_instead_of_deferring(target, monkeypatch, tool):
+    def refuse(*args, **kwargs):
+        raise ValidationError("request refused")
+
+    monkeypatch.setattr(mcp_module, "resolve_mcp_user_path", refuse)
+    with pytest.raises(ValidationError):
+        session_mcp_conflicts(
+            tool,
+            target.access(),
+            received(mcp()),
+            home=str(target.home),
+            environment={},
+            workspace=str(target.home),
+        )
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex"])

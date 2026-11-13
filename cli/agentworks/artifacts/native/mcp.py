@@ -162,8 +162,8 @@ def session_mcp_conflicts(
 
     ``workspace`` is the session's stored workspace path, read as the file
     operations address it (``workspaces.guest.addressable_workspace_path``);
-    one they cannot address defers every MCP input like any other check that
-    cannot run safely.
+    one they cannot address defers every MCP input with the refusal as the
+    reason. A ``ValidationError`` from the requests themselves still raises.
     """
     items = tuple(item for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER)
     if not items:
@@ -175,6 +175,10 @@ def session_mcp_conflicts(
         }
     try:
         root = addressable_workspace_path(workspace)
+    except ValidationError as error:
+        reason = " ".join(part for part in (str(error), error.hint, "Invocation delivery is deferred.") if part)
+        return {item.identity: reason for item in items}
+    try:
         user = resolve_mcp_user_path(tool, access, home=home, environment=environment)
         project = root + ("/.mcp.json" if tool == "claude" else "/.codex/config.toml")
         key = "mcpServers" if tool == "claude" else "mcp_servers"
@@ -186,8 +190,9 @@ def session_mcp_conflicts(
             tables = [_table(document, key)]
             if tool == "claude" and path == user:
                 projects = _table(document, "projects")
-                # Claude keys a project by the directory it runs in, whose
-                # spelling never has an empty or "." component.
+                # Assumed from Claude Code's behavior, not its documentation:
+                # it keys a project by the directory it runs in, whose spelling
+                # never has an empty or "." component.
                 local = projects.get(root, {})
                 if not isinstance(local, dict):
                     raise ConfigError("native MCP project config must use an object")
@@ -199,7 +204,7 @@ def session_mcp_conflicts(
                     conflicts[item.identity] = (
                         "An existing native MCP entry differs; invocation delivery leaves it unchanged."
                     )
-    except (ConfigError, ConnectivityError, ExternalError, PathRefused, ValidationError):
+    except (ConfigError, ConnectivityError, ExternalError, PathRefused):
         return {
             item.identity: "Native MCP configuration could not be checked safely; invocation delivery is deferred."
             for item in items
