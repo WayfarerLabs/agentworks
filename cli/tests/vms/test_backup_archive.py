@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from agentworks import output
 from agentworks.errors import BackupError
 from agentworks.execution.access import Admin
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
@@ -200,6 +201,25 @@ def test_a_second_ctrl_c_while_stopping_the_archive_still_discards_it(tmp_path: 
         vm_backup._archive_workspaces(access, workspaces("/srv/a"), tmp_path / "archive")  # noqa: SLF001
 
     assert operations(access)[-2:] == ["interrupt", "discard"]
+
+
+def test_a_second_ctrl_c_as_the_stop_is_announced_still_discards_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access = access_for(Guest(observed("running"), KeyboardInterrupt()))
+    warned: list[str] = []
+
+    def warn(message: str) -> None:
+        warned.append(message)
+        if len(warned) == 1:  # the stop's announcement, the first warning on this path
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(output, "warn", warn)
+
+    with pytest.raises(KeyboardInterrupt):
+        vm_backup._archive_workspaces(access, workspaces("/srv/a"), tmp_path / "archive")  # noqa: SLF001
+
+    assert operations(access)[-1] == "discard"
 
 
 def test_an_archive_that_ended_is_not_interrupted_when_its_download_fails(tmp_path: Path) -> None:

@@ -411,8 +411,8 @@ def _wait_for_archive(detached: Detached, launch: Launch, vm_name: str) -> Obser
 
 def _interrupt(detached: Detached, launch: Launch) -> None:
     """Stop the archive's process group; a failure, or a second Ctrl-C, warns, since the backup is already ending."""
-    output.warn("Stopping the remote archive...")
     try:
+        output.warn("Stopping the remote archive...")
         observation = detached.interrupt(launch)
     except (AgentworksError, KeyboardInterrupt) as error:
         output.warn(f"Could not stop the remote archive (launch {launch.id}): {str(error) or 'interrupted'}")
