@@ -1,23 +1,15 @@
-"""Introspect the Typer/Click command tree and build a completion spec.
-
-typer 0.26 vendored click into ``typer._click``; ``typer.main.get_command()``
-now returns objects whose classes are ``typer._click.core.{Command,Group}``,
-not the real ``click.core.*``. isinstance-checks against real click classes
-therefore silently return ``False``, producing an empty spec tree.
-
-To avoid coupling to either variant we duck-type against the surface both
-provide (``.name`` / ``.params`` / ``.commands`` / ``.opts`` /
-``.param_type_name`` / etc.) via the Protocol types below.
-"""
+"""Build a completion spec from Typer's command tree and type descriptors."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Protocol
 
 import typer
+from typer.core import TyperArgument, TyperGroup, TyperOption
 
 COMPLETION_PROBE_OPTION = "--completion-probe"
 
@@ -99,29 +91,11 @@ def is_legacy_database_completion(argv: list[str]) -> bool:
     return True
 
 
-# -- Structural types for click-like objects ------------------------------
-#
-# Both real click and typer's vendored ``typer._click`` conform to these.
-
-
-class _ClickParameter(Protocol):
-    name: str | None
-    opts: list[str]
-    secondary_opts: list[str]
-    multiple: bool
-    nargs: int
-    required: bool
-    type: Any  # click ParamType; Choice subtype exposes ``.choices``
-
-
-class _ClickCommand(Protocol):
+class _Command(Protocol):
     name: str | None
     help: str | None
+    hidden: bool
     params: list[Any]
-
-
-class _ClickGroup(_ClickCommand, Protocol):
-    commands: dict[str, _ClickCommand]
 
 
 # -- Data model ------------------------------------------------------------
@@ -352,7 +326,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # config, which is exactly when this command is worth reaching for).
     ("resource.explain", "target"): "resource_kinds",
     # Resource authoring. `resource sample`'s kind argument
-    # is a plain string (no click.Choice: any typed kind must reach the
+    # is a plain string (no closed choices: any typed kind must reach the
     # service layer for a clean domain error, issue #276), so it
     # completes via the same config-free kinds completer `resource list
     # --kind` uses. Capability kinds complete too, then fail with a
@@ -362,7 +336,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # `resource schema`'s kind argument completes from the same config-free
     # kinds completer for the same reason `resource sample`'s does: it is a
     # plain string, so any typed kind reaches the service layer and gets a
-    # clean domain error rather than a click.Choice parse failure.
+    # clean domain error rather than a closed-choice parse failure.
     ("resource.schema", "kind"): "resource_kinds",
 }
 
@@ -387,8 +361,8 @@ def build_spec(app: typer.Typer) -> CommandSpec:
     return _build_command_spec(click_app, path="")
 
 
-def _build_command_spec(cmd: _ClickCommand, path: str) -> CommandSpec:
-    """Recursively build a CommandSpec from a Click-like command."""
+def _build_command_spec(cmd: _Command, path: str) -> CommandSpec:
+    """Recursively build a CommandSpec from a Typer command."""
     help_text = (cmd.help or "").split("\n")[0].strip()
     name = cmd.name or ""
 
@@ -397,48 +371,30 @@ def _build_command_spec(cmd: _ClickCommand, path: str) -> CommandSpec:
     # Build params
     current_path = f"{path}.{name}" if path else name
     for param in cmd.params:
-        if param.name == "help" or getattr(param, "hidden", False):
+        if param.name == "help" or param.hidden:
             continue
         spec.params.append(_build_param_spec(param, current_path))
 
-    # Build subcommands for groups. Duck-type: Group has ``.commands``, plain
-    # Command doesn't. We iterate the dict directly rather than through
-    # ``list_commands(ctx) / get_command(ctx, name)`` because the ctx
-    # construction differs between real click and typer._click, and both
-    # default impls just walk this dict anyway.
-    commands = getattr(cmd, "commands", None)
-    if isinstance(commands, dict):
-        for sub_name in sorted(commands):
-            sub_cmd = commands[sub_name]
-            if sub_cmd is not None and not getattr(sub_cmd, "hidden", False):
+    if isinstance(cmd, TyperGroup):
+        for sub_name, sub_cmd in sorted(cmd.commands.items()):
+            if not sub_cmd.hidden:
                 spec.subcommands[sub_name] = _build_command_spec(sub_cmd, path=current_path)
 
     return spec
 
 
-def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
-    """Build a ParamSpec from a Click-like parameter."""
-    # ``param_type_name`` is a click class attribute set to "argument" /
-    # "option" on the respective subclasses -- stable across click versions
-    # and preserved by typer's vendored copy.
-    param_kind = getattr(param, "param_type_name", "")
-    is_argument = param_kind == "argument"
-    is_option = param_kind == "option"
-
-    choices = None
-    # ``Choice`` param types expose ``.choices``; other ParamType subclasses
-    # (STRING, INT, etc.) do not. Typer wraps ``click_type=`` params in its
-    # ``FuncParamType``, which hides the real type on ``.func`` -- unwrap
-    # one level so Choice values survive into the completion tree
-    # (without this, every ``click_type=click.Choice(...)`` option
-    # silently loses static completion).
-    ptype = param.type
-    if not hasattr(ptype, "choices"):
-        inner = getattr(ptype, "func", None)
-        if inner is not None and hasattr(inner, "choices"):
-            ptype = inner
-    if hasattr(ptype, "choices"):
-        choices = list(ptype.choices)
+def _build_param_spec(param: TyperArgument | TyperOption, command_path: str) -> ParamSpec:
+    """Read the current Typer parameter contract, including typed choices."""
+    if not isinstance(param, (TyperArgument, TyperOption)):
+        raise TypeError(f"Unsupported completion parameter: {type(param).__name__}")
+    is_argument = isinstance(param, TyperArgument)
+    is_option = isinstance(param, TyperOption)
+    typed_choices = param.type_descriptor.choices
+    choices = (
+        None
+        if typed_choices is None
+        else [str(choice.value) if isinstance(choice, Enum) else str(choice) for choice in typed_choices]
+    )
 
     opts: list[str] = []
     if is_option:
@@ -458,8 +414,8 @@ def _build_param_spec(param: _ClickParameter, command_path: str) -> ParamSpec:
     return ParamSpec(
         name=param.name or "",
         opts=opts,
-        help=getattr(param, "help", None) or "",
-        is_flag=getattr(param, "is_flag", False),
+        help=param.help or "",
+        is_flag=isinstance(param, TyperOption) and param.is_flag,
         is_argument=is_argument,
         multiple=accepts_multi,
         required=param.required,

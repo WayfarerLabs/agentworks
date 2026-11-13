@@ -619,10 +619,12 @@ assume elevation.
 An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
 User install commands contribute to the selected admin or agent user's profile; system install
 commands contribute to the VM admin's profile. Agentworks rewrites the profile after install
-commands run, including paths from commands skipped by completion checks. Later shells that source
-the profile prepend these directories to `PATH`, and child processes inherit them. A leading `~`
-resolves to the target user's home. Install commands themselves use the login shell's existing
-`PATH`; declaring `path` does not inject those directories into that command.
+commands run, including paths from successful commands and commands skipped by completion checks.
+Failed commands warn and setup continues, without contributing paths. Later shells that source the
+profile prepend these directories to `PATH`, and child processes inherit them. A leading `~`
+resolves to the target user's home. Install commands share existing home and login state, but
+declared paths are deferred until the batch finishes. Use an absolute path to invoke a tool absent
+from the login shell's existing `PATH`.
 
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a

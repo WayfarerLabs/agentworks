@@ -1131,11 +1131,7 @@ class TestKindsSourcedCompleter:
 
 
 class TestStaticChoiceCompletion:
-    """click.Choice values reach the completion tree. Typer wraps
-    ``click_type=`` params in ``FuncParamType`` (the real type hides on
-    ``.func``); the spec extraction unwraps one level -- without it,
-    every Choice-typed option silently loses static completion (the
-    generators' choices branches were dead code)."""
+    """Typed choices reach the completion tree and each shell backend."""
 
     def test_shell_option_choices_extracted(self) -> None:
         from agentworks.cli import app
@@ -1146,7 +1142,7 @@ class TestStaticChoiceCompletion:
         assert by_name["shell"] == ["bash", "zsh", "powershell", "pwsh"]
 
     def test_sample_kind_completes_dynamically(self) -> None:
-        # The sample-kind argument is a plain string (no click.Choice: any
+        # The sample-kind argument is a plain string (no closed choices: any
         # typed kind, capability kinds and typos included, must reach the
         # service layer for a clean, kind-aware domain error, issue #276).
         # It completes via the config-free resource_kinds dynamic completer,
@@ -1163,7 +1159,7 @@ class TestStaticChoiceCompletion:
         # `resource schema` takes its kind the same way `resource sample`
         # does, and for the same reason: a plain string, so a capability
         # kind or a typo reaches the service layer and gets a clean domain
-        # error instead of a click.Choice parse failure.
+        # error instead of a closed-choice parse failure.
         from agentworks.cli import app
         from agentworks.completions.spec import build_spec
 
