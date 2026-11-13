@@ -177,11 +177,11 @@ def test_an_identity_file_ssh_would_expand_is_refused_by_name(tmp_path: Path) ->
 # -- ssh -G: what the installed client would really do ---------------------------------
 
 
-@pytest.mark.parametrize("key_dir", ["keys", "dir with space"])
-def test_only_an_identity_path_with_whitespace_is_quoted(key_dir: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
+def test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted(key_dir: str, tmp_path: Path) -> None:
     """The ssh shipped with Git for Windows refuses a quoted value without whitespace (#898)."""
     key = (tmp_path / key_dir / "id_ed25519").as_posix()
-    quote = '"' if " " in key_dir else ""
+    quote = '"' if key_dir != "keys" else ""
 
     argv = argv_for(Path(key))
 
@@ -190,10 +190,10 @@ def test_only_an_identity_path_with_whitespace_is_quoted(key_dir: str, tmp_path:
 
 
 @needs_ssh
-@pytest.mark.parametrize("key_dir", ["keys", "dir with space"])
+@pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
 def test_the_policy_takes_effect(key_dir: str, tmp_path: Path) -> None:
     """The installed client may accept a quoted value without whitespace too, so this
-    cannot reproduce #898 alone; ``test_only_an_identity_path_with_whitespace_is_quoted`` guards that."""
+    cannot reproduce #898 alone; ``test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted`` guards that."""
     key = tmp_path / key_dir / "id_ed25519"
 
     config = effective_config(argv_for(key))

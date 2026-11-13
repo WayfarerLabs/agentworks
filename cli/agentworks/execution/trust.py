@@ -144,18 +144,19 @@ def literal_path(path: PurePath, what: str) -> str:
     return value
 
 
-def option_value(text: str) -> str:
-    """``text`` as an ``ssh`` option value: bare, or double-quoted when it contains whitespace.
+def option_value(path_text: str) -> str:
+    """A path as an ``ssh`` option value: double-quoted when ssh would split or unquote it, bare otherwise.
 
-    ssh splits an option value at whitespace, so a value with a space needs its
-    quotes to stay one value (``UserKnownHostsFile`` takes a list of files). A
-    value without whitespace stays bare: quoting it gains nothing, and the ssh
-    shipped with Git for Windows rejects the quoted form with ``invalid quotes``.
-    Every value written into an option goes through here, for the ``-o``
-    arguments and the managed SSH config entries alike. ``text`` must hold no
-    double quote; :func:`literal_path` refuses one.
+    ssh splits an option value at whitespace (``UserKnownHostsFile`` takes a
+    list of files) and reads ``'`` as a quote, so a path with either is wrapped
+    in double quotes to stay one literal value. Any other path stays bare:
+    quoting it gains nothing, and the ssh shipped with Git for Windows rejects a
+    quoted value without whitespace with ``invalid quotes``. Every path written
+    into an option goes through here, for the ``-o`` arguments and the managed
+    SSH config entries alike. Callers pass :func:`literal_path` output, so
+    ``path_text`` holds no double quote that could end the quoting early.
     """
-    return f'"{text}"' if any(char in " \t" for char in text) else text
+    return f'"{path_text}"' if any(char in " \t'" for char in path_text) else path_text
 
 
 def _store_error(action: str, path: Path, error: OSError, vm_name: str | None = None) -> StateError:

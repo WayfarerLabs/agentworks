@@ -517,7 +517,7 @@ def test_an_entry_gains_and_loses_the_store_options_with_the_record(tmp_path: Pa
 
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
-@pytest.mark.parametrize("store_name", ["store", "store with space"])
+@pytest.mark.parametrize("store_name", ["store", "store with space", "o'brien"])
 def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     store_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

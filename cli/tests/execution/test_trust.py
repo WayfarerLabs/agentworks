@@ -86,12 +86,12 @@ def test_unverified_mode_pins_the_provisioning_file_and_sets_no_alias(tmp_path: 
 
 @needs_ssh
 @pytest.mark.windows
-@pytest.mark.parametrize("store_name", ["store", "store with space"])
-def test_the_installed_client_reads_the_store_path_with_or_without_a_space(
+@pytest.mark.parametrize("store_name", ["store", "store with space", "o'brien", "a'b'c"])
+def test_the_installed_client_reads_the_store_path_as_written(
     store_name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The installed client may accept a quoted value without whitespace too, so this
-    cannot reproduce #898 alone; ``test_only_a_value_with_whitespace_is_quoted`` guards that."""
+    cannot reproduce #898 alone; ``test_only_a_path_ssh_would_split_or_unquote_is_quoted`` guards that."""
     store = tmp_path / store_name
     monkeypatch.setattr(trust, "STORE_DIR", store)
     trust.write_records("web", [_KEY])
@@ -152,22 +152,22 @@ def test_a_store_directory_ssh_would_expand_is_a_config_error(
 # -- Option values -------------------------------------------------------------------
 
 
-@pytest.mark.windows
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
         ("C:/Users/operator/known_hosts/vm-web", "C:/Users/operator/known_hosts/vm-web"),
         ("C:/Users/Op Erator/known_hosts/vm-web", '"C:/Users/Op Erator/known_hosts/vm-web"'),
         ("/home/op\terator/vm-web", '"/home/op\terator/vm-web"'),
+        ("/home/o'brien/known_hosts/vm-web", '"/home/o\'brien/known_hosts/vm-web"'),
     ],
 )
-def test_an_option_value_is_quoted_only_when_it_contains_whitespace(text: str, expected: str) -> None:
+def test_an_option_value_is_quoted_only_when_ssh_would_split_or_unquote_it(text: str, expected: str) -> None:
     assert trust.option_value(text) == expected
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("store_name", ["store", "store with space"])
-def test_only_a_value_with_whitespace_is_quoted(
+@pytest.mark.parametrize("store_name", ["store", "store with space", "o'brien"])
+def test_only_a_path_ssh_would_split_or_unquote_is_quoted(
     store_name: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The ssh shipped with Git for Windows refuses a quoted value without whitespace (#898)."""
@@ -175,7 +175,7 @@ def test_only_a_value_with_whitespace_is_quoted(
     trust.write_records("web", [_KEY])
 
     def value(path: Path) -> str:
-        return f'"{path.as_posix()}"' if " " in store_name else path.as_posix()
+        return f'"{path.as_posix()}"' if store_name != "store" else path.as_posix()
 
     for mode in (TrustMode.VM, TrustMode.ENROLL):
         assert f"UserKnownHostsFile={value(trust.store_file('web'))}" in trust.ssh_options(TrustBinding(mode, "web"))
