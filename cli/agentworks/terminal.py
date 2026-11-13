@@ -24,19 +24,14 @@ different owners, so they are gated separately: the line discipline
 belongs to stdin, the escape sequences to stdout.
 
 `guarded_terminal()` handles both, and sanitizes on the way IN as well
-as on the way out. The exit pass runs unconditionally, including when
-the attach raises, but its payload depends on how the attach ended. A
-clean detach has already left the alt screen itself, so re-sending the
-alt-screen buffer switches is redundant, and on Windows Terminal `?1049l`
-is not idempotent: it restores the cursor saved at the matching `?1049h`
-(the remote program's alt-screen entry, near the top of the viewport),
-which jerks the next shell prompt up onto the operator's existing
-scrollback. So a clean exit gets the alt-screen switches omitted
-(`TERMINAL_SANITIZE_CLEAN_EXIT`) while a drop or crash gets the full
-reset (`TERMINAL_SANITIZE`); every other sequence is idempotent and
-cursor-safe and is shared by both. The attach body reports its outcome
-through the guard object `guarded_terminal()` yields, defaulting to the
-full reset when the body raised (a drop can surface as an exception).
+as on the way out, with one payload (`TERMINAL_SANITIZE`) for both
+passes. The exit pass runs unconditionally, including when the attach
+raises. Every sequence in the payload is safe to send whatever state the
+terminal is in: each is idempotent, and none moves the cursor on the
+primary screen. That includes leaving the alternate screen, which is
+done with a cursor-neutral pair rather than a bare `?1049l`, because
+`?1049l` restores a saved cursor even on the primary screen (see
+`_SANITIZE_ALT_SCREEN_OFF`).
 
 The entry pass covers the case this process never saw end at all: the
 operator closed the tab, or agentworks was killed outright, so no exit
@@ -111,12 +106,10 @@ MOUSE_TRACKING_DISABLE = "\x1b[?1000;1002;1003;1006;1015l"
 # client detaches cleanly, which is exactly the payload that goes
 # missing when the connection dies instead.
 #
-# Split into three ordered segments so the exit pass can drop the middle
-# one (the alt-screen buffer switches) on a clean exit: those are the only
-# sequences here that move the cursor, and a clean detach has already left
-# the alt screen, so re-sending them is redundant on a spec terminal and
-# actively harmful on Windows Terminal. See TERMINAL_SANITIZE /
-# TERMINAL_SANITIZE_CLEAN_EXIT below.
+# Three ordered segments: the input-reporting resets, leaving the
+# alternate screen, then the margin and rendering resets. Each is sent on
+# entry and on exit alike, so none may move the cursor when the terminal is
+# already in the state it resets.
 #
 # RIS (`\x1bc`) would clear all of this in one byte pair and is
 # deliberately not used: a hard reset also clears scrollback in most
@@ -141,21 +134,42 @@ _SANITIZE_HEAD = (
     + "\x1b[?2026l"  # synchronized output off (a mid-frame drop otherwise freezes the display)
 )
 
-# -- Screen buffer. Leaving the alternate screen. These are the ONLY
-# sanitize sequences that move the cursor, and the only ones that misbehave
-# on a redundant re-send: on Windows Terminal `?1049l` restores the cursor
-# saved at the matching `?1049h` (the remote program's alt-screen entry,
-# near the top of the viewport), so sending it again on an exit that is
-# ALREADY on the primary screen jerks the next shell prompt upward, over
-# the operator's existing scrollback. They are needed only when the remote
-# died mid-attach still holding the alt screen (a drop or crash); a clean
-# detach already sent its own, so the clean-exit variant omits this
-# segment. Ordered before the margin reset in the tail so that reset lands
-# on the buffer the operator is actually left looking at.
+# -- Screen buffer. Leave the alternate screen if a remote program died
+# holding it (a dropped attach, or an agw killed outright before the next
+# attach's entry pass), without moving the cursor when the terminal is
+# already on the primary screen.
+#
+# A bare `?1049l` cannot do that: it restores the saved cursor whichever
+# screen is showing. xterm runs `CursorRestore` after its `FromAlternate`
+# no-op (charproc.c, srm_OPT_ALTBUF_CURSOR), and so do VTE (vteseq.cc,
+# eXTERM_OPT_ALTBUF_SAVE_CURSOR), Windows Terminal and conhost
+# (adaptDispatch.cpp, _SetAlternateScreenBufferMode), iTerm2
+# (VT100Terminal.m, case 1049) and tmux (screen.c, screen_alternate_off:
+# "This happens even if not currently in the alternate screen"). The saved
+# cursor is stale by then: whatever an earlier DECSC or alt-screen entry
+# left, so output resumed over the operator's scrollback (issue #889).
+#
+# `?1049h` first makes the pair neutral. On the primary screen it saves the
+# current cursor and the `?1049l` restores that same position. On the
+# alternate screen it saves into the alternate screen's slot (xterm, VTE
+# and Windows Terminal keep one saved cursor per screen; tmux ignores a
+# `?1049h` it is already in), so the `?1049l` still restores the cursor
+# saved when the remote program entered, and the operator lands where they
+# were. Measured in tmux 3.3a; the other terminals are read from source.
+#
+# `?1047l` and `?47l` follow for a terminal without mode 1049. Neither
+# restores a cursor (xterm and VTE switch only, iTerm2 puts the cursor back
+# where it was, tmux passes no cursor restore, and Windows Terminal does not
+# implement them), so after the pair they are no-ops. They must not come
+# first: leaving the alternate screen without the restore would make the
+# pair save, and so keep, the remote program's cursor position.
+#
+# Ordered before the margin reset in the tail so that reset lands on the
+# buffer the operator is actually left looking at.
 _SANITIZE_ALT_SCREEN_OFF = (
-    "\x1b[?47l"  # legacy alternate screen off
+    "\x1b[?1049h\x1b[?1049l"  # alternate screen off, cursor-neutral (see above)
     "\x1b[?1047l"  # legacy alternate screen off (clearing variant)
-    "\x1b[?1049l"  # alternate screen off
+    "\x1b[?47l"  # legacy alternate screen off
 )
 
 _SANITIZE_TAIL = (
@@ -183,19 +197,9 @@ _SANITIZE_TAIL = (
     + "\x1b[0m"  # colors and attributes back to default
 )
 
-# Full reset: used on entry (prior terminal state is unknown, so an alt
-# screen may still be set) and on any non-clean exit (a drop or crash may
-# have died mid-attach still holding the alt screen).
+# The reset, sent on entry (prior terminal state is unknown: an agw killed
+# mid-attach may have left any of it set) and on every exit.
 TERMINAL_SANITIZE = _SANITIZE_HEAD + _SANITIZE_ALT_SCREEN_OFF + _SANITIZE_TAIL
-
-# Clean-exit reset: the full reset minus the alt-screen buffer switches. A
-# clean detach (exit 0) has already left the alt screen, so re-sending
-# `?1049l` would only jerk the cursor on Windows Terminal; every remaining
-# sequence is idempotent and cursor-safe (the margin homing is bracketed in
-# DECSC/DECRC). Being a strict subset of the full reset, this is safe on
-# every terminal: on a spec terminal the omitted switches were no-ops here
-# anyway. Selected by guarded_terminal when the attach body reports exit 0.
-TERMINAL_SANITIZE_CLEAN_EXIT = _SANITIZE_HEAD + _SANITIZE_TAIL
 
 # Home the cursor and clear the visible screen, leaving scrollback intact (no
 # `\x1b[3J`, which would drop the buffer). Emitted on detach for terminals we
@@ -219,11 +223,9 @@ def clear_screen_on_detach(setting: ClearOnDetach) -> bool:
     platform.
 
     ``"always"`` and ``"never"`` force the choice regardless of OS. ``"auto"``
-    (the default) clears only on Windows. The exit-code gate above already
-    removes agentworks' own redundant ``?1049l``, which fixes the flat (session)
-    and non-clearing paths there; but the nested-tmux console path stays
-    unreliable on Windows Terminal even so (the outer tmux's own alt-screen
-    leave is enough to trigger the bad cursor restore), so full-screen attaches
+    (the default) clears only on Windows, where the nested-tmux console path
+    proved unreliable on Windows Terminal (the outer tmux's own alt-screen
+    leave was enough to trigger a bad cursor restore), so full-screen attaches
     clear as a deterministic fallback. Elsewhere it preserves. This is the
     single place the platform check lives: a future terminal that needs the
     same treatment is a one-line change here.
@@ -267,45 +269,24 @@ _ENABLE_ECHO_INPUT = 0x0004  # off => typed characters are invisible
 _TTY_ERRORS = (OSError, ValueError, AttributeError, io.UnsupportedOperation)
 
 
-class TerminalGuard:
-    """Handle yielded by ``guarded_terminal`` so the attach body can record
-    how the attach ended, which selects the exit sanitize variant.
-
-    Defaults to ``clean_exit = False`` (the full reset) so a body that
-    raised, or that never set the flag, still gets the alt-screen switches:
-    a drop is the case that most needs them.
-    """
-
-    __slots__ = ("clean_exit",)
-
-    def __init__(self) -> None:
-        self.clean_exit = False
-
-
 @contextlib.contextmanager
-def guarded_terminal() -> Iterator[TerminalGuard]:
+def guarded_terminal() -> Iterator[None]:
     """Protect local terminal state across an interactive attach.
 
     Sanitizes on entry (recovering a terminal a previous attach could
     not clean up after), snapshots the line discipline, and on the way
-    out restores that discipline and sanitizes again. Every step is
-    individually best-effort and independently gated, so a redirected
-    stdout still gets its stdin discipline restored and vice versa.
-
-    Yields a ``TerminalGuard`` whose ``clean_exit`` the body sets to
-    ``True`` on a clean exit (e.g. a tmux detach returning 0). That
-    selects ``TERMINAL_SANITIZE_CLEAN_EXIT`` for the exit pass, which
-    omits the alt-screen buffer switches the clean detach already sent;
-    the default (unset, or a body that raised) uses the full reset.
+    out restores that discipline and sanitizes again, however the body
+    ended. Every step is individually best-effort and independently
+    gated, so a redirected stdout still gets its stdin discipline
+    restored and vice versa.
     """
-    guard = TerminalGuard()
     _emit_to_terminal(TERMINAL_SANITIZE)
     snapshot = _snapshot_line_discipline()
     try:
-        yield guard
+        yield
     finally:
         _restore_line_discipline(snapshot)
-        _emit_to_terminal(TERMINAL_SANITIZE_CLEAN_EXIT if guard.clean_exit else TERMINAL_SANITIZE)
+        _emit_to_terminal(TERMINAL_SANITIZE)
 
 
 def emit_clear() -> None:
@@ -370,8 +351,8 @@ def ensure_cooked_input() -> None:
 
 
 def _emit_to_terminal(payload: str) -> None:
-    """Write *payload* (a sanitize variant, or ``TERMINAL_CLEAR``) to stdout
-    when stdout is a terminal.
+    """Write *payload* (``TERMINAL_SANITIZE`` or ``TERMINAL_CLEAR``) to
+    stdout when stdout is a terminal.
 
     Not gated on ``output.non_interactive()``, unlike the confirm
     prompt's narrower mouse reset in ``cli/_typer_output.py``. That gate

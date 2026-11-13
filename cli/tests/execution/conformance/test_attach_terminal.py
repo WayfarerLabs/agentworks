@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import subprocess
 import sys
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -29,13 +28,12 @@ def events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     log: list[tuple[str, Any]] = []
 
     @contextlib.contextmanager
-    def guard() -> Iterator[SimpleNamespace]:
-        handle = SimpleNamespace(clean_exit=False)
+    def guard() -> Iterator[None]:
         log.append(("enter", None))
         try:
-            yield handle
+            yield
         finally:
-            log.append(("exit", handle.clean_exit))
+            log.append(("exit", None))
 
     monkeypatch.setattr(attach_module, "guarded_terminal", guard)
     monkeypatch.setattr(output, "warn", lambda message: log.append(("warn", message)))
@@ -51,17 +49,6 @@ def test_a_dropped_connection_is_explained_after_the_guard_has_closed(
 
     kinds = [kind for kind, _ in events]
     assert kinds == ["enter", "exit", "warn", "detail"]  # I6: the guard's reset would wipe an earlier notice
-    assert events[1] == ("exit", False)
-
-
-@pytest.mark.parametrize(("code", "clean"), [(0, True), (1, False), (130, False)])
-def test_only_a_zero_exit_skips_the_full_terminal_reset(
-    local_lane: LocalLane, events: list[tuple[str, Any]], code: int, clean: bool
-) -> None:
-    with local_lane.terminal(behavior=lambda argv, half: code):
-        assert local_lane.access.attach(LoginShell(cwd=local_lane.workdir)) == code
-
-    assert events == [("enter", None), ("exit", clean)]
 
 
 def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
@@ -75,7 +62,7 @@ def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
         with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
             local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
-        assert events == [("enter", None), ("exit", False)]  # I21
+        assert events == [("enter", None), ("exit", None)]  # I21
     finally:
         # The pump kills the parking client at once here, and in this lane that kills the launcher
         # itself; over ssh the launcher sees its stdin close and removes the directory.

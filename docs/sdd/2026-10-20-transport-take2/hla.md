@@ -775,7 +775,7 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I18 | A failed backend delete keeps the VM's row and its store record (#329; `vms/manager/power.py:312-320`)                                                                                                                                             | 4            |
 | I19 | The agent probe tells an unreachable VM from an agent that predates the rollout (ADR 0011; `agents/manager/_common.py:237-286`)                                                                                                                    | 2, 6         |
 | I20 | Backup's download stops the copy and removes the partial file on Ctrl-C (`97e11a168`; `vms/backup.py:504-505`)                                                                                                                                     | 7            |
-| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`)                                                                                                                          | 2            |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach, with one payload that leaves the alternate screen without moving the cursor on the primary screen (`897248ead`, `80c813db4`, #889)                 | 2            |
 
 ### Release behaviors to preserve (R10)
 

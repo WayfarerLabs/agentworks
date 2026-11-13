@@ -76,9 +76,8 @@ def attach(
         stop = session.pump(lambda: session.stdout.parked, budget=Deadline.after(PARKING_WAIT_SECONDS))
         if not session.stdout.parked:
             _raise_parking_failure(vm_name, session, stop, log)
-        with guarded_terminal() as guard:
+        with guarded_terminal():
             code = ssh_process.run_terminal(terminal_argv)
-            guard.clean_exit = code == 0
         # After the guard: its exit pass leaves the alternate screen, which
         # would wipe anything written before it closes (I6).
         if code == _SSH_STATUS_CONNECTION_ENDED:
