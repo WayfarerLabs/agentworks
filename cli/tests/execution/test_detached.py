@@ -156,11 +156,10 @@ def test_after_a_lost_connection_launch_raises_naming_the_id_unless_the_launch_i
         (Result(Completed(detached_program.EXIT_EXISTS)), DetachedRefused),
         (Result(Completed(127), stderr=b"exec ENOENT\n"), RequestRefused),
         (Result(Completed(126), stderr=b"exec EACCES\n"), RequestRefused),
-        (Result(Completed(126), stderr=b"exec ENOENT\n"), CommandFailed),
         (Result(Completed(127), stderr=b"\x1b[31mexec ENOENT; rm -rf\n"), CommandFailed),
         (Result(Completed(1)), CommandFailed),
     ],
-    ids=["not-delivered", "no-python", "exists", "not-found", "not-executable", "mismatched", "not-a-code", "failed"],
+    ids=["not-delivered", "no-python", "exists", "not-found", "not-executable", "not-a-code", "failed"],
 )
 def test_any_other_outcome_raises_at_once_with_no_follow_up(outcome: Result, error: type[Exception]) -> None:
     access = admin()

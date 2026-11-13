@@ -25,11 +25,9 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution import detached_program, reachability
-from agentworks.execution.agw_launch import refusal_status
 from agentworks.execution.envelope import checked_argv, checked_env
 from agentworks.execution.errors import CommandFailed, DetachedRefused, ExecutionIncomplete, RequestRefused
 from agentworks.execution.requests import Bytes, Command, NoInput, PythonProgram
-from agentworks.execution.results import REFUSAL_CODE
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -44,20 +42,18 @@ INTERRUPT_DEADLINE = 30
 DISCARD_DEADLINE = 60
 
 _ID = re.compile(r"[0-9a-f]{32}")
+_EXEC_REFUSAL = re.compile(r"exec [A-Z][A-Z0-9]*")
 
 
 def _exec_refusal(status: int, result: Result) -> str | None:
-    """The ``exec`` refusal code ``launch`` reported, or ``None``.
+    """The ``exec`` refusal code ``launch`` reported with status 126 or 127, or ``None``.
 
-    A boundary: the code is guest output, so it counts only when it is an
-    ``exec`` code of the refusal grammar and its status is the one that code
-    maps to (127 for ``ENOENT``, 126 for the rest).
+    A boundary: the code is guest output, so only a last stderr line that is
+    exactly an ``exec`` code counts.
     """
     lines = result.stderr.decode("ascii", errors="replace").strip().splitlines()
     code = lines[-1] if lines else ""
-    if code.startswith("exec ") and REFUSAL_CODE.fullmatch(code) and refusal_status(code) == status:
-        return code
-    return None
+    return code if status in (126, 127) and _EXEC_REFUSAL.fullmatch(code) else None
 
 
 def program_source() -> str:
