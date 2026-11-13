@@ -356,6 +356,20 @@ class HarnessIntegration(Capability):
             field=f"{self.owner_kind}/{self.owner_name}.extra_args",
         )
 
+    def render_context_args(self, field_name: str, value: list[str]) -> tuple[str, ...]:
+        """Render an opted-in argument field against this invocation's context."""
+        from agentworks.interpolation_fields import render_list_field
+
+        return tuple(
+            render_list_field(
+                type(self.config),
+                field_name,
+                value,
+                self._session_binding.context_values,
+                location=f"{self.owner_kind}/{self.owner_name}.{field_name}",
+            )
+        )
+
     @property
     def _session_binding(self) -> SessionBinding:
         if self._session is None:
