@@ -75,7 +75,8 @@ def validate_vm_workspaces(path: str) -> None:
             f"normalized to {normalized!r}). /home is the Linux user-home namespace "
             "on the VM and will collide with a future 'useradd -m'. Use the default "
             "'/opt/agentworks/workspaces', or mount a data volume at that path (or "
-            "symlink it there), rather than nesting workspaces under /home."
+            "bind-mount a directory there), rather than nesting workspaces under /home. "
+            "A symbolic link will not do: workspace files are never written through one."
         )
 
 

@@ -233,15 +233,17 @@ the VM once no backup is running.
 
 - **Links are not followed.** A workspace's generated `.tmuxinator.yml` and the admin's
   `~/.config/tmuxinator` directory are written by the file program, which refuses a symbolic link at
-  the file or any parent, so a workspace path below a link, or a linked `~/.config` or
-  `~/.config/tmuxinator`, now fails `workspace create`, `workspace copy` and `workspace rehome`
-  where it was followed. A failed `workspace create` removes what it created, as for any other
-  failure. A refused `workspace copy` leaves the extracted tree in the new directory and no
-  workspace row, so remove that directory before retrying. A refused `workspace rehome` leaves the
-  copied tree at the new path and the workspace where it was, its error naming both; remove the new
-  directory before retrying. The session commands regenerate the config as a convenience: a refusal
-  there, or any failed request, now warns and leaves the session command's result standing, where a
-  failure of the regeneration used to fail the command.
+  the file or any parent, so a workspace path below a link (most likely a `paths.vm_workspaces` that
+  is, or lies under, a symbolic link on the VM), or a linked `~/.config` or `~/.config/tmuxinator`,
+  now fails `workspace create`, `workspace copy` and `workspace rehome` where it was followed. A
+  failed `workspace create` removes what it created, as for any other failure. A refused
+  `workspace copy` leaves the extracted tree in the new directory and no workspace row, so remove
+  that directory before retrying. A refused `workspace rehome` leaves the copied tree at the new
+  path and the workspace where it was, its error naming both; remove the new directory before
+  retrying. The session commands regenerate the config as a convenience: a refusal there, or any
+  failed request, now warns and leaves the session command's result standing, where a failure of the
+  regeneration used to fail the command. To put workspaces on a data volume, mount it, or bind-mount
+  a directory of it, at `paths.vm_workspaces` instead of linking it there.
 - **`workspace copy` refuses an occupied destination.** A directory, file or link already at the new
   workspace's path is refused before anything is extracted, as `workspace create` refuses it, where
   the copy used to extract into it.
