@@ -80,6 +80,11 @@ metadata requires exactly one unambiguous pane in its named session. Healthy old
 ordinary no-op start and active-pane log capture. Malformed metadata is refused; the legacy log
 fallback does not establish identity or authorize recovery mutations.
 
+Access sharing grants read/write tmux access to the socket group's members. Retrying startup
+completion reapplies that access, including restoring a member's read-only entry to read/write. A
+failed group lookup or member grant stops sharing rather than reporting successful completion; the
+retained runtime remains available for a later retry unless workload death is confirmed.
+
 If no process identity can be recovered and the same VM boot is still running, preserve the row and
 inspect the guest. `--force` cannot turn missing identity into evidence of absence. A mutating
 repair attempt can record the observed boot for an older row that lacks one. An actual VM reboot
