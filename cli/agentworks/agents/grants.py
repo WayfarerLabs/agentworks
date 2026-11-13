@@ -278,7 +278,6 @@ def remove_from_workspace_group(
     admin.run(Command(("gpasswd", "-d", linux_user, ws_grp), elevated=True)).require_completed(vm.name)
 
 
-
 # -- Grant-all materialization ---------------------------------------------
 
 
