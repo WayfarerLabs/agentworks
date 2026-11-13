@@ -217,6 +217,13 @@ def _install_apt_packages(
         output.warn(msg)
 
 
+def _install_command_owner(entry: SystemInstallCommandEntry | UserInstallCommandEntry) -> str:
+    from agentworks.install_commands import SystemInstallCommandEntry
+
+    kind = "system-install-command" if isinstance(entry, SystemInstallCommandEntry) else "user-install-command"
+    return f"{kind}/{entry.name}"
+
+
 def _build_test_command(
     entry: SystemInstallCommandEntry | UserInstallCommandEntry,
     shell: str,
@@ -231,15 +238,10 @@ def _build_test_command(
     Empty tests are ignored. Returning ``None`` when none remain prevents
     an empty conjunction from vacuously skipping the install.
     """
-    test_exec = render_scalar_field(
-        type(entry), "test_exec", entry.test_exec, context, location=f"install-command/{entry.name}.test_exec"
-    )
-    test_file = render_scalar_field(
-        type(entry), "test_file", entry.test_file, context, location=f"install-command/{entry.name}.test_file"
-    )
-    test_dir = render_scalar_field(
-        type(entry), "test_dir", entry.test_dir, context, location=f"install-command/{entry.name}.test_dir"
-    )
+    owner = _install_command_owner(entry)
+    test_exec = render_scalar_field(type(entry), "test_exec", entry.test_exec, context, location=f"{owner}.test_exec")
+    test_file = render_scalar_field(type(entry), "test_file", entry.test_file, context, location=f"{owner}.test_file")
+    test_dir = render_scalar_field(type(entry), "test_dir", entry.test_dir, context, location=f"{owner}.test_dir")
     commands: list[str] = []
     if test_exec:
         commands.append(f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(test_exec)}')} > /dev/null 2>&1")
@@ -304,9 +306,8 @@ def _run_install_commands(
                 # Timeout or connection issue -- assume not installed, proceed
                 logger.output(f"{name}: install check failed ({e}), assuming not installed")
 
-        command = render_scalar_field(
-            type(entry), "command", entry.command, context, location=f"install-command/{name}.command"
-        )
+        owner = _install_command_owner(entry)
+        command = render_scalar_field(type(entry), "command", entry.command, context, location=f"{owner}.command")
         truncated = command[:60]
         output.info(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
