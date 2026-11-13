@@ -585,14 +585,19 @@ def _grant_server_access(
 
     Called as the agent (the tmux server owner). No inner
     sudo is needed: the agent runs ``tmux server-access`` against its
-    own server. ``-w`` adds missing users and updates existing users, so
-    interrupted startup completion can safely repeat the grant.
+    own server. Root and the owner already have intrinsic access. ``-w``
+    adds other missing users and updates existing users, so interrupted
+    startup completion can safely repeat the grant.
     """
     q_sock = shlex.quote(socket_path)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
     run_command(
         f"agw_socket_group=$(getent group {grp}) || exit $?; "
+        "agw_socket_owner_uid=$(id -u) || exit $?; "
         "for u in $(printf '%s' \"$agw_socket_group\" | cut -d: -f4 | tr ',' ' '); do "
+        'agw_socket_member_uid=$(id -u "$u") || exit $?; '
+        'if [ "$agw_socket_member_uid" = 0 ] || '
+        '[ "$agw_socket_member_uid" = "$agw_socket_owner_uid" ]; then continue; fi; '
         f'tmux -S {q_sock} server-access -w "$u" || exit $?; done',
     )
 
