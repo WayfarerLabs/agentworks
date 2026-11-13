@@ -82,9 +82,11 @@ fallback does not establish identity or authorize recovery mutations.
 
 Access sharing grants read/write tmux access to the socket group's members. Retrying startup
 completion reapplies that access, including restoring a member's read-only entry to read/write. The
-server owner and root already have tmux access and need no explicit grant. A failed group or user
-lookup or member grant stops sharing rather than reporting successful completion; the retained
-runtime remains available for a later retry unless workload death is confirmed.
+server owner and root already have tmux access and need no explicit grant. Member names are read
+individually from the comma-separated group entry, without shell option or filename expansion. A
+failed group or user lookup or member grant stops sharing rather than reporting successful
+completion; the retained runtime remains available for a later retry unless workload death is
+confirmed.
 
 If no process identity can be recovered and the same VM boot is still running, preserve the row and
 inspect the guest. `--force` cannot turn missing identity into evidence of absence. A mutating
