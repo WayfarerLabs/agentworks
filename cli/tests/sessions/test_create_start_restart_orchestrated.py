@@ -1267,6 +1267,54 @@ def test_regenerate_tmuxinator_failure_warns_and_leaves_the_command_standing(
     db.close()
 
 
+@pytest.mark.parametrize("workspace_spec", [None, '{"tmuxinator":false}'], ids=["enabled", "disabled"])
+@pytest.mark.parametrize("stored", ["~/ws1", "/home/me/../srv/ws1"], ids=["tilde", "dotdot"])
+def test_regenerate_tmuxinator_warns_and_sends_nothing_for_a_stored_path_it_cannot_address(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    workspace_spec: str | None,
+    stored: str,
+) -> None:
+    """A '~' row names no one directory, and a '..' row names its directory only once the VM resolves it."""
+    from agentworks.instance_specs import parse_instance_spec
+
+    db = _seed_db(tmp_path)
+    db._conn.execute("UPDATE workspaces SET workspace_path = ? WHERE name = 'ws1'", (stored,))
+    db._conn.commit()
+    if workspace_spec is not None:
+        overlay = parse_instance_spec("workspace", workspace_spec)
+        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
+    recorder = install_access_recorder(monkeypatch)
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+
+    assert len(captured_output.warnings) == 1
+    assert recorder.requests("run") == []
+    db.close()
+
+
+def test_regenerate_tmuxinator_lets_a_misused_request_raise(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a failed request or file operation is tolerated: a request the execution layer refuses to build raises."""
+    db = _seed_db(tmp_path)
+    install_access_recorder(monkeypatch).access(vm_name="vm1").default_outcome = ValidationError("misused request")
+    vm = db.get_vm("vm1")
+    ws = db.get_workspace("ws1")
+    assert vm is not None and ws is not None
+
+    with pytest.raises(ValidationError, match="misused request"):
+        _real_regenerate_tmuxinator(db, make_config(), vm, ws)
+    db.close()
+
+
 def test_compound_create_reports_each_retained_overlay_once_after_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

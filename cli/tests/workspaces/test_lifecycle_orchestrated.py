@@ -1536,6 +1536,61 @@ def test_delete_of_a_stored_path_that_is_not_absolute_removes_the_row_and_leaves
     assert "~/ws/ws1" in captured_output.warnings[0]
 
 
+def _store_a_dotdot_path(db: Database) -> None:
+    """A row an earlier release stored as typed, or a relative '../srv/ws1' the state migration anchored."""
+    db._conn.execute("UPDATE workspaces SET workspace_path = '/home/admin/../srv/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+
+
+def test_delete_of_a_stored_path_with_a_dotdot_removes_its_directory_and_link_as_the_vm_resolves_them(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.linux_users import managed_home
+    from agentworks.workspaces.tmuxinator import remove_link_to
+
+    config = make_config()
+    _seed(db)
+    _store_a_dotdot_path(db)
+    _reachable(monkeypatch, True)
+    fake = _FakeAdminTarget()
+    recorder = _route(monkeypatch, fake)
+    vm = db.get_vm("box")
+    assert vm is not None
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is None
+    assert "rm -rf -- /home/admin/../srv/ws1" in fake.commands
+    assert remove_link_to(managed_home(vm.admin_username), "ws1", "/home/admin/../srv/ws1") in recorder.requests("run")
+    assert captured_output.warnings == []
+
+
+def test_rehome_of_a_stored_path_with_a_dotdot_stores_the_target(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Rehome is how such a row is repaired: the guest resolves the source, and the new row has no '..'."""
+    config = make_config()
+    _seed(db)
+    _store_a_dotdot_path(db)
+    _reachable(monkeypatch, True)
+    fake = _RehomeTarget()
+    _route(monkeypatch, fake)
+
+    workspace_manager.rehome_workspace(
+        db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/dst/ws1"
+    assert "rsync -a -- /home/admin/../srv/ws1/ /dst/ws1/" in fake.commands
+
+
 def test_rehome_refuses_a_target_inside_the_source_through_a_link(
     db: Database,
     make_config,  # noqa: ANN001

@@ -39,7 +39,9 @@ def stored_workspace_path(path: str) -> str:
     Boundary: the path is persisted state. The state migration anchors a
     relative path in the admin's home, but one starting with ``~`` stays
     relative, since which home it named is not recorded, so nothing is run
-    against it.
+    against it. A ``..`` component is kept: a command given the path resolves
+    it on the VM, but the file operations cannot address files under it
+    (:func:`addressable_workspace_path`).
     """
     normalized = normalized_guest_path(path)
     if not normalized.startswith("/"):
@@ -49,6 +51,24 @@ def stored_workspace_path(path: str) -> str:
                 "Delete and recreate the workspace: which directory this stored path names is not recorded, "
                 "so delete leaves it on the VM for you to check."
             ),
+        )
+    return normalized
+
+
+def addressable_workspace_path(path: str) -> str:
+    """A workspace row's path as the file operations address files under it, refusing one they cannot.
+
+    That is :func:`stored_workspace_path`'s path and refusal, and a path with
+    a ``..`` component is refused too: it names a directory only once the VM
+    resolves it, which the file operations never do
+    (``execution.files.guest_path``). An earlier release stored such a path as
+    typed, and rehome replaces it with a path that has none.
+    """
+    normalized = stored_workspace_path(path)
+    if ".." in normalized.split("/"):
+        raise ValidationError(
+            f"workspace path {path!r} has a '..' component, which names a directory only once the VM resolves it",
+            hint="Move the workspace with 'agw workspace rehome', which stores its new path without one.",
         )
     return normalized
 

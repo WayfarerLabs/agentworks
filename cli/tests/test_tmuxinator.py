@@ -283,16 +283,40 @@ def test_a_stored_workspace_path_names_its_config_in_one_spelling(stored: str) -
     assert config_path(stored) == "/data/ws/.tmuxinator.yml"
 
 
-def test_a_dotdot_component_in_a_stored_path_is_kept() -> None:
-    """Collapsing ``..`` would name another directory when the component before it is a link."""
-    from agentworks.workspaces.tmuxinator import config_path
-
-    assert config_path("/data/link/../ws/") == "/data/link/../ws/.tmuxinator.yml"
-
-
-def test_a_stored_path_that_is_not_absolute_names_no_config() -> None:
+@pytest.mark.parametrize("stored", ["~/ws", "/data/link/../ws/"])
+def test_a_stored_path_the_file_operations_cannot_address_names_no_config(stored: str) -> None:
+    """A relative path names no one directory, and a ``..`` one names its directory only once the VM resolves it."""
     from agentworks.errors import ValidationError
     from agentworks.workspaces.tmuxinator import config_path
 
     with pytest.raises(ValidationError):
-        config_path("~/ws")
+        config_path(stored)
+
+
+@pytest.mark.parametrize(
+    ("stored", "target", "removed"),
+    [
+        ("{root}/ws", "{root}/ws/.tmuxinator.yml", True),
+        ("{root}/ws/", "{root}/ws/.tmuxinator.yml", True),
+        ("{root}/home/../srv/ws", "{root}/home/../srv/ws/.tmuxinator.yml", True),
+        ("{root}/home/../srv/ws", "{root}/srv/ws/.tmuxinator.yml", True),
+        ("{root}/ws", "{root}/other/.tmuxinator.yml", False),
+        ("{root}/ws", "ws/.tmuxinator.yml", False),
+    ],
+    ids=["same-spelling", "trailing-slash", "dotdot-as-written", "dotdot-collapsed", "another-workspace", "relative"],
+)
+def test_delete_removes_the_console_link_only_while_it_points_at_this_workspace(
+    tmp_path: Path, stored: str, target: str, removed: bool
+) -> None:
+    """The guest script itself, run by this machine's ``/bin/sh`` with GNU ``realpath``."""
+    from agentworks.workspaces.tmuxinator import config_link, remove_link_to
+
+    home = tmp_path / "home" / "admin"
+    link = Path(config_link(str(home), "w"))
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target.format(root=tmp_path))
+
+    request = remove_link_to(str(home), "w", stored.format(root=tmp_path))
+    subprocess.run(["/bin/sh", "-c", request.source], check=True)
+
+    assert link.is_symlink() != removed

@@ -39,10 +39,9 @@ _REGENERATION_FAILURES = (
     FileConflict,
     FileContentMismatch,
     FileLockTimeout,
-    ValidationError,
 )
-"""What the tmuxinator regeneration tolerates: a failed request, a file operation that was refused,
-conflicted, timed out or wrote nothing, or a stored workspace path that is not absolute."""
+"""What the tmuxinator regeneration tolerates: a failed request, or a file operation that was refused,
+conflicted, timed out or wrote nothing."""
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -168,15 +167,24 @@ def _regenerate_tmuxinator(
 
     Best effort: the config is a convenience, so a request or file operation
     that fails, a link in its path included, warns naming the workspace and
-    leaves the session command's result as it is.
+    leaves the session command's result as it is. A stored path the file
+    operations cannot address (``guest.addressable_workspace_path``) warns
+    with its next step before anything runs.
     """
     import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
     from agentworks.linux_users import managed_home
     from agentworks.vms.initializer.steps import describe_failure
+    from agentworks.workspaces.guest import addressable_workspace_path
     from agentworks.workspaces.templates import resolve_live_tmuxinator
     from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
+
+    try:
+        addressable_workspace_path(ws.workspace_path)
+    except ValidationError as error:
+        output.warn(f"The tmuxinator config of workspace '{ws.name}' was not updated: {error}. {error.hint}")
+        return
 
     registry = load_request_registry(config, live_database=db)
     admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
