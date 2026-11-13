@@ -536,7 +536,7 @@ instead of `SSHLogger`.
 
 | Operation                     | Today                                                                                                                                                                                                       | Request                                                                                                                                                       | As                      | stdin   | Deadline                  |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------- | ------------------------- |
-| Path free                     | `test -d \|\| test -e \|\| test -L`, `workspaces/backends/vm.py:70`                                                                                                                                         | the same line as a `Script(Shell.SH)` with the path as `$1`                                                                                                   | admin                   |         | 10                        |
+| Path free                     | `test -d \|\| test -e \|\| test -L`, `workspaces/backends/vm.py:70`                                                                                                                                         | `test -e \|\| test -L` as a `Script(Shell.SH)` with the path as `$1` (`test -e` covers a directory)                                                           | admin                   |         | 10                        |
 | Parent and directory          | `mkdir -p`, `mkdir`, `:86`, `:88`                                                                                                                                                                           | `Command(("mkdir", "-p", "--", parent))`, `Command(("mkdir", "--", ws))`                                                                                      | root                    |         | none                      |
 | Group                         | `sh -c 'getent ... \|\| groupadd'`, `usermod`, `chown`, `chmod 2770`, `:100-103`                                                                                                                            | `Script(Shell.SH)` for the group line; `Command`s for the rest                                                                                                | root                    |         | none                      |
 | Clone attempt                 | `mkdir -m 700`, `chown`, `:115`, `:123`                                                                                                                                                                     | `Command`s                                                                                                                                                    | root                    |         | none                      |
@@ -560,8 +560,17 @@ before relying on it. The `ln -s` is a `Command`, since a link is not a file ope
 here needs an unconditional `remove`, which HLA D6 lists for workspaces (amendment A4).
 
 `workspace delete` (`workspaces/manager/delete.py:153-213`) passes the admin's access to session
-teardown and to `kill_session_windows`, and `workspaces/realize.py` and
-`materialize_grant_all_agents` type their log as `InitLog`.
+teardown and to `kill_session_windows`; `workspaces/realize.py` types its log as `InitLog` and
+`materialize_grant_all_agents` as `OperationLog`, the record callable being all it reads. Repair,
+which sent its requests with no log, keeps a `workspace-repair` operation log, and every step
+warning shows the failed command's redacted stderr tail (`describe_failure`).
+
+**The rehome target** is the operator's `--target`, so `rehome_workspace` checks it before anything
+runs: a trailing `/` is dropped, and a path that is then not absolute and normalized (`guest_path`'s
+rule) is a `ValidationError`, since rsync reads `host:x` as a remote and the traversal walk needs an
+absolute path. The walk itself stops at any path that is not absolute and has a 30-second deadline.
+A stored workspace path is normalized for its tmuxinator config, so an earlier release's row such as
+`/data/ws/` still regenerates, and delete compares the console link's target normalized.
 
 ### Workspace copy
 
@@ -577,7 +586,10 @@ removal (`:242`). It becomes two `run`s over an opaque stream, never extracted o
    `Completed(0)` raises; the sink has already removed the partial file.
 2. **Destination.** `Command(("tar", "xzf", "-", "--no-same-owner", "-C", ws))`, elevated, with
    `stdin=FromFile(local)` and `check=True`, on the destination's admin access, no deadline. Nothing
-   is staged on the destination VM, so the `mktemp`, the upload and the `rm -f` go.
+   is staged on the destination VM, so the `mktemp`, the upload and the `rm -f` go. A file that
+   cannot be read to its end fails the request before the guest's input ends. Before it, the
+   destination path is refused when occupied and reserved with an exclusive `mkdir`, as create does;
+   after it, the directory's mode is put back to 2770, since the archive's `.` member sets it.
 
 **Extraction safety.** The archive comes from another VM, so the extraction relies on GNU tar's
 defaults and never passes `-P` (`--absolute-names`): member names lose a leading `/`, members with
@@ -592,7 +604,8 @@ the partial tree. The follow-ups do not follow links: `chown -R -P` and
 
 **An interrupt or a failure during extraction** leaves the partial tree in the new workspace
 directory and no workspace row, since the row is inserted after the extraction (`copy.py:209`), as
-today; the operator removes the directory before retrying.
+today; the operator removes the directory before retrying. The tmuxinator config is published before
+the row too, so a refused config leaves the same.
 
 The group, directory, `chown -R` and `find` steps (`:171-193`) are `Command`s as in the workspaces
 table, and the tmuxinator write (`:230-233`) is as create's, its link replaced with `ln -sf` as
