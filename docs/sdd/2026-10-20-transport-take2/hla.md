@@ -173,11 +173,12 @@ The client writes three things on stdin, in order:
 
 **Stage 0.** The remote command is one constant line, `/usr/bin/python3 -I -S -c '<stage 0>'`, with
 `sudo -n` in front for an elevated request and a handover path after it for the terminal half of an
-attach (D8). Stage 0 is one line of under 200 characters: it reads the length-prefixed agw-launch
-source from stdin, or from the handover socket, and runs it. If it cannot read or start it, Python
-exits non-zero before any start marker, so the request is not delivered. The client discards
-everything before the marker, so a traceback quoting misaligned request bytes, as a startup file
-that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
+attach (D8). On a Windows console the terminal half's command is also led by a NUL (execution LLD,
+Terminal handover). Stage 0 is one line of under 200 characters: it reads the length-prefixed
+agw-launch source from stdin, or from the handover socket, and runs it. If it cannot read or start
+it, Python exits non-zero before any start marker, so the request is not delivered. The client
+discards everything before the marker, so a traceback quoting misaligned request bytes, as a startup
+file that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
 quote, double quote, backslash, `!` or newline, so the account shell passes it through unchanged and
 Windows argument quoting has nothing to escape. `-I` ignores Python's environment variables and the
 user site directory, and `-S` skips site packages, so no Python startup applies. The short line
