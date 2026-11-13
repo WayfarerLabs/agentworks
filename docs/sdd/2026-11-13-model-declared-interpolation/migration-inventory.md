@@ -1,9 +1,9 @@
 # Field adoption inventory
 
 Snapshot: `3ad615680ee8e1ef56c864170deaf62392578661`, 2026-11-13. Core and all 10 shipped system
-plugins were inspected through their real consumers. The operator accepted groups A-D on
-2026-11-13 and deferred marketplace sources. Implementation is in progress. Line anchors
-below refer to this snapshot. Paths are relative to `cli/agentworks/`.
+plugins were inspected through their real consumers. The operator accepted groups A-D on 2026-11-13
+and deferred marketplace sources. Implementation is in progress. Line anchors below refer to this
+snapshot. Paths are relative to `cli/agentworks/`.
 
 ## Existing support to retain
 
@@ -21,8 +21,8 @@ annotations preserves behavior rather than adding new support.
 
 ## Agreed new opt-ins
 
-The following eleven additional declarations are agreed, grouped by consumer contract. All
-use the existing context catalogue. The examples describe the implementation target.
+The following eleven additional declarations are agreed, grouped by consumer contract. All use the
+existing context catalogue. The examples describe the implementation target.
 
 ### A. Install commands and their completion/profile fields
 
@@ -139,7 +139,6 @@ these source strings is worth that additional lifecycle work now.
 
 ## Disposition
 
-On 2026-11-13 the operator accepted groups A-D and the recommended marketplace
-deferral. The other holds remain outside this implementation. Shipped manifests need
-no wholesale rewrite merely to adopt the annotations; ordinary shell variables and
-useful tilde paths remain valid.
+On 2026-11-13 the operator accepted groups A-D and the recommended marketplace deferral. The other
+holds remain outside this implementation. Shipped manifests need no wholesale rewrite merely to
+adopt the annotations; ordinary shell variables and useful tilde paths remain valid.

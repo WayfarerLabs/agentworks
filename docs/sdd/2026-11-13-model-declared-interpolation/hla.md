@@ -1,6 +1,6 @@
 # Model-declared runtime interpolation: architecture
 
-Status: proposed design for [the requirements](frd.md).
+Status: implementation architecture for [the accepted requirements](frd.md).
 
 ## Model declaration
 
@@ -55,7 +55,7 @@ a previous result.
 
 ## Adoption and compatibility
 
-The [inventory](migration-inventory.md) proposes existing-support migration and new field groups.
+The [inventory](migration-inventory.md) records existing-support migration and accepted groups A-D.
 The [migration strategy](migration-strategy.md) describes rollout without stored-state changes. New
 candidates are deliberately distinct from already supported fields so a design review cannot
 accidentally approve a behavior expansion.
@@ -67,6 +67,6 @@ eligibility or change deprecation policy.
 ## Documentation and delivery
 
 Use one feature branch and PR for the SDD and implementation. Initially the PR is a draft design
-checkpoint with `review-requested`, pending migration-list discussion. Permanent documentation
-changes ride with their supporting code. The old completed SDD stays locked; this effort records its
-own requirements and implementation evidence.
+checkpoint with `review-requested`; implementation continues after operator acceptance. Permanent
+documentation changes ride with their supporting code. The old completed SDD stays locked; this
+effort records its own requirements and implementation evidence.

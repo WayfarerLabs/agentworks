@@ -26,6 +26,7 @@ model config. This document covers the derivation layer.
 | D11 | Manifest envelope validation    | `manifests/envelope.py`                            |
 | D12 | YAML 1.1 spelling support       | `manifests/emit.py` spelling tables                |
 | D13 | Layer merge policy              | `merge.py` and model annotation metadata           |
+| D14 | Runtime interpolation           | `interpolation.py`, field markers and adapters     |
 
 The field tree, `explain`, and generated samples consume D3. Add a consumer of D3 when possible
 instead of walking models again.
@@ -140,6 +141,35 @@ The merger does not validate, construct defaults, coerce, filter, or mutate its 
 values, `null`, unknown keys, and other malformed raw data survive to the existing final Pydantic
 validation boundary. Whole-node replacement is also the safe policy when an author intentionally
 uses a model domain broader than the recursive merge contract can interpret.
+
+## Runtime interpolation
+
+`Interpolated()` is optional `Annotated` metadata for strings, nullable strings and string list
+elements. Mark only fields whose consumer has defined when to render and which invocation facts it
+knows. Model loading does not evaluate templates.
+
+```python
+from typing import Annotated
+
+from agentworks.schema import AgwModel, Interpolated
+
+
+class ToolConfig(AgwModel):
+    directory: Annotated[str, Interpolated()]
+    arguments: list[Annotated[str, Interpolated()]]
+    profile: str
+```
+
+The string node emits `x-agw-interpolation: true`; `FieldDoc.interpolation` carries the
+scalar/element fact to explanation and sample output. Scalar shorthand derives that fact from its
+target field. Invalid marker placement, including a resource or secret reference on the same value,
+is rejected at the model/registration boundary.
+
+Consumers use the model-aware adapters in `agentworks.interpolation_fields`, selecting only
+applicable values and supplying their known context and owning field location. Unmarked values pass
+through literally. A component may continue to use its own literal contract without adopting the
+pattern. See [runtime context](../../../docs/arch/runtime-context.md) for the language, lifecycle,
+secret boundary and destination handling.
 
 ## Adding or changing a derivation
 

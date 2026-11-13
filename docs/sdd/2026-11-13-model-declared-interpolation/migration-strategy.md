@@ -1,6 +1,7 @@
 # Migration strategy
 
-Status: proposed, pending the [field adoption discussion](migration-inventory.md).
+Status: implementation rollout for [accepted migration groups A-D](migration-inventory.md);
+marketplace sources are deferred.
 
 ## Starting state
 

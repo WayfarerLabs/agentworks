@@ -1,8 +1,8 @@
 # Model-declared runtime interpolation: plan
 
 Vehicle: one feature PR on `feat/model-declared-interpolation`, initially a draft `review-requested`
-design checkpoint. The operator accepted groups A-D; implementation now continues on the same PR. This effort is independent of the test-only
-cleanup in PR #896 and does not change that PR.
+design checkpoint. The operator accepted groups A-D; implementation now continues on the same PR.
+This effort is independent of the test-only cleanup in PR #896 and does not change that PR.
 
 ## Design checkpoint
 
