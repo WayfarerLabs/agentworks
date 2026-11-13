@@ -37,7 +37,7 @@ def _source_existing_bash_login_files(target: Transport) -> None:
         path = f'"$HOME/{filename}"'
         target.run(
             f"if [ -f {path} ]; then grep -Fqx {shlex.quote(source_line)} {path} 2>/dev/null "
-            f"|| printf '%s\\n' {shlex.quote(source_line)} >> {path}; fi",
+            f"|| printf '\\n%s\\n' {shlex.quote(source_line)} >> {path}; fi",
             check=False,
         )
 
@@ -81,7 +81,7 @@ def _ensure_agentworks_files_sourced(
         profile_rcs.append(f"{home}/.zprofile")
     for rc in profile_rcs:
         target.run(
-            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{profile_source}' >> {rc}",
+            f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '\\n%s\\n' '{profile_source}' >> {rc}",
             check=False,
         )
 
@@ -91,7 +91,7 @@ def _ensure_agentworks_files_sourced(
         rc_files.append(f"{home}/.zshrc")
     for rc in rc_files:
         target.run(
-            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{rc_source}' >> {rc}",
+            f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '\\n%s\\n' '{rc_source}' >> {rc}",
             check=False,
         )
 
@@ -163,7 +163,7 @@ def _write_agentworks_profile(
         _source_existing_bash_login_files(target)
         for rc in ("$HOME/.profile", "$HOME/.zprofile"):
             target.run(
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '\\n%s\\n' '{source_line}' >> {rc}",
             )
     except SSHError as e:
         msg = f"shell profile write failed: {e}"
@@ -624,7 +624,7 @@ def _write_agentworks_rc(
         source_line = f". $HOME/{AGENTWORKS_RC}"
         for rc in ("$HOME/.bashrc", "$HOME/.zshrc"):
             target.run(
-                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '\\n%s\\n' '{source_line}' >> {rc}",
             )
     except SSHError as e:
         msg = f"shell rc write failed: {e}"

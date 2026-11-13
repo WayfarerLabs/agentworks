@@ -17,9 +17,19 @@ pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux guest Bash sta
 
 
 @pytest.mark.parametrize("role", ["admin", "agent"])
-@pytest.mark.parametrize("startup", [None, ".bash_profile", ".bash_login"])
+@pytest.mark.parametrize(
+    "startup,trailing_newline",
+    [
+        (None, True),
+        (".profile", False),
+        (".bash_profile", True),
+        (".bash_profile", False),
+        (".bash_login", True),
+        (".bash_login", False),
+    ],
+)
 def test_actual_bash_login_finds_package_tools_and_preserves_dotfiles(
-    tmp_path: Path, role: str, startup: str | None
+    tmp_path: Path, role: str, startup: str | None, trailing_newline: bool
 ) -> None:
     binary_dir = tmp_path / ".local/bin"
     binary_dir.mkdir(parents=True)
@@ -27,7 +37,8 @@ def test_actual_bash_login_finds_package_tools_and_preserves_dotfiles(
     probe.write_text("#!/bin/sh\nprintf '%s' ready\n")
     probe.chmod(0o755)
     if startup is not None:
-        (tmp_path / startup).write_text("# .agentworks-profile.sh is managed separately.\nexport DOTFILE_MARKER=kept\n")
+        content = "# managed shell setup\nexport DOTFILE_MARKER=kept"
+        (tmp_path / startup).write_text(content + ("\n" if trailing_newline else ""))
     child_env = {**os.environ, "HOME": str(tmp_path)}
     target = MagicMock()
 

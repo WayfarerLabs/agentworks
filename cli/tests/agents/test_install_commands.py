@@ -139,7 +139,7 @@ def test_agent_profile_deduplicates_without_changing_path_precedence(
         assert result.stdout.splitlines() == [f"{tmp_path}/.local/bin:/opt/tools:/usr/bin:/bin", "dev"]
     rc_files = [".profile", ".bashrc"] + ([".zprofile"] if shell == "zsh" else [])
     for name in rc_files:
-        assert (tmp_path / name).read_text().splitlines() == [f". {profile}"]
+        assert [line for line in (tmp_path / name).read_text().splitlines() if line] == [f". {profile}"]
     installs = [call.args[0] for call in target.run.call_args_list if "install-" in call.args[0]]
     assert len(installs) == (0 if test_returncode == 0 else 4)
 

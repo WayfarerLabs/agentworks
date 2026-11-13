@@ -26,7 +26,7 @@ def run_npm_install(
     home: str,
     min_release_age_days: int,
     logger: SSHLogger | None = None,
-) -> list[str]:
+) -> None:
     """Install declared registry packages into ``~/.local`` without sudo.
 
     The caller gates this runner with ``npm_enabled``. npm supplies dependency
@@ -35,10 +35,9 @@ def run_npm_install(
     if a subsequent installation fails. Runtime provisioning is independent.
     """
     if not packages:
-        return []
+        return
 
     prefix = posixpath.join(home, ".local")
-    paths = [posixpath.join(prefix, "bin")]
     if logger is not None:
         logger.step("Npm packages")
 
@@ -57,7 +56,7 @@ def run_npm_install(
             result = target.run(login(["npm", "--version"]), timeout=30)
         except SSHError as exc:
             warn(f"npm packages skipped: install Node.js and npm >= 11.10.0 for this user, then reinit ({exc})")
-            return paths
+            return
 
         match = _VERSION.fullmatch(result.stdout.strip())
         version = tuple(int(part) for part in match.groups()) if match is not None else None
@@ -66,7 +65,7 @@ def run_npm_install(
                 "npm packages skipped: npm >= 11.10.0 is required to enforce "
                 "npm_min_release_age_days; install a supported Node.js/npm release, then reinit"
             )
-            return paths
+            return
 
         args = [
             "npm",
@@ -87,5 +86,3 @@ def run_npm_install(
             target.run(login([*args, "--", package]), timeout=300)
         except SSHError as exc:
             warn(f"npm package '{package}' failed: {exc}")
-
-    return paths

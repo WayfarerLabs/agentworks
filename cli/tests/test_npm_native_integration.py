@@ -28,6 +28,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.skipif(os.name != "posix", re
 
 def _tarball(name: str, version: str, *, dependency: bool = False) -> bytes:
     manifest: dict[str, object] = {"name": name, "version": version}
+    if name == "agw-npm-incompatible":
+        manifest["engines"] = {"node": ">=999.0.0"}
     files = {}
     if name == "npm":
         manifest["bin"] = {"npm": "cli.js"}
@@ -58,7 +60,7 @@ def _tarball(name: str, version: str, *, dependency: bool = False) -> bytes:
 def registry():
     tarballs = {
         (name, version): _tarball(name, version, dependency=name == "agw-npm-tool")
-        for name in ("agw-npm-tool", "agw-npm-dep", "npm")
+        for name in ("agw-npm-tool", "agw-npm-dep", "npm", "agw-npm-incompatible")
         for version in ("1.0.0", "2.0.0")
     }
 
@@ -69,7 +71,7 @@ def registry():
         def do_GET(self) -> None:
             path = unquote(urlsplit(self.path).path).strip("/")
             name = path.split("/", 1)[0]
-            if name not in {"agw-npm-tool", "agw-npm-dep", "npm"}:
+            if name not in {"agw-npm-tool", "agw-npm-dep", "npm", "agw-npm-incompatible"}:
                 self.send_error(404)
                 return
             if "/-/" in path:
@@ -93,6 +95,8 @@ def registry():
                         metadata["bin"] = {"agw-npm-probe": "cli.js"}
                     elif name == "npm":
                         metadata["bin"] = {"npm": "cli.js"}
+                    elif name == "agw-npm-incompatible":
+                        metadata["engines"] = {"node": ">=999.0.0"}
                     versions[version] = metadata
                 body = json.dumps(
                     {
@@ -178,8 +182,7 @@ def test_native_npm_filters_direct_and_transitive_releases_and_reinitializes(
     native_target: MagicMock, tmp_path: Path
 ) -> None:
     for _ in range(2):
-        paths = run_npm_install(native_target, ["agw-npm-tool@latest"], "sh", str(tmp_path), 7)
-        assert paths == [str(tmp_path / ".local/bin")]
+        run_npm_install(native_target, ["agw-npm-tool@latest"], "sh", str(tmp_path), 7)
         installed = native_target.run(f"sh -lc {shlex.quote(str(tmp_path / '.local/bin/agw-npm-probe'))}")
         assert installed.stdout.strip() == "1.0.0:1.0.0"
 
@@ -224,3 +227,17 @@ def test_native_npm_replacement_without_age_support_stops_remaining_installs(
     assert native_target.run("sh -lc 'npm --version'").stdout.strip() == "1.0.0"
     assert not (tmp_path / ".local/bin/agw-npm-probe").exists()
     logger.warning.assert_called_once()
+    installs = [call for call in native_target.run.call_args_list if " install " in call.args[0]]
+    assert len(installs) == 1
+
+
+def test_native_npm_rejects_incompatible_node_even_with_user_force_enabled(
+    native_target: MagicMock, tmp_path: Path
+) -> None:
+    with (tmp_path / ".npmrc").open("a") as stream:
+        stream.write("force=true\nengine-strict=false\n")
+    logger = MagicMock()
+    run_npm_install(native_target, ["agw-npm-incompatible@1.0.0"], "sh", str(tmp_path), 7, logger)
+    logger.warning.assert_called_once()
+    assert "EBADENGINE" in logger.warning.call_args.args[0]
+    assert not (tmp_path / ".local/lib/node_modules/agw-npm-incompatible").exists()

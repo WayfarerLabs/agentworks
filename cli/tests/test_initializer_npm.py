@@ -25,14 +25,14 @@ def _argv(command: str) -> list[str]:
 
 def test_empty_package_selection_does_no_remote_work() -> None:
     target = _target()
-    assert run_npm_install(target, [], "bash", "/home/user", 7) == []
+    run_npm_install(target, [], "bash", "/home/user", 7)
     target.run.assert_not_called()
 
 
 @pytest.mark.parametrize("version", ["10.9.0", "11.9.9", "11.10.0-rc.1", "unknown", "", "11.10"])
 def test_unsupported_or_unknown_npm_never_installs(version: str) -> None:
     target = _target(version)
-    assert run_npm_install(target, ["tool"], "bash", "/home/user", 7) == ["/home/user/.local/bin"]
+    run_npm_install(target, ["tool"], "bash", "/home/user", 7)
     assert target.run.call_count == 1
     assert _argv(target.run.call_args.args[0]) == ["npm", "--version"]
 
@@ -49,9 +49,7 @@ def test_install_uses_user_prefix_age_policy_and_strict_engines(version: str) ->
     target = _target(version)
     logger = MagicMock()
     packages = ["@scope/tool@1.2.3", "other@>=1 <2 || ^3"]
-    paths = run_npm_install(target, packages, "bash", "/home/a user's home", 14, logger)
-
-    assert paths == ["/home/a user's home/.local/bin"]
+    run_npm_install(target, packages, "bash", "/home/a user's home", 14, logger)
     assert target.run.call_count == 4
     for call, package in zip(target.run.call_args_list[1::2], packages, strict=True):
         argv = _argv(call.args[0])
@@ -70,7 +68,7 @@ def test_zero_age_is_passed_explicitly() -> None:
     assert "--min-release-age=0" in _argv(target.run.call_args.args[0])
 
 
-def test_install_failure_keeps_existing_path_and_continues_without_unfiltered_retry() -> None:
+def test_install_failure_continues_without_unfiltered_retry() -> None:
     target = _target()
     target.run.side_effect = [
         SSHResult(0, "11.17.0\n", ""),
@@ -80,9 +78,7 @@ def test_install_failure_keeps_existing_path_and_continues_without_unfiltered_re
     ]
     logger = MagicMock()
 
-    paths = run_npm_install(target, ["too-new@1.2.3", "other@1.2.3"], "bash", "/home/user", 7, logger)
-
-    assert paths == ["/home/user/.local/bin"]
+    run_npm_install(target, ["too-new@1.2.3", "other@1.2.3"], "bash", "/home/user", 7, logger)
     assert target.run.call_count == 4
     logger.warning.assert_called_once()
     for call in target.run.call_args_list[1::2]:

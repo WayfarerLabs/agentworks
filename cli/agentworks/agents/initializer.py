@@ -605,7 +605,7 @@ def _write_agent_profile(
             rc_files.append(f"{home}/.zprofile")
         for rc in rc_files:
             agent_target.run(
-                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_PROFILE} {rc} 2>/dev/null || printf '\\n%s\\n' '{source_line}' >> {rc}",
             )
     except SSHError as e:
         output.warn(f"agent profile configuration failed: {e}")
@@ -639,7 +639,7 @@ def _write_agent_shell_rc(
         source_line = f". {rc_path}"
         for rc in [f"{home}/.bashrc", f"{home}/.zshrc"]:
             agent_target.run(
-                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '%s\\n' '{source_line}' >> {rc}",
+                f"grep -q {AGENTWORKS_RC} {rc} 2>/dev/null || printf '\\n%s\\n' '{source_line}' >> {rc}",
             )
     except SSHError as e:
         output.warn(f"agent rc configuration failed: {e}")
