@@ -21,6 +21,7 @@ from agentworks.errors import AgentworksError, ValidationError
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.runtime_state import reconcile_console, reconcile_session, reconcile_vm
+from agentworks.runtime_state._models import Outcome
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions import multi_console as mc
@@ -323,8 +324,6 @@ def test_incomplete_provisioning_blocks_its_family_before_any_effect(
 ):
     """A trusted VM a killed create left unattested is refused before its provider, credential, hold or guest
     is touched; the complete VM beside it still previews or converges."""
-    from agentworks.runtime_state._models import Outcome
-
     powers, _, events = runtime
     monkeypatch.setenv("AW_SECRET_INCOMPLETE_TOKEN", "would-resolve")
     monkeypatch.setattr(

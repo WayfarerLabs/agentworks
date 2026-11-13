@@ -110,8 +110,8 @@ def start_vm_runtime(context: VMRuntimeContext) -> bool:
 def _start_vm_runtime(context: VMRuntimeContext, *, explicit: bool) -> bool:
     """Start the VM unless it is running, then wait inside a hold for it to answer over SSH.
 
-    A VM with no host-key record is refused before its power is read, since
-    the wait could only fail, and a VM that does not answer fails naming
+    A VM with no host-key record is refused before it is started, since the
+    wait could only fail, and a VM that does not answer fails naming
     ``agw vm recover``, which repairs what a start cannot. An explicit start
     differs from an activation two ways. It proceeds on an unknown power
     observation. And it says what it did before the wait, so a failed wait
