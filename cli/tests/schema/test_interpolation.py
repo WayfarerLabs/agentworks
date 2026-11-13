@@ -111,6 +111,7 @@ def test_scalar_shorthand_derives_interpolation_from_its_target_field() -> None:
         Annotated[list[str], Interpolated()],
         dict[Annotated[str, Interpolated()], str],
         list[list[Annotated[str, Interpolated()]]],
+        list[Annotated[str, Interpolated()] | None],
         Annotated[str, Interpolated(), SecretRef(usage="a credential")],
         Annotated[str, Interpolated()] | int,
     ],

@@ -47,7 +47,7 @@ class PlaintextEnvEntry(AgwModel):
     consuming invocation's managed context, such as ${agw:user_home_dir}.
     Use $${agw:NAME} to preserve a literal reference. Session-scope values
     also accept the deprecated {{session_name}} and {{workspace_name}}
-    aliases until removal in 2.0.0."""
+    aliases until removal in 0.22.0."""
 
 
 class SecretEnvEntry(AgwModel):
