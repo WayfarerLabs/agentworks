@@ -437,7 +437,12 @@ def observe_session_statuses(
     config: Config,
     include_legacy: bool = False,
 ) -> dict[str, SessionStatus]:
-    """Observe selected sessions, optionally including legacy shared-server rows."""
+    """Observe selected sessions, optionally including legacy shared-server rows.
+
+    A session that cannot be read reads as ``UNKNOWN``: a VM whose SSH
+    boundary or reads fail warns once with the first error, and a row whose
+    socket path fails validation warns naming it.
+    """
     from concurrent.futures import as_completed
     from functools import partial
 
@@ -446,7 +451,10 @@ def observe_session_statuses(
     # Resolve each session's VM and group
     by_vm: dict[str, list[SessionRow]] = {}
     vm_admins: dict[str, VMAccess] = {}
-    legacy_owners: dict[str, VMAccess] = {}
+    # A legacy row is always an admin's (the schema requires an agent
+    # session's socket), so it reads the admin's default server on the
+    # VM admin's access, like every other read here.
+    legacy: set[str] = set()
     socket_owners: dict[str, str] = {}
     unavailable_vms: set[str] = set()
     result_map = {session.name: SessionStatus.UNKNOWN for session in sessions}
@@ -472,7 +480,7 @@ def observe_session_statuses(
             except TrustMissing as exc:
                 # One VM's missing host key must not abort the listing for the
                 # others: report it once and leave that VM's sessions UNKNOWN.
-                output.warn(f"Session status on VM '{ws.vm_name}' is unavailable: {exc}. {exc.hint}")
+                _warn_unavailable(ws.vm_name, exc)
                 unavailable_vms.add(ws.vm_name)
                 continue
             except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
@@ -487,49 +495,55 @@ def observe_session_statuses(
                 continue
         by_vm.setdefault(ws.vm_name, []).append(s)
         if include_legacy and s.socket_path is None:
-            try:
-                legacy_owners[s.name] = _mgr._verified_session_access(
-                    s, vm=vm, config=config, db=db, admin=vm_admins[ws.vm_name], logger=None
-                )
-            except UserAbort:
-                raise
-            except AgentworksError:
-                continue
+            legacy.add(s.name)
 
     if not by_vm:
         return result_map
 
-    def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
+    def _check_vm(vm_name: str) -> tuple[dict[str, SessionStatus], AgentworksError | None]:
+        """The VM's statuses, and the first error that left any of them unknown."""
         statuses = batch_check_status(by_vm[vm_name], admin=vm_admins[vm_name], owners=socket_owners)
+        failure: AgentworksError | None = None
         for session in by_vm[vm_name]:
-            owner = legacy_owners.get(session.name)
-            if owner is None:
+            if session.name not in legacy:
                 continue
             try:
                 presence = probe_tmux_session(
                     session.name,
-                    run_command=access_run_command(owner, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False),
+                    run_command=access_run_command(
+                        vm_admins[vm_name], deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False
+                    ),
                     socket_path=None,
                 )
             except UserAbort:
                 raise
-            except AgentworksError:
+            except AgentworksError as error:
+                failure = failure or error
                 continue
             statuses[session.name] = {
                 ProbeStatus.PRESENT: SessionStatus.RUNNING,
                 ProbeStatus.ABSENT: SessionStatus.STOPPED,
                 ProbeStatus.UNKNOWN: SessionStatus.UNKNOWN,
             }[presence]
-        return statuses
+        return statuses, failure
 
     tasks = {vm_name: partial(_check_vm, vm_name) for vm_name in by_vm}
     with cancelling_futures(tasks) as futures:
         for future in as_completed(futures):
             try:
-                result_map.update(future.result())
+                statuses, failure = future.result()
             except UserAbort:
                 raise
-            except AgentworksError:
-                continue
+            except AgentworksError as error:
+                statuses, failure = {}, error
+            result_map.update(statuses)
+            if failure is not None:
+                _warn_unavailable(futures[future], failure)
 
     return result_map
+
+
+def _warn_unavailable(vm_name: str, error: AgentworksError) -> None:
+    """Say once why a VM's session statuses, or some of them, read as unknown in a listing."""
+    hint = f" {error.hint}" if error.hint else ""
+    output.warn(f"Session status on VM '{vm_name}' is unavailable: {error}.{hint}")

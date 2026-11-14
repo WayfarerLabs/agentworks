@@ -10,7 +10,8 @@ import pytest
 
 from agentworks.db import PID_STOPPED, ProvisioningStatus, SessionMode, SessionStatus, VMStatus
 from agentworks.errors import NotFoundError, StateError
-from agentworks.execution.errors import TrustMissing
+from agentworks.execution.errors import ExecutionIncomplete, TrustMismatch, TrustMissing, VMNotReady
+from agentworks.execution.results import NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -23,6 +24,8 @@ from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 from tests.vm_access_support import route_vm_access_to_target
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
 
@@ -843,6 +846,46 @@ def test_session_description_warns_which_vm_has_no_host_key_record_and_degrades(
 
     assert description.status == SessionStatus.UNKNOWN.value
     assert len([w for w in captured_output.warnings if "'box'" in w]) == 1
+
+
+@pytest.mark.parametrize(
+    "make_error",
+    [lambda: TrustMismatch("box"), lambda: VMNotReady("box", NotDeliveredReason.PYTHON_MISSING)],
+    ids=["host-key-mismatch", "vm-not-ready"],
+)
+def test_session_description_raises_a_trust_or_readiness_error_from_its_reads(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    make_error: Callable[[], StateError],
+) -> None:
+    """Describing one session surfaces a host key or VM it cannot trust rather than reading as unknown."""
+    error = make_error()
+    config = make_config()
+    _seed_singular(db)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+
+    with pytest.raises(StateError) as caught:
+        session_manager.session_description(db, config, name="s1")
+
+    assert caught.value is error
+
+
+def test_session_description_reads_a_read_that_does_not_complete_as_unknown(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    incomplete = ExecutionIncomplete("box", Result(Unknown(UnknownReason.DEADLINE)))
+    monkeypatch.setattr(
+        session_manager, "check_session_status", lambda *_args, **_kwargs: (_ for _ in ()).throw(incomplete)
+    )
+
+    assert session_manager.session_description(db, config, name="s1").status == SessionStatus.UNKNOWN.value
 
 
 def test_running_session_description_derives_uptime(

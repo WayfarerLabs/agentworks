@@ -13,7 +13,7 @@ import pytest
 
 from agentworks.db import PID_STOPPED, SessionMode, SessionRow, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import ConnectivityError, StateError
-from agentworks.execution.errors import ExecutionIncomplete, TrustMissing
+from agentworks.execution.errors import ExecutionIncomplete, TrustMismatch, TrustMissing
 from agentworks.execution.requests import Bytes, Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.sessions.manager import (
@@ -1086,9 +1086,20 @@ def test_session_observer_names_each_rows_owner_from_the_database_and_leaves_an_
     assert "astray" in captured_output.warnings[0]
 
 
-def test_session_observer_isolates_one_vm_transport_failure(
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        lambda: ConnectivityError("offline"),
+        lambda: ExecutionIncomplete("vm-b", Result(Unknown(UnknownReason.DEADLINE))),
+        lambda: TrustMismatch("vm-b"),
+    ],
+    ids=["connectivity", "incomplete", "host-key-mismatch"],
+)
+def test_session_observer_isolates_one_vm_read_failure_and_says_why_once(
     db,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    make_error: Callable[[], Exception],
 ) -> None:
     sessions: list[SessionRow] = []
     for vm_name in ("vm-a", "vm-b"):
@@ -1128,9 +1139,10 @@ def test_session_observer_isolates_one_vm_transport_failure(
 
     def batch(rows: list[SessionRow], *, admin: object, **_kwargs: object) -> dict[str, SessionStatus]:
         if admin.vm_name == "vm-b":  # type: ignore[attr-defined]
-            raise ConnectivityError("offline")
+            raise error
         return {row.name: SessionStatus.RUNNING for row in rows}
 
+    error = make_error()
     monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
 
     changes_before = db._conn.total_changes  # noqa: SLF001
@@ -1139,6 +1151,37 @@ def test_session_observer_isolates_one_vm_transport_failure(
         "session-vm-b": SessionStatus.UNKNOWN,
     }
     assert db._conn.total_changes == changes_before  # noqa: SLF001
+    [warning] = captured_output.warnings
+    assert "'vm-b'" in warning and str(error) in warning
+
+
+def test_session_observer_reads_a_legacy_row_once_within_the_deadline_and_says_why_it_reads_unknown(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from tests.vm_access_support import install_access_recorder
+
+    db.insert_vm("box", site="site", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
+    db.insert_session("old", "ws", "default", SessionMode.ADMIN)
+    db.update_session_runtime("old", socket_path=None, pid=42, boot_id=BOOT_CURRENT, tmux_server_start_ticks=7)
+    session = db.get_session("old")
+    assert session is not None
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = lambda call: Result(Unknown(UnknownReason.DEADLINE))
+
+    assert observe_session_statuses([session], db=db, config=object(), include_legacy=True) == {
+        "old": SessionStatus.UNKNOWN
+    }
+
+    [call] = recorder.calls
+    assert call.identity == Admin()
+    assert isinstance(call.request, Script) and call.request.deadline == GUEST_OBSERVATION_TIMEOUT_SECONDS
+    [warning] = captured_output.warnings
+    assert "'box'" in warning
 
 
 def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_the_others(
