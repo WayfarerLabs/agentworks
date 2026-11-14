@@ -24,6 +24,7 @@ from ._prepare import OFF, _guest_stop_failure
 if TYPE_CHECKING:
     from agentworks.db import SessionRow, VMRow
     from agentworks.execution.access import VMAccess
+    from agentworks.vms.initializer.steps import InitLog
 
     from ._models import RuntimeInvocation
 
@@ -62,8 +63,9 @@ def _completed(invocation: RuntimeInvocation, name: str, *, changed: bool) -> No
 def execute_public_stops(invocation: RuntimeInvocation) -> None:
     """Repair on the caller, then use named or bulk native teardown authority.
 
-    Stop-all writes one ``session-stop-all`` operation log per VM, which its
-    concurrent teardowns on that VM share.
+    Each VM's work writes one operation log, ``session-stop`` for named
+    stops and ``session-stop-all`` for stop-all, which every access on that
+    VM shares, stop-all's concurrent teardowns included.
     """
     with contextlib.ExitStack() as logs:
         _execute_public_stops(invocation, logs)
@@ -73,16 +75,17 @@ def _execute_public_stops(invocation: RuntimeInvocation, logs: contextlib.ExitSt
     from agentworks.vms.manager import operation_log, require_vm_ssh_boundary
 
     live = []
+    vm_logs: dict[str, InitLog] = {}
     vm_admins: dict[str, VMAccess] = {}
+
+    def log_of(vm: VMRow) -> InitLog:
+        if vm.name not in vm_logs:
+            vm_logs[vm.name] = logs.enter_context(operation_log(vm.name, f"session-{invocation.operation}"))
+        return vm_logs[vm.name]
 
     def admin_of(vm: VMRow) -> VMAccess:
         if vm.name not in vm_admins:
-            log = (
-                logs.enter_context(operation_log(vm.name, "session-stop-all"))
-                if invocation.operation == "stop-all"
-                else None
-            )
-            vm_admins[vm.name] = sessions._identity_access(vm, invocation.config, None, logger=log)
+            vm_admins[vm.name] = sessions._identity_access(vm, invocation.config, None, logger=log_of(vm))
         return vm_admins[vm.name]
 
     unobserved: set[str] = set()
@@ -176,7 +179,7 @@ def _execute_public_stops(invocation: RuntimeInvocation, logs: contextlib.ExitSt
                 current = _selected_session(invocation, prepared.session)
                 if not prepared.parent_off:
                     prepared = sessions.prepare_session_stop(
-                        invocation.db, invocation.config, current, force=invocation.force
+                        invocation.db, invocation.config, current, force=invocation.force, logger=log_of(prepared.vm)
                     )
                     invocation.stops[name] = prepared
             except (UserAbort, StateConflictError, DatabaseDriverError):

@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from agentworks.sessions.nodes import LiveSessionNode
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.templates import ResolvedSessionTemplate
+    from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.nodes import LiveVMNode
     from agentworks.workspaces.nodes import LiveWorkspaceNode
 
@@ -366,15 +367,19 @@ def prepare_session_stop(
     *,
     parent_off: bool = False,
     force: bool = False,
+    logger: OperationLog | None = None,
 ) -> PreparedSessionStop:
-    """Prepare direct teardown, never activating or holding the parent VM."""
+    """Prepare direct teardown, never activating or holding the parent VM.
+
+    Its accesses log to ``logger``, the stop operation's own log, or to none.
+    """
     workspace = _mgr._require_workspace(db, session.workspace_name)
     vm = _mgr._require_vm_for_workspace(db, workspace)
     if not parent_off:
         from agentworks.vms.manager import require_vm_ssh_boundary
 
         require_vm_ssh_boundary(db, config, vm)
-    admin = None if parent_off else _mgr._identity_access(vm, config, None, logger=None)
+    admin = None if parent_off else _mgr._identity_access(vm, config, None, logger=logger)
     checkpoint_only = False
     if admin is None:
         status = SessionStatus.STOPPED
@@ -397,7 +402,7 @@ def prepare_session_stop(
     owner = None
     if status is not SessionStatus.STOPPED and not checkpoint_only:
         assert admin is not None
-        owner = _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=None)
+        owner = _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=logger)
     return PreparedSessionStop(
         db=db,
         config=config,

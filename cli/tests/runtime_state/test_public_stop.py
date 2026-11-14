@@ -280,3 +280,48 @@ def test_live_public_stop_without_host_trust_keeps_intent_and_refuses_guest_work
     assert db.get_session("work").desired_runtime_state is DesiredRuntimeState.STOPPED
     assert SessionRuntimeSnapshot.from_session(db.get_session("work")) == before
     assert not runtime[2]
+
+
+def test_named_stop_logs_each_vms_work_to_one_session_stop_log(db, make_config, runtime, monkeypatch):
+    """Every access a named stop builds on a VM, the repair's, the preparation's and the owner's, logs to one log."""
+    from contextlib import contextmanager
+
+    _, statuses, _ = runtime
+    seed_vm(db, "box")
+    _running(db, statuses, "mine", "box")
+    _running(db, statuses, "theirs", "box", agent=True)
+    opened = []
+
+    @contextmanager
+    def operation_log(vm_name, command_stem, **_kwargs):
+        log = SimpleNamespace(vm=vm_name, stem=command_stem)
+        opened.append(log)
+        yield log
+
+    built = []
+
+    def identity_access(vm, config, agent, *, logger):
+        built.append(("admin", logger))
+        return SimpleNamespace(vm_name=vm.name)
+
+    def verified_session_access(session, *, admin, logger, **_kwargs):
+        built.append(("owner", logger))
+        return admin
+
+    def teardown(session, **_kwargs):
+        db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(session))
+        statuses[session.name] = SessionStatus.STOPPED
+
+    monkeypatch.setattr("agentworks.vms.manager.operation_log", operation_log)
+    monkeypatch.setattr(manager, "_identity_access", identity_access)
+    monkeypatch.setattr(manager, "_verified_session_access", verified_session_access)
+    monkeypatch.setattr(manager, "_teardown_session", teardown)
+    config = make_config()
+
+    for name in ("mine", "theirs"):
+        manager.stop_session(db, config, name=name, interaction=REFUSE)
+
+    assert [(log.vm, log.stem) for log in opened] == [("box", "session-stop")] * 2
+    for log in opened:
+        assert {kind for kind, logger in built if logger is log} == {"admin", "owner"}
+    assert all(any(logger is log for log in opened) for _, logger in built)
