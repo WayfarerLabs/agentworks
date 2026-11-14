@@ -83,9 +83,7 @@ def _execute_session_start(
 
     if prepared.checkpoint_only:
         checkpoint_session_identity(db, session, vm=vm, admin=admin_access)
-    observed_now = observe_session_runtime(
-        session, admin=admin_access, db=db, session_access=session_access if is_legacy else None
-    )
+    observed_now = observe_session_runtime(session, admin=admin_access, db=db)
     if observed_now is SessionStatus.UNKNOWN:
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
     if observed_now is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING:
@@ -250,12 +248,7 @@ def _execute_session_start(
         output.info(f"{operation.title()}ing session '{name}'...")
 
         session = require_session_launch_identity(definition)
-        observed_now = observe_session_runtime(
-            session,
-            admin=admin_access,
-            db=db,
-            session_access=session_access if is_legacy else None,
-        )
+        observed_now = observe_session_runtime(session, admin=admin_access, db=db)
         if observed_now is SessionStatus.UNKNOWN or (
             observed_now is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING
         ):

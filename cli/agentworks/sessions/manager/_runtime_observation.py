@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import StateError
 from agentworks.sessions.tmux import ProbeStatus, access_run_command
 from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
@@ -26,12 +26,10 @@ def observe_session_runtime(
     *,
     admin: VMAccess,
     db: Database,
-    session_access: VMAccess | None = None,
 ) -> SessionStatus:
     """Classify exact presence and stored boot/process absence without evidence writes.
 
-    A legacy row's shared server is probed on ``session_access``, the owner's,
-    when given, else on ``admin``.
+    A legacy row's shared server, the admin's default one, is probed on ``admin``.
     """
     from agentworks.sessions.tmux import capture_tmux_server_fingerprint, probe_tmux_session, require_socket_path
 
@@ -46,12 +44,10 @@ def observe_session_runtime(
             ):
                 return SessionStatus.STOPPED
         return status
-    run = (
-        run_command
-        if session_access is None
-        else access_run_command(session_access, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False)
-    )
-    presence = probe_tmux_session(session.name, run_command=run, socket_path=None)
+    # A legacy row is always an admin session: the schema requires an agent
+    # session's socket (CHECK in db/migrations.py:163), so the shared server
+    # it names is the admin's own, and these reads run unelevated.
+    presence = probe_tmux_session(session.name, run_command=run_command, socket_path=None)
     if presence is ProbeStatus.PRESENT and session.pid in {None, PID_STOPPED}:
         return SessionStatus.UNKNOWN
     if (
@@ -73,8 +69,6 @@ def require_unaddressed_session_absence(session: SessionRow, *, vm: VMRow, admin
         return
     from agentworks.sessions.tmux import admin_socket_path, capture_tmux_server_fingerprint, require_socket_path
 
-    if session.mode != SessionMode.ADMIN.value:
-        raise StateError("session has no managed socket identity", entity_kind="session", entity_name=session.name)
     run_command = _mgr.observation_run_command(admin, session)
     expected = admin_socket_path(vm.admin_username, session.name)
     require_socket_path(expected, run_command=run_command)

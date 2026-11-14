@@ -322,9 +322,11 @@ def test_runtime_absence_proof_rejects_a_malformed_stored_boot_identity(tmp_path
         )
 
 
-def test_legacy_teardown_elevates_when_the_access_is_not_the_owner(
+def test_legacy_teardown_reads_the_admins_own_server_without_elevating(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A legacy row is always an admin's, so even a caller that does not own it reads the admin's default
+    server as the admin: root's would be a different server."""
     from agentworks.db import SessionMode
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
@@ -370,7 +372,7 @@ def test_legacy_teardown_elevates_when_the_access_is_not_the_owner(
         legacy_running_authorized=True,
     )
 
-    assert calls == [("probe", True), ("kill", True), ("probe", True)]
+    assert calls == [("probe", False), ("kill", False), ("probe", False)]
 
 
 def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

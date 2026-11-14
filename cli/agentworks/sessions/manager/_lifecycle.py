@@ -109,11 +109,13 @@ def _teardown_legacy_session(
     session: SessionRow,
     *,
     access: VMAccess,
-    target_owns_session: bool,
     db: Database,
     running_authorized: bool,
 ) -> None:
-    """Destroy one exact session on a reachable legacy shared tmux server, on ``access``, as root unless it owns it."""
+    """Destroy one exact session on a reachable legacy shared tmux server, the admin's own, on ``access``, the admin's.
+
+    A legacy row is always an admin session (see ``observe_session_runtime``).
+    """
     from agentworks.sessions.tmux import (
         ProbeStatus,
         access_run_command,
@@ -122,7 +124,7 @@ def _teardown_legacy_session(
         probe_tmux_session_after_teardown,
     )
 
-    run_runtime = access_run_command(access, deadline=None, elevated=not target_owns_session)
+    run_runtime = access_run_command(access, deadline=None, elevated=False)
 
     expected = SessionRuntimeSnapshot.from_session(session)
     presence = probe_tmux_session(session.name, run_command=run_runtime, socket_path=None)
@@ -171,7 +173,6 @@ def _teardown_session(
         _teardown_legacy_session(
             session,
             access=access,
-            target_owns_session=target_owns_session,
             db=db,
             running_authorized=legacy_running_authorized,
         )

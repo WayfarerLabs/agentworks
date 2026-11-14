@@ -18,7 +18,7 @@ from tests.sessions.test_create_start_restart_orchestrated import _stub_build_re
 from tests.sessions.test_native_startup import _NATIVE_CAPTURE, launch
 from tests.sessions.test_native_startup import native as native
 from tests.sessions.test_round8_startup import bind_native_runtime
-from tests.vm_access_support import Admin, Agent, RecordingVMAccess
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize("operation", ["start_session", "restart_session", "stop_session"])
@@ -113,7 +113,7 @@ def test_checkpoint_refuses_present_or_unknown_native_server_without_writing_ide
         db.close()
 
 
-def test_runtime_observer_bounds_admin_and_legacy_owning_accesses(tmp_path, monkeypatch):
+def test_runtime_observer_bounds_its_reads_and_reads_a_legacy_row_as_the_admin(tmp_path, monkeypatch):
     from dataclasses import replace
 
     from agentworks.sessions.manager import _status
@@ -128,7 +128,6 @@ def test_runtime_observer_bounds_admin_and_legacy_owning_accesses(tmp_path, monk
     row = db.get_session("s1")
     assert row is not None
     admin = RecordingVMAccess([], Admin())
-    owner = RecordingVMAccess(admin.calls, Agent("a1", "agt-a1"))
     monkeypatch.setattr(manager, "check_session_status", _status.check_session_status)
 
     manager.observe_session_runtime(row, admin=admin, db=db)
@@ -138,8 +137,10 @@ def test_runtime_observer_bounds_admin_and_legacy_owning_accesses(tmp_path, monk
         return tmux.ProbeStatus.PRESENT
 
     monkeypatch.setattr(tmux, "probe_tmux_session", legacy)
-    manager.observe_session_runtime(replace(row, socket_path=None, pid=4242), admin=admin, db=db, session_access=owner)
+    before = len(admin.calls)
+    manager.observe_session_runtime(replace(row, socket_path=None, pid=4242), admin=admin, db=db)
     requests = [call.request for call in admin.calls]
-    assert owner.requests() and requests
+    legacy_reads = requests[before:]
+    assert legacy_reads and not any(request.elevated for request in legacy_reads)
     assert all(request.deadline == GUEST_OBSERVATION_TIMEOUT_SECONDS for request in requests)
     db.close()
