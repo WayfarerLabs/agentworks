@@ -229,16 +229,13 @@ def test_the_native_shell_runs_under_the_terminal_guard_and_255_is_noted_after_i
     events: list[str] = []
     calls: list[str] = []
     _native_shell_platform(monkeypatch, status, calls)
-    clean_exits: list[bool] = []
 
     @contextlib.contextmanager
-    def guard() -> Iterator[object]:
+    def guard() -> Iterator[None]:
         events.append("guard-enter")
-        handle = type("Guard", (), {"clean_exit": False})()
         try:
-            yield handle
+            yield
         finally:
-            clean_exits.append(handle.clean_exit)
             events.append("guard-exit")
 
     monkeypatch.setattr("agentworks.terminal.guarded_terminal", guard)
@@ -257,7 +254,6 @@ def test_the_native_shell_runs_under_the_terminal_guard_and_255_is_noted_after_i
 
     assert len(calls) == 1
     assert events == ["guard-enter", "guard-exit", *(["warn"] if status == 255 else [])]
-    assert clean_exits == [status == 0]
     db.close()
 
 

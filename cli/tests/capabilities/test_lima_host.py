@@ -15,9 +15,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost, _Completed
-from agentworks.execution import root_script
+from agentworks.execution import root_script, ssh_process
 from agentworks.execution.client import SSHClient
 from agentworks.execution.root_script import RawRun
+from tests.conftest import pretend_windows_console
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -110,6 +111,28 @@ def test_the_native_shell_is_limactl_shell_on_the_operators_terminal(
         # A terminal for the hop, and no batch mode: the operator's interactive hop may prompt.
         assert "-t" in argv
         assert "BatchMode=yes" not in argv
+
+
+def test_only_the_remote_native_shell_leads_its_host_command_with_a_nul_on_a_windows_console(
+    monkeypatch: pytest.MonkeyPatch, spawned: list[tuple[list[str], dict[str, Any]]]
+) -> None:
+    pretend_windows_console(monkeypatch)
+    argvs: list[list[str]] = []
+    monkeypatch.setattr(
+        "agentworks.capabilities.vm_platform.lima_host.ssh_process.run_terminal",
+        lambda argv: argvs.append(list(argv)) or 0,
+    )
+
+    LimaHost("me@gpu-box").shell("vm1")
+    LimaHost(None).shell("vm1")
+    LimaHost("me@gpu-box").run("limactl list", check=False)
+
+    remote, local = argvs
+    assert remote[-1] == ssh_process.nul_first_on_a_windows_console("$SHELL -lc 'limactl shell vm1'")
+    assert remote[-1].startswith("printf ")
+    assert local == ["limactl", "shell", "vm1"]  # no ssh client, so no console write to guard
+    ((piped, _),) = spawned
+    assert piped[-1] == "$SHELL -lc 'limactl list'"  # a piped connection has no raw-mode console write
 
 
 @pytest.mark.skipif(shutil.which("sleep") is None, reason="needs sleep")

@@ -104,7 +104,9 @@ class LimaHost:
         """An interactive ``limactl shell <instance>`` on the operator's terminal; returns its exit status.
 
         Remotely the host connection asks for a terminal (``ssh -t``) and runs
-        ``limactl`` under the host user's login shell, as every remote command does.
+        ``limactl`` under the host user's login shell, as every remote command
+        does. On a Windows console that host command is led by a NUL
+        (``ssh_process.nul_first_on_a_windows_console``).
         """
         command = f"limactl shell {shlex.quote(instance)}"
         return ssh_process.run_terminal(self._argv(command, mode=ssh_process.ArgvMode.TERMINAL))
@@ -245,9 +247,10 @@ class LimaHost:
     ) -> list[str]:
         if self.host is None:
             return shlex.split(command)
-        return ssh_process.build_host_argv(
-            execution.resolve_ssh(), self.host, mode, f"$SHELL -lc {shlex.quote(command)}"
-        )
+        remote = f"$SHELL -lc {shlex.quote(command)}"
+        if mode is ssh_process.ArgvMode.TERMINAL:
+            remote = ssh_process.nul_first_on_a_windows_console(remote)
+        return ssh_process.build_host_argv(execution.resolve_ssh(), self.host, mode, remote)
 
     def _execute(self, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         """Run ``command`` once, here or on the host; the one place this module starts a process.

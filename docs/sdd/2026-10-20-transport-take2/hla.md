@@ -181,11 +181,12 @@ The client writes three things on stdin, in order:
 
 **Stage 0.** The remote command is one constant line, `/usr/bin/python3 -I -S -c '<stage 0>'`, with
 `sudo -n` in front for an elevated request and a handover path after it for the terminal half of an
-attach (D8). Stage 0 is one line of under 200 characters: it reads the length-prefixed agw-launch
-source from stdin, or from the handover socket, and runs it. If it cannot read or start it, Python
-exits non-zero before any start marker, so the request is not delivered. The client discards
-everything before the marker, so a traceback quoting misaligned request bytes, as a startup file
-that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
+attach (D8). On a Windows console the terminal half's command is also led by a NUL (execution LLD,
+Terminal handover). Stage 0 is one line of under 200 characters: it reads the length-prefixed
+agw-launch source from stdin, or from the handover socket, and runs it. If it cannot read or start
+it, Python exits non-zero before any start marker, so the request is not delivered. The client
+discards everything before the marker, so a traceback quoting misaligned request bytes, as a startup
+file that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
 quote, double quote, backslash, `!` or newline, so the account shell passes it through unchanged and
 Windows argument quoting has nothing to escape. `-I` ignores Python's environment variables and the
 user site directory, and `-S` skips site packages, so no Python startup applies. The short line
@@ -842,7 +843,7 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I18 | A backend delete that cannot run (the site no longer binds) or runs and fails keeps the VM's row and its store record, naming the backend identifiers the row holds; `vm delete --force` removes them whatever kept the backend delete from completing, warning with those identifiers (#329; `vms/manager/power.py`) | 4            |
 | I19 | The agent probe tells an unreachable VM from an agent that predates the rollout (ADR 0011; `agents/manager/_common.py:237-286`)                                                                                                                                                                                       | 2, 6         |
 | I20 | Backup's download stops the copy and removes the partial file on Ctrl-C (`97e11a168`; `vms/backup.py:504-505`)                                                                                                                                                                                                        | 7            |
-| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`)                                                                                                                                                                                             | 2            |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach, with one payload that leaves the alternate screen without moving the cursor on the primary screen (`897248ead`, `80c813db4`, #889)                                                                                    | 2            |
 | I22 | An operator interrupt during Phase A still closes the kept VM's provisioning access before it propagates (`vms/initializer/driver.py:193-210`)                                                                                                                                                                        | 3            |
 | I23 | A first connection that left no key makes create fail where the cause is known (`vms/initializer/driver.py:438-445`)                                                                                                                                                                                                  | 3            |
 | I24 | The auth key is joined exactly once: a failed address read never causes a second join, and now logs the node out (`tailscale_join.py:65-71`, `7307e2f60`)                                                                                                                                                             | 3            |
