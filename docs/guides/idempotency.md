@@ -85,6 +85,7 @@ These add things on reinit but do not remove them when removed from config:
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Apt packages            | Never removed. Transitive deps not cleaned up. Too risky for reinit.                                                                           |
 | Snap packages           | Never removed.                                                                                                                                 |
+| npm packages            | Reconciled to the requested version or range; removed declarations leave existing packages installed.                                          |
 | System install commands | Not uninstalled when removed from config. Commands must be repeat-safe intrinsically or use reliable completion checks to skip completed work. |
 | User install commands   | Same as system install commands.                                                                                                               |
 | Mise packages           | When `mise_prune_on_reinit = false`, stale tool versions are not removed.                                                                      |
@@ -135,10 +136,11 @@ access was restored.
 
 ### Additive only
 
-| Step                  | Notes                                                                     |
-| --------------------- | ------------------------------------------------------------------------- |
-| User install commands | Not uninstalled when removed from template.                               |
-| Mise packages         | When `mise_prune_on_reinit = false`, stale tool versions are not removed. |
+| Step                  | Notes                                                                         |
+| --------------------- | ----------------------------------------------------------------------------- |
+| User install commands | Not uninstalled when removed from template.                                   |
+| npm packages          | Reconciled on reinit; removed declarations leave existing packages installed. |
+| Mise packages         | When `mise_prune_on_reinit = false`, stale tool versions are not removed.     |
 
 ### Other
 

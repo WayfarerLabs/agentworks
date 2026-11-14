@@ -105,7 +105,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # DevOps git-credential provider, and the `az-cli` install-command), `aws`
 # (the EC2 VM platform), and `gcp`
 # (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
-# package). Core still owns runners and executors, plus snap, mise, dotfiles,
+# package). Core still owns runners and executors, plus snap, mise, npm, dotfiles,
 # and tmuxinator. Harness integrations own native marketplace/plugin setup and
 # declared MCP registrations. Artifact bundles and per-scope activation belong
 # in resource manifests; enabling a plugin alone does not register MCP servers.

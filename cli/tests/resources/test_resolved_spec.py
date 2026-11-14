@@ -32,6 +32,7 @@ def test_projection_is_complete_ordered_and_maps_layer_roles() -> None:
         "memory",
         "disk",
         "swap",
+        "mise_enabled",
         "apt",
         "apt_packages",
         "snap",

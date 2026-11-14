@@ -261,9 +261,9 @@ interchangeable alternatives.
 A few other integrations are useful but not fundamental: **Git** (workspace templates around
 repositories, plus scoped git credential management for GitHub, Azure DevOps, and more), **VS Code**
 (auto-generated Remote - SSH workspaces), **[Mise en Place](https://mise.jdx.dev/)** (software
-installation with checksum validation), and
-**[dotfiles](https://www.datacamp.com/tutorial/dotfiles)** (consistent shell/editor setup for the
-admin user and agents).
+installation with checksum validation), **[npm](docs/guides/npm.md)** (per-user JavaScript CLI
+packages), and **[dotfiles](https://www.datacamp.com/tutorial/dotfiles)** (consistent shell/editor
+setup for the admin user and agents).
 
 ## Components
 

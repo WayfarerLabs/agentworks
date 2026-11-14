@@ -149,23 +149,26 @@ def _resolve_apt_sources(
 def _install_system_packages(
     target: Transport,
     logger: SSHLogger,
+    *,
+    mise_enabled: bool = True,
 ) -> None:
     """Install system repos and packages. Always runs on every init/reinit."""
     logger.step("System packages")
 
-    # Add mise apt source
-    try:
-        target.run(
-            f"curl -fsSL {MISE_GPG_KEY_URL} -o {MISE_GPG_KEY_PATH}",
-            sudo=True,
-            timeout=30,
-        )
-        inner = f"printf '%s\\n' '{MISE_SOURCE_LINE}' > {MISE_SOURCE_FILE}"
-        target.run(f"sh -c {shlex.quote(inner)}", sudo=True)
-    except SSHError as e:
-        msg = f"mise apt source setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+    if mise_enabled:
+        # Add mise apt source
+        try:
+            target.run(
+                f"curl -fsSL {MISE_GPG_KEY_URL} -o {MISE_GPG_KEY_PATH}",
+                sudo=True,
+                timeout=30,
+            )
+            inner = f"printf '%s\\n' '{MISE_SOURCE_LINE}' > {MISE_SOURCE_FILE}"
+            target.run(f"sh -c {shlex.quote(inner)}", sudo=True)
+        except SSHError as e:
+            msg = f"mise apt source setup failed: {e}"
+            logger.warning(msg)
+            output.warn(msg)
 
     output.info("Running apt-get update...")
     try:
@@ -175,8 +178,9 @@ def _install_system_packages(
         logger.warning(msg)
         output.warn(msg)
 
-    output.info(f"Installing {output.count(len(INIT_SYSTEM_PACKAGES), 'system package')}...")
-    apt_str = " ".join(shlex.quote(p) for p in INIT_SYSTEM_PACKAGES)
+    packages = [*INIT_SYSTEM_PACKAGES, *(["mise"] if mise_enabled else [])]
+    output.info(f"Installing {output.count(len(packages), 'system package')}...")
+    apt_str = " ".join(shlex.quote(p) for p in packages)
     target.run(
         f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew {apt_str}",
         sudo=True,

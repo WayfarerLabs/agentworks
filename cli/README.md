@@ -541,6 +541,15 @@ Agentworks installs [mise](https://mise.jdx.dev/) by default on all VMs for mana
 (terraform, adr-tools, node, etc.) with optional lockfile-based integrity verification. See
 [Using mise](../docs/guides/mise.md) for the full guide.
 
+Set `mise_enabled: false` on a VM template to skip mise installation and setup.
+
+### npm CLI packages
+
+Admin and agent templates can select `npm_packages`, independently of mise. Native npm installs them
+without sudo into each user's `~/.local` prefix and enforces `npm_min_release_age_days` (seven days
+by default). `npm_enabled: false` skips npm setup. Provision a compatible Node.js/npm runtime
+separately; npm 11.10.0 or newer is required. See [Installing npm CLI tools](../docs/guides/npm.md).
+
 ### Claude Code Plugins
 
 Agentworks manages native marketplaces, plugins, and settings through explicit user-facet
@@ -584,13 +593,14 @@ An `apt-source` uses either a release-independent `spec.source` scalar or a rele
 selects the entry for the VM's verified Debian release and fails before source mutation when that
 mapping is absent.
 
-Prefer template `apt`, `apt_packages`, `snap`, or `mise_packages` fields over a custom install
-command. When an install command is necessary, its `command` is one logical shell invocation written
-as a single-line YAML scalar, either plain or quoted, normally one maintained package-manager or
-vendor entry point. Do not embed a script, block scalar, here-document, multi-step installer, state
-machine, signature pipeline, or cleanup routine. The invocation must be repeat-safe itself or use
-`test_exec`, `test_file`, or `test_dir` as reliable completion checks. System install commands run
-as the VM admin, not root, and explicitly use `sudo` for privileged work.
+Prefer template `apt`, `apt_packages`, `snap`, `mise_packages`, or `npm_packages` fields over a
+custom install command. When an install command is necessary, its `command` is one logical shell
+invocation written as a single-line YAML scalar, either plain or quoted, normally one maintained
+package-manager or vendor entry point. Do not embed a script, block scalar, here-document,
+multi-step installer, state machine, signature pipeline, or cleanup routine. The invocation must be
+repeat-safe itself or use `test_exec`, `test_file`, or `test_dir` as reliable completion checks.
+System install commands run as the VM admin, not root, and explicitly use `sudo` for privileged
+work.
 
 ## VM Initialization
 
@@ -603,8 +613,8 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
 2. **Initialization** (`init_status`): repeatable via `vm reinit`, over Tailscale SSH: configure apt
    sources, install apt packages, install snap packages, install mise, set shell, reconcile SSH
    authorized keys, run system install commands, write mise config, configure PATH, configure git
-   credentials, sync dotfiles, fetch mise lockfile, run mise install, run user install commands for
-   the admin user
+   credentials, sync dotfiles, fetch mise lockfile, run mise install when enabled, install npm
+   packages, run user install commands for the admin user
 
 Initialization is fully declarative. `vm create` accepts a name, `--template`, `--spec`,
 `--admin-template`, `--admin-spec`, and `--site`. Immutable hardware starts with the VM template and

@@ -49,8 +49,8 @@ class _AgentTemplateKind:
         title="Agent templates",
         overview="""
         An agent-template configures an agent USER on a VM: the shell it logs in with,
-        the dotfiles it clones, the per-user install commands it runs, the mise packages
-        it activates, and the git credentials it may use. `agw agent create --template`
+        the dotfiles it clones, the per-user install commands it runs, the mise and npm
+        packages it installs, and the git credentials it may use. `agw agent create --template`
         selects one.
 
         An agent gets nothing it is not given. Every field here defaults to inheriting

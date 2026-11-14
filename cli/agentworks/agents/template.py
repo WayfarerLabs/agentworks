@@ -20,6 +20,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
+from agentworks.npm import NpmPackageSpec
 from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
 from agentworks.schema.reference import RefRelationship
 
@@ -147,6 +148,20 @@ class AgentTemplate(DeclaredResource):
     mise_prune_on_reinit: bool | None = None
     """Whether re-running init removes mise tools no longer declared.
     Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
+
+    npm_enabled: bool | None = None
+    """Whether to install declared npm packages and expose their executable directory.
+    False skips npm checks and installs without removing existing packages."""
+
+    npm_packages: list[NpmPackageSpec] | None = None
+    """Registry CLI packages to install per user with native npm, such as
+    `typescript@latest` or `@scope/tool@1.2.3`. Node.js and npm must already be
+    installed; npm 11.10.0 or newer is required. Files, Git, URLs, and aliases
+    are not supported."""
+
+    npm_min_release_age_days: int | None = Field(default=None, ge=0)
+    """Minimum release age in days for npm packages and registry-resolved dependencies,
+    including explicitly pinned versions. Zero disables the age restriction."""
 
     harness_integrations: dict[NonEmptyStr, CapabilityConfig | None] | None = None
     """Integrations explicitly activated for native user setup.

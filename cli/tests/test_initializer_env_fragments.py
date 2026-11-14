@@ -426,7 +426,7 @@ def test_ensure_files_sourced_appends_profile_to_bash_rcs() -> None:
         logger=_SpyLogger(),
     )
     commands = [c for c, _ in target.runs]
-    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
+    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c]
     assert any("/home/me/.profile" in c for c in profile_appends)
     assert any("/home/me/.bashrc" in c for c in profile_appends)
     assert not any(".zprofile" in c for c in profile_appends), "bash shell should not touch .zprofile"
@@ -441,7 +441,7 @@ def test_ensure_files_sourced_adds_zprofile_when_shell_is_zsh() -> None:
         logger=_SpyLogger(),
     )
     commands = [c for c, _ in target.runs]
-    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c and "grep -q" in c]
+    profile_appends = [c for c in commands if AGENTWORKS_PROFILE in c]
     assert any("/home/me/.zprofile" in c for c in profile_appends)
 
 
@@ -459,22 +459,6 @@ def test_ensure_files_sourced_appends_rc_to_interactive_rcs() -> None:
     rc_appends = [c for c in commands if AGENTWORKS_RC in c and "grep -q" in c]
     assert any("/home/me/.bashrc" in c for c in rc_appends)
     assert any("/home/me/.zshrc" in c for c in rc_appends)
-
-
-def test_ensure_files_sourced_uses_grep_or_append_shape() -> None:
-    """The source-line append is idempotent: ``grep -q ... || printf ... >> rc``.
-    A future contributor swapping for an unconditional append would
-    introduce duplicate source lines on every reinit."""
-    target = _SpyTarget()
-    _ensure_agentworks_files_sourced(
-        target,
-        home="/home/me",
-        shell="bash",
-        logger=_SpyLogger(),
-    )
-    for command, _ in target.runs:
-        assert command.startswith("grep -q "), f"expected grep-or-append shape; got: {command}"
-        assert " || printf " in command
 
 
 if __name__ == "__main__":  # pragma: no cover

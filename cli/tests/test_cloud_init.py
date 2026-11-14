@@ -50,4 +50,3 @@ def test_init_system_packages() -> None:
     assert "tmuxinator" in INIT_SYSTEM_PACKAGES
     assert "acl" in INIT_SYSTEM_PACKAGES
     assert "jq" in INIT_SYSTEM_PACKAGES
-    assert "mise" in INIT_SYSTEM_PACKAGES

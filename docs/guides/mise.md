@@ -36,8 +36,9 @@ Run `agw vm create <name>` or `agw vm reinit <name>` and the tools will be avail
 
 ## Config reference
 
-The `mise_*` settings are available on the admin template (for the admin user) and on agent
-templates (for agents). Mise itself is always installed as a system package on every VM.
+The per-user `mise_*` settings are available on the admin template (for the admin user) and on agent
+templates (for agents). The VM template's `mise_enabled` setting controls whether Agentworks
+installs and configures mise at all; it defaults to true.
 
 ```bash
 agw resource explain admin-template   # every field, with types and defaults
@@ -126,13 +127,17 @@ When no lockfile is present, `mise install` runs without `--locked` (no verifica
 
 ## Sequencing
 
-Understanding the init ordering matters if your dotfiles also configure mise:
+Understanding the admin init ordering matters if dotfiles also configure mise:
 
-1. **Mise config write** -- agentworks writes `~/.config/mise/config.toml` from `mise_packages`
-2. **Dotfiles sync** -- your dotfiles can override the mise config (or provide their own lockfile)
-3. **Mise lockfile fetch** -- if `mise_lockfile` is set, it is copied last, overriding anything
+1. **Mise config write**: agentworks writes `~/.config/mise/config.toml` from `mise_packages`
+2. **Dotfiles sync**: dotfiles can override the mise config (or provide their own lockfile)
+3. **Mise lockfile fetch**: if `mise_lockfile` is set, it is copied last, overriding anything
    dotfiles put there
-4. **Mise install** -- runs with the final config + lockfile state
+4. **Mise install**: runs with the final config + lockfile state
+
+Agent setup installs dotfiles before writing its declared mise configuration and fetching the
+lockfile. In both flows, mise and native npm packages install before custom user install commands.
+npm does not require mise; see [npm CLI tools](npm.md).
 
 This means:
 
@@ -157,9 +162,12 @@ Supports relative durations (`7d`, `90d`, `6m`, `1y`) and absolute dates (`2024-
 affects fuzzy version requests (e.g., `latest`, `node@20`). Explicitly pinned versions (e.g.,
 `terraform@1.14.5`) bypass the filter.
 
-## Disabling mise activation
+## Disabling mise
 
-Mise is always installed as a system package. To disable shell activation (so mise tools are not
-automatically available in shells), set `mise_activate: false` in your admin or agent template. The
-`mise` binary will still be available but tools will not be on PATH unless explicitly invoked via
-`mise exec`.
+Set `mise_enabled: false` on a VM template to skip the mise apt repository and package, per-user
+configuration and installation, shell activation, and managed shim PATH. Existing installations and
+configuration files remain on disk.
+
+To keep mise enabled but skip interactive shell activation, set `mise_activate: false` in the admin
+or agent template. Managed shim paths still make installed tools available in non-interactive login
+shells.

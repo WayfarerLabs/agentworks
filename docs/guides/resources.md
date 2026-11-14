@@ -600,11 +600,12 @@ assumes no particular runtime, and a session runs whatever integration its templ
 ## Install-command reruns and optional checks
 
 Prefer a VM template's `apt`, `apt_packages`, or `snap` fields for system software and
-`mise_packages` for user tools. Use an install-command only when those package paths do not fit. Its
-`command` must be one logical shell invocation written as a single-line YAML scalar, either plain or
-quoted. Prefer one maintained package-manager or vendor entry point. Embedded scripts, block
-scalars, here-documents, multi-step installers, state machines, signature pipelines, and cleanup
-routines do not belong in an install-command manifest.
+`mise_packages` or `npm_packages` for user tools. See [npm CLI tools](npm.md) for native per-user
+npm installs. Use an install-command only when those package paths do not fit. Its `command` must be
+one logical shell invocation written as a single-line YAML scalar, either plain or quoted. Prefer
+one maintained package-manager or vendor entry point. Embedded scripts, block scalars,
+here-documents, multi-step installers, state machines, signature pipelines, and cleanup routines do
+not belong in an install-command manifest.
 
 Agentworks runs install commands during init and may run them again during every reinit. Each
 invocation must therefore be repeat-safe itself or declare `test_exec`, `test_file`, or `test_dir`
@@ -618,11 +619,12 @@ assume elevation.
 
 An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
 User install commands contribute to the selected admin or agent user's profile; system install
-commands contribute to the VM admin's profile. Agentworks rewrites the profile after install
-commands run, including paths from successful commands and commands skipped by completion checks.
-Failed commands warn and setup continues, without contributing paths. Later shells that source the
-profile prepend these directories to `PATH`, and child processes inherit them. A leading `~`
-resolves to the target user's home. Install commands share existing home and login state, but
+commands contribute to the VM admin's profile. Mise and npm packages are installed before custom
+user commands, with their executable paths already available. Agentworks rewrites the profile after
+install commands run, including paths from successful commands and commands skipped by completion
+checks. Failed commands warn and setup continues, without contributing paths. Later shells that
+source the profile prepend these directories to `PATH`, and child processes inherit them. A leading
+`~` resolves to the target user's home. Install commands share existing home and login state, but
 declared paths are deferred until the batch finishes. Use an absolute path to invoke a tool absent
 from the login shell's existing `PATH`.
 
