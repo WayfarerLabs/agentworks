@@ -531,7 +531,7 @@ def test_single_stop_uses_prepared_teardown_and_preserves_runtime_identity(db, m
         "check_session_status",
         lambda *a, **k: SessionStatus.RUNNING if not stopped else SessionStatus.STOPPED,
     )
-    monkeypatch.setattr(session_manager, "_session_owner_access", lambda *a, **k: k["admin"])
+    monkeypatch.setattr(session_manager, "_verified_session_access", lambda *a, **k: k["admin"])
     monkeypatch.setattr(session_manager, "_teardown_session", lambda session, **k: stopped.append(session.session_uuid))
     session_manager.stop_session(db, make_config(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
     assert stopped == [selected.session_uuid]

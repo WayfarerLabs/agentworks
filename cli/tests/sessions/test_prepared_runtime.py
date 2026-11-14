@@ -91,7 +91,7 @@ def _definition(db: Database, monkeypatch: pytest.MonkeyPatch, *, status: Sessio
 def test_running_noop_preparation_never_repairs_or_uses_env_targets(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     definition = _definition(db, monkeypatch, status=SessionStatus.RUNNING)
-    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: pytest.fail("owning access probed"))
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: pytest.fail("owning access probed"))
     prepared = prepare_session_launch(definition)
     assert prepared.noop and prepared.secret_targets == ()
     db.close()

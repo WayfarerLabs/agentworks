@@ -201,7 +201,7 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
         "observe_session_statuses",
         lambda sessions, **kwargs: {session.name: SessionStatus.BROKEN for session in sessions},
     )
-    monkeypatch.setattr(session_manager, "_session_owner_access", lambda *a, **k: k["admin"])
+    monkeypatch.setattr(session_manager, "_verified_session_access", lambda *a, **k: k["admin"])
 
     resolve_calls: list[object] = []
 
@@ -263,7 +263,7 @@ def test_session_restart_eager_resolve_fires_before_teardown(
         "observe_session_statuses",
         lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
     )
-    monkeypatch.setattr(session_manager, "_session_owner_access", lambda *a, **k: k["admin"])
+    monkeypatch.setattr(session_manager, "_verified_session_access", lambda *a, **k: k["admin"])
 
     class _Tmpl:
         name = "default"

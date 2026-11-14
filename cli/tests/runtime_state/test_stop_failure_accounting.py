@@ -107,7 +107,7 @@ def test_parent_shutdown_does_not_hide_named_or_serial_execution_failure(
         statuses[session.name] = SessionStatus.STOPPED
 
     monkeypatch.setattr(manager, "_teardown_session", execute)
-    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: k["admin"])
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: k["admin"])
     import agentworks.runtime_state._session_stop as stop
 
     original_completed = stop._completed

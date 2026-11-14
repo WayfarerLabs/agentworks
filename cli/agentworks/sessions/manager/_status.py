@@ -464,7 +464,7 @@ def observe_session_statuses(
         by_vm.setdefault(ws.vm_name, []).append(s)
         if include_legacy and s.socket_path is None:
             try:
-                legacy_owners[s.name] = _mgr._session_owner_access(
+                legacy_owners[s.name] = _mgr._verified_session_access(
                     s, vm=vm, config=config, db=db, admin=vm_admins[ws.vm_name], logger=None
                 )
             except UserAbort:

@@ -97,9 +97,6 @@ from ._pids import (
     _session_access as _session_access,
 )
 from ._pids import (
-    _session_owner_access as _session_owner_access,
-)
-from ._pids import (
     _validated_observed_boot_id as _validated_observed_boot_id,
 )
 from ._pids import (
@@ -107,6 +104,9 @@ from ._pids import (
 )
 from ._pids import (
     _validated_stored_start_ticks as _validated_stored_start_ticks,
+)
+from ._pids import (
+    _verified_session_access as _verified_session_access,
 )
 from ._pids import (
     ensure_pids_batch as ensure_pids_batch,

@@ -207,12 +207,12 @@ def _delete_session_runtime(
                 )
 
             # Pick the destructive-op access BEFORE prompting the operator.
-            # For agent sessions, ``_session_owner_access`` probes direct agent
+            # For agent sessions, ``_verified_session_access`` probes direct agent
             # SSH; a pre-rollout agent surfaces here as an
             # actionable error rather than after the operator has already
             # confirmed the delete. The access is the owner's, so nothing
             # below elevates.
-            owner = _mgr._session_owner_access(session, vm=vm, config=config, db=db, admin=admin, logger=log)
+            owner = _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=log)
 
             # Confirm before any destructive action
             if not yes and not output.confirm(f"Delete session '{name}'?"):

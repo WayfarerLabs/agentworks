@@ -196,7 +196,7 @@ def test_workload_secret_failure_blocks_all_tmux_and_provider_stops(db, make_con
         return prepared
 
     monkeypatch.setattr(manager, "prepare_session_stop", prepare)
-    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: k["admin"])
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: k["admin"])
     monkeypatch.setattr(
         manager, "_teardown_session", lambda *a, **k: pytest.fail("session stopped before shared secrets")
     )

@@ -40,51 +40,22 @@ def _resolve_session_linux_user(db: Database, session: SessionRow, vm: VMRow) ->
     return vm.admin_username
 
 
-def _session_owner_access(
-    session: SessionRow,
-    *,
-    vm: VMRow,
-    config: Config,
-    db: Database,
-    admin: VMAccess,
-    logger: OperationLog | None,
-) -> VMAccess:
-    """The access of the session's owner, for destructive operations on a single session.
+def _session_agent(db: Database, session: SessionRow) -> AgentRow | None:
+    """The agent that owns ``session``, or ``None`` for an admin-mode session.
 
-    For an admin session that is ``admin`` itself. For an agent session it is
-    the agent's access, logging to ``logger``, once a probe proves direct SSH
-    as the agent works (``_assert_agent_access_works``): an agent that
-    predates the direct-SSH rollout raises a ``StateError`` with the reinit
-    hint before anything changes.
-
-    Single-session paths use this to make stop / restart operations
-    consistent with create: every destructive step on an agent session
-    runs as the agent, which owns the session, so nothing elevates. Batch
-    paths intentionally don't use this helper; they keep the admin's access
-    across all sessions and elevate to reach into agent tmux servers
-    (carve-out for batch ops).
+    Raises ``NotFoundError`` when an agent-mode session names no agent, or an
+    agent that is gone.
     """
     if session.mode == SessionMode.ADMIN.value:
-        return admin
-
-    if session.agent_name is None:
-        raise NotFoundError(
-            f"session '{session.name}' is agent-mode but has no agent_name",
-            entity_kind="session",
-            entity_name=session.name,
-        )
-    agent = db.get_agent(session.agent_name)
+        return None
+    agent = db.get_agent(session.agent_name) if session.agent_name is not None else None
     if agent is None:
         raise NotFoundError(
             f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
             entity_kind="agent",
             entity_name=session.agent_name,
         )
-    from agentworks.agents.manager.access import _assert_agent_access_works
-
-    access = _identity_access(vm, config, agent, logger=logger)
-    _assert_agent_access_works(access, admin, agent)
-    return access
+    return agent
 
 
 def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logger: OperationLog | None) -> VMAccess:
@@ -105,17 +76,40 @@ def _identity_access(vm: VMRow, config: Config, agent: AgentRow | None, *, logge
 def _session_access(
     session: SessionRow, *, vm: VMRow, config: Config, db: Database, logger: OperationLog | None
 ) -> VMAccess:
-    """The ``VMAccess`` of the session's owning identity: the admin for an admin-mode session, else its agent."""
-    if session.mode == SessionMode.ADMIN.value:
-        return _identity_access(vm, config, None, logger=logger)
-    agent = db.get_agent(session.agent_name) if session.agent_name is not None else None
+    """The ``VMAccess`` of the session's owning identity: the admin for an admin-mode session, else its agent.
+
+    Building it connects to nothing; ``_verified_session_access`` is the one
+    that proves an agent's direct SSH works first.
+    """
+    return _identity_access(vm, config, _session_agent(db, session), logger=logger)
+
+
+def _verified_session_access(
+    session: SessionRow,
+    *,
+    vm: VMRow,
+    config: Config,
+    db: Database,
+    admin: VMAccess,
+    logger: OperationLog | None,
+) -> VMAccess:
+    """The session owner's access, for destructive operations on a single session, after the I19 probe.
+
+    For an admin session that is ``admin`` itself. For an agent session it is
+    the agent's access, logging to ``logger``, once a probe proves direct SSH
+    as the agent works (``_assert_agent_access_works``): an agent that
+    predates the direct-SSH rollout raises a ``StateError`` with the reinit
+    hint before anything changes. That probe connects, so a caller that only
+    reads, such as a status listing, takes ``_session_access`` instead.
+    """
+    agent = _session_agent(db, session)
     if agent is None:
-        raise NotFoundError(
-            f"agent '{session.agent_name}' (referenced by session '{session.name}') not found",
-            entity_kind="agent",
-            entity_name=session.agent_name,
-        )
-    return _identity_access(vm, config, agent, logger=logger)
+        return admin
+    from agentworks.agents.manager.access import _assert_agent_access_works
+
+    access = _identity_access(vm, config, agent, logger=logger)
+    _assert_agent_access_works(access, admin, agent)
+    return access
 
 
 def _repair_session_pid(

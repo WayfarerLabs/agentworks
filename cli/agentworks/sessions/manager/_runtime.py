@@ -327,7 +327,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
                 "session became running without restart authorization", entity_kind="session", entity_name=session.name
             )
     require_unaddressed_session_absence(current, vm=definition.vm, admin=admin)
-    session_access = _mgr._session_owner_access(
+    session_access = _mgr._verified_session_access(
         current, vm=definition.vm, config=config, db=db, admin=admin, logger=None
     )
     if not recovered_startup or definition.replace_running:
@@ -397,7 +397,7 @@ def prepare_session_stop(
     owner = None
     if status is not SessionStatus.STOPPED and not checkpoint_only:
         assert admin is not None
-        owner = _mgr._session_owner_access(session, vm=vm, config=config, db=db, admin=admin, logger=None)
+        owner = _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=None)
     return PreparedSessionStop(
         db=db,
         config=config,

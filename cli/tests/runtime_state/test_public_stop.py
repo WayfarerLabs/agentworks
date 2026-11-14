@@ -60,7 +60,7 @@ def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_pe
         return access
 
     monkeypatch.setattr(manager, "_identity_access", admin_access)
-    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: pytest.fail("unused direct-agent SSH"))
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: pytest.fail("unused direct-agent SSH"))
     wave_ready = threading.Event()
     lock = threading.Lock()
     active = maximum = 0
@@ -128,7 +128,7 @@ def test_filtered_one_bulk_uses_worker_while_named_stop_is_synchronous(db, make_
 
     monkeypatch.setattr(_teardown, "execute_dedicated_teardown", execute)
     monkeypatch.setattr(manager, "_teardown_session", teardown)
-    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: k["admin"])
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: k["admin"])
     if bulk:
         manager.stop_all_sessions(db, make_config(), workspace_name="ws-box", interaction=REFUSE)
         assert len(workers) == 1 and workers[0] != main_thread
@@ -206,7 +206,7 @@ def test_off_parent_explicit_stop_never_opens_transport_repairs_observes_guest_o
     _running(db, statuses, "work", "box")
     powers["box"] = VMStatus.STOPPED
     before = SessionRuntimeSnapshot.from_session(db.get_session("work"))
-    for method in ["_identity_access", "ensure_pids_batch", "observe_session_statuses", "_session_owner_access"]:
+    for method in ["_identity_access", "ensure_pids_batch", "observe_session_statuses", "_verified_session_access"]:
         monkeypatch.setattr(manager, method, lambda *a, **k: pytest.fail("off parent reached guest work"))
     if bulk:
         manager.stop_all_sessions(db, make_config(), interaction=REFUSE)
@@ -270,7 +270,7 @@ def test_live_public_stop_without_host_trust_keeps_intent_and_refuses_guest_work
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require_vm_ssh_boundary)
     before = SessionRuntimeSnapshot.from_session(db.get_session("work"))
     monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("guest transport without trust"))
-    monkeypatch.setattr(manager, "_session_owner_access", lambda *a, **k: pytest.fail("agent access without trust"))
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: pytest.fail("agent access without trust"))
     monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: pytest.fail("teardown without trust"))
     with pytest.raises(StateError):
         if bulk:
