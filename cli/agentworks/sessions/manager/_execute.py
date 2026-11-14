@@ -215,6 +215,8 @@ def _execute_session_start(
     # strict resume failure or an unsupported intent therefore leaves an
     # existing runtime intact. Stateful integrations decide from their
     # durable target state, not from whether the old tmux process is live.
+    # Once decided, an integration may put a per-user launch prerequisite
+    # in place (codex's conversation recorder), which touches no runtime.
     start_ctx = RunContext(
         config=config,
         operation_scope=scope,

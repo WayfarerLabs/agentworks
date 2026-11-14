@@ -796,7 +796,10 @@ The `chown`, the staged path list, the thread and the assertion that the target 
 
 `Files.write` refuses a link at the recorder's path or a parent. Today's `mkdir -p` and `mv` follow
 one; a linked `~/.agentworks` now makes the recorder absent with a warning, and codex falls back to
-discovery, which is how a failed install already behaves.
+discovery, which is how a failed install already behaves. `start` writes it once its launch decision
+is made, so a refused strict resume writes nothing; a missing or mismatched host key and a VM that
+cannot run requests propagate rather than warn. The harness contract has no launch-step hook to
+carry the write past teardown, and adding one is a contract change, so `start` is where it stays.
 
 ## Deletions
 

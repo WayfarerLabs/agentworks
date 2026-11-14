@@ -742,9 +742,6 @@ class CodexIntegration(HarnessIntegration):
         self._decision = None
         self._adopted_id = None
         self._dropped_stale = False
-        # Every launch form passes the recorder to codex, so it is in place first.
-        if access is not None:
-            install_recorder(access, home=None if artifact_context is None else artifact_context.home)
         prior_state = self._state.copy() if intent is HarnessLaunchIntent.RESUME_ONLY else None
         try:
             command = (
@@ -752,6 +749,10 @@ class CodexIntegration(HarnessIntegration):
                 if intent.starts_fresh
                 else self._resume_or_launch(ctx, resume_only=intent is HarnessLaunchIntent.RESUME_ONLY)
             )
+            # Every launch form passes the recorder to codex, so it is in place
+            # once the launch is decided, and never for a refused resume.
+            if access is not None:
+                install_recorder(access, home=None if artifact_context is None else artifact_context.home)
         except StateError:
             if prior_state is not None:
                 self._state.clear()

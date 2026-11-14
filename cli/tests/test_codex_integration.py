@@ -390,6 +390,7 @@ def test_resume_only_refuses_non_resumable_paths_without_state_mutation(
     with pytest.raises(StateError):
         _harness_integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
     assert state == before
+    assert not any(_is_file_write(request) for request in target.requests())
 
 
 def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
