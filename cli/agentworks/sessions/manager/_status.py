@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -21,6 +20,7 @@ from agentworks.execution.errors import TrustMissing
 from agentworks.execution.requests import Bytes, Script, Shell
 from agentworks.sessions.manager._teardown import _validated_socket
 from agentworks.sessions.tmux import (
+    CommandOutcome,
     ProbeStatus,
     access_run_command,
     probe_tmux_server,
@@ -59,8 +59,8 @@ def _pid_probe_script(pid: int) -> str:
     return f"if test -d /proc/{pid}; then printf {_PID_PRESENT_FACT}; else printf {_PID_ABSENT_FACT}; fi"
 
 
-def _pid_presence_from_fact(returncode: object, fact: object, *, stderr: object = "") -> ProbeStatus:
-    if returncode != 0 or not isinstance(fact, str) or not isinstance(stderr, str):
+def _pid_presence_from_fact(returncode: int, fact: str | None, *, stderr: str | None = "") -> ProbeStatus:
+    if returncode != 0 or fact is None or stderr is None:
         return ProbeStatus.UNKNOWN
     if fact == _PID_PRESENT_FACT and not stderr:
         return ProbeStatus.PRESENT
@@ -72,9 +72,9 @@ def _pid_presence_from_fact(returncode: object, fact: object, *, stderr: object 
 def _pid_presence(pid: int, *, run_command: RunCommand) -> ProbeStatus:
     """Probe a PID without treating a transport failure as process absence."""
     result = run_command(runtime_probe_command(_pid_probe_script(pid), "PRESENT"), check=False)
-    stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "PRESENT")
-    stderr = runtime_probe_stderr(getattr(result, "stderr", "") or "")
-    return _pid_presence_from_fact(getattr(result, "returncode", None), stdout, stderr=stderr)
+    stdout = runtime_probe_payload(result.stdout, "PRESENT")
+    stderr = runtime_probe_stderr(result.stderr)
+    return _pid_presence_from_fact(result.returncode, stdout, stderr=stderr)
 
 
 def _get_boot_id(run_command: RunCommand) -> str | None:
@@ -426,8 +426,9 @@ def _batch_tmux_presence(
         diagnostic = bytes.fromhex(diagnostic_hex).decode("utf-8")
     except (UnicodeDecodeError, ValueError):
         return ProbeStatus.UNKNOWN
-    result = SimpleNamespace(returncode=code, stdout="", stderr=diagnostic)
-    return _tmux_presence_from_result(result, missing_target_is_absent=missing_target_is_absent)
+    return _tmux_presence_from_result(
+        CommandOutcome("", diagnostic, code), missing_target_is_absent=missing_target_is_absent
+    )
 
 
 def observe_session_statuses(

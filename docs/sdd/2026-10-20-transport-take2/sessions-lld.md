@@ -659,8 +659,10 @@ does not know its identity or bound. The five that take a `Transport` directly
 (`probe_tmux_server_pid`, `probe_process_start_ticks`, `read_boot_id`,
 `capture_tmux_server_fingerprint` and `_matches_launch_attempt`, `:1185-1318`) take a `RunCommand`;
 the four with a `sudo` parameter lose it, which the caller binds as `elevated` (`read_boot_id` never
-elevates). `tmux_cmd`'s `sudo` (`:555`), which nothing passes, goes. Once every caller is on
-`access_run_command` (batch D), `RunCommand` returns `CommandOutcome` rather than `object`, and its
+elevates). `tmux_cmd`'s `sudo` (`:555`), which nothing passes, goes. `RunCommand` returns a
+`CommandResult` protocol (`stdout`, `stderr`, `returncode`, `ok`), the shape of both
+`access_run_command`'s `CommandOutcome` and the legacy `SSHResult`, so the primitives read a
+result's fields as attributes; once every caller is on `access_run_command` (batch D), its
 docstring's `Transport.run` half goes.
 
 | Primitive                                                                                    | Today                                        | Read-only | Notes                                                                                                                    |
@@ -1107,13 +1109,12 @@ collateral it makes stale.
 
 **Bridges.**
 
-| Bridge                                                                                                                                                                        | Left by | Removed in                                     |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------------------------------------------- |
-| `_scope._regenerate_tmuxinator` builds an admin access beside its legacy target for the tmuxinator write and `remove_config`                                                  | B       | C                                              |
-| `delete_workspace` keeps a legacy target for session teardown and `kill_session_windows`                                                                                      | B       | C                                              |
-| The console modules pass their legacy `target.run` as a `RunCommand`, and `crud.remove_sessions` builds an admin access beside its target for `kill_session_windows`          | C       | D                                              |
-| Slice 6's test bridges `route_vm_access_to_target` and `files_over_target` (`cli/tests/vm_access_support.py`), which run a moved step's requests on a legacy transport double | slice 6 | D, with the last legacy target                 |
-| `tmux.CommandOutcome`'s duck-typed mirror of `SSHResult`: `RunCommand` returns `object` while legacy `Transport.run` can be one                                               | slice 6 | D, where `RunCommand` returns `CommandOutcome` |
+| Bridge                                                                                                                                                                        | Left by | Removed in                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------ |
+| `_scope._regenerate_tmuxinator` builds an admin access beside its legacy target for the tmuxinator write and `remove_config`                                                  | B       | C                              |
+| `delete_workspace` keeps a legacy target for session teardown and `kill_session_windows`                                                                                      | B       | C                              |
+| The console modules pass their legacy `target.run` as a `RunCommand`, and `crud.remove_sessions` builds an admin access beside its target for `kill_session_windows`          | C       | D                              |
+| Slice 6's test bridges `route_vm_access_to_target` and `files_over_target` (`cli/tests/vm_access_support.py`), which run a moved step's requests on a legacy transport double | slice 6 | D, with the last legacy target |
 
 ## Decisions
 

@@ -74,12 +74,32 @@ ADMIN_SOCKET_ROOT = "/run/agentworks/admin-tmux-sockets"
 TMUX_BINARY = "/usr/bin/tmux"
 
 
+class CommandResult(Protocol):
+    """What a ``RunCommand`` returns: the decoded streams and the exit status.
+
+    ``CommandOutcome`` is ``access_run_command``'s; a legacy ``Transport.run``'s
+    ``SSHResult`` has the same shape.
+    """
+
+    @property
+    def stdout(self) -> str: ...
+
+    @property
+    def stderr(self) -> str: ...
+
+    @property
+    def returncode(self) -> int: ...
+
+    @property
+    def ok(self) -> bool: ...
+
+
 class RunCommand(Protocol):
     """Callable that runs a shell command on a target: ``access_run_command`` over a ``VMAccess``, or ``Transport.run``.
 
-    The result has ``stdout``, ``stderr``, ``returncode`` and ``ok``. Over a
-    ``VMAccess`` the ``env`` kwarg travels in the request; over a legacy
-    ``Transport`` its SSH layer sends it as ``-o SetEnv=KEY=VALUE`` arguments.
+    Over a ``VMAccess`` the ``env`` kwarg travels in the request; over a
+    legacy ``Transport`` its SSH layer sends it as ``-o SetEnv=KEY=VALUE``
+    arguments.
     """
 
     def __call__(
@@ -88,7 +108,7 @@ class RunCommand(Protocol):
         *,
         check: bool = True,
         env: dict[str, str] | None = None,
-    ) -> object: ...
+    ) -> CommandResult: ...
 
 
 @dataclass(frozen=True)
@@ -155,11 +175,9 @@ class FingerprintProbe:
     fingerprint: TmuxServerFingerprint | None = None
 
 
-def _test_presence_from_result(result: object) -> ProbeStatus:
+def _test_presence_from_result(result: CommandResult) -> ProbeStatus:
     """Classify a shell ``test`` result, whose 0/1 contract is unambiguous."""
-    returncode = getattr(result, "returncode", None)
-    if returncode is None:
-        return ProbeStatus.PRESENT if getattr(result, "ok", False) else ProbeStatus.ABSENT
+    returncode = result.returncode
     if returncode == 0:
         return ProbeStatus.PRESENT
     if returncode == 1:
@@ -174,11 +192,9 @@ _TMUX_SERVER_ABSENCE_DIAGNOSTICS = (
 _TMUX_TARGET_ABSENCE_DIAGNOSTIC = re.compile(r"can't find session: .+", re.ASCII)
 
 
-def _normalized_probe_streams(result: object) -> tuple[str, str]:
+def _normalized_probe_streams(result: CommandResult) -> tuple[str, str]:
     """Return probe stdout and stderr with surrounding whitespace removed."""
-    stdout = (getattr(result, "stdout", "") or "").strip()
-    stderr = (getattr(result, "stderr", "") or "").strip()
-    return stdout, stderr
+    return result.stdout.strip(), result.stderr.strip()
 
 
 def runtime_probe_command(command: str, fact: str) -> str:
@@ -205,12 +221,10 @@ def runtime_probe_stderr(stderr: str) -> str | None:
 
 
 def _tmux_presence_from_result(
-    result: object, *, missing_target_is_absent: bool, stdout: str | None = None
+    result: CommandResult, *, missing_target_is_absent: bool, stdout: str | None = None
 ) -> ProbeStatus:
     """Classify one tmux presence probe from its exit and canonical diagnostic."""
-    returncode = getattr(result, "returncode", None)
-    if returncode is None:
-        return ProbeStatus.PRESENT if getattr(result, "ok", False) else ProbeStatus.UNKNOWN
+    returncode = result.returncode
     original_stdout, stderr = _normalized_probe_streams(result)
     native_stderr = runtime_probe_stderr(stderr)
     if native_stderr is None:
@@ -427,7 +441,7 @@ def _cleanup_stale_sockets_under(files: Files, dir_path: str, *, owner: str) -> 
 
         def probe(
             command: str, *, check: bool = True, env: dict[str, str] | None = None, guard: str = socket_guard
-        ) -> object:
+        ) -> CommandResult:
             # Root runs only the guard; tmux runs as the socket's owner.
             as_owner = f"runuser -u {shlex.quote(owner)} -- sh -c {shlex.quote(command)}"
             return as_root(f"{guard} && {{ {as_owner}; }}", check=check, env=env)
@@ -753,8 +767,8 @@ def _probe_pane_liveness(
     )
     for _attempt in range(2):  # retry once: a single blip must not condemn the create
         result = run_command(runtime_probe_command(cmd, "PANE"), check=False)
-        if getattr(result, "ok", False):
-            payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "PANE")
+        if result.ok:
+            payload = runtime_probe_payload(result.stdout, "PANE")
             if payload is None:
                 continue
             observed = re.fullmatch(r"([01])(?: ([0-9]+))?", payload.strip())
@@ -796,8 +810,8 @@ def _raise_workload_died(
             + " 2>/dev/null",
             check=False,
         )
-        if getattr(alt, "ok", False):
-            captures.append(getattr(alt, "stdout", "") or "")
+        if alt.ok:
+            captures.append(alt.stdout)
     captured = _trim_captured_output("\n".join(dict.fromkeys(captures)), redactions=redactions)
     with suppress(ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
         run_command(tmux_cmd("kill-server", socket_path) + " 2>/dev/null", check=False)
@@ -1002,7 +1016,7 @@ def create_session(
         before_spawn()
     result = run_command(cmd, env=launch_env)
     try:
-        pid = _parse_pid(getattr(result, "stdout", "") or "", context="after session create")
+        pid = _parse_pid(result.stdout, context="after session create")
     except RuntimeError:
         pid = None
     # The acknowledgement is returned before any further remote work. The
@@ -1063,8 +1077,8 @@ def startup_protection_enabled(session_name: str, *, run_command: RunCommand, so
         f'if [ -z "$agw_startup_pane" ]; then printf off; else {pane_command}; fi'
     )
     result = run_command(runtime_probe_command(command, "STARTUP"), check=False)
-    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "STARTUP")
-    if getattr(result, "returncode", None) != 0 or runtime_probe_stderr(getattr(result, "stderr", "") or "") != "":
+    payload = runtime_probe_payload(result.stdout, "STARTUP")
+    if result.returncode != 0 or runtime_probe_stderr(result.stderr) != "":
         return None
     return {"on": True, "off": False}.get(payload.strip()) if payload is not None else None
 
@@ -1081,13 +1095,13 @@ def kill_session(
         tmux_cmd(f"kill-session -t {q_session}", socket_path),
         check=False,
     )
-    return getattr(result, "ok", True)
+    return result.ok
 
 
 def kill_server(*, run_command: RunCommand, socket_path: str) -> bool:
     """Destroy the complete dedicated tmux server behind ``socket_path``."""
     result = run_command(tmux_cmd("kill-server", socket_path), check=False)
-    return getattr(result, "ok", True)
+    return result.ok
 
 
 def probe_tmux_session(
@@ -1102,8 +1116,8 @@ def probe_tmux_session(
         runtime_probe_command(tmux_cmd(f"has-session -t {q_session}", socket_path), "SESSION"),
         check=False,
     )
-    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "SESSION")
-    if payload is None or (getattr(result, "ok", False) and payload.strip()):
+    payload = runtime_probe_payload(result.stdout, "SESSION")
+    if payload is None or (result.ok and payload.strip()):
         return ProbeStatus.UNKNOWN
     return _tmux_presence_from_result(result, missing_target_is_absent=True, stdout=payload)
 
@@ -1113,8 +1127,8 @@ def probe_tmux_server(*, run_command: RunCommand, socket_path: str) -> ProbeStat
     result = run_command(
         runtime_probe_command(tmux_cmd("list-sessions", socket_path) + " >/dev/null", "SERVER"), check=False
     )
-    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "SERVER")
-    if payload is None or (getattr(result, "ok", False) and payload.strip()):
+    payload = runtime_probe_payload(result.stdout, "SERVER")
+    if payload is None or (result.ok and payload.strip()):
         return ProbeStatus.UNKNOWN
     return _tmux_presence_from_result(result, missing_target_is_absent=False, stdout=payload)
 
@@ -1167,12 +1181,12 @@ def capture_output(
         ),
         check=False,
     )
-    if getattr(result, "returncode", None) != 0:
+    if result.returncode != 0:
         raise ExternalError(
             f"Could not capture output for session '{session_name}'.",
             hint="Check that the session's tmux server and pane are reachable, then retry session logs.",
         )
-    captured = (getattr(result, "stdout", "") or "").splitlines()
+    captured = result.stdout.splitlines()
     while captured and not captured[-1].strip():
         captured.pop()
     return "\n".join(captured[-lines:]) + ("\n" if captured else "")
@@ -1203,17 +1217,14 @@ def probe_tmux_server_pid(
     """Probe the positive PID of a running tmux server."""
     cmd = runtime_probe_command(tmux_cmd("display-message -p '#{pid}'", socket_path), "PID")
     result = run_command(cmd, check=False)
-    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "PID")
+    payload = runtime_probe_payload(result.stdout, "PID")
     if payload is None:
         return IntegerProbe(ProbeStatus.UNKNOWN)
     presence = _tmux_presence_from_result(result, missing_target_is_absent=False, stdout=payload)
     if presence is not ProbeStatus.PRESENT:
         return IntegerProbe(presence)
     pid_str = payload.strip()
-    if (
-        not re.fullmatch(r"[0-9]+", pid_str, re.ASCII)
-        or runtime_probe_stderr(getattr(result, "stderr", "") or "") != ""
-    ):
+    if not re.fullmatch(r"[0-9]+", pid_str, re.ASCII) or runtime_probe_stderr(result.stderr) != "":
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         pid = int(pid_str)
@@ -1244,13 +1255,13 @@ def parse_process_start_ticks(stat_line: str) -> int:
 def probe_process_start_ticks(pid: int, *, run_command: RunCommand) -> IntegerProbe:
     """Probe one process start time without conflating failure with absence."""
     result = run_command(runtime_probe_command(f"cat /proc/{pid}/stat", "TICKS"), check=False)
-    if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
+    if result.returncode != 0:
         return IntegerProbe(ProbeStatus.UNKNOWN)
-    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "TICKS")
+    payload = runtime_probe_payload(result.stdout, "TICKS")
     if payload is None:
         return IntegerProbe(ProbeStatus.UNKNOWN)
     payload = payload.strip()
-    if "\n" in payload or "\r" in payload or runtime_probe_stderr(getattr(result, "stderr", "") or "") != "":
+    if "\n" in payload or "\r" in payload or runtime_probe_stderr(result.stderr) != "":
         return IntegerProbe(ProbeStatus.UNKNOWN)
     try:
         return IntegerProbe(ProbeStatus.PRESENT, parse_process_start_ticks(payload))
@@ -1261,11 +1272,11 @@ def probe_process_start_ticks(pid: int, *, run_command: RunCommand) -> IntegerPr
 def read_boot_id(run_command: RunCommand) -> str | None:
     """Read a canonical boot UUID from this command's own observation frame."""
     result = run_command(runtime_probe_command("cat /proc/sys/kernel/random/boot_id", "BOOT"), check=False)
-    if getattr(result, "returncode", 0 if getattr(result, "ok", False) else 1) != 0:
+    if result.returncode != 0:
         return None
-    if runtime_probe_stderr(getattr(result, "stderr", "") or "") != "":
+    if runtime_probe_stderr(result.stderr) != "":
         return None
-    return canonical_boot_id(runtime_probe_payload(getattr(result, "stdout", "") or "", "BOOT"))
+    return canonical_boot_id(runtime_probe_payload(result.stdout, "BOOT"))
 
 
 def capture_tmux_server_fingerprint(*, run_command: RunCommand, socket_path: str) -> FingerprintProbe:
@@ -1319,13 +1330,9 @@ def _matches_launch_attempt(
         tmux_cmd("show-environment -g _AGW_RUN_ID", socket_path),
     )
     result = run_command(runtime_probe_command(" && ".join(commands), "LAUNCH"), check=False)
-    payload = runtime_probe_payload(getattr(result, "stdout", "") or "", "LAUNCH")
+    payload = runtime_probe_payload(result.stdout, "LAUNCH")
     expected = f"{fingerprint.pid}\n_AGW_SESSION_UUID={session_uuid}\n_AGW_RUN_ID={run_id}\n"
-    if (
-        getattr(result, "returncode", None) != 0
-        or runtime_probe_stderr(getattr(result, "stderr", "") or "") != ""
-        or payload != expected
-    ):
+    if result.returncode != 0 or runtime_probe_stderr(result.stderr) != "" or payload != expected:
         return False
     verified = capture_tmux_server_fingerprint(run_command=run_command, socket_path=socket_path)
     return verified.status is ProbeStatus.PRESENT and verified.fingerprint == fingerprint
