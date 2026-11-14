@@ -41,7 +41,7 @@ def session_logs(
         operation="session-logs",
         interaction=interaction,
     ) as (_ws, _vm, admin, _log):
-        status = _mgr.check_session_status(session, admin=admin)
+        status = _mgr.check_session_status(session, admin=admin, db=db)
 
         if status == SessionStatus.STOPPED:
             raise StateError(

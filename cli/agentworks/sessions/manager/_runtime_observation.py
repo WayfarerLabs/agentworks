@@ -25,6 +25,7 @@ def observe_session_runtime(
     session: SessionRow,
     *,
     admin: VMAccess,
+    db: Database,
     session_access: VMAccess | None = None,
 ) -> SessionStatus:
     """Classify exact presence and stored boot/process absence without evidence writes.
@@ -36,7 +37,7 @@ def observe_session_runtime(
 
     run_command = _mgr.observation_run_command(admin, session)
     if session.socket_path is not None:
-        status = _mgr.check_session_status(session, admin=admin)
+        status = _mgr.check_session_status(session, admin=admin, db=db)
         if status is SessionStatus.UNKNOWN and _mgr._needs_repair(session) and session.boot_id is not None:
             require_socket_path(session.socket_path, run_command=run_command)
             probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=session.socket_path)

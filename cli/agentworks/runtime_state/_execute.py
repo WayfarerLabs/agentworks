@@ -192,6 +192,7 @@ def final_observations(invocation: RuntimeInvocation) -> None:
                 observed = sessions.observe_session_runtime(
                     current,
                     admin=admin,
+                    db=invocation.db,
                     session_access=prepared.session_access if prepared is not None and prepared.legacy else None,
                 )
             else:

@@ -189,7 +189,7 @@ def _delete_session_runtime(
                 status = SessionStatus.RUNNING
             else:
                 session = _mgr._ensure_pid(session, admin=admin, db=db)
-                status = _mgr.check_session_status(session, admin=admin)
+                status = _mgr.check_session_status(session, admin=admin, db=db)
 
             if status == SessionStatus.UNKNOWN:
                 raise StateError(
@@ -482,7 +482,9 @@ def session_description(
             pass
         else:
             try:
-                status = _mgr.check_session_status(session, admin=_mgr._identity_access(vm, config, None, logger=None))
+                status = _mgr.check_session_status(
+                    session, admin=_mgr._identity_access(vm, config, None, logger=None), db=db
+                )
             except UserAbort:
                 raise
             except ConnectivityError:
@@ -926,7 +928,7 @@ def attach_session(
         operation="session-attach",
         interaction=interaction,
     ) as (_ws, _vm, admin, _log):
-        status = _mgr.check_session_status(session, admin=admin)
+        status = _mgr.check_session_status(session, admin=admin, db=db)
 
         if status == SessionStatus.STOPPED:
             raise StateError(

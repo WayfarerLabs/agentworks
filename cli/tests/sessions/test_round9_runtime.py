@@ -69,7 +69,7 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
         native.native(f"rename-session -t '=s1' {native_name}")
     before = db.get_session("s1")
     assert before is not None
-    assert manager.check_session_status(before, admin=native.access()) is SessionStatus.UNKNOWN
+    assert manager.check_session_status(before, admin=native.access(), db=db) is SessionStatus.UNKNOWN
     assert native.batch_status([before]) == {"s1": SessionStatus.UNKNOWN}
     fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     events.clear()
@@ -485,7 +485,7 @@ def test_recorded_native_runtime_keeps_running_and_residual_inventory(tmp_path, 
     assert row is not None
     expected = SessionStatus.RUNNING if native_name == "s1" else SessionStatus.RESIDUAL
     try:
-        assert manager.check_session_status(row, admin=native.access()) is expected
+        assert manager.check_session_status(row, admin=native.access(), db=db) is expected
         assert native.batch_status([row]) == {"s1": expected}
     finally:
         db.close()

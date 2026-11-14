@@ -20,8 +20,10 @@ from agentworks.db import SessionRow, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
+from agentworks.sessions.manager import _status
 from agentworks.sessions.manager._pids import _repair_session_pid
 from agentworks.sessions.manager._status import batch_check_status, check_session_status
+from agentworks.sessions.manager._teardown import ManagedSocket
 from agentworks.ssh import SSHError, SSHResult
 from tests.vm_access_support import Admin, RecordingVMAccess, access_over_target
 
@@ -125,6 +127,10 @@ def native(monkeypatch):
         monkeypatch.setattr(tmux, "ensure_agent_socket_dir", lambda *a: None)
         # Cross-user access is independently tested; no system users are created.
         monkeypatch.setattr(tmux, "_grant_server_access", lambda *a: None)
+        # The native socket lives in this fixture's directory, outside the managed
+        # socket roots, and this account owns it, so status reads run as this account.
+        owner = pwd.getpwuid(os.getuid()).pw_name
+        monkeypatch.setattr(_status, "_validated_socket", lambda db, session: ManagedSocket(session.socket_path, owner))
         try:
             yield target
         finally:
@@ -262,11 +268,11 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
         # kill-server acknowledgement can precede process teardown. Keep the
         # stored-identity guard in force until that process is actually absent.
         deadline = time.monotonic() + 5
-        status = check_session_status(row, admin=native.access())
+        status = check_session_status(row, admin=native.access(), db=db)
         while status is not SessionStatus.STOPPED and time.monotonic() < deadline:
             assert status is SessionStatus.BROKEN
             time.sleep(0.02)
-            status = check_session_status(row, admin=native.access())
+            status = check_session_status(row, admin=native.access(), db=db)
         assert status is SessionStatus.STOPPED
         monkeypatch.setattr(
             tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
@@ -281,7 +287,7 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
         )
         recovered = db.get_session("s1")
         assert recovered is not None and recovered.pid is not None
-        assert check_session_status(recovered, admin=native.access()) is SessionStatus.RUNNING
+        assert check_session_status(recovered, admin=native.access(), db=db) is SessionStatus.RUNNING
     finally:
         db.close()
 
@@ -308,7 +314,7 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
         row = db.get_session("s1")
         assert row is not None and row.pid is None
         assert Path(native.socket).stat().st_mode & 0o077 == 0
-        assert check_session_status(row, admin=native.access()) is SessionStatus.UNKNOWN
+        assert check_session_status(row, admin=native.access(), db=db) is SessionStatus.UNKNOWN
         assert any(options.get("sudo") is True for command, options in native.calls if "has-session" in command)
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
         assert _repair_session_pid(row, admin=native.access(), db=db)
@@ -375,7 +381,7 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
         assert row is not None and row.socket_path == native.socket
         assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None
         expected = SessionStatus.UNKNOWN if fault == "fingerprint" else SessionStatus.RUNNING
-        assert check_session_status(row, admin=native.access()) is expected
+        assert check_session_status(row, admin=native.access(), db=db) is expected
         if fault == "fingerprint":
             assert row.pid is None
             monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
@@ -438,7 +444,7 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
             observed.boot_id,
             observed.start_ticks,
         )
-        assert check_session_status(row, admin=native.access()) is SessionStatus.RUNNING
+        assert check_session_status(row, admin=native.access(), db=db) is SessionStatus.RUNNING
         assert native.native("show-option -wqv -t =s1: remain-on-exit").stdout.strip() == "on"
         if operation == "create_session":
             assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None

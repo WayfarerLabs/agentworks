@@ -88,7 +88,7 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         row = db.get_session("s1")
         assert row is not None and row.pid is None
         assert row.boot_id == tmux.read_boot_id(native.run)
-        assert manager._status.check_session_status(row, admin=native.access()) is SessionStatus.RUNNING
+        assert manager._status.check_session_status(row, admin=native.access(), db=db) is SessionStatus.RUNNING
         assert native.batch_status([row]) == {"s1": SessionStatus.RUNNING}
         assert db.get_session("s1") == row
         proofs = [options for command, options in native.calls if "AGW_RUNTIME_LAUNCH=" in command]
@@ -110,7 +110,7 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
                 manager,
                 "observe_session_statuses",
                 lambda rows, **k: {
-                    row.name: manager._status.check_session_status(row, admin=native.access()) for row in rows
+                    row.name: manager._status.check_session_status(row, admin=native.access(), db=db) for row in rows
                 },
             )
             manager.start_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
@@ -233,7 +233,7 @@ def test_boot_only_evidence_has_matching_readonly_status_projections(tmp_path, m
     from agentworks.sessions.manager._status import check_session_status
 
     try:
-        assert check_session_status(checkpoint, admin=native.access()) is expected
+        assert check_session_status(checkpoint, admin=native.access(), db=db) is expected
         assert native.batch_status([checkpoint]) == {"s1": expected}
         assert db.get_session("s1") == row
     finally:

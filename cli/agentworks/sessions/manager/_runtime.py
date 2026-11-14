@@ -270,7 +270,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     # Preflight precedes secret resolution, so its accesses log nothing.
     admin = _mgr._identity_access(definition.vm, config, None, logger=None)
     try:
-        status = observe_session_runtime(current, admin=admin)
+        status = observe_session_runtime(current, admin=admin, db=db)
     except StateError:
         if not can_checkpoint_session(current, vm=definition.vm, admin=admin):
             raise
@@ -385,7 +385,7 @@ def prepare_session_stop(
         status = SessionStatus.STOPPED
     else:
         try:
-            status = observe_session_runtime(session, admin=admin)
+            status = observe_session_runtime(session, admin=admin, db=db)
         except StateError:
             if not can_checkpoint_session(session, vm=vm, admin=admin):
                 raise

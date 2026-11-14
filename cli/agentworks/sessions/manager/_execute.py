@@ -84,7 +84,7 @@ def _execute_session_start(
     if prepared.checkpoint_only:
         checkpoint_session_identity(db, session, vm=vm, admin=admin_access)
     observed_now = observe_session_runtime(
-        session, admin=admin_access, session_access=session_access if is_legacy else None
+        session, admin=admin_access, db=db, session_access=session_access if is_legacy else None
     )
     if observed_now is SessionStatus.UNKNOWN:
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
@@ -111,7 +111,7 @@ def _execute_session_start(
     if not is_legacy or session.pid in {None, PID_STOPPED}:
         session = _mgr._ensure_pid(session, admin=admin_access, db=db)
         is_legacy = session.socket_path is None
-    status = _mgr.check_session_status(session, admin=admin_access) if not is_legacy else observed_now
+    status = _mgr.check_session_status(session, admin=admin_access, db=db) if not is_legacy else observed_now
     if status is SessionStatus.UNKNOWN:
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
     if status is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING:
@@ -253,6 +253,7 @@ def _execute_session_start(
         observed_now = observe_session_runtime(
             session,
             admin=admin_access,
+            db=db,
             session_access=session_access if is_legacy else None,
         )
         if observed_now is SessionStatus.UNKNOWN or (

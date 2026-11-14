@@ -65,7 +65,7 @@ def partial_runtime(
     monkeypatch.setattr(
         manager,
         "observe_session_statuses",
-        lambda rows, **k: {row.name: manager.check_session_status(row, admin=native.access()) for row in rows},
+        lambda rows, **k: {row.name: manager.check_session_status(row, admin=native.access(), db=db) for row in rows},
     )
     monkeypatch.setattr(
         tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
@@ -98,7 +98,7 @@ def test_partial_fingerprint_never_relearns_or_kills_unproven_native_server(
     try:
         assert not _pids._needs_repair(before)
         assert _pids._ensure_pid(before, admin=native.access(), db=db) == before
-        assert manager.check_session_status(before, admin=native.access()) is SessionStatus.RUNNING
+        assert manager.check_session_status(before, admin=native.access(), db=db) is SessionStatus.RUNNING
         assert native.batch_status([before]) == {"s1": SessionStatus.RUNNING}
         assert not any("show-environment" in command for command, _ in native.calls[first:])
         with pytest.raises(AgentworksError) as caught:
@@ -126,7 +126,7 @@ def test_partial_fingerprint_can_complete_with_matching_native_attempt(tmp_path,
             assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == observed
         elif operation == "restart_session":
             assert row is not None and row.tmux_server_start_ticks is not None
-            assert manager.check_session_status(row, admin=native.access()) is SessionStatus.RUNNING
+            assert manager.check_session_status(row, admin=native.access(), db=db) is SessionStatus.RUNNING
         else:
             assert row is not None and row.pid == PID_STOPPED
     finally:

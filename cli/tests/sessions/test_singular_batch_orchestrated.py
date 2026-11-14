@@ -51,17 +51,22 @@ def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox"
 
 
 def _seed_session(db: Database, name: str, ws: str, *, agent: str | None = None) -> None:
+    """A stopped session whose socket sits in its owner's managed directory."""
+    from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
+
+    agent_row = db.get_agent(agent) if agent else None
+    workspace = db.get_workspace(ws)
+    vm = db.get_vm(workspace.vm_name) if workspace is not None else None
+    assert vm is not None and (agent is None or agent_row is not None)
+    socket = (
+        f"{AGENT_SOCKET_ROOT}/{agent_row.linux_user}/{name}.sock"
+        if agent_row is not None
+        else f"{ADMIN_SOCKET_ROOT}/{vm.admin_username}/{name}.sock"
+    )
     db.insert_session(
-        name,
-        ws,
-        "default",
-        SessionMode.AGENT if agent else SessionMode.ADMIN,
-        agent_name=agent,
-        socket_path=f"/tmp/{name}.sock",
+        name, ws, "default", SessionMode.AGENT if agent else SessionMode.ADMIN, agent_name=agent, socket_path=socket
     )
-    db.update_session_runtime(
-        name, socket_path=f"/tmp/{name}.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
-    )
+    db.update_session_runtime(name, socket_path=socket, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None)
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -679,7 +684,7 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, admin: SessionStatus.RUNNING,
+        lambda session, *, admin, db: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -743,7 +748,7 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, admin: SessionStatus.RUNNING,
+        lambda session, *, admin, db: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -771,7 +776,7 @@ def test_describe_session_observes_without_a_vm_hold(
     events: list[str] = []
     _record_holds(monkeypatch, events)
 
-    def _probe(session: object, *, admin: object) -> object:
+    def _probe(session: object, *, admin: object, **_kwargs: object) -> object:
         del session, admin
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
@@ -939,9 +944,11 @@ def test_describe_session_preserves_malformed_stored_boot_error(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
+    seeded = db.get_session("s1")
+    assert seeded is not None
     db.update_session_runtime(
         "s1",
-        socket_path="/tmp/s1.sock",
+        socket_path=seeded.socket_path,
         pid=42,
         boot_id="malformed",
         tmux_server_start_ticks=100,

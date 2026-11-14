@@ -120,21 +120,25 @@ def test_runtime_observer_bounds_admin_and_legacy_owning_accesses(tmp_path, monk
     from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 
     db = _create_stubs(tmp_path, monkeypatch, [])
-    db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
+    vm = db.get_vm("vm1")
+    assert vm is not None
+    db.insert_session(
+        "s1", "ws1", "claude", SessionMode.ADMIN, socket_path=f"{tmux.ADMIN_SOCKET_ROOT}/{vm.admin_username}/s1.sock"
+    )
     row = db.get_session("s1")
     assert row is not None
     admin = RecordingVMAccess([], Admin())
     owner = RecordingVMAccess(admin.calls, Agent("a1", "agt-a1"))
     monkeypatch.setattr(manager, "check_session_status", _status.check_session_status)
 
-    manager.observe_session_runtime(row, admin=admin)
+    manager.observe_session_runtime(row, admin=admin, db=db)
 
     def legacy(name, *, run_command, socket_path):
         run_command("legacy", check=False)
         return tmux.ProbeStatus.PRESENT
 
     monkeypatch.setattr(tmux, "probe_tmux_session", legacy)
-    manager.observe_session_runtime(replace(row, socket_path=None, pid=4242), admin=admin, session_access=owner)
+    manager.observe_session_runtime(replace(row, socket_path=None, pid=4242), admin=admin, db=db, session_access=owner)
     requests = [call.request for call in admin.calls]
     assert owner.requests() and requests
     assert all(request.deadline == GUEST_OBSERVATION_TIMEOUT_SECONDS for request in requests)

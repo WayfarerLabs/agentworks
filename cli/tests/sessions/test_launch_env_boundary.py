@@ -81,7 +81,8 @@ def test_manager_preserves_unreserved_private_prefix_env_in_native_launch(tmp_pa
     try:
         invoke(db, "create_session", workspace="ws1", agent="a1")
         row = db.get_session("s1")
-        assert row is not None and manager.check_session_status(row, admin=native.access()) is SessionStatus.RUNNING
+        assert row is not None
+        assert manager.check_session_status(row, admin=native.access(), db=db) is SessionStatus.RUNNING
         assert native.native("show-environment -g _AGW_OPERATOR_VALUE").stdout.strip() == (
             "_AGW_OPERATOR_VALUE=operator-value"
         )
