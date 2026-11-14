@@ -122,7 +122,7 @@ def prepare_session_definition(
 ) -> SessionLaunchDefinition:
     """Resolve the local definition and graph before infrastructure activation."""
     from agentworks.agents.nodes import live_agent_node
-    from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
+    from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
     from agentworks.orchestration.walk import walk
     from agentworks.resources.access import ensure_recipe_enabled
     from agentworks.sessions.nodes import live_session_node
@@ -156,6 +156,9 @@ def prepare_session_definition(
         )
         validate_effective_harness(template, ("session", session.name), layered.provenance)
     ensure_harness_integration_enabled(registry, template.harness_integration)
+    harness_integration_for(template.harness_integration).validate_launch_config(
+        template.harness_integration_config, intent=intent
+    )
     ensure_recipe_enabled(registry, "session-template", template.name)
     workspace_node = live_workspace_node(workspace, vm_node)
     agent = db.get_agent(session.agent_name) if session.agent_name is not None else None

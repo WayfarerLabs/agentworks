@@ -62,6 +62,19 @@ The main comparators are:
 D6 has no independent comparator against D3: its tests pin error paths as literals rather than
 checking that field documentation can address them.
 
+## Instance-only capability config
+
+Use `Annotated[T, InstanceOnly()]` for a capability config field that must be authored on an
+instance, such as Claude's `force_uuid`. Import the marker from `agentworks.schema`. The shared
+capability declaration validator rejects the field on `*-template` owners, including an explicit
+null. Omission remains valid. Nested model, list, mapping and union fields are checked using the
+validated shape and the authored payload. Effective-config provenance identifies the true field
+declarer, so an instance cannot accidentally inherit an instance-only value from a template.
+
+Ordinary pydantic construction and runtime `validate_own_config` remain owner-free shape checks:
+declaration validation is the boundary that knows whether a value came from a template. The marker
+currently applies to capability config declarations, not arbitrary resource-spec fields.
+
 ## Structural unions
 
 `StructuralUnion` is selector-free and strict. Its closed model arms must be distinguishable by
