@@ -45,9 +45,16 @@ from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
-from agentworks.execution.errors import ExecutionIncomplete, PathRefusal, PathRefused
+from agentworks.execution.errors import (
+    ExecutionIncomplete,
+    PathRefusal,
+    PathRefused,
+    TrustMismatch,
+    TrustMissing,
+    VMNotReady,
+)
 from agentworks.execution.requests import PythonProgram
-from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.execution.results import Completed, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.plugins.codex.harness_integration import (
     CodexConfig,
     CodexIntegration,
@@ -70,7 +77,7 @@ from tests.vm_access_support import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from agentworks.execution.access import VMAccess
@@ -1454,6 +1461,37 @@ def test_a_failed_recorder_install_warns_and_the_launch_goes_on(warnings: list[s
     assert len(warnings) == 1
     if failure != "write-refused":
         assert not any(_is_file_write(request) for request in access.requests())
+
+
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        lambda: TrustMissing("box"),
+        lambda: TrustMismatch("box"),
+        lambda: VMNotReady("box", NotDeliveredReason.PYTHON_MISSING),
+    ],
+    ids=["host-key-missing", "host-key-mismatch", "vm-not-ready"],
+)
+@pytest.mark.parametrize("during", ["home", "write"])
+def test_a_host_key_or_readiness_error_from_the_recorder_install_stops_the_launch(
+    warnings: list[str], make_error: Callable[[], Exception], during: str
+) -> None:
+    """Every later request of the launch would fail the same way, so the install does not warn past it."""
+    access = _target()
+    error = make_error()
+
+    def answer(call: Call) -> Result | None:
+        if (during == "home" and call.request == HOME_PROBE) or (during == "write" and _is_file_write(call.request)):
+            raise error
+        return _installs_the_recorder(call)
+
+    access.answer = answer
+
+    with pytest.raises(type(error)) as caught:
+        _harness_integration(state={}).start(_op_ctx(access))
+
+    assert caught.value is error
+    assert warnings == []
 
 
 def _record(recorder: Path, dest: Path, payload: str) -> int:

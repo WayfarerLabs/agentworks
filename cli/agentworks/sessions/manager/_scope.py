@@ -13,10 +13,9 @@ from agentworks.errors import (
     StateError,
     ValidationError,
 )
-from agentworks.execution.errors import FileConflict, FileContentMismatch, FileLockTimeout, PathRefused
 from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary, operation_log
-from agentworks.workspaces.guest import REQUEST_FAILURES
+from agentworks.workspaces.guest import FILE_WRITE_FAILURES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -29,17 +28,6 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.steps import InitLog
-
-
-_REGENERATION_FAILURES = (
-    *REQUEST_FAILURES,
-    PathRefused,
-    FileConflict,
-    FileContentMismatch,
-    FileLockTimeout,
-)
-"""What the tmuxinator regeneration tolerates: a failed request, or a file operation that was refused,
-conflicted, timed out or wrote nothing."""
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -190,7 +178,7 @@ def _regenerate_tmuxinator(
         socket_paths = {s.name: s.socket_path for s in sessions}
         config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
         write_config(admin, ws.workspace_path, config_text)
-    except _REGENERATION_FAILURES as error:
+    except FILE_WRITE_FAILURES as error:
         # Its requests carry no secret, so the stderr tail needs no redaction.
         output.warn(
             f"The tmuxinator config of workspace '{ws.name}' was not updated: "

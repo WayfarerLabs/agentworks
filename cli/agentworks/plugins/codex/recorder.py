@@ -36,16 +36,9 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import StateError
-from agentworks.execution.errors import (
-    CommandFailed,
-    ExecutionIncomplete,
-    FileConflict,
-    FileContentMismatch,
-    FileLockTimeout,
-    PathRefused,
-    RequestRefused,
-)
+from agentworks.execution.errors import TrustMismatch, TrustMissing, VMNotReady
 from agentworks.vms.home_layout import AGENTWORKS_STATE_DIR
+from agentworks.workspaces.guest import FILE_WRITE_FAILURES
 
 if TYPE_CHECKING:
     from agentworks.execution.access import VMAccess
@@ -169,21 +162,6 @@ def notify_value_word(session_name: str) -> str:
     )
 
 
-_INSTALL_FAILURES = (
-    CommandFailed,
-    ExecutionIncomplete,
-    RequestRefused,
-    PathRefused,
-    FileConflict,
-    FileContentMismatch,
-    FileLockTimeout,
-)
-"""What a failed write or home read raises: a request that did not complete or failed, or a refused write.
-
-A conflicting write raises too, and an unreadable or unusable home raises ``StateError`` besides these.
-"""
-
-
 def recorder_script() -> bytes:
     """The recorder's exact bytes, one line each."""
     return "".join(f"{line}\n" for line in _RECORDER_LINES).encode()
@@ -204,7 +182,8 @@ def install_recorder(access: VMAccess, *, home: str | None) -> None:
     the path or a parent rather than following it. A failure, of the home
     read or the write, is not fatal by design: it warns, and the launch goes
     on, since codex treats a missing notify program as a silent no-op and the
-    session falls back to discovery.
+    session falls back to discovery. A missing or mismatched host key and a VM
+    that cannot run requests are not such failures; they propagate.
     """
     from agentworks.artifacts.session import _session_artifact_home
 
@@ -213,7 +192,11 @@ def install_recorder(access: VMAccess, *, home: str | None) -> None:
         access.files().write(
             f"{recorder_home.rstrip('/')}/{_RECORDER_TAIL}", recorder_script(), mode=0o755, parent_mode=0o755
         )
-    except (*_INSTALL_FAILURES, StateError) as error:
+    except (TrustMissing, TrustMismatch, VMNotReady):
+        # Every later request of the launch would fail the same way.
+        raise
+    except (*FILE_WRITE_FAILURES, StateError) as error:
+        # A plain StateError is the home read's: no home, or one that is not a usable path.
         output.warn(
             f"The codex conversation recorder could not be installed ({error}); "
             "this session's conversation is found by discovery instead."

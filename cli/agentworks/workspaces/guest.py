@@ -11,7 +11,15 @@ from __future__ import annotations
 import shlex
 
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
+from agentworks.execution.errors import (
+    CommandFailed,
+    ExecutionIncomplete,
+    FileConflict,
+    FileContentMismatch,
+    FileLockTimeout,
+    PathRefused,
+    RequestRefused,
+)
 from agentworks.execution.files import guest_path, normalized_guest_path
 from agentworks.execution.requests import Script, Shell
 
@@ -30,6 +38,13 @@ REQUEST_FAILURES = (CommandFailed, ExecutionIncomplete, RequestRefused)
 A missing or mismatched host key, a VM that cannot run requests and an
 elevated request on an agent's access are not among them: every later
 request would fail the same way, so they propagate.
+"""
+
+FILE_WRITE_FAILURES = (*REQUEST_FAILURES, PathRefused, FileConflict, FileContentMismatch, FileLockTimeout)
+"""What a step that tolerates a failed file write catches: a failed request, or a file operation that was refused,
+conflicted, timed out or wrote nothing.
+
+The host-key, readiness and elevation errors still propagate, as for ``REQUEST_FAILURES``.
 """
 
 
