@@ -391,16 +391,20 @@ Named consoles keep the older path for now.
   and every pane inherits, instead of as `tmux new-session -e` arguments. The operation log records
   only their names.
 - **Every status read is one request with a 10-second deadline.** That covers the reads before a
-  start, restart, stop or delete and the PID repair, which waited for as long as the VM took before,
-  as well as the listings and `session describe`, which were bounded already. A read the VM does not
-  answer in time leaves a listing showing `unknown`, as before, and stops a lifecycle command with a
-  connection error instead of the refusal of an unknown runtime; nothing is torn down on a guess.
-  The batched read of `session list --status` runs as root as a whole, where it elevated only for
-  agent sessions.
+  start, restart, stop or delete, the reads of `session attach` and `session logs`, and the PID
+  repair, which waited for as long as the VM took before, as well as the listings and
+  `session describe`, which were bounded already. A read the VM does not answer in time leaves a
+  listing showing `unknown`, as before, and stops a lifecycle command with a connection error
+  instead of the refusal of an unknown runtime; nothing is torn down on a guess. The batched read of
+  `session list --status` is one elevated request that reads each session's server as the account
+  that owns it, where it read admin sessions as the admin and elevated for agent sessions; a session
+  whose socket path is a link, is not a socket or belongs to another account shows `unknown`. A
+  listing that cannot read a VM now warns once with the reason.
 - **Launches are logged as the session's owner.** `session create`, `start` and `restart` write
   every request of the launch, an agent session's requests as the agent included, to the command's
-  operation log by shape. `session stop --all` writes one `session-stop-all` log per VM. Status
-  reads write none.
+  operation log by shape. `session stop` writes one `session-stop` log per VM and
+  `session stop --all` one `session-stop-all` log per VM. The listings, `session describe` and the
+  reads that prepare a start or restart write none.
 - **`session attach` runs `tmux attach` itself.** The connection starts `tmux` directly with its
   arguments rather than through the admin's shell, and `[terminal] clear_on_detach` applies as
   before.

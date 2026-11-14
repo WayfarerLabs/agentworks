@@ -28,9 +28,18 @@ eager identity repair. Batched checks combine the normal probes into one remote 
 reachable VM. A pending launch with no recorded PID requires additional bounded reads to verify its
 native attempt identity and stable process fingerprint. These reads do not adopt the runtime or
 repair its row. Incomplete or indeterminate evidence stays `UNKNOWN`. Every read runs on the VM
-admin's access as one request, sent once, with a 10-second deadline. A single session's reads run as
-root only for an agent's runtime; the batched read runs as root, which reaches every session's
-server. Status reads write no operation log.
+admin's access as one request, sent once, with a 10-second deadline. A legacy row on the shared
+server is always an admin session, so its read runs on that same access. A single session's reads
+run as root only for an agent's runtime. The batched read is elevated only to read each session's
+server as the account that owns it: each socket path is checked against its owner's directory first,
+and a socket that is a link, is not a socket, or belongs to another account is never read and shows
+as `UNKNOWN`. A listing that cannot read a VM shows its sessions as `UNKNOWN` and warns once with
+the reason.
+
+The listings, `session describe` and the reads that prepare a start or restart write no operation
+log. A command that reads status inside its own operation (`session attach`, `logs`, `delete`,
+`stop`, and a start's or restart's checks once it begins) writes those reads to that operation's
+log.
 
 Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
 them; the table adds `STATUS`, reports progress before SSH begins, and appends compact uptime to a
