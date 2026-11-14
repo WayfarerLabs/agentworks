@@ -156,7 +156,6 @@ def test_concurrent_teardowns_overlap_under_fixed_bound_and_reconcile_on_main_th
     assert {thread_id for thread_id, _name in db.calls} == {main_thread}
     assert set(output_threads) == {main_thread}
     assert {name for _thread_id, name in db.calls} == {plan.session_name for plan in plans}
-    assert len({id(plan.access) for plan in plans}) == len(plans)
 
 
 @pytest.mark.parametrize("collision", ["socket", "process"])

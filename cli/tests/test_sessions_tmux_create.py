@@ -1,12 +1,11 @@
-"""Tests for the wire shape of sessions/tmux.create_session.
+"""Tests for the wire shape of sessions/tmux.create_session and the tmux helpers beside it.
 
 Two contracts live here:
 
-- The SetEnv-based env injection shape: env vars reach the pane via tmux's
-  session-environment flags (``tmux new-session -e KEY=VAL``) AND via the
-  SSH layer's SetEnv (materialized when ``run_command`` is called with
-  ``env=``). See the sshd-accept-env-wildcard ADR for the AcceptEnv-side
-  rationale.
+- The environment shape: a session's environment reaches the launch only as
+  ``run_command``'s ``env``, which the request carries, never as
+  ``tmux new-session -e`` arguments on its command line. ``_tmux_env_flags``,
+  which the consoles still use, keeps its own tests here.
 - The dead-workload capture path: remain-on-exit chained into the create,
   the liveness probes around the grant machinery, and the capture-and-raise
   (or could-not-verify) errors for a workload that dies instantly.

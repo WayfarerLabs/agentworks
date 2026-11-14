@@ -537,12 +537,11 @@ def answer_from_target(target: Any) -> Callable[[Call], Result | None]:
             options["env"] = dict(request.env)
         outcome = target.run(line, **options)
         stdout, stderr = getattr(outcome, "stdout", "") or "", getattr(outcome, "stderr", "") or ""
-        result = Result(
+        return Result(
             Completed(getattr(outcome, "returncode", 0 if getattr(outcome, "ok", True) else 1)),
             stdout.encode() if isinstance(stdout, str) else stdout,
             stderr.encode() if isinstance(stderr, str) else stderr,
         )
-        return result
 
     return answer
 
