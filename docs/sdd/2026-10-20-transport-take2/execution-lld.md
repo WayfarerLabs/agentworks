@@ -57,7 +57,7 @@ them:
 | `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
 
 `trust.py` makes `_literal_path` (`trust.py:122`) public as `literal_path(path, what)`, so the VM
-policy quotes the identity file by the same rules as the store path and its refusal names what it
+policy checks the identity file by the same rules as the store path, and its refusal names what it
 was refusing.
 
 ## The proof modules
@@ -179,12 +179,12 @@ database, with the proof's host and user patterns (`connection.py:51-58`).
 **VM policy options.** `-F none` first, so no operator or system configuration applies, then these
 as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leaves to say):
 
-| Group    | Options                                                                                                                                                                                                                       |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity | `IdentityFile="<ssh_private_key>"` and `IdentitiesOnly=yes` (I13). `CertificateFile="<ssh_private_key>/disabled-certificate"`, the 8.5 workaround (`:117-121`). No `IdentityAgent`: the default agent serves an encrypted key |
-| Auth     | `BatchMode=yes`, `PreferredAuthentications=publickey`, `SecurityKeyProvider=none`                                                                                                                                             |
-| Trust    | `trust.ssh_options(TrustBinding(VM, vm.name))`, read at spawn, so a missing record is `TrustMissing` and nothing spawns                                                                                                       |
-| Liveness | `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                                                    |
+| Group    | Options                                                                                                                                                                                                                                                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity | `IdentityFile=<ssh_private_key>` and `IdentitiesOnly=yes` (I13). `CertificateFile=<ssh_private_key>/disabled-certificate`, the 8.5 workaround (`:117-121`). Each path is quoted only when it holds whitespace or an apostrophe (`trust.option_value`). No `IdentityAgent`: the default agent serves an encrypted key |
+| Auth     | `BatchMode=yes`, `PreferredAuthentications=publickey`, `SecurityKeyProvider=none`                                                                                                                                                                                                                                    |
+| Trust    | `trust.ssh_options(TrustBinding(VM, vm.name))`, read at spawn, so a missing record is `TrustMissing` and nothing spawns                                                                                                                                                                                              |
+| Liveness | `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                                                                                                                                           |
 
 - **What `-F none` already settles.** Password and keyboard-interactive authentication, multiplexing
   (I12), proxies, agent and X11 forwarding, host-key DNS, canonicalization, `KnownHostsCommand`,

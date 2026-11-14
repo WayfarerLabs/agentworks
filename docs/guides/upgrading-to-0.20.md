@@ -218,6 +218,10 @@ path and needs none of what follows. Everything else keeps its current path for 
   to be loaded in that agent first. When a connection fails and the configured key is
   passphrase-protected, the error's hint mentions `ssh-add`; `vm port-forward` shows ssh's own log
   instead.
+- **Key paths ssh would misread are refused.** A configured private key whose path holds `%`, `$`,
+  `"`, a backslash or a control character is refused by these commands, and is left out of the
+  managed SSH config entries with a warning, so the operator's own `ssh` offers its default keys for
+  those hosts. Move the key to a plain path.
 - **Windows passes arguments through unexpanded.** `agw` no longer expands `*`, `?`, `~`, `%VAR%` or
   `$VAR` in its own arguments on Windows, which it did before forwarding them, even after `--`. A
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a
