@@ -1298,10 +1298,11 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
   have recovered, such as a slow Wi-Fi handoff or a tunnel renegotiation. Nothing on the VM is
   affected either way, so reattaching picks the console back up where you left it. A tab killed
   outright, before the command can return, runs no cleanup at all. The next attach sanitizes on the
-  way in, which clears the leftover emulator modes (the mouse codes, the alternate screen), but it
-  cannot recover a lost line discipline: there is no record of what echo and line-editing looked
-  like before the attach that died, so a tab left not echoing stays that way. Open a fresh tab for
-  that case.
+  way in, which clears the leftover emulator modes (the mouse codes, the alternate screen). On a tab
+  not left on the alternate screen it leaves your cursor where it is, so output continues below your
+  scrollback rather than over it. It cannot recover a lost line discipline: there is no record of
+  what echo and line-editing looked like before the attach that died, so a tab left not echoing
+  stays that way. Open a fresh tab for that case.
 - **A dropped connection says so.** When ssh exits 255 (its transport-failure code, as opposed to
   the remote command simply exiting non-zero) you get a one-line notice that the connection dropped
   and the terminal was restored. Without it the failure is silent: ssh writes its own diagnostic

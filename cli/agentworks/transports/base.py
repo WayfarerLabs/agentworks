@@ -169,27 +169,17 @@ class Transport(ExecTransport):
         agent/VM shells; putting the guard here means none of them can
         forget it. See :mod:`agentworks.terminal`.
         """
-        with guarded_terminal() as guard:
+        with guarded_terminal():
             code = self._interactive(command, env=env)
-            # A clean exit (0, e.g. a tmux detach) means the remote already
-            # left the alt screen, so the guard's exit pass can skip the
-            # alt-screen buffer switches that would otherwise jerk the cursor
-            # on Windows Terminal. A non-zero exit, or an exception (which
-            # leaves clean_exit at its default False), keeps the full reset.
-            guard.clean_exit = code == 0
         if clear_screen_on_exit:
-            # Two complementary mechanisms restore the terminal on exit. The
-            # guard's exit-code gate (above) keeps the cursor clean for EVERY
-            # interactive path, including the ones that do NOT clear (vm/agent
-            # shell, vm exec) -- which is why it is gated on the exit code
-            # rather than on "is this a tmux attach". This clear is an
-            # additional, deterministic fallback that only full-screen attaches
-            # (session / console) request, and only on terminals we don't trust
-            # to restore cleanly (Windows), where the gate alone proved
-            # unreliable on the nested-tmux console path. Emitted after the
-            # guard's mode resets (which clearing does not cover) and before the
-            # notice (so a dropped-connection message survives on the cleared
-            # screen).
+            # The guard's exit pass resets the modes without moving the cursor,
+            # on every interactive path. This clear is an additional,
+            # deterministic fallback that only full-screen attaches (session /
+            # console) request, and only on terminals we don't trust to restore
+            # cleanly (Windows), where the nested-tmux console path proved
+            # unreliable. Emitted after the guard's mode resets (which clearing
+            # does not cover) and before the notice (so a dropped-connection
+            # message survives on the cleared screen).
             emit_clear()
         self._note_interactive_exit(code)
         return code

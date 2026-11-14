@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextlib
 import inspect
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -272,10 +271,10 @@ def test_interactive_runs_inside_the_terminal_guard(monkeypatch: pytest.MonkeyPa
     entered: list[str] = []
 
     @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
+    def _spy() -> Iterator[None]:
         entered.append("enter")
         try:
-            yield SimpleNamespace(clean_exit=False)
+            yield
         finally:
             entered.append("exit")
 
@@ -291,10 +290,10 @@ def test_interactive_guard_closes_when_the_transport_raises(monkeypatch: pytest.
     entered: list[str] = []
 
     @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
+    def _spy() -> Iterator[None]:
         entered.append("enter")
         try:
-            yield SimpleNamespace(clean_exit=False)
+            yield
         finally:
             entered.append("exit")
 
@@ -303,48 +302,6 @@ def test_interactive_guard_closes_when_the_transport_raises(monkeypatch: pytest.
     with pytest.raises(RuntimeError):
         t.interactive("")
     assert entered == ["enter", "exit"]
-
-
-def test_interactive_flags_a_clean_exit_to_the_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wrapper reports the outcome to the guard so the exit sanitize can
-    drop the alt-screen switches on a clean exit. Exit 0 -> clean; a non-zero
-    exit -> not clean (a drop keeps the full reset)."""
-    seen: list[bool] = []
-
-    @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
-        guard = SimpleNamespace(clean_exit=False)
-        try:
-            yield guard
-        finally:
-            seen.append(guard.clean_exit)
-
-    monkeypatch.setattr("agentworks.transports.base.guarded_terminal", _spy)
-    _RecordingTransport(exit_code=0).interactive("")
-    _RecordingTransport(exit_code=255).interactive("")
-    assert seen == [True, False]
-
-
-def test_interactive_leaves_clean_exit_false_when_the_transport_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An exception never reaches the clean_exit assignment, so the guard
-    keeps its default (full reset). A drop that surfaces as a raise is
-    exactly the case the alt-screen switches exist for."""
-    seen: list[bool] = []
-
-    @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
-        guard = SimpleNamespace(clean_exit=False)
-        try:
-            yield guard
-        finally:
-            seen.append(guard.clean_exit)
-
-    monkeypatch.setattr("agentworks.transports.base.guarded_terminal", _spy)
-    with pytest.raises(RuntimeError):
-        _RecordingTransport(raises=True).interactive("")
-    assert seen == [False]
 
 
 def test_interactive_clears_screen_only_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:

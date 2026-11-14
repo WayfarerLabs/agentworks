@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import shutil
@@ -19,7 +20,8 @@ from agentworks.execution.errors import TrustMissing
 from agentworks.execution.requests import Forward
 from agentworks.execution.ssh_process import ArgvMode, Destination, VMPolicy, build_argv, stage0_command
 from agentworks.execution.trust import TrustBinding, TrustMode
-from tests.conftest import seed_vm_trust
+from tests.conftest import pretend_windows_console, requires_posix_shell, seed_vm_trust
+from tests.execution.conformance.lanes import SHELLS, require_shell
 
 SSH = shutil.which("ssh")
 needs_ssh = pytest.mark.skipif(SSH is None, reason="requires an installed OpenSSH client")
@@ -267,3 +269,55 @@ def test_stage0_is_one_short_line_that_no_account_shell_rewrites() -> None:
     assert command.startswith("/usr/bin/python3 -I -S -c '")
     assert command.endswith(f"{program}'")
     assert stage0_command("/tmp/agw-handover-ab/s").endswith("' /tmp/agw-handover-ab/s")
+
+
+# -- The interactive remote command on a Windows console -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("platform", "stdin_tty", "stdout_tty", "led"),
+    [
+        ("win32", True, True, True),
+        ("win32", False, True, False),  # no pty, so no raw mode: the client's console write would stop at the NUL
+        ("win32", True, False, False),  # the NUL would land in the redirected output
+        ("linux", True, True, False),
+    ],
+)
+def test_an_interactive_remote_command_is_led_by_a_nul_only_on_a_windows_console(
+    monkeypatch: pytest.MonkeyPatch, platform: str, stdin_tty: bool, stdout_tty: bool, led: bool
+) -> None:
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr("sys.platform", platform)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: stdin_tty)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: stdout_tty)
+
+    command = ssh_process.nul_first_on_a_windows_console("tmux attach -t s1")
+
+    assert command == ("printf '\\000'; tmux attach -t s1" if led else "tmux attach -t s1")
+
+
+def test_a_closed_or_missing_stream_is_not_a_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    pretend_windows_console(monkeypatch)
+    closed = io.StringIO()
+    closed.close()
+    monkeypatch.setattr("sys.stdout", closed)
+    assert ssh_process.nul_first_on_a_windows_console("x") == "x"
+
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr("sys.stdin", None)
+    assert ssh_process.nul_first_on_a_windows_console("x") == "x"
+
+
+@requires_posix_shell
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_nul_led_command_writes_the_nul_first_and_keeps_its_exit_status(
+    monkeypatch: pytest.MonkeyPatch, shell: str
+) -> None:
+    with monkeypatch.context() as windows:
+        pretend_windows_console(windows)
+        led = ssh_process.nul_first_on_a_windows_console("cd / && printf hi && exit 9")
+
+    completed = subprocess.run([require_shell(shell), "-c", led], capture_output=True, timeout=30, check=False)
+
+    assert completed.stdout == b"\0hi"
+    assert completed.returncode == 9

@@ -173,11 +173,12 @@ The client writes three things on stdin, in order:
 
 **Stage 0.** The remote command is one constant line, `/usr/bin/python3 -I -S -c '<stage 0>'`, with
 `sudo -n` in front for an elevated request and a handover path after it for the terminal half of an
-attach (D8). Stage 0 is one line of under 200 characters: it reads the length-prefixed agw-launch
-source from stdin, or from the handover socket, and runs it. If it cannot read or start it, Python
-exits non-zero before any start marker, so the request is not delivered. The client discards
-everything before the marker, so a traceback quoting misaligned request bytes, as a startup file
-that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
+attach (D8). On a Windows console the terminal half's command is also led by a NUL (execution LLD,
+Terminal handover). Stage 0 is one line of under 200 characters: it reads the length-prefixed
+agw-launch source from stdin, or from the handover socket, and runs it. If it cannot read or start
+it, Python exits non-zero before any start marker, so the request is not delivered. The client
+discards everything before the marker, so a traceback quoting misaligned request bytes, as a startup
+file that reads stdin produces, never reaches the error or a log. Stage 0's line contains no single
 quote, double quote, backslash, `!` or newline, so the account shell passes it through unchanged and
 Windows argument quoting has nothing to escape. `-I` ignores Python's environment variables and the
 user site directory, and `-S` skips site packages, so no Python startup applies. The short line
@@ -775,7 +776,7 @@ linked issues and fix history) and adds rows before anything is deleted.
 | I18 | A failed backend delete keeps the VM's row and its store record (#329; `vms/manager/power.py:312-320`)                                                                                                                                             | 4            |
 | I19 | The agent probe tells an unreachable VM from an agent that predates the rollout (ADR 0011; `agents/manager/_common.py:237-286`)                                                                                                                    | 2, 6         |
 | I20 | Backup's download stops the copy and removes the partial file on Ctrl-C (`97e11a168`; `vms/backup.py:504-505`)                                                                                                                                     | 7            |
-| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`)                                                                                                                          | 2            |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach, with one payload that leaves the alternate screen without moving the cursor on the primary screen (`897248ead`, `80c813db4`, #889)                 | 2            |
 
 ### Release behaviors to preserve (R10)
 

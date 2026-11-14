@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import contextlib
+import subprocess
 import sys
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks import output
 from agentworks.execution import attach as attach_module
+from agentworks.execution import ssh_process
 from agentworks.execution.requests import LoginShell
+from tests.conftest import pretend_windows_console
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
     from tests.execution.conformance.lanes import LocalLane
 
@@ -27,13 +29,12 @@ def events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     log: list[tuple[str, Any]] = []
 
     @contextlib.contextmanager
-    def guard() -> Iterator[SimpleNamespace]:
-        handle = SimpleNamespace(clean_exit=False)
+    def guard() -> Iterator[None]:
         log.append(("enter", None))
         try:
-            yield handle
+            yield
         finally:
-            log.append(("exit", handle.clean_exit))
+            log.append(("exit", None))
 
     monkeypatch.setattr(attach_module, "guarded_terminal", guard)
     monkeypatch.setattr(output, "warn", lambda message: log.append(("warn", message)))
@@ -49,17 +50,6 @@ def test_a_dropped_connection_is_explained_after_the_guard_has_closed(
 
     kinds = [kind for kind, _ in events]
     assert kinds == ["enter", "exit", "warn", "detail"]  # I6: the guard's reset would wipe an earlier notice
-    assert events[1] == ("exit", False)
-
-
-@pytest.mark.parametrize(("code", "clean"), [(0, True), (1, False), (130, False)])
-def test_only_a_zero_exit_skips_the_full_terminal_reset(
-    local_lane: LocalLane, events: list[tuple[str, Any]], code: int, clean: bool
-) -> None:
-    with local_lane.terminal(behavior=lambda argv, half: code):
-        assert local_lane.access.attach(LoginShell(cwd=local_lane.workdir)) == code
-
-    assert events == [("enter", None), ("exit", clean)]
 
 
 def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
@@ -73,7 +63,7 @@ def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
         with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
             local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
-        assert events == [("enter", None), ("exit", False)]  # I21
+        assert events == [("enter", None), ("exit", None)]  # I21
     finally:
         # The pump kills the parking client at once here, and in this lane that kills the launcher
         # itself; over ssh the launcher sees its stdin close and removes the directory.
@@ -100,3 +90,33 @@ def test_the_login_shell_gets_the_requested_environment_without_it_touching_a_co
     assert code == 0
     assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), b"home=/tmp"]
     assert not any(secret in argument for argument in terminal.argv)
+
+
+def test_on_a_windows_console_the_terminal_half_writes_a_nul_first_and_keeps_the_shells_exit_status(
+    local_lane: LocalLane, events: list[tuple[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr(ssh_process, "_CREATE_NO_WINDOW", 0)  # this host cannot create a console-free process
+    with local_lane.terminal(b"echo hi\nexit 7\n") as terminal:
+        code = local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
+
+    assert code == 7
+    assert terminal.stdout.startswith(b"\0hi\n")
+
+
+def test_only_the_parking_connection_leaves_the_operators_console(
+    local_lane: LocalLane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #889: the parked client must not share the console the terminal half runs on."""
+    spawned: list[bool] = []
+    real_spawn = ssh_process.spawn
+
+    def spawn(argv: Sequence[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        spawned.append(kwargs.get("share_console", True))
+        return real_spawn(argv, **kwargs)
+
+    monkeypatch.setattr(ssh_process, "spawn", spawn)
+    with local_lane.terminal(behavior=lambda argv, half: 0):
+        local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
+
+    assert spawned == [False]  # the terminal half is stubbed here; it spawns with the default

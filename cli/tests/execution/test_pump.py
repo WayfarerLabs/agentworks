@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING
@@ -553,6 +554,142 @@ def test_the_child_environment_is_inherited_off_windows() -> None:
     if os.name == "nt":
         pytest.skip("covered by the Windows test")
     assert ssh_process.child_environment() is None
+
+
+@pytest.fixture
+def popen_flags(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Record each spawn's ``creationflags`` instead of starting a process."""
+    flags: list[int] = []
+
+    class Started:
+        def wait(self) -> int:
+            return 0
+
+    def record(*_args: object, creationflags: int = 0, **_kwargs: object) -> Started:
+        flags.append(creationflags)
+        return Started()
+
+    monkeypatch.setattr(subprocess, "Popen", record)
+    return flags
+
+
+@pytest.mark.parametrize(("platform", "expected"), [("win32", 0x08000000), ("linux", 0), ("darwin", 0)])
+def test_a_client_that_does_not_share_the_console_gets_one_of_its_own_only_on_windows(
+    monkeypatch: pytest.MonkeyPatch, popen_flags: list[int], platform: str, expected: int
+) -> None:
+    monkeypatch.setattr("sys.platform", platform)
+
+    ssh_process.spawn(["ssh"], stdin=None, stdout=None, stderr=None, share_console=False)
+
+    assert popen_flags == [expected]
+
+
+def test_clients_share_the_operators_console_by_default(
+    monkeypatch: pytest.MonkeyPatch, popen_flags: list[int]
+) -> None:
+    monkeypatch.setattr("sys.platform", "win32")
+
+    ssh_process.spawn(["ssh"], stdin=None, stdout=None, stderr=None)
+    ssh_process.run_terminal(["ssh"])
+
+    assert popen_flags == [0, 0]
+
+
+def test_a_session_shares_the_console_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[bool] = []
+
+    def spawn(*_args: object, share_console: bool, **_kwargs: object) -> None:
+        asked.append(share_console)
+        raise ClientUnsupported("recorded")
+
+    monkeypatch.setattr(ssh_process, "spawn", spawn)
+    session = PipeSession(["ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
+
+    with pytest.raises(ClientUnsupported):
+        session.start()
+    assert asked == [True]
+
+
+# Run in a child with a console of its own, so the check never depends on whether
+# pytest has one. Prints whether the child and its client are on that console.
+_CONSOLE_MEMBERSHIP = """
+import ctypes, os, subprocess, sys
+from ctypes import wintypes
+from agentworks.execution import ssh_process
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.GetConsoleProcessList.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
+kernel32.GetConsoleProcessList.restype = wintypes.DWORD
+
+def attached():
+    ids = (wintypes.DWORD * 1024)()
+    count = kernel32.GetConsoleProcessList(ids, len(ids))
+    return {ids[index] for index in range(min(count, len(ids)))}
+
+client = ssh_process.spawn(
+    [sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(30)"],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    share_console=sys.argv[1] == "share",
+)
+try:
+    assert client.stdout.readline().strip() == b"ready"
+    members = attached()
+    print(os.getpid() in members, client.pid in members)
+finally:
+    client.kill()
+    client.wait()
+"""
+
+
+@pytest.mark.parametrize("share_console", [True, False])
+def test_a_console_free_client_is_not_attached_to_the_operators_console(share_console: bool) -> None:
+    if sys.platform != "win32":  # a statement, not a skipif mark, so the type checker narrows too
+        pytest.skip("Win32 consoles")
+    hidden = subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE)
+
+    probe = subprocess.run(
+        [sys.executable, "-c", _CONSOLE_MEMBERSHIP, "share" if share_console else "own"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=60,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+        startupinfo=hidden,
+        check=False,
+    )
+
+    assert probe.returncode == 0, probe.stderr.decode(errors="replace")
+    assert probe.stdout.split() == [b"True", str(share_console).encode()]
+
+
+# Exits 0 when the remote command of an interactive ssh would be led by a NUL, 3 when not.
+_NUL_LEAD = (
+    "import sys; from agentworks.execution import ssh_process; "
+    "sys.exit(0 if ssh_process.nul_first_on_a_windows_console('x') != 'x' else 3)"
+)
+
+
+@pytest.mark.parametrize("on_the_console", [True, False])
+def test_only_a_client_whose_stdio_is_the_console_gets_the_nul_lead(on_the_console: bool) -> None:
+    if sys.platform != "win32":  # a statement, not a skipif mark, so the type checker narrows too
+        pytest.skip("Win32 consoles")
+    hidden = subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW, wShowWindow=subprocess.SW_HIDE)
+    # None for all three leaves the child's standard handles on its new console.
+    redirect = None if on_the_console else subprocess.PIPE
+
+    probe = subprocess.run(
+        [sys.executable, "-c", _NUL_LEAD],
+        stdin=None if on_the_console else subprocess.DEVNULL,
+        stdout=redirect,
+        stderr=redirect,
+        timeout=60,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+        startupinfo=hidden,
+        check=False,
+    )
+
+    assert probe.returncode == (0 if on_the_console else 3)
 
 
 def test_binary_stdio_round_trips_every_byte_and_end_of_file() -> None:

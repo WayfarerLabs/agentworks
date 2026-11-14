@@ -15,6 +15,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.execution.ssh_process import nul_first_on_a_windows_console
 from agentworks.execution.trust import HOST_TRUST, ssh_options
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
@@ -126,12 +127,15 @@ class RemoteLimaTransport(Transport):
         *,
         env: dict[str, str] | None = None,
     ) -> int:
-        """Interactive shell via ``ssh -t <host> $SHELL -lc 'limactl shell ...'``."""
+        """Interactive shell via ``ssh -t <host> $SHELL -lc 'limactl shell ...'``.
+
+        The host command is led by a NUL on a Windows console (``nul_first_on_a_windows_console``).
+        """
         del env  # documented gap: no env propagation on interactive path
         inner = f"limactl shell {self.vm_name}"
         if command:
             inner = _lima_shell_command(self.vm_name, command)
-        wrapped = f"$SHELL -lc {shlex.quote(inner)}"
+        wrapped = nul_first_on_a_windows_console(f"$SHELL -lc {shlex.quote(inner)}")
         args = [
             "ssh",
             "-t",

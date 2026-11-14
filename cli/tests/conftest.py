@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import sqlite3
 import tempfile
@@ -72,6 +73,20 @@ requires_posix_shell = pytest.mark.skipif(
     not Path("/bin/sh").exists(),
     reason="requires a POSIX shell (skipped on the Windows controller)",
 )
+
+
+class _Terminal(io.StringIO):
+    """A text stream that reports itself as a terminal."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def pretend_windows_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make this process look like a Windows one whose stdin and stdout are the console."""
+    monkeypatch.setattr("sys.platform", "win32")
+    monkeypatch.setattr("sys.stdin", _Terminal())
+    monkeypatch.setattr("sys.stdout", _Terminal())
 
 
 @pytest.fixture
