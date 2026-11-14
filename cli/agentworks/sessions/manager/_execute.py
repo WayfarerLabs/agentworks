@@ -45,7 +45,11 @@ def execute_session_start(
         operation_log(definition.vm.name, f"session-{operation}", redactions=redactions) as logger,
     ):
         return _execute_session_start(
-            prepared, secret_values=secret_values, graph_secret_values=graph_secret_values, logger=logger
+            prepared,
+            secret_values=secret_values,
+            graph_secret_values=graph_secret_values,
+            logger=logger,
+            operation=operation,
         )
 
 
@@ -55,8 +59,9 @@ def _execute_session_start(
     secret_values: Mapping[str, str],
     graph_secret_values: Mapping[str, str],
     logger: InitLog,
+    operation: str,
 ) -> bool:
-    """The start itself, inside the operation's log and its redaction of launch errors."""
+    """The start itself, ``operation`` (``start`` or ``restart``), inside its log and its redaction of launch errors."""
     from agentworks.sessions.tmux import create_session as create_tmux_session
     from agentworks.sessions.tmux import deploy_restricted_config
 
@@ -69,7 +74,6 @@ def _execute_session_start(
     name, template, session_node, scope = session.name, definition.template, definition.session_node, definition.scope
     replace_running, force, intent = definition.replace_running, definition.force, definition.intent
     running_restart_authorized = definition.running_restart_authorized
-    operation = "restart" if replace_running else "start"
     is_admin, is_legacy = session.mode == SessionMode.ADMIN.value, prepared.legacy
     # The prepared owner's access already proved direct SSH as an agent; these log to the operation.
     session_access = _mgr._session_access(session, vm=vm, config=config, db=db, logger=logger)
@@ -127,7 +131,6 @@ def _execute_session_start(
         running_restart_authorized=running_restart_authorized,
     )
     recovered_startup = prepared.recovered_startup
-    redactions = logger.redactions
     session_run_command = access_run_command(session_access, deadline=None, elevated=False)
     if recovered_startup and status is SessionStatus.RUNNING and not replace_running:
         from agentworks.sessions.tmux import (
@@ -159,7 +162,7 @@ def _execute_session_start(
             run_command=session_run_command,
             socket_path=socket_path,
             is_admin=is_admin,
-            redactions=redactions,
+            redactions=logger.redactions,
         )
         output.result(f"Session '{name}' startup recovered")
         return True
@@ -359,7 +362,7 @@ def _execute_session_start(
             run_command=session_run_command,
             socket_path=new_sock,
             is_admin=is_admin,
-            redactions=redactions,
+            redactions=logger.redactions,
         )
 
     from agentworks.harness_setup.outcomes import setup_completion_suffix
