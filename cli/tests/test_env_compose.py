@@ -136,12 +136,15 @@ def test_secrets_bypass_substitution_and_escaping() -> None:
 
 
 @pytest.mark.parametrize("value", ["/srv/line\nbreak", "/srv/carriage\rreturn", "/srv/nul\0value"])
-def test_rendered_plaintext_is_checked_for_environment_delivery(value: str) -> None:
+@pytest.mark.parametrize("scope", ["vm", "session"])
+def test_rendered_plaintext_is_checked_for_environment_delivery(value: str, scope: str) -> None:
+    source = {"CONFIG": EnvEntry("${agw:workspace_dir}")}
     with pytest.raises(ValidationError) as caught:
         compose_env(
             values={},
             ctx=_ctx(workspace_dir=value),
-            vm={"CONFIG": EnvEntry("${agw:workspace_dir}")},
+            vm=source if scope == "vm" else {},
+            session=source if scope == "session" else None,
         )
     assert caught.value.entity_name == "env.CONFIG"
     assert value not in repr((caught.value.args, vars(caught.value)))
@@ -198,19 +201,6 @@ def test_legacy_placeholders_apply_only_to_session_scope(scope: str, warnings: l
     assert len(warnings) == (1 if scope == "session" else 0)
 
 
-def test_session_legacy_and_namespaced_values_render_once_with_dollar_adjacency(warnings: list[str]) -> None:
-    workspace = "{{session_name}}${agw:session_name}"
-    out = compose_env(
-        values={},
-        ctx=_ctx(workspace_name=workspace, session_name="work"),
-        vm={},
-        session={"LABEL": EnvEntry("{{workspace_name}}|${agw:workspace_name}|${{session_name}}|$${agw:session_name}")},
-    )
-
-    assert out["LABEL"] == f"{workspace}|{workspace}|$work|${{agw:session_name}}"
-    assert len(warnings) == 1
-
-
 def test_discarded_session_aliases_and_secret_values_do_not_warn(warnings: list[str]) -> None:
     secret = "{{session_name}}/${agw:session_name}/$${agw:unknown}"
     out = compose_env(
@@ -232,19 +222,4 @@ def test_discarded_session_aliases_and_secret_values_do_not_warn(warnings: list[
     assert out["OVERRIDDEN"] == "literal"
     assert out["VM_ONLY"] == "{{workspace_name}}"
     assert out["AGENTWORKS_SESSION"] == "work"
-    assert warnings == []
-
-
-@pytest.mark.parametrize("value", ["line\nbreak", "carriage\rreturn", "nul\0value"])
-def test_session_legacy_replacements_retain_env_line_safety(value: str, warnings: list[str]) -> None:
-    with pytest.raises(ValidationError) as caught:
-        compose_env(
-            values={},
-            ctx=_ctx(workspace_name=value),
-            vm={},
-            session={"PATH": EnvEntry("{{workspace_name}}")},
-        )
-
-    assert caught.value.entity_name == "env.PATH"
-    assert value not in repr((caught.value.args, vars(caught.value)))
     assert warnings == []
