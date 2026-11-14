@@ -18,6 +18,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions.multi_console import console_listing
+from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT
 from agentworks.vms.manager import inspect
 from tests.vm_access_support import Admin, Call, install_access_recorder
 
@@ -80,6 +81,10 @@ def _guard_mutating_seams(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(session_manager, "_repair_session_pid", _forbidden("single PID repair"))
 
 
+WORK_SOCKET = f"{ADMIN_SOCKET_ROOT}/agentworks/work.sock"
+"""The seeded session's socket, in the seeded VM admin's (``insert_vm``'s default ``agentworks``) directory."""
+
+
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
@@ -93,11 +98,11 @@ def _seed_session(db: Database) -> None:
         "ws",
         "default",
         SessionMode.ADMIN,
-        socket_path="/tmp/work.sock",
+        socket_path=WORK_SOCKET,
     )
     db.update_session_runtime(
         "work",
-        socket_path="/tmp/work.sock",
+        socket_path=WORK_SOCKET,
         pid=100,
         boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         tmux_server_start_ticks=1,
@@ -180,9 +185,10 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
         assert isinstance(request.stdin, Bytes)
         lines = request.stdin.data.decode().splitlines()
         assert len(lines) == 1
-        encoded_name, encoded_socket, pid = lines[0].split()
+        encoded_name, encoded_socket, encoded_owner, pid = lines[0].split()
         assert base64.b64decode(encoded_name, validate=True).decode() == "work"
-        assert base64.b64decode(encoded_socket, validate=True).decode() == "/tmp/work.sock"
+        assert base64.b64decode(encoded_socket, validate=True).decode() == WORK_SOCKET
+        assert base64.b64decode(encoded_owner, validate=True).decode() == "agentworks"
         assert pid == "100"
         events.append("status-read")
         return Result(Completed(0), f"\nAGW_RUNTIME_BATCH=S:{name_key}:0::0::0::0:\n".encode())

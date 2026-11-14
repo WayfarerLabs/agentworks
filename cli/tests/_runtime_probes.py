@@ -12,7 +12,7 @@ _FRAME = re.compile(r"printf '\\nAGW_RUNTIME_([A-Z]+)='; (?:printf '\\nAGW_RUNTI
 
 def owner_probe_line(command: str) -> str:
     """The line a stale-socket probe runs as the socket's owner (``runuser -u O -- sh -c LINE``), else ``command``."""
-    if "runuser -u " not in command:
+    if re.search(r"runuser -u \S+ -- sh -c ", command) is None:
         return command
     words = shlex.split(command)
     start = words.index("runuser")

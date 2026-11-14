@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pwd
 import shlex
 import shutil
 import subprocess
@@ -15,12 +16,12 @@ from uuid import uuid4
 
 import pytest
 
-from agentworks.db import SessionStatus
+from agentworks.db import SessionRow, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager._pids import _repair_session_pid
-from agentworks.sessions.manager._status import check_session_status
+from agentworks.sessions.manager._status import batch_check_status, check_session_status
 from agentworks.ssh import SSHError, SSHResult
 from tests.vm_access_support import Admin, RecordingVMAccess, access_over_target
 
@@ -52,9 +53,15 @@ class NativeTarget:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.banner = ""
         self.stderr_banner = ""
+        # The batch status probe drops to each row's owner with runuser; this
+        # account owns every native server here, so the stand-in runs the rest as it.
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "runuser").write_text('#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\nshift 3\nexec "$@"\n')
+        (bin_dir / "runuser").chmod(0o700)
         self.environment = {
             "HOME": str(root),
-            "PATH": os.defpath,
+            "PATH": f"{bin_dir}{os.pathsep}{os.defpath}",
             "SHELL": "/bin/sh",
             "TERM": "xterm",
             "TMUX_TMPDIR": str(root),
@@ -81,6 +88,11 @@ class NativeTarget:
     def access(self) -> RecordingVMAccess:
         """The admin's access, its requests run here."""
         return access_over_target(self)
+
+    def batch_status(self, sessions: list[SessionRow]) -> dict[str, SessionStatus]:
+        """``batch_check_status`` on :meth:`access`, every row's socket owner this account, which owns the server."""
+        owner = pwd.getpwuid(os.getuid()).pw_name
+        return batch_check_status(sessions, admin=self.access(), owners={session.name: owner for session in sessions})
 
     def native(self, command: str) -> SSHResult:
         return self.run(tmux.tmux_cmd(command, self.socket), check=False)

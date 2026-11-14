@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -100,9 +99,7 @@ def test_partial_fingerprint_never_relearns_or_kills_unproven_native_server(
         assert not _pids._needs_repair(before)
         assert _pids._ensure_pid(before, admin=native.access(), db=db) == before
         assert manager.check_session_status(before, admin=native.access()) is SessionStatus.RUNNING
-        assert manager.batch_check_status([replace(before, mode="admin")], admin=native.access()) == {
-            "s1": SessionStatus.RUNNING
-        }
+        assert native.batch_status([before]) == {"s1": SessionStatus.RUNNING}
         assert not any("show-environment" in command for command, _ in native.calls[first:])
         with pytest.raises(AgentworksError) as caught:
             act(db, native, operation)

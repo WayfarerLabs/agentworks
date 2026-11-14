@@ -684,7 +684,7 @@ docstring's `Transport.run` half goes.
 | Start, restart                                | `_lifecycle.py:502-942`                                                                                                 | admin (logged from the start, where today the first requests are not logged, `:502-503`), owner for the launch | none, except the status reads                                                              | the log-free `transport(vm, config)` and `_build_session_target`                                   |
 | Status of one session                         | `check_session_status`, `_status.py:89-112`, and `_check_dedicated_session`, `:139-170`, unbounded                      | root for an agent session, admin for an admin session                                                          | 10                                                                                         | `partial(target.run, sudo=agent)`                                                                  |
 | Status, bounded                               | `_BoundedStatusTarget`, `_status.py:50-56`, `:196-216`, `_queries.py:478-481`                                           | as above                                                                                                       | 10                                                                                         | `_BoundedStatusTarget`, which goes                                                                 |
-| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one root `Script(Shell.SH)` per VM, the rows on stdin as `Bytes`, no inner `sudo` (decision 5)                 | 10                                                                                         | the script's own `sudo -n tmux` and `sudo -n sh -c`                                                |
+| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one elevated `Script(Shell.SH)` per VM, each row's tmux reads as its socket owner (decision 5)                 | 10                                                                                         | the script's own `sudo -n tmux` and `sudo -n sh -c`                                                |
 | Legacy rows in a status fan-out               | `_status.py:476`, `:498-500`, an unbounded probe on the main thread                                                     | owner, through `_assert_agent_access_works` for an agent                                                       | 10                                                                                         | `_build_session_target`'s `true`                                                                   |
 | Pid repair                                    | `_repair_session_pid`, `_pids.py:122-422`, unbounded                                                                    | admin, root for an agent session                                                                               | 10 for every read                                                                          | `target.run`, `partial(target.run, sudo=agent)`                                                    |
 | The agent probe in `_build_session_target`    | `_pids.py:86-87`                                                                                                        | `_assert_agent_access_works`                                                                                   | its own                                                                                    | `_assert_agent_ssh_works`                                                                          |
@@ -701,12 +701,24 @@ VM that stops answering stalls `session stop`, `session delete`, `session attach
 listing's repair pass. Their reads take the 10-second bound their bounded siblings already have
 (`_pending_launch_is_owned`, `session_description`); a read that runs out raises
 `ExecutionIncomplete` (`access_run_command`), which a listing reports as unknown and a lifecycle
-command surfaces before it changes anything, so both fail closed (`d193e48fd`). The batch status
-script loses its inner `sudo -n` and runs elevated as a whole (HLA D4: elevation is the whole
-operation). That rests on root being allowed to connect to an admin-owned tmux server, which tmux
-3.3's `server-access` manual reads as always allowed for the owner and root; it is not measured yet,
-so batch C's first test runs the script as root against a real admin-owned tmux server, and if root
-is refused the batch is two requests, the admin's rows unelevated and the agents' elevated.
+command surfaces before it changes anything, so both fail closed (`d193e48fd`).
+
+**The batch status script reads each row as its owner** (decision 5). It loses its inner `sudo -n`
+and runs elevated as one request (HLA D4: elevation is the whole operation), but only to read the
+boot id and drop privilege: each row's tmux reads run as that row's socket owner through
+`runuser -u <owner> --` (util-linux, essential on Debian, as the stale-socket probe already uses),
+so no tmux read runs as root against a socket path from the database. An agent's socket directory is
+writable by the agent, so a root read there would follow whatever the agent left at the path. The
+controller (`observe_session_statuses`) validates each row's socket path against its owner's
+directory with `_validated_socket` (`_teardown.py`) before building the request, sends the owner
+from the database on stdin beside the name, socket and pid, and leaves a row that fails unknown with
+a warning. The script refuses a row whose socket is a link, exists but is not a socket, or is owned
+by another account than that owner, reporting status 126 for both reads, which reads as unknown.
+`runuser` opens a PAM session per read, which `pam_unix` logs on the guest; the elevated request
+itself is already logged by `sudo`. The real-tmux test
+(`tests/sessions/test_native_batch_status.py`, the sudo lane) runs the script as root against a
+server its user owns, and the shell-level test in `test_session_liveness.py` covers the refusals and
+the `runuser` argv without root.
 
 ### Consoles
 
@@ -934,9 +946,9 @@ under the sudo lane, with `TERM` from the environment and `DEFAULT_TERM` without
 Debian 13 VM.
 
 **tmux.** Tests against a real tmux (skipped where none is installed), the first of batch C: the
-batch status script runs as root against an admin-owned server (decision 5); and a session launched
-with its identity in the request's environment is matched through `_matches_launch_attempt`'s
-`show-environment -g`.
+batch status script runs as root and reads a server as the account that owns it, refusing a link or
+a socket another account owns (decision 5); and a session launched with its identity in the
+request's environment is matched through `_matches_launch_attempt`'s `show-environment -g`.
 
 **Callers.** Session, console, workspace and backup tests that build MagicMock transports and assert
 command strings move to `RecordingVMAccess` and `local_files` (`cli/tests/vm_access_support.py`),
@@ -1105,7 +1117,8 @@ The lead accepted each on 2026-11-12, and the operator ruled on the pane secrets
 4. **Pane `TERM` comes from the terminal's owner**: only a `park` envelope carries no `TERM`, and
    `tty` mode then takes it from the inherited environment, falling back to `DEFAULT_TERM`.
 5. **Two tighter bounds**: the session status and pid-repair reads at 10 seconds, and the batch
-   status script elevated as a whole, gated on the real-tmux root-connect test that opens batch C.
+   status script elevated as a whole, reading each row as its socket owner after validating its
+   socket path (lead, 2026-11-14, replacing root reads against every row's server).
 6. **Pane secrets in the boundary** (operator, 2026-11-12), as tabled above.
 7. **No re-dispatch option.** Every read is one dispatch with its deadline (complexity review).
 8. **Detached work takes no input and no working directory**, and identifies its process by a held

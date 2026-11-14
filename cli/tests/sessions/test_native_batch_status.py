@@ -1,16 +1,17 @@
-"""The batch status script against a real tmux server, run as root over a server the admin owns.
+"""The batch status script against a real tmux server, run as root and reading each row as its owner.
 
-The batch observation runs its whole script elevated, so it rests on root
-being allowed to connect to an admin-owned tmux server (tmux 3.3's
-``server-access`` lets the owner and root in). This runs the script exactly as
-the probe sends it, under ``sudo -n``, against a server this test's user
-started: the sudo lane, required where passwordless sudo is granted (CI) and
-skipped elsewhere.
+The batch observation runs its whole script elevated, but only to drop to each
+row's socket owner with ``runuser``: no tmux read runs as root, and root first
+refuses a socket path that is a link, is not a socket, or belongs to another
+account. This runs the script exactly as the probe sends it, under
+``sudo -n``, against a server this test's user started: the sudo lane,
+required where passwordless sudo is granted (CI) and skipped elsewhere.
 """
 
 from __future__ import annotations
 
 import os
+import pwd
 import shutil
 import subprocess
 import sys
@@ -49,11 +50,15 @@ def as_root(call: Call) -> Result:
     return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
 
 
-def root_admin() -> RecordingVMAccess:
-    """The admin's access, its elevated requests run as root here."""
+def statuses(rows: list[SessionRow], *, owner: str | None = None) -> dict[str, SessionStatus]:
+    """Batch status over the admin's access, its elevated requests run as root here, each row owned by ``owner``.
+
+    ``owner`` defaults to this test's user, who owns the server.
+    """
     access = RecordingVMAccess([], Admin())
     access.answer = as_root
-    return access
+    owner = owner or pwd.getpwuid(os.getuid()).pw_name
+    return batch_check_status(rows, admin=access, owners={row.name: owner for row in rows})
 
 
 @pytest.fixture
@@ -88,13 +93,20 @@ def row(socket: str, *, name: str = SESSION, pid: int | None = 4242) -> SessionR
     )
 
 
-def test_root_reads_a_server_the_admin_owns(server: str) -> None:
-    statuses = batch_check_status([row(server)], admin=root_admin())
-
-    assert statuses == {SESSION: SessionStatus.RUNNING}
+def test_root_reads_a_server_as_the_account_that_owns_it(server: str) -> None:
+    assert statuses([row(server)]) == {SESSION: SessionStatus.RUNNING}
 
 
-def test_root_reads_a_missing_session_on_that_server_as_its_absence(server: str) -> None:
-    statuses = batch_check_status([row(server, name="gone")], admin=root_admin())
+def test_a_missing_session_on_that_server_reads_as_its_absence(server: str) -> None:
+    assert statuses([row(server, name="gone")]) == {"gone": SessionStatus.RESIDUAL}
 
-    assert statuses == {"gone": SessionStatus.RESIDUAL}
+
+def test_a_socket_owned_by_another_account_than_the_rows_is_never_read(server: str) -> None:
+    assert statuses([row(server)], owner="root") == {SESSION: SessionStatus.UNKNOWN}
+
+
+def test_a_link_to_the_owners_socket_is_never_read(server: str) -> None:
+    link = Path(server).with_name("link.sock")
+    link.symlink_to(server)
+
+    assert statuses([row(str(link))]) == {SESSION: SessionStatus.UNKNOWN}

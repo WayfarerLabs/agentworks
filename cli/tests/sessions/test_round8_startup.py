@@ -89,9 +89,7 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         assert row is not None and row.pid is None
         assert row.boot_id == tmux.read_boot_id(native.run)
         assert manager._status.check_session_status(row, admin=native.access()) is SessionStatus.RUNNING
-        assert manager.batch_check_status([replace(row, mode="admin")], admin=native.access()) == {
-            "s1": SessionStatus.RUNNING
-        }
+        assert native.batch_status([row]) == {"s1": SessionStatus.RUNNING}
         assert db.get_session("s1") == row
         proofs = [options for command, options in native.calls if "AGW_RUNTIME_LAUNCH=" in command]
         assert proofs and all(options.get("timeout") == GUEST_OBSERVATION_TIMEOUT_SECONDS for options in proofs)
@@ -232,11 +230,11 @@ def test_boot_only_evidence_has_matching_readonly_status_projections(tmp_path, m
     )
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     expected = SessionStatus.UNKNOWN if same_boot else SessionStatus.STOPPED
-    from agentworks.sessions.manager._status import batch_check_status, check_session_status
+    from agentworks.sessions.manager._status import check_session_status
 
     try:
         assert check_session_status(checkpoint, admin=native.access()) is expected
-        assert batch_check_status([checkpoint], admin=native.access()) == {"s1": expected}
+        assert native.batch_status([checkpoint]) == {"s1": expected}
         assert db.get_session("s1") == row
     finally:
         db.close()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import socket
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -71,9 +70,7 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
     before = db.get_session("s1")
     assert before is not None
     assert manager.check_session_status(before, admin=native.access()) is SessionStatus.UNKNOWN
-    assert manager.batch_check_status([replace(before, mode="admin")], admin=native.access()) == {
-        "s1": SessionStatus.UNKNOWN
-    }
+    assert native.batch_status([before]) == {"s1": SessionStatus.UNKNOWN}
     fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     events.clear()
     first = len(native.calls)
@@ -489,6 +486,6 @@ def test_recorded_native_runtime_keeps_running_and_residual_inventory(tmp_path, 
     expected = SessionStatus.RUNNING if native_name == "s1" else SessionStatus.RESIDUAL
     try:
         assert manager.check_session_status(row, admin=native.access()) is expected
-        assert manager.batch_check_status([replace(row, mode="admin")], admin=native.access()) == {"s1": expected}
+        assert native.batch_status([row]) == {"s1": expected}
     finally:
         db.close()

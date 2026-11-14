@@ -28,9 +28,8 @@ from agentworks.sessions.manager._status import (
     _batch_probe_command,
     _batch_probe_data,
     _encoded_probe_field,
-    batch_status_request,
 )
-from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid, runtime_probe_command
+from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, ProbeStatus, probe_tmux_server_pid, runtime_probe_command
 from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 from tests._runtime_probes import framed_runtime_result
 from tests.conftest import requires_posix_shell, requires_symlinks
@@ -39,6 +38,10 @@ from tests.vm_access_support import Admin, RecordingVMAccess, answer_from_target
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+
+ADMIN_SOCKETS = f"{ADMIN_SOCKET_ROOT}/agentworks"
+"""The socket directory of the test database's VM admin, ``insert_vm``'s default ``agentworks``."""
 
 
 @dataclass
@@ -105,6 +108,35 @@ def _session(
     )
 
 
+def _owner(session: SessionRow) -> str:
+    """The socket owner the controller names for ``session``: the admin, or an agent account of its own."""
+    return "admin" if session.mode == "admin" else f"agt-{session.name}"
+
+
+def _batch(sessions: list[SessionRow], *, admin: RecordingVMAccess) -> dict[str, SessionStatus]:
+    """``batch_check_status`` with each row's owner as the controller names it."""
+    return batch_check_status(sessions, admin=admin, owners={session.name: _owner(session) for session in sessions})
+
+
+def _stdin_rows(request: Script) -> list[tuple[str, str, str, str]]:
+    """The batch request's stdin rows, decoded: name, socket path, owner and pid field."""
+    import base64
+
+    assert isinstance(request.stdin, Bytes)
+    rows = []
+    for line in request.stdin.data.decode().splitlines():
+        name, socket_path, owner, pid = line.split(" ")
+        rows.append(
+            (
+                base64.b64decode(name).decode(),
+                base64.b64decode(socket_path).decode(),
+                base64.b64decode(owner).decode(),
+                pid,
+            )
+        )
+    return rows
+
+
 def _batch_row(
     name: str,
     *,
@@ -156,19 +188,19 @@ def test_batch_mixed() -> None:
             ),
         }
     )
-    result = batch_check_status(sessions, admin=_admin(target))
+    result = _batch(sessions, admin=_admin(target))
     assert result["a1"] == SessionStatus.RUNNING
     assert result["s1"] == SessionStatus.STOPPED
     assert "s2" not in result
 
 
 def test_batch_empty() -> None:
-    assert batch_check_status([], admin=_admin(_FakeTarget())) == {}
+    assert _batch([], admin=_admin(_FakeTarget())) == {}
 
 
 def test_batch_all_missing_pid() -> None:
     sessions = [_session("s1", pid=None)]
-    assert batch_check_status(sessions, admin=_admin(_FakeTarget())) == {}
+    assert _batch(sessions, admin=_admin(_FakeTarget())) == {}
 
 
 def test_session_observer_treats_disappeared_workspace_as_unknown() -> None:
@@ -191,7 +223,7 @@ def test_session_observer_preserves_corrupt_ssh_applied_state(
     db.insert_vm("box", site="site", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
-    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path="/tmp/alpha.sock")
+    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path=f"{ADMIN_SOCKETS}/alpha.sock")
     session = db.get_session("alpha")
     assert session is not None
     structural = StateError("corrupt SSH applied state", entity_kind="vm", entity_name="box")
@@ -210,19 +242,20 @@ def test_session_observer_preserves_corrupt_ssh_applied_state(
     assert caught.value is structural
 
 
-def test_batch_status_of_admin_and_agent_rows_is_one_root_request_within_the_deadline() -> None:
+def test_batch_status_is_one_elevated_request_within_the_deadline_with_each_row_and_its_owner_on_stdin() -> None:
     sessions = [
         _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
-        _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
+        _session("s1", pid=None, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
     ]
     target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('a1')}\n{_batch_row('s1')}\n")})
     admin = _admin(target)
 
-    batch_check_status(sessions, admin=admin)
+    _batch(sessions, admin=admin)
 
-    assert admin.requests() == [batch_status_request(sessions)]
     (request,) = admin.requests()
+    assert isinstance(request, Script)
     assert (request.elevated, request.deadline) == (True, GUEST_OBSERVATION_TIMEOUT_SECONDS)
+    assert _stdin_rows(request) == [("a1", "/sock", "agt-a1", "100"), ("s1", "/sock2", "admin", "-")]
 
 
 @pytest.mark.parametrize("mode", ["admin", "agent"])
@@ -252,7 +285,7 @@ def test_a_status_read_that_does_not_complete_raises_after_one_dispatch_and_the_
     db.insert_vm("box", site="site", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
-    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path="/tmp/alpha.sock")
+    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path=f"{ADMIN_SOCKETS}/alpha.sock")
     session = db.get_session("alpha")
     assert session is not None
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
@@ -284,13 +317,15 @@ def test_batch_fleet_sends_a_constant_script_and_every_row_on_its_input() -> Non
         ("\nAGW_RUNTIME_BATCH=" + "\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
     )
 
-    status_map = batch_check_status(sessions, admin=admin)
+    status_map = _batch(sessions, admin=admin)
 
     (request,) = admin.requests()
     assert isinstance(request, Script)
     assert request.source == runtime_probe_command(_batch_probe_command(), "BATCH")
-    assert request.stdin == Bytes(_batch_probe_data(sessions).encode())
-    assert len(request.stdin.data) > 32_767
+    assert _stdin_rows(request) == [
+        (session.name, session.socket_path, _owner(session), str(session.pid)) for session in sessions
+    ]
+    assert isinstance(request.stdin, Bytes) and len(request.stdin.data) > 32_767
     assert status_map == {session.name: SessionStatus.RUNNING for session in sessions}
 
 
@@ -307,13 +342,19 @@ def test_batch_command_is_valid_shell_syntax() -> None:
 
 @requires_symlinks
 @requires_posix_shell
-def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) -> None:
-    """Reject unexpected PATH tools, sudo calls, tmux verbs, and temp-tree writes."""
+def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_trust(tmp_path: Path) -> None:
+    """Only read-only guest operations run, each row's tmux reads run as its owner through ``runuser``, and a
+    socket that is a link, is not a socket, or belongs to another account is never handed to tmux."""
+    import pwd
+    import socket
+    import tempfile
+    from pathlib import Path
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     audit = tmp_path / "audit"
 
-    for name in ("base64", "cat", "od", "tr"):
+    for name in ("base64", "cat", "od", "stat", "tr"):
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)
@@ -327,7 +368,15 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
     )
     tmux.chmod(0o755)
 
-    # The script runs as root as a whole, so it never elevates a row itself.
+    # Root drops to each row's owner; this stand-in records the account and runs the rest as the caller.
+    runuser = bin_dir / "runuser"
+    runuser.write_text(
+        '#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\n'
+        'printf \'runuser\\t%s\\n\' "$2" >> "$AGW_PROBE_AUDIT"\nshift 3\nexec "$@"\n'
+    )
+    runuser.chmod(0o755)
+
+    # The script runs elevated as a whole, so it never elevates a row itself.
     sudo = bin_dir / "sudo"
     sudo.write_text('#!/bin/sh\nprintf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\nexit 97\n')
     sudo.chmod(0o755)
@@ -345,71 +394,114 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
     )
     shell.chmod(0o755)
 
-    def snapshot() -> dict[str, tuple[str, bytes | str]]:
-        observed: dict[str, tuple[str, bytes | str]] = {}
-        for path in tmp_path.rglob("*"):
-            if path == audit:
-                continue
-            relative = str(path.relative_to(tmp_path))
-            if path.is_symlink():
-                observed[relative] = ("link", os.readlink(path))
-            elif path.is_file():
-                observed[relative] = ("file", path.read_bytes())
-            else:
-                observed[relative] = ("directory", "")
-        return observed
+    # Socket paths must fit sun_path, which pytest's nested tmp_path can exceed.
+    sockets = Path(tempfile.mkdtemp(prefix="agw-batch-", dir="/tmp"))
+    try:
+        owned = sockets / "owned.sock"
+        foreign = sockets / "foreign.sock"
+        listeners = []
+        for path in (owned, foreign):
+            listener = socket.socket(socket.AF_UNIX)
+            listener.bind(str(path))
+            listeners.append(listener)
+        linked = sockets / "linked.sock"
+        linked.symlink_to(owned)
+        regular = sockets / "regular.sock"
+        regular.write_text("")
 
-    before = snapshot()
-    sessions = [
-        _session("admin", socket_path="/tmp/admin.sock"),
-        _session("agent", socket_path="/tmp/agent.sock", mode="agent"),
-        _session("admin-pid", pid=10101, socket_path="/tmp/admin-pid.sock"),
-        _session("agent-pid", pid=20202, socket_path="/tmp/agent-pid.sock", mode="agent"),
-    ]
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "AGW_PROBE_AUDIT": str(audit),
-            "HOME": str(tmp_path),
-            "PATH": str(bin_dir),
-            "TMPDIR": str(tmp_path),
-        }
-    )
-    environment.pop("BASH_ENV", None)
-    program = (
-        "command_not_found_handle() { "
-        'printf \'unexpected\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"; return 127; }; '
-        f"{_batch_probe_command()}"
-    )
+        def snapshot() -> dict[str, tuple[str, bytes | str]]:
+            observed: dict[str, tuple[str, bytes | str]] = {}
+            for path in tmp_path.rglob("*"):
+                if path == audit:
+                    continue
+                relative = str(path.relative_to(tmp_path))
+                if path.is_symlink():
+                    observed[relative] = ("link", os.readlink(path))
+                elif path.is_file():
+                    observed[relative] = ("file", path.read_bytes())
+                else:
+                    observed[relative] = ("directory", "")
+            return observed
 
-    result = subprocess.run(
-        ["/bin/bash", "--noprofile", "--norc", "-c", program],
-        input=_batch_probe_data(sessions),
-        text=True,
-        capture_output=True,
-        check=False,
-        cwd=tmp_path,
-        env=environment,
-        timeout=5,
-    )
+        before = snapshot()
+        sessions = [
+            _session("admin", socket_path="/tmp/admin.sock"),
+            _session("agent", socket_path="/tmp/agent.sock", mode="agent"),
+            _session("admin-pid", pid=10101, socket_path="/tmp/admin-pid.sock"),
+            _session("agent-pid", pid=20202, socket_path="/tmp/agent-pid.sock", mode="agent"),
+            _session("owned", socket_path=str(owned), mode="agent"),
+            _session("foreign", socket_path=str(foreign), mode="agent"),
+            _session("linked", socket_path=str(linked), mode="agent"),
+            _session("regular", socket_path=str(regular), mode="agent"),
+        ]
+        owners = {session.name: _owner(session) for session in sessions}
+        owners["owned"] = pwd.getpwuid(os.getuid()).pw_name
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "AGW_PROBE_AUDIT": str(audit),
+                "HOME": str(tmp_path),
+                "PATH": str(bin_dir),
+                "TMPDIR": str(tmp_path),
+            }
+        )
+        environment.pop("BASH_ENV", None)
+        program = (
+            "command_not_found_handle() { "
+            'printf \'unexpected\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"; return 127; }; '
+            f"{_batch_probe_command()}"
+        )
+
+        result = subprocess.run(
+            ["/bin/bash", "--noprofile", "--norc", "-c", program],
+            input=_batch_probe_data(sessions, owners),
+            text=True,
+            capture_output=True,
+            check=False,
+            cwd=tmp_path,
+            env=environment,
+            timeout=5,
+        )
+        for listener in listeners:
+            listener.close()
+    finally:
+        shutil.rmtree(sockets)
 
     assert result.returncode == 0
     assert result.stderr == ""
-    parsed = batch_check_status(sessions, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)})))
+    refused = {"foreign", "linked", "regular"}
+    frames = {
+        base64_name: fields
+        for base64_name, fields in ((line.split(":")[1], line.split(":")) for line in result.stdout.splitlines())
+    }
+    assert {name for name in owners if frames[_encoded_probe_field(name)][2:5:2] == ["126", "126"]} == refused
+    parsed = _batch(sessions, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)})))
     assert parsed == {
         session.name: SessionStatus.UNKNOWN if session.pid is None else SessionStatus.RUNNING for session in sessions
     }
     assert audit.read_text().splitlines() == [
+        "runuser\tadmin",
         "tmux\t-S\t/tmp/admin.sock\thas-session\t-t\t=admin",
+        "runuser\tadmin",
         "tmux\t-S\t/tmp/admin.sock\tlist-sessions",
+        "runuser\tagt-agent",
         "tmux\t-S\t/tmp/agent.sock\thas-session\t-t\t=agent",
+        "runuser\tagt-agent",
         "tmux\t-S\t/tmp/agent.sock\tlist-sessions",
+        "runuser\tadmin",
         "tmux\t-S\t/tmp/admin-pid.sock\thas-session\t-t\t=admin-pid",
+        "runuser\tadmin",
         "tmux\t-S\t/tmp/admin-pid.sock\tlist-sessions",
         "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
+        "runuser\tagt-agent-pid",
         "tmux\t-S\t/tmp/agent-pid.sock\thas-session\t-t\t=agent-pid",
+        "runuser\tagt-agent-pid",
         "tmux\t-S\t/tmp/agent-pid.sock\tlist-sessions",
         "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
+        f"runuser\t{owners['owned']}",
+        f"tmux\t-S\t{owned}\thas-session\t-t\t=owned",
+        f"runuser\t{owners['owned']}",
+        f"tmux\t-S\t{owned}\tlist-sessions",
     ]
     assert snapshot() == before
 
@@ -792,7 +884,7 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
             )
         }
     )
-    result = batch_check_status(sessions, admin=_admin(target))
+    result = _batch(sessions, admin=_admin(target))
 
     assert result["ok1"] == SessionStatus.RUNNING
     assert result["stopped1"] == SessionStatus.STOPPED
@@ -875,7 +967,7 @@ def test_batch_empty_boot_id_is_unknown() -> None:
             ),
         }
     )
-    result = batch_check_status(sessions, admin=_admin(target))
+    result = _batch(sessions, admin=_admin(target))
     assert result["a1"] == SessionStatus.UNKNOWN
 
 
@@ -892,7 +984,7 @@ def test_batch_sudo_refusal_is_unknown() -> None:
     )
 
     assert (
-        batch_check_status([session], admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=row)})))["a1"]
+        _batch([session], admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=row)})))["a1"]
         is SessionStatus.UNKNOWN
     )
 
@@ -914,7 +1006,7 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
         for name in ("valid", "invalid")
     )
 
-    result = batch_check_status(sessions, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=output)})))
+    result = _batch(sessions, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=output)})))
 
     assert result["valid"] is SessionStatus.STOPPED
     assert result["invalid"] is SessionStatus.UNKNOWN
@@ -938,10 +1030,60 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
 def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResult) -> None:
     sessions = [_session(name, socket_path=f"/{name}") for name in ("alpha", "beta")]
 
-    assert batch_check_status(sessions, admin=_admin(_FakeTarget({"has-session": result}))) == {
+    assert _batch(sessions, admin=_admin(_FakeTarget({"has-session": result}))) == {
         "alpha": SessionStatus.UNKNOWN,
         "beta": SessionStatus.UNKNOWN,
     }
+
+
+def test_session_observer_names_each_rows_owner_from_the_database_and_leaves_an_unsafe_socket_path_unread(
+    db,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
+
+    db.insert_vm("box", site="site", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
+    db.insert_agent("bot", "box", "agt-bot")
+    db.insert_session("mine", "ws", "default", SessionMode.ADMIN, socket_path=f"{ADMIN_SOCKETS}/mine.sock")
+    db.insert_session(
+        "theirs",
+        "ws",
+        "default",
+        SessionMode.AGENT,
+        agent_name="bot",
+        socket_path=f"{AGENT_SOCKET_ROOT}/agt-bot/t.sock",
+    )
+    # An agent row whose stored socket sits in the admin's directory: probing it as the agent proves nothing.
+    db.insert_session(
+        "astray", "ws", "default", SessionMode.AGENT, agent_name="bot", socket_path=f"{ADMIN_SOCKETS}/astray.sock"
+    )
+    sessions = [row for row in (db.get_session(name) for name in ("mine", "theirs", "astray")) if row is not None]
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "agentworks.sessions.manager._identity_access",
+        lambda vm, _config, _agent, **_kwargs: SimpleNamespace(vm_name=vm.name),
+    )
+    probed: list[tuple[list[str], dict[str, str]]] = []
+
+    def batch(rows: list[SessionRow], *, admin: object, owners: dict[str, str]) -> dict[str, SessionStatus]:
+        probed.append(([row.name for row in rows], dict(owners)))
+        return {row.name: SessionStatus.RUNNING for row in rows}
+
+    monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
+
+    assert observe_session_statuses(sessions, db=db, config=object()) == {
+        "mine": SessionStatus.RUNNING,
+        "theirs": SessionStatus.RUNNING,
+        "astray": SessionStatus.UNKNOWN,
+    }
+    [(rows, owners)] = probed
+    assert rows == ["mine", "theirs"]
+    assert {name: owners[name] for name in rows} == {"mine": "agentworks", "theirs": "agt-bot"}
+    assert len(captured_output.warnings) == 1
+    assert "astray" in captured_output.warnings[0]
 
 
 def test_session_observer_isolates_one_vm_transport_failure(
@@ -960,7 +1102,7 @@ def test_session_observer_isolates_one_vm_transport_failure(
             workspace_name,
             "default",
             SessionMode.ADMIN,
-            socket_path=f"/tmp/{session_name}.sock",
+            socket_path=f"{ADMIN_SOCKETS}/{session_name}.sock",
         )
         session = db.get_session(session_name)
         assert session is not None
@@ -1010,7 +1152,11 @@ def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_th
         db.update_vm_tailscale(vm_name, f"100.64.0.{1 if vm_name == 'vm-a' else 2}")
         db.insert_workspace(f"ws-{vm_name}", f"/srv/ws-{vm_name}", vm_name, f"ws-{vm_name}")
         db.insert_session(
-            f"session-{vm_name}", f"ws-{vm_name}", "default", SessionMode.ADMIN, socket_path=f"/tmp/{vm_name}.sock"
+            f"session-{vm_name}",
+            f"ws-{vm_name}",
+            "default",
+            SessionMode.ADMIN,
+            socket_path=f"{ADMIN_SOCKETS}/{vm_name}.sock",
         )
         session = db.get_session(f"session-{vm_name}")
         assert session is not None

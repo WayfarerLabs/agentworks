@@ -19,6 +19,7 @@ from agentworks.errors import (
 )
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.requests import Bytes, Script, Shell
+from agentworks.sessions.manager._teardown import _validated_socket
 from agentworks.sessions.tmux import (
     ProbeStatus,
     access_run_command,
@@ -31,6 +32,8 @@ from agentworks.sessions.tmux import (
 from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS, cancelling_futures
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.execution.access import VMAccess
@@ -213,29 +216,24 @@ def _pending_launch_is_owned(session: SessionRow, *, admin: VMAccess) -> bool:
         return False
 
 
-def batch_status_request(sessions: list[SessionRow]) -> Script:
-    """One VM's batch status probe: the loop program as root, the selected rows on its stdin."""
-    return Script(
-        runtime_probe_command(_batch_probe_command(), "BATCH"),
-        Shell.SH,
-        elevated=True,
-        deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS,
-        stdin=Bytes(_batch_probe_data(sessions).encode()),
-    )
-
-
 def batch_check_status(
     sessions: list[SessionRow],
     *,
     admin: VMAccess,
+    owners: Mapping[str, str],
 ) -> dict[str, SessionStatus]:
     """Probe session presence together, verifying pending launch candidates separately.
 
-    The probe is one request as root on ``admin``, within the observation
-    deadline; one that does not complete raises its typed error. Returns
-    {session_name: SessionStatus}. An unrecorded present server remains
-    ``UNKNOWN`` unless its exact native launch identity matches the pending
-    attempt. Observation never adopts that identity into the persisted row.
+    ``owners`` names each session's socket owner, whose socket path the caller
+    validated (``_validated_socket``). The probe is one elevated request on
+    ``admin``, within the observation deadline, its rows on stdin; it runs
+    each row's tmux reads as that row's owner, never as root, and refuses a
+    row whose socket is a link, is not a socket, or belongs to another
+    account, which reads as ``UNKNOWN``. A probe that does not complete raises
+    its typed error. Returns {session_name: SessionStatus}. An unrecorded
+    present server remains ``UNKNOWN`` unless its exact native launch identity
+    matches the pending attempt. Observation never adopts that identity into
+    the persisted row.
     """
     from agentworks.sessions.tmux import canonical_boot_id
 
@@ -243,7 +241,15 @@ def batch_check_status(
     if not checkable:
         return {}
 
-    raw = admin.run(batch_status_request(checkable))
+    raw = admin.run(
+        Script(
+            runtime_probe_command(_batch_probe_command(), "BATCH"),
+            Shell.SH,
+            elevated=True,
+            deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+            stdin=Bytes(_batch_probe_data(checkable, owners).encode()),
+        )
+    )
     returncode = raw.require_completed(admin.vm_name)
     stdout = runtime_probe_payload(raw.stdout.decode("utf-8", "replace"), "BATCH")
 
@@ -336,8 +342,8 @@ def _encoded_probe_field(value: str) -> str:
     return base64.b64encode(value.encode()).decode("ascii")
 
 
-def _batch_probe_data(sessions: list[SessionRow]) -> str:
-    """Encode selected session rows as non-sensitive stdin protocol data."""
+def _batch_probe_data(sessions: list[SessionRow], owners: Mapping[str, str]) -> str:
+    """Encode selected session rows, each with its socket owner, as non-sensitive stdin protocol data."""
     records = []
     for session in sessions:
         assert session.socket_path is not None
@@ -351,6 +357,7 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
                 (
                     _encoded_probe_field(session.name),
                     _encoded_probe_field(session.socket_path),
+                    _encoded_probe_field(owners[session.name]),
                     pid,
                 )
             )
@@ -359,17 +366,27 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
 
 
 def _batch_probe_command() -> str:
-    """Build the constant-size loop program for a VM's session rows; it runs as root, so no row elevates."""
+    """Build the constant-size loop program for a VM's session rows.
+
+    It runs as root only to read the boot id and drop to each row's owner:
+    ``runuser`` runs that row's tmux reads as the owner, after root refuses a
+    socket path that is a link, is not a socket, or is owned by another
+    account. A refused row reports status 126 for both reads, which reads as
+    unknown.
+    """
     return (
         "hex() { od -An -tx1 | tr -d ' \\n'; }; "
         'decode() { printf %s "$1" | base64 -d; }; '
         "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
         'BOOT_HEX=$(printf %s "$BOOT" | hex); '
-        "while read -r N64 S64 PID; do "
-        'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; '
-        'HERR=$(tmux -S "$SOCK" has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
+        "while read -r N64 S64 O64 PID; do "
+        'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; O=$(decode "$O64") || exit 90; '
+        'if [ -L "$SOCK" ] || { [ -e "$SOCK" ] && { [ ! -S "$SOCK" ] || '
+        '[ "$(stat -c %U -- "$SOCK" 2>/dev/null)" != "$O" ]; }; }; then '
+        "H=126; HERR=; S=126; SERR=; else "
+        'HERR=$(runuser -u "$O" -- tmux -S "$SOCK" has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
+        'SERR=$(runuser -u "$O" -- tmux -S "$SOCK" list-sessions 2>&1 >/dev/null); S=$?; fi; '
         'HHEX=$(printf %s "$HERR" | hex); '
-        'SERR=$(tmux -S "$SOCK" list-sessions 2>&1 >/dev/null); S=$?; '
         'SHEX=$(printf %s "$SERR" | hex); '
         'if [ "$PID" = - ]; then PFACT=; P=1; '
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
@@ -430,6 +447,7 @@ def observe_session_statuses(
     by_vm: dict[str, list[SessionRow]] = {}
     vm_admins: dict[str, VMAccess] = {}
     legacy_owners: dict[str, VMAccess] = {}
+    socket_owners: dict[str, str] = {}
     unavailable_vms: set[str] = set()
     result_map = {session.name: SessionStatus.UNKNOWN for session in sessions}
 
@@ -461,6 +479,12 @@ def observe_session_statuses(
                 unavailable_vms.add(ws.vm_name)
                 continue
             vm_admins[ws.vm_name] = _mgr._identity_access(vm, config, None, logger=None)
+        if s.socket_path is not None:
+            try:
+                socket_owners[s.name] = _validated_socket(db, s).owner
+            except StateError as exc:
+                output.warn(f"Session status is unavailable: {exc}.")
+                continue
         by_vm.setdefault(ws.vm_name, []).append(s)
         if include_legacy and s.socket_path is None:
             try:
@@ -476,7 +500,7 @@ def observe_session_statuses(
         return result_map
 
     def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
-        statuses = batch_check_status(by_vm[vm_name], admin=vm_admins[vm_name])
+        statuses = batch_check_status(by_vm[vm_name], admin=vm_admins[vm_name], owners=socket_owners)
         for session in by_vm[vm_name]:
             owner = legacy_owners.get(session.name)
             if owner is None:

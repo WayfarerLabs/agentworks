@@ -79,8 +79,22 @@ class _SubmissionGate:
         return not self._aborted.is_set()
 
 
-def _validated_socket_path(db: Database, session: SessionRow) -> str:
-    """Validate persisted socket identity before destructive use."""
+@dataclass(frozen=True)
+class ManagedSocket:
+    """A session's validated tmux socket: its path, and the account that owns its server."""
+
+    path: str
+    owner: str
+
+
+def _validated_socket(db: Database, session: SessionRow) -> ManagedSocket:
+    """Validate persisted socket identity against its owner's socket directory, from the DB.
+
+    An agent session's owner is its agent's Linux user, under
+    ``AGENT_SOCKET_ROOT``; an admin session's is its VM's admin, under
+    ``ADMIN_SOCKET_ROOT``. A row with no socket, a gone owner, or a path
+    outside the owner's directory raises ``StateError``.
+    """
     socket_path = session.socket_path
     if socket_path is None:
         raise StateError(
@@ -88,22 +102,28 @@ def _validated_socket_path(db: Database, session: SessionRow) -> str:
             entity_kind="session",
             entity_name=session.name,
         )
+    owner: str | None
     if session.mode == SessionMode.AGENT.value:
         agent = db.get_agent(session.agent_name or "")
-        owner_dir = f"{AGENT_SOCKET_ROOT}/{agent.linux_user}" if agent is not None else ""
+        owner, root = (agent.linux_user if agent is not None else None), AGENT_SOCKET_ROOT
     else:
         workspace = db.get_workspace(session.workspace_name)
         vm = db.get_vm(workspace.vm_name) if workspace is not None else None
-        owner_dir = f"{ADMIN_SOCKET_ROOT}/{vm.admin_username}" if vm is not None else ""
+        owner, root = (vm.admin_username if vm is not None else None), ADMIN_SOCKET_ROOT
     path = PurePosixPath(socket_path)
-    if not path.is_absolute() or str(path.parent) != owner_dir or path.name in {"", ".", ".."}:
+    if owner is None or not path.is_absolute() or str(path.parent) != f"{root}/{owner}" or path.name in {"", ".", ".."}:
         raise StateError(
             f"session '{session.name}' has an invalid managed tmux socket path",
             entity_kind="session",
             entity_name=session.name,
             hint="Repair the persisted session row before retrying destructive cleanup.",
         )
-    return socket_path
+    return ManagedSocket(socket_path, owner)
+
+
+def _validated_socket_path(db: Database, session: SessionRow) -> str:
+    """Validate persisted socket identity before destructive use."""
+    return _validated_socket(db, session).path
 
 
 def _validated_pid(session: SessionRow) -> int:
