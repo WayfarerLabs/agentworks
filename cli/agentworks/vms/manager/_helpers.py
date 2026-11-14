@@ -234,7 +234,7 @@ def operation_log(
 
     The log is written under the log directory, or to ``path`` when given
     (backup keeps its log beside the archive). Each write holds the log's
-    lock, so concurrent work may share one log. Typed by the ``InitLog``
+    lock, so threads of one command may share one log. Typed by the ``InitLog``
     protocol, never as ``SSHLogger``, so a manager module that imports
     nothing legacy can use it.
     """

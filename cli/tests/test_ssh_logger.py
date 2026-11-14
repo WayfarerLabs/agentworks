@@ -85,7 +85,6 @@ def test_path_retargeting_moves_subsequent_records(
     logger.path = retargeted
 
     logger.output("backup payload")
-    assert logger._active_handler is None
     logger.close()
 
     assert "backup payload" not in original_path.read_text()
@@ -116,7 +115,6 @@ def test_write_error_propagates_and_closes_handler(
     with pytest.raises(OSError, match="disk full"):
         logger.output("payload")
 
-    assert logger._active_handler is None
     [(handler, stream)] = captured
     assert handler.stream is None
     assert stream.closed is True

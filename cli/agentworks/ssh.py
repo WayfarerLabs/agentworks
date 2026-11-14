@@ -147,8 +147,9 @@ class SSHLogger:
         self.vm_name = vm_name
         self.path = path or LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._active_handler: _PropagatingFileHandler | None = None
-        # Concurrent teardowns share one log; each write holds its handler alone.
+        # Writers in this process that share this logger, such as stop-all's
+        # concurrent teardowns, take turns: each write opens, writes and closes
+        # its own handler under the lock. It orders nothing across processes.
         self._write_lock = threading.Lock()
         self._secrets = tuple(dict.fromkeys(secret for secret in redactions if secret))
         normalized: list[str] = []
@@ -322,19 +323,12 @@ class SSHLogger:
         with self._write_lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             handler = _PropagatingFileHandler(self.path, mode="a", encoding="utf-8", errors="replace")
-            self._active_handler = handler
             try:
                 handler.setFormatter(logging.Formatter("%(message)s"))
                 handler.terminator = ""
                 handler.handle(record)
             finally:
-                self._close_active_handler()
-
-    def _close_active_handler(self) -> None:
-        handler = self._active_handler
-        self._active_handler = None
-        if handler is not None:
-            handler.close()
+                handler.close()
 
 
 SSH_CONNECT_TIMEOUT = 30
