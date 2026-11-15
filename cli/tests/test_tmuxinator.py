@@ -154,9 +154,11 @@ def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent() -> None
                 socket_path=sock,
                 owner="agt--alice",
                 switch_user=True,
+                terminal=terminal,
             )
         )
-        for verb in ("has-session", "attach")
+        # The attach is an interactive client, so it runs on a relay terminal of its own.
+        for verb, terminal in (("has-session", False), ("attach", True))
     ]
     assert all(command in pane for command in switched)
     remainder = pane

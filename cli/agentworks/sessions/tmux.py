@@ -152,7 +152,13 @@ with the same status (``sessions/manager/_status.py``, ``_batch_probe_command``)
 
 
 def as_socket_owner_line(
-    command: str, *, socket_path: str, owner: str, switch_user: bool, refusal: str | None = None
+    command: str,
+    *,
+    socket_path: str,
+    owner: str,
+    switch_user: bool,
+    terminal: bool = False,
+    refusal: str | None = None,
 ) -> str:
     """``command`` behind a guard on ``socket_path``, run as ``owner``: the line ``socket_owner_run_command`` sends.
 
@@ -165,24 +171,38 @@ def as_socket_owner_line(
     without it the caller already is ``owner``. The batch status script
     (``_status._batch_probe_command``) runs the same checks per row in its
     own loop.
+
+    ``terminal`` is for an interactive client on the caller's terminal, such
+    as ``tmux attach``: ``runuser --pty`` gives ``command`` a terminal of its
+    own and relays to the caller's, window size changes included, so no
+    process of ``owner``'s ever holds the caller's terminal, and ``cd /``
+    leaves it no hold on the caller's directory either.
     """
+    if terminal and not switch_user:
+        raise ValueError("a relay terminal is only for a switch to the socket's owner")
     q_socket, q_owner = shlex.quote(socket_path), shlex.quote(owner)
     guard = (
         f"test ! -L {q_socket} && {{ test ! -e {q_socket} || "
         f'{{ test -S {q_socket} && test "$(stat -c %U -- {q_socket})" = {q_owner}; }}; }}'
     )
     notice = f"printf '%s\\n' {shlex.quote(refusal)} >&2; " if refusal is not None else ""
-    line = f"runuser -u {q_owner} -- sh -c {shlex.quote(command)}" if switch_user else command
+    if not switch_user:
+        line = command
+    elif terminal:
+        line = f"cd / && runuser --pty -u {q_owner} -- sh -c {shlex.quote(command)}"
+    else:
+        line = f"runuser -u {q_owner} -- sh -c {shlex.quote(command)}"
     return f"{{ {guard}; }} || {{ {notice}exit {SOCKET_GUARD_REFUSED}; }}; {line}"
 
 
-def as_socket_owner_from_admin(command: str, *, socket_path: str, owner: str) -> str:
+def as_socket_owner_from_admin(command: str, *, socket_path: str, owner: str, terminal: bool = False) -> str:
     """A shell line the admin runs that runs ``command`` as ``owner`` behind the socket guard, through ``sudo -n``.
 
     For the admin's own shells (a console window, a tmuxinator pane), which
     must never be a tmux client of a server another account controls.
+    ``terminal`` is ``as_socket_owner_line``'s, for an attach.
     """
-    line = as_socket_owner_line(command, socket_path=socket_path, owner=owner, switch_user=True)
+    line = as_socket_owner_line(command, socket_path=socket_path, owner=owner, switch_user=True, terminal=terminal)
     return f"sudo -n /bin/sh -c {shlex.quote(line)}"
 
 

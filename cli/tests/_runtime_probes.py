@@ -25,21 +25,33 @@ def socket_guard(command: str) -> tuple[str, str] | None:
     return shlex.split(guarded[1])[0], shlex.split(guarded[2])[0]
 
 
+# ``as_socket_owner_line``'s switch to the owner: plain, or onto a relay terminal of its own.
+_OWNER_SWITCH = re.compile(r"(?P<relay>cd / && runuser --pty|runuser) -u (?P<owner>\S+) -- sh -c ")
+
+
+def owner_switch(command: str) -> tuple[str, bool] | None:
+    """The owner a guarded line switches to and whether onto a relay terminal, or ``None`` for no switch."""
+    guarded = _SOCKET_GUARD.fullmatch(command)
+    switch = _OWNER_SWITCH.match(guarded["line"] if guarded is not None else command)
+    if switch is None:
+        return None
+    return shlex.split(switch["owner"])[0], switch["relay"] != "runuser"
+
+
 def owner_probe_line(command: str) -> str:
     """The line a socket-owner request runs as the socket's owner, else ``command``.
 
     Unwraps ``tmux.as_socket_owner_line``'s guard and, when present, its
-    ``runuser -u O -- sh -c LINE``, as the stale-socket probe and every
-    owner read send them.
+    switch to the owner (``runuser ... -- sh -c LINE``), as the stale-socket
+    probe, every owner read and every attach send them.
     """
     guarded = _SOCKET_GUARD.fullmatch(command)
     if guarded is not None:
         command = guarded["line"]
-    if re.match(r"runuser -u \S+ -- sh -c ", command) is None:
+    switch = _OWNER_SWITCH.match(command)
+    if switch is None:
         return command
-    words = shlex.split(command)
-    start = words.index("runuser")
-    return words[words.index("-c", start) + 1]
+    return shlex.split(command[switch.end() :])[0]
 
 
 def runtime_probe_parts(command: str) -> tuple[str, str] | None:

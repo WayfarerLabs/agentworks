@@ -973,9 +973,8 @@ def _attach_command(db: Database, session: SessionRow) -> TerminalCommand:
     session's server is the agent's, and no other account is ever its client:
     the admin elevates only to switch to the agent behind the socket guard
     (``as_socket_owner_line``), which says on the terminal why it refuses a
-    socket. The attach keeps the admin's controlling terminal (no ``setsid``,
-    no ``runuser --pty``): window size changes reach the client through it,
-    and the attach ends with the SSH session.
+    socket. The agent's client runs on ``runuser``'s relay terminal, never on
+    the admin's.
     """
     from agentworks.execution.requests import TerminalCommand
     from agentworks.sessions.manager import _teardown
@@ -992,6 +991,7 @@ def _attach_command(db: Database, session: SessionRow) -> TerminalCommand:
         socket_path=socket.path,
         owner=socket.owner,
         switch_user=True,
+        terminal=True,
         refusal=(
             f"Not attaching to session '{session.name}': its tmux socket is not a socket that '{socket.owner}' owns."
         ),

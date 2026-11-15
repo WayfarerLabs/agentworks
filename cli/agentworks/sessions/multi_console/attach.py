@@ -171,7 +171,8 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, agent_ow
     The admin's console runs the wrapper. An agent session's server is the
     agent's, ``agent_owner``, and no other account is ever its client: each
     ``has-session`` and ``attach`` elevates only to switch to the agent
-    behind the socket guard (``as_socket_owner_from_admin``).
+    behind the socket guard (``as_socket_owner_from_admin``), the attach on a
+    relay terminal of its own.
     """
     from agentworks.sessions.tmux import as_socket_owner_from_admin
 
@@ -181,9 +182,8 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, agent_ow
     if agent_owner is not None:
         if socket_path is None:
             raise ValueError("an agent session's console window needs its socket path")
-        has, att = (
-            as_socket_owner_from_admin(command, socket_path=socket_path, owner=agent_owner) for command in (has, att)
-        )
+        has = as_socket_owner_from_admin(has, socket_path=socket_path, owner=agent_owner)
+        att = as_socket_owner_from_admin(att, socket_path=socket_path, owner=agent_owner, terminal=True)
     return f"""\
 unset TMUX
 

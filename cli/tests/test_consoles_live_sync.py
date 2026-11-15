@@ -26,7 +26,7 @@ from agentworks.sessions.multi_console import (
     reorder_sessions,
 )
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
-from tests._runtime_probes import owner_probe_line, socket_guard
+from tests._runtime_probes import owner_probe_line, owner_switch, socket_guard
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
@@ -127,15 +127,16 @@ def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent(db: Datab
     [new_window] = [c for c in fake_target.commands if "new-window -t '=aw-console-con'" in c]
     wrapper = shlex.split(new_window)[-1]
     elevated = []
-    for line in (line for line in wrapper.splitlines() if "tmux " in line):
+    for line in (line for line in wrapper.splitlines() if "tmux -S " in line):
         words = shlex.split(line)
         start = words.index("sudo")
         assert words[start : start + 4] == ["sudo", "-n", "/bin/sh", "-c"]
         elevated.append(words[start + 4])
     assert {socket_guard(line) for line in elevated} == {(socket, "bot-user")}
-    assert {owner_probe_line(line) for line in elevated} == {
-        f"tmux -S {socket} has-session -t '=s'",
-        f"tmux -S {socket} attach -t '=s'",
+    # Probes switch plainly; the attach, an interactive client, onto a relay terminal of its own.
+    assert {(owner_probe_line(line), owner_switch(line)) for line in elevated} == {
+        (f"tmux -S {socket} has-session -t '=s'", ("bot-user", False)),
+        (f"tmux -S {socket} attach -t '=s'", ("bot-user", True)),
     }
 
 

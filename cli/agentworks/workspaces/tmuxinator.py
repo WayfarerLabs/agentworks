@@ -151,8 +151,9 @@ def generate_config(
     its window reaches it directly. An agent session's server is the agent's,
     and no other account is ever its client: its window elevates only to
     switch to the agent named in ``agent_owners`` behind the socket guard
-    (``as_socket_owner_from_admin``). Each pane is a YAML double-quoted scalar, so no
-    shell text can change the YAML around it.
+    (``as_socket_owner_from_admin``), its attach on a relay terminal of its
+    own. Each pane is a YAML double-quoted scalar, so no shell text can change
+    the YAML around it.
     """
     lines = [
         GENERATED_HEADER,
@@ -175,9 +176,8 @@ def generate_config(
         attach_cmd = tmux_cmd(f"attach -t {q_exact_session}", sock)
         if session.mode == SessionMode.AGENT.value and sock is not None:
             owner = (agent_owners or {})[session.name]
-            has_cmd, attach_cmd = (
-                as_socket_owner_from_admin(command, socket_path=sock, owner=owner) for command in (has_cmd, attach_cmd)
-            )
+            has_cmd = as_socket_owner_from_admin(has_cmd, socket_path=sock, owner=owner)
+            attach_cmd = as_socket_owner_from_admin(attach_cmd, socket_path=sock, owner=owner, terminal=True)
         # Wrapper: unset TMUX for nesting, loop attach while session exists
         wrapper = (
             f"unset TMUX; "
