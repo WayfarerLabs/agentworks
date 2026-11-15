@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -137,6 +139,46 @@ def test_a_commented_out_include_does_not_count(newline: str, tmp_path: Path) ->
 
     added = f"# Added by agentworks{newline}{directive}{newline}{newline}"
     assert ssh_config.read_bytes() == (added + original).encode()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    ssh_config.write_text("Host *\n    Foo bar\n")
+    ssh_config.chmod(0o640)
+    other_groups = [gid for gid in os.getgroups() if gid != ssh_config.stat().st_gid]
+    if other_groups:
+        os.chown(ssh_config, -1, other_groups[0])
+    before = ssh_config.stat()
+
+    _ensure_include(ssh_config, _directive(ssh_config))
+
+    after = ssh_config.stat()
+    assert stat.S_IMODE(after.st_mode) == 0o640
+    assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_a_new_config_is_created_under_the_umask(tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    previous = os.umask(0o022)
+    try:
+        _ensure_include(ssh_config, _directive(ssh_config))
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(ssh_config.stat().st_mode) == 0o644
+
+
+def test_bytes_that_are_not_utf8_survive_a_rewrite(tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    original = "# caf\u00e9 in Latin-1\nHost *\n    Foo bar\n".encode("latin-1")
+    ssh_config.write_bytes(original)
+    directive = _directive(ssh_config)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_bytes() == f"# Added by agentworks\n{directive}\n\n".encode() + original
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")

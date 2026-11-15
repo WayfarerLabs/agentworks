@@ -298,14 +298,27 @@ def _remove_legacy_section(ssh_config: Path) -> None:
 
 
 def _read_user_config(ssh_config: Path) -> str:
-    """The operator's SSH config with its line endings as written."""
-    with open(ssh_config, encoding="utf-8", newline="") as f:
+    """The operator's SSH config with its line endings as written.
+
+    Bytes that are not UTF-8 decode to surrogates, which
+    :func:`_write_user_config` writes back unchanged.
+    """
+    with open(ssh_config, encoding="utf-8", errors="surrogateescape", newline="") as f:
         return f.read()
 
 
 def _write_user_config(ssh_config: Path, content: str) -> None:
-    """Replace the operator's SSH config atomically, through a symlink to it, line endings as given."""
-    atomic_write_text(ssh_config.resolve(), content, newline="")
+    """Write the operator's SSH config through a symlink to it, line endings and undecodable bytes as given.
+
+    An existing file is replaced atomically and keeps its mode, owner and
+    group; a new one is created the way any file is, under the umask.
+    """
+    target = ssh_config.resolve()
+    if target.exists():
+        atomic_write_text(target, content, newline="", errors="surrogateescape", preserve_metadata=True)
+        return
+    with open(target, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
+        f.write(content)
 
 
 # -- Legacy approach (managed section in ssh_config) -----------------------
