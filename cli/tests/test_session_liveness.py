@@ -1214,15 +1214,24 @@ def test_session_observer_reads_a_legacy_row_once_within_the_deadline_and_says_w
     assert "'box'" in warning
 
 
-def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_the_others(
+@pytest.mark.parametrize(
+    "failure",
+    ["host-key-missing", "config", "connectivity", "identity-policy", "no-tailscale-ip"],
+)
+def test_session_observer_reports_a_vm_it_cannot_reach_once_and_observes_the_others(
     db,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
+    failure: str,
 ) -> None:
+    from agentworks.errors import ConfigError
+    from agentworks.vms.applied_state import VMSSHIdentityPolicyError
+
     sessions: list[SessionRow] = []
     for vm_name in ("vm-a", "vm-b"):
         db.insert_vm(vm_name, site="site", hostname=vm_name)
-        db.update_vm_tailscale(vm_name, f"100.64.0.{1 if vm_name == 'vm-a' else 2}")
+        if vm_name == "vm-a" or failure != "no-tailscale-ip":
+            db.update_vm_tailscale(vm_name, f"100.64.0.{1 if vm_name == 'vm-a' else 2}")
         db.insert_workspace(f"ws-{vm_name}", f"/srv/ws-{vm_name}", vm_name, f"ws-{vm_name}")
         db.insert_session(
             f"session-{vm_name}",
@@ -1235,9 +1244,16 @@ def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_th
         assert session is not None
         sessions.append(session)
 
+    errors: dict[str, Exception] = {
+        "host-key-missing": TrustMissing("vm-b"),
+        "config": ConfigError("no usable ssh client"),
+        "connectivity": ConnectivityError("offline"),
+        "identity-policy": VMSSHIdentityPolicyError("identity outside policy"),
+    }
+
     def require(_db: object, _config: object, vm: object) -> None:
         if vm.name == "vm-b":  # type: ignore[attr-defined]
-            raise TrustMissing("vm-b")
+            raise errors[failure]
 
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require)
     monkeypatch.setattr(
@@ -1253,8 +1269,8 @@ def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_th
         "session-vm-a": SessionStatus.RUNNING,
         "session-vm-b": SessionStatus.UNKNOWN,
     }
-    assert len(captured_output.warnings) == 1
-    assert "vm-b" in captured_output.warnings[0]
+    [warning] = captured_output.warnings
+    assert "'vm-b'" in warning
 
 
 # -- _ensure_pid strict gate ------------------------------------------------

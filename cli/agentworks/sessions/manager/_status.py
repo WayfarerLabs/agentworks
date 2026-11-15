@@ -507,7 +507,19 @@ def observe_session_statuses(
         if ws.vm_name in unavailable_vms:
             continue
         if ws.vm_name not in vm_admins:
+            # One VM that cannot be reached must not abort the listing for the
+            # others: report it once and leave that VM's sessions UNKNOWN.
             if not vm.tailscale_host:
+                _warn_unavailable(
+                    ws.vm_name,
+                    StateError(
+                        f"VM '{ws.vm_name}' has no Tailscale IP",
+                        entity_kind="vm",
+                        entity_name=ws.vm_name,
+                        hint="VM init may not be complete. Check 'vm describe' for status.",
+                    ),
+                )
+                unavailable_vms.add(ws.vm_name)
                 continue
             try:
                 from agentworks.vms.manager import require_vm_ssh_boundary
@@ -515,13 +527,8 @@ def observe_session_statuses(
                 require_vm_ssh_boundary(db, config, vm)
             except UserAbort:
                 raise
-            except TrustMissing as exc:
-                # One VM's missing host key must not abort the listing for the
-                # others: report it once and leave that VM's sessions UNKNOWN.
+            except (TrustMissing, ConfigError, ConnectivityError, VMSSHIdentityPolicyError) as exc:
                 _warn_unavailable(ws.vm_name, exc)
-                unavailable_vms.add(ws.vm_name)
-                continue
-            except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
                 unavailable_vms.add(ws.vm_name)
                 continue
             vm_admins[ws.vm_name] = _mgr._identity_access(vm, config, None, logger=None)

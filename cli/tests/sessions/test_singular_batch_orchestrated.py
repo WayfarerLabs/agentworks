@@ -158,7 +158,9 @@ def test_list_status_reports_identity_refusal_as_unknown_without_access(
     assert json_rows[0]["status"] == "unknown"
 
     session_manager.render_session_listing(listing, include_status=True)
-    assert sum(role is Role.WARNING for role, _level, _message in captured_output.lines) == 1
+    warnings = [message for role, _level, message in captured_output.lines if role is Role.WARNING]
+    # The observation's reason for the VM, then the table's summary of unknown statuses.
+    assert len(warnings) == 2 and "'vm-a'" in warnings[0]
 
 
 class _FakeTarget:
