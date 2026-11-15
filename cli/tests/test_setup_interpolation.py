@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -17,10 +18,13 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ValidationError
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
 from agentworks.interpolation import context_values
+from agentworks.ssh import SSHError
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.initializer.driver import VMInitializationOperation, _phase_b_setup
 from agentworks.vms.initializer.packages import _run_install_commands
+from agentworks.vms.initializer.shell_env import _write_agentworks_profile
 from agentworks.vms.templates import ResolvedVMTemplate
+from tests.conftest import requires_posix_shell
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -85,6 +89,104 @@ def test_skipped_install_does_not_render_its_unselected_command() -> None:
         == []
     )
     assert [call.args[0] for call in target.run.call_args_list] == ["test -f /home/operator/installed"]
+
+
+@requires_posix_shell
+@pytest.mark.parametrize("agent", [False, True])
+@pytest.mark.parametrize("outcome", ["installed", "skipped", "failed"])
+def test_install_paths_render_before_profile_shell_expansion(agent: bool, outcome: str) -> None:
+    user = "agt-dev" if agent else "operator"
+    authored_paths = [
+        "${agw:user_home_dir}/.tool/${agw:vm_name}/bin",
+        "$HOME/.local/bin",
+        "~/.tilde/bin",
+        "${TOOLS_ROOT}/${agw:user_name}/bin",
+    ]
+    entry = UserInstallCommandEntry(
+        name="tool",
+        command="${agw:session_name}" if outcome == "skipped" else "install-tool",
+        test_exec="tool",
+        path=authored_paths,
+    )
+    target = MagicMock()
+
+    def run(command: str, **kwargs: object) -> SimpleNamespace:
+        if outcome == "failed" and "install-tool" in command:
+            raise SSHError("installer exited 1")
+        return SimpleNamespace(returncode=0 if outcome == "skipped" else 1)
+
+    target.run.side_effect = run
+    context = context_values(vm_name="box", user=user, agent_name="dev" if agent else None)
+    if agent:
+        registry = MagicMock()
+        registry.iter_kind_items.return_value = [(entry.name, entry)]
+        _run_agent_install_commands(
+            agent_target=target,
+            registry=registry,
+            agent_tmpl=ResolvedAgentTemplate(name="default", user_install_commands=[entry.name]),
+            home=f"/home/{user}",
+            identity_env={},
+            context=context,
+        )
+    else:
+        paths = _run_install_commands(
+            target, [entry.name], {entry.name: entry}, "bash", f"/home/{user}", MagicMock(), context=context
+        )
+        assert paths == (
+            []
+            if outcome == "failed"
+            else [
+                f"/home/{user}/.tool/box/bin",
+                "$HOME/.local/bin",
+                "~/.tilde/bin",
+                f"${{TOOLS_ROOT}}/{user}/bin",
+            ]
+        )
+        _write_agentworks_profile(target, paths, MagicMock())
+
+    assert entry.path == authored_paths
+    profile = target.write_file.call_args.args[1]
+    result = subprocess.run(
+        ["/bin/sh"],
+        input=profile + 'printf "%s" "$PATH"',
+        env={"HOME": "/shell/home", "TOOLS_ROOT": "/opt/tools", "PATH": "/base/bin"},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout == (
+        "/base/bin"
+        if outcome == "failed"
+        else f"/opt/tools/{user}/bin:/shell/home/.tilde/bin:/shell/home/.local/bin:/home/{user}/.tool/box/bin:/base/bin"
+    )
+
+
+@pytest.mark.parametrize("agent", [False, True])
+def test_install_path_rejects_unavailable_context_before_remote_work(agent: bool) -> None:
+    entry = UserInstallCommandEntry(
+        name="tool", command="install-tool", test_exec="tool", path=["/opt/bin", "${agw:workspace_dir}/bin"]
+    )
+    target = MagicMock()
+    context = context_values(vm_name="box", user="operator")
+    with pytest.raises(ValidationError) as caught:
+        if agent:
+            registry = MagicMock()
+            registry.iter_kind_items.return_value = [(entry.name, entry)]
+            _run_agent_install_commands(
+                agent_target=target,
+                registry=registry,
+                agent_tmpl=ResolvedAgentTemplate(name="default", user_install_commands=[entry.name]),
+                home="/home/operator",
+                identity_env={},
+                context=context,
+            )
+        else:
+            _run_install_commands(
+                target, [entry.name], {entry.name: entry}, "bash", "/home/operator", MagicMock(), context=context
+            )
+    assert caught.value.entity_name == "user-install-command/tool.path[1]"
+    target.run.assert_not_called()
+    target.write_file.assert_not_called()
 
 
 @pytest.mark.parametrize(

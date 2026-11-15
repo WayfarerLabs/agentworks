@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.interpolation import runtime_values
-from agentworks.interpolation_fields import render_scalar_field
+from agentworks.interpolation_fields import render_list_field, render_scalar_field
 from agentworks.linux_users import managed_home
 from agentworks.transports import transport
 
@@ -494,6 +494,9 @@ def _run_agent_install_commands(
         if entry is None:
             output.warn(f"'{name}' is not a declared user install command")
             continue
+        paths = render_list_field(
+            type(entry), "path", entry.path, context, location=f"user-install-command/{name}.path"
+        )
         # Skip if already installed for this user (short timeout)
         test_cmd = _build_agent_test_command(entry, home, shell, context=context)
         if test_cmd:
@@ -501,7 +504,7 @@ def _run_agent_install_commands(
                 check = agent_target.run(test_cmd, check=False, timeout=10)
                 if check.returncode == 0:
                     output.info(f"Agent install command {i}/{total} ({name}): already installed, skipping")
-                    path_additions.extend(entry.path)
+                    path_additions.extend(paths)
                     continue
             except SSHError as e:
                 output.warn(f"install check for '{name}' failed ({e}), assuming not installed")
@@ -522,7 +525,7 @@ def _run_agent_install_commands(
         except SSHError as e:
             output.warn(f"agent install command '{name}' failed: {e}")
         else:
-            path_additions.extend(entry.path)
+            path_additions.extend(paths)
 
     # Rewrite the agent's profile fragment with identity + accumulated
     # PATH additions. The fragment was written with identity-only earlier
