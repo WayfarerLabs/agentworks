@@ -18,6 +18,7 @@ from agentworks import output
 from agentworks.atomic_write import atomic_write_text
 from agentworks.errors import AgentworksError, ConfigError
 from agentworks.execution import trust
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -51,10 +52,25 @@ def _to_ssh_path(path: Path) -> str:
     return posix
 
 
-def _include_directive(ssh_config: Path) -> str:
-    """Build the Include directive for config.d."""
+def _include_directive(ssh_config: Path) -> str | None:
+    """The Include directive for config.d, or ``None`` with a warning when ssh would misread its path.
+
+    The resolved directory must pass :func:`trust.literal_path`, the rule for
+    every path ssh is given, and the pattern is written through
+    :func:`trust.option_value`, so a directory with a space stays one
+    pattern instead of splitting into two that match nothing. Computed once
+    per rebuild, so the warning appears once.
+    """
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
-    return f"Include {_to_ssh_path(config_d)}/*"
+    try:
+        trust.literal_path(config_d.resolve(), "SSH config directory")
+    except ConfigError as e:
+        output.warn(
+            f"Include directive left out of {format_host_path(ssh_config)}, so ssh reads none of the "
+            f"managed entries: {e}"
+        )
+        return None
+    return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -174,10 +190,12 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     agent_prefix = config.operator.ssh_agent_host_prefix
 
     # Ensure Include directive at top of ssh_config
-    _ensure_include(ssh_config)
+    directive = _include_directive(ssh_config)
+    if directive is not None:
+        _ensure_include(ssh_config, directive)
 
     # Clean up legacy managed section if present
-    _remove_legacy_section(ssh_config)
+    _remove_legacy_section(ssh_config, directive)
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
@@ -229,15 +247,14 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     atomic_write_text(conf_path, "\n".join(blocks))
 
 
-def _ensure_include(ssh_config: Path) -> None:
-    """Ensure the Include directive is present in ssh_config.
+def _ensure_include(ssh_config: Path, directive: str) -> None:
+    """Ensure ``directive`` is present in ssh_config.
 
     Adds it at the top if not present. If the user has moved it elsewhere
-    in the file, their placement is respected.
+    in the file, their placement is respected. A line holding the same
+    pattern unquoted, which ssh split at its whitespace, is replaced in place.
     """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
-    directive = _include_directive(ssh_config)
-
     include_block = f"{_INCLUDE_COMMENT}\n{directive}"
 
     if not ssh_config.exists():
@@ -248,12 +265,23 @@ def _ensure_include(ssh_config: Path) -> None:
     if directive in content:
         return  # already present (with or without comment)
 
+    # Earlier releases wrote the pattern unquoted, which ssh split at its
+    # whitespace. Replace that line in place rather than leave it beside this one.
+    unquoted = directive.replace('"', "")
+    lines = content.splitlines(keepends=True)
+    stale = [i for i, line in enumerate(lines) if line.strip() == unquoted]
+    if unquoted != directive and stale:
+        for i in stale:
+            lines[i] = lines[i].replace(unquoted, directive)
+        ssh_config.write_text("".join(lines))
+        return
+
     # Insert at top
     ssh_config.write_text(f"{include_block}\n\n{content}")
 
 
-def _remove_legacy_section(ssh_config: Path) -> None:
-    """Remove the legacy managed section from ssh_config if present."""
+def _remove_legacy_section(ssh_config: Path, directive: str | None) -> None:
+    """Remove the legacy managed section from ssh_config if present, keeping ``directive``."""
     if not ssh_config.exists():
         return
 
@@ -264,11 +292,10 @@ def _remove_legacy_section(ssh_config: Path) -> None:
 
     # Keep everything before the marker
     user_section = content[:marker_idx].rstrip("\n")
-    directive = _include_directive(ssh_config)
     if user_section:
         ssh_config.write_text(user_section + "\n")
     else:
-        ssh_config.write_text(f"{directive}\n")
+        ssh_config.write_text(f"{directive}\n" if directive is not None else "")
 
 
 # -- Legacy approach (managed section in ssh_config) -----------------------
