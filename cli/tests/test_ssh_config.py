@@ -283,6 +283,51 @@ def test_an_identity_file_ssh_would_misread_is_left_out_with_a_warning(
     assert len(captured_output.warnings) == 1
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
+@pytest.mark.parametrize(("link_dir", "target_dir"), [("keys", "100%"), ("100%", "keys")])
+def test_the_managed_entry_and_the_execution_core_judge_the_same_identity_path(
+    link_dir: str,
+    target_dir: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    from agentworks.errors import ConfigError
+    from agentworks.execution.ssh_process import VMPolicy
+    from agentworks.execution.trust import TrustBinding, TrustMode
+    from tests.conftest import seed_vm_trust
+
+    config, ssh_dir = _mock_config(tmp_path)
+    target = tmp_path / target_dir / "id_ed25519"
+    target.parent.mkdir()
+    target.write_text("")
+    key = tmp_path / link_dir / "id_ed25519"
+    key.parent.mkdir()
+    key.symlink_to(target)
+    config.operator.ssh_private_key = key
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+    seed_vm_trust("web")
+
+    _rebuild_config_dir(config, db)
+
+    block = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())["awvm--web"]
+    try:
+        VMPolicy(key, TrustBinding(TrustMode.VM, "web")).options()
+        core_accepts = True
+    except ConfigError:
+        core_accepts = False
+    assert core_accepts == (link_dir == "keys")
+    if core_accepts:
+        (identity_line,) = [line for line in block.splitlines() if "IdentityFile" in line]
+        assert identity_line.endswith(f"/{link_dir}/id_ed25519")  # the link, not its target
+        assert not captured_output.warnings
+    else:
+        assert "IdentityFile" not in block
+        assert len(captured_output.warnings) == 1
+
+
 def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
     agent = MagicMock()
     agent.name = name

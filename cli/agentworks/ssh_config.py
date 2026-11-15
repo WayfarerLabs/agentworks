@@ -30,25 +30,21 @@ _CONFIG_DIR_NAME = "config.d"
 _MANAGED_CONF = "agentworks.conf"
 
 
-def _to_ssh_path(path: Path) -> str:
-    """Convert a Path to an SSH config-safe string.
+def _to_ssh_path(path: Path, home: Path) -> str:
+    """``path`` as an SSH config token: ``~`` for a ``home`` prefix, forward slashes on every platform.
 
-    Uses ~ for the home directory prefix and forward slashes on all platforms
-    since OpenSSH expects POSIX-style paths even on Windows.
-
-    Deliberately NOT ``path_rendering.format_host_path``, despite the
-    overlapping ``~`` behaviour. That one renders prose for a human; this
-    one generates a token for ``ssh`` to parse, which is why it resolves
-    symlinks first and forces POSIX separators on Windows. Two callers
-    with genuinely different output contracts, so folding them together
-    would mean one of them silently getting the other's rules.
+    OpenSSH expects POSIX-style paths even on Windows. Deliberately NOT
+    ``path_rendering.format_host_path``, despite the overlapping ``~``
+    behaviour. That one renders prose for a human; this one generates a token
+    for ``ssh`` to parse, which is why it forces POSIX separators on Windows.
+    Two callers with genuinely different output contracts, so folding them
+    together would mean one of them silently getting the other's rules.
     """
-    resolved = path.resolve()
-    posix = resolved.as_posix()
-    home = Path.home().resolve().as_posix()
+    posix = path.as_posix()
+    home_posix = home.as_posix()
     # Check with trailing slash to avoid false matches (e.g. /home/user2)
-    if posix == home or posix.startswith(home + "/"):
-        posix = "~" + posix[len(home) :]
+    if posix == home_posix or posix.startswith(home_posix + "/"):
+        posix = "~" + posix[len(home_posix) :]
     return posix
 
 
@@ -61,16 +57,18 @@ def _include_directive(ssh_config: Path) -> str | None:
     pattern instead of splitting into two that match nothing. Computed once
     per rebuild, so the warning appears once.
     """
-    config_d = ssh_config.parent / _CONFIG_DIR_NAME
+    # Resolved, as the directive has always been written, so a line an
+    # earlier rebuild added still matches.
+    config_d = (ssh_config.parent / _CONFIG_DIR_NAME).resolve()
     try:
-        trust.literal_path(config_d.resolve(), "SSH config directory")
+        trust.literal_path(config_d, "SSH config directory")
     except ConfigError as e:
         output.warn(
             f"Include directive left out of {format_host_path(ssh_config)}, so ssh reads none of the "
             f"managed entries: {e}"
         )
         return None
-    return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
+    return f"Include {trust.option_value(_to_ssh_path(config_d, Path.home().resolve()) + '/*')}"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -318,20 +316,20 @@ def _trust_options(vm_name: str) -> tuple[str, ...]:
 def _identity_value(identity_file: Path) -> str | None:
     """The operator's key as an ``IdentityFile`` value, ``~``-relative under the home directory.
 
-    The resolved path must pass :func:`trust.literal_path`, the rule the
-    execution core applies to the same key. A path with ``%``, ``$``, a double
-    quote, a backslash or a control character, which ssh would expand or
-    misread, is left out of the entries with a warning (``None``) rather than
-    written as a line that names another file. Computed once per rebuild, so the
-    warning appears once.
+    The configured path, not its symlink target, must pass
+    :func:`trust.literal_path`: the execution core checks and passes that same
+    path, so both accept or refuse the same key. A path with ``%``, ``$``, a
+    double quote, a backslash or a control character, which ssh would expand
+    or misread, is left out of the entries with a warning (``None``) rather
+    than written as a line that names another file. Computed once per rebuild,
+    so the warning appears once.
     """
-    resolved = identity_file.resolve()
     try:
-        trust.literal_path(resolved, "SSH identity file")
+        trust.literal_path(identity_file, "SSH identity file")
     except ConfigError as e:
         output.warn(f"IdentityFile left out of the SSH config entries: {e}")
         return None
-    return trust.option_value(_to_ssh_path(resolved))
+    return trust.option_value(_to_ssh_path(identity_file, Path.home()))
 
 
 def _format_entry(
