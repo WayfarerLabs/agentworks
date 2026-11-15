@@ -1135,7 +1135,8 @@ def test_attach_reaches_an_agent_sessions_server_only_as_the_agent(
 ) -> None:
     """The admin's terminal elevates only to switch to the agent, behind the socket guard, and keeps its options."""
     from agentworks.execution.requests import TerminalCommand
-    from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
+    from agentworks.sessions.tmux import exact_tmux_target, tmux_cmd
+    from tests._runtime_probes import owner_probe_line, socket_guard
 
     _seed_singular(db, agent="a1")
     _reachable(monkeypatch, True)
@@ -1147,10 +1148,12 @@ def test_attach_reaches_an_agent_sessions_server_only_as_the_agent(
     assert session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
     [call] = [call for call in recorder.calls if call.operation == "attach"]
-    line = as_socket_owner_line(
-        tmux_cmd(f"attach -t {exact_tmux_target('s1')}", socket), socket_path=socket, owner=owner, switch_user=True
-    )
-    assert call.request == TerminalCommand(("sudo", "-n", "/bin/sh", "-c", line))
+    assert isinstance(call.request, TerminalCommand)
+    sudo, line = call.request.argv[:4], call.request.argv[4]
+    assert sudo == ("sudo", "-n", "/bin/sh", "-c") and len(call.request.argv) == 5
+    assert socket_guard(line) == (socket, owner)
+    assert f"runuser -u {owner} -- sh -c " in line
+    assert owner_probe_line(line) == tmux_cmd(f"attach -t {exact_tmux_target('s1')}", socket)
     assert "clear_screen_on_exit" in call.options
 
 

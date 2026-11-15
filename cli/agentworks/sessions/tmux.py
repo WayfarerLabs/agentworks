@@ -142,22 +142,38 @@ def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bo
     return run
 
 
-def as_socket_owner_line(command: str, *, socket_path: str, owner: str, switch_user: bool) -> str:
+SOCKET_GUARD_REFUSED = 126
+"""The status a socket-owner line exits with when its guard refuses the socket.
+
+Neither tmux's 0 nor 1, so a probe reads a refusal as unknown, never as a
+present or an absent server. The batch status script reports a refused row
+with the same status (``sessions/manager/_status.py``, ``_batch_probe_command``).
+"""
+
+
+def as_socket_owner_line(
+    command: str, *, socket_path: str, owner: str, switch_user: bool, refusal: str | None = None
+) -> str:
     """``command`` behind a guard on ``socket_path``, run as ``owner``: the line ``socket_owner_run_command`` sends.
 
     The guard refuses a path that is a link, exists but is not a socket, or is
-    a socket another account than ``owner`` owns: the line then exits 1 and
-    prints nothing. With ``switch_user`` the caller's line runs as root and
-    ``command`` runs as ``owner`` through ``runuser``; without it the caller
-    already is ``owner``.
+    a socket another account than ``owner`` owns: the line then exits
+    ``SOCKET_GUARD_REFUSED`` without running ``command``, printing ``refusal``
+    to stderr when one is given and nothing otherwise. A missing path passes,
+    so a probe still reads an absent server. With ``switch_user`` the line
+    runs as root and ``command`` runs as ``owner`` through ``runuser``;
+    without it the caller already is ``owner``. The batch status script
+    (``_status._batch_probe_command``) runs the same checks per row in its
+    own loop.
     """
     q_socket, q_owner = shlex.quote(socket_path), shlex.quote(owner)
     guard = (
         f"test ! -L {q_socket} && {{ test ! -e {q_socket} || "
         f'{{ test -S {q_socket} && test "$(stat -c %U -- {q_socket})" = {q_owner}; }}; }}'
     )
+    notice = f"printf '%s\\n' {shlex.quote(refusal)} >&2; " if refusal is not None else ""
     line = f"runuser -u {q_owner} -- sh -c {shlex.quote(command)}" if switch_user else command
-    return f"{guard} && {{ {line}; }}"
+    return f"{{ {guard}; }} || {{ {notice}exit {SOCKET_GUARD_REFUSED}; }}; {line}"
 
 
 def socket_owner_run_command(

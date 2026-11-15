@@ -11,10 +11,18 @@ _FRAME = re.compile(r"printf '\\nAGW_RUNTIME_([A-Z]+)='; (?:printf '\\nAGW_RUNTI
 
 
 _SOCKET_GUARD = re.compile(
-    r"test ! -L (\S+) && \{ test ! -e \1 \|\| \{ test -S \1 && "
-    r'test "\$\(stat -c %U -- \1\)" = (\S+); \}; \} && \{ (?P<line>.*); \}',
+    r"\{ test ! -L (\S+) && \{ test ! -e \1 \|\| \{ test -S \1 && "
+    r'test "\$\(stat -c %U -- \1\)" = (\S+); \}; \}; \} \|\| \{ (?:printf .*? >&2; )?exit 126; \}; (?P<line>.*)',
     re.DOTALL,
 )
+
+
+def socket_guard(command: str) -> tuple[str, str] | None:
+    """The socket path and owner a ``tmux.as_socket_owner_line`` guard checks, or ``None`` for an unguarded line."""
+    guarded = _SOCKET_GUARD.fullmatch(command)
+    if guarded is None:
+        return None
+    return shlex.split(guarded[1])[0], shlex.split(guarded[2])[0]
 
 
 def owner_probe_line(command: str) -> str:
@@ -27,7 +35,7 @@ def owner_probe_line(command: str) -> str:
     guarded = _SOCKET_GUARD.fullmatch(command)
     if guarded is not None:
         command = guarded["line"]
-    if re.search(r"runuser -u \S+ -- sh -c ", command) is None:
+    if re.match(r"runuser -u \S+ -- sh -c ", command) is None:
         return command
     words = shlex.split(command)
     start = words.index("runuser")

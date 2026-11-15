@@ -390,8 +390,9 @@ def _batch_probe_command() -> str:
     It runs as root only to read the boot id and drop to each row's owner:
     ``runuser`` runs that row's tmux reads as the owner, after root refuses a
     socket path that is a link, is not a socket, or is owned by another
-    account. A refused row reports status 126 for both reads, which reads as
-    unknown.
+    account, the checks ``tmux.as_socket_owner_line`` makes for every other
+    owner read, inlined here for the loop. A refused row reports
+    ``SOCKET_GUARD_REFUSED`` (126) for both reads, which reads as unknown.
     """
     return (
         "hex() { od -An -tx1 | tr -d ' \\n'; }; "
