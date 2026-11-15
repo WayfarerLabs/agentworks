@@ -424,7 +424,7 @@ handover for each pane it creates:
   resolved and never delivered. It now parks the admin pane's environment the same way and runs
   `new-session -d ... <handover.command()>`, closing the gap.
 
-Windows that run the attach loop (`multi_console/attach.py:155-215`) carry no environment and keep
+Windows that run the attach loop (`multi_console/attach.py:155-235`) carry no environment and keep
 their command. No pane path passes `-e`, and none passes `env=` to the admin's `run`.
 
 **A missing workspace directory** keeps today's behavior. Today the pane runs
@@ -753,16 +753,20 @@ when the caller's access is not the owner's, `runuser` to the owner (`as_socket_
   the NUL lead as before; `session logs` captures through the builder; and the tmuxinator config
   gives an agent session's window the same switched `has-session` and `attach` (`agent_owners`, from
   `_validated_socket`), each pane a YAML double-quoted scalar. A named console's window for an agent
-  session runs its attach loop (`multi_console/attach.py:155-215`) with every `has-session` and
+  session runs its attach loop (`multi_console/attach.py:155-235`) with every `has-session` and
   `attach` switched the same way (`tmux.as_socket_owner_from_admin`), the owner from
   `_validated_socket`; a row that fails it gets no window, with a warning. The guard's refusal exits
   `SOCKET_GUARD_REFUSED` (126), neither tmux's 0 nor 1, so an unframed probe and the stale socket's
   removal check read it as unknown rather than as an absent server; `session attach` prints a
-  one-line reason with it, and a console window keeps waiting.
-- The attach keeps the admin's controlling terminal: no `setsid` and no `runuser --pty` between the
-  admin's SSH session and the agent's `tmux attach`. The window size changes reach the client
-  through that terminal, and the whole chain ends with the SSH session. Live checks of resize and of
-  the end of the SSH session under the switch are pending.
+  one-line reason with it, and a console window says why once per refused stretch, then keeps
+  waiting.
+- Every interactive client, the `tmux attach` of `session attach`, of the console window loop and of
+  the tmuxinator window, runs on `runuser`'s own relay terminal (`cd / && runuser --pty -u <agent>`,
+  after the guard; `as_socket_owner_line(terminal=True)`), so the agent's processes cannot reach the
+  admin's terminal, independently of the VM's sudo and kernel settings. `runuser --pty` is in
+  util-linux 2.38.1 (Debian 12) and 2.41.5 (Debian 13), and its relay copies the window size to its
+  terminal on `SIGWINCH` (`lib/pty-session.c`). The non-interactive probes keep plain `runuser`.
+  Live checks of resize, detach, UTF-8 and `clear_screen_on_exit` under the relay are pending.
 
 **The admin's standing access to agent tmux servers retires in batch D.** Once every admin path
 switches to the agent, nothing uses the group access that made the admin able to connect to an
