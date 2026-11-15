@@ -181,6 +181,9 @@ resolved client that cannot start raises `ConnectivityError` naming it, the prec
   `plugins/proxmox/transport.py:74-80`), and the clouds' join over `SSHTransport`
   (`tailscale_join.py:43-48`). No argv carries request data, so D2's "script content out of
   arguments" holds on every channel.
+- Remote Lima's native shell leads its host command with a NUL on a Windows console
+  (`ssh_process.nul_first_on_a_windows_console`, as the attach's terminal half does). The clouds'
+  native shell is a login shell with no remote command, so it gets none.
 - WSL2 uses `--exec`, so root's login shell is not between `wsl.exe` and Bash. The program name is a
   literal today (`wsl2.py:247-248`, and `transports/wsl2.py:139`, which goes); this slice introduces
   the constant `_WSL` in `wsl2.py`, used by `_wsl` and the two new calls, and absolute on Windows
@@ -859,11 +862,10 @@ refuses `--workspace` before anything else, with the hint to `cd` inside the she
 `require_native_shell` right after resolving the site, before the boundary, which raises
 `FeatureUnavailable` with the platform's hint when there is none. Otherwise, inside
 `gated_vm_platform_channel_boundary` with no environment targets, it runs
-`platform.native_shell(vm, ops_ctx)` under `guarded_terminal`, sets `clean_exit` on a zero status,
-and after the guard prints the 255 notice (I6) without claiming the cause: "the native shell ended
-with status 255 (the connection may have dropped); terminal restored". The environment is not
-composed and its secrets are not resolved (R7: the native shell does not seed it).
-`platform_shell.py` is deleted.
+`platform.native_shell(vm, ops_ctx)` under `guarded_terminal`, and after the guard prints the 255
+notice (I6) without claiming the cause: "the native shell ended with status 255 (the connection may
+have dropped); terminal restored". The environment is not composed and its secrets are not resolved
+(R7: the native shell does not seed it). `platform_shell.py` is deleted.
 
 ## Retiring the lazy repair-secret protocol
 

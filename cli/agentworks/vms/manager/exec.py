@@ -196,9 +196,8 @@ def _shell_native(
             ops_ctx,
         ),
     ):
-        with guarded_terminal() as guard:
+        with guarded_terminal():
             code = vm_node.site.platform.native_shell(vm, ops_ctx)
-            guard.clean_exit = code == 0
         # After the guard: its exit pass leaves the alternate screen, which
         # would wipe anything written before it closes.
         if code == _STATUS_CONNECTION_MAY_HAVE_DROPPED:

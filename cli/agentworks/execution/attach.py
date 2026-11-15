@@ -64,15 +64,21 @@ def attach(
     touched. So is a parking connection that never reports ``parked`` (a
     startup file that reads stdin would hold it forever).
     """
+    # Off the operator's console: see ssh_process.spawn.
     with PipeSession(
-        parking_argv, request=wire, nonce=nonce, hold_stdin_open=True, on_stdout=_ignore, on_stderr=_ignore
+        parking_argv,
+        request=wire,
+        nonce=nonce,
+        hold_stdin_open=True,
+        share_console=False,
+        on_stdout=_ignore,
+        on_stderr=_ignore,
     ) as session:
         stop = session.pump(lambda: session.stdout.parked, budget=Deadline.after(PARKING_WAIT_SECONDS))
         if not session.stdout.parked:
             _raise_parking_failure(vm_name, session, stop, log)
-        with guarded_terminal() as guard:
+        with guarded_terminal():
             code = ssh_process.run_terminal(terminal_argv)
-            guard.clean_exit = code == 0
         # After the guard, whose mode resets clearing does not cover, and
         # before the notice, so the notice lands on the cleared screen.
         if clear_screen_on_exit:

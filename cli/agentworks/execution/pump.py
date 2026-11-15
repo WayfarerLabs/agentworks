@@ -208,6 +208,8 @@ class PipeSession:
     session ends when the process exits and its pipes go quiet, at end of
     file, at the deadline or at an output limit.
 
+    ``share_console`` is passed to :func:`ssh_process.spawn`, which says when to clear it.
+
     A write that fails to the client's stdin is the consumer ending early, not
     a failure: the session stops sending and keeps reading. A sink that raises
     an error for which :func:`agentworks.output.consumer_left` holds is the
@@ -237,6 +239,7 @@ class PipeSession:
         stdin: BinaryIO | None = None,
         fail_on_input_error: bool = False,
         hold_stdin_open: bool = False,
+        share_console: bool = True,
         on_stdout: Sink,
         on_stderr: Sink,
         deadline: Deadline | None = None,
@@ -248,6 +251,7 @@ class PipeSession:
         self._pending: dict[str, bytes | None] = {"out": None, "err": None}
         self._deadline = deadline or Deadline(None)
         self._hold_stdin_open = hold_stdin_open
+        self._share_console = share_console
         self._eof = {"out": False, "err": False}
         self._proc: subprocess.Popen[bytes] | None = None
         self._killed = False
@@ -266,7 +270,12 @@ class PipeSession:
 
     def start(self) -> None:
         self._proc = ssh_process.spawn(
-            self._argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
+            self._argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            share_console=self._share_console,
         )
         for pipe in (self._proc.stdin, self._proc.stdout, self._proc.stderr):
             assert pipe is not None

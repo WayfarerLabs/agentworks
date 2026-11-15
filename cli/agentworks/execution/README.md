@@ -112,13 +112,15 @@ registered when it was constructed, at its one sink.
 ## What a request becomes
 
 Every connection runs the same constant command, `python3 -I -S -c '<stage 0>'` (`ssh_process.py`),
-behind `sudo -n` for an elevated request. Stage 0 is a one-line program that reads the launcher's
-source from stdin with exact-length reads and runs it. Its reader is recursive, so a pathological
-drip of tiny reads fails safely, as not delivered, instead of running. The launcher,
-`agw_launch.py`, reads the request, resets what the payload inherits, runs the payload as a child
-and reports completion. The client writes three things to ssh's stdin in order: the launcher source,
-the JSON envelope (`envelope.py`), and the caller's input untouched. A frame is ten ASCII digits
-then that many bytes, so the payload's stdin starts at the caller's first byte.
+behind `sudo -n` for an elevated request; the terminal half of an attach adds the socket path and,
+on a Windows console, a NUL lead ([Terminal handover](#terminal-handover)). Stage 0 is a one-line
+program that reads the launcher's source from stdin with exact-length reads and runs it. Its reader
+is recursive, so a pathological drip of tiny reads fails safely, as not delivered, instead of
+running. The launcher, `agw_launch.py`, reads the request, resets what the payload inherits, runs
+the payload as a child and reports completion. The client writes three things to ssh's stdin in
+order: the launcher source, the JSON envelope (`envelope.py`), and the caller's input untouched. A
+frame is ten ASCII digits then that many bytes, so the payload's stdin starts at the caller's first
+byte.
 
 The guest's account shell may print or export before stage 0 runs. The launcher brackets the
 payload's output with marker lines (`0x1E`, a per-request nonce, a word, a newline), and the client
@@ -283,10 +285,17 @@ terminal is touched. No guest text reaches a command line, and the parked launch
 directory when the second connection is served, when the client closes its end, after 30 seconds, or
 on `SIGHUP` or `SIGTERM`. The client gives up on a parking connection that never reports `parked`
 within 60 seconds (its own bound for connecting and running the account's startup files; the 30
-seconds above start only after `parked`), and raises before the terminal is touched.
-`clear_screen_on_exit` clears the visible screen after the terminal is restored and before the
+seconds above start only after `parked`), and raises before the terminal is touched. On Windows the
+parking client starts off the operator's console (`share_console=False`; `ssh_process.spawn` says
+why). `clear_screen_on_exit` clears the visible screen after the terminal is restored and before the
 notice about a dropped connection, for a full-screen attach on a terminal that does not restore
 cleanly (`[terminal] clear_on_detach`).
+
+On a Windows console the terminal half's remote command is led by a NUL, which stops Win32-OpenSSH
+from deleting the operator's lines on its first write; `ssh_process.nul_first_on_a_windows_console`
+says why and when. Every other `ssh -t` that runs a remote command uses it too (Remote Lima's native
+shell and the legacy attaches), but a login shell with no command, such as a public-SSH platform's
+native shell, gets none, because sshd's MOTD and lastlog fill its first write.
 
 ## Root scripts
 

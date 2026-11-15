@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import shutil
@@ -24,7 +25,8 @@ from agentworks.execution.requests import Forward
 from agentworks.execution.results import Unknown, UnknownReason
 from agentworks.execution.ssh_process import ArgvMode, Destination, VMPolicy, build_argv, stage0_command
 from agentworks.execution.trust import TrustBinding, TrustMode
-from tests.conftest import seed_vm_trust
+from tests.conftest import pretend_windows_console, requires_posix_shell, seed_vm_trust
+from tests.execution.conformance.lanes import SHELLS, require_shell
 
 SSH = shutil.which("ssh")
 needs_ssh = pytest.mark.skipif(SSH is None, reason="requires an installed OpenSSH client")
@@ -208,9 +210,24 @@ def test_an_identity_file_ssh_would_expand_is_refused_by_name(tmp_path: Path) ->
 # -- ssh -G: what the installed client would really do ---------------------------------
 
 
+@pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
+def test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted(key_dir: str, tmp_path: Path) -> None:
+    """The ssh shipped with Git for Windows refuses a quoted value without whitespace (#898)."""
+    key = (tmp_path / key_dir / "id_ed25519").as_posix()
+    quote = '"' if key_dir != "keys" else ""
+
+    argv = argv_for(Path(key))
+
+    assert f"IdentityFile={quote}{key}{quote}" in argv
+    assert f"CertificateFile={quote}{key}/disabled-certificate{quote}" in argv
+
+
 @needs_ssh
-def test_the_policy_takes_effect(tmp_path: Path) -> None:
-    key = tmp_path / "dir with space" / "id_ed25519"
+@pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
+def test_the_policy_takes_effect(key_dir: str, tmp_path: Path) -> None:
+    """The installed client may accept a quoted value without whitespace too, so this
+    cannot reproduce #898 alone; ``test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted`` guards that."""
+    key = tmp_path / key_dir / "id_ed25519"
 
     config = effective_config(argv_for(key))
 
@@ -342,3 +359,55 @@ def test_only_a_piped_host_connection_is_batch_mode(tmp_path: Path) -> None:
     assert config_for(ArgvMode.PIPE)["batchmode"] == ["yes"]
     assert config_for(ArgvMode.TERMINAL)["batchmode"] == ["no"]
     assert config_for(ArgvMode.TERMINAL)["requesttty"] in (["yes"], ["true"])  # the rendering differs by version
+
+
+# -- The interactive remote command on a Windows console -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("platform", "stdin_tty", "stdout_tty", "led"),
+    [
+        ("win32", True, True, True),
+        ("win32", False, True, False),  # no pty, so no raw mode: the client's console write would stop at the NUL
+        ("win32", True, False, False),  # the NUL would land in the redirected output
+        ("linux", True, True, False),
+    ],
+)
+def test_an_interactive_remote_command_is_led_by_a_nul_only_on_a_windows_console(
+    monkeypatch: pytest.MonkeyPatch, platform: str, stdin_tty: bool, stdout_tty: bool, led: bool
+) -> None:
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr("sys.platform", platform)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: stdin_tty)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: stdout_tty)
+
+    command = ssh_process.nul_first_on_a_windows_console("tmux attach -t s1")
+
+    assert command == ("printf '\\000'; tmux attach -t s1" if led else "tmux attach -t s1")
+
+
+def test_a_closed_or_missing_stream_is_not_a_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    pretend_windows_console(monkeypatch)
+    closed = io.StringIO()
+    closed.close()
+    monkeypatch.setattr("sys.stdout", closed)
+    assert ssh_process.nul_first_on_a_windows_console("x") == "x"
+
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr("sys.stdin", None)
+    assert ssh_process.nul_first_on_a_windows_console("x") == "x"
+
+
+@requires_posix_shell
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_nul_led_command_writes_the_nul_first_and_keeps_its_exit_status(
+    monkeypatch: pytest.MonkeyPatch, shell: str
+) -> None:
+    with monkeypatch.context() as windows:
+        pretend_windows_console(windows)
+        led = ssh_process.nul_first_on_a_windows_console("cd / && printf hi && exit 9")
+
+    completed = subprocess.run([require_shell(shell), "-c", led], capture_output=True, timeout=30, check=False)
+
+    assert completed.stdout == b"\0hi"
+    assert completed.returncode == 9
