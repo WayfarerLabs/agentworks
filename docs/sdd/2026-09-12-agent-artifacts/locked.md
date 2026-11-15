@@ -42,3 +42,22 @@ transaction or Transport/SSH/provider redesign is claimed.
 
 This lock takes effect when the closeout merges to main. Ordinary pre-merge review and corrections
 remain permitted; the normal PR validation and operator merge process still apply.
+
+## Amendment: direct artifact declarations, 2026-11-15
+
+At the operator's direction, the additive authoring extension from issue
+[#907](https://github.com/WayfarerLabs/agentworks/issues/907) is recorded here instead of opening a
+new SDD. The original design and acceptance records above retain their historical scope.
+
+Owning scopes accept `artifacts.declare` with the same five type maps as named bundles, including
+MCP servers added by their separate effort. Selected bundles apply first, then direct definitions.
+Direct maps inherit by key and replace individual definitions completely. Omission and `{}` inherit;
+`declare: null` clears direct definitions, independently of `bundles: []` clearing bundle
+references. The existing source validation, capture limits, normalization, original-owner
+identities, routing, native claims and cleanup apply to both authoring forms. Bundle-only captures
+retain their existing fingerprints and format; no declaration migration is required.
+
+Permanent artifact guidance and examples describe the authoring contract. Offline inspection
+distinguishes current direct selection from captured bundle provenance, including missing or stale
+captures. Direct content creates no synthetic bundle resource. Agent Plugins package ingestion is
+the operator-approved next separate effort and does not change this delivery's source formats.
