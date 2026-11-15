@@ -30,21 +30,25 @@ _CONFIG_DIR_NAME = "config.d"
 _MANAGED_CONF = "agentworks.conf"
 
 
-def _to_ssh_path(path: Path, home: Path) -> str:
-    """``path`` as an SSH config token: ``~`` for a ``home`` prefix, forward slashes on every platform.
+def _to_ssh_path(path: Path) -> str:
+    """Convert a Path to an SSH config-safe string.
 
-    OpenSSH expects POSIX-style paths even on Windows. Deliberately NOT
-    ``path_rendering.format_host_path``, despite the overlapping ``~``
-    behaviour. That one renders prose for a human; this one generates a token
-    for ``ssh`` to parse, which is why it forces POSIX separators on Windows.
-    Two callers with genuinely different output contracts, so folding them
-    together would mean one of them silently getting the other's rules.
+    Uses ~ for the home directory prefix and forward slashes on all platforms
+    since OpenSSH expects POSIX-style paths even on Windows.
+
+    Deliberately NOT ``path_rendering.format_host_path``, despite the
+    overlapping ``~`` behaviour. That one renders prose for a human; this
+    one generates a token for ``ssh`` to parse, which is why it resolves
+    symlinks first and forces POSIX separators on Windows. Two callers
+    with genuinely different output contracts, so folding them together
+    would mean one of them silently getting the other's rules.
     """
-    posix = path.as_posix()
-    home_posix = home.as_posix()
+    resolved = path.resolve()
+    posix = resolved.as_posix()
+    home = Path.home().resolve().as_posix()
     # Check with trailing slash to avoid false matches (e.g. /home/user2)
-    if posix == home_posix or posix.startswith(home_posix + "/"):
-        posix = "~" + posix[len(home_posix) :]
+    if posix == home or posix.startswith(home + "/"):
+        posix = "~" + posix[len(home) :]
     return posix
 
 
@@ -68,7 +72,7 @@ def _include_directive(ssh_config: Path) -> str | None:
             f"managed entries: {e}"
         )
         return None
-    return f"Include {trust.option_value(_to_ssh_path(config_d, Path.home().resolve()) + '/*')}"
+    return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -314,25 +318,25 @@ def _trust_options(vm_name: str) -> tuple[str, ...]:
 
 
 def _identity_value(identity_file: Path) -> str | None:
-    """The operator's key as an ``IdentityFile`` value, ``~``-relative under the home directory.
+    """The operator's key as an ``IdentityFile`` value: the configured path, as the execution core passes it.
 
     The configured path, not its symlink target, must pass
-    :func:`trust.literal_path`: the execution core checks and passes that same
-    path, so both accept or refuse the same key. A path with ``%``, ``$``, a
-    double quote, a backslash or a control character, which ssh would expand
-    or misread, is left out of the entries with a warning (``None``) rather
-    than written as a line that names another file. Computed once per rebuild,
-    so the warning appears once.
+    :func:`trust.literal_path`, so both accept or refuse the same key, and it
+    is written absolute, so ssh reads the same file the core does whatever its
+    own idea of ``~``. A path with ``%``, ``$``, a double quote, a backslash or
+    a control character, which ssh would expand or misread, is left out of the
+    entries with a warning (``None``) rather than written as a line that names
+    another file. Computed once per rebuild, so the warning appears once.
     """
     try:
-        trust.literal_path(identity_file, "SSH identity file")
+        path = trust.literal_path(identity_file, "SSH identity file")
     except ConfigError as e:
         output.warn(
             f"IdentityFile left out of the SSH config entries: {e}. Your own ssh offers its default keys "
             "for those aliases instead; move the key to a plain path."
         )
         return None
-    return trust.option_value(_to_ssh_path(identity_file, Path.home()))
+    return trust.option_value(path)
 
 
 def _format_entry(

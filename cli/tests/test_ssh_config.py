@@ -10,6 +10,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks.errors import ConfigError
+from agentworks.execution.ssh_process import VMPolicy
+from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.ssh_config import (
     _LEGACY_MARKER,
     _MANAGED_CONF,
@@ -20,6 +23,7 @@ from agentworks.ssh_config import (
     ssh_host_alias,
     sync_ssh_config,
 )
+from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
 
 
@@ -284,18 +288,14 @@ def test_an_identity_file_ssh_would_misread_is_left_out_with_a_warning(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
-@pytest.mark.parametrize(("link_dir", "target_dir"), [("keys", "100%"), ("100%", "keys")])
+@pytest.mark.parametrize(("link_dir", "target_dir", "expected_ok"), [("keys", "100%", True), ("100%", "keys", False)])
 def test_the_managed_entry_and_the_execution_core_judge_the_same_identity_path(
     link_dir: str,
     target_dir: str,
+    expected_ok: bool,
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    from agentworks.errors import ConfigError
-    from agentworks.execution.ssh_process import VMPolicy
-    from agentworks.execution.trust import TrustBinding, TrustMode
-    from tests.conftest import seed_vm_trust
-
     config, ssh_dir = _mock_config(tmp_path)
     target = tmp_path / target_dir / "id_ed25519"
     target.parent.mkdir()
@@ -313,19 +313,37 @@ def test_the_managed_entry_and_the_execution_core_judge_the_same_identity_path(
     _rebuild_config_dir(config, db)
 
     block = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())["awvm--web"]
-    try:
-        VMPolicy(key, TrustBinding(TrustMode.VM, "web")).options()
-        core_accepts = True
-    except ConfigError:
-        core_accepts = False
-    assert core_accepts == (link_dir == "keys")
-    if core_accepts:
-        (identity_line,) = [line for line in block.splitlines() if "IdentityFile" in line]
-        assert identity_line.endswith(f"/{link_dir}/id_ed25519")  # the link, not its target
+    if expected_ok:
+        policy = VMPolicy(key, TrustBinding(TrustMode.VM, "web")).options()
+        assert f"IdentityFile={key.as_posix()}" in policy
+        assert f"    IdentityFile {key.as_posix()}\n" in block  # the link, as the core passes it
         assert not captured_output.warnings
     else:
+        with pytest.raises(ConfigError):
+            VMPolicy(key, TrustBinding(TrustMode.VM, "web")).options()
         assert "IdentityFile" not in block
         assert len(captured_output.warnings) == 1
+
+
+@pytest.mark.windows
+def test_the_identity_file_is_written_as_the_configured_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ssh reads ``~`` as the passwd home, which need not be ``$HOME``, so the entry never abbreviates."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    config, ssh_dir = _mock_config(tmp_path)
+    key = tmp_path / "keys" / "id_ed25519"
+    config.operator.ssh_private_key = key
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    block = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())["awvm--web"]
+    assert f"    IdentityFile {key.as_posix()}\n" in block
 
 
 def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
