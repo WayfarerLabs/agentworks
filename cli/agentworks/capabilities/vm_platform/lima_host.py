@@ -11,6 +11,7 @@ argv, so the operator's SSH configuration for the host applies.
 from __future__ import annotations
 
 import contextlib
+import posixpath
 import shlex
 import subprocess
 import time
@@ -114,12 +115,21 @@ class LimaHost:
     def upload(self, path: str, content: str) -> None:
         """Write ``content`` to ``path``, mode 0600, through stdin, never an argument.
 
-        The file is created and set to 0600 before any content arrives: a
-        default ACL inherited from the parent directory overrides the umask, so
-        only an explicit ``chmod`` pins the mode.
+        The content goes to a file ``mktemp`` creates beside ``path``, which
+        passes mode 0600 to the create itself, so neither the umask nor a POSIX
+        default ACL on the directory can widen it, and is then renamed over
+        ``path``. ``>|`` writes under ``noclobber``. The rename replaces a
+        symlink at ``path`` rather than following it, and in a sticky directory
+        such as ``/var/tmp`` is refused over a file another user owns. The
+        temporary file is removed if the write or the rename fails. Inherited
+        macOS ACL entries are not masked by mode bits, so they still apply.
         """
-        quoted = shlex.quote(path)
-        self.run(f"touch {quoted} && chmod 600 {quoted} && cat > {quoted}", input=content)
+        template = shlex.quote(f"{posixpath.dirname(path)}/.agw-upload.XXXXXX")
+        self.run(
+            f"umask 077 && tmp=$(mktemp {template}) && "
+            f'{{ cat >| "$tmp" && mv -f "$tmp" {shlex.quote(path)} || {{ rm -f "$tmp"; false; }}; }}',
+            input=content,
+        )
 
     # -- Detached commands, for work that must outlive the connection --------------------
 

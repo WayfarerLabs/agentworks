@@ -150,7 +150,30 @@ def test_a_command_given_input_exposes_no_output() -> None:
     assert "tskey-reflected" not in str(caught.value)
 
 
-@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="runs the host command in a POSIX shell")
+needs_posix_sh = pytest.mark.skipif(not Path("/bin/sh").exists(), reason="runs the host command in a POSIX shell")
+
+
+def _upload_in_a_local_shell(
+    monkeypatch: pytest.MonkeyPatch,
+    path: Path,
+    content: str,
+    *,
+    shell_setup: str = "",
+    env: dict[str, str] | None = None,
+) -> None:
+    """``LimaHost.upload`` with its host command run by a local ``sh``, after ``shell_setup``."""
+
+    def in_a_local_shell(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        completed = subprocess.run(
+            ["sh", "-c", shell_setup + command], input=input, capture_output=True, text=True, check=False, env=env
+        )
+        return _Completed(completed.returncode, completed.stdout, completed.stderr)
+
+    monkeypatch.setattr(LimaHost, "_execute", in_a_local_shell)
+    LimaHost("vm-host").upload(str(path), content)
+
+
+@needs_posix_sh
 def test_an_upload_is_mode_0600_under_an_inherited_default_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A default ACL on the directory, such as one on ``/var/tmp``, overrides the umask for new files."""
     setfacl = shutil.which("setfacl")
@@ -158,18 +181,56 @@ def test_an_upload_is_mode_0600_under_an_inherited_default_acl(tmp_path: Path, m
         pytest.skip("setfacl is required to provision the ACL fixture")
     if subprocess.run([setfacl, "-d", "-m", "g::rwx,o::rwx", str(tmp_path)], capture_output=True).returncode:
         pytest.skip("the test file system does not support default ACLs")
-
-    def in_a_local_shell(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
-        completed = subprocess.run(["sh", "-c", command], input=input, capture_output=True, text=True, check=False)
-        return _Completed(completed.returncode, completed.stdout, completed.stderr)
-
-    monkeypatch.setattr(LimaHost, "_execute", in_a_local_shell)
     target = tmp_path / "agentworks-lima-myvm.sh"
 
-    LimaHost("vm-host").upload(str(target), "echo hi\n")
+    _upload_in_a_local_shell(monkeypatch, target, "echo hi\n")
 
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert target.read_text() == "echo hi\n"
+
+
+@needs_posix_sh
+def test_an_upload_replaces_an_existing_file_under_noclobber(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wrapper is rewritten on every create, and a host user's startup files may ``set -C``."""
+    target = tmp_path / "agentworks-lima-myvm.sh"
+    target.write_text("old\n")
+
+    _upload_in_a_local_shell(monkeypatch, target, "new\n", shell_setup="set -C; ")
+
+    assert target.read_text() == "new\n"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+@needs_posix_sh
+def test_an_upload_replaces_a_symlink_instead_of_writing_through_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_text("not yours\n")
+    target = tmp_path / "agentworks-lima-myvm.sh"
+    target.symlink_to(elsewhere)
+
+    _upload_in_a_local_shell(monkeypatch, target, "echo hi\n")
+
+    assert not target.is_symlink()
+    assert target.read_text() == "echo hi\n"
+    assert elsewhere.read_text() == "not yours\n"
+
+
+@needs_posix_sh
+def test_a_failed_upload_leaves_no_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    (shims / "mv").write_text("#!/bin/sh\nexit 1\n")
+    (shims / "mv").chmod(0o755)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    env = {**os.environ, "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}"}
+
+    with pytest.raises(LimaCommandFailed):
+        _upload_in_a_local_shell(monkeypatch, staging / "template.yaml", "arch: default\n", env=env)
+
+    assert list(staging.iterdir()) == []
 
 
 def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
