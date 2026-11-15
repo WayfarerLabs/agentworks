@@ -172,26 +172,46 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, agent_ow
     agent's, ``agent_owner``, and no other account is ever its client: each
     ``has-session`` and ``attach`` elevates only to switch to the agent
     behind the socket guard (``as_socket_owner_from_admin``), the attach on a
-    relay terminal of its own.
+    relay terminal of its own. A poll the guard refuses reads as down, and
+    the window says why once per refused stretch rather than on every poll.
     """
-    from agentworks.sessions.tmux import as_socket_owner_from_admin
+    from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, as_socket_owner_from_admin
 
     q = exact_tmux_target(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
-    if agent_owner is not None:
+    if agent_owner is None:
+        probe = f"agw_up() {{ {has} 2>/dev/null; }}"
+    else:
         if socket_path is None:
             raise ValueError("an agent session's console window needs its socket path")
         has = as_socket_owner_from_admin(has, socket_path=socket_path, owner=agent_owner)
         att = as_socket_owner_from_admin(att, socket_path=socket_path, owner=agent_owner, terminal=True)
+        reason = shlex.quote(
+            f"Not attaching to session '{session_name}': its tmux socket is not a socket that '{agent_owner}' owns."
+        )
+        probe = f"""\
+agw_refused=
+agw_up() {{
+    {has} 2>/dev/null
+    agw_rc=$?
+    if [ "$agw_rc" -eq {SOCKET_GUARD_REFUSED} ]; then
+        [ -n "$agw_refused" ] || echo {reason}
+        agw_refused=1
+    else
+        agw_refused=
+    fi
+    return "$agw_rc"
+}}"""
     return f"""\
 unset TMUX
+{probe}
 
 # Entry: if the session isn't up yet, show a banner and wait for it.
-if ! {has} 2>/dev/null; then
-    clear
+clear
+if ! agw_up; then
     echo 'Waiting for session {session_name} to come up...'
-    while ! {has} 2>/dev/null; do sleep 2; done
+    while ! agw_up; do sleep 2; done
 fi
 
 # Main loop: attach; on exit, distinguish detach (re-attach silently) from
@@ -200,7 +220,7 @@ while true; do
     clear
     {att}
     rc=$?
-    if {has} 2>/dev/null; then
+    if agw_up; then
         continue
     fi
     echo
@@ -210,7 +230,7 @@ while true; do
         echo "Session {session_name} exited (status $rc)."
     fi
     echo 'Waiting for session to start again...'
-    while ! {has} 2>/dev/null; do sleep 2; done
+    while ! agw_up; do sleep 2; done
 done
 """
 
