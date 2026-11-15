@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
+from agentworks.db import SessionMode
 from agentworks.errors import (
     AgentworksError,
     NotFoundError,
@@ -173,10 +174,18 @@ def _regenerate_tmuxinator(
             )
             return
 
-        sessions = db.list_sessions(workspace_name=ws.name)
-        # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
-        socket_paths = {s.name: s.socket_path for s in sessions}
-        config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
+        from agentworks.sessions.manager._teardown import _validated_socket
+
+        sessions, agent_owners = [], {}
+        for session in db.list_sessions(workspace_name=ws.name):
+            if session.mode == SessionMode.AGENT.value:
+                try:
+                    agent_owners[session.name] = _validated_socket(db, session).owner
+                except StateError as error:
+                    output.warn(f"The tmuxinator config of workspace '{ws.name}' leaves out a session: {error}.")
+                    continue
+            sessions.append(session)
+        config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, agent_owners=agent_owners)
         write_config(admin, ws.workspace_path, config_text)
     except FILE_WRITE_FAILURES as error:
         # Its requests carry no secret, so the stderr tail needs no redaction.

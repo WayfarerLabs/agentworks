@@ -404,10 +404,12 @@ Named consoles keep the older path for now.
   that owns it, where it read admin sessions as the admin and elevated for agent sessions; a session
   whose socket path is a link, is not a socket or belongs to another account shows `unknown`. A
   listing that cannot read a VM now warns once with the reason.
-- **An agent's session is read and torn down as the agent.** Every read of an agent session's tmux
-  server, and its teardown by `session stop --all`, `agent delete` or `workspace delete`, runs as
-  the agent, where these ran as root; root never acts as a client of a tmux server an agent
-  controls.
+- **An agent's session is reached only as the agent.** Every read of an agent session's tmux server,
+  its teardown by `session stop --all`, `agent delete` or `workspace delete`, `session attach`,
+  `session logs` and the workspace's tmuxinator window for it run as the agent, where these ran as
+  root or as the admin. Neither root nor the admin acts as a client of a tmux server an agent
+  controls. Attaching switches to the agent with `sudo -n`, which the admin already has; named
+  consoles keep attaching as the admin for now.
 - **Launches are logged as the session's owner.** `session create`, `start` and `restart` write
   every request of the launch, an agent session's requests as the agent included, to the command's
   operation log by shape. `session stop` writes one `session-stop` log per VM and

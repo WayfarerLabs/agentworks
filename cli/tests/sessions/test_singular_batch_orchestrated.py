@@ -1119,3 +1119,69 @@ def test_session_describe_does_not_reach_provider_readiness(
     session_manager.describe_session(db, config, name="s1")
 
     assert scopes == []
+
+
+def _agent_socket(db: Database) -> tuple[str, str]:
+    """The seeded agent session's socket path and its owner, the agent's Linux user."""
+    session, agent = db.get_session("s1"), db.get_agent("a1")
+    assert session is not None and session.socket_path is not None and agent is not None
+    return session.socket_path, agent.linux_user
+
+
+def test_attach_reaches_an_agent_sessions_server_only_as_the_agent(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The admin's terminal elevates only to switch to the agent, behind the socket guard, and keeps its options."""
+    from agentworks.execution.requests import TerminalCommand
+    from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
+
+    _seed_singular(db, agent="a1")
+    _reachable(monkeypatch, True)
+    recorder = route_vm_access_to_target(monkeypatch, _FakeTarget())
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.RUNNING)
+    socket, owner = _agent_socket(db)
+    config = make_config()
+
+    assert session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE) == 0
+
+    [call] = [call for call in recorder.calls if call.operation == "attach"]
+    line = as_socket_owner_line(
+        tmux_cmd(f"attach -t {exact_tmux_target('s1')}", socket), socket_path=socket, owner=owner, switch_user=True
+    )
+    assert call.request == TerminalCommand(("sudo", "-n", "/bin/sh", "-c", line))
+    assert "clear_screen_on_exit" in call.options
+
+
+def test_logs_capture_an_agent_sessions_pane_only_as_the_agent(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.execution.requests import Script
+    from agentworks.sessions import tmux
+    from agentworks.sessions.tmux import as_socket_owner_line
+    from tests._runtime_probes import owner_probe_line
+
+    _seed_singular(db, agent="a1")
+    _reachable(monkeypatch, True)
+    recorder = route_vm_access_to_target(monkeypatch, _FakeTarget())
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.RUNNING)
+    socket, owner = _agent_socket(db)
+
+    def capture(name: str, *, run_command: tmux.RunCommand, lines: int, socket_path: str | None) -> str:
+        run_command(tmux.tmux_cmd(f"capture-pane -p -t {tmux.exact_tmux_target(name)}", socket_path), check=False)
+        return ""
+
+    monkeypatch.setattr(tmux, "capture_output", capture)
+
+    session_manager.session_logs(db, make_config(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
+
+    [request] = [
+        call.request
+        for call in recorder.calls
+        if isinstance(call.request, Script) and "capture-pane" in call.request.source
+    ]
+    expected = as_socket_owner_line(owner_probe_line(request.source), socket_path=socket, owner=owner, switch_user=True)
+    assert (request.elevated, request.source) == (True, expected)

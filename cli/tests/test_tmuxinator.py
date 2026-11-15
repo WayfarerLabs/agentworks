@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -10,17 +11,29 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+import yaml
 
 from agentworks.db import SessionRow
 from agentworks.sessions.tmux import (
     AGENT_SOCKET_GROUP,
     AGENT_SOCKET_ROOT,
     agent_socket_path,
+    as_socket_owner_line,
     ensure_agent_socket_dir,
     ensure_agent_socket_root,
+    exact_tmux_target,
+    tmux_cmd,
 )
 from agentworks.workspaces.tmuxinator import GENERATED_HEADER, console_session_name, generate_config
 from tests.vm_access_support import files_over_target
+
+
+def _pane(config: str, window: str) -> str:
+    """The one pane command of ``window`` in a generated config, as tmuxinator reads it."""
+    windows = yaml.safe_load(config)["windows"]
+    [pane] = next(entry[window] for entry in windows if window in entry)["panes"]
+    assert isinstance(pane, str)
+    return pane
 
 
 def test_generate_config_no_sessions() -> None:
@@ -82,8 +95,7 @@ def test_generated_wrapper_does_not_match_a_session_name_prefix() -> None:
                 updated_at="",
                 socket_path=socket_path,
             )
-            config = generate_config("ws", "/tmp/ws", sessions=[session])
-            wrapper = next(line.strip().removeprefix("- ") for line in config.splitlines() if "while tmux" in line)
+            wrapper = _pane(generate_config("ws", "/tmp/ws", sessions=[session]), "foo")
             probe = wrapper.removeprefix("unset TMUX; while ").split(" 2>/dev/null;", maxsplit=1)[0]
             result = subprocess.run(["zsh", "-f", "-c", probe], check=False)
             assert result.returncode == 1
@@ -117,8 +129,8 @@ def test_agent_socket_path() -> None:
     assert path == f"{AGENT_SOCKET_ROOT}/agt--alice/myws-dev.sock"
 
 
-def test_generate_config_agent_session_socket() -> None:
-    """Agent-mode sessions should use -S <socket> in wrapper commands."""
+def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent() -> None:
+    """The admin runs the config, so an agent's window elevates only to switch to the agent behind the guard."""
     sock = "/run/agentworks/agent-tmux-sockets/agt--alice/ws-dev.sock"
     sessions = [
         SessionRow(
@@ -132,9 +144,25 @@ def test_generate_config_agent_session_socket() -> None:
             socket_path=sock,
         ),
     ]
-    config = generate_config("ws", "/tmp/ws", sessions=sessions)
-    assert f"-S {sock}" in config
-    assert "tmux -S" in config
+    pane = _pane(generate_config("ws", "/tmp/ws", sessions=sessions, agent_owners={"ws-dev": "agt--alice"}), "ws-dev")
+
+    switched = [
+        "sudo -n /bin/sh -c "
+        + shlex.quote(
+            as_socket_owner_line(
+                tmux_cmd(f"{verb} -t {exact_tmux_target('ws-dev')}", sock),
+                socket_path=sock,
+                owner="agt--alice",
+                switch_user=True,
+            )
+        )
+        for verb in ("has-session", "attach")
+    ]
+    assert all(command in pane for command in switched)
+    remainder = pane
+    for command in switched:
+        remainder = remainder.replace(command, "")
+    assert "tmux" not in remainder
 
 
 def test_generate_config_admin_session_no_socket() -> None:

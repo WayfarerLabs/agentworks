@@ -6,7 +6,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
-from agentworks.db import SessionStatus
+from agentworks.db import SessionMode, SessionStatus
 from agentworks.errors import (
     BrokenStateError,
     StateError,
@@ -16,8 +16,10 @@ from agentworks.machine_output import write_all
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, SessionRow
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.tmux import RunCommand
 
 
 def session_logs(
@@ -29,7 +31,7 @@ def session_logs(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    from agentworks.sessions.tmux import access_run_command, capture_output
+    from agentworks.sessions.tmux import capture_output
 
     if lines is not None and lines < 1:
         raise ValidationError("session log line count must be positive")
@@ -70,17 +72,37 @@ def session_logs(
                 entity_name=name,
             )
 
-        sock = session.socket_path
         captured = capture_output(
             name,
-            # The admin reads an agent session's pane through the socket group, unbounded as before.
-            run_command=access_run_command(admin, deadline=None, elevated=False),
+            run_command=_capture_run_command(db, session, admin=admin),
             lines=lines or config.session.history_limit,
-            socket_path=sock,
+            socket_path=session.socket_path,
         )
         # Raw data pipe (opaque tmux capture-pane output), not a structured message.
         # Intentionally not routed through the output handler.
         _write_raw_capture(captured)
+
+
+def _capture_run_command(db: Database, session: SessionRow, *, admin: VMAccess) -> RunCommand:
+    """The admin's unbounded capture of ``session``'s pane, reaching its tmux server only as its owner.
+
+    A legacy row's server is the admin's own default one. A dedicated
+    server's capture runs behind the socket guard, an agent session's as the
+    agent (``socket_owner_run_command``).
+    """
+    from agentworks.sessions.manager._teardown import _validated_socket
+    from agentworks.sessions.tmux import access_run_command, socket_owner_run_command
+
+    if session.socket_path is None:
+        return access_run_command(admin, deadline=None, elevated=False)
+    socket = _validated_socket(db, session)
+    return socket_owner_run_command(
+        admin,
+        socket_path=socket.path,
+        owner=socket.owner,
+        switch_user=session.mode == SessionMode.AGENT.value,
+        deadline=None,
+    )
 
 
 def _write_raw_capture(captured: str) -> None:

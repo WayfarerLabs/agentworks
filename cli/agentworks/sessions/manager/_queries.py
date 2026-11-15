@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import SessionStatus
+from agentworks.db import SessionMode, SessionStatus
 from agentworks.db.projections import project_session_mode
 from agentworks.errors import (
     AgentworksError,
@@ -26,6 +26,7 @@ from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, InstanceStateInspection, SessionRow
+    from agentworks.execution.requests import TerminalCommand
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject, JsonValue
@@ -920,8 +921,6 @@ def attach_session(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
-    from agentworks.execution.requests import TerminalCommand
-
     session = _mgr._require_session(db, name)
     with _mgr._prepare_vm(
         db,
@@ -961,11 +960,36 @@ def attach_session(
 
         from agentworks.terminal import clear_screen_on_detach
 
-        # A legacy row's session is on the admin's default tmux server.
-        socket = ("-S", session.socket_path) if session.socket_path is not None else ()
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return admin.attach(
-            TerminalCommand(("tmux", *socket, "attach", "-t", "=" + name)),
-            clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
+            _attach_command(db, session), clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach)
         )
+
+
+def _attach_command(db: Database, session: SessionRow) -> TerminalCommand:
+    """The admin's terminal command that attaches to ``session``, reaching its tmux server only as its owner.
+
+    A legacy row's session is on the admin's own default server and an admin
+    session's server is the admin's, so the admin attaches directly. An agent
+    session's server is the agent's, and no other account is ever its client:
+    the admin elevates only to switch to the agent behind the socket guard
+    (``as_socket_owner_line``).
+    """
+    from agentworks.execution.requests import TerminalCommand
+    from agentworks.sessions.manager._teardown import _validated_socket
+    from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
+
+    target = "=" + session.name
+    if session.socket_path is None:
+        return TerminalCommand(("tmux", "attach", "-t", target))
+    if session.mode != SessionMode.AGENT.value:
+        return TerminalCommand(("tmux", "-S", session.socket_path, "attach", "-t", target))
+    socket = _validated_socket(db, session)
+    line = as_socket_owner_line(
+        tmux_cmd(f"attach -t {exact_tmux_target(session.name)}", socket.path),
+        socket_path=socket.path,
+        owner=socket.owner,
+        switch_user=True,
+    )
+    return TerminalCommand(("sudo", "-n", "/bin/sh", "-c", line))

@@ -11,16 +11,20 @@ tmux session using the same wrapper pattern as the VM console.
 
 from __future__ import annotations
 
+import json
 import shlex
 from typing import TYPE_CHECKING
 
+from agentworks.db import SessionMode
 from agentworks.execution.requests import Command
 from agentworks.sessions.multi_console import ADMIN_SHELL_WINDOW
-from agentworks.sessions.tmux import exact_tmux_target, tmux_cmd
+from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
 from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
 from agentworks.workspaces.guest import PROBE_DEADLINE, addressable_workspace_path, script
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.db import SessionRow
     from agentworks.execution.access import VMAccess
     from agentworks.execution.requests import Script
@@ -136,15 +140,19 @@ def generate_config(
     ws_name: str,
     workspace_path: str,
     sessions: list[SessionRow] | None = None,
-    socket_paths: dict[str, str | None] | None = None,
+    agent_owners: Mapping[str, str] | None = None,
 ) -> str:
     """Generate a tmuxinator YAML config for a workspace.
 
     Produces an admin-shell window plus one window per session. Session windows
     use a wrapper that attaches to the session's locked-down tmux session.
 
-    *socket_paths* overrides ``session.socket_path`` when provided (used to
-    supply derived paths for migrated sessions with NULL socket_path).
+    The admin runs the config. An admin session's server is the admin's, so
+    its window reaches it directly. An agent session's server is the agent's,
+    and no other account is ever its client: its window elevates only to
+    switch to the agent named in ``agent_owners`` behind the socket guard
+    (``as_socket_owner_line``). Each pane is a YAML double-quoted scalar, so no
+    shell text can change the YAML around it.
     """
     lines = [
         GENERATED_HEADER,
@@ -159,14 +167,20 @@ def generate_config(
         '        - ""',
     ]
 
-    paths = socket_paths or {}
     for session in sessions or []:
         q_session = shlex.quote(session.name)
         q_exact_session = exact_tmux_target(session.name)
-        sock = paths.get(session.name, session.socket_path)
-        # Wrapper: unset TMUX for nesting, loop attach while session exists
+        sock = session.socket_path
         has_cmd = tmux_cmd(f"has-session -t {q_exact_session}", sock)
         attach_cmd = tmux_cmd(f"attach -t {q_exact_session}", sock)
+        if session.mode == SessionMode.AGENT.value and sock is not None:
+            owner = (agent_owners or {})[session.name]
+            has_cmd, attach_cmd = (
+                "sudo -n /bin/sh -c "
+                + shlex.quote(as_socket_owner_line(command, socket_path=sock, owner=owner, switch_user=True))
+                for command in (has_cmd, attach_cmd)
+            )
+        # Wrapper: unset TMUX for nesting, loop attach while session exists
         wrapper = (
             f"unset TMUX; "
             f"while {has_cmd} 2>/dev/null; do "
@@ -180,7 +194,7 @@ def generate_config(
             [
                 f'  - "{session.name}":',
                 "      panes:",
-                f"        - {wrapper}",
+                f"        - {json.dumps(wrapper)}",
             ]
         )
 
