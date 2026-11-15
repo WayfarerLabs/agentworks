@@ -139,10 +139,10 @@ private-review results are still pending at this checkpoint.
 ### 2026-11-15 implementation validation
 
 The composed implementation at `e0284d19c2bac49cc140a2cecc8e5fef5156c20c` passed the full
-non-integration suite: 13,766 tests passed, 58 skipped and 15 subtests passed in 361.86 seconds.
-The test selection matches CI and used four workers plus the Python 3.11 conformance interpreter.
-Independent project, complexity and generic correctness reviews are clean on that exact head,
-including PATH consumption, documentation, encoder removal and the Claude merge intersection.
+non-integration suite: 13,766 tests passed, 58 skipped and 15 nested checks passed in 361.86
+seconds. The test selection matches CI and used four workers plus the Python 3.11 conformance
+interpreter. Independent project, complexity and generic correctness reviews are clean on that exact
+head, including PATH consumption, documentation, encoder removal and the Claude merge intersection.
 
 Ruff, formatting across 1,107 files, strict Mypy across 1,071 source/test files, typer isolation,
 repository file quality, locked-SDD protection and Rulesync drift checks passed. Website Python
@@ -152,7 +152,7 @@ builds passed and removed their outputs. Six actual CLI commands passed in an is
 recorded above. No managed backend resources or model calls were used; these checks do not claim
 live VM initialization coverage.
 
-Implementation is complete for the six migrated declarations and eleven accepted additions. The
-PR handoff records final CI and requests independent integration validation. SDD closeout and its
+Implementation is complete for the six migrated declarations and eleven accepted additions. The PR
+handoff records final CI and requests independent integration validation. SDD closeout and its
 lockfile remain open until that PR-level evidence is accepted; neither is claimed by the private
 quality loop.
