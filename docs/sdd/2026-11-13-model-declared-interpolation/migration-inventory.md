@@ -50,10 +50,10 @@ Preserve existing tilde and downstream shell behavior.
 
 Cost: context threading and three destination kinds, not five new parsing algorithms. Profile
 writers currently interpolate authored PATH fragments into double-quoted shell source
-(`vms/initializer/shell_env.py:139`, `agents/initializer.py:567`). Adoption must keep existing
-intentional `~`/`$HOME` behavior while treating inserted context data correctly. Specify that
-serialization in the implementation design rather than assuming PATH values are already safely
-quoted.
+(`vms/initializer/shell_env.py:139`, `agents/initializer.py:567`). Adoption preserves that
+downstream shell-source contract. Interpolation does not escape inserted text or impose a restricted
+shell grammar. Document both stages and namespace-escape limitations; the mechanism makes no claim
+that profile entries are safely quoted literal paths.
 
 ### B. Admin and agent dotfiles installation
 

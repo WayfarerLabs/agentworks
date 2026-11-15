@@ -98,3 +98,13 @@ The operator replied "Agreed on 2. But please explain 1." to the recommendations
 model-aware rendering therefore requires the matching annotation, and the unused, unreleased
 `render_context_argv` helper is removed. The proposed scope reduction in recommendation 1 remains
 undecided; the earlier A-D scope is not amended.
+
+### 2026-11-15: PATH contributions and downstream interpretation
+
+The operator agreed that this is "a very narrow, cli-side templating mechanism that otherwise leaves
+text unchanged" and that broader shell/env handling problems are outside this effort. After
+discussion of PATH, the operator explicitly required interpolation of its contributions and
+clarified: "we should also document how the path contributions are ultimately handled." The full A-D
+adoption scope remains accepted. PATH contributions use the same textual substitution without
+additional shell escaping or restrictions; permanent guidance explains their profile serialization,
+later shell expansion, available context and initialization lifecycle.

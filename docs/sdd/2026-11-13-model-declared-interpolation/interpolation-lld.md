@@ -1,11 +1,11 @@
 # Model declaration and rendering design
 
-Status: implementation design for accepted groups A-D. The public adapter surface and profile
-destination encoding are specified below.
+Status: implementation design for accepted groups A-D. Interpolation performs textual substitution;
+each consumer retains its downstream interpretation.
 
 ## Marker and supported shapes
 
-Proposed declarations:
+Declarations:
 
 ```python
 value: Annotated[str, Interpolated()]
@@ -26,8 +26,8 @@ remain traversable for declaration discovery through existing schema infrastruct
 
 - Extend field documentation with a presentation-free interpolation fact, carrying the distinction
   between a scalar and its elements.
-- Emit a namespaced JSON Schema extension, proposed as `x-agw-interpolation: true` on the string
-  node. Preserve nullable and list structure rather than marking unrelated branches as interpreted.
+- Emit a namespaced JSON Schema extension, `x-agw-interpolation: true` on the string node. Preserve
+  nullable and list structure rather than marking unrelated branches as interpreted.
 - Have scalar shorthand schema and documentation derive the fact from its target model field. Do not
   broaden shorthand's accepted scalar type to hide the metadata gap.
 - Add the fact to resource explanation and generated sample annotations. Guide prose teaches use and
@@ -77,35 +77,32 @@ substitution engine and compatibility adapter already exist in `interpolation.py
 `interpolation_compat.py`. No new external templating dependency or separate external prior-art
 research is proposed.
 
-## Adapter interface and profile source encoding
+## Adapter interface and PATH consumption
 
-Use
-`render_scalar_field(model, field_name, value, values, *, location, legacy_placeholders=None, encode_inserted=None)`
+Use `render_scalar_field(model, field_name, value, values, *, location, legacy_placeholders=None)`
 for strings/nullable strings and `render_list_field(...)` for string lists. Scalar overloads
 preserve the caller's nullable type. Both read interpolation eligibility from the declaring model
 and reject an explicit call for an unmarked field or incompatible marker shape. This check also
 applies to nullable values and empty lists. Lists retain order and render each element.
 
-For installer PATH additions, existing authored text is a double-quoted profile fragment: leading
-`~` and ordinary authored shell variables continue to expand. Only text inserted by Agentworks must
-be escaped for that double-quoted position. A small destination encoder escapes backslash, double
-quote, dollar and backtick. Apply it to context replacements and to the literal namespace prefix
-produced by the grammar's escape operation. Source chunks remain authored shell source.
+Installer `path` elements use the list adapter with the install resource's real kind/name and field
+location. Both the VM/admin and agent runners render the selected resource's contributions before
+its remote completion checks or command execution. Successful and already-installed resources
+contribute those rendered values; failed installs contribute nothing. The source model is unchanged.
+No contribution is injected between commands in the batch.
 
-The pure renderer therefore accepts an optional `encode_inserted` callback with identity behavior by
-default. The marker has no destination-policy parameter; ordinary env values, command source and
-argv data keep their existing behavior. The model-aware adapters forward the callback for the
-profile consumer. This avoids a second global template lexer or a shell parser. It only protects
-insertions at the supported outer double-quoted position, not arbitrary authored shell contexts.
-Both profile writers use the same installer-produced fragments. Do not encode complete rendered
-paths, which would also disable existing authored `$HOME` expansion.
+VM/admin setup supplies managed user and VM facts. Agent setup also supplies the agent name.
+Workspace and session context remain unavailable. Non-namespace shell expressions pass through
+unchanged; neither the renderer nor the adapters read ambient environment variables.
 
-### PATH source boundary under discussion
+The existing profile writers consume the rendered strings after the batch. They retain their
+collection order/deduplication conventions, convert a leading tilde to `$HOME`, and emit each entry
+inside `export PATH="<entry>:$PATH"`. Later shells interpret that source when they load the profile.
+Text inserted by interpolation has the same downstream meaning as text authored directly in that
+position. The mechanism does not escape inserted values, restrict shell fragments, normalize paths
+or change shell expansion. The renderer has no destination encoder hook.
 
-An independent complexity check reproduced execution of inserted command-looking data when an
-authored backslash precedes a placeholder. The callback alone is insufficient for arbitrary profile
-source. The operator is being asked whether newly templated PATH fragments should be restricted to
-path text, leading tilde and simple shell-variable references, preserving existing non-templated
-fragments, or whether PATH interpolation should be deferred. All other agreed consumers can proceed
-independently. No PATH implementation is accepted as safe pending that disposition and a real-shell
-regression check.
+Permanent documentation and the guide describe both stages, the reinitialization lifecycle and the
+difference between Agentworks namespace escaping and shell quoting. A real-shell behavioral check
+sources generated profile content under a controlled environment to demonstrate that namespace
+substitution happens in the CLI while ordinary shell expansion happens later.

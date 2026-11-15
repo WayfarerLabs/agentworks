@@ -48,3 +48,5 @@ valid choice. Rendering this guide performs none of those operations.
 <!-- agw:include path="_guide_sources/docs/arch/runtime-context.md" heading="Secrets" -->
 
 <!-- agw:include path="_guide_sources/docs/arch/runtime-context.md" heading="Commands and shell quoting" -->
+
+<!-- agw:include path="_guide_sources/docs/arch/runtime-context.md" heading="Installer PATH contributions" -->

@@ -56,15 +56,16 @@ independently ready releases. The initial draft is for design feedback.
   paths or context facts back into reusable templates or instance specs.
 - Compare old and new existing-consumer behavior, including losers, literal secrets, unselected
   commands, aliases, warning suppression, doctor and offline preview.
-- Preserve path conventions intentionally. Profile PATH serialization and admin dotfiles `cd`
-  quoting need concrete treatment in their adoption work; a marker alone is insufficient.
+- Preserve PATH contributions as shell fragments in the existing double-quoted profile assignments.
+  Document that CLI interpolation leaves ordinary shell expressions for later profile sourcing.
+  Admin dotfiles destinations remain path data and are quoted for `cd`.
 - Preserve authored list merge/deduplication rules. Do not normalize or deduplicate rendered paths
   as an incidental behavior change.
 - Keep owner-templated resource defaults separate. This work does not change graph edges, source
   packaging, controller paths, remote architecture discovery or SSH transport.
-- Existing alias removal text in code/docs still differs from issue #878's two-minor decision.
-  Resolve that alignment explicitly with the operator's release policy; do not infer a new cutoff
-  from this SDD or extend aliases to newly annotated fields.
+- Keep the compatibility cutoff aligned with issue #878's two-minor decision. The warning window is
+  0.20.x and 0.21.x, with deliberate removal planned for 0.22.0. Do not extend aliases to newly
+  annotated fields.
 
 Before merge, ordinary code correction or revert of private commits is sufficient. After release,
 preserve accepted config spellings and use the normal compatibility pattern for any later removal

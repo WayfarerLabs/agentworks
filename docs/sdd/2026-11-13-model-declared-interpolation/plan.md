@@ -22,7 +22,7 @@ publishing the draft.
 - [x] Extend the common field documentation projection and scalar shorthand metadata.
 - [x] Add the model-aware rendering adapter and migrate winning plaintext env.
 - [x] Migrate selected Shell commands and native extra arguments with existing semantics.
-- [ ] Verify schema/documentation/runtime agreement and the literal unmarked default.
+- [x] Verify schema/documentation/runtime agreement and the literal unmarked default.
 
 Definition of done: existing support has one eligibility declaration, normal model loading stays
 context-free, and existing lifecycle, secret and compatibility behavior is preserved.
@@ -30,13 +30,14 @@ context-free, and existing lifecycle, secret and compatibility behavior is prese
 ## Agreed new consumers
 
 - [x] Replace proposed inventory dispositions with the operator's agreed adoption list.
-- [ ] Implement only agreed fields, including context threading and destination handling.
-- [ ] Validate each new boundary and preserve existing path/merge conventions.
-- [ ] Review the shipped manifests; change examples only where the new language helps, without
+- [x] Implement only agreed fields, including context threading and destination handling.
+- [x] Validate each new boundary and preserve existing path/merge conventions.
+- [x] Review the shipped manifests; change examples only where the new language helps, without
       mechanically replacing ordinary shell variables or already useful tilde paths.
 
 Definition of done: each adopted field has a concrete consumption boundary, consistent checking and
-execution values, correct quoting, field-aware failures and useful examples.
+execution values, destination handling that preserves its contract, field-aware failures and useful
+examples.
 
 ## Permanent documentation and handoff
 
@@ -112,3 +113,25 @@ access remains literal. The existing A-D adoption scope is unchanged pending tha
 All 384 affected schema, env, secrets, harness and setup tests passed. Strict Mypy across 448 source
 files, targeted Ruff and repository file-quality checks passed. Private review evidence and the
 exact pushed head will be recorded in the PR update.
+
+### 2026-11-15 PATH adoption and branch integration
+
+The operator retained all A-D fields and explicitly required interpolation of PATH contributions,
+with documentation of their ultimate handling. Both installer runners now render those elements
+before remote checks or execution. They preserve skipped/successful contributions and failed-install
+exclusion. Profile writers retain textual shell-fragment handling, leading tilde conversion and
+their existing ordering/deduplication. The unused insertion-encoding hook is removed. No shell
+grammar restriction or downstream escaping change is introduced.
+
+The permanent runtime-context reference and its guide import explain both processing stages,
+available setup context, batch timing, reinitialization and the difference between namespace
+escaping and shell quoting. Resource field guidance explains the same destination. Existing bundled
+install manifests retain useful tilde paths; no mechanical spelling migration is needed.
+
+The PATH worker passed 156 focused tests, including six controlled real-shell cases across both
+runners' success/skip/failure paths and two located unavailable-context checks. Root merged main at
+`432766fad`, preserving its Claude conversation selection alongside model-aware argument rendering;
+166 merge-focused tests passed. Source/test Mypy passed across 1,071 files, Ruff and formatting
+passed, and six real CLI discovery/explanation/sample/schema commands exited zero in an isolated
+home. The PATH element advertises interpolation and the home remained empty. Full-suite and final
+private-review results are still pending at this checkpoint.

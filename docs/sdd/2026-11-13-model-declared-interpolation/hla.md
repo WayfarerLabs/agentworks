@@ -54,6 +54,12 @@ Render results are separate invocation values, not mutations of registry models 
 declarations. Repeated preflight/launch may each render from the source declaration; neither renders
 a previous result.
 
+Installer PATH contributions render before the selected resource's completion checks or execution,
+then retain the existing profile-writer contract. The writer emits double-quoted shell assignments;
+later shells interpret ordinary variables and other authored shell syntax. Interpolation performs
+textual substitution without adding escaping or a restricted shell grammar. Permanent guidance
+explains both stages and the available setup context.
+
 ## Adoption and compatibility
 
 The [inventory](migration-inventory.md) records existing-support migration and accepted groups A-D.
