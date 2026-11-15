@@ -821,3 +821,59 @@ def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_fi
     assert state.complete and not state.incomplete_reasons
     assert not any(entry.input_id == item.identity for entry in state.deferred)
     assert all(not path.exists() for path in old_files)
+
+
+def test_direct_session_spec_persists_recaptures_and_clears_inherited_entries(lifecycle, monkeypatch):
+    from agentworks.artifacts.state import read_captures
+    from agentworks.schema import CapabilityBlock
+    from agentworks.sessions.manager._env import _resolve_template
+    from agentworks.sessions.template import SessionTemplate
+    from agentworks.sessions.templates import resolve_from_dict_with_provenance
+
+    # Restore real template resolution around the fixture's process/transport seams.
+    base = SessionTemplate.model_validate(
+        {
+            "name": "claude",
+            "harness_integration": CapabilityBlock.of("shell"),
+            "artifacts": {"declare": {"hints": {"base": {"text": "Base direct context."}}}},
+        }
+    )
+    monkeypatch.setattr(lifecycle.config, "session_templates", {"claude": base}, raising=False)
+    monkeypatch.setattr(manager, "_resolve_template", _resolve_template)
+    monkeypatch.setattr(
+        "agentworks.sessions.templates.resolve_template_with_provenance",
+        lambda registry, name=None, **kwargs: resolve_from_dict_with_provenance(
+            dict(registry.iter_kind_items("session-template")), name, **kwargs
+        ),
+    )
+    specification = {"artifacts": {"declare": {"hints": {"instance": {"text": "Instance direct context."}}}}}
+    manager.restart_session(
+        lifecycle.db,
+        lifecycle.config,
+        name="s1",
+        spec=json.dumps(specification),
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    captured = read_captures(lifecycle.db, "session", "s1")["session"]
+    assert list(captured.inputs.hints) == ["base", "instance"]
+    assert all(item.origin.bundle == "" for item in captured.inputs.items())
+    desired = lifecycle.db.instance_state.get_desired_overlay("session", "s1")
+    assert desired is not None and desired.payload.value == specification
+    first_files = lifecycle.files()
+    assert len(first_files) == 3 and all(path.exists() for path in first_files)
+    lifecycle.restart()
+    assert read_captures(lifecycle.db, "session", "s1")["session"] == captured
+    assert all(not path.exists() for path in first_files)
+    manager.restart_session(
+        lifecycle.db,
+        lifecycle.config,
+        name="s1",
+        spec='{"artifacts":{"declare":null}}',
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert not read_captures(lifecycle.db, "session", "s1")["session"].inputs
+    assert not lifecycle.files()
+    lifecycle.restart()
+    assert not read_captures(lifecycle.db, "session", "s1")["session"].inputs

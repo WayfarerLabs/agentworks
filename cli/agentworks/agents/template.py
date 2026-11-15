@@ -154,7 +154,7 @@ class AgentTemplate(DeclaredResource):
     A null entry disables that integration."""
 
     artifacts: ArtifactsConfig | None = None
-    """Artifact bundles selected at this scope; an omitted selection inherits."""
+    """Bundle selections and direct artifact definitions at this scope; omission inherits."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported for this agent, as a plaintext value

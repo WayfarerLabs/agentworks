@@ -57,7 +57,7 @@ def _needed(
 ) -> bool:
     return (
         bool(activations)
-        or bool(artifacts.bundles)
+        or bool(artifacts)
         or component in read_captures(db, kind, name)
         or any(item.component == component for item in read_native_setup(db, kind, name).records)
     )
