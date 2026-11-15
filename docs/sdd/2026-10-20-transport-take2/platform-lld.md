@@ -183,7 +183,8 @@ resolved client that cannot start raises `ConnectivityError` naming it, the prec
   arguments" holds on every channel.
 - Remote Lima's native shell leads its host command with a NUL on a Windows console
   (`ssh_process.nul_first_on_a_windows_console`, as the attach's terminal half does). The clouds'
-  native shell is a login shell with no remote command, so it gets none.
+  native shell is a login shell with no remote command, so it gets none. Local Lima's and WSL2's get
+  none because no ssh client runs there, so there is no Win32-OpenSSH console write to guard.
 - WSL2 uses `--exec`, so root's login shell is not between `wsl.exe` and Bash. The program name is a
   literal today (`wsl2.py:247-248`, and `transports/wsl2.py:139`, which goes); this slice introduces
   the constant `_WSL` in `wsl2.py`, used by `_wsl` and the two new calls, and absolute on Windows
