@@ -47,11 +47,12 @@ def format_host_path(file: Path) -> str:
       ``~/workspaces/w`` and go looking on the wrong machine. Remote
       paths stay absolute. See ``workspaces/manager/rehome.py`` for the
       density of them.
-    - **Text written into a file another program parses**, where ``~`` is
-      not expanded in that position: the PowerShell ``$PROFILE``
-      source line (``completions/install.py``), and the OpenSSH config
-      writer, which has its own ``_to_ssh_path`` because it is generating
-      config for ``ssh`` to read rather than prose for a human.
+    - **Text written into a file another program parses**, which follows
+      that program's rules rather than these: the PowerShell ``$PROFILE``
+      source line (``completions/install.py``), where ``~`` is not
+      expanded in that position, and the OpenSSH config writer, which has
+      its own ``_to_ssh_path`` because it is generating config for ``ssh``
+      to read rather than prose for a human.
     - **Verbatim echoes of what the operator typed**, such as
       ``admin.dotfiles_source`` (which may be a git URL, not a path at
       all) and ``apt.source_file``. Quoting input back unchanged is the
