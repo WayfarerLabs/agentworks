@@ -40,8 +40,8 @@ class DedicatedTeardownPlan:
 
     Every request runs on ``access`` as ``owner``, the account that owns the
     session's server, guarded on ``socket_path`` (``socket_owner_run_command``):
-    when ``elevated``, the admin's access to another account's session, it is
-    elevated only to switch to ``owner``. Each is one dispatch bounded by
+    with ``switch_user``, the admin's access to another account's session, it
+    is elevated only to switch to ``owner``. Each is one dispatch bounded by
     ``deadline`` seconds (``None``: unbounded).
     """
 
@@ -55,7 +55,7 @@ class DedicatedTeardownPlan:
     stored_boot_id: str
     stored_start_ticks: int
     access: VMAccess
-    elevated: bool
+    switch_user: bool
     deadline: float | None
     force: bool
 
@@ -65,7 +65,7 @@ class DedicatedTeardownPlan:
             self.access,
             socket_path=self.socket_path,
             owner=self.owner,
-            switch_user=self.elevated,
+            switch_user=self.switch_user,
             deadline=self.deadline,
         )
 
@@ -190,7 +190,7 @@ def prepare_dedicated_teardown(
         stored_boot_id=boot_id,
         stored_start_ticks=start_ticks,
         access=access,
-        elevated=not target_owns_session,
+        switch_user=not target_owns_session,
         deadline=deadline,
         force=force,
     )

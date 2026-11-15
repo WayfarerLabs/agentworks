@@ -97,7 +97,7 @@ def test_dedicated_worker_preserves_non_socket_paths(
             stored_boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             stored_start_ticks=201,
             access=target.access(),
-            elevated=False,
+            switch_user=False,
             deadline=None,
             force=True,
         )

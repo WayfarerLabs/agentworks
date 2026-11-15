@@ -41,7 +41,7 @@ def _plan(native: NativeTarget, access: RecordingVMAccess, *, force: bool = Fals
         stored_boot_id=fingerprint.boot_id,
         stored_start_ticks=fingerprint.start_ticks,
         access=access,
-        elevated=False,
+        switch_user=False,
         deadline=10,
         force=force,
     )

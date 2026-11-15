@@ -77,7 +77,7 @@ def _plan(
         stored_boot_id=BOOT_ID,
         stored_start_ticks=start_ticks or 2000 + ordinal,
         access=access or _access(name),
-        elevated=False,
+        switch_user=False,
         deadline=None,
         force=False,
     )

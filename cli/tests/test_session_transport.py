@@ -262,7 +262,7 @@ def test_admin_access_elevates_agent_runtime_absence_proof(
     observed_sudo: list[bool] = []
 
     def _still_live_plan(plan):  # type: ignore[no-untyped-def]
-        observed_sudo.append(plan.elevated)
+        observed_sudo.append(plan.switch_user)
         return False
 
     monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", _still_live_plan)

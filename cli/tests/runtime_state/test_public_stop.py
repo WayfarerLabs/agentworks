@@ -70,7 +70,7 @@ def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_pe
     def execute(plan):
         nonlocal active, maximum
         assert (plan.access.vm, plan.deadline) == (plan.vm_name, 10)
-        assert plan.elevated == (plan.vm_name == "a")
+        assert plan.switch_user == (plan.vm_name == "a")
         with lock:
             active += 1
             maximum = max(maximum, active)
