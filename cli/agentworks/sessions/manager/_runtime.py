@@ -257,7 +257,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     from agentworks.sessions.tmux import startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
-    from agentworks.sessions.manager._teardown import _validated_socket
+    from agentworks.sessions.manager import _teardown
 
     current = require_session_launch_identity(definition)
     if current.workspace_name != definition.workspace.name:
@@ -301,7 +301,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
                 if _mgr._needs_repair(current):
                     recovered_startup = True  # status proved the interrupted launch's ownership
                 else:
-                    socket = _validated_socket(db, current)
+                    socket = _teardown._validated_socket(db, current)
                     protection = startup_protection_enabled(
                         current.name,
                         socket_path=socket.path,

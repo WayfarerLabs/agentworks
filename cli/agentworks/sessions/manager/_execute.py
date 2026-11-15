@@ -11,11 +11,11 @@ from agentworks.capabilities.harness_integration import require_implemented_star
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import ExternalError, StateError
 from agentworks.orchestration.secrets import ScopedSecrets
+from agentworks.sessions.manager import _teardown
 from agentworks.sessions.manager._lifecycle import (
     _mark_runtime_unknown,
     _redacted_launch_errors,
 )
-from agentworks.sessions.manager._teardown import _validated_socket_path
 from agentworks.sessions.tmux import access_run_command
 from agentworks.vms.manager import operation_log
 
@@ -138,7 +138,7 @@ def _execute_session_start(
             require_socket_path,
         )
 
-        socket_path = _validated_socket_path(db, session)
+        socket_path = _teardown._validated_socket(db, session).path
         require_socket_path(socket_path, run_command=session_run_command)
         probe = capture_tmux_server_fingerprint(run_command=session_run_command, socket_path=socket_path)
         observed = probe.fingerprint

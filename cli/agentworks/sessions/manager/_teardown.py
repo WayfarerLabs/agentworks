@@ -16,6 +16,7 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot
 from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError, StateError, UserAbort
+from agentworks.naming import NAME_RE
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT, ProbeStatus, socket_owner_run_command
 
 if TYPE_CHECKING:
@@ -102,8 +103,9 @@ def _validated_socket(db: Database, session: SessionRow) -> ManagedSocket:
 
     An agent session's owner is its agent's Linux user, under
     ``AGENT_SOCKET_ROOT``; an admin session's is its VM's admin, under
-    ``ADMIN_SOCKET_ROOT``. A row with no socket, a gone owner, or a path
-    outside the owner's directory raises ``StateError``.
+    ``ADMIN_SOCKET_ROOT``. A row with no socket, a gone owner, a path
+    outside the owner's directory, or a name agentworks would not generate
+    raises ``StateError``.
     """
     socket_path = session.socket_path
     if socket_path is None:
@@ -121,7 +123,15 @@ def _validated_socket(db: Database, session: SessionRow) -> ManagedSocket:
         vm = db.get_vm(workspace.vm_name) if workspace is not None else None
         owner, root = (vm.admin_username if vm is not None else None), ADMIN_SOCKET_ROOT
     path = PurePosixPath(socket_path)
-    if owner is None or not path.is_absolute() or str(path.parent) != f"{root}/{owner}" or path.name in {"", ".", ".."}:
+    # The name is one agentworks generates (``tmux.admin_socket_path``,
+    # ``agent_socket_path``): a session name, then ``.sock``.
+    if (
+        owner is None
+        or not path.is_absolute()
+        or str(path.parent) != f"{root}/{owner}"
+        or path.suffix != ".sock"
+        or NAME_RE.fullmatch(path.stem) is None
+    ):
         raise StateError(
             f"session '{session.name}' has an invalid managed tmux socket path",
             entity_kind="session",
@@ -129,11 +139,6 @@ def _validated_socket(db: Database, session: SessionRow) -> ManagedSocket:
             hint="Repair the persisted session row before retrying destructive cleanup.",
         )
     return ManagedSocket(socket_path, owner)
-
-
-def _validated_socket_path(db: Database, session: SessionRow) -> str:
-    """Validate persisted socket identity before destructive use."""
-    return _validated_socket(db, session).path
 
 
 def _validated_pid(session: SessionRow) -> int:

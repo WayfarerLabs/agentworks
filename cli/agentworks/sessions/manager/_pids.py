@@ -196,9 +196,9 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        from agentworks.sessions.manager._teardown import _validated_socket
+        from agentworks.sessions.manager import _teardown
 
-        socket = _validated_socket(db, session)
+        socket = _teardown._validated_socket(db, session)
         run_command = _mgr.owner_run_command(admin, session, socket)
         require_socket_path(sock, run_command=run_command)
         probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=sock)

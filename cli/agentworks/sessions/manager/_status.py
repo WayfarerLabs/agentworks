@@ -121,6 +121,11 @@ def check_session_status(
     """
     if session.socket_path is not None:
         return _check_dedicated_session(session, admin=admin, socket=_teardown._validated_socket(db, session))
+    return _legacy_session_status(session)
+
+
+def _legacy_session_status(session: SessionRow) -> SessionStatus:
+    """A legacy shared-server row's status, which needs no read: unknown, or the canonical refusal for a live one."""
     if session.pid is None or session.boot_id is None:
         return SessionStatus.UNKNOWN
     raise _legacy_session_status_error(session)

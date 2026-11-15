@@ -465,9 +465,7 @@ def session_description(
     output.info(f"Checking session '{name}' runtime...")
     status = SessionStatus.UNKNOWN
     if session.socket_path is None:
-        # A legacy row's status needs no read: a live one is the canonical refusal, any other unknown.
-        if session.pid is not None and session.boot_id is not None:
-            raise _mgr._legacy_session_status_error(session)
+        status = _mgr._legacy_session_status(session)
     else:
         from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
@@ -977,7 +975,7 @@ def _attach_command(db: Database, session: SessionRow) -> TerminalCommand:
     (``as_socket_owner_line``).
     """
     from agentworks.execution.requests import TerminalCommand
-    from agentworks.sessions.manager._teardown import _validated_socket
+    from agentworks.sessions.manager import _teardown
     from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
 
     target = "=" + session.name
@@ -985,7 +983,7 @@ def _attach_command(db: Database, session: SessionRow) -> TerminalCommand:
         return TerminalCommand(("tmux", "attach", "-t", target))
     if session.mode != SessionMode.AGENT.value:
         return TerminalCommand(("tmux", "-S", session.socket_path, "attach", "-t", target))
-    socket = _validated_socket(db, session)
+    socket = _teardown._validated_socket(db, session)
     line = as_socket_owner_line(
         tmux_cmd(f"attach -t {exact_tmux_target(session.name)}", socket.path),
         socket_path=socket.path,

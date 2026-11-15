@@ -164,7 +164,7 @@ def _owned(session: SessionRow) -> SessionRow:
     if session.socket_path is None:
         return session
     root, owner = (AGENT_SOCKET_ROOT, "agt") if session.mode == "agent" else (ADMIN_SOCKET_ROOT, "admin")
-    return replace(session, socket_path=f"{root}/{owner}/{PurePosixPath(session.socket_path).name}")
+    return replace(session, socket_path=f"{root}/{owner}/{PurePosixPath(session.socket_path).stem}.sock")
 
 
 def _check(session: SessionRow, *, admin: RecordingVMAccess) -> SessionStatus:

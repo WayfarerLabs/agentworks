@@ -90,12 +90,12 @@ def _capture_run_command(db: Database, session: SessionRow, *, admin: VMAccess) 
     server's capture runs behind the socket guard, an agent session's as the
     agent (``socket_owner_run_command``).
     """
-    from agentworks.sessions.manager._teardown import _validated_socket
+    from agentworks.sessions.manager import _teardown
     from agentworks.sessions.tmux import access_run_command, socket_owner_run_command
 
     if session.socket_path is None:
         return access_run_command(admin, deadline=None, elevated=False)
-    socket = _validated_socket(db, session)
+    socket = _teardown._validated_socket(db, session)
     return socket_owner_run_command(
         admin,
         socket_path=socket.path,

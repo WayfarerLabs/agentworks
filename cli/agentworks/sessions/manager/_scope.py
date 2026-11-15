@@ -174,13 +174,13 @@ def _regenerate_tmuxinator(
             )
             return
 
-        from agentworks.sessions.manager._teardown import _validated_socket
+        from agentworks.sessions.manager import _teardown
 
         sessions, agent_owners = [], {}
         for session in db.list_sessions(workspace_name=ws.name):
             if session.mode == SessionMode.AGENT.value:
                 try:
-                    agent_owners[session.name] = _validated_socket(db, session).owner
+                    agent_owners[session.name] = _teardown._validated_socket(db, session).owner
                 except StateError as error:
                     output.warn(f"The tmuxinator config of workspace '{ws.name}' leaves out a session: {error}.")
                     continue
