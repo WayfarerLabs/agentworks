@@ -176,6 +176,16 @@ def as_socket_owner_line(
     return f"{{ {guard}; }} || {{ {notice}exit {SOCKET_GUARD_REFUSED}; }}; {line}"
 
 
+def as_socket_owner_from_admin(command: str, *, socket_path: str, owner: str) -> str:
+    """A shell line the admin runs that runs ``command`` as ``owner`` behind the socket guard, through ``sudo -n``.
+
+    For the admin's own shells (a console window, a tmuxinator pane), which
+    must never be a tmux client of a server another account controls.
+    """
+    line = as_socket_owner_line(command, socket_path=socket_path, owner=owner, switch_user=True)
+    return f"sudo -n /bin/sh -c {shlex.quote(line)}"
+
+
 def socket_owner_run_command(
     access: VMAccess, *, socket_path: str, owner: str, switch_user: bool, deadline: float | None
 ) -> RunCommand:

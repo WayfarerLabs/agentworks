@@ -11,6 +11,7 @@ Config classes live in `tests/_consoles_support.py`.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,7 +26,7 @@ from agentworks.sessions.multi_console import (
     reorder_sessions,
 )
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
-from tests._runtime_probes import owner_probe_line
+from tests._runtime_probes import owner_probe_line, socket_guard
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
@@ -107,6 +108,35 @@ def test_add_session_live_sync_adds_window_when_alive(db: Database, fake_target:
     assert "-n b" in new_window[0]
     splits = [c for c in fake_target.commands if "split-window -t '=aw-console-con':b" in c]
     assert len(splits) == 1
+
+
+def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent(db: Database, fake_target: _FakeTarget) -> None:
+    """The admin's console pane switches to the agent, behind the socket guard, for every probe and attach."""
+    socket = "/run/agentworks/agent-tmux-sockets/bot-user/s.sock"
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    db._conn.execute("INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')")
+    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path=socket)
+    db._conn.commit()
+    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
+
+    fake_target.commands.clear()
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["s"], interaction=TtyInteractionPolicy.REFUSE)
+
+    [new_window] = [c for c in fake_target.commands if "new-window -t '=aw-console-con'" in c]
+    wrapper = shlex.split(new_window)[-1]
+    elevated = []
+    for line in (line for line in wrapper.splitlines() if "tmux " in line):
+        words = shlex.split(line)
+        start = words.index("sudo")
+        assert words[start : start + 4] == ["sudo", "-n", "/bin/sh", "-c"]
+        elevated.append(words[start + 4])
+    assert {socket_guard(line) for line in elevated} == {(socket, "bot-user")}
+    assert {owner_probe_line(line) for line in elevated} == {
+        f"tmux -S {socket} has-session -t '=s'",
+        f"tmux -S {socket} attach -t '=s'",
+    }
 
 
 def test_add_session_live_sync_adds_window_for_bare_spec(
@@ -1100,7 +1130,12 @@ def test_delete_agent_kills_console_windows(
     db._conn.execute("INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')")
     for name in ("s1", "s2"):
         db.insert_session(
-            name, "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path=f"/tmp/{name}.sock"
+            name,
+            "ws-vm1",
+            "default",
+            SessionMode.AGENT,
+            agent_name="bot",
+            socket_path=f"/run/agentworks/agent-tmux-sockets/bot-user/{name}.sock",
         )
         _mark_stopped(db, name, fake_target, monkeypatch)
     db._conn.commit()

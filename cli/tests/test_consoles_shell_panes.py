@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
 # tmux session name for console "con"; see tmux_session_name.
 CON = "aw-console-con"
+# Where the agent session's server listens: the bot agent's socket directory.
+AGENT_SOCKET = "/run/agentworks/agent-tmux-sockets/bot-user/s.sock"
 
 
 def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_target: _FakeTarget) -> None:
@@ -82,7 +84,14 @@ def test_split_shell_pane_agent_branch_uses_sudo(db: Database, fake_target: _Fak
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
     )
-    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
+    db.insert_session(
+        "s",
+        "ws-vm1",
+        "default",
+        SessionMode.AGENT,
+        agent_name="bot",
+        socket_path="/run/agentworks/agent-tmux-sockets/bot-user/s.sock",
+    )
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
@@ -126,7 +135,14 @@ def _seed_agent_session_console(db: Database) -> None:
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
     )
-    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
+    db.insert_session(
+        "s",
+        "ws-vm1",
+        "default",
+        SessionMode.AGENT,
+        agent_name="bot",
+        socket_path="/run/agentworks/agent-tmux-sockets/bot-user/s.sock",
+    )
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
@@ -279,7 +295,14 @@ def test_split_shell_pane_emits_workspace_identity_only(db: Database, fake_targe
     db._conn.execute(
         "INSERT INTO agents (name, vm_name, linux_user) VALUES ('bot', 'vm1', 'bot-user')",
     )
-    db.insert_session("s", "ws-vm1", "default", SessionMode.AGENT, agent_name="bot", socket_path="/tmp/s.sock")
+    db.insert_session(
+        "s",
+        "ws-vm1",
+        "default",
+        SessionMode.AGENT,
+        agent_name="bot",
+        socket_path="/run/agentworks/agent-tmux-sockets/bot-user/s.sock",
+    )
     db._conn.commit()
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 

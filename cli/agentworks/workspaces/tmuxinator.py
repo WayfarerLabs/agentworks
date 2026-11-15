@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from agentworks.db import SessionMode
 from agentworks.execution.requests import Command
 from agentworks.sessions.multi_console import ADMIN_SHELL_WINDOW
-from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
+from agentworks.sessions.tmux import as_socket_owner_from_admin, exact_tmux_target, tmux_cmd
 from agentworks.vms.home_layout import TMUXINATOR_CONFIG_DIR
 from agentworks.workspaces.guest import PROBE_DEADLINE, addressable_workspace_path, script
 
@@ -151,7 +151,7 @@ def generate_config(
     its window reaches it directly. An agent session's server is the agent's,
     and no other account is ever its client: its window elevates only to
     switch to the agent named in ``agent_owners`` behind the socket guard
-    (``as_socket_owner_line``). Each pane is a YAML double-quoted scalar, so no
+    (``as_socket_owner_from_admin``). Each pane is a YAML double-quoted scalar, so no
     shell text can change the YAML around it.
     """
     lines = [
@@ -176,9 +176,7 @@ def generate_config(
         if session.mode == SessionMode.AGENT.value and sock is not None:
             owner = (agent_owners or {})[session.name]
             has_cmd, attach_cmd = (
-                "sudo -n /bin/sh -c "
-                + shlex.quote(as_socket_owner_line(command, socket_path=sock, owner=owner, switch_user=True))
-                for command in (has_cmd, attach_cmd)
+                as_socket_owner_from_admin(command, socket_path=sock, owner=owner) for command in (has_cmd, attach_cmd)
             )
         # Wrapper: unset TMUX for nesting, loop attach while session exists
         wrapper = (

@@ -152,7 +152,7 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
     return vm.admin_username
 
 
-def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
+def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, agent_owner: str | None = None) -> str:
     """Build the shell snippet that holds a console window open for the given
     session.
 
@@ -167,10 +167,23 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
     The wrapper never exits on its own; users dismiss dead windows with their
     console's kill-window binding. Names are validated to [a-z0-9_-]+, so
     embedding the raw session_name inside the single-quoted strings is safe.
+
+    The admin's console runs the wrapper. An agent session's server is the
+    agent's, ``agent_owner``, and no other account is ever its client: each
+    ``has-session`` and ``attach`` elevates only to switch to the agent
+    behind the socket guard (``as_socket_owner_from_admin``).
     """
+    from agentworks.sessions.tmux import as_socket_owner_from_admin
+
     q = exact_tmux_target(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
+    if agent_owner is not None:
+        if socket_path is None:
+            raise ValueError("an agent session's console window needs its socket path")
+        has, att = (
+            as_socket_owner_from_admin(command, socket_path=socket_path, owner=agent_owner) for command in (has, att)
+        )
     return f"""\
 unset TMUX
 
