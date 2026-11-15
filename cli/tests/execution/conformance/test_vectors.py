@@ -5,14 +5,10 @@ The V lane is ``test_live_vectors.py``.
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
-from tests.execution.conformance.lanes import Lane
+from tests.execution.conformance.lanes import Lane, require_linux_guest
 from tests.execution.conformance.vectors import Vector, vectors_for
-
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="agw-launch needs Linux")
 
 
 @pytest.mark.parametrize("vector", vectors_for("L"), ids=lambda vector: vector.name)
@@ -22,4 +18,6 @@ def test_local_lane(vector: Vector, local_lane: Lane) -> None:
 
 @pytest.mark.parametrize("vector", vectors_for("S"), ids=lambda vector: vector.name)
 def test_sshd_lane(vector: Vector, sshd_lane: Lane) -> None:
+    # sshd starts agw-launch on this machine; the lane's forward tests need no launcher.
+    require_linux_guest()
     vector.check(sshd_lane)

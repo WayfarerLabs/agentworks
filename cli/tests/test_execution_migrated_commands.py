@@ -68,14 +68,12 @@ def test_an_unsupported_client_refuses_before_the_database_is_read(
         COMMANDS[command](UntouchableDatabase(), SimpleNamespace())
 
 
-def test_vm_shell_platform_does_not_need_an_openssh_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    # --platform reaches the VM through the platform's own channel, which is the way in when ssh is the problem.
+def test_vm_shell_platform_runs_no_client_check_up_front(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Local Lima and WSL2 need no OpenSSH client; Remote Lima and the clouds resolve it themselves.
     monkeypatch.setattr("agentworks.execution.resolve_ssh", unsupported)
 
     with pytest.raises(AssertionError, match="database was read"):
-        vm_manager.shell_vm(
-            UntouchableDatabase(), SimpleNamespace(), "box", platform_transport=True, interaction=REFUSE
-        )  # type: ignore[arg-type]
+        vm_manager.shell_vm(UntouchableDatabase(), SimpleNamespace(), "box", native_shell=True, interaction=REFUSE)  # type: ignore[arg-type]
 
 
 # -- The agent probe: an unreachable VM versus an agent that predates the rollout (I19) ------
@@ -111,11 +109,12 @@ def test_the_probe_runs_a_bounded_true_as_the_agent(vm_access_recorder: AccessRe
     assert request.deadline is not None
 
 
-def test_a_dropped_connection_with_a_healthy_admin_means_the_agent_predates_the_rollout(
-    vm_access_recorder: AccessRecorder,
+@pytest.mark.parametrize("reason", [UnknownReason.CONNECTION, UnknownReason.AUTH_FAILED])
+def test_a_refused_or_dropped_connection_with_a_healthy_admin_means_the_agent_predates_the_rollout(
+    vm_access_recorder: AccessRecorder, reason: UnknownReason
 ) -> None:
     with pytest.raises(StateError) as raised:
-        probe(vm_access_recorder, Result(Unknown(UnknownReason.CONNECTION)), Result(Completed(0)))
+        probe(vm_access_recorder, Result(Unknown(reason)), Result(Completed(0)))
 
     assert type(raised.value) is StateError  # not VMNotReady or a trust error, which are its subclasses
     assert vm_access_recorder.operations == [("a1", "run"), ("admin", "run")]
@@ -128,6 +127,20 @@ def test_a_dropped_connection_with_an_unreachable_admin_means_the_vm_is_unreacha
         probe(vm_access_recorder, Result(Unknown(UnknownReason.CONNECTION)), Result(Unknown(UnknownReason.CONNECTION)))
 
     assert type(raised.value) is ConnectivityError
+
+
+def test_an_admin_refused_too_is_the_operators_key_with_its_passphrase_hint(
+    vm_access_recorder: AccessRecorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refused = Result(Unknown(UnknownReason.AUTH_FAILED))
+    monkeypatch.setattr(VMAccess, "passphrase_hint", lambda self: "load the key")
+
+    with pytest.raises(ExecutionIncomplete) as raised:
+        probe(vm_access_recorder, refused, refused)
+
+    assert raised.value.result.completion == Unknown(UnknownReason.AUTH_FAILED)
+    assert raised.value.hint is not None
+    assert raised.value.hint.endswith("load the key")
 
 
 def test_an_unreachable_vm_carries_the_access_objects_passphrase_hint(

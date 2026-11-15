@@ -528,7 +528,7 @@ def test_output_after_the_closing_lines_is_dropped() -> None:
 
 
 def test_a_client_that_cannot_start_is_a_typed_refusal() -> None:
-    session = PipeSession(["/nonexistent/agw-ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
+    session = PipeSession(["/nonexistent/bin/ssh"], request=b"", nonce=NONCE, on_stdout=Capture(), on_stderr=Capture())
 
     with pytest.raises(ClientUnsupported):
         session.start()
@@ -573,13 +573,17 @@ def popen_flags(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     return flags
 
 
+# The resolved client is always a path, which ``spawn`` starts without a PATH lookup.
+_CLIENT = "/usr/bin/ssh"
+
+
 @pytest.mark.parametrize(("platform", "expected"), [("win32", 0x08000000), ("linux", 0), ("darwin", 0)])
 def test_a_client_that_does_not_share_the_console_gets_one_of_its_own_only_on_windows(
     monkeypatch: pytest.MonkeyPatch, popen_flags: list[int], platform: str, expected: int
 ) -> None:
     monkeypatch.setattr("sys.platform", platform)
 
-    ssh_process.spawn(["ssh"], stdin=None, stdout=None, stderr=None, share_console=False)
+    ssh_process.spawn([_CLIENT], stdin=None, stdout=None, stderr=None, share_console=False)
 
     assert popen_flags == [expected]
 
@@ -589,8 +593,8 @@ def test_clients_share_the_operators_console_by_default(
 ) -> None:
     monkeypatch.setattr("sys.platform", "win32")
 
-    ssh_process.spawn(["ssh"], stdin=None, stdout=None, stderr=None)
-    ssh_process.run_terminal(["ssh"])
+    ssh_process.spawn([_CLIENT], stdin=None, stdout=None, stderr=None)
+    ssh_process.run_terminal([_CLIENT])
 
     assert popen_flags == [0, 0]
 

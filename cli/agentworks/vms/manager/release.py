@@ -1,4 +1,9 @@
-"""Live Debian release observation and ordinary reconciliation."""
+"""Reconciling an observed Debian release with the recorded one, and explicit adoption.
+
+The observation itself is the VM contract's (``contract.observe_release``),
+over ``agentworks.execution``, so a VM without python3 cannot be observed and
+raises ``VMNotReady``.
+"""
 
 from __future__ import annotations
 
@@ -6,25 +11,23 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import InitStatus
-from agentworks.debian import DebianRelease, probe_debian_release
 from agentworks.errors import StateError, UserAbort
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.debian import DebianRelease
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import ExecTransport
 
 
-def verified_vm_release(db: Database, vm: VMRow, target: ExecTransport) -> DebianRelease:
-    """Return and persist a matching recognized live release.
+def reconcile_release(db: Database, vm: VMRow, observed: DebianRelease) -> DebianRelease:
+    """Persist ``observed`` as ``vm``'s release and return it, refusing drift.
 
     This ordinary service may fill an unknown row or refresh a matching
-    observation. It deliberately refuses drift. ``vm confirm-release`` owns
-    explicit adoption when an operator changed the guest outside Agentworks.
+    observation. It refuses a live release that differs from the recorded
+    one: ``vm confirm-release`` owns explicit adoption when an operator
+    changed the guest outside Agentworks.
     """
-
-    observed = probe_debian_release(target)
     if vm.debian_release is not None and vm.debian_release is not observed:
         raise StateError(
             f"VM release changed from recorded {vm.debian_release} to live {observed}",
@@ -46,16 +49,24 @@ def confirm_vm_release(
 ) -> DebianRelease:
     """Observe and explicitly adopt a recognized live Debian release."""
 
+    import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
-    from agentworks.transports import transport
+    from agentworks.execution.access import Admin
+    from agentworks.vms.contract import observe_release
 
-    from ._helpers import _require_vm
+    from ._helpers import _guard_incomplete_vm, _require_vm
     from .boundary import gated_vm_boundary
 
+    # Before any database read or gate: an unsupported client refuses first.
+    execution.resolve_ssh()
     vm = _require_vm(db, name)
+    # A failed initialization only warns: reinit refuses release drift and names
+    # this command, so refusing here would leave that VM with no way forward.
+    _guard_incomplete_vm(vm, allow_failed_init=True)
     registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
-        observed = probe_debian_release(transport(vm, config))
+        # Only the release request: adoption does not run the rest of the contract.
+        observed = observe_release(execution.vm_access(vm, config, Admin()), expected=None)
 
     recorded = vm.debian_release
     output.info(f"Recorded Debian release: {recorded.value if recorded is not None else 'not recorded'}")

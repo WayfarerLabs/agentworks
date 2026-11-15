@@ -1,6 +1,5 @@
 """The activation gate: fast path, auto-start vs operator-stopped
-refusal, span open/close, the just-in-time gate-secret resolve, and
-the lazy repair-secret resolve.
+refusal, span open/close, and the just-in-time gate-secret resolve.
 
 The fake target plays the live VM node's power-state surface
 (``GateTarget``); the oracle semantics are the ones the now-retired
@@ -33,21 +32,16 @@ class _Target:
         stopped: bool = False,
         operator_stopped: bool = False,
         refs: tuple[str, ...] = (),
-        repair_refs: tuple[str, ...] = (),
     ) -> None:
         self._active = active
         self._stopped = stopped
         self._operator_stopped = operator_stopped
         self._refs = refs
-        self._repair_refs = repair_refs
         self.events: list[str] = []
         self.seen_secrets: dict[str, str] = {}
 
     def gate_secret_refs(self) -> tuple[str, ...]:
         return self._refs
-
-    def repair_secret_refs(self) -> tuple[str, ...]:
-        return self._repair_refs
 
     def confirmed_active(self) -> bool:
         self.events.append("probe")
@@ -172,71 +166,17 @@ def test_gate_reader_is_scoped_to_declared_gate_secrets() -> None:
         ensure_active(target, _resolver({"proxmox-token": "t"}, []))
 
 
-# -- the lazy repair-secret resolve ------------------------------------------
+def test_auto_start_reads_only_the_gate_secrets_and_resolves_nothing_more() -> None:
+    """A started VM that does not answer fails naming recover, so the gate
+    hands auto-start no way to resolve anything past its gate names, a
+    Tailscale auth key included."""
 
-
-class _Rejoining(_Target):
-    """A target whose auto-start takes the repair path: it reads the
-    rejoin key (today's ``_ensure_tailscale`` observing the node fail
-    to reconnect and rejoining)."""
-
-    def auto_start(self, gate_secrets: SecretReader) -> None:
-        super().auto_start(gate_secrets)
-        self.seen_secrets["tailscale-auth-key"] = gate_secrets.get("tailscale-auth-key")
-        # A second read must serve the recorded value, not re-resolve.
-        gate_secrets.get("tailscale-auth-key")
-
-
-def test_repair_path_untaken_resolves_no_repair_secret() -> None:
-    """Declared repair secrets cost nothing unless the repair path
-    reads them: parity with HEAD's conditional-need exception (no
-    prompt on every start for a key that is almost never used)."""
-    target = _Target(
-        stopped=True,
-        refs=("proxmox-token",),
-        repair_refs=("tailscale-auth-key",),
-    )
-    log: list[str] = []
-    values = ensure_active(
-        target,
-        _resolver({"proxmox-token": "tok", "tailscale-auth-key": "ts"}, log),
-    )
-    assert log == ["resolve:proxmox-token"]
-    assert values == {"proxmox-token": "tok"}
-
-
-def test_repair_secret_resolves_lazily_and_lands_in_the_seed() -> None:
-    """A taken repair path resolves the key on first read (after the
-    start, never up front), exactly once, delivers it through the
-    reader, and the value still lands in the returned seed (the
-    no-double-resolve guarantee survives the laziness)."""
-    target = _Rejoining(
-        stopped=True,
-        refs=("proxmox-token",),
-        repair_refs=("tailscale-auth-key",),
-    )
-    # Share one event list between the target and the resolver so the
-    # ordering across them is provable.
-    values = ensure_active(
-        target,
-        _resolver({"proxmox-token": "tok", "tailscale-auth-key": "ts"}, target.events),
-    )
-    assert target.events == [
-        "probe",
-        "resolve:proxmox-token",
-        "status",
-        "start",
-        "resolve:tailscale-auth-key",  # once, despite two reads
-    ]
-    assert target.seen_secrets["tailscale-auth-key"] == "ts"
-    assert values == {"proxmox-token": "tok", "tailscale-auth-key": "ts"}
-
-
-def test_auto_start_reader_refuses_undeclared_names() -> None:
     class _Greedy(_Target):
         def auto_start(self, gate_secrets: SecretReader) -> None:
-            gate_secrets.get("git-token-gh")  # neither gate nor repair
+            gate_secrets.get("tailscale-auth-key")
 
-    target = _Greedy(stopped=True, repair_refs=("tailscale-auth-key",))
+    log: list[str] = []
+    target = _Greedy(stopped=True, refs=("proxmox-token",))
     with pytest.raises(StateError, match="not declared"):
-        ensure_active(target, _resolver({}, []))
+        ensure_active(target, _resolver({"proxmox-token": "t", "tailscale-auth-key": "ts"}, log))
+    assert log == ["resolve:proxmox-token"]

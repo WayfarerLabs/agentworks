@@ -1,4 +1,4 @@
-"""New package imports must work when legacy execution is unavailable."""
+"""The new package, and the modules built on it alone, import with legacy execution unavailable."""
 
 from __future__ import annotations
 
@@ -35,6 +35,13 @@ for module in pkgutil.walk_packages(
     agentworks.execution.__path__, agentworks.execution.__name__ + "."
 ):
     importlib.import_module(module.name)
+
+# Modules outside the package that are built on it alone. Importing
+# public_ssh runs the vm_platform package, which proves the Lima and WSL2
+# platforms and the shared provisioning modules too.
+import agentworks.capabilities.vm_platform.public_ssh
+import agentworks.vms.contract
+import agentworks.vms.recovery
 
 assert not any(
     loaded == name or loaded.startswith(name + ".")

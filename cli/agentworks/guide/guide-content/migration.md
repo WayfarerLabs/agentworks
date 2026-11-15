@@ -22,7 +22,7 @@ target.
 
 **Breaking batch behavior:** session start/restart now gathers all eligible workload secrets before
 changing any selected runtime. One required workload secret failure prevents the entire deferred
-batch instead of leaving earlier sessions restarted. Required VM activation/repair may already have
+batch instead of leaving earlier sessions restarted. Required VM activation may already have
 happened and is not rolled back. An infrastructure credential failure blocks only dependent families
 unless an eligible workload also requires that credential. Accepted targets survive later failure or
 cancellation.

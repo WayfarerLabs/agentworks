@@ -35,6 +35,7 @@ from agentworks.capabilities.secret_backend.client import (
     TtyInteractionAccess,
 )
 from agentworks.errors import ConfigError, StateError
+from agentworks.programs import is_installed, resolve_program
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
 from agentworks.topics import TopicProse
 
@@ -98,7 +99,7 @@ def _bounded_read(args: list[str], *, timeout: float) -> _BoundedRead:
         return _BoundedRead(failure=FailureReason.DEADLINE_EXCEEDED)
     try:
         completed = subprocess.run(  # noqa: S603 - explicit argv, no shell
-            [_OP_BINARY, *args],
+            [resolve_program(_OP_BINARY), *args],
             capture_output=True,
             text=True,
             check=False,
@@ -269,11 +270,9 @@ class OnePasswordBackend(SecretBackend):
 
     @classmethod
     def backend_readiness(cls) -> Readiness:
-        import shutil
-
         from agentworks.resources.graph import Readiness
 
-        if shutil.which("op") is None:
+        if not is_installed(_OP_BINARY):
             return Readiness.blocked("op CLI not installed")
         return Readiness.ready()
 

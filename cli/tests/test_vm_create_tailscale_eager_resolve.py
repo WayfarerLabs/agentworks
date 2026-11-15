@@ -141,21 +141,3 @@ def test_template_preflight_detects_an_ordinary_env_miss(
             registry=registry,
             interaction=TtyInteractionPolicy.REFUSE,
         )
-
-
-def test_join_tailscale_signature_requires_auth_key_kwarg() -> None:
-    """``_join_tailscale`` must require ``auth_key`` as a keyword arg --
-    the SDD's hermetic-provisioning contract is broken if callers can
-    pass None or omit it.
-    """
-    import inspect
-
-    from agentworks.vms.initializer import _join_tailscale
-
-    sig = inspect.signature(_join_tailscale)
-    assert "auth_key" in sig.parameters
-    param = sig.parameters["auth_key"]
-    # Keyword-only (after the `*`).
-    assert param.kind == inspect.Parameter.KEYWORD_ONLY
-    # No default; required.
-    assert param.default is inspect.Parameter.empty

@@ -11,6 +11,9 @@ from agentworks import output
 from agentworks.ssh import SSHError, SSHLogger
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
     from agentworks.config import Config
     from agentworks.ssh_identity import SSHIdentity
     from agentworks.transports import Transport
@@ -35,6 +38,16 @@ class AuthorizedKeysUnproven:
 
 
 AuthorizedKeysOutcome = AuthorizedKeysApplied | AuthorizedKeysUnproven
+
+
+def authorized_keys_content(public_text: str, extra_keys: Sequence[Path]) -> str:
+    """A managed ``authorized_keys`` file: the header, the configured key, then each extra key file's content.
+
+    Reinit and ``agw vm recover`` both write exactly this, so a key it does
+    not list (one the configured key replaced, or a manual edit) is removed.
+    """
+    keys = [public_text, *(path.read_text().strip() for path in extra_keys)]
+    return AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
 
 
 def _reconcile_authorized_keys(
@@ -74,17 +87,13 @@ def _reconcile_authorized_keys(
 
     logger.step("SSH authorized keys")
 
-    keys: list[str] = [prepared.public_text]
-    for path in config.operator.extra_ssh_public_keys:
-        keys.append(path.read_text().strip())
+    content = authorized_keys_content(prepared.public_text, config.operator.extra_ssh_public_keys)
 
-    extra_count = len(keys) - 1
+    extra_count = len(config.operator.extra_ssh_public_keys)
     label = f"1 primary + {extra_count} extra" if extra_count else "1 primary"
     if owner is not None:
         label = f"{label} for {owner}"
     output.info(f"Reconciling authorized_keys ({label})...")
-
-    content = AUTHORIZED_KEYS_HEADER + "\n".join(keys) + "\n"
 
     if owner is None:
         # Direct-write: the SSH user writes to its own home.

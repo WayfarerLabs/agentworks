@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import Database, ProvisioningStatus
 from agentworks.errors import AuthorizationError, NotFoundError, ValidationError
 from agentworks.execution.requests import LoginShell, Script, Shell
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -58,6 +58,7 @@ def _seed_db(tmp_path: Path) -> Database:
     for name, address in (("vm1", "100.64.0.5"), ("vm2", "100.64.0.6")):
         db.insert_vm(name, site="lima", hostname="h", admin_username="admin")
         db.update_vm_tailscale(name, address)
+        db.update_vm_provisioning_status(name, ProvisioningStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
         "VALUES ('ws1', 'vm1', '/opt/agentworks/workspaces/ws1', 'ws-ws1')"

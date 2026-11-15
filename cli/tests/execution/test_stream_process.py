@@ -21,7 +21,7 @@ CHILD = r"""
 import getpass, sys
 from pathlib import Path
 from agentworks.execution import client, ssh_process
-from agentworks.execution.access import VMAccess, stream_to_operator
+from agentworks.execution.access import Admin, VMAccess, stream_to_operator
 from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import Command
 
@@ -32,7 +32,7 @@ ssh_process.build_argv = lambda ssh, policy, destination, mode, command, *a, **k
 ]
 access = VMAccess(
     vm_name="local", host="127.0.0.1", user=getpass.getuser(),
-    identity_file=Path("/nonexistent"),
+    identity=Admin(), identity_file=Path("/nonexistent"),
 )
 SETUP
 status = stream_to_operator(access, Command(COMMAND, deadline=60))

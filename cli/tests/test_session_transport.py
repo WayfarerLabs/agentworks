@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import Database, ProvisioningStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 
@@ -66,6 +66,7 @@ class _Target:
 def _seed_db(tmp_path: Path) -> Database:
     db = Database(tmp_path / "test.db")
     db.insert_vm("vm1", "lima", "h", admin_username="admin")
+    db.update_vm_provisioning_status("vm1", ProvisioningStatus.COMPLETE)
     seed_vm_trust("vm1")
     db.update_vm_tailscale("vm1", "100.64.0.5")
     db._conn.execute(

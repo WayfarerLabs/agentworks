@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
-import sys
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -19,9 +18,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from tests.execution.conformance.lanes import LocalLane
-
-
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="agw-launch needs Linux")
 
 
 @pytest.fixture

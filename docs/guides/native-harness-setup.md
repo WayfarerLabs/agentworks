@@ -8,10 +8,10 @@ Integration activation must be explicit, including when all configuration fields
 
 Agentworks installs `python3` as a required system package on every VM during create and reinit.
 Native setup uses its standard library for guarded file access, atomic publication and artifact
-discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm reinit <vm-name>` to
-repair an older VM missing the interpreter. A missing interpreter is reported before staging or
-native mutation. The harness CLI itself must also be installed through the existing package or
-install-command configuration.
+discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm recover <vm-name>` to
+install it on an older VM missing the interpreter, then `agw vm reinit <vm-name>`. A missing
+interpreter is reported before staging or native mutation. The harness CLI itself must also be
+installed through the existing package or install-command configuration.
 
 ## Settings mappings
 
@@ -312,17 +312,18 @@ can survive the workspace directory. Unresolved cleanup warns and preserves fore
 bytes without preventing the normal deletion. A warning does not certify that shared exclusions were
 removed.
 
-Backend binding failures warn and continue local cleanup without attempting remote deletion. An
-exception raised by a bound platform's delete operation aborts local removal. Agent and workspace
-remote cleanup retains its existing best-effort warnings. Files deliberately configured outside the
-removed parent remain outside that filesystem cleanup; setup does not introduce a new forget command
-or force option.
+A VM whose backend cannot be deleted, a site that cannot be bound included, keeps its local state
+unless `--force` is passed, which removes it anyway; see `vm delete` in the command reference. Agent
+and workspace remote cleanup retains its existing best-effort warnings. Files deliberately
+configured outside the removed parent remain outside that filesystem cleanup; setup does not
+introduce a new forget command or force option.
 
-Whole-VM deletion does not first log out of Tailscale or stop individual guest sessions. An external
-tailnet entry can remain after the guest is gone; remove a retired node from the Tailscale admin
-console separately. A binding-failure warning means remote deletion was not attempted, so inspect
-and clean up the provider resource as well. Platform-specific best-effort deletion may also leave
-remote resources; a removed local row alone does not prove provider removal.
+Whole-VM deletion logs the node out of Tailscale first, best effort, and does not stop individual
+guest sessions, which deleting the VM ends. When that logout does not run or fails, the tailnet
+entry can remain; delete names the node to remove from the Tailscale admin console. A delete forced
+past a backend it could not delete leaves that backend, so inspect and clean up the provider
+resource as well. Platform-specific best-effort deletion may also leave remote resources; a removed
+local row alone does not prove provider removal.
 
 Setup and parent deletion share a VM-family mutation guard so they cannot race. This serializes
 mutating operations on the same VM, including owners without harness activations; contention refuses

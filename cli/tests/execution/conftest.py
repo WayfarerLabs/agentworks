@@ -1,4 +1,4 @@
-"""Make the six legacy execution modules unavailable to every test in this directory.
+"""Make the legacy execution modules unavailable to every test in this directory.
 
 The package's tests must pass with the legacy stack blocked (R10, HLA D14). The
 fresh-interpreter guard in ``test_independence.py`` proves import time; this

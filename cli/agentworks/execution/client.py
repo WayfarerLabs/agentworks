@@ -1,7 +1,8 @@
 """Resolve the OpenSSH client once, to an absolute path and a version.
 
-Every spawn takes the resolved :class:`SSHClient`, so no caller can launch a
-bare ``ssh``. Two hazards guard the resolution: on Windows a bare ``ssh`` is
+Every spawn in this package takes the resolved :class:`SSHClient`, so none of
+it launches a bare ``ssh``; the legacy transports (``transports/ssh.py``)
+still do until they are removed. Two hazards guard the resolution: on Windows a bare ``ssh`` is
 looked up in the current directory first and ``PATH`` commonly finds the MSYS
 build bundled with Git for Windows, whose argument handling corrupts every
 invocation; and an empty ``PATH`` element means the current directory on POSIX.
@@ -18,7 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks import ssh_identity
 from agentworks.execution.errors import ClientUnsupported
+from agentworks.programs import find_program
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -71,12 +74,8 @@ def candidates(*, windows: bool, environ: Mapping[str, str]) -> list[Path]:
                 if path.is_file():
                     found.append(path)
         return found
-    for element in environ.get("PATH", "").split(os.pathsep):
-        if element and os.path.isabs(element):
-            path = Path(element, "ssh")
-            if path.is_file() and os.access(path, os.X_OK):
-                return [path]
-    return []
+    first = find_program("ssh", search_path=environ.get("PATH", ""), windows=False)
+    return [] if first is None else [first]
 
 
 def judge(path: Path, *, windows: bool) -> SSHClient | str:
@@ -171,6 +170,20 @@ def identity_is_loaded(ssh: SSHClient, identity_file: Path) -> bool:
         return False
     listed = probe.stdout.decode("utf-8", errors="replace").splitlines()
     return any(line.split()[:2] == wanted for line in listed)
+
+
+def agent_load_hint(identity_file: Path) -> str | None:
+    """How to load ``identity_file`` into the SSH agent, or ``None`` unless that is the likely fix.
+
+    ssh runs in batch mode, so an encrypted key the agent does not hold is
+    refused like any other. There is no hint for an unencrypted key or one the
+    agent already lists. This reads the key file and may run ``ssh-add``, so
+    callers ask only after a connection or authentication failure.
+    """
+    hint = ssh_identity.passphrase_hint(identity_file)
+    if hint is None or identity_is_loaded(resolve_ssh(), identity_file):
+        return None
+    return hint
 
 
 @functools.cache

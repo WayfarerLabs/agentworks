@@ -197,6 +197,13 @@ class CapabilityKindDescriptor:
     mapping_host: MappingHost | None = None
     """The declarable map field hosting :attr:`mapping_schema`."""
 
+    retired_members: tuple[tuple[str, str], ...] = ()
+    """``(retired, replacement)`` member names of earlier contract versions.
+
+    Registration refuses an implementation that still defines a retired
+    member, naming its replacement: nothing calls the retired name, so an
+    override of it would register and silently never run."""
+
 
 @cache
 def capability_descriptors() -> tuple[CapabilityKindDescriptor, ...]:

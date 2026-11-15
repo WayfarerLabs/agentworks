@@ -4,15 +4,13 @@ Each subclasses the ``agentworks.errors`` kind the failure belongs to. No
 message, ``repr`` or hint holds a stream, an environment value or script text:
 the only transcript an error may show is the last lines of ssh's own
 diagnostics, which the client keeps apart from the payload's output.
-
-This module imports nothing from the legacy transport stack.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
+from agentworks.errors import AuthorizationError, ConfigError, ConnectivityError, ExternalError, StateError
 
 if TYPE_CHECKING:
     from agentworks.execution.results import NotDeliveredReason, Result
@@ -35,9 +33,46 @@ class TrustMissing(StateError):
             entity_kind="vm",
             entity_name=vm_name,
             hint=(
-                f"Run 'agw vm import-host-keys {vm_name}' (see its --help for --known-hosts), "
-                "or delete and recreate a VM whose create never enrolled."
+                f"Run 'agw vm import-host-keys {vm_name}' (see its --help for --known-hosts), or "
+                f"'agw vm recover {vm_name}' to read the keys through the platform and confirm them; "
+                "delete and recreate a VM whose create never enrolled."
             ),
+        )
+
+
+class FeatureUnavailable(StateError):
+    """A VM's platform does not offer what the command needs, such as a native shell.
+
+    Raised before the operation boundary resolves anything. ``hint`` is the
+    platform's own guidance, when it gives any.
+    """
+
+    def __init__(self, vm_name: str, platform_name: str, feature: str, hint: str | None) -> None:
+        super().__init__(
+            f"VM platform '{platform_name}' does not offer {feature}",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint=hint,
+        )
+
+
+class PermissionDenied(AuthorizationError):
+    """An agent-bound access was asked for an elevated request, which an agent never gets.
+
+    Raised before anything is resolved or spawned. Names the VM and the
+    account, never the request. The guest's ``sudo -n`` is the second layer,
+    so an agent placed in a sudo group by hand still gains nothing through
+    Agentworks.
+    """
+
+    def __init__(self, vm_name: str, account: str) -> None:
+        self.vm_name = vm_name
+        self.account = account
+        super().__init__(
+            f"an elevated request was refused for agent account '{account}' on VM '{vm_name}': "
+            "agents never run as root through Agentworks",
+            entity_kind="vm",
+            entity_name=vm_name,
         )
 
 
@@ -56,8 +91,8 @@ def _with_tail(message: str, client_log_tail: str) -> str:
 class VMNotReady(StateError):
     """The VM cannot run agw-launch: no python3, or one without its standard library.
 
-    PR A's hint names ``agw vm reinit``, whose release probe and Phase A still
-    run on the legacy stack and so reach a VM without python3.
+    The hint names ``agw vm recover``, whose repair script installs python3
+    through the platform's own channel, which needs no python3 on the VM.
     """
 
     def __init__(self, vm_name: str, reason: NotDeliveredReason) -> None:
@@ -74,7 +109,7 @@ class VMNotReady(StateError):
             f"VM '{vm_name}' cannot run Agentworks requests: {what}",
             entity_kind="vm",
             entity_name=vm_name,
-            hint=f"Run 'agw vm reinit {vm_name}' to install python3.",
+            hint=f"Run 'agw vm recover {vm_name}' to install python3.",
         )
 
 
@@ -151,7 +186,8 @@ class ExecutionIncomplete(ConnectivityError):
 
     Carries the whole ``Result`` and names which case it is, so that fact is
     held once. A ``NotDelivered`` command did not start; an ``Unknown`` one may
-    have run. ``attaching`` is for the parking connection of a terminal attach,
+    have run, except ``AUTH_FAILED``: the VM refused the key, so nothing ran.
+    ``attaching`` is for the parking connection of a terminal attach,
     where an unknown outcome still means no shell started: the message says so
     instead of that the command may have run.
     """
@@ -175,10 +211,26 @@ class ExecutionIncomplete(ConnectivityError):
         elif isinstance(completion, NotDelivered):
             summary = f"the command did not start on VM '{vm_name}' ({completion.reason.value})"
             hint = "The command did not start, so running it again is safe."
+        elif getattr(completion, "reason", None) is UnknownReason.AUTH_FAILED:
+            summary = f"VM '{vm_name}' did not accept the configured SSH key, so nothing ran"
+            hint = (
+                "Check that operator.ssh_private_key is the key authorized for this account on the VM. "
+                f"If the admin account refused it, 'agw vm recover {vm_name}' restores the admin's key through "
+                "the platform's own channel; on a cloud that channel uses the same key and sshd, so use the "
+                "provider's console there."
+            )
         else:
             reason = getattr(completion, "reason", None)
             summary = f"the outcome of the command on VM '{vm_name}' is unknown ({getattr(reason, 'value', reason)})"
             hint = "The command may have run; check its effects before running it again."
+            if reason is UnknownReason.CONNECTION:
+                # No start marker says nothing ran: one written after the payload started can be lost
+                # with the connection, so only the repair is named.
+                hint += (
+                    f" If the VM does not answer, 'agw vm recover {vm_name}' repairs its SSH server and"
+                    " Tailscale node through the platform's own channel; on a cloud that channel uses the"
+                    " same key and sshd, so if they are what fails, use the provider's console."
+                )
         super().__init__(
             _with_tail(summary, result.client_log_tail),
             entity_kind="vm",

@@ -1,4 +1,4 @@
-"""Contract-v1 Debian release selection at the VM-platform boundary."""
+"""Debian release selection at the VM-platform boundary."""
 
 from __future__ import annotations
 
@@ -8,27 +8,14 @@ from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
     operator_owned_release_value,
 )
-from agentworks.capabilities.vm_platform.lima import _LIMA_IMAGE_BLOCKS, LimaPlatform
-from agentworks.capabilities.vm_platform.wsl2 import _DEBIAN_OCI_TAGS, WSL2Platform
+from agentworks.capabilities.vm_platform.lima import _LIMA_IMAGE_BLOCKS
+from agentworks.capabilities.vm_platform.wsl2 import _DEBIAN_OCI_TAGS
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.aws.platform import _DEBIAN_SSM_RELEASES, EC2Platform
+from agentworks.plugins.aws.platform import _DEBIAN_SSM_RELEASES
 from agentworks.plugins.azure.config import AZURE_IMAGES
-from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.gcp.config import IMAGE_FAMILIES
-from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.plugins.proxmox.platform import ProxmoxConfig, ProxmoxPlatform
-
-
-def test_all_platforms_declare_contract_version_one() -> None:
-    assert {
-        LimaPlatform.contract_version,
-        WSL2Platform.contract_version,
-        EC2Platform.contract_version,
-        AzureVMPlatform.contract_version,
-        GCEPlatform.contract_version,
-        ProxmoxPlatform.contract_version,
-    } == {1}
 
 
 def test_every_code_owned_platform_map_has_the_trixie_selector() -> None:

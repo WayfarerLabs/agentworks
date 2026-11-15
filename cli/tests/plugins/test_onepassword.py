@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from contextlib import AbstractContextManager
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import ValidationError
@@ -32,6 +33,21 @@ from agentworks.plugins.onepassword.backend import (
     OnePasswordSourceConfig,
     _BoundedRead,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+@pytest.fixture(autouse=True)
+def op_program(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An installed ``op``, which the backend starts by its absolute path."""
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    program = directory / ("op.exe" if sys.platform == "win32" else "op")
+    program.write_text("")
+    program.chmod(0o755)
+    monkeypatch.setenv("PATH", str(directory))
+    return program
 
 
 def _request(
@@ -122,7 +138,9 @@ def test_factory_and_context_entry_do_no_provider_work(monkeypatch: pytest.Monke
     assert client is not None
 
 
-def test_resolution_exact_subprocess_boundary_ignores_tty_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolution_exact_subprocess_boundary_ignores_tty_policy(
+    monkeypatch: pytest.MonkeyPatch, op_program: Path
+) -> None:
     calls: list[tuple[list[str], dict[str, object]]] = []
     clock = iter((100.0, 102.5))
     monkeypatch.setattr(onepassword_backend, "_MONOTONIC", lambda: next(clock))
@@ -144,7 +162,7 @@ def test_resolution_exact_subprocess_boundary_ignores_tty_policy(monkeypatch: py
         context.__exit__(None, None, None)
     assert result == BackendResolved("resolved")
     [(argv, kwargs)] = calls
-    assert argv == ["op", "read", "--no-newline", "--account", "work.example.com", "op://Work/item/password"]
+    assert argv == [str(op_program), "read", "--no-newline", "--account", "work.example.com", "op://Work/item/password"]
     assert cast("float", kwargs["timeout"]) == pytest.approx(4.5)
     assert kwargs == {
         "capture_output": True,

@@ -315,7 +315,14 @@ def vm_stop(
 def vm_delete(
     name: Annotated[str, typer.Argument(help="VM name")],
     force: Annotated[
-        bool, typer.Option("--force", help="Also delete dependent workspaces, agents and sessions")
+        bool,
+        typer.Option(
+            "--force",
+            help=(
+                "Also delete dependent workspaces, agents and sessions, and remove the VM's row even when "
+                "its backend could not be deleted"
+            ),
+        ),
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
@@ -368,6 +375,27 @@ def vm_rekey(
     )
 
 
+@vm_app.command("recover")
+def vm_recover(
+    name: Annotated[str, typer.Argument(help="VM name")],
+) -> None:
+    """Repair a VM's SSH access, python3 and Tailscale node.
+
+    Starts the VM first if it is stopped. Then, through the platform's own
+    channel, without the VM's Tailscale: records a missing host key once you
+    confirm its fingerprints, restores your SSH key, restarts a broken SSH
+    server, installs python3,
+    starts tailscaled if it is not running, and rejoins Tailscale only when
+    the node needs a login. Then it waits for the VM to answer over SSH, and
+    records your configured SSH identity as the VM's.
+    """
+    interaction = ordinary_tty_interaction_policy()
+    from agentworks.config import load_config
+    from agentworks.vms.manager import recover_vm
+
+    recover_vm(get_db(), load_config(), name, interaction=interaction)
+
+
 @vm_app.command("reinit")
 def vm_reinit(
     name: Annotated[str, typer.Argument(help="VM name")],
@@ -417,16 +445,17 @@ def vm_shell(
         typer.Option(
             "--platform",
             help=(
-                "Use the platform-native interactive transport, when available, to access the VM without Tailscale SSH."
+                "Open the platform's own shell (limactl, wsl.exe, or SSH to a cloud VM's public address), "
+                "which works without the VM's Tailscale."
             ),
         ),
     ] = False,
     workspace: Annotated[
         str | None,
-        typer.Option("--workspace", help="cd into a workspace"),
+        typer.Option("--workspace", help="cd into a workspace (not with --platform)"),
     ] = None,
 ) -> None:
-    """Open a shell on a VM as the admin user."""
+    """Open a shell on a VM as the admin user (as Lima's own guest user under --platform on Lima)."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.vms.manager import shell_vm
@@ -436,7 +465,7 @@ def vm_shell(
             get_db(),
             load_config(),
             name,
-            platform_transport=platform,
+            native_shell=platform,
             workspace_name=workspace,
             interaction=interaction,
         )

@@ -7,8 +7,8 @@ instance-type catalog
 with smallest-that-fits selection, and the baseline-deny / ephemeral-scoped-allow
 exposure model azure's redesign established (a security
 group that denies all inbound by default; SSH via ephemeral rules scoped to the
-operator's egress prefixes; ``post_tailscale_ready`` / ``secure_failed_vm`` /
-``transient_route`` close hooks; create rollback on both failure and operator
+operator's egress prefixes; ``close_provisioning_access`` and
+``_transient_route`` close hooks; create rollback on both failure and operator
 interrupt). Two deliberate divergences from azure are documented where they
 live: ``runup`` / ``status`` classify credential rejection, authorization
 denial, and an unreachable endpoint separately, and the security-group
@@ -27,19 +27,26 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     RetainedProvisioningError,
-    VMPlatform,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
     code_owned_release_value,
 )
+from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
-from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import AuthorizationError, ConfigError, NotFoundError, StateError, TokenRejectedError
-from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.errors import (
+    AuthorizationError,
+    ConfigError,
+    NotFoundError,
+    ProvisioningError,
+    StateError,
+    TokenRejectedError,
+)
+from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -70,15 +77,12 @@ from agentworks.plugins.aws.network import (
     wrap_ec2_error,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.transports import Transport
 
 
 # Debian's image naming for the EC2 architecture vocabulary. The mapping
@@ -95,13 +99,13 @@ _DEBIAN_SSM_RELEASES: dict[DebianRelease, str] = {
 _MAX_USER_DATA_BYTES = 16384
 
 
-class EC2Platform(VMPlatform):
+class EC2Platform(PublicAddressPlatform):
     """Runs VMs on Amazon EC2 via the AWS Python SDK (boto3). Named ``aws-ec2``,
     not ``aws``: the capability is one specific AWS service, and other AWS
     services could plausibly back platforms of their own someday (the same
     one-service rationale ``azure-vm`` follows for Azure)."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
@@ -133,25 +137,21 @@ class EC2Platform(VMPlatform):
         refuses a different account, and confirms the recorded security group's
         ownership before terminating the instance.
 
-        EC2 retains credential-free UserData. After cloud-init is ready, creation sends
-        the required Tailscale key through one fixed SSH command on stdin and returns
-        only after join succeeds. Failure terminates the new instance and security group;
-        an unconfirmed cleanup retains an addressable failed VM row.
+        EC2 retains credential-free UserData. After cloud-init is ready, creation joins
+        Tailscale over SSH to the public address as root, with the auth key only on the
+        join script's stdin, and returns only after it reads the VM's Tailscale address;
+        an address that cannot be read logs the node out. Failure terminates the new
+        instance and security group; an unconfirmed cleanup retains an addressable failed
+        VM row.
 
         Ships as the opt-in `aws` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
         """,
     )
 
-    # Warned by the transports factory when every reachability probe fails: the
-    # ephemeral SSH allow is scoped to the DETECTED egress IP, so an operator
-    # whose SSH traffic leaves through a different address (VPN split tunnel,
-    # proxy, CGNAT) gets a hole that does not match and every probe times out.
-    probe_failure_hint: ClassVar[str | None] = (
-        "The transient EC2 SSH allow is scoped to your detected public IP; "
-        "if your SSH traffic egresses elsewhere (VPN split tunnel, proxy, "
-        "CGNAT), add your address(es) to operator.ssh_allow_cidrs in your "
-        "agentworks config."
+    public_address_hint = (
+        "A stopped EC2 instance has no public IP: start it, or check the instance in the EC2 console "
+        "(the EC2 serial console reaches it without one)."
     )
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
@@ -415,14 +415,12 @@ class EC2Platform(VMPlatform):
             output.detail(f"Swap: {swap} GiB")
 
         # EC2 retains UserData. The SSH key is installed once by the cloud-init
-        # users block. When create-time bootstrap is requested, embed the full
-        # script with no Tailscale key and deliver the resolved key once over
-        # the post-boot provisioning transport below.
+        # users block, and the bootstrap holds no secret; the Tailscale key is
+        # sent once, in the join over the VM's root channel below.
         bootstrap = generate_bootstrap_script(
             admin_username=request.admin_username,
             ssh_public_key="",
             provisioning_packages=PROVISIONING_PACKAGES,
-            tailscale_auth_key=None,
             hostname=request.hostname,
             swap=swap,
         )
@@ -451,8 +449,6 @@ class EC2Platform(VMPlatform):
 
         security_group_id: str | None = None
         instance_id: str | None = None
-        prov_transport: Transport | None = None
-        tailscale_ip: str | None = None
         bootstrap_ssh_open = False
 
         def _metadata(*, incomplete: bool) -> dict[str, str]:
@@ -560,7 +556,7 @@ class EC2Platform(VMPlatform):
             ec2.get_waiter("instance_running").wait(InstanceIds=[instance_id])
 
             # Open the scoped bootstrap SSH hole (the group is deny-baseline
-            # until now); post_tailscale_ready / secure_failed_vm close exactly
+            # until now); close_provisioning_access closes exactly
             # these prefixes, recorded in platform_metadata below.
             output.detail("Opening scoped SSH bootstrap access...")
             poke_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
@@ -570,16 +566,11 @@ class EC2Platform(VMPlatform):
             public_ip = self._public_ip(ec2, instance_id)
             output.detail(f"EC2 instance '{backend_name}' provisioned (IP: {public_ip})")
 
-            prov_transport = SSHTransport(
-                host=public_ip,
-                trust=request.provisioning_trust,
-                user=request.admin_username,
-                identity_file=request.ssh_private_key,
-            )
-
             # The provider-retained bootstrap installed Tailscale without a
-            # credential. Wait for it, then join once over stdin.
-            tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
+            # credential. Wait for it over the VM's root channel, then join
+            # once and settle the address.
+            target = PublicSSH(public_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
+            tailnet_address = complete_cloud_bootstrap(target, request.tailscale_auth_key, node=request.hostname)
         except KeyboardInterrupt:
             output.warn(
                 f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "
@@ -594,14 +585,11 @@ class EC2Platform(VMPlatform):
                 raise
             raise wrap_ec2_error(exc) from exc
 
-        # Reached only when the guarded region completed (both except arms
-        # re-raise), so the transport was built.
-        assert prov_transport is not None
+        # Reached only when the guarded region completed: both except arms re-raise.
         metadata = _metadata(incomplete=False)
         return ProvisionResult(
-            native_transport=prov_transport,
             platform_metadata=metadata,
-            tailscale_ip=tailscale_ip,
+            tailnet_address=tailnet_address,
         )
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:
@@ -693,76 +681,51 @@ class EC2Platform(VMPlatform):
         region = vm.platform_metadata.get("region")
         return f"{instance_id}@{region}" if region else instance_id
 
-    def native_transport(
-        self,
-        vm: VMRow,
-        ctx: RunContext,
-        *,
-        config: Config | None = None,
-    ) -> Transport:
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
+        """Revoke EXACTLY the bootstrap allow's tuples on the VM's per-VM
+        security group, leaving zero inbound exposure (the empty security
+        group is the deny-all-inbound baseline; the public IP stays for the
+        VM's lifetime). Phase A calls it once, however it ends, with the
+        create op's own scoped context, and every root-channel route calls it
+        again once it closes; on an ``access-key`` site the network call
+        authenticates as the configured key, with no ambient fallback. A
+        failure before the revoke raises naming the tuples, and a refused
+        revoke warns naming them.
+        A kept VM Phase A did not complete is debugged through the EC2 serial
+        console; ``vm delete``'s logout pokes a fresh transient allow via
+        :meth:`_transient_route`.
+
+        Revoking exactly the recorded bootstrap prefixes, rather than sweeping
+        all ingress, is what lets a concurrent ``vm shell --platform`` route
+        (nothing serializes commands per VM) keep its own distinct allow: a
+        blanket revoke-all would tear it out. The prefixes come from
+        platform_metadata, recorded by :meth:`create` as exactly what it poked;
+        recomputing them here would drift if the operator's egress IP or
+        ``ssh_allow_cidrs`` changed since create, revoking the wrong tuples.
+        ``remove_ssh_allow`` is tolerant of an already-gone tuple, so a shared
+        prefix another route revoked first is a no-op. A row with no recorded
+        security group or prefixes is warned and skipped (the hook is
+        best effort; ``delete`` removes the group outright regardless)."""
+        security_group_id = vm.platform_metadata.get("security_group_id")
+        if not security_group_id:
+            output.warn(f"VM '{vm.name}' has no EC2 security_group_id; cannot close provisioning access")
+            return
+        recorded = vm.platform_metadata.get("bootstrap_ssh_prefixes")
+        prefixes = [p for p in recorded.split(",") if p] if recorded else []
+        if not prefixes:
+            output.warn(f"VM '{vm.name}' has no recorded bootstrap SSH prefixes; cannot close provisioning access")
+            return
         try:
-            result = ec2.describe_instances(InstanceIds=[self._instance_id(vm)])
+            ec2 = self._client("ec2", self._region_of(vm), ctx)
         except Exception as exc:
-            raise wrap_ec2_error(exc) from exc
-
-        # The public IP is read LIVE off a fresh describe every time (EC2
-        # reassigns it across stop/start, so it is never cached). The SSH route
-        # is opened by transient_route, which the transports factory wraps
-        # around this call; a stopped instance has no public IP, which
-        # propagates to SSHTransport(host="") and the factory's typed StateError.
-        public_ip = first_instance_public_ip(result)
-
-        identity_file = None
-        if config is not None:
-            identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
-
-        return SSHTransport(
-            host=public_ip,
-            trust=TrustBinding(TrustMode.VM, vm.name),
-            user=vm.admin_username,
-            identity_file=identity_file,
-        )
-
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
-        """Close provisioning access now that Tailscale is up.
-
-        The VM comes out of :meth:`create` reachable only through the ephemeral
-        bootstrap SSH allow (scoped to the operator's egress prefixes; the empty
-        security group is the deny-all-inbound baseline). This hook fires at the
-        async Tailscale-ready point inside ``bootstrap_vm`` (Phase A) and revokes
-        EXACTLY the bootstrap allow's tuples (recorded in platform_metadata at
-        create), leaving zero inbound exposure; the public IP stays for the VM's
-        lifetime.
-
-        ``ctx`` is the create op's own scoped context (secrets already resolved
-        before Phase A): revoking the allow is a network call and reads the
-        credential through it, with no ambient fallback.
-        """
-        self._close_provisioning_access(vm, ctx)
-
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
-        """Fail closed after kept post-create verification failure.
-
-        Mirrors :meth:`post_tailscale_ready`, which only fires on success: a VM
-        whose Tailscale SSH verification died (marked FAILED) or was interrupted
-        during verification (row status untouched by the abort) is kept for
-        debugging, and this hook revokes exactly the bootstrap allow's tuples so
-        it defaults to zero inbound exposure. Create-time bootstrap failures roll
-        back inside :meth:`create` and never reach this hook. Debugging and
-        recovery stay possible: ``vm shell --platform`` and ``vm delete`` poke a
-        fresh transient allow via :meth:`transient_route`.
-
-        ``ctx`` is the create op's own scoped context, whose secrets were
-        resolved before Phase A began, so even the interrupt path never resolves
-        a secret here for the first time; on an ``access-key`` site the
-        network call authenticates as the configured access key, with no ambient
-        fallback.
-        """
-        self._close_provisioning_access(vm, ctx)
+            raise ProvisioningError(
+                f"could not close or check the bootstrap SSH allow for {', '.join(prefixes)} on security group "
+                f"'{security_group_id}', so it may remain open: {exc}"
+            ) from exc
+        remove_ssh_allow(ec2, str(security_group_id), prefixes)
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Iterator[None]:
+    def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         """Open a scoped SSH route to the VM for the context's duration.
 
         Enter pokes this operation's SSH allow scoped to the operator's egress
@@ -774,9 +737,8 @@ class EC2Platform(VMPlatform):
         contract). Unlike azure there is no public-IP heal on enter: the EC2
         auto-assigned IP is permanent for the VM's lifetime.
 
-        ``ctx`` is the op-start context threaded from the factory; ``config``
-        carries OPERATOR settings (``operator.ssh_allow_cidrs``), mirroring
-        azure and :meth:`native_transport`.
+        ``ctx`` is the op-start context; its ``config`` carries the operator's
+        ``operator.ssh_allow_cidrs``.
 
         ``poke_ssh_allow`` checks the matching revoke permissions before it
         mutates ingress and cleans up any partial poke itself. Once the poke
@@ -784,12 +746,13 @@ class EC2Platform(VMPlatform):
         """
         ec2 = self._client("ec2", self._region_of(vm), ctx)
         security_group_id = self._security_group_id(vm)
-        prefixes = operator_ssh_prefixes(config_allow_cidrs(config))
+        prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
         poke_ssh_allow(ec2, security_group_id, prefixes)
         try:
             yield
         finally:
-            remove_ssh_allow(ec2, security_group_id, prefixes)
+            with interrupts_deferred():
+                remove_ssh_allow(ec2, security_group_id, prefixes)
 
     # -- Helpers ---------------------------------------------------------------
 
@@ -842,32 +805,8 @@ class EC2Platform(VMPlatform):
         predate the metadata key."""
         return str(vm.platform_metadata.get("region") or self.config.region)
 
-    def _close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
-        """Revoke EXACTLY the bootstrap allow's tuples on the VM's per-VM
-        security group (best-effort). Shared by the two close hooks.
-
-        Revoking exactly the recorded bootstrap prefixes, rather than sweeping
-        all ingress, is what lets a concurrent ``vm shell --platform`` route
-        (nothing serializes commands per VM) keep its own distinct allow: a
-        blanket revoke-all would tear it out. The prefixes come from
-        platform_metadata, recorded by :meth:`create` as exactly what it poked;
-        recomputing them here would drift if the operator's egress IP or
-        ``ssh_allow_cidrs`` changed since create, revoking the wrong tuples.
-        ``remove_ssh_allow`` is tolerant of an already-gone tuple, so a shared
-        prefix another route revoked first is a no-op. A row with no recorded
-        security group or prefixes is warned and skipped (the hooks are
-        best-effort; ``delete`` removes the group outright regardless)."""
-        security_group_id = vm.platform_metadata.get("security_group_id")
-        if not security_group_id:
-            output.warn(f"VM '{vm.name}' has no EC2 security_group_id; cannot close provisioning access")
-            return
-        recorded = vm.platform_metadata.get("bootstrap_ssh_prefixes")
-        prefixes = [p for p in recorded.split(",") if p] if recorded else []
-        if not prefixes:
-            output.warn(f"VM '{vm.name}' has no recorded bootstrap SSH prefixes; cannot close provisioning access")
-            return
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
-        remove_ssh_allow(ec2, str(security_group_id), prefixes)
+    def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
+        return self._public_ip(self._client("ec2", self._region_of(vm), ctx), self._instance_id(vm))
 
     def _public_ip(self, ec2: Any, instance_id: str) -> str:
         """The instance's live auto-assigned public IP (never cached)."""

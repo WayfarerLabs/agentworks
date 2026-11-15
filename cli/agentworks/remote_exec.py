@@ -55,21 +55,15 @@ def run_detached(
     timeout: int | None = None,
     as_root: bool = False,
     quiet: bool = False,
-    reuse_completed: bool = True,
 ) -> DetachedResult:
     """Run a command detached on a remote host, polling for completion.
 
     If a previous run is still in progress (PID file exists, process alive),
-    resumes polling instead of starting a new one.
-
-    ``reuse_completed`` controls what a leftover STATUS file from an
-    earlier, already-finished run means. ``True`` (default) treats it as
-    this operation's own completed result -- right for resumable
-    operations (a reconnect after the workstation dropped mid-init).
-    ``False`` treats it as stale garbage: it is cleared (with a warning)
-    and a fresh run starts -- right for one-shot operations like VM
-    creation, where consuming a stale exit code silently reports a
-    failure (or worse, a success) for work that never ran.
+    resumes polling instead of starting a new one, and a leftover status
+    file from an earlier, already-finished run counts as this operation's
+    own completed result: the shape of a resumable operation (a reconnect
+    after the workstation dropped). A one-shot operation must not consume
+    one; Lima's create has its own copy for that (``LimaHost.run_detached``).
 
     Running as root: prefer ``as_root=True`` to embedding ``sudo -n`` in the
     command. With ``as_root=True``, the wrapper script itself runs as root so
@@ -90,9 +84,6 @@ def run_detached(
         as_root: Run the wrapper script as root. Prefer this over embedding
             ``sudo -n`` in the command.
         quiet: Suppress progress output (still captured in the result).
-        reuse_completed: Whether a leftover status file counts as this
-            operation's completed result (resume) or stale garbage
-            (cleared; fresh start).
 
     Returns:
         DetachedResult with exit code and full output.
@@ -103,7 +94,7 @@ def run_detached(
     wrapper_file = f"{base_path}.sh"
 
     # Check for a completed previous run (reconnect after process finished)
-    if _status_file_exists(target, status_file) and reuse_completed:
+    if _status_file_exists(target, status_file):
         if not quiet:
             output.detail(f"{label}: found completed result from previous run")
     # Check for an existing running process (resume scenario)
@@ -111,11 +102,6 @@ def run_detached(
         if not quiet:
             output.detail(f"{label}: resuming in-progress operation...")
     else:
-        if not reuse_completed and _status_file_exists(target, status_file):
-            # Stale result from an interrupted earlier attempt. Loud even
-            # in quiet mode: silently consuming it once masked a VM-create
-            # failure as an empty-output error.
-            output.warn(f"{label}: clearing stale result files from a previous interrupted run ({base_path}.*)")
         # Write and start the wrapper script
         wrapper = _WRAPPER_TEMPLATE.format(
             command=command,
@@ -185,32 +171,6 @@ def _kill_by_pid_file(target: Transport, pid_file: str) -> None:
             f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
             check=False,
         )
-
-
-def kill_detached(target: Transport, base_path: str) -> None:
-    """Kill the still-running command a ``run_detached`` with this
-    ``base_path`` started, if any (the same PID-file mechanism the
-    hard-timeout path uses; best-effort, never raises over a transport
-    failure).
-
-    For callers whose interrupt handling must stop the remote command
-    before tearing down what it was building: ``run_detached`` nohups
-    the command precisely so it SURVIVES the workstation process, so a
-    locally raised ``KeyboardInterrupt`` stops nothing remotely
-    (LimaPlatform's create-interrupt rollback is the motivating case)."""
-    try:
-        _kill_by_pid_file(target, f"{base_path}.pid")
-    finally:
-        # Interrupted callers never reach run_detached's normal cleanup.
-        # Remove the wrapper and every result artifact after the kill so
-        # command output and stale status cannot survive the rollback.
-        # Ordinary cleanup failures are suppressed because this function
-        # runs while its caller is preserving an earlier failure.
-        with contextlib.suppress(Exception):
-            target.run(
-                f"rm -f {base_path}.out {base_path}.sh {base_path}.pid {base_path}.status",
-                check=False,
-            )
 
 
 def _is_running(target: Transport, pid_file: str) -> bool:

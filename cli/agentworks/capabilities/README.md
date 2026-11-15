@@ -49,10 +49,10 @@ infrastructure: `lima` and `wsl2` provide local VMs on macOS and Windows, while 
 `proxmox`, `aws-ec2`, and `gcp-gce` target cloud or datacenter capacity. Whatever the backend, each
 delivers the same foundation: a Debian VM with a passwordless-sudo admin login reachable over
 Tailscale and a lifecycle (create, start, a cost-saving stop that resumes with state intact, delete)
-that Agentworks drives through the platform. Each platform also provides Tailscale-independent
-native command execution for bootstrap and recovery. Interactive native access is optional. See
-[`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
-of each.
+that Agentworks drives through the platform. Each platform also provides a root channel, its own way
+to run a script as root on the VM without the VM's Tailscale, which bootstrap and recovery use.
+Interactive native access is optional. See [`vm_platform/README.md`](vm_platform/README.md) for what
+a platform must provide and the specifics of each.
 
 ### Harness Integration
 
@@ -577,7 +577,9 @@ implementation of it:
   models.**
 - **`implementation_contract`, `required_operations`, `required_attributes`**, what an
   implementation must satisfy. All four kinds declare nominal bases, and every registered
-  implementation must derive from its kind's contract.
+  implementation must derive from its kind's contract. **`retired_members`** pairs the members an
+  earlier contract version had with their replacements; registration refuses an implementation that
+  still defines one, since nothing calls it.
 - **`registry`, `entry_factory`, `readiness`, `publisher_source`**, how the kind's implementations
   are stored, published as read-only rows, and asked whether this host supports them.
 - **`manifest_sections`** (a sequence of `HostSurface` records), which declarable fields select this
@@ -729,12 +731,13 @@ secret set from the node graph, resolves once, and exposes only declared values 
 
 A consuming domain can also own required operation values that every implementation must honor. The
 VM domain resolves its template's Tailscale auth-key reference once and selects the concrete Debian
-release from core policy. Vm-platform contract version 1 carries both through `ProvisionRequest`,
+release from core policy. Vm-platform contract version 2 carries both through `ProvisionRequest`,
 alongside a value-free progress sink. A platform must not redeclare either value in its config, read
 a substitute from ambient state, or infer its own meaning of "current." It translates the requested
-release through a platform-owned artifact map. Core probes the returned transport and persists only
-that live observation. Platform-config secrets still use `ctx.secret(name)`; domain-owned values
-follow the operation that consumes them.
+release through a platform-owned artifact map. Core observes the live release itself, over SSH at
+the address the platform returns, as the first check of the VM contract, and persists only that
+observation. Platform-config secrets still use `ctx.secret(name)`; domain-owned values follow the
+operation that consumes them.
 
 The shipped capabilities illustrate both shapes. A secret-backed `git-credential-provider` reads its
 declared inputs through `ctx.secret(name)` during pre-creation input validation, runup, and final

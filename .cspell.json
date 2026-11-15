@@ -40,6 +40,7 @@
     "buildx",
     "bundleable",
     "burstable",
+    "cffi",
     "checkip",
     "chokepoint",
     "chowned",

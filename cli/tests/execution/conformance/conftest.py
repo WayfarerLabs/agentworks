@@ -12,6 +12,7 @@ from tests.execution.conformance.lanes import (
     SSHDLane,
     SSHDServer,
     python_interpreters,
+    require_linux_guest,
     rootless_sshd,
 )
 
@@ -30,6 +31,7 @@ def sshd_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SSHDServer
 
 @pytest.fixture(params=L_CASES, ids=[f"{shell}-{label}" for shell, label in L_CASES])
 def local_lane(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalLane:
+    require_linux_guest()
     shell, label = request.param
     return LocalLane(monkeypatch, tmp_path, shell, python_interpreters()[label])
 

@@ -3,10 +3,12 @@
 - **L** runs ``$SHELL -c <remote command>`` locally, through the real
   ``VMAccess`` and pump, with ``ssh_process.build_argv`` replaced by a local
   shell. The account's startup files are set per vector and ``SSH_CLIENT`` is
-  exported as sshd does. It covers the shells and runs on every Linux CI host.
+  exported as sshd does. It covers the shells and runs on every Linux CI host;
+  elsewhere it skips, since agw-launch is a Linux guest program.
 - **S** runs the real client against a rootless local ``sshd`` (loopback, a
   temporary host key and ``AuthorizedKeysFile``, no PAM) and ``trust.write_records``
-  for the test host key. It skips when no ``sshd`` binary exists, and fails on CI.
+  for the test host key. It skips when no ``sshd`` binary exists, and fails on CI;
+  its vectors skip off Linux, as L does.
 - **V** runs against a live VM named by ``AGW_CONFORMANCE_VM``, as the operator's
   own configured admin. It is the integration lane, run by the tester from each
   workstation.
@@ -21,6 +23,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -31,7 +34,7 @@ import pytest
 
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
-from agentworks.execution.access import VMAccess
+from agentworks.execution.access import Admin, VMAccess
 from agentworks.execution.client import SSHClient
 from agentworks.execution.requests import Command, RunRequest, Script, Shell
 from agentworks.execution.results import Completed, Result
@@ -39,6 +42,8 @@ from agentworks.execution.results import Completed, Result
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from typing import NoReturn
+
+    from agentworks.db import VMRow
 
 SHELLS = ("sh", "dash", "bash", "zsh")
 STARTUP_TIMEOUT_SECONDS = 15
@@ -156,6 +161,10 @@ class Lane:
         assert rewritten != source
         self.monkeypatch.setattr(envelope, "launcher_source", lambda: rewritten)
 
+    def access_with_identity(self, identity_file: Path) -> VMAccess:
+        """The lane's access to the same account with another key, for a vector about the key itself."""
+        raise NotImplementedError
+
     def shorten_handover_wait(self, seconds: int = 1) -> None:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
         self.rewrite_launcher(b"handover_wait_seconds = 30", b"handover_wait_seconds = %d" % seconds)
@@ -196,11 +205,31 @@ def find_shell(name: str) -> str | None:
     return shutil.which(name)
 
 
+def require_linux_guest() -> None:
+    """Skip unless this machine can stand in for the guest: the L and S lanes run agw-launch here.
+
+    agw-launch is a Linux guest program (it stages a script with
+    ``os.memfd_create`` and reads ``/proc``), so on macOS or Windows those
+    lanes would test a launcher where it never runs. It is not a missing
+    prerequisite to install, so it skips on CI too; CI's lanes run on Linux.
+    """
+    if sys.platform != "linux":
+        pytest.skip("the L and S lanes run agw-launch, a Linux guest program, on this machine")
+
+
 def unavailable(message: str) -> NoReturn:
     """What a lane's missing prerequisite does: fail on CI, where the workflow installs them, and skip elsewhere."""
     if os.environ.get("CI"):
         pytest.fail(message)
     pytest.skip(message)
+
+
+def sudo_granted() -> bool:
+    """Whether this machine's user may run ``sudo -n`` without a password."""
+    sudo = shutil.which("sudo")
+    if sudo is None:
+        return False
+    return subprocess.run([sudo, "-n", "true"], capture_output=True, check=False).returncode == 0
 
 
 def require_shell(name: str) -> str:
@@ -249,6 +278,7 @@ class LocalLane(LocalFilesystem):
             vm_name="local",
             host="127.0.0.1",
             user=getpass.getuser(),
+            identity=Admin(),
             identity_file=Path("/nonexistent/identity"),
         )
         monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
@@ -295,6 +325,13 @@ def find_sshd() -> str | None:
     return shutil.which("sshd") or next(
         (p for p in ("/usr/sbin/sshd", "/usr/local/sbin/sshd") if Path(p).exists()), None
     )
+
+
+def generate_key(path: Path) -> Path:
+    """A fresh unencrypted ed25519 key at ``path``, from the ``ssh-keygen`` beside the resolved client."""
+    keygen = client.tool_beside_ssh(client.resolve_ssh(), "ssh-keygen")
+    subprocess.run([str(keygen), "-q", "-t", "ed25519", "-N", "", "-f", str(path)], check=True)
+    return path
 
 
 @dataclass(frozen=True)
@@ -388,8 +425,19 @@ class SSHDLane(LocalFilesystem):
             vm_name=vm_name,
             host="127.0.0.1",
             user=getpass.getuser(),
+            identity=Admin(),
             identity_file=server.client_key,
             port=server.port,
+        )
+
+    def access_with_identity(self, identity_file: Path) -> VMAccess:
+        return VMAccess(
+            vm_name=self.vm_name,
+            host="127.0.0.1",
+            user=getpass.getuser(),
+            identity=Admin(),
+            identity_file=identity_file,
+            port=self.server.port,
         )
 
 
@@ -402,11 +450,20 @@ class LiveLane(Lane):
     name = "V"
     workdir = "/tmp"
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: object, access: VMAccess) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, access: VMAccess) -> None:
         super().__init__(monkeypatch)
         self.vm = vm
         self.access = access
         self._created: list[str] = []
+
+    def access_with_identity(self, identity_file: Path) -> VMAccess:
+        return VMAccess(
+            vm_name=self.vm.name,
+            host=self.vm.tailscale_host,
+            user=self.vm.admin_username,
+            identity=Admin(),
+            identity_file=identity_file,
+        )
 
     def _sh(self, source: str) -> Result:
         result = self.access.run(Script(source, Shell.SH, deadline=60))

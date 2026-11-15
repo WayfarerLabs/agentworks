@@ -35,10 +35,10 @@ def preflight_console_vm(
     """Check known local VM and provider policies before accepting intent."""
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.walk import walk
-    from agentworks.vms.manager._helpers import _guard_failed_vm, _vm_scope
+    from agentworks.vms.manager._helpers import _guard_incomplete_vm, _vm_scope
     from agentworks.vms.nodes import live_vm_node
 
-    _guard_failed_vm(vm)
+    _guard_incomplete_vm(vm)
     node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
     preflight_all(
         walk(node),
@@ -101,7 +101,7 @@ def realize_console(
                 held_native_guard=guard,
                 vm_node=node,
             )
-            activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+            activate_vm_runtime(context)
             with context.node.hold_active():
                 prepared = _mc.prepare_console_reconcile(
                     db,
@@ -285,7 +285,7 @@ def attach_running_console(
                             entity_name=name,
                         )
                 else:
-                    activate_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+                    activate_vm_runtime(context)
                 holds.enter_context(context.node.hold_active())
                 target = transport(vm, config)
                 canonical, staging = _mc._console_runtime_presence(target, name)

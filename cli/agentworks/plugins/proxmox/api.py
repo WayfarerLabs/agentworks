@@ -1,11 +1,12 @@
 """Thin REST client for the Proxmox VE API.
 
-Uses stdlib urllib.request -- no external dependencies. Authentication
+Uses stdlib urllib.request, with no external dependencies. Authentication
 is via PVEAPIToken (token ID + secret), not session cookies.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import ssl
 import time
@@ -16,6 +17,32 @@ from typing import Any
 
 from agentworks.errors import ProvisioningError
 
+ERROR_BODY_LIMIT_BYTES = 4096
+"""How much of an error response's body is read: enough for Proxmox's JSON errors, and it bounds every message."""
+
+REQUEST_TIMEOUT_SECONDS = 30.0
+"""The socket timeout of a request whose caller passes none, so an API that stops answering fails the call.
+
+It bounds the connection and each wait for the answer, as ssh's
+``ConnectTimeout`` (``ssh_process.CONNECT_TIMEOUT_SECONDS``) bounds a host
+connection. The calls that wait on long work (clone, start, stop, delete)
+return a task UPID at once and ``wait_for_task`` polls it, so no single
+request needs longer. A call with a budget of its own gives each request
+what remains of it when that is less: the identity check
+(``identity.find_guest``) when ``status`` or a root script bounds it, and
+the guest agent.
+"""
+
+
+def _error_body(error: urllib.error.HTTPError) -> str:
+    """An error response's body as text, or what of it could be read: callers branch on the HTTP code."""
+    if not error.fp:
+        return ""
+    try:
+        return error.read(ERROR_BODY_LIMIT_BYTES).decode("utf-8", errors="replace")
+    except (OSError, http.client.HTTPException):
+        return ""
+
 
 class ProxmoxAPIError(ProvisioningError):
     """A Proxmox API call failed.
@@ -23,9 +50,11 @@ class ProxmoxAPIError(ProvisioningError):
     ``code`` carries the HTTP status when the failure was an HTTP error
     (``None`` for a non-HTTP failure), so callers can distinguish an
     auth rejection (401/403) from other failures without parsing the
-    message. Used by the platform's ``runup`` token check."""
+    message, and ``body`` the start of the error response's body, for the
+    one caller that reads Proxmox's error detail (:meth:`ProxmoxAPI.vmid_in_use`)."""
 
     code: int | None = None
+    body: str = ""
 
 
 _QGA_BOOLEAN_FIELDS = ("exited", "out-truncated", "err-truncated")
@@ -41,6 +70,10 @@ _QGA_COMPLETION_FIELDS = {
 
 class _InvalidQGAExecStatus(ProxmoxAPIError):
     """A QGA exec-status response violates the provider contract."""
+
+
+class _TruncatedQGAOutput(_InvalidQGAExecStatus):
+    """A QGA exec-status reports the command exited but cut its output short."""
 
 
 def _invalid_qga_exec_status(reason: str, *, node: str, vmid: int, pid: int) -> _InvalidQGAExecStatus:
@@ -100,8 +133,21 @@ def _validate_qga_exec_status(
     if type(out_truncated) is not bool or type(err_truncated) is not bool:
         raise _invalid_qga_exec_status("has invalid truncation fields", node=node, vmid=vmid, pid=pid)
     if out_truncated or err_truncated:
-        raise _invalid_qga_exec_status("reports truncated output", node=node, vmid=vmid, pid=pid)
+        raise _TruncatedQGAOutput(
+            f"Proxmox guest-agent exec-status for VMID {vmid} on node '{node}' (PID {pid}) reports truncated output"
+        )
     return normalized
+
+
+def _vmid_exists(body: str) -> bool:
+    """Whether an error body is Proxmox's ``vmid`` parameter error for a VMID that is taken."""
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    errors = parsed.get("errors") if isinstance(parsed, dict) else None
+    detail = errors.get("vmid") if isinstance(errors, dict) else None
+    return isinstance(detail, str) and "already exists" in detail
 
 
 class ProxmoxAPI:
@@ -132,13 +178,15 @@ class ProxmoxAPI:
         data: dict[str, Any] | None = None,
         *,
         json_body: bool = False,
-        timeout: float | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> Any:
         """Send an API request and return the parsed JSON ``data`` field.
 
         Args:
             json_body: If True, send data as JSON (required for guest agent
                        endpoints). Otherwise use form-urlencoded.
+            timeout: The socket timeout in seconds, for the connection and
+                     for each read of the answer.
         """
         url = f"{self._base}{path}"
 
@@ -157,19 +205,15 @@ class ProxmoxAPI:
             req.add_header("Content-Type", content_type)
 
         try:
-            response = (
-                urllib.request.urlopen(req, context=self._ssl_ctx)
-                if timeout is None
-                else urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout)
-            )
-            with response as resp:
+            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout) as resp:
                 resp_body = resp.read().decode()
         except urllib.error.HTTPError as e:
-            err_body = e.read().decode() if e.fp else ""
-            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {err_body}")
+            error_body = _error_body(e)
+            err = ProxmoxAPIError(f"Proxmox API {method} {path} failed ({e.code}): {error_body}")
             err.code = e.code
+            err.body = error_body
             raise err from e
-        except (OSError, UnicodeError) as e:
+        except (OSError, UnicodeError, http.client.HTTPException) as e:
             raise ProxmoxAPIError(f"Proxmox API {method} {path} failed: {e}") from e
 
         if not resp_body:
@@ -189,12 +233,32 @@ class ProxmoxAPI:
         result = self._request("GET", "/cluster/nextid")
         return int(result)
 
+    def vmid_in_use(self, vmid: int, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> bool:
+        """Whether any guest in the cluster holds ``vmid``, asked of ``/cluster/nextid``.
+
+        Any valid token may ask, whatever its ACLs, so it also sees guests the
+        token cannot audit. A 200 echoing the VMID means nothing holds it; a
+        400 whose ``vmid`` error says the VM already exists means something
+        does. Any other answer raises, since it shows neither.
+        """
+        try:
+            result = self._request("GET", f"/cluster/nextid?vmid={vmid}", timeout=timeout)
+        except ProxmoxAPIError as error:
+            if error.code == 400 and _vmid_exists(error.body):
+                return True
+            raise
+        if str(result) != str(vmid):
+            raise ProxmoxAPIError(f"Proxmox API GET /cluster/nextid?vmid={vmid} returned a different VMID")
+        return False
+
     # -- VM operations ---------------------------------------------------------
 
     def list_vms(self, node: str) -> list[dict[str, Any]]:
         """List the VMs on a node (GET /nodes/{node}/qemu)."""
         result = self._request("GET", f"/nodes/{node}/qemu")
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list):
+            raise ProxmoxAPIError(f"Proxmox API GET /nodes/{node}/qemu returned a malformed listing")
+        return result
 
     def clone_vm(
         self,
@@ -224,13 +288,14 @@ class ProxmoxAPI:
         """Update VM configuration."""
         self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", params)
 
-    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> None:
-        """Resize a VM disk (e.g. disk='scsi0', size='+20G')."""
-        self._request(
+    def resize_disk(self, node: str, vmid: int, disk: str, size: str) -> str | None:
+        """Resize a VM disk (e.g. disk='scsi0', size='+20G'). Returns the task UPID, or ``None`` with no task."""
+        result = self._request(
             "PUT",
             f"/nodes/{node}/qemu/{vmid}/resize",
             {"disk": disk, "size": size},
         )
+        return None if result is None else str(result)
 
     def start_vm(self, node: str, vmid: int) -> str:
         """Start a VM. Returns the task UPID."""
@@ -247,10 +312,13 @@ class ProxmoxAPI:
         result = self._request("DELETE", f"/nodes/{node}/qemu/{vmid}")
         return str(result)
 
-    def vm_status(self, node: str, vmid: int, *, timeout: float | None = None) -> dict[str, Any]:
+    def vm_status(self, node: str, vmid: int, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> dict[str, Any]:
         """Get current VM status."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/status/current", timeout=timeout)
-        return result  # type: ignore[no-any-return]
+        path = f"/nodes/{node}/qemu/{vmid}/status/current"
+        result = self._request("GET", path, timeout=timeout)
+        if not isinstance(result, dict):
+            raise ProxmoxAPIError(f"Proxmox API GET {path} returned a malformed status")
+        return result
 
     # -- Tasks -----------------------------------------------------------------
 
@@ -284,57 +352,9 @@ class ProxmoxAPI:
 
     # -- Guest agent -----------------------------------------------------------
 
-    def guest_agent_network(self, node: str, vmid: int) -> list[dict[str, Any]]:
-        """Get network interfaces from the QEMU guest agent."""
-        result = self._request("GET", f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces")
-        if result and "result" in result:
-            data = result["result"]
-            if isinstance(data, list):
-                return data
-            raise ProxmoxAPIError(f"unexpected network-get-interfaces shape: {type(data).__name__}")
-        return []
-
-    def guest_agent_exec_wait(
-        self,
-        node: str,
-        vmid: int,
-        command: str,
-        args: list[str] | None = None,
-        *,
-        timeout: float = 60,
-    ) -> dict[str, Any] | None:
-        """Run a command via the guest agent and wait for completion.
-
-        Uses exec then polls exec-status until finished or timeout.
-        Returns a validated completion status, or ``None`` at the deadline.
-
-        Proxmox 8 requires the command as a JSON array sent with
-        Content-Type: application/json.
-        """
-        deadline = time.monotonic() + timeout
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        pid = self.guest_agent_exec(
-            node,
-            vmid,
-            command=[command, *(args or [])],
-            timeout=remaining,
-        )
-        while (remaining := deadline - time.monotonic()) > 0:
-            status = self.guest_agent_exec_status(
-                node,
-                vmid,
-                pid=pid,
-                timeout=remaining,
-            )
-            if status.get("exited") is True:
-                return status
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(2, remaining))
-
-        return None
+    def guest_agent_ping(self, node: str, vmid: int, *, timeout: float = REQUEST_TIMEOUT_SECONDS) -> None:
+        """Ask the VM's guest agent to answer; raises ``ProxmoxAPIError`` while it does not."""
+        self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/ping", timeout=timeout)
 
     def guest_agent_exec(
         self,
@@ -343,7 +363,7 @@ class ProxmoxAPI:
         *,
         command: list[str],
         input_data: str | None = None,
-        timeout: float | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> int:
         """Dispatch one QGA command and return its provider PID."""
         payload: dict[str, Any] = {"command": command}
@@ -366,7 +386,7 @@ class ProxmoxAPI:
         vmid: int,
         *,
         pid: int,
-        timeout: float | None = None,
+        timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Read one QGA command's current status."""
         result = self._request(
@@ -377,16 +397,3 @@ class ProxmoxAPI:
         if not isinstance(result, dict):
             raise _invalid_qga_exec_status("returned a malformed response", node=node, vmid=vmid, pid=pid)
         return _validate_qga_exec_status(result, node=node, vmid=vmid, pid=pid)
-
-    def guest_agent_file_write(self, node: str, vmid: int, path: str, content: str) -> None:
-        """Write a file inside the VM via the guest agent.
-
-        Sends raw content and lets Proxmox handle base64 encoding
-        for the guest agent.
-        """
-        self._request(
-            "POST",
-            f"/nodes/{node}/qemu/{vmid}/agent/file-write",
-            {"file": path, "content": content},
-            json_body=True,
-        )

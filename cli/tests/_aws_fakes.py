@@ -8,7 +8,9 @@ build (with the credentials it was handed) and every client call. The fake EC2
 client also tracks per-security-group ingress state so the exposure tests can
 assert what is authorized and revoked, and reproduce the shared-tuple
 concurrency behavior (a duplicate authorize is ``InvalidPermission.Duplicate``,
-a missing revoke is ``InvalidPermission.NotFound``).
+a missing revoke is ``InvalidPermission.NotFound``, or with
+``Controls.missing_revoke_succeeds`` the success response that lists it under
+``UnknownIpPermissions``, which EC2 also gives).
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ class Controls:
     # STS get_caller_identity: None passes; an Exception is raised.
     identity_error: Exception | None = None
     account_id: str = "111122223333"
-    # describe_instances(InstanceIds=...) state name (status / native_transport).
+    # describe_instances(InstanceIds=...) state name (status and the public address read).
     instance_state: str = "running"
     instance_public_ip: str = "203.0.113.10"
     instance_backend_name: str = "dev"
@@ -68,6 +70,9 @@ class Controls:
     # finally succeeds (drives the DependencyViolation retry test).
     sg_delete_errors: list[Exception] = field(default_factory=list)
     terminate_errors: list[Exception] = field(default_factory=list)
+    # A revoke of a tuple the group lacks succeeds and lists it under
+    # UnknownIpPermissions instead of raising InvalidPermission.NotFound.
+    missing_revoke_succeeds: bool = False
     # Outcomes for successive DryRun calls across the EC2 client. An Exception
     # is raised; None models an invalid normal return. Once exhausted, the
     # documented positive answer is DryRunOperation.
@@ -250,13 +255,17 @@ class _FakeEC2:
                 if rid in ids:
                     del ing[cidr]
             return {}
+        unknown: list[dict[str, Any]] = []
         for perm in kwargs["IpPermissions"]:
             for ip_range in perm["IpRanges"]:
                 cidr = ip_range["CidrIp"]
                 if cidr not in ing:
-                    raise client_error("InvalidPermission.NotFound", "gone", "RevokeSecurityGroupIngress")
+                    if not self._c.missing_revoke_succeeds:
+                        raise client_error("InvalidPermission.NotFound", "gone", "RevokeSecurityGroupIngress")
+                    unknown.append({**perm, "IpRanges": [ip_range]})
+                    continue
                 del ing[cidr]
-        return {}
+        return {"Return": True, "UnknownIpPermissions": unknown} if unknown else {"Return": True}
 
     def describe_images(self, **kwargs: Any) -> dict[str, Any]:
         self._record("describe_images", **kwargs)

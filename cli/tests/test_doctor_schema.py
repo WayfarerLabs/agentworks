@@ -202,6 +202,31 @@ def test_doctor_missing_ssh_evidence_includes_an_action_hint(
     assert comparison.hint is not None
 
 
+@pytest.mark.parametrize(("provisioning", "command"), [("complete", "vm reinit"), ("pending", "vm delete")])
+def test_doctor_s_missing_ssh_evidence_hint_names_a_command_that_accepts_the_vm(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    provisioning: str,
+    command: str,
+) -> None:
+    """Reinit refuses a VM whose provisioning did not complete, so it is never the hint there."""
+    from agentworks.db import ProvisioningStatus
+
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("box", site="local", hostname="box")
+    db.update_vm_provisioning_status("box", ProvisioningStatus(provisioning))
+
+    group = check_database(None)
+
+    (comparison,) = (
+        check
+        for check in group.checks
+        if check.instance_state is not None and check.instance_state.comparison == "not-recorded"
+    )
+    assert f"agw {command} box" in (comparison.hint or "")
+
+
 def test_doctor_keeps_independent_instance_state_facts_when_one_row_is_malformed(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,

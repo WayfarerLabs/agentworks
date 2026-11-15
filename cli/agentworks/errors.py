@@ -43,6 +43,11 @@ class AgentworksError(Exception):
         self.entity_name = entity_name
         self.hint = hint
 
+    def add_hint(self, hint: str | None) -> None:
+        """Append ``hint`` to this error's hint, after a space; ``None`` or ``""`` changes nothing."""
+        if hint:
+            self.hint = f"{self.hint} {hint}" if self.hint else hint
+
 
 class TokenRejectedError(AgentworksError):
     """An external service definitively rejected a credential token

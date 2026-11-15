@@ -7,6 +7,7 @@ safe for every other submodule to depend on.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -16,12 +17,15 @@ from agentworks.errors import NotFoundError, ValidationError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.db import Database, VMRow, VMStatus, WorkspaceRow
     from agentworks.env import EnvEntry
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
+    from agentworks.vms.initializer.phase_a import OperationLog
 
 
 class _VmAdminEnvScopes(NamedTuple):
@@ -215,8 +219,43 @@ def _init_log_hint(vm_name: str) -> str:
     return f" See log: {format_host_path(logs[0])}" if logs else ""
 
 
-def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
-    """Block operations on VMs with failed provisioning or initialization.
+@contextlib.contextmanager
+def _operation_log(vm_name: str, command_stem: str, *, redactions: tuple[str, ...]) -> Iterator[OperationLog]:
+    """An operation log for ``command_stem``, closed on exit, with ``redactions`` registered before its first write.
+
+    Typed by the small ``OperationLog`` protocol, never as ``SSHLogger``, so a
+    manager module that imports nothing legacy can use it.
+    """
+    from agentworks.ssh import SSHLogger
+
+    log = SSHLogger(vm_name, command_stem, redactions=redactions)
+    try:
+        yield log
+    finally:
+        log.close()
+
+
+def _require_known_power_state(status: VMStatus, name: str) -> None:
+    """Refuse a VM whose power state the platform could not report (its API or placement host is unreachable)."""
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateError
+
+    if status is VMStatus.UNKNOWN:
+        raise StateError(
+            f"the platform could not report the power state of VM '{name}'",
+            entity_kind="vm",
+            entity_name=name,
+            hint=f"Check the VM in its provider, or run 'agw vm describe {name}'.",
+        )
+
+
+def _guard_incomplete_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
+    """Block operations on a VM whose provisioning never completed, or whose initialization failed.
+
+    Provisioning is complete only once create's Phase A passed the VM
+    contract, so any other status (failed, or a pending or in-progress row a
+    killed create left behind) is a VM that was never attested; only
+    ``vm delete`` is supported there, and that is never softened.
 
     When ``allow_failed_init`` is True, an init-status failure becomes
     a non-fatal warning instead of a hard block. Used by operations
@@ -224,9 +263,7 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
     diagnose or fix the cause of the init failure (e.g. ``vm shell``
     opening a session on a partially-initialized VM to apply a manual
     heal before re-running ``vm reinit``; ``vm exec`` running a one-shot
-    diagnostic command). Provisioning failure is never softened: the
-    VM may not even be reachable, and the project's stance there is
-    "delete and recreate."
+    diagnostic command).
     """
     from agentworks.db import InitStatus, ProvisioningStatus
     from agentworks.errors import StateError
@@ -237,6 +274,13 @@ def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:
             entity_kind="vm",
             entity_name=vm.name,
             hint="Only 'vm delete' is supported on a failed-provisioning VM.",
+        )
+    if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
+        raise StateError(
+            f"VM '{vm.name}' has not completed provisioning.{_init_log_hint(vm.name)}",
+            entity_kind="vm",
+            entity_name=vm.name,
+            hint="Only 'vm delete' is supported on a VM whose provisioning did not complete.",
         )
     if vm.init_status == InitStatus.FAILED.value:
         if allow_failed_init:

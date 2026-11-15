@@ -56,8 +56,9 @@ agw vm start workstation
 agw vm reconcile workstation
 ```
 
-VM start establishes running intent and prepares the VM's connection. It does not restore session or
-console runtimes automatically.
+VM start establishes running intent, starts the VM, and waits for it to answer over SSH; a VM that
+does not answer fails naming `agw vm recover`. It does not restore session or console runtimes
+automatically.
 
 Fleet recovery requires explicit selection. Use it only when recovery of the entire managed fleet is
 intended:
@@ -132,13 +133,14 @@ refused actions contribute no unused workload secrets. One required workload sec
 all deferred changes in that batch, including restarts, console staging cleanup, and VM stops.
 Correct the missing input and retry the intended scope.
 
-Infrastructure preparation happens first. Required VM activation and conditional Tailscale repair
-may already have completed when workload preparation fails; those effects are not rolled back.
-Repair credentials are requested only when needed, including when the provider reports a VM running
-but its connection needs repair. An infrastructure credential failure blocks only the families that
-need it, so independent families may continue. If an eligible workload also needs that failed
-credential, the complete workload-secret barrier still fails. Execution and final observation do not
-open another secret prompt between workload changes.
+Infrastructure preparation happens first. Required VM activation may already have completed when
+workload preparation fails; it is not rolled back. Activation waits for each VM to answer over SSH
+and requests no Tailscale key: a VM that does not answer, including one the provider reports
+running, blocks its family with a failure naming `agw vm recover`, which repairs the connection. An
+infrastructure credential failure blocks only the families that need it, so independent families may
+continue. If an eligible workload also needs that failed credential, the complete workload-secret
+barrier still fails. Execution and final observation do not open another secret prompt between
+workload changes.
 
 Cancellation stops further work and retains accepted targets and completed effects. It does not
 promise rollback of provider or guest changes. Results distinguish unchanged, changed, failed, and
@@ -148,12 +150,11 @@ uptime, useful harness progress, or restored conversation state.
 
 ## What preview does
 
-`--dry-run` does not write targets, activate or repair VMs, repair process evidence, create or
-remove tmux staging, preview or resolve workload secrets, or create mutation-guard files. Provider
-status may still need its ordinary observation credentials and their configured authentication
-behavior. When the VM is off, the preview identifies guest checks as conditional on later
-activation; it does not claim to have inspected an unreachable workload. Unknown attempted
-observations remain blockers.
+`--dry-run` does not write targets, activate VMs, repair process evidence, create or remove tmux
+staging, preview or resolve workload secrets, or create mutation-guard files. Provider status may
+still need its ordinary observation credentials and their configured authentication behavior. When
+the VM is off, the preview identifies guest checks as conditional on later activation; it does not
+claim to have inspected an unreachable workload. Unknown attempted observations remain blockers.
 
 ## Busy families and WSL2 access
 

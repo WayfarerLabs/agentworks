@@ -1,19 +1,20 @@
 """VM lifecycle: provisioning (one-time) and initialization (repeatable).
 
 Two phases:
-  A. Provisioning (over provisioning transport): record platform-owned bootstrap
-     and verify Tailscale SSH. One-time, pass/fail. Tracked via provisioning_status.
+  A. Provisioning (``phase_a``, over agentworks.execution): record the platform's
+     address, enroll the host key on first contact and check the VM contract.
+     One-time, pass/fail. Tracked via provisioning_status.
   B. Initialization (over Tailscale SSH): packages, install commands, git credentials,
      dotfiles. Repeatable via `vm reinit`. Tracked via init_status.
 
-Phase A IP discovery and Tailscale SSH verification are fatal: if they fail,
-the VM is unreachable and useless. Post-ready cleanup and SSH-config sync are
-non-fatal: failures produce warnings and continue into Phase B.
+Everything in Phase A up to the contract passing is fatal: a VM that fails it is
+retained as failed. Post-ready cleanup and SSH-config sync are non-fatal:
+failures produce warnings and continue into Phase B.
 Phase B steps are non-fatal: failures produce warnings and a 'partial' status.
 
 This package preserves the flat ``agentworks.vms.initializer`` import
 surface that predates the split into submodules (``shell_env``, ``mise``,
-``ssh_keys``, ``packages``, ``credentials``, ``driver``): every name below
+``ssh_keys``, ``packages``, ``tailscale_preflight``, ``driver``, ``phase_a``): every name below
 is re-exported here so ``from agentworks.vms.initializer import
 bootstrap_vm`` (and the many ``agentworks.vms.initializer.<name>``
 attribute references across the codebase and test suite) keep working
@@ -30,14 +31,8 @@ that caller must switch to package-object indirection.
 
 from __future__ import annotations
 
-from .credentials import (
-    _join_tailscale,
-    rejoin_tailscale,
-    verify_tailscale_available,
-)
 from .driver import (
     VMInitializationOperation,
-    _phase_a_bootstrap,
     _phase_b_setup,
     bootstrap_vm,
     run_initialization,
@@ -81,6 +76,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
+from .tailscale_preflight import verify_tailscale_available
 
 __all__ = [
     "AGENTWORKS_IDENTITY_PROFILE_PATH",
@@ -105,8 +101,6 @@ __all__ = [
     "_ensure_agentworks_files_sourced",
     "_harden_admin_home",
     "_install_apt_packages",
-    "_join_tailscale",
-    "_phase_a_bootstrap",
     "_phase_b_setup",
     "_preserve_ssh_host_keys",
     "_reconcile_authorized_keys",
@@ -119,7 +113,6 @@ __all__ = [
     "_write_sudoers_console_setenv",
     "_write_sudoers_env_keep",
     "bootstrap_vm",
-    "rejoin_tailscale",
     "run_initialization",
     "verify_tailscale_available",
 ]

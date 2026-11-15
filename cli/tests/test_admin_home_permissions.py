@@ -185,7 +185,6 @@ def test_bootstrap_forces_private_group_idempotently() -> None:
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
-        tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
         swap=4,
     )

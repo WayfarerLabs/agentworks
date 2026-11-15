@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.db import AppliedStateKey, VersionedPayload
+from agentworks.db import AppliedStateKey, ProvisioningStatus, VersionedPayload
 from agentworks.errors import BackupError, StateError
 from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -42,6 +42,7 @@ def test_a_vm_without_a_host_key_record_is_refused_before_anything_is_written(
     from agentworks.execution.errors import TrustMissing
 
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.9")
     trust.remove("bvm")
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: object())
@@ -54,10 +55,25 @@ def test_a_vm_without_a_host_key_record_is_refused_before_anything_is_written(
         vm_backup.backup_vm(db, SimpleNamespace(), "bvm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("status", [ProvisioningStatus.FAILED, ProvisioningStatus.IN_PROGRESS])
+def test_a_vm_whose_provisioning_did_not_complete_is_refused_before_the_boundary(
+    db: Database, monkeypatch: pytest.MonkeyPatch, status: ProvisioningStatus
+) -> None:
+    db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_tailscale("bvm", "100.64.0.9")
+    db.update_vm_provisioning_status("bvm", status)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *a, **k: pytest.fail("registry loaded"))
+    monkeypatch.setattr(vm_backup, "gated_vm_boundary", lambda *a, **k: pytest.fail("the boundary opened"))
+
+    with pytest.raises(StateError):
+        vm_backup.backup_vm(db, SimpleNamespace(), "bvm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+
+
 def test_missing_tailscale_fails_before_the_boundary(
     db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: object
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")  # no tailscale
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
 
     def _no_boundary(*args: object, **kwargs: object) -> None:
         raise AssertionError("the boundary opened (and possibly prompted) before the guard")
@@ -180,6 +196,7 @@ def test_backup_refuses_a_malformed_selected_applied_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     _replace_ssh_payload_with_malformed_known_value(db, "bvm")
     _install_metadata_only_backup_fakes(monkeypatch)
@@ -200,6 +217,7 @@ def test_backup_refuses_an_unsupported_selected_applied_payload_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     db.instance_state.replace_applied_slices(
         "vm",
@@ -230,6 +248,7 @@ def test_backup_does_not_decode_an_unrelated_malformed_applied_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     db.instance_state.replace_applied_slices(
         "vm",
@@ -263,6 +282,7 @@ def test_vm_backup_exports_versioned_instance_specs(
     legacy: bool,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     if legacy:
         payload = VersionedPayload(1, {"env": {"TOKEN": {"value": "plaintext"}}})
@@ -370,6 +390,7 @@ def test_vm_backup_uses_post_activation_start_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     _install_metadata_only_backup_fakes(monkeypatch)
 
@@ -400,6 +421,7 @@ def test_windows_refuses_overlay_backup_before_any_json_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     overlays = parse_vm_instance_specs('{"env":{"TOKEN":"plaintext"}}', None)
     assert overlays is not None
@@ -439,6 +461,7 @@ def test_windows_allows_backup_with_only_nonsecret_applied_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db.insert_vm("bvm", site="lima-local", hostname="bvm")
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     db.instance_state.replace_applied_slices(
         "vm",
@@ -490,6 +513,7 @@ def test_native_setup_export_and_database_restore_preserve_owner_tree(db, tmp_pa
     from agentworks.harness_setup.state import decode_native_setup, read_native_setup, write_native_setup
 
     vm_row = db.insert_vm("bvm", site="lima-local", hostname="bvm", desired_runtime_state=DesiredRuntimeState.ON_DEMAND)
+    db.update_vm_provisioning_status("bvm", ProvisioningStatus.COMPLETE)
     db.update_vm_tailscale("bvm", "100.64.0.8")
     db.insert_agent("a", "bvm", "agt-a")
     db.insert_workspace("w", "/work/w", "bvm", "aw-w")

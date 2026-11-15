@@ -358,10 +358,9 @@ def test_check_raises_state_error_with_heal_hint() -> None:
     assert "systemctl stop tailscaled" in hint
     assert "ln -sf /run/systemd/resolve/stub-resolv.conf" in hint
     assert "systemctl start tailscaled" in hint
-    # And must direct the operator at the provisioner-shell entry point
-    # so they don't kill their Tailscale-SSH session running the first
-    # command. The platform-native transport survives stopping
-    # tailscaled; a future contributor who drops this reference back to
+    # And must direct the operator at the platform's own shell so they
+    # don't kill their Tailscale-SSH session running the first command.
+    # The native shell survives stopping tailscaled; a future contributor who drops this reference back to
     # the simple-block form re-introduces the lockout footgun.
     assert "vm shell --platform" in hint
 
