@@ -151,9 +151,13 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
     return vm.admin_username
 
 
-def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
+def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, owner: str | None) -> str:
     """Build the shell snippet that holds a console window open for the given
     session.
+
+    The snippet runs in the admin's console pane. ``owner`` names the account
+    that owns the session's server when that is not the admin (an agent
+    session), and every tmux client in the snippet then runs as ``owner``.
 
     Two phases:
     1. Entry: if the session isn't up yet, clear the pane and show a "Waiting..."
@@ -168,8 +172,8 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
     embedding the raw session_name inside the single-quoted strings is safe.
     """
     q = exact_tmux_target(session_name)
-    has = tmux_cmd(f"has-session -t {q}", socket_path)
-    att = tmux_cmd(f"attach -t {q}", socket_path)
+    has = tmux_cmd(f"has-session -t {q}", socket_path, owner=owner)
+    att = tmux_cmd(f"attach -t {q}", socket_path, owner=owner)
     return f"""\
 unset TMUX
 

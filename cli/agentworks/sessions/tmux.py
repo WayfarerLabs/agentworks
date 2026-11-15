@@ -14,6 +14,7 @@ import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.errors import ConnectivityError, ExternalError, StateError
@@ -22,6 +23,7 @@ from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from agentworks.ssh import SSHResult
     from agentworks.transports import Transport
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
@@ -37,6 +39,12 @@ DEAD_WORKLOAD_OUTPUT_LINE_CHARS = 500
 # Agent tmux socket infrastructure
 AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
 AGENT_SOCKET_GROUP = "tmux-agent-access"
+
+# A tmux client carries out requests from the server it connects to with the
+# client's own rights, and does not check who runs that server. So whenever
+# the identity Agentworks connects as does not own a server, its tmux client
+# first switches to the server's owner; root performs the switch.
+RUNUSER_PATH = "/usr/sbin/runuser"
 
 # AF_UNIX socket paths are capped by ``sizeof(sun_path)`` (Linux <sys/un.h>):
 # 108 bytes. A pathname socket needs a trailing NUL, so the usable path length
@@ -232,6 +240,64 @@ def agent_socket_path(linux_user: str, session_name: str) -> str:
     return f"{agent_socket_dir(linux_user)}/{session_name}.sock"
 
 
+def agent_socket_owner(socket_path: str) -> str:
+    """Return the agent account whose socket directory holds ``socket_path``.
+
+    The inverse of ``agent_socket_path``, applied to a persisted path rather
+    than to anything the guest reports. ``ensure_agent_socket_dir`` gives each
+    agent sole ownership of its directory, shared only with the admin group
+    and root, so a client running as this account never holds more rights
+    than whoever could have created the server behind the path. Raises
+    ``StateError`` for a path that is not directly inside one agent directory.
+    """
+    path = PurePosixPath(socket_path)
+    directory = path.parent
+    if (
+        not path.is_absolute()
+        or str(directory.parent) != AGENT_SOCKET_ROOT
+        or directory.name in {"", ".", ".."}
+        or path.name in {"", ".", ".."}
+    ):
+        raise StateError(
+            f"tmux socket path '{socket_path}' is not inside an agent socket directory",
+            hint="Repair the persisted session row before retrying.",
+        )
+    return directory.name
+
+
+def _runuser_prefix(owner: str) -> str:
+    return f"{RUNUSER_PATH} -u {shlex.quote(owner)} --"
+
+
+def as_server_owner(command: str, owner: str) -> str:
+    """Wrap a command that runs as root so it runs wholly as ``owner``.
+
+    For compound commands the transport elevates (``sudo=True``): root only
+    performs the account switch, and every tmux client inside ``command``
+    runs as the server's owner.
+    """
+    return f"{_runuser_prefix(owner)} /bin/bash -c {shlex.quote(command)}"
+
+
+def server_owner_run_command(target: Transport, owner: str | None) -> RunCommand:
+    """Return a ``RunCommand`` that reaches a tmux server as its owner.
+
+    ``owner`` is ``None`` when ``target``'s own identity owns the server, and
+    commands run there unchanged. Otherwise they run as ``owner`` through
+    ``as_server_owner``.
+    """
+    if owner is None:
+        return target.run
+
+    def run(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
+        # Forward ``env`` only when given, exactly as a bound ``target.run`` would.
+        if env is None:
+            return target.run(as_server_owner(command, owner), sudo=True, check=check)
+        return target.run(as_server_owner(command, owner), sudo=True, check=check, env=env)
+
+    return run
+
+
 def admin_socket_path(admin_username: str, session_name: str) -> str:
     """Return the tmux socket path for an admin-mode session."""
     return f"{ADMIN_SOCKET_ROOT}/{admin_username}/{session_name}.sock"
@@ -339,14 +405,16 @@ def cleanup_stale_sockets(target: Transport, linux_user: str) -> int:
 
     Targets the per-user agent socket directory under ``AGENT_SOCKET_ROOT``.
     Use ``cleanup_stale_admin_sockets`` for admin sessions (different root).
-    Uses sudo for both the tmux check and file removal -- this is an
-    infrastructure maintenance context (vm reinit / agent create).
+    This is an infrastructure maintenance context (vm reinit / agent create):
+    listing and removal run as root, and each server probe runs as
+    ``linux_user``, the directory's owner.
 
     Returns the number of stale sockets removed.
     """
     return _cleanup_stale_sockets_under(
         target,
         agent_socket_dir(linux_user),
+        owner=linux_user,
     )
 
 
@@ -361,11 +429,16 @@ def cleanup_stale_admin_sockets(target: Transport, admin_username: str) -> int:
     return _cleanup_stale_sockets_under(
         target,
         f"{ADMIN_SOCKET_ROOT}/{admin_username}",
+        owner=admin_username,
     )
 
 
-def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
-    """Remove only observed direct sockets whose native server is confirmed absent."""
+def _cleanup_stale_sockets_under(target: Transport, dir_path: str, *, owner: str) -> int:
+    """Remove only observed direct sockets whose native server is confirmed absent.
+
+    ``owner`` owns ``dir_path``; root lists and removes, and the probe of each
+    socket's server runs as ``owner``.
+    """
     from agentworks.native_files import native_path
 
     dir_path = native_path(dir_path)
@@ -404,7 +477,9 @@ def _cleanup_stale_sockets_under(target: Transport, dir_path: str) -> int:
         def run(
             command: str, *, check: bool = True, env: dict[str, str] | None = None, guard: str = socket_guard
         ) -> object:
-            return target.run(f"{guard} && {{ {command}; }}", sudo=True, check=check, env=env or {})
+            return target.run(
+                f"{guard} && {{ {as_server_owner(command, owner)}; }}", sudo=True, check=check, env=env or {}
+            )
 
         if probe_tmux_server(run_command=run, socket_path=sock_path) is ProbeStatus.ABSENT:
             result = target.run(f"{socket_guard} && rm -f -- {q_sock}", sudo=True, check=False)
@@ -519,15 +594,18 @@ def deploy_restricted_config(
     run_command(f"sudo tee {RESTRICTED_CONFIG_PATH} > /dev/null << 'TMUX_CONF'\n{config}TMUX_CONF")
 
 
-def tmux_cmd(base: str, socket_path: str | None = None, *, sudo: bool = False) -> str:
-    """Build a tmux command string, optionally with ``-S`` and ``sudo``.
+def tmux_cmd(base: str, socket_path: str | None = None, *, owner: str | None = None) -> str:
+    """Build a tmux command string, optionally with ``-S``.
 
-    Owner-targeted session commands do not need sudo because socket access goes
-    through group permissions. Admin-targeted batch operations use
-    ``sudo=True`` when inspecting agent-owned runtimes.
+    ``owner`` is for a command the VM admin's own shell runs against a server
+    another account owns, such as an attach into an agent session: the
+    client then runs as ``owner`` through ``sudo`` and ``runuser``. Compound
+    commands the transport already elevates use ``as_server_owner`` instead.
     """
+    if owner is not None and socket_path is None:
+        raise ValueError("an owner-scoped tmux command needs the owner's socket path")
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
-    return f"sudo -n {cmd}" if sudo else cmd
+    return f"sudo -n {_runuser_prefix(owner)} {cmd}" if owner is not None else cmd
 
 
 def exact_tmux_target(name: str) -> str:
@@ -1160,15 +1238,25 @@ def _parse_pid(raw: str, context: str) -> int:
 # -- PID-based liveness helpers --------------------------------------------
 
 
+def _run_as_server_owner(target: Transport, command: str, *, owner: str | None) -> SSHResult:
+    """Run one tmux-client command as the server's owner (see ``server_owner_run_command``)."""
+    if owner is None:
+        return target.run(command, check=False)
+    return target.run(as_server_owner(command, owner), sudo=True, check=False)
+
+
 def probe_tmux_server_pid(
     *,
     target: Transport,
     socket_path: str | None = None,
-    sudo: bool = False,
+    owner: str | None = None,
 ) -> IntegerProbe:
-    """Probe the positive PID of a running tmux server."""
+    """Probe the positive PID of a running tmux server.
+
+    ``owner`` names the server's account when ``target`` is not that account.
+    """
     cmd = runtime_probe_command(tmux_cmd("display-message -p '#{pid}'", socket_path), "PID")
-    result = target.run(cmd, sudo=True, check=False) if sudo else target.run(cmd, check=False)
+    result = _run_as_server_owner(target, cmd, owner=owner)
     payload = runtime_probe_payload(result.stdout, "PID")
     if payload is None:
         return IntegerProbe(ProbeStatus.UNKNOWN)
@@ -1240,16 +1328,21 @@ def capture_tmux_server_fingerprint(
     *,
     target: Transport,
     socket_path: str,
-    sudo: bool = False,
+    owner: str | None = None,
 ) -> FingerprintProbe:
-    """Capture a stable tmux PID, boot ID, and process start time."""
-    first_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
+    """Capture a stable tmux PID, boot ID, and process start time.
+
+    ``owner`` names the server's account when ``target`` is not that account:
+    the tmux probes then run as ``owner`` and the process reads as root.
+    """
+    sudo = owner is not None
+    first_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, owner=owner)
     if first_pid.status is not ProbeStatus.PRESENT:
         return FingerprintProbe(first_pid.status)
     assert first_pid.value is not None
     first_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
     boot_id = read_boot_id(target)
-    second_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, sudo=sudo)
+    second_pid = probe_tmux_server_pid(target=target, socket_path=socket_path, owner=owner)
     second_ticks = probe_process_start_ticks(first_pid.value, target=target, sudo=sudo)
     if second_pid.status is ProbeStatus.ABSENT:
         return FingerprintProbe(ProbeStatus.ABSENT)
@@ -1277,9 +1370,12 @@ def _matches_launch_attempt(
     session_uuid: str,
     run_id: str | None,
     fingerprint: TmuxServerFingerprint,
-    sudo: bool = False,
+    owner: str | None = None,
 ) -> bool:
-    """Bind an unacknowledged launch to its exact native session and stable server."""
+    """Bind an unacknowledged launch to its exact native session and stable server.
+
+    ``owner`` names the server's account when ``target`` is not that account.
+    """
     if run_id is None:
         return False
     q_target = exact_tmux_target(session_name)
@@ -1288,10 +1384,10 @@ def _matches_launch_attempt(
         tmux_cmd(f"show-environment -t {q_target} _AGW_SESSION_UUID", socket_path),
         tmux_cmd(f"show-environment -t {q_target} _AGW_RUN_ID", socket_path),
     )
-    result = target.run(runtime_probe_command(" && ".join(commands), "LAUNCH"), sudo=sudo, check=False)
+    result = _run_as_server_owner(target, runtime_probe_command(" && ".join(commands), "LAUNCH"), owner=owner)
     payload = runtime_probe_payload(result.stdout, "LAUNCH")
     expected = f"{fingerprint.pid}\n_AGW_SESSION_UUID={session_uuid}\n_AGW_RUN_ID={run_id}\n"
     if result.returncode != 0 or runtime_probe_stderr(result.stderr) != "" or payload != expected:
         return False
-    verified = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
+    verified = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, owner=owner)
     return verified.status is ProbeStatus.PRESENT and verified.fingerprint == fingerprint

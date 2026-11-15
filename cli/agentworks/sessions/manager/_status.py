@@ -21,11 +21,13 @@ from agentworks.errors import (
 from agentworks.execution.errors import TrustMissing
 from agentworks.sessions.tmux import (
     ProbeStatus,
+    agent_socket_owner,
     probe_tmux_server,
     probe_tmux_session,
     runtime_probe_command,
     runtime_probe_payload,
     runtime_probe_stderr,
+    server_owner_run_command,
 )
 from agentworks.status_observation import (
     GUEST_OBSERVATION_ATTEMPTS,
@@ -78,6 +80,25 @@ def _pid_presence(pid: int, *, target: Transport, sudo: bool = False) -> ProbeSt
     stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "PRESENT")
     stderr = runtime_probe_stderr(getattr(result, "stderr", "") or "")
     return _pid_presence_from_fact(getattr(result, "returncode", None), stdout, stderr=stderr)
+
+
+def _session_tmux_owner(session: SessionRow) -> str | None:
+    """Return the account the VM admin's transport must act as on this session's server.
+
+    Agent sessions run their dedicated server as the agent, read from the
+    persisted socket path (``agent_socket_owner``). Admin sessions return
+    ``None``: the admin transport already owns their server. Raises
+    ``StateError`` for an agent row without a valid agent socket path.
+    """
+    if session.mode != SessionMode.AGENT.value:
+        return None
+    if session.socket_path is None:
+        raise StateError(
+            f"agent session '{session.name}' has no dedicated tmux socket",
+            entity_kind="session",
+            entity_name=session.name,
+        )
+    return agent_socket_owner(session.socket_path)
 
 
 def _get_boot_id(target: Transport) -> str | None:
@@ -135,9 +156,13 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     socket_path = session.socket_path
     assert socket_path is not None
     # Match batch observation and fingerprint repair: admin inspection of an
-    # agent server uses the existing privileged read boundary, even before
-    # startup completed its shared socket permissions.
-    run_command = partial(target.run, sudo=session.mode == SessionMode.AGENT.value)
+    # agent server runs its tmux clients as the agent, which works even
+    # before startup completed its shared socket permissions.
+    try:
+        owner = _session_tmux_owner(session)
+    except StateError:
+        return SessionStatus.UNKNOWN
+    run_command = server_owner_run_command(target, owner)
     session_presence = probe_tmux_session(session.name, run_command=run_command, socket_path=socket_path)
     if session_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
@@ -171,7 +196,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     pid_presence = _pid_presence(
         session.pid,
         target=target,
-        sudo=session.mode == SessionMode.AGENT.value,
+        sudo=owner is not None,
     )
     if pid_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
@@ -195,11 +220,11 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
     if boot_id is None:
         return False
     bounded = cast("Transport", _BoundedStatusTarget(target))
-    sudo = session.mode == SessionMode.AGENT.value
     try:
+        owner = _session_tmux_owner(session)
         stored_ticks = _mgr._validated_stored_start_ticks(session)
-        require_socket_path(session.socket_path, run_command=partial(bounded.run, sudo=sudo))
-        probe = capture_tmux_server_fingerprint(target=bounded, socket_path=session.socket_path, sudo=sudo)
+        require_socket_path(session.socket_path, run_command=partial(bounded.run, sudo=owner is not None))
+        probe = capture_tmux_server_fingerprint(target=bounded, socket_path=session.socket_path, owner=owner)
         observed = probe.fingerprint
         return (
             probe.status is ProbeStatus.PRESENT
@@ -213,7 +238,7 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
                 session_uuid=session.session_uuid,
                 run_id=session.run_id,
                 fingerprint=observed,
-                sudo=sudo,
+                owner=owner,
             )
         )
     except UserAbort:
@@ -238,6 +263,15 @@ def batch_check_status(
     checkable = [s for s in sessions if s.socket_path is not None]
     if not checkable:
         return {}
+    # A row whose server owner cannot be established is never probed and
+    # stays UNKNOWN, like any other indeterminate observation.
+    owners: dict[str, str | None] = {}
+    for session in checkable:
+        try:
+            owners[session.name] = _session_tmux_owner(session)
+        except StateError:
+            continue
+    probed = [session for session in checkable if session.name in owners]
 
     cmd = runtime_probe_command(_batch_probe_command(), "BATCH")
     result = target.run(
@@ -246,14 +280,14 @@ def batch_check_status(
         timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
         retries=GUEST_OBSERVATION_ATTEMPTS,
         tty=False,
-        input_data=_batch_probe_data(checkable),
+        input_data=_batch_probe_data(probed),
     )
     stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "BATCH")
 
     status_map: dict[str, SessionStatus] = {
         session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
     }
-    sessions_by_key = {_encoded_probe_field(session.name): session for session in checkable}
+    sessions_by_key = {_encoded_probe_field(session.name): session for session in probed}
 
     if (
         result.returncode != 0
@@ -340,11 +374,16 @@ def _encoded_probe_field(value: str) -> str:
 
 
 def _batch_probe_data(sessions: list[SessionRow]) -> str:
-    """Encode selected session rows as non-sensitive stdin protocol data."""
+    """Encode selected session rows as non-sensitive stdin protocol data.
+
+    Each record is ``name socket mode pid owner``; ``owner`` is ``-`` unless
+    the row is an agent session (mode ``a``), whose probes run as that owner.
+    """
     records = []
     for session in sessions:
         assert session.socket_path is not None
-        mode = "a" if session.mode == SessionMode.AGENT.value else "u"
+        owner = _session_tmux_owner(session)
+        mode = "a" if owner is not None else "u"
         pid = (
             str(session.pid)
             if isinstance(session.pid, int) and not isinstance(session.pid, bool) and session.pid > 0
@@ -357,6 +396,7 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
                     _encoded_probe_field(session.socket_path),
                     mode,
                     pid,
+                    _encoded_probe_field(owner) if owner is not None else "-",
                 )
             )
         )
@@ -365,15 +405,20 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
 
 def _batch_probe_command() -> str:
     """Build the constant-size loop program for a VM's session rows."""
+    from agentworks.sessions.tmux import RUNUSER_PATH
+
     return (
         "hex() { od -An -tx1 | tr -d ' \\n'; }; "
         'decode() { printf %s "$1" | base64 -d; }; '
         "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
         'BOOT_HEX=$(printf %s "$BOOT" | hex); '
-        "while read -r N64 S64 M PID; do "
+        "while read -r N64 S64 M PID O64; do "
         'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; '
-        'run_tmux() { if [ "$M" = a ]; then sudo -n tmux -S "$SOCK" "$@"; '
-        'else tmux -S "$SOCK" "$@"; fi; }; '
+        'if [ "$M" = a ]; then OWNER=$(decode "$O64") || exit 90; fi; '
+        # The clients take no stdin: the remaining rows stay out of every
+        # server's reach.
+        f'run_tmux() {{ if [ "$M" = a ]; then sudo -n {RUNUSER_PATH} -u "$OWNER" -- tmux -S "$SOCK" "$@" </dev/null; '
+        'else tmux -S "$SOCK" "$@" </dev/null; fi; }; '
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
         'HHEX=$(printf %s "$HERR" | hex); '
         "SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; "

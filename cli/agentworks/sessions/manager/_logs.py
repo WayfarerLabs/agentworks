@@ -29,7 +29,8 @@ def session_logs(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    from agentworks.sessions.tmux import capture_output
+    from agentworks.sessions.manager._teardown import _validated_socket_path
+    from agentworks.sessions.tmux import capture_output, server_owner_run_command
 
     if lines is not None and lines < 1:
         raise ValidationError("session log line count must be positive")
@@ -43,7 +44,7 @@ def session_logs(
     ) as (
         _ws,
         _vm,
-        run_command,
+        _run_command,
         _run_as_root,
         target,
     ):
@@ -76,10 +77,11 @@ def session_logs(
                 entity_name=name,
             )
 
-        sock = session.socket_path
+        sock = _validated_socket_path(db, session) if session.socket_path is not None else None
+        owner = _mgr._session_tmux_owner(session) if sock is not None else None
         captured = capture_output(
             name,
-            run_command=run_command,
+            run_command=server_owner_run_command(target, owner),
             lines=lines or config.session.history_limit,
             socket_path=sock,
         )

@@ -981,12 +981,15 @@ def attach_session(
                 entity_name=name,
             )
 
+        from agentworks.sessions.manager._teardown import _validated_socket_path
         from agentworks.terminal import clear_screen_on_detach
 
         q_session = exact_tmux_target(name)
+        socket_path = _validated_socket_path(db, session) if session.socket_path is not None else None
+        owner = _mgr._session_tmux_owner(session) if socket_path is not None else None
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(
-            tmux_cmd(f"attach -t {q_session}", session.socket_path),
+            tmux_cmd(f"attach -t {q_session}", socket_path, owner=owner),
             clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )

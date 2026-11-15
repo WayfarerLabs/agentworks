@@ -184,10 +184,10 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
             assert input_data.endswith("\n")
             lines = input_data.splitlines()
             assert len(lines) == 1
-            encoded_name, encoded_socket, mode, pid = lines[0].split()
+            encoded_name, encoded_socket, mode, pid, owner = lines[0].split()
             assert base64.b64decode(encoded_name, validate=True).decode() == "work"
             assert base64.b64decode(encoded_socket, validate=True).decode() == "/tmp/work.sock"
-            assert (mode, pid) == ("u", "100")
+            assert (mode, pid, owner) == ("u", "100", "-")
             events.append("transport-read")
             return framed_runtime_result(_command, _Result(0, f"S:{name_key}:0::0::0::0:\n"))
 

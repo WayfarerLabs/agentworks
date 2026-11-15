@@ -164,9 +164,10 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        sudo = session.mode == SessionMode.AGENT.value
+        owner = _mgr._session_tmux_owner(session)
+        sudo = owner is not None
         require_socket_path(sock, run_command=partial(target.run, sudo=sudo))
-        probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, sudo=sudo)
+        probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, owner=owner)
         if probe.status is ProbeStatus.PRESENT:
             fingerprint = probe.fingerprint
             assert fingerprint is not None
@@ -189,7 +190,7 @@ def _repair_session_pid(
                             session_uuid=session.session_uuid,
                             run_id=session.run_id,
                             fingerprint=fingerprint,
-                            sudo=sudo,
+                            owner=owner,
                         )
                     )
                 )

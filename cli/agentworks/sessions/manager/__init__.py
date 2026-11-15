@@ -178,6 +178,9 @@ from ._status import (
     _pid_presence as _pid_presence,
 )
 from ._status import (
+    _session_tmux_owner as _session_tmux_owner,
+)
+from ._status import (
     batch_check_status as batch_check_status,
 )
 from ._status import (

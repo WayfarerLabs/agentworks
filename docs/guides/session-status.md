@@ -27,10 +27,10 @@ Inspection is read-only. Existing positive-PID rows retain their ordinary presen
 eager identity repair. Batched checks combine the normal probes into one remote request per
 reachable VM. A pending launch with no recorded PID requires additional bounded reads to verify its
 native attempt identity and stable process fingerprint. These reads do not adopt the runtime or
-repair its row. Incomplete or indeterminate evidence stays `UNKNOWN`. Probes elevate only where
-needed to inspect agent-owned runtimes. Each guest call is non-interactive, makes one attempt, and
-has a 10-second timeout. Calls without fact input explicitly close stdin so Windows SSH does not
-retain the operator's console handle after returning the complete result.
+repair its row. Incomplete or indeterminate evidence stays `UNKNOWN`. Each guest call is
+non-interactive, makes one attempt, and has a 10-second timeout. Calls without fact input explicitly
+close stdin so Windows SSH does not retain the operator's console handle after returning the
+complete result.
 
 Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
 them; the table adds `STATUS`, reports progress before SSH begins, and appends compact uptime to a
@@ -88,6 +88,15 @@ any existing instance fields you want to keep. A valid replacement is retained a
 subsequent launch work fails; invalid input or cancelled restart confirmation preserves the prior
 spec. Changing a running session's spec through `start` does not itself replace its runtime; use
 `restart` when the running workload must use the replacement immediately.
+
+A tmux client carries out requests from the server it connects to with the client's own rights.
+Agentworks therefore never runs a tmux client as root or as the VM admin against an agent's server.
+Status probes, identity repair, startup recovery, teardown, `session logs`, `session attach`, named
+console windows, workspace tmuxinator windows and stale-socket cleanup all switch to the agent that
+owns the server first, with `sudo` and `runuser`. That agent is the owner of the socket directory
+the session's stored socket path names, which must sit directly inside one agent's directory under
+`/run/agentworks/agent-tmux-sockets`. A row whose path does not is observed as `UNKNOWN` and refused
+by lifecycle operations. Process reads, socket inspection and socket removal still run as root.
 
 Access sharing grants read/write tmux access to the socket group's members. Retrying startup
 completion reapplies that access, including restoring a member's read-only entry to read/write. The

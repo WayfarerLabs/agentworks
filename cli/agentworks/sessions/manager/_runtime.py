@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -253,7 +252,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     """Classify eligibility and preflight this session without writing evidence."""
     from agentworks.capabilities.base import RunContext
     from agentworks.harness_setup.readiness import require_setup_ready
-    from agentworks.sessions.tmux import startup_protection_enabled
+    from agentworks.sessions.tmux import server_owner_run_command, startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
     from agentworks.sessions.manager._teardown import _validated_socket_path
@@ -302,7 +301,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
                     protection = startup_protection_enabled(
                         current.name,
                         socket_path=_validated_socket_path(db, current),
-                        run_command=partial(admin_target.run, sudo=current.mode == SessionMode.AGENT.value),
+                        run_command=server_owner_run_command(admin_target, _mgr._session_tmux_owner(current)),
                     )
                     if protection is None:
                         raise StateError(

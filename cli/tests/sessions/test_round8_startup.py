@@ -38,6 +38,7 @@ def bind_native_runtime(db, monkeypatch, native: NativeTarget) -> None:
     native.socket = str(native.root / "agt-a1" / "s1.sock")
     Path(native.socket).parent.mkdir()
     monkeypatch.setattr(_teardown, "AGENT_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(tmux, "AGENT_SOCKET_ROOT", str(native.root))
     monkeypatch.setattr(manager, "_teardown_session", _lifecycle._teardown_session)
     _patch_transports(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")

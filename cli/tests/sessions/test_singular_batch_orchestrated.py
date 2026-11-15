@@ -47,16 +47,27 @@ def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox"
 
 
 def _seed_session(db: Database, name: str, ws: str, *, agent: str | None = None) -> None:
+    from agentworks.sessions.tmux import admin_socket_path, agent_socket_path
+
+    workspace = db.get_workspace(ws)
+    vm = db.get_vm(workspace.vm_name) if workspace is not None else None
+    assert vm is not None
+    agent_row = db.get_agent(agent) if agent is not None else None
+    socket_path = (
+        agent_socket_path(agent_row.linux_user, name)
+        if agent_row is not None
+        else admin_socket_path(vm.admin_username, name)
+    )
     db.insert_session(
         name,
         ws,
         "default",
         SessionMode.AGENT if agent else SessionMode.ADMIN,
         agent_name=agent,
-        socket_path=f"/tmp/{name}.sock",
+        socket_path=socket_path,
     )
     db.update_session_runtime(
-        name, socket_path=f"/tmp/{name}.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        name, socket_path=socket_path, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
     )
 
 

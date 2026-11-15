@@ -38,8 +38,9 @@ def observe_session_runtime(
     if session.socket_path is not None:
         status = _mgr.check_session_status(session, target=admin_target)
         if status is SessionStatus.UNKNOWN and _mgr._needs_repair(session) and session.boot_id is not None:
+            owner = _mgr._session_tmux_owner(session)
             require_socket_path(session.socket_path, run_command=partial(admin_target.run, sudo=sudo))
-            probe = capture_tmux_server_fingerprint(target=admin_target, socket_path=session.socket_path, sudo=sudo)
+            probe = capture_tmux_server_fingerprint(target=admin_target, socket_path=session.socket_path, owner=owner)
             if probe.status is ProbeStatus.ABSENT and _mgr._prove_stored_runtime_absent(
                 session, target=admin_target, sudo=sudo
             ):
@@ -96,9 +97,10 @@ def can_checkpoint_session(session: SessionRow, *, vm: VMRow, admin_target: Tran
             return False
         require_unaddressed_session_absence(session, vm=vm, admin_target=admin_target)
     else:
+        owner = _mgr._session_tmux_owner(session)
         require_socket_path(session.socket_path, run_command=partial(admin_target.run, sudo=sudo))
         if (
-            capture_tmux_server_fingerprint(target=admin_target, socket_path=session.socket_path, sudo=sudo).status
+            capture_tmux_server_fingerprint(target=admin_target, socket_path=session.socket_path, owner=owner).status
             is not ProbeStatus.ABSENT
         ):
             return False

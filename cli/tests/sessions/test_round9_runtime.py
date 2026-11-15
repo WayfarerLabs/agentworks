@@ -309,7 +309,7 @@ def test_maintenance_socket_guard_covers_the_entire_framed_probe(monkeypatch, na
         return result
 
     monkeypatch.setattr(native, "run", replace_after_enumeration)
-    assert tmux._cleanup_stale_sockets_under(native, str(scan)) == 0
+    assert tmux._cleanup_stale_sockets_under(native, str(scan), owner="agt-owned") == 0
     assert stale.is_symlink()
     assert not observed.exists()
     assert native.native("list-sessions").ok

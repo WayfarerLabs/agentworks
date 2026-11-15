@@ -53,7 +53,12 @@ def generate_config(
 
     *socket_paths* overrides ``session.socket_path`` when provided (used to
     supply derived paths for migrated sessions with NULL socket_path).
+
+    The wrappers run in the admin's console, so an agent session's tmux
+    clients run as the agent that owns its server.
     """
+    from agentworks.sessions.manager import _session_tmux_owner
+
     lines = [
         GENERATED_HEADER,
         f"name: {console_session_name(ws_name)}",
@@ -72,9 +77,10 @@ def generate_config(
         q_session = shlex.quote(session.name)
         q_exact_session = exact_tmux_target(session.name)
         sock = paths.get(session.name, session.socket_path)
+        owner = _session_tmux_owner(session)
         # Wrapper: unset TMUX for nesting, loop attach while session exists
-        has_cmd = tmux_cmd(f"has-session -t {q_exact_session}", sock)
-        attach_cmd = tmux_cmd(f"attach -t {q_exact_session}", sock)
+        has_cmd = tmux_cmd(f"has-session -t {q_exact_session}", sock, owner=owner)
+        attach_cmd = tmux_cmd(f"attach -t {q_exact_session}", sock, owner=owner)
         wrapper = (
             f"unset TMUX; "
             f"while {has_cmd} 2>/dev/null; do "
