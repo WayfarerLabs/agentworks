@@ -44,8 +44,8 @@ def test_ssh_run_plain_closes_stdin_with_dash_n_and_no_tt() -> None:
     """A plain ``ssh_run`` (no ``input_text``, no forced TTY) closes stdin with
     ssh's own ``-n``: a stdin-reading remote command then cannot hang and ssh
     cannot pull from the operator's console. This mirrors ``SSHTransport.run``'s
-    default, extending it to the bare-target primitive (``_run_lima``'s remote
-    Lima hop). ``-tt`` is never forced by default."""
+    default, extending it to the bare-target primitive. ``-tt`` is never forced
+    by default."""
     with patch("agentworks.ssh.subprocess.run") as process:
         process.return_value = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
         run(SSHTarget(host="vm-host", host_key_options=ssh_options(HOST_TRUST)), "limactl list --json")
@@ -134,8 +134,8 @@ def test_ssh_run_rejects_logging_sensitive_input_before_subprocess() -> None:
 
 
 def test_transport_stdin_allocates_no_tty_and_leaves_stdin_open() -> None:
-    """The production path. ``join_tailscale_ephemerally`` sends the
-    tailnet auth key over stdin with no ``tty`` override, so the stdin
+    """The production path. Git credential reconciliation sends its
+    payload over stdin with no ``tty`` override, so the stdin
     branch must neither force a TTY (``-tt`` would corrupt the byte-exact
     payload) nor close stdin (``-n`` would starve the remote reader). It
     uses ``-T`` (no pty, also defeating operator ``RequestTTY force``) and

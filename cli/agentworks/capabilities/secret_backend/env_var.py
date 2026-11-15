@@ -1,4 +1,19 @@
-"""The ``env-var`` secret backend."""
+"""The ``env-var`` secret backend.
+
+Its conventional variables, ``AW_SECRET_<NAME>``, are carriers: they exist
+only to bring a value to this backend. Agentworks hands each resolved secret
+to what needs it explicitly, so no program it starts needs a carrier, and a
+long-lived one (Lima's host agent, a WSL2 keepalive, an editor) would keep it
+for as long as it runs. The entry point therefore moves them out of the
+process environment with :func:`withhold_carriers` before anything starts,
+and every child inherits an environment without them. A variable that a
+secret's ``env-var`` mapping names outside the ``AW_SECRET_`` prefix is the
+operator's own, there for other programs too, and stays where it is.
+
+Only children are covered: the environment block this process started with
+stays readable to the same user and to root (``/proc/<pid>/environ``,
+``ps eww``) for as long as it runs.
+"""
 
 from __future__ import annotations
 
@@ -37,9 +52,36 @@ if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
 
 
+CARRIER_PREFIX = "AW_SECRET_"
+
+_withheld: dict[str, str] = {}
+"""The carriers :func:`withhold_carriers` took out of ``os.environ``, by variable name."""
+
+
 def env_var_name_for(secret_name: str) -> str:
     """Return the default ``AW_SECRET_<NAME>`` environment variable."""
-    return "AW_SECRET_" + secret_name.upper().replace("-", "_")
+    return CARRIER_PREFIX + secret_name.upper().replace("-", "_")
+
+
+def _key(name: str) -> str:
+    # Windows environment names are case-insensitive, and os.environ upper-cases them there.
+    return name.upper() if os.name == "nt" else name
+
+
+def withhold_carriers() -> None:
+    """Move every ``AW_SECRET_`` variable out of ``os.environ``, where only this backend still reads it.
+
+    Called once by the entry point, before anything starts a child process:
+    each child inherits ``os.environ``, so none inherits a carrier.
+    """
+    for name in [name for name in os.environ if _key(name).startswith(CARRIER_PREFIX)]:
+        _withheld[_key(name)] = os.environ.pop(name)
+
+
+def read_variable(name: str) -> str | None:
+    """The value the operator's environment gave ``name``, a withheld carrier included."""
+    value = os.environ.get(name)
+    return _withheld.get(_key(name)) if value is None else value
 
 
 class EnvVarSourceConfig(AgwModel):
@@ -55,7 +97,7 @@ class EnvVarMapping(AgwRootModel[NonEmptyStr]):
 def _read(request: SecretLookupRequest) -> str | None:
     mapping = request.mapping
     env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
-    return os.environ.get(env_name)
+    return read_variable(env_name)
 
 
 class _EnvVarClient:

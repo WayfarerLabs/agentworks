@@ -81,10 +81,10 @@ the mechanism itself and stay as written.
   it (identity/billing); the access-key-id and secret must be a MATCHED pair (mismatch results in
   `SignatureDoesNotMatch` at runup). Exposure model: empty security group is the deny baseline (zero
   ingress; no deny rule to install, unlike azure's NSG); ephemeral (proto,port,cidr)-tuple allows
-  scoped to the operator /32 for bootstrap + transient_route, revoked after. LEAK-WITNESS SWEEP
-  (boto3, `<aws-region>`): running instances tagged `agentworks:vm`, non-default security groups,
-  volumes; all must be empty after delete (EIPs omitted by design). Instances cost money; always
-  terminate + sweep.
+  scoped to the operator /32 for bootstrap and each root script or `vm shell --platform` route,
+  revoked after. LEAK-WITNESS SWEEP (boto3, `<aws-region>`): running instances tagged
+  `agentworks:vm`, non-default security groups, volumes; all must be empty after delete (EIPs
+  omitted by design). Instances cost money; always terminate + sweep.
 - System slug: `<system-slug>`. It prefixes Lima instance names and tailnet hostnames automatically,
   so entity names stay bare (no extra prefix duplication).
 - Tailnet: this host and test VMs join the operator's tailnet. Deleted VMs leave offline machine

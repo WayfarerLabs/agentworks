@@ -304,7 +304,7 @@ printf '%s\\n' "${{COMPREPLY[@]}}"
             )
             os.close(slave)
             setup = f"""
-autoload -Uz compinit && compinit -u
+autoload -Uz compinit && compinit -u -D
 source {script_path}
 _describe() {{
   if [[ $1 == command ]]; then

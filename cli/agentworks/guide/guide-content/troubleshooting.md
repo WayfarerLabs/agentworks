@@ -29,18 +29,24 @@ generated entry is stale; installations may configure a different alias prefix.
 A message that the OpenSSH client is unsupported means `ssh` on the workstation is missing or older
 than 8.5; `agw doctor` shows which client Agentworks resolved, and on Windows only the native
 Win32-OpenSSH is used. A message that a VM cannot run Agentworks requests means `python3` or its
-standard library is missing there; `agw vm reinit NAME` installs it.
+standard library is missing there; `agw vm recover NAME` installs it.
 
 A message that a VM has no recorded host key is fixed with `agw vm import-host-keys NAME`; see its
-`--help` for a VM with no matching entry.
+`--help` for a VM with no matching entry. `agw vm recover NAME` can instead read the keys through
+the platform and record them once you confirm their fingerprints against the VM's console.
 
 When the failure appears to be below SSH, use `tailscale status` to confirm the workstation is
 connected and can see the VM, then `tailscale ping HOST` with the Tailscale address from
 `agw vm describe NAME`. `agw vm logs NAME` shows the VM's recent SSH logs.
 
-If Tailscale itself needs repair, `agw vm shell NAME --platform` provides a platform-native recovery
-path where the selected platform supports one. It is an explicit recovery tool, not the routine
-connection path.
+When a VM does not answer after `agw vm start`, or Tailscale itself needs repair, run
+`agw vm recover NAME`, which starts the VM first if it is stopped. It works through the platform's
+own channel, without Tailscale, and changes the VM, in this order: it restores your SSH key,
+restarts a broken SSH server, installs `python3` if missing, starts `tailscaled` if it is not
+running, and rejoins Tailscale with the VM template's auth key only when the node needs a login,
+then waits for SSH. A step that fails stops it and names `agw vm logs NAME`. If you would rather not
+change the VM, delete and recreate it instead. `agw vm shell NAME --platform` remains an interactive
+escape hatch where the platform offers one.
 
 ## Runtime recovery and busy operations
 
@@ -57,10 +63,10 @@ runtimes unchanged. Unknown observations and unsafe recovery remain blockers, no
 replace a runtime.
 
 A required workload secret failure prevents all deferred changes in the selected batch. Earlier
-infrastructure activation or Tailscale repair may remain. An infrastructure credential failure
-blocks only dependent families unless an eligible workload also requires it. Correct the input,
-inspect completed effects, and retry the intended scope; cancellation does not erase accepted
-targets or roll back provider work.
+infrastructure activation may remain. An infrastructure credential failure blocks only dependent
+families unless an eligible workload also requires it. Correct the input, inspect completed effects,
+and retry the intended scope; cancellation does not erase accepted targets or roll back provider
+work.
 
 A busy VM family can be held by reconciliation secret interaction or console deletion consent.
 Finish that operation and retry instead of bypassing the guard. Even diagnostic access to a live VM

@@ -72,6 +72,7 @@ from agentworks.schema.base import (
     reference_marker_error,
 )
 from agentworks.schema.block import CapabilityBlock, CapabilityConfig
+from agentworks.schema.declaration_scope import InstanceOnly
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     config_error_from,
@@ -118,6 +119,7 @@ __all__ = [
     "CapabilityBlock",
     "CapabilityConfig",
     "FieldDoc",
+    "InstanceOnly",
     "ModelDoc",
     "MergeStrategy",
     "NonBlankStr",

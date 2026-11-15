@@ -18,14 +18,15 @@ import tempfile
 from dataclasses import dataclass
 from ipaddress import IPv6Address
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from agentworks.errors import ValidationError
+from agentworks.errors import ConnectivityError, ValidationError
 from agentworks.execution import trust
 from agentworks.execution.client import install_guidance
 from agentworks.execution.envelope import classify
 from agentworks.execution.errors import ClientUnsupported
 from agentworks.execution.results import Completion, Result, Unknown
+from agentworks.programs import resolve_program
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -58,19 +59,67 @@ SERVER_ALIVE_COUNT_MAX = 4
 CLIENT_LOG_TAIL_LINES = 20
 CLIENT_LOG_READ_BYTES = 65_536
 HOST_KEY_FAILURE = "Host key verification failed"
+# What the client logs when the server refused every key it offered, whatever follows the
+# parenthesis (a server that also allows other methods lists them there).
+AUTH_FAILURE = "Permission denied (publickey"
+# What the client logs when the address answered and nothing listens on the port: ssh's
+# "connect to host H port P: Connection refused", from the operating system's own text.
+CONNECTION_REFUSED = "Connection refused"
 
 _HOST = re.compile(r"[A-Za-z0-9_:][A-Za-z0-9_.:-]*")
 _USER = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\$?")
 
 
-def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_PYTHON) -> str:
+def stage0_command(handover_socket: str | None = None, *, python: str = DEFAULT_PYTHON, elevated: bool = False) -> str:
     """The remote command: ``python3 -I -S -c '<stage 0>'``, plus the socket path for a handover.
 
     ``-I`` ignores Python's environment variables and the user site directory,
-    and ``-S`` skips site packages, so no Python startup applies.
+    and ``-S`` skips site packages, so no Python startup applies. ``elevated``
+    puts ``sudo -n`` in front, so the whole operation runs as root; the
+    launcher rebuilds the payload's environment from root's passwd entry, so
+    nothing has to survive ``sudo``'s ``env_reset``. Only a pipe request
+    elevates: the attach path never passes it.
     """
     command = f"{python} -I -S -c '{STAGE0_PROGRAM}'"
+    if elevated:
+        command = f"sudo -n {command}"
     return command if handover_socket is None else f"{command} {handover_socket}"
+
+
+_NUL_FIRST = "printf '\\000'; "
+
+
+def nul_first_on_a_windows_console(command: str) -> str:
+    """The remote command of an interactive ``ssh -t``, led by a NUL byte when that matters.
+
+    Win32-OpenSSH searches its first raw-mode console write for ``ESC[2J`` and,
+    when it is there, first moves the console so the cursor is at the top of
+    the visible window:
+    https://github.com/PowerShell/openssh-portable/blob/v9.5.0.0/contrib/win32/win32compat/tnnet.c#L75-L83
+    Under ConPTY that move deletes the lines above the cursor, which never
+    reach scrollback, and a full-screen program's first frame (tmux attaching,
+    a ``clear`` in a startup file) carries ``ESC[2J``. The search is a
+    ``strstr``, so a leading NUL ends it at the first byte; the write itself
+    passes every byte on. Terminals discard the NUL: conhost and Windows Terminal
+    (https://github.com/microsoft/terminal/blob/v1.25.3131.0/src/terminal/parser/OutputStateMachineEngine.cpp#L98-L102)
+    and tmux (https://github.com/tmux/tmux/blob/3.8/input.c#L1320-L1321).
+
+    Only a raw-mode console write makes the search, so the NUL is added only on
+    Windows with stdin and stdout both on the terminal. Without a terminal on
+    stdin the client allocates no pty and stays out of raw mode, and its console
+    write ends at the first NUL:
+    https://github.com/PowerShell/openssh-portable/blob/v9.5.0.0/contrib/win32/win32compat/termio.c#L202-L210
+    Without one on stdout the NUL would land in the output.
+
+    The result is ``printf '\\000'; <command>``, so ``command`` may be any shell
+    command line, compound ones included, and the result's exit status is
+    ``command``'s. The account shell's startup files still run before it.
+    """
+    try:
+        on_console = sys.platform == "win32" and sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, OSError, ValueError):  # a missing, detached or closed stream
+        on_console = False
+    return _NUL_FIRST + command if on_console else command
 
 
 # -- Policy and argv ---------------------------------------------------------------------
@@ -116,13 +165,13 @@ class VMPolicy:
         """
         identity = trust.literal_path(self.identity_file, "SSH identity file")
         values = [
-            f'IdentityFile="{identity}"',
+            f"IdentityFile={trust.option_value(identity)}",
             "IdentitiesOnly=yes",
             # OpenSSH 8.5 reads CertificateFile=none as a relative file name:
             # https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c#L2312-L2320
             # A child of the regular identity file cannot exist, so no certificate
             # loads, including the automatic .pub probe.
-            f'CertificateFile="{identity}/disabled-certificate"',
+            f"CertificateFile={trust.option_value(identity + '/disabled-certificate')}",
             "BatchMode=yes",
             "PreferredAuthentications=publickey",
             "SecurityKeyProvider=none",
@@ -194,6 +243,37 @@ def build_argv(
     return argv
 
 
+def build_host_argv(
+    client: SSHClient,
+    host: str,
+    mode: Literal[ArgvMode.PIPE, ArgvMode.TERMINAL],
+    remote_command: str | None = None,
+) -> list[str]:
+    """The argv for a platform's own connection to its host (Remote Lima's), under the host policy.
+
+    Unlike a VM connection it honors the operator's SSH configuration (no
+    ``-F none``) and trusts the host through :data:`trust.HOST_TRUST`. It
+    adds the VM policy's connect timeout and keepalives, ``BatchMode`` in
+    ``PIPE`` mode only (an interactive hop may prompt), ``-T`` or ``-t``, and
+    the host after ``--``. ``host`` is operator configuration, refused at its
+    boundary when it holds whitespace or a control character. There is no
+    identity: the host's keys come from that configuration.
+    """
+    values = [
+        f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
+        f"ServerAliveInterval={SERVER_ALIVE_INTERVAL_SECONDS}",
+        f"ServerAliveCountMax={SERVER_ALIVE_COUNT_MAX}",
+    ]
+    if mode is ArgvMode.PIPE:
+        values.append("BatchMode=yes")
+    argv = [client.path, "-T" if mode is ArgvMode.PIPE else "-t", *trust.ssh_options(trust.HOST_TRUST)]
+    argv += [arg for value in values for arg in ("-o", value)]
+    argv += ["--", host]
+    if remote_command is not None:
+        argv.append(remote_command)
+    return argv
+
+
 # -- The client log -----------------------------------------------------------------------
 
 
@@ -258,22 +338,67 @@ def child_environment() -> dict[str, str] | None:
     return {name: value for name, value in os.environ.items() if name.upper() not in hidden}
 
 
-def spawn(
-    argv: Sequence[str], *, stdin: int | None, stdout: int | None, stderr: int | None, bufsize: int = -1
-) -> subprocess.Popen[bytes]:
-    """Start the client, or raise :class:`ClientUnsupported` when the operating system cannot.
+# Written out rather than read from ``subprocess``, which defines it only on
+# Windows, so the flag's selection can be tested on any host.
+# https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
+_CREATE_NO_WINDOW = 0x08000000
 
-    The one place a client process is started, so the environment strip and the
-    error mapping exist once. ``None`` for a stream inherits the operator's.
+
+def spawn(
+    argv: Sequence[str],
+    *,
+    stdin: int | None,
+    stdout: int | None,
+    stderr: int | None,
+    bufsize: int = -1,
+    share_console: bool = True,
+) -> subprocess.Popen[bytes]:
+    """Start the process, or raise a typed error naming what could not start.
+
+    The one place a client process is started, so the environment strip, the
+    program lookup and the error mapping exist once. A bare program name (local
+    Lima's ``limactl``) is looked up by :func:`agentworks.programs.resolve_program`,
+    never in the current directory. ``None`` for a stream inherits the
+    operator's. The OpenSSH client that cannot start is
+    :class:`ClientUnsupported`; any other program (a platform's ``limactl`` or
+    ``wsl.exe``) is a ``ConnectivityError`` naming it.
+
+    ``share_console=False`` is for a client that never uses the operator's
+    terminal while another client does. Windows-only by design: there it starts
+    the client with ``CREATE_NO_WINDOW``, off the operator's console. A parked
+    client left on the console was measured to turn the terminal client's UTF-8
+    into code-page glyphs (issue #889); the mechanism is not established, but
+    Win32-OpenSSH opens ``CONIN$`` and ``CONOUT$`` itself whatever its stdio are.
+    It also stops the console's Ctrl-C from reaching that client, which then
+    ends when its remote command does, or when agw ends it. Elsewhere it changes nothing: with
+    ``BatchMode=yes`` the client never opens the terminal.
     """
+    console_free = not share_console and sys.platform == "win32"
     try:
         return subprocess.Popen(
-            list(argv), stdin=stdin, stdout=stdout, stderr=stderr, bufsize=bufsize, env=child_environment()
+            [resolve_program(argv[0]), *argv[1:]],
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            bufsize=bufsize,
+            env=child_environment(),
+            creationflags=_CREATE_NO_WINDOW if console_free else 0,
         )
     except OSError as error:
-        reason = error.strerror or error
-        guidance = install_guidance(windows=sys.platform == "win32")
-        raise ClientUnsupported(f"the OpenSSH client could not be started: {reason}\n{guidance}") from error
+        reason = error.strerror or str(error)
+        if _is_openssh_client(argv[0]):
+            guidance = install_guidance(windows=sys.platform == "win32")
+            raise ClientUnsupported(f"the OpenSSH client could not be started: {reason}\n{guidance}") from error
+        program = os.path.basename(argv[0])
+        raise ConnectivityError(
+            f"'{program}' could not be started: {reason}",
+            hint=f"Install '{program}' on this machine, or check that it is on PATH.",
+        ) from error
+
+
+def _is_openssh_client(program: str) -> bool:
+    """Whether ``program`` is an OpenSSH client: the resolver only ever yields one named ``ssh``."""
+    return os.path.basename(program).lower() in ("ssh", "ssh.exe")
 
 
 def exit_status(returncode: int) -> int:
@@ -282,7 +407,7 @@ def exit_status(returncode: int) -> int:
 
 
 def run_terminal(argv: Sequence[str]) -> int:
-    """Run the client on the operator's terminal and return its exit status."""
+    """Run ``argv`` (the client, or a platform's own shell program) on the operator's terminal; return its status."""
     process = spawn(argv, stdin=None, stdout=None, stderr=None)
     try:
         return exit_status(process.wait())
@@ -307,6 +432,7 @@ def outcome(session: PipeSession, stop: StopReason, log: Path) -> Result:
             session.stderr,
             session.exit_status,
             host_key_failed=HOST_KEY_FAILURE in text,
+            auth_failed=AUTH_FAILURE in text,
             stdout_abandoned=session.stdout_abandoned,
             stderr_abandoned=session.stderr_abandoned,
         )

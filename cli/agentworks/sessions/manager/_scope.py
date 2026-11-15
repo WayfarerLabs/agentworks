@@ -105,12 +105,8 @@ def _prepare_vm(
     # Cheap row validation stays pre-gate: a VM with no Tailscale
     # address can never serve a session op, so it must fail with zero
     # prompts and zero VM starts. (The imperative body checked this
-    # after its gate; the gate cannot populate the address on the
-    # already-loaded row, so the command's outcome is identical. The
-    # hoist does forgo one accidental heal: the post-gate order could
-    # start a stopped VM whose rejoin repopulated the row's address,
-    # letting a RETRY succeed; now the retry keeps failing until an
-    # explicit vm start or reinit.)
+    # after its gate; the gate never changes the row's address, so the
+    # command's outcome is identical.)
     if vm.tailscale_host is None:
         raise StateError(
             f"VM '{vm.name}' has no Tailscale address",

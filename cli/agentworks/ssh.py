@@ -10,10 +10,10 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
 - ``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSH_TRANSPORT_ERROR``:
   shared data shapes still used across the codebase (and by
   ``SSHTransport`` itself).
-- ``SSHLogger`` / ``LOG_DIR``: the unified command logger.
-- Module-level ``run``: called from ``capabilities/vm_platform/lima.py``
-  (the SSH-placed Lima control plane), where the caller has a bare
-  ``SSHTarget`` and doesn't want to construct a full ``SSHTransport``.
+- ``SSHLogger`` / ``LOG_DIR``: the unified command logger, whose ``record``
+  is the operation log ``agentworks.execution`` requests are written to.
+- Module-level ``run``: the bare-``SSHTarget`` command primitive that
+  ``SSHTransport`` runs its sensitive-stdin commands through.
 - Module-level ``copy_to``: retained as the bare-``SSHTarget`` scp primitive.
 """
 
@@ -28,10 +28,14 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError
 from agentworks.path_rendering import format_host_path
+from agentworks.programs import resolve_program
 from agentworks.subprocess_io import decode_stream, stdin_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,21 @@ class SSHError(ConnectivityError):
     """
 
 
+def openssh_program(name: str) -> str:
+    """The absolute path of the OpenSSH program ``name`` (``ssh``, ``scp``) on ``PATH``, for a legacy argv.
+
+    A missing program raises :class:`SSHError`, the failure every caller of
+    this module and of ``SSHTransport`` already handles.
+    """
+    try:
+        return resolve_program(name)
+    except FileNotFoundError as error:
+        raise SSHError(
+            f"'{name}' could not be started: {error}",
+            hint="Install the OpenSSH client on this machine, or check that it is on PATH.",
+        ) from error
+
+
 LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 
 
@@ -138,6 +157,7 @@ class SSHLogger:
         # cannot rewrite part of it before the complete value is matched.
         self._redact = tuple(sorted(normalized, key=len, reverse=True))
         self._warnings: list[str] = []
+        self._label = command_stem
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
@@ -175,11 +195,26 @@ class SSHLogger:
         return text
 
     def step(self, name: str) -> None:
-        """Log the start of a named step."""
+        """Log the start of a named step, which labels the requests :meth:`record` writes after it."""
         from datetime import UTC, datetime
 
+        self._label = name
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
         self._write(f"--- [{ts}] {name} ---\n")
+
+    def record(self, request: RunRequest, result: Result) -> None:
+        """Log one ``agentworks.execution`` request and its result, labeled with the latest step.
+
+        The callable a command hands ``VMAccess`` as its ``log``. The record
+        holds no environment value, script source or stdin, and goes through
+        the same redaction as every other line.
+        """
+        from datetime import UTC, datetime
+
+        from agentworks.execution.oplog import format_record
+
+        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        self._write(f"[{ts}] " + format_record(request, result, label=self._label))
 
     def output(self, text: str) -> None:
         """Log general output."""
@@ -348,7 +383,7 @@ def _ssh_base_args(
     ``input_text`` payload is written, so callers set ``close_stdin`` only for
     the no-stdin-payload case.
     """
-    args = ["ssh", *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("ssh"), *target.host_key_options, "-o", "BatchMode=yes"]
     if tty:
         args.insert(1, "-tt")
     else:
@@ -491,7 +526,7 @@ def run(
 
 def _scp_base_args(target: SSHTarget) -> list[str]:
     """Build the base scp argument list (flags and options, no paths)."""
-    args = ["scp", "-q", *target.host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("scp"), "-q", *target.host_key_options, "-o", "BatchMode=yes"]
     if target.port is not None:
         args.extend(["-P", str(target.port)])
     if target.identity_file is not None:

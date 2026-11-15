@@ -130,7 +130,6 @@ class LiveVMNode:
         site: VMSiteNode,
         *,
         held_native_guard: NativeMutationGuard | None = None,
-        repair_auth_key_name: str | None = None,
     ) -> None:
         self._db = db
         self._config = config
@@ -139,9 +138,6 @@ class LiveVMNode:
         self._site = site
         self._held_native_guard = held_native_guard
         self._observed: VMStatus | None = None
-        self._repair_refs: tuple[str, ...] | None = (
-            (repair_auth_key_name,) if repair_auth_key_name is not None else None
-        )
 
     @property
     def key(self) -> str:
@@ -191,36 +187,17 @@ class LiveVMNode:
 
     def _gate_ops_ctx(self, gate_secrets: SecretReader) -> RunContext:
         """The op-start context for gate-driven power ops: the gate's
-        scoped reader (eager gate values, lazy repair values, anything
-        else refused) behind the standard ``ctx.secret`` surface."""
+        scoped reader (its gate values, anything else refused) behind the
+        standard ``ctx.secret`` surface."""
         from agentworks.capabilities.base import RunContext
 
         return RunContext(config=self._config, secrets=gate_secrets)
-
-    def repair_secret_refs(self) -> tuple[str, ...]:
-        # The rejoin auth key comes from the VM's template row field.
-        # Resolved on FIRST call, not construction: the gate consults
-        # this only when the repair path actually reads a name, which
-        # keeps the healthy path free of template resolution, exactly
-        # like the imperative repair path (_ensure_tailscale resolves
-        # the template only after a failed reconnect). Memoized so the
-        # gate reader's authorization check and the node's own read
-        # share one template resolution.
-        if self._repair_refs is None:
-            from agentworks.vms.templates import resolve_live_template
-
-            # One ref, always: the resolved template's auth-key name is
-            # non-optional (the kind's default is "tailscale-auth-key"),
-            # so there is no absent case to fold to an empty tuple.
-            tmpl = resolve_live_template(self._db, self._registry, self._row.name, self._row.template)
-            self._repair_refs = (tmpl.tailscale_auth_key,)
-        return self._repair_refs
 
     def confirmed_active(self) -> bool:
         from agentworks.vms.manager import _is_tailscale_reachable
 
         row = self._row
-        # A row already marked manually stopped skips the reachability
+        # A row that already records stopped intent skips the reachability
         # probe: pinging a stopped VM burns the probe's full timeout
         # just to reach the refusal (the backend answers directly).
         # Truthiness on the host, matching the oracle: an empty string
@@ -260,7 +237,7 @@ class LiveVMNode:
     def auto_start(self, gate_secrets: SecretReader) -> None:
         from agentworks import output
         from agentworks.harness_setup.locking import native_mutation_guard
-        from agentworks.vms.manager import _ensure_tailscale, _tailscale_rejoin_required
+        from agentworks.vms.manager import _await_tailnet
 
         with native_mutation_guard(self._db.path, self._row.name, held=self._held_native_guard):
             row = self.reload_row()
@@ -271,7 +248,12 @@ class LiveVMNode:
                     entity_name=row.name,
                     hint=f"start it with: agw vm start {row.name}",
                 )
-            # Persisted trust may have changed since the command's preflight.
+            # The commands that open this gate refuse a VM with no host-key record
+            # earlier, through require_vm_ssh_boundary, before any secret resolves.
+            # This is the last check ahead of the start for a gate opened without
+            # that precondition, and persisted trust may have changed since the
+            # command's preflight: the start is the first thing that spends
+            # anything, and with no record the wait after it could only fail.
             trust.require_record(row.name)
             platform = self._site.platform
             ctx = self._gate_ops_ctx(gate_secrets)
@@ -284,18 +266,9 @@ class LiveVMNode:
             output.info(f"VM '{row.name}' is {observed.value}. Starting...")
             platform.start(row, ctx)
             self._db.record_vm_started(row.name)
+            # A VM that does not answer fails naming 'agw vm recover'.
             with platform.vm_active(row, config=self._config):
-                if _tailscale_rejoin_required(self._db, self._config, row, already_running=False):
-                    auth_key_name = self.repair_secret_refs()[0]
-                    _ensure_tailscale(
-                        self._db,
-                        self._config,
-                        row,
-                        platform,
-                        ctx,
-                        auth_keys=gate_secrets,
-                        auth_key_name=auth_key_name,
-                    )
+                _await_tailnet(self._db, self._config, row, already_running=False)
 
     @contextmanager
     def hold_active(self, *, held_native_guard: NativeMutationGuard | None = None) -> Iterator[None]:
@@ -391,8 +364,9 @@ class PendingVMNode:
     identity is complete while it is still pending; the orchestrator
     flips it through ``RealizationLog.mark_realized`` once its row
     exists, and ``teardown`` is today's rollback body (delete the row)
-    relocated onto the node. The row is the only artifact this node
-    unwinds: a provisioning failure means nothing usable was created
+    relocated onto the node. The row, and the host-key store file
+    create resets for the name right after it, are the only artifacts
+    this node unwinds: a provisioning failure means nothing usable was created
     remotely (or the remote was unreachable), today's stance, and
     initialization failures are deliberately NOT unwound (the VM
     exists and is debuggable; reinit retries).
@@ -403,6 +377,7 @@ class PendingVMNode:
         db: Database,
         name: str,
         debian_release: DebianRelease,
+        hostname: str,
         template: VMTemplateNode,
         site: VMSiteNode,
         credentials: tuple[GitCredentialNode, ...],
@@ -410,6 +385,7 @@ class PendingVMNode:
         self._db = db
         self._name = name
         self._debian_release = debian_release
+        self._hostname = hostname
         self._template = template
         self._site = site
         self._credentials = credentials
@@ -430,6 +406,7 @@ class PendingVMNode:
 
     def preflight(self, ctx: RunContext) -> None:
         self._site.platform.validate_create_release(self._debian_release)
+        self._site.platform.validate_create_hostname(self._hostname)
 
     def runup(self, ctx: RunContext) -> None: ...
 
@@ -455,6 +432,10 @@ class PendingVMNode:
                 entity_kind="vm",
                 entity_name=self._name,
             ) from exc
+        # The store file goes with the row, as at delete. Create reset it
+        # for this name (``trust.begin_enrollment``), so it holds nothing
+        # that predates this create, and a store error names the file.
+        trust.remove(self._name)
 
 
 # -- Factories: the translation rule applied to real declared resources ----
@@ -485,7 +466,6 @@ def live_vm_node(
     *,
     site_nodes: dict[str, VMSiteNode] | None = None,
     held_native_guard: NativeMutationGuard | None = None,
-    repair_auth_key_name: str | None = None,
 ) -> LiveVMNode:
     """Build the ``vm/<name>`` node from its DB row. The row's ``site``
     field translates to the live edge (row fields become edges): the
@@ -501,9 +481,6 @@ def live_vm_node(
     instance per site (the by-site dedup the imperative batch bind
     performed). ``None`` builds a fresh site node, the single-VM
     composition's shape.
-
-    ``repair_auth_key_name`` selects an operation-local rejoin key, as when
-    rekey supplies a replacement instead of the VM template's usual key.
     """
     if site_nodes is None:
         site = vm_site_node(registry, row.site)
@@ -513,15 +490,7 @@ def live_vm_node(
             memoized = vm_site_node(registry, row.site)
             site_nodes[row.site] = memoized
         site = memoized
-    return LiveVMNode(
-        db,
-        config,
-        registry,
-        row,
-        site,
-        held_native_guard=held_native_guard,
-        repair_auth_key_name=repair_auth_key_name,
-    )
+    return LiveVMNode(db, config, registry, row, site, held_native_guard=held_native_guard)
 
 
 def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:
@@ -535,6 +504,7 @@ def pending_vm_node(
     db: Database,
     name: str,
     debian_release: DebianRelease,
+    hostname: str,
     template: VMTemplateNode,
     site: VMSiteNode,
     credentials: tuple[GitCredentialNode, ...],
@@ -544,4 +514,4 @@ def pending_vm_node(
     with (the resolved template, the chosen site, the admin template's
     declared credentials), and every edge holder shares those same
     objects (one object per node)."""
-    return PendingVMNode(db, name, debian_release, template, site, credentials)
+    return PendingVMNode(db, name, debian_release, hostname, template, site, credentials)

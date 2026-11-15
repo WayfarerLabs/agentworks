@@ -15,13 +15,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import VersionedPayload, VMStatus
+from agentworks.db import ProvisioningStatus, VersionedPayload, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution.access import Admin
-from agentworks.execution.trust import HOST_TRUST
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 
@@ -51,6 +49,7 @@ def _env_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     seed_vm_trust("box")
 
 
@@ -80,8 +79,7 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
 
 
 # -- the derived graph and the env-target seam --------------------------------
@@ -625,6 +623,7 @@ def test_shell_no_tailscale_fails_before_any_resolve(
 
     config = make_config()
     db.insert_vm("box", site="proxmox", hostname="box")  # no tailscale host
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
     _no_gate(monkeypatch)
 
     with pytest.raises(StateError, match="no Tailscale IP"):
@@ -632,86 +631,40 @@ def test_shell_no_tailscale_fails_before_any_resolve(
     assert resolve_counter == []
 
 
-def test_shell_platform_transport_routes_through_the_node_platform(
+def test_shell_platform_runs_the_native_shell_on_the_node_platform_with_the_site_context(
     db: Database,
     make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """--platform: the native transport receives the SAME platform
-    instance the node's site edge holds (one object per node)."""
-    config = make_config()
-    _seed_vm(db)
-    _reachable(monkeypatch, True)
-    seen: list[object] = []
-    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
-    target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
-    monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
+    """--platform runs ``native_shell`` on the SAME platform instance the
+    node's site edge holds, with the boundary's op-start context.
 
-    def _fake_native(vm: object, platform: object, cfg: object, *, ctx: object, stack: object) -> SSHTransport:
-        seen.append(platform)
-        return target
-
-    monkeypatch.setattr("agentworks.transports.native_transport", _fake_native)
-
-    def _no_transport(*a: object, **k: object) -> object:
-        raise AssertionError("--platform must not route through Tailscale SSH")
-
-    monkeypatch.setattr("agentworks.transports.transport", _no_transport)
-
-    assert vm_manager.shell_vm(db, config, "box", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE) == 0
-
-    (platform,) = seen
-    assert isinstance(platform, ProxmoxPlatform)
-
-
-def test_shell_platform_transport_hands_a_secret_bearing_ctx(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """--platform hands the native-transport factory the BOUNDARY's
-    op-start context, not a fresh empty one.
-
-    This is the load-bearing half of the ctx threading: a cold
-    ``vm shell --platform`` on a running VM never touches the platform
-    with a context first (the gate's happy path is a pure Tailscale
-    reachability probe), so if this call site handed over a secret-less
-    context, a platform whose transport needs a credential would have
-    no delivery surface at all and could only work by accident, off a
-    cache some earlier op happened to warm. The pin: the delivered
-    context can read the site's declared secret.
+    A cold ``vm shell --platform`` on a running VM never touches the
+    platform with a context first (the gate's happy path is a pure
+    Tailscale reachability probe), so a secret-less context here would
+    leave a platform whose channel needs a credential (a cloud's route)
+    no delivery surface at all. The pin: the delivered context reads the
+    site's declared secret, and only that one, since the native shell
+    composes no environment and so resolves no environment secret (R7).
     """
-    from agentworks.errors import StateError
-
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
-    seen: list[RunContext] = []
-    target = SSHTransport(trust=HOST_TRUST, host="203.0.113.8")
-    target.interactive = lambda *_args, **_kwargs: 0  # type: ignore[method-assign]
-    monkeypatch.setattr(ProxmoxPlatform, "native_shell_unavailable_hint", None)
+    seen: list[tuple[object, RunContext]] = []
 
-    def _fake_native(
-        vm: object,
-        platform: object,
-        cfg: object,
-        *,
-        ctx: RunContext,
-        stack: object,
-    ) -> SSHTransport:
-        seen.append(ctx)
-        return target
+    def _native_shell(platform: object, vm: object, ctx: RunContext) -> int:
+        seen.append((platform, ctx))
+        return 0
 
-    monkeypatch.setattr("agentworks.transports.native_transport", _fake_native)
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: None)
+    monkeypatch.setattr(ProxmoxPlatform, "native_shell", _native_shell)
 
-    assert vm_manager.shell_vm(db, config, "box", platform_transport=True, interaction=TtyInteractionPolicy.REFUSE) == 0
+    assert vm_manager.shell_vm(db, config, "box", native_shell=True, interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    (ctx,) = seen
+    ((platform, ctx),) = seen
+    assert isinstance(platform, ProxmoxPlatform)
     assert ctx.secret("proxmox-token") == "pve-token"
-    # And scoped: a name the site never declared is refused, so the
-    # delivery is the site's own, not the whole boundary's values.
+    assert not any("vm-env-secret" in names for names in resolve_counter)
     with pytest.raises(StateError, match="not declared by this node"):
         ctx.secret("vm-env-secret")

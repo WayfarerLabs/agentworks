@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
+    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
 
     from ._models import RuntimeSelection, SessionOperation
@@ -67,6 +68,7 @@ def run_session_batch(
     intent: HarnessLaunchIntent,
     running_restart_authorized: frozenset[str],
     interaction: TtyInteractionPolicy,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> None:
     require_exact_tty_interaction_policy(interaction)
     if not sessions:
@@ -80,4 +82,5 @@ def run_session_batch(
         operation=operation,
         force=force,
         authorized_running=running_restart_authorized,
+        held_native_guard=held_native_guard,
     )

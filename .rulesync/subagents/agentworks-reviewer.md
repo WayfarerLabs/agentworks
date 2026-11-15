@@ -162,8 +162,8 @@ Look for:
   unsafe?"
 - New behavior reachable only via `vm create` and not via `vm reinit`. Operators with long-lived VMs
   should not have to recreate them to pick up new declared state.
-- Code that conflates the two transports (uses platform-native transport for initialization, or uses
-  Tailscale SSH for provisioning before Tailscale is joined).
+- Code that conflates the two channels (uses a platform's own root channel, `run_as_root`, for
+  initialization, or uses Tailscale SSH for provisioning before Tailscale is joined).
 - Provisioning-time decisions being recorded as if they were declarative config (locking the VM into
   a shape that can't be changed later).
 
@@ -189,9 +189,8 @@ Look for:
   invoking a held instance's lifecycle directly instead of through its holding node, or an inline
   instance being keyed into a graph.
 - Secret access outside declare-and-receive: any resolved-value read that is not `ctx.secret(name)`
-  / scoped delivery; construct-time secret registration; a resurrected bound resolver; resolution
-  after the boundary pass outside the one sanctioned conditional-repair shape (the Tailscale rejoin
-  key, resolved late only when the repair path actually needs it).
+  / scoped delivery; construct-time secret registration; a resurrected bound resolver; any
+  resolution after the boundary pass.
 - Hand-wired edges: an orchestrator wiring dependencies the node factories should derive from
   declared references and row fields. Two constructions of "the same" node (the walk raises loudly
   on this; the fix is in the factory, not in softening the walk).

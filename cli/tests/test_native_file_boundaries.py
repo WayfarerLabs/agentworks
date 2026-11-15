@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -281,7 +282,7 @@ def test_first_party_ssh_python_probe_accepts_startup_output_without_a_newline(t
     calls = []
 
     def ssh_locally(args, **kwargs):
-        assert args[0] == "ssh"
+        assert Path(args[0]).stem == "ssh"
         calls.append(args)
         # Execute only the remote payload in the fixture's shell and environment.
         return execute(["/bin/bash", "-c", args[-1]], cwd=target.home, env=target.environment, **kwargs)

@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.schema import CapabilityBlock
-from tests.conftest import registry_with_shell
+from tests.conftest import fake_installed_programs, registry_with_shell
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -153,7 +153,7 @@ def test_vm_shell_platform_flag_routes_native(monkeypatch: pytest.MonkeyPatch) -
         captured,
     )
     assert result.exit_code == 0, result.output
-    assert captured["platform_transport"] is True
+    assert captured["native_shell"] is True
 
 
 def test_vm_shell_provisioner_alias_is_removed(
@@ -209,7 +209,7 @@ def test_doctor_vm_sites_defers_on_pending_migration(db: Database, monkeypatch: 
     monkeypatch.setattr(Database, "check_schema", staticmethod(lambda path=None: (True, 26, 27)))
     # Deterministic site preflights: lima/wsl2 check their local
     # binary; pretend both are present regardless of the host.
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
 
     group = doctor._check_vm_sites(_config_stub(), registry)
 
@@ -281,7 +281,7 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
     # Deterministic bundled-site preflights: lima/wsl2 check their local
     # binary; pretend both are present regardless of the host.
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
 
     group = doctor._check_vm_sites(_config_stub(), registry)
 
@@ -331,7 +331,7 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
         return Readiness.blocked("limactl not installed") if mode == "local" else Readiness.ready()
 
     monkeypatch.setattr(LimaPlatform, "not_ready", classmethod(_lima_readiness))
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
 
     registry = registry_with_shell()
     builtin_manifests.publish_to(registry)
@@ -389,7 +389,7 @@ def test_doctor_warns_on_references_to_not_ready_sites(
     monkeypatch.setattr(
         LimaPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("limactl not installed"))
     )
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
 
     registry = registry_with_shell()
     builtin_manifests.publish_to(registry)

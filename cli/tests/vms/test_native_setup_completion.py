@@ -13,12 +13,14 @@ from agentworks.config import load_config
 from agentworks.db import InitStatus, ProvisioningStatus, VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
-from tests.conftest import CapturedOutput, pin_wsl2_unsupported, seed_vm_trust
+from tests.conftest import CapturedOutput, fake_installed_programs, pin_wsl2_unsupported, seed_vm_trust
 from tests.ssh_fixtures import write_test_ssh_keypair
+from tests.vm_access_support import AccessRecorder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +28,6 @@ if TYPE_CHECKING:
     from agentworks.db import Database
 
 
-@pytest.mark.usefixtures("verified_debian_release")
 @pytest.mark.parametrize("operation", ["create", "reinit"])
 @pytest.mark.parametrize("native_failure", [False, True])
 def test_vm_reports_native_failures_only_after_command_completion(
@@ -36,6 +37,7 @@ def test_vm_reports_native_failures_only_after_command_completion(
     captured_output: CapturedOutput,
     operation: str,
     native_failure: bool,
+    vm_access_recorder: AccessRecorder,
 ) -> None:
     private = tmp_path / "id_ed25519"
     write_test_ssh_keypair(private)
@@ -45,18 +47,23 @@ def test_vm_reports_native_failures_only_after_command_completion(
     )
     config = load_config(settings, warn_issues=False, warn_deprecations=False)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "fixture-ts-key")
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     pin_wsl2_unsupported(monkeypatch)
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     monkeypatch.setattr(LimaPlatform, "status", lambda *a, **k: VMStatus.RUNNING)
     target = MagicMock()
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
-    monkeypatch.setattr(vm_manager, "verified_vm_release", lambda *a: DebianRelease.TRIXIE)
+    # Reinit's base checks: the release, the check script, then the elevated sudo check.
+    vm_access_recorder.access(vm_name="box").run_outcomes = [
+        Result(Completed(0), b'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'),
+        Result(Completed(0), b"AGW-CHECK-END\n"),
+        Result(Completed(0), b"0\n"),
+    ]
     monkeypatch.setattr(
         LimaPlatform,
         "create",
-        lambda *a, **k: ProvisionResult(native_transport=target, tailscale_ip="100.64.0.7"),
+        lambda *a, **k: ProvisionResult(tailnet_address="100.64.0.7"),
     )
     events: list[str] = []
 
@@ -66,15 +73,21 @@ def test_vm_reports_native_failures_only_after_command_completion(
         def __init__(self, *args, **kwargs) -> None:
             pass
 
+        def step(self, name: str) -> None:
+            pass
+
+        def record(self, request: object, result: object) -> None:
+            pass
+
         def close(self) -> None:
             events.append("close")
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
 
-    def bootstrap(*args: object, **kwargs: object) -> tuple[MagicMock, str]:
+    def bootstrap(*args: object, **kwargs: object) -> tuple[MagicMock, str, DebianRelease]:
         db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
         db.update_vm_tailscale("box", "100.64.0.7")
-        return target, "/home/agentworks"
+        return target, "/home/agentworks", DebianRelease.TRIXIE
 
     monkeypatch.setattr(vm_manager, "bootstrap_vm", bootstrap)
     expected = [
@@ -103,6 +116,7 @@ def test_vm_reports_native_failures_only_after_command_completion(
         raise_setup_failures(failures)
 
     monkeypatch.setattr("agentworks.vms.manager.lifecycle.raise_setup_failures", report)
+    monkeypatch.setattr("agentworks.vms.manager.reinit.raise_setup_failures", report)
     if operation == "reinit":
         db.insert_vm("box", site="lima-local", hostname="box")
         seed_vm_trust("box")
@@ -125,7 +139,8 @@ def test_vm_reports_native_failures_only_after_command_completion(
     else:
         run()
 
-    assert events == ["initialize", "close"] + (["ssh", "overlay"] if operation == "create" else []) + ["report"]
+    # Both sync the SSH config after initialization, since its aliases name the configured key.
+    assert events == ["initialize", "close", "ssh"] + (["overlay"] if operation == "create" else []) + ["report"]
     row = db.get_vm("box")
     assert row is not None
     assert row.provisioning_status == ProvisioningStatus.COMPLETE.value

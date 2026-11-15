@@ -29,6 +29,7 @@ import pytest
 
 from agentworks.errors import SecretUnavailableError
 from agentworks.secrets.policy import TtyInteractionPolicy
+from tests.conftest import fake_installed_programs
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
@@ -195,7 +196,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
     # the lima tool check deterministic on any host. The activation
     # gate opens (fast path) before the boundary; keep its
     # reachability probe off the network.
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
@@ -252,7 +253,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     # the lima tool check deterministic on any host. The activation
     # gate opens (fast path) before the boundary; keep its
     # reachability probe off the network.
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
 
     monkeypatch.setattr(
@@ -306,7 +307,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
     # the lima tool check deterministic on any host. The activation
     # gate opens (fast path) before the boundary; keep its
     # reachability probe off the network.
-    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    fake_installed_programs(monkeypatch, lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr("agentworks.vms.manager._is_tailscale_reachable", lambda host: True)
     db.insert_agent("a1", "vm1", "agt-a1", template="default")
 

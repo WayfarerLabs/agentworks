@@ -421,7 +421,7 @@ def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: py
     ``not ready: op CLI not installed``."""
     from agentworks.doctor import _check_secret_backends
 
-    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))  # op absent
     config = load_config(
         _write_config(tmp_path, settings='[plugins]\nsystem = ["onepassword"]\n'),
         warn_issues=False,
@@ -447,7 +447,7 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     """
     from agentworks.doctor import _check_plugins, _check_secret_backends
 
-    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))  # op absent
     config = load_config(_write_config(tmp_path), warn_issues=False)  # no [plugins] system
     registry = build_registry(config)
 
@@ -478,7 +478,7 @@ def test_check_secrets_flags_a_not_ready_only_source(tmp_path: Path, monkeypatch
     """R9.6: a secret whose only attempting source selects a not-ready backend
     is at-risk. ``_check_secrets`` warns rather than falsely predicting
     resolution through that source (lockstep with the resolution skip)."""
-    monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
+    monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))  # op absent
     cfg = _write_config(
         tmp_path,
         settings="""

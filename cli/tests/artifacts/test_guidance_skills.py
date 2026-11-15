@@ -157,8 +157,6 @@ def test_ordinary_home_file_without_a_native_skill_package_is_never_authorized()
 def test_explicit_claude_persona_selection_tracks_only_its_delivered_native_identity(selection, delivered):
     import shlex
 
-    from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.plugins.claude.artifacts import session_artifacts
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 
@@ -179,7 +177,7 @@ def test_explicit_claude_persona_selection_tracks_only_its_delivered_native_iden
     integration._artifact_plan = session_artifacts(
         current, extra_args=[], enabled_workarounds=["session-agent-definitions"] if delivered else []
     )
-    command = integration._resume_or_launch(RunContext(), intent=HarnessLaunchIntent.CREATE)
+    command = integration._resume_or_launch("11111111-2222-4333-8444-555555555555", resume=False)
     argv = shlex.split(shlex.split(command)[2])
     if selection is None:
         assert "--agent" not in argv

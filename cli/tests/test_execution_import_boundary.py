@@ -1,6 +1,6 @@
 """Files migrated onto ``agentworks.execution`` must not import the legacy transport stack.
 
-Most of the tree imports the six legacy modules transitively, so an import
+Most of the tree imports the legacy modules transitively, so an import
 guard cannot prove independence until they are deleted. Each slice instead adds
 its migrated files here, and this check rejects any import of a legacy module
 anywhere in them: at the top level, inside a function, or under
@@ -26,6 +26,37 @@ MIGRATED_FILES = (
     "vms/manager/verification.py",
     "vms/manager/port_forward.py",
     "agents/manager/access.py",
+    # The package guard imports the vm_platform modules too, but runs no
+    # function body and skips TYPE_CHECKING blocks; this check reads both.
+    "capabilities/vm_platform/__init__.py",
+    "capabilities/vm_platform/base.py",
+    "capabilities/vm_platform/bootstrap_script.py",
+    "capabilities/vm_platform/cloud_init.py",
+    "capabilities/vm_platform/debian_release.py",
+    "capabilities/vm_platform/kinds.py",
+    "capabilities/vm_platform/lima.py",
+    "capabilities/vm_platform/lima_host.py",
+    "capabilities/vm_platform/public_ssh.py",
+    "capabilities/vm_platform/skel.py",
+    "capabilities/vm_platform/ssh_exposure.py",
+    "capabilities/vm_platform/tailscale_join.py",
+    "capabilities/vm_platform/wsl2.py",
+    # The plugins cannot pass the package guard yet: importing one
+    # loads the plugin index, which loads the harness plugins.
+    "plugins/aws/platform.py",
+    "plugins/azure/platform.py",
+    "plugins/gcp/platform.py",
+    "plugins/proxmox/platform.py",
+    "plugins/proxmox/guest_agent.py",
+    "vms/contract.py",
+    "vms/manager/release.py",
+    "vms/initializer/phase_a.py",
+    "vms/recovery.py",
+    "vms/manager/recover.py",
+    "vms/manager/tailscale.py",
+    "vms/nodes.py",
+    "orchestration/activation.py",
+    "vms/initializer/tailscale_preflight.py",
 )
 
 
@@ -67,7 +98,6 @@ def legacy_imports(source: str, *, module: str, is_package: bool = False, filena
         ("from agentworks.harness_setup import runner", ["agentworks.harness_setup.runner"]),
         ("def f():\n    from agentworks.native_files import x", ["agentworks.native_files.x"]),
         ("if TYPE_CHECKING:\n    import agentworks.remote_exec", ["agentworks.remote_exec"]),
-        ("from agentworks.plugins.proxmox import transport", ["agentworks.plugins.proxmox.transport"]),
     ],
 )
 def test_every_import_form_of_a_legacy_module_is_found(source: str, expected: list[str]) -> None:

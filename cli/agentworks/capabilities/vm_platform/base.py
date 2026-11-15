@@ -12,6 +12,7 @@ the capability/declarable split.
 
 from __future__ import annotations
 
+import ipaddress
 from abc import abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -28,8 +29,9 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
-    from agentworks.execution.trust import TrustBinding
-    from agentworks.transports import ExecTransport
+    from agentworks.execution.errors import FeatureUnavailable
+    from agentworks.execution.root_script import RawRun
+    from agentworks.execution.trust import HostKey, TrustBinding
 
 
 class BootstrapProgress(Protocol):
@@ -80,9 +82,9 @@ class ProvisionRequest:
     system_slug: str | None
     admin_username: str
     ssh_public_key: str
-    # Path to the operator's SSH private key when a platform's create path
-    # constructs an SSH transport.
-    ssh_private_key: Path | None
+    # The operator's SSH private key, for a platform whose create path reaches
+    # the VM over SSH. Create always passes the configured one.
+    ssh_private_key: Path
     # Host-key trust for a platform whose create path reaches the VM over its
     # public address before the VM is in the host-key store: an UNVERIFIED
     # binding whose file the manager owns and deletes when the create ends.
@@ -104,15 +106,45 @@ class ProvisionRequest:
 class ProvisionResult:
     """What a platform returns from ``create()``.
 
-    ``platform_metadata`` is the opaque dict written verbatim to
+    ``tailnet_address`` is the joined node's address, read over the
+    platform's root channel with ``tailscale_join.settle_tailnet_address``;
+    core validates it again before recording it, and reaches the VM over SSH
+    there for everything after create. ``platform_metadata`` is the opaque
+    dict written verbatim to
     ``vms.platform_metadata``; the owning platform is its only reader.
     Keys are absent when there is nothing to record, never empty
     strings.
     """
 
-    native_transport: ExecTransport
+    tailnet_address: str
     platform_metadata: dict[str, str] = field(default_factory=dict)
-    tailscale_ip: str | None = None
+
+
+def parse_tailnet_address(text: object) -> str:
+    """The VM's tailnet address in canonical form, or ``ValueError``.
+
+    Validates at two boundaries: each address read over a platform's root
+    channel (guest output), and the address a platform returns in
+    :class:`ProvisionResult` before core records it (a plugin's value). The
+    address is the node's IPv4 one (what ``tailscale ip -4`` prints), and an
+    address no tailnet assigns (loopback, unspecified, multicast, link-local
+    or reserved) is refused. No tailnet range is assumed, so a self-hosted
+    tailnet with another prefix still parses.
+    """
+    if not isinstance(text, str):
+        raise ValueError("a tailnet address must be text")
+    address = ipaddress.IPv4Address(text.strip())
+    if (
+        address.is_loopback
+        or address.is_unspecified
+        or address.is_multicast
+        or address.is_link_local
+        or address.is_reserved
+    ):
+        raise ValueError(
+            "a tailnet address cannot be a loopback, unspecified, multicast, link-local or reserved address"
+        )
+    return str(address)
 
 
 class RetainedProvisioningError(ProvisioningError):
@@ -189,18 +221,15 @@ class VMPlatform(Capability):
         """
         return None
 
-    # Operator guidance shown before attempting a native interactive shell.
-    # None means the platform declares full native interaction.
+    # Guidance for a platform that offers no native shell (it does not
+    # override :meth:`native_shell`): where its operator reaches a VM by hand.
     native_shell_unavailable_hint: ClassVar[str | None] = None
 
-    # Operator guidance warned when every reachability probe of the
-    # native transport fails (the transports factory emits it just
-    # before the SSHError propagates). None means no extra guidance;
-    # platforms whose route setup can succeed while the transport still
-    # cannot connect override with prose naming the likely cause (azure:
-    # the ephemeral SSH allow is scoped to the DETECTED egress IP, which
-    # may not be where the operator's SSH traffic actually leaves).
-    probe_failure_hint: ClassVar[str | None] = None
+    # Whether ``run_as_root``'s channel goes through the guest's sshd, so a
+    # broken sshd can leave no root script a way in (recover's failure hint
+    # says so). Declared by every platform (a descriptor requirement), never
+    # defaulted here.
+    recovery_needs_guest_sshd: ClassVar[bool]
 
     @property
     def site_name(self) -> str:
@@ -235,6 +264,16 @@ class VMPlatform(Capability):
         artifact a load-time requirement for sites used only by existing VMs.
         """
 
+    def validate_create_hostname(self, hostname: str) -> None:  # noqa: B027  # intentional concrete no-op
+        """Refuse a create-time ``hostname`` the platform cannot give the VM, before secret resolution.
+
+        Pure and offline, called beside :meth:`validate_create_release` before
+        the create boundary resolves anything or writes the VM's row. Raise
+        ``ValidationError`` for a hostname the backend would change (WSL2
+        keeps only alphanumerics joined by single hyphens). The default
+        accepts every hostname core composes.
+        """
+
     @abstractmethod
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         """Create the backend-side VM.
@@ -259,9 +298,12 @@ class VMPlatform(Capability):
           the exact backend identifier in ``platform_metadata`` so every
           later operation targets the created resource.
         - Create the resource(s).
-        - Complete create-time bootstrap, including the Tailscale join, before
-          returning. A successful join may return without an IP when discovery
-          failed; the manager retries only ``tailscale ip -4`` in that case.
+        - Complete create-time bootstrap, then join Tailscale once with
+          ``tailscale_join.join_tailscale`` (the clouds through
+          ``complete_cloud_bootstrap``) and read the node's address with
+          ``settle_tailnet_address`` over :meth:`run_as_root`, all inside the
+          rollback window: an address that cannot be read logs the node out
+          and fails create like any other step.
         - Roll back partial backend state before letting a failure OR
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend
@@ -271,11 +313,12 @@ class VMPlatform(Capability):
           If a platform cannot confirm that rollback completed, it raises
           ``RetainedProvisioningError`` with the identifiers needed by its
           ``delete`` op. Core persists them and retains the failed VM row.
-        - Return ``ProvisionResult`` with ``platform_metadata``
-          capturing whatever identifiers subsequent ops need, without
-          relying on live configuration (e.g. proxmox records the node
-          alongside the vmid), and a transport through which core can attest
-          the live Debian release.
+        - Return ``ProvisionResult`` with the required ``tailnet_address``
+          the settle read and ``platform_metadata`` capturing whatever
+          identifiers subsequent ops need, without relying on live
+          configuration (e.g. proxmox records the node alongside the vmid).
+          Core reaches the VM over SSH at that address from then on, and
+          attests the live Debian release there itself.
         """
 
     @idempotent_op
@@ -332,103 +375,92 @@ class VMPlatform(Capability):
         """
 
     @abstractmethod
-    def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> ExecTransport:
-        """Build the required Tailscale-independent execution transport.
+    def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
+        """Run ``/bin/bash -s`` as root through the platform's own channel, with ``script`` on its stdin.
 
-        Callers reach this through the
-        :func:`agentworks.transports.native_transport` factory, which
-        wraps the call in :meth:`transient_route` and applies the
-        reachability probe.
-
-        ``ctx`` is the op-start :class:`RunContext`, exactly as the ops
-        receive it (see :meth:`create`): building a native transport is
-        backend work like any other, and a platform whose backend API
-        needs a credential reads it here via ``ctx.secret(name)``. Azure
-        needs it (its network/compute clients resolve the transient
-        public IP); lima and wsl2 accept and ignore it.
-
-        ``config`` carries OPERATOR settings (azure needs
-        ``config.operator.ssh_private_key`` for the public-IP path),
-        distinct from the bound ``platform_config``.
+        The channel works without the VM's Tailscale state. Write ``script``,
+        close stdin, and return everything the channel printed on each
+        stream when it ends or ``deadline`` seconds pass; stop waiting at the
+        deadline and never claim the guest command stopped. A channel that
+        reaches the guest through an HTTP API bounds each socket wait by what
+        remains, which is as far as a socket timeout reaches: a response that
+        keeps arriving can carry one request past the deadline. Run it once:
+        never retry, parse the output or report an exit code (``RawRun`` has
+        no field for one, because no channel's status is trusted; core reads
+        the status from markers in the streams). ``script`` can carry a
+        secret, so it never reaches an argument, a log, an exception or a
+        file. A channel that waits for the VM to answer before it dispatches
+        (the clouds' public SSH, Proxmox's guest agent) raises
+        ``root_script.ChannelUnreachable`` when that wait runs out, since
+        nothing was dispatched: callers stop there, and do not try a logout
+        they could not deliver. Raise another ``AgentworksError`` when the
+        channel cannot start or a provider call fails; core treats that like
+        an unknown outcome and never dispatches again. ``ctx`` is the
+        op-start context, for a platform whose channel needs a credential.
         """
 
-    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
-        """Hook called once the VM's Tailscale node is up during create.
+    def native_shell(self, vm: VMRow, ctx: RunContext) -> int:
+        """Open an interactive login shell on the VM through the platform's own channel.
 
-        Default no-op. The hook's contract is "close provisioning
-        access": whatever ingress the platform opened for bootstrap is
-        no longer needed once Tailscale carries the traffic. Azure
-        overrides to delete the ephemeral bootstrap SSH allow rule
-        (scoped to the operator's egress prefixes; a permanent
-        deny-all-inbound baseline remains), leaving the VM with zero
-        inbound exposure. The asymmetry vs. :meth:`transient_route` is
-        genuine: the bootstrap ingress opens inside :meth:`create`
-        (cloud-init needs inbound SSH) and closes at an async
-        Tailscale-ready point inside ``bootstrap_vm`` (Phase A),
-        neither of which is an ExitStack-shaped lifecycle.
-
-        ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): closing the ingress is a backend call and
-        reads any credential it needs from it. With a service principal
-        configured there is no ambient fallback, so the caller must hand
-        the real scoped context (the create op's own).
+        Optional: a platform offers one by overriding this, and the default
+        offers none. Core checks for the override with
+        :func:`require_native_shell` before the operation boundary, so a
+        platform without one is refused before any credential resolves. The
+        override runs the shell on the operator's terminal, without the VM's
+        Tailscale, and returns its exit status; core owns the terminal guard
+        around it. ``ctx`` is the op-start context, for a platform whose
+        channel needs a credential.
         """
+        raise _native_shell_unavailable(self, vm.name)
 
-    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
-        """Hook called when a created VM is kept after Phase A fails:
-        post-create Tailscale verification died (the row is marked FAILED) or
-        the operator interrupted verification (the row keeps its in-flight
-        status), and the VM is kept for debugging rather than rolled back.
+    def read_host_keys(self, vm: VMRow, ctx: RunContext) -> tuple[HostKey, ...]:
+        """The VM's public host keys, read through :meth:`run_as_root` by core's fixed script.
 
-        Create-time bootstrap failures never reach this hook. They raise from
-        :meth:`create` while the platform's backend rollback window is open.
-
-        Default no-op. Same contract as :meth:`post_tailscale_ready`
-        (which only fires on success): close provisioning access. Azure
-        overrides to delete the ephemeral bootstrap SSH allow rule, so a
-        failed VM defaults to zero inbound exposure rather than keeping
-        its bootstrap ingress indefinitely. Implementations must not
-        assume the VM is reachable, and the caller treats the hook as
-        best-effort: the original failure keeps propagating regardless.
-        Operator debugging survives the fail-closed posture: ``vm shell
-        --platform`` pokes a fresh transient allow via
-        :meth:`transient_route`, and platform consoles outside the
-        firewalled path (Azure's serial console) are unaffected.
-
-        ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): closing the ingress is a backend call and
-        reads any credential it needs from it. The caller passes the
-        create op's own scoped context, whose secrets are already
-        resolved (the boundary resolve ran before Phase A began), so
-        even the interrupt path never resolves a secret here for the
-        first time; with a service principal configured there is no
-        ambient fallback.
+        Recovery shows them to the operator, who compares them with the VM's
+        console before anything is recorded. A platform whose root channel
+        verifies the host key it is reading overrides this to read under an
+        Unverified provisioning file instead.
         """
+        from functools import partial
 
-    def transient_route(
-        self, vm: VMRow, ctx: RunContext, *, config: Config | None = None
-    ) -> AbstractContextManager[None]:
-        """Hold any platform-native transient network state while the
-        native transport is in use.
+        from agentworks.execution import root_script
 
-        Default no-op (:func:`contextlib.nullcontext`) for platforms
-        whose native transport works without setup (lima, wsl2). Azure
-        overrides to open a scoped SSH route on enter (heal a missing
-        public IP, poke an ephemeral NSG allow scoped to the operator's
-        egress prefixes) and delete the allow on exit so the transient
-        state is bounded by the caller's :class:`contextlib.ExitStack`
-        scope.
+        return root_script.read_host_keys(partial(self.run_as_root, vm, ctx))
 
-        ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): opening and closing the route are backend calls
-        and read any credential they need from it, with no ambient
-        fallback when a service principal is configured. ``config``
-        carries OPERATOR settings, mirroring :meth:`native_transport`
-        and :meth:`vm_active` (azure reads
-        ``config.operator.ssh_allow_cidrs`` to widen the allow's scope),
-        distinct from the bound ``platform_config``.
+    def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
+        """Close whatever ingress the platform opened for bootstrap; Phase A calls it once, however it ends.
+
+        Default no-op. The clouds override it to remove their bootstrap SSH
+        allow (scoped to the operator's egress prefixes; the deny-all-inbound
+        baseline remains), leaving the VM with zero inbound exposure. Unlike a
+        cloud's route around each :meth:`run_as_root` call, this ingress is
+        not one scope: it opens inside :meth:`create` (cloud-init needs
+        inbound SSH) and closes when Phase A (``phase_a.bootstrap``) ends,
+        whether the VM contract passed, Phase A failed (the row is marked
+        FAILED) or the operator interrupted it (the row stays incomplete). A
+        create that fails before it returns rolls back its own ingress
+        inside :meth:`create` and never reaches this hook. The clouds' base
+        (``public_ssh.PublicAddressPlatform``) calls it again after each
+        root-channel route, so an access an earlier close left open is
+        closed then, and a close with nothing to remove must be silent.
+
+        Implementations must not assume the VM is reachable or complete, and
+        the callers treat the hook as best effort
+        (:func:`close_provisioning_access_or_warn`): a failure warns with what
+        it raised, so an error should name what may remain open, and an error or
+        interrupt already propagating keeps going. The
+        ordinary-command gate refuses a VM Phase A did not complete,
+        ``vm shell --platform`` included, so debugging such a VM goes
+        through the platform's console outside the firewalled path.
+
+        ``ctx`` is the op-start :class:`RunContext` (see :meth:`create`):
+        closing the ingress is a backend call and reads any credential it
+        needs from it. The caller passes the create op's own scoped context,
+        whose secrets were resolved before Phase A began, so even the
+        interrupt path never resolves a secret here for the first time; with
+        a service principal or access key configured there is no ambient
+        fallback.
         """
-        return nullcontext()
 
     def vm_active(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
         """Hold the VM against the backend's own idle-shutdown mechanism
@@ -451,10 +483,56 @@ class VMPlatform(Capability):
         reserved operator settings, available to a platform whose hold
         needs them (none does today).
 
-        No ``ctx`` here, unlike :meth:`transient_route`: every hold that
-        exists is local (wsl2 runs ``wsl.exe``), so none makes a backend
-        call and none needs a credential. A platform whose hold does
-        (a cloud API "keep this instance awake") threads ``ctx`` in the
-        same way the transport hooks did.
+        No ``ctx`` here: every hold that exists is local (wsl2 runs
+        ``wsl.exe``), so none makes a backend call and none needs a
+        credential. A platform whose hold does (a cloud API "keep this
+        instance awake") would take ``ctx`` as the ops do.
         """
         return nullcontext()
+
+
+def offers_native_shell(platform: VMPlatform) -> bool:
+    """Whether the platform overrides :meth:`VMPlatform.native_shell`; reads only the class."""
+    return type(platform).native_shell is not VMPlatform.native_shell
+
+
+def require_native_shell(platform: VMPlatform, vm_name: str) -> None:
+    """Refuse a platform that does not override :meth:`VMPlatform.native_shell`.
+
+    Reads only the class, so a command calls it before its operation boundary
+    resolves anything.
+    """
+    if not offers_native_shell(platform):
+        raise _native_shell_unavailable(platform, vm_name)
+
+
+def close_provisioning_access_or_warn(platform: VMPlatform, vm: VMRow, ctx: RunContext) -> None:
+    """Run :meth:`VMPlatform.close_provisioning_access` to its end, warning rather than raising when it fails.
+
+    An interrupt that arrives meanwhile waits for the close to finish and is
+    raised then (:func:`agentworks.interrupts.interrupts_deferred`), since a
+    close cut short before its provider call leaves the allow open. A failure
+    warns with what the platform said, which names the rule, and the command
+    that finishes the close: any later root-channel operation, of which
+    ``vm recover`` is the one a complete VM always allows, or ``vm delete``
+    for a VM that never completed provisioning.
+    """
+    from agentworks import output
+    from agentworks.db import ProvisioningStatus
+    from agentworks.interrupts import interrupts_deferred
+
+    with interrupts_deferred():
+        try:
+            platform.close_provisioning_access(vm, ctx)
+        except Exception as error:
+            if vm.provisioning_status == ProvisioningStatus.COMPLETE.value:
+                remedy = f"run 'agw vm recover {vm.name}' to close it"
+            else:
+                remedy = f"run 'agw vm delete {vm.name}' to remove it with the VM"
+            output.warn(f"could not close the provisioning access of VM '{vm.name}': {error}; {remedy}")
+
+
+def _native_shell_unavailable(platform: VMPlatform, vm_name: str) -> FeatureUnavailable:
+    from agentworks.execution.errors import FeatureUnavailable
+
+    return FeatureUnavailable(vm_name, platform.name, "a native shell", platform.native_shell_unavailable_hint)

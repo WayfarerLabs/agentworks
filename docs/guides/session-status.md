@@ -80,6 +80,15 @@ metadata requires exactly one unambiguous pane in its named session. Healthy old
 ordinary no-op start and active-pane log capture. Malformed metadata is refused; the legacy log
 fallback does not establish identity or authorize recovery mutations.
 
+Named `session start` and `session restart` accept `--spec` to replace the complete stored instance
+spec before launching. Omission retains the current spec; an explicit `{}` clears all instance
+overrides. The selected template still supplies inherited defaults. This option is refused with
+`--all`. Inspect `agw session describe NAME --output json` before replacing the spec, and include
+any existing instance fields you want to keep. A valid replacement is retained as desired state if
+subsequent launch work fails; invalid input or cancelled restart confirmation preserves the prior
+spec. Changing a running session's spec through `start` does not itself replace its runtime; use
+`restart` when the running workload must use the replacement immediately.
+
 Access sharing grants read/write tmux access to the socket group's members. Retrying startup
 completion reapplies that access, including restoring a member's read-only entry to read/write. The
 server owner and root already have tmux access and need no explicit grant. Member names are read

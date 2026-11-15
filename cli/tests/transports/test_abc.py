@@ -1,29 +1,19 @@
 """ABC-level invariants for the ``Transport`` polymorphic surface.
 
-These tests assert structural properties of the ABC itself; per-transport
-behavior is covered in the sibling ``test_<transport>.py`` files.
+These tests assert structural properties of the ABC itself; the SSH
+transport's own behavior is covered in ``test_ssh.py``.
 """
 
 from __future__ import annotations
 
 import contextlib
 import inspect
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.ssh import SSHError, SSHResult
-from agentworks.transports import (
-    ExecTransport,
-    LimaTransport,
-    RemoteLimaTransport,
-    SSHTransport,
-    Transport,
-    WSL2Transport,
-)
-from tests.native_exec_support import ExecutionOnlyTransport
+from agentworks.transports import SSHTransport, Transport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -37,7 +27,6 @@ REQUIRED_METHODS = {
     "copy_from",
     "call_streaming",
 }
-EXEC_REQUIRED_METHODS = {"describe", "run"}
 # ``copy_dir_to`` and ``write_file`` are concrete defaults on the ABC
 # (tarball + ``copy_to`` + remote extract; tempfile + ``copy_to``).
 # They're not in REQUIRED_METHODS because the ABC ships a working
@@ -55,25 +44,6 @@ def test_transport_is_abstract() -> None:
         Transport()  # type: ignore[abstract]
 
 
-def test_exec_transport_is_the_narrow_abstract_base() -> None:
-    with pytest.raises(TypeError):
-        ExecTransport()  # type: ignore[abstract]
-    methods = {
-        name for name, value in inspect.getmembers(ExecTransport) if getattr(value, "__isabstractmethod__", False)
-    }
-    assert methods == EXEC_REQUIRED_METHODS
-    assert issubclass(Transport, ExecTransport)
-
-
-def test_provision_result_accepts_execution_only_transport() -> None:
-    target = ExecutionOnlyTransport()
-
-    result = ProvisionResult(native_transport=target)
-
-    assert result.native_transport is target
-    assert not isinstance(target, Transport)
-
-
 def test_abc_surface_is_complete() -> None:
     """The ABC exposes every method the operator surface requires.
 
@@ -87,16 +57,10 @@ def test_abc_surface_is_complete() -> None:
     assert abc_methods == REQUIRED_METHODS
 
 
-@pytest.mark.parametrize(
-    "transport_cls",
-    [SSHTransport, LimaTransport, RemoteLimaTransport, WSL2Transport],
-)
-def test_concrete_transports_implement_abc(transport_cls: type[Transport]) -> None:
-    """Each concrete transport implements every abstract method."""
-    assert issubclass(transport_cls, Transport)
-    # Concrete classes must not have any leftover abstract methods.
-    leftover: frozenset[str] = getattr(transport_cls, "__abstractmethods__", frozenset())
-    assert leftover == frozenset(), f"{transport_cls.__name__} missing: {leftover}"
+def test_the_ssh_transport_implements_the_abc() -> None:
+    assert issubclass(SSHTransport, Transport)
+    leftover: frozenset[str] = getattr(SSHTransport, "__abstractmethods__", frozenset())
+    assert leftover == frozenset(), f"SSHTransport missing: {leftover}"
 
 
 @pytest.mark.windows
@@ -247,7 +211,7 @@ class _RecordingTransport(Transport):
 
 
 def test_abc_reports_nothing_on_a_non_zero_interactive_exit(captured_output) -> None:  # noqa: ANN001
-    """The default hook is a no-op on purpose. For Lima, WSL2, or any
+    """The default hook is a no-op on purpose. For any
     login shell a non-zero exit is usually just the remote command's own
     status, so narrating it would be noise. Only transports that can
     tell a connection failure apart from a command failure override."""
@@ -272,10 +236,10 @@ def test_interactive_runs_inside_the_terminal_guard(monkeypatch: pytest.MonkeyPa
     entered: list[str] = []
 
     @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
+    def _spy() -> Iterator[None]:
         entered.append("enter")
         try:
-            yield SimpleNamespace(clean_exit=False)
+            yield
         finally:
             entered.append("exit")
 
@@ -291,10 +255,10 @@ def test_interactive_guard_closes_when_the_transport_raises(monkeypatch: pytest.
     entered: list[str] = []
 
     @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
+    def _spy() -> Iterator[None]:
         entered.append("enter")
         try:
-            yield SimpleNamespace(clean_exit=False)
+            yield
         finally:
             entered.append("exit")
 
@@ -303,48 +267,6 @@ def test_interactive_guard_closes_when_the_transport_raises(monkeypatch: pytest.
     with pytest.raises(RuntimeError):
         t.interactive("")
     assert entered == ["enter", "exit"]
-
-
-def test_interactive_flags_a_clean_exit_to_the_guard(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wrapper reports the outcome to the guard so the exit sanitize can
-    drop the alt-screen switches on a clean exit. Exit 0 -> clean; a non-zero
-    exit -> not clean (a drop keeps the full reset)."""
-    seen: list[bool] = []
-
-    @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
-        guard = SimpleNamespace(clean_exit=False)
-        try:
-            yield guard
-        finally:
-            seen.append(guard.clean_exit)
-
-    monkeypatch.setattr("agentworks.transports.base.guarded_terminal", _spy)
-    _RecordingTransport(exit_code=0).interactive("")
-    _RecordingTransport(exit_code=255).interactive("")
-    assert seen == [True, False]
-
-
-def test_interactive_leaves_clean_exit_false_when_the_transport_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An exception never reaches the clean_exit assignment, so the guard
-    keeps its default (full reset). A drop that surfaces as a raise is
-    exactly the case the alt-screen switches exist for."""
-    seen: list[bool] = []
-
-    @contextlib.contextmanager
-    def _spy() -> Iterator[SimpleNamespace]:
-        guard = SimpleNamespace(clean_exit=False)
-        try:
-            yield guard
-        finally:
-            seen.append(guard.clean_exit)
-
-    monkeypatch.setattr("agentworks.transports.base.guarded_terminal", _spy)
-    with pytest.raises(RuntimeError):
-        _RecordingTransport(raises=True).interactive("")
-    assert seen == [False]
 
 
 def test_interactive_clears_screen_only_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:

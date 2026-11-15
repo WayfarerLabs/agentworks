@@ -3,26 +3,23 @@
 from __future__ import annotations
 
 import contextlib
+from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.capabilities.base import RunContext
 from agentworks.db import DesiredRuntimeState, VMStatus
-from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.errors import AgentworksError, StateError, UserAbort, ValidationError
 from agentworks.execution import trust
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-from ._helpers import (
-    _guard_failed_vm,
-    _require_vm,
-    _vm_scope,
-)
-from .boundary import _live_vm_boundary, _platform_ops_ctx, _warn_legacy_release
+from ._helpers import _guard_incomplete_vm, _operation_log, _require_known_power_state, _require_vm
+from .boundary import _auth_key_boundary, _live_vm_boundary, _warn_legacy_release
+from .tailscale import VMNotAnswering
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
@@ -47,7 +44,18 @@ def start_vm(
     *,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Accept running intent, then start and repair the retained VM."""
+    """Accept running intent, then start the retained VM and wait for it to answer.
+
+    The intent is recorded first, whatever the observed state, so a crashed
+    start does not leave the gate refusing to auto-resume a VM the operator
+    asked to run. A VM with no host-key record is refused before that, since
+    the wait could only fail; the refusal names ``agw vm recover``, which
+    starts a stopped VM and reads its keys through the platform. A VM that
+    does not answer fails naming recover too, which repairs what a start
+    cannot.
+    """
+    import agentworks.execution as execution
+    import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.secrets.resolver import Resolver
@@ -57,11 +65,16 @@ def start_vm(
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
-    _guard_failed_vm(selected)
+    # The wait reaches the VM at its tailnet address through
+    # agentworks.execution, so a workstation off Tailscale or an unsupported
+    # client refuses before anything is resolved or started.
+    _mgr.verify_tailscale_available()
+    execution.resolve_ssh()
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
         vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
-        _guard_failed_vm(vm_node.reload_row())
+        # Before the intent write; prepared runtime's own check comes after it.
+        _guard_incomplete_vm(vm_node.reload_row())
         trust.require_record(name)
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)
@@ -77,15 +90,11 @@ def start_vm(
                 held_native_guard=guard,
                 vm_node=vm_node,
             )
-            start_vm_runtime(context, resolve_secret=resolver.resolve_gate)
+            start_vm_runtime(context)
         finally:
             if context is not None:
                 context.clear_values()
             resolver.close()
-        if context.started:
-            output.info(f"VM '{name}' started")
-        else:
-            output.info(f"VM '{name}' is already running")
 
 
 def stop_vm(
@@ -105,11 +114,11 @@ def stop_vm(
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
-    _guard_failed_vm(selected)
     with native_mutation_guard(db.path, name) as guard:
         registry = load_request_registry(config, live_database=db)
         vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
-        _guard_failed_vm(vm_node.reload_row())
+        # Before the intent write; prepared runtime's own check comes after it.
+        _guard_incomplete_vm(vm_node.reload_row())
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
         vm = _require_vm(db, name)
         resolver = Resolver(config, registry, interaction=interaction)
@@ -146,11 +155,30 @@ def delete_vm(
 ) -> None:
     """Delete the backend VM before removing its managed local resources.
 
-    Child-count and confirmation checks run before binding or secret resolution.
-    Binding failures warn and continue local cleanup, including stranded sites.
-    A bound provider delete that raises retains local state for retry. Deletion
-    never starts the guest or tears down individual workloads.
+    Child-count and confirmation checks run before binding or secret
+    resolution, so a refused or declined delete prompts for and resolves
+    nothing; ``interaction`` is checked before binding, whose failures are
+    handled below and must not swallow a malformed argument. Once the binding
+    holds, the node is logged out of the tailnet through the platform's root
+    channel, best effort, and the provider delete follows: whoever deletes a
+    VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
+    Deletion never tears down individual workloads, which the provider delete
+    ends, and starts the guest only as a side effect of the logout's hold: a
+    WSL2 hold boots a stopped distro, unless the VM's intent is stopped, which
+    admits no hold.
+
+    Without ``force``, a row is removed only once its backend VM is deleted,
+    because a removed row would leave a surviving backend VM with nothing to
+    target it (#329): a binding failure (a broken backend, a removed site or
+    plugin, an unresolvable secret) and a bound delete that raises (the
+    ``VMPlatform.delete`` contract) both keep the row and the host-key
+    record, with a hint naming the backend identifiers the row holds. With
+    ``force`` the children go too, and the row and record go whatever kept
+    the backend delete from completing, with a warning naming those
+    identifiers. ``UserAbort`` always propagates and keeps the row.
     """
+    import agentworks.vms.manager as _mgr
+
     require_exact_tty_interaction_policy(interaction)
     vm = _require_vm(db, name)
 
@@ -192,25 +220,75 @@ def delete_vm(
         if selected.vm_uuid != vm.vm_uuid:
             raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
         vm = selected
+        backend_left = False
+        # Why a row with a tailnet address was not logged out, reported once the
+        # row goes; None while nothing kept it from that. A row without one is
+        # never logged out.
+        not_logged_out: str | None = None
         try:
             vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction, held_native_guard=guard)
         except UserAbort:
             raise
-        except Exception:
-            # Preserve the existing local retirement path for an unavailable
-            # binding. Provider errors after a successful binding still raise.
-            output.warn(
-                "Backend binding failed; remote VM deletion was not attempted. "
-                "Removing local state only. Inspect and remove any remaining backend resources manually."
-            )
+        except Exception as e:
+            # Preflight or build failure (unreachable API, missing tool,
+            # stranded site, unset or unresolvable secret): nothing can reach
+            # the backend, which may still run.
+            not_logged_out = f"vm-site '{vm.site}' cannot be bound"
+            if not force:
+                refusal = StateError(
+                    f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
+                    entity_kind="vm",
+                    entity_name=name,
+                    hint=getattr(e, "hint", None),
+                )
+                refusal.add_hint(_finish_delete_hint(vm, fix="Fix the site", logged_out=False))
+                raise refusal from e
+            _warn_backend_left(vm, f"vm-site '{vm.site}' cannot be bound: {e}")
+            backend_left = True
         else:
-            # Whole-VM removal does not depend on guest workload cleanup.
-            vm_node.site.platform.delete(vm, ops_ctx)
-        if vm.tailscale_host:
-            output.warn(
-                "The external Tailscale node entry may remain. "
-                "Remove the retired node from the Tailscale admin console."
-            )
+            platform = vm_node.site.platform
+            # The logout, best effort and inside a hold-only span: it wants the
+            # VM up if it happens to be (the WSL2 hold boots a stopped distro),
+            # but never gates, since a VM with stopped intent would refuse; such
+            # a VM is not held either, since the hold could boot it. A platform
+            # that cannot confirm the guest is this VM's is asked nothing (the
+            # helper reads its status first), and its delete below refuses or
+            # finds the guest gone.
+            if vm.tailscale_host:
+                logout_ran = False
+                try:
+                    with vm_node.hold_active():
+                        not_logged_out = _mgr._tailscale_logout(vm, platform, ops_ctx)
+                        logout_ran = True
+                except UserAbort:
+                    raise
+                except Exception as e:
+                    # A hold that fails only as it is released, after the logout
+                    # ran, leaves the logout's own result standing: the delete
+                    # below ends the VM the hold was keeping up.
+                    if not logout_ran:
+                        not_logged_out = f"the VM could not be held for its logout ({e})"
+            # NOT best-effort: a platform delete that cannot remove the backend
+            # VM raises (VMPlatform.delete), which keeps the row unless forced.
+            try:
+                platform.delete(vm, ops_ctx)
+            except UserAbort:
+                raise
+            except Exception as failure:
+                if not force:
+                    if isinstance(failure, AgentworksError):
+                        failure.add_hint(
+                            _finish_delete_hint(
+                                vm,
+                                fix="Fix what the provider refused",
+                                logged_out=bool(vm.tailscale_host) and not_logged_out is None,
+                            )
+                        )
+                    raise
+                _warn_backend_left(vm, str(failure))
+                backend_left = True
+        if vm.tailscale_host and not_logged_out is not None:
+            _warn_not_logged_out(vm, not_logged_out)
 
         # Clean up logs
         from agentworks.ssh import LOG_DIR
@@ -238,12 +316,49 @@ def delete_vm(
         # The store file goes whenever the VM's row goes, even if the SSH config
         # rebuild raises. Reaching here means the platform delete succeeded (it
         # raises, keeping the row and the record, when it cannot remove the
-        # backend VM) or backend cleanup was skipped after a binding failure.
+        # backend VM) or --force removed a row whose backend was not deleted.
         try:
             trust.remove(name)
         finally:
             sync_ssh_config(config, db)
-        output.result(f"VM '{name}' deleted")
+        output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
+
+
+def _finish_delete_hint(vm: VMRow, *, fix: str, logged_out: bool) -> str:
+    """How to finish a delete whose backend was not deleted, then, after a logout, how to undo it instead."""
+    hint = (
+        f"{fix} and run 'agw vm delete {vm.name}' again, or remove its backend yourself "
+        f"{_backend_named(vm)} and run 'agw vm delete {vm.name} --force'."
+    )
+    if logged_out:
+        hint += (
+            f" The VM was logged out of Tailscale before its delete failed; to put it back on Tailscale "
+            f"instead, run 'agw vm rekey {vm.name}'."
+        )
+    return hint
+
+
+def _warn_not_logged_out(vm: VMRow, reason: str) -> None:
+    """The warning for a deleted VM whose Tailscale node was not logged out, so may still be listed."""
+    output.warn(
+        f"Tailscale node {vm.hostname} was not logged out: {reason}; "
+        f"remove '{vm.hostname}' in the Tailscale admin console if it is listed there."
+    )
+
+
+def _warn_backend_left(vm: VMRow, reason: str) -> None:
+    """The warning ``--force`` gives for a row it removes whose backend was not deleted."""
+    output.warn(
+        f"The backend of VM '{vm.name}' was not deleted ({reason}). It may still run "
+        f"{_backend_named(vm)}; remove it there."
+    )
+
+
+def _backend_named(vm: VMRow) -> str:
+    """Where to find a VM's backend by hand: its site, the hostname platforms name or tag it with, and its metadata."""
+    identifiers = [f"hostname '{vm.hostname}'"]
+    identifiers += [f"{key} '{value}'" for key, value in sorted(vm.platform_metadata.items())]
+    return f"on vm-site '{vm.site}' ({', '.join(identifiers)})"
 
 
 def rekey_vm(
@@ -258,31 +373,32 @@ def rekey_vm(
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
 
-    Useful for rotating keys, switching tailnets, or recovering from
-    expired ephemeral keys. Uses the platform's native transport
-    (out-of-band) since Tailscale connectivity drops during
-    the operation.
+    Useful for rotating keys or switching tailnets. The rekey script runs
+    through the platform's root channel, which works without the VM's
+    Tailscale, since its connectivity drops during the operation; then the
+    new address is settled, recorded, and waited on over SSH.
 
-    ``secret`` selects a declared replacement key for this operation only.
-    ``prompt`` forces terminal entry of the template's key instead. Both
-    paths retain the ordinary preflight and single secret-resolution boundary;
-    the running check and held-active span follow it.
+    Orchestrated: the walk roots the VM-TEMPLATE node beside the live VM node
+    (:func:`_auth_key_boundary`), because the new auth key IS this command's
+    planned op, and it joins the ONE boundary resolve. The running check stays
+    past the boundary (a backend status read; on proxmox it needs the token),
+    and the activation gate opens AFTER it: a not-running VM errors before any
+    gate, so rekey never auto-starts one outside the race of a VM stopping in
+    between.
+
+    ``secret`` selects a declared replacement key for this operation only;
+    ``prompt`` forces terminal entry of the template's key instead. Both are
+    checked here, before anything is touched, and applied in the boundary.
     """
-    import ipaddress
-    import time
-    from dataclasses import replace
-
-    from agentworks.bootstrap import load_request_registry
+    import agentworks.execution as execution
+    import agentworks.vms.manager as _mgr
+    from agentworks.capabilities.vm_platform.tailscale_join import settle_tailnet_address
+    from agentworks.execution import reachability
+    from agentworks.execution.access import Admin
+    from agentworks.execution.root_script import ChannelUnreachable
     from agentworks.orchestration.activation import activation_gate
-    from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import secret_union
-    from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.ssh import SSHError
     from agentworks.ssh_config import sync_ssh_config
-    from agentworks.transports import native_transport, transport, wait_for_reconnect
-    from agentworks.vms.nodes import live_vm_node, vm_template_node
-    from agentworks.vms.templates import resolve_live_template
+    from agentworks.vms import recovery
 
     require_exact_tty_interaction_policy(interaction)
     if secret is not None and prompt:
@@ -298,58 +414,26 @@ def rekey_vm(
         if selected.vm_uuid != vm.vm_uuid:
             raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
         vm = selected
-        _guard_failed_vm(vm)
+        _guard_incomplete_vm(vm)
         _warn_legacy_release(vm)
+        # Before the auth key resolves: a rekey with no host-key record would spend
+        # the new key and record the new address before its reconnect check raised.
         trust.require_record(name)
+        # The settle reads the new address from the VM, but the final wait reaches
+        # it over the tailnet, so a workstation off Tailscale is refused before the
+        # key is spent, as recover refuses it.
+        _mgr.verify_tailscale_available()
+        # The final wait runs through agentworks.execution: an unsupported client
+        # refuses before a secret or the platform is touched.
+        execution.resolve_ssh()
 
-        registry = load_request_registry(config, live_database=db)
-        rekey_vm_tmpl = resolve_live_template(db, registry, vm.name, vm.template)
-        if secret is not None:
-            try:
-                registry.lookup("secret", secret)
-            except KeyError:
-                raise NotFoundError(
-                    f"secret {secret!r} is not in the resource registry",
-                    entity_kind="secret",
-                    entity_name=secret,
-                    hint="check `agw secret list` for declared and auto-declared names",
-                ) from None
-            rekey_vm_tmpl = replace(rekey_vm_tmpl, tailscale_auth_key=secret)
-        auth_key_name = rekey_vm_tmpl.tailscale_auth_key
-        prompt_names = frozenset((auth_key_name,)) if prompt else frozenset()
-        resolver = Resolver(config, registry, interaction=interaction, prompt_names=prompt_names)
+        vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
+            db, config, vm, secret=secret, prompt=prompt, interaction=interaction, held_native_guard=guard
+        )
         cleanup.callback(resolver.close)
-        vm_node = live_vm_node(db, config, registry, vm, repair_auth_key_name=auth_key_name, held_native_guard=guard)
-        tmpl_node = vm_template_node(rekey_vm_tmpl)
-        nodes = walk(tmpl_node, vm_node)
-        for secret_name in secret_union(nodes):
-            resolver.register_name(secret_name)
-        scope = _vm_scope(db, name)
-        preflight_all(
-            nodes,
-            RunContext(config=config, operation_scope=scope),
-            registry=registry,
-            interaction=interaction,
-            prompt_names=prompt_names,
-        )
-        resolver.resolve()
-        from agentworks.secrets.line_safety import (
-            LineOrientedSecretUse,
-            require_line_safe_secret,
-        )
-
-        ts_auth_key = require_line_safe_secret(
-            resolver.get(auth_key_name),
-            use=LineOrientedSecretUse.TAILSCALE,
-            secret_name=auth_key_name,
-        )
-
-        # The running check is an op (a backend status read), so it sits
-        # past the boundary: on proxmox it needs the API token, delivered
-        # scoped to the site's declared names.
-        ops_ctx = _platform_ops_ctx(config, scope, vm_node, resolver)
         platform = vm_node.site.platform
         status = platform.status(vm, ops_ctx)
+        _require_known_power_state(status, name)
         if status != VMStatus.RUNNING:
             raise StateError(
                 f"VM '{name}' is not running (status: {status.value})",
@@ -357,69 +441,43 @@ def rekey_vm(
                 entity_name=name,
             )
 
-        with output.section(f"Rekeying '{name}'"), contextlib.ExitStack() as _stack:
-            # The activation gate, opened AFTER the boundary at exactly the
-            # point HEAD held ``keep_active``: converge power state (a race
-            # from the running check above, as at HEAD), then hold for the
-            # rekey's duration (no-op for Lima/Azure/Proxmox; WSL2 anchors
-            # the distro against vmIdleTimeout so per-step `time.sleep`s
-            # can't let it idle out). Boundary-then-gate means the gate
-            # callback must SERVE the boundary's cached values, never
-            # resolve or seed (the batch-ops precedent): the union already
-            # covers the gate secrets AND the repair path's rejoin key (the
-            # auth key is this command's op secret), and ``Resolver.get``
-            # refuses anything outside it loudly.
-            _stack.enter_context(activation_gate(vm_node, resolver.get))
-
-            # native_transport() composes transient_route (Azure pokes a
-            # scoped ephemeral SSH allow on enter and deletes it on exit)
-            # with the platform-native transport builder and the 6-attempt
-            # reachability probe. The caller-supplied ExitStack scopes the
-            # transient state to the duration of the rekey; ``ops_ctx``
-            # delivers the SP credential to those NSG calls with no ambient
-            # fallback.
-            exec_target = native_transport(vm, platform, config, ctx=ops_ctx, stack=_stack)
-
-            # Restart, logout, login, restart. The initial restart clears any
-            # stale daemon state (a previous interrupted rekey can leave the
-            # daemon in a state where `tailscale logout` hangs waiting for a
-            # control plane response that never comes). The final restart
-            # fixes a Tailscale bug where the node registers but peers can't
-            # reach it after rekeying to a different tailnet.
-            # All platforms run systemd (WSL2 enables it via /etc/wsl.conf during
-            # provisioning); tailscaled is always a systemd unit. Daemon-side
-            # flags like --tun=userspace-networking live in /etc/default/tailscaled,
-            # not on `tailscale up`.
-            restart_cmd = "systemctl restart tailscaled"
-            stabilize_secs = 15  # pause between steps for daemon/network stability
-
-            output.info("Restarting Tailscale daemon...")
-            exec_target.run(restart_cmd, sudo=True, timeout=15)
-            time.sleep(stabilize_secs)
-
-            output.info("Logging out of current tailnet...")
-            exec_target.run("tailscale logout", sudo=True, timeout=30)
-            time.sleep(stabilize_secs)
-
-            output.info("Joining new tailnet...")
-            from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
-
-            join_tailscale_ephemerally(exec_target, ts_auth_key, timeout=30)
-            time.sleep(stabilize_secs)
-
-            output.info("Restarting Tailscale daemon...")
-            exec_target.run(restart_cmd, sudo=True, timeout=15)
-            time.sleep(stabilize_secs)
-
-            output.info("Reading new Tailscale IP...")
-            result = exec_target.run("tailscale ip -4", sudo=True, timeout=15)
-            raw_ip = result.stdout.strip()
-            new_ip = raw_ip.splitlines()[0].strip() if raw_ip else ""
+        recover_hint = f"Run 'agw vm recover {name}' to rejoin it."
+        # The log has the key in its redaction set before its first write. The
+        # activation gate converges power state (a race from the running check
+        # above), then holds the VM for the rekey's duration (WSL2 anchors the
+        # distro against vmIdleTimeout through the script's pauses). A VM whose
+        # intent is stopped admits no hold, since a hold could boot it, so a
+        # running one is rekeyed without a hold: on WSL2 it can idle out between calls.
+        # Boundary-then-gate means the gate callback SERVES the boundary's cached
+        # values, never resolves or seeds: the union covers the gate secrets, and
+        # ``Resolver.get`` refuses anything outside it.
+        with (
+            _operation_log(name, "rekey", redactions=(auth_key,)) as logger,
+            output.section(f"Rekeying '{name}'"),
+            activation_gate(vm_node, resolver.get),
+        ):
+            output.info("Logging out and joining the tailnet with the new key (about a minute)...")
+            logger.step("Rekey")
             try:
-                ipaddress.IPv4Address(new_ip)
-            except ValueError:
-                raise SSHError(f"tailscale ip -4 returned invalid address: {new_ip!r}\nfull output: {raw_ip}") from None
-            output.detail(f"Tailscale IP: {new_ip}")
+                result = recovery.rekey(platform, vm, ops_ctx, auth_key=auth_key, log=logger.record)
+            except ChannelUnreachable as error:
+                # The script never ran, so the node is as it was: once the channel's own hint gets the VM
+                # answering, the rekey itself is what is left to do.
+                # Not a rebuilt command line: one that dropped any option, a global one included, would
+                # change the key, the pause or the interaction policy of the retry.
+                error.add_hint(
+                    f"Once it answers, run the same 'agw vm rekey {name}' command again, with every option you gave it."
+                )
+                raise
+            recovery.require_success(
+                result,
+                script="rekey",
+                vm_name=name,
+                hint=f"Run 'agw vm logs {name}' for its output, then 'agw vm recover {name}'.",
+            )
+            new_ip = settle_tailnet_address(
+                partial(platform.run_as_root, vm, ops_ctx), node=vm.hostname, rerun_hint=recover_hint, log=logger.record
+            )
 
             # Update DB and SSH config with the new IP (correct regardless of
             # reachability: the old IP is definitely dead after logout)
@@ -431,20 +489,9 @@ def rekey_vm(
             if wait_for_share:
                 output.pause("Share the VM back to your tailnet, then press Enter to verify connectivity...")
 
-            # Always verify Tailscale SSH connectivity to the new IP
             output.info(f"Verifying SSH to {new_ip}...")
-            from agentworks.transports import SSHTransport
-
-            ts_target = transport(vm, config)
-            # ``transport()`` returns an SSHTransport for Tailscale-backed VMs.
-            # Retarget the host in place instead of rebuilding the whole
-            # transport; the other fields (user, identity, etc.) are unchanged.
-            assert isinstance(ts_target, SSHTransport)
-            ts_target.host = new_ip
-            if wait_for_reconnect(ts_target):
-                output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")
-            else:
-                output.warn(
-                    f"VM '{name}' rekeyed but {new_ip} is not reachable via SSH. "
-                    "Check tailnet sharing/ACLs. Run 'vm rekey' again to retry."
-                )
+            access = execution.vm_access(_require_vm(db, name), config, Admin(), log=logger.record)
+            # The new address is recorded either way: the old one died with the logout.
+            if not reachability.wait(access, wording=reachability.Wording.RECONNECT):
+                raise VMNotAnswering(name, new_ip)
+            output.result(f"VM '{name}' rekeyed successfully. Tailscale IP: {new_ip}")

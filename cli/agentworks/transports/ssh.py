@@ -5,9 +5,8 @@ surface. Holds the argv builders, SetEnv handling, sudo-wrap, and
 login-shell wrapping for the canonical Tailscale SSH path.
 ``agentworks/ssh.py`` retains a small surface of SSH primitives
 (``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSHLogger`` /
-``LOG_DIR`` / module-level ``run`` / ``copy_to``) used by
-``capabilities/vm_platform/lima.py`` against bare ``SSHTarget``s; everything
-polymorphic-transport-shaped lives here.
+``LOG_DIR`` / module-level ``run`` / ``copy_to``) that work against bare
+``SSHTarget``s; everything polymorphic-transport-shaped lives here.
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks.execution import trust as host_trust
+from agentworks.execution.ssh_process import nul_first_on_a_windows_console
 from agentworks.ssh import (
     SSH_DEFAULT_RETRIES,
     SSH_INTERACTIVE_ALIVE_COUNT_MAX,
@@ -26,6 +26,7 @@ from agentworks.ssh import (
     SSHResult,
     SSHTarget,
     _set_env_args,
+    openssh_program,
 )
 from agentworks.ssh import (
     run as ssh_run,
@@ -84,11 +85,9 @@ def note_ssh_interactive_exit(code: int, endpoint: str) -> None:
     and ssh's own diagnostic went to the alternate screen that the
     terminal guard has since discarded.
 
-    Shared by ``SSHTransport`` and ``RemoteLimaTransport``, whose outer
-    hop is an ``ssh -t`` with the same failure mode. Callers invoke this
-    from ``_note_interactive_exit``, which the ABC calls only after the
-    guard has closed; see ``Transport._note_interactive_exit`` for why
-    that ordering matters.
+    ``SSHTransport._note_interactive_exit`` calls this; the ABC calls
+    that only after the guard has closed, and
+    ``Transport._note_interactive_exit`` says why that ordering matters.
     """
     if code != SSH_TRANSPORT_ERROR:
         return
@@ -105,7 +104,7 @@ def _scp_base_args(
     identity_file: Path | None,
     proxy_jump: str | None,
 ) -> list[str]:
-    args = ["scp", "-q", *host_key_options, "-o", "BatchMode=yes"]
+    args = [openssh_program("scp"), "-q", *host_key_options, "-o", "BatchMode=yes"]
     if port is not None:
         args.extend(["-P", str(port)])
     if identity_file is not None:
@@ -205,7 +204,7 @@ class SSHTransport(Transport):
         ``input_data`` payload leave ``close_stdin`` false so stdin stays open
         for the write.
         """
-        args = ["ssh", *self.host_key_options(), "-o", "BatchMode=yes"]
+        args = [openssh_program("ssh"), *self.host_key_options(), "-o", "BatchMode=yes"]
         if tty:
             args.insert(1, "-tt")
         else:
@@ -375,9 +374,12 @@ class SSHTransport(Transport):
         env: dict[str, str] | None = None,
     ) -> int:
         """Interactive SSH with ``-t`` (allocates a TTY) and no
-        ``BatchMode``. Empty ``command`` opens a login shell.
+        ``BatchMode``. Empty ``command`` opens a login shell, which gets no
+        NUL lead because sshd's MOTD and lastlog fill its first write; a
+        command is led by a NUL on a Windows console
+        (``nul_first_on_a_windows_console``).
         """
-        args = ["ssh", "-t", *self.host_key_options(), *keepalive_args()]
+        args = [openssh_program("ssh"), "-t", *self.host_key_options(), *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -389,7 +391,7 @@ class SSHTransport(Transport):
         args.append(target)
         if command:
             args.append("--")  # fence: see run() for rationale
-            args.append(command)
+            args.append(nul_first_on_a_windows_console(command))
         return subprocess.call(args)
 
     def _note_interactive_exit(self, code: int) -> None:
@@ -463,7 +465,7 @@ class SSHTransport(Transport):
         ``vm exec`` and ``agent exec`` so the operator sees output
         stream in real time. Returns the remote exit code.
         """
-        args = ["ssh", "-T", *self.host_key_options(), "-o", "BatchMode=yes", *keepalive_args()]
+        args = [openssh_program("ssh"), "-T", *self.host_key_options(), "-o", "BatchMode=yes", *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:

@@ -155,8 +155,7 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         lambda self, row, ctx: events.append("status") or _VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
-    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
-    monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
 
 
 @pytest.mark.parametrize("operation", ["create", "reinit"])

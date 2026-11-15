@@ -9,24 +9,26 @@ import pytest
 from agentworks import output
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, ExternalError, NotFoundError, ValidationError
-from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager
 from tests.conftest import ManifestDoc
 from tests.vms.test_remaining_commands_orchestrated import (
-    _fake_rekey_transports,
+    _fake_rekey_channel,
     _fake_status,
     _reachable,
     _seed_vm,
 )
 from tests.vms.test_remaining_commands_orchestrated import (
+    _on_tailscale as _on_tailscale,
+)
+from tests.vms.test_remaining_commands_orchestrated import (
     _stub_ssh_identity as _stub_ssh_identity,
 )
 
-pytestmark = pytest.mark.usefixtures("_stub_ssh_identity")
+pytestmark = pytest.mark.usefixtures("_stub_ssh_identity", "_on_tailscale")
 
 
-def test_replacement_secret_reaches_join_and_gate_repair_without_persisting(
+def test_replacement_secret_reaches_the_rekey_script_without_persisting(
     db, make_config, resolve_counter, monkeypatch, captured_output
 ) -> None:
     config = make_config(
@@ -37,17 +39,9 @@ def test_replacement_secret_reaches_join_and_gate_repair_without_persisting(
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)
     _seed_vm(db)
     original_template = db.get_vm("box").template
-    _reachable(monkeypatch, False)
+    _reachable(monkeypatch, True)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
-    statuses = iter((VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.STOPPED))
-    monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: next(statuses))
-    repairs = []
-
-    def repair(*args, auth_keys, auth_key_name, **kwargs):
-        repairs.append((auth_key_name, auth_keys.get(auth_key_name)))
-
-    monkeypatch.setattr(manager, "_ensure_tailscale", repair)
-    calls = _fake_rekey_transports(monkeypatch)
+    guest = _fake_rekey_channel(monkeypatch)
     pauses = []
     monkeypatch.setattr(output, "pause", lambda message: pauses.append(message))
 
@@ -61,10 +55,8 @@ def test_replacement_secret_reaches_join_and_gate_repair_without_persisting(
     )
 
     assert resolve_counter == [["replacement-key", "proxmox-token"]]
-    assert repairs == [("replacement-key", "replacement-value")]
-    assert events == ["start"]
-    assert [call.input_text for call in calls if call.input_text is not None] == ["replacement-value\n"]
-    assert all("replacement-value" not in call.command for call in calls)
+    assert events == ["status"]
+    assert [b"replacement-value" in script for script in guest.scripts] == [True, False]
     assert len(pauses) == 1
     assert db.get_vm("box").template == original_template
     from agentworks.bootstrap import build_registry
@@ -99,7 +91,7 @@ def test_secret_and_prompt_are_mutually_exclusive(db, make_config, resolve_count
     monkeypatch.setattr(output, "prompt_secret", lambda label, **kwargs: prompts.append(label) or "fresh-key")
     _reachable(monkeypatch, True)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
-    calls = _fake_rekey_transports(monkeypatch)
+    guest = _fake_rekey_channel(monkeypatch)
 
     with pytest.raises(ValidationError):
         manager.rekey_vm(
@@ -108,29 +100,34 @@ def test_secret_and_prompt_are_mutually_exclusive(db, make_config, resolve_count
     assert resolve_counter == []
     assert prompts == []
     assert events == []
-    assert calls == []
+    assert guest.scripts == []
     assert db.get_vm("box") == before
 
 
 def test_prompt_ignores_stale_key_but_resolves_site_normally(
     db, make_config, resolve_counter, monkeypatch, captured_output
 ) -> None:
+    from agentworks.capabilities.secret_backend import env_var
+
     config = make_config('[secret_config]\nsources = ["env-var"]\n')
     _seed_vm(db)
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "stale-key")
+    # As the entry point leaves it: the stale carrier is withheld from the environment.
+    env_var.withhold_carriers()
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     prompted = []
     monkeypatch.setattr(output, "prompt_secret", lambda label, **kwargs: prompted.append(label) or "fresh-key")
     _reachable(monkeypatch, True)
     _fake_status(monkeypatch, VMStatus.RUNNING)
-    calls = _fake_rekey_transports(monkeypatch)
+    guest = _fake_rekey_channel(monkeypatch)
 
     manager.rekey_vm(db, config, "box", prompt=True, interaction=TtyInteractionPolicy.ALLOW)
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "tailscale-auth-key"]
     assert len(prompted) == 1 and "tailscale-auth-key" in prompted[0]
-    assert [call.input_text for call in calls if call.input_text is not None] == ["fresh-key\n"]
+    assert [b"fresh-key" in script for script in guest.scripts] == [True, False]
+    assert all(b"stale-key" not in script for script in guest.scripts)
 
 
 @pytest.mark.parametrize(
@@ -195,6 +192,7 @@ def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
     from agentworks.db import DesiredRuntimeState
     from agentworks.errors import StateError
     from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.secrets.resolver import Resolver
 
     config = make_config('[secret_config]\nsources = ["env-var"]\n')
@@ -216,14 +214,13 @@ def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
     statuses = iter((VMStatus.RUNNING, VMStatus.STOPPED, VMStatus.STOPPED))
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *args: next(statuses))
-    repairs = []
 
-    def repair(*args, auth_keys, auth_key_name, **kwargs):
+    def await_tailnet(*args, **kwargs):
         with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
-            pytest.fail("another mutation entered during connection repair")
-        repairs.append((auth_key_name, auth_keys.get(auth_key_name)))
+            pytest.fail("another mutation entered during the activation's wait")
+        events.append("wait")
 
-    monkeypatch.setattr(manager, "_ensure_tailscale", repair)
+    monkeypatch.setattr(manager, "_await_tailnet", await_tailnet)
     monkeypatch.setattr(Resolver, "resolve_gate", lambda *args: pytest.fail("late source resolution"))
     closed = []
     original_close = Resolver.close
@@ -233,15 +230,14 @@ def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
         closed.append(resolver)
 
     monkeypatch.setattr(Resolver, "close", close)
-    calls = _fake_rekey_transports(monkeypatch)
+    guest = _fake_rekey_channel(monkeypatch)
 
     manager.rekey_vm(db, config, "box", prompt=True, interaction=TtyInteractionPolicy.ALLOW)
 
     assert len(prompts) == 1
     assert resolve_counter == [["tailscale-auth-key", "proxmox-token"]]
-    assert repairs == [("tailscale-auth-key", "fresh-key")]
-    assert events == ["start"]
-    assert [call.input_text for call in calls if call.input_text is not None] == ["fresh-key\n"]
+    assert events == ["start", "wait"]
+    assert [b"fresh-key" in script for script in guest.scripts] == [True, False]
     after = db.get_vm("box")
     assert (after.vm_uuid, after.desired_runtime_state, after.template) == (
         before.vm_uuid,

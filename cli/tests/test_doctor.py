@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -33,6 +33,9 @@ from agentworks.secrets.preview import (
     ResolutionPreview,
     SourcePreviewAttempt,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _first_projected_check(report: HealthReport) -> dict[str, object]:
@@ -305,15 +308,21 @@ class TestCompletionChecks:
         powershell shell should still count as available. Also pins the
         symmetric case: `powershell` on PATH without `pwsh` should also
         count (Windows-native Windows PowerShell)."""
-        import shutil
-
         from agentworks import doctor
 
-        monkeypatch.setattr(shutil, "which", lambda name: "/x/pwsh" if name == "pwsh" else None)
+        def only(installed: str) -> Callable[[str], str]:
+            def resolve(name: str) -> str:
+                if name != installed:
+                    raise FileNotFoundError(name)
+                return f"/x/{name}"
+
+            return resolve
+
+        monkeypatch.setattr("agentworks.programs.resolve_program", only("pwsh"))
         assert doctor._shell_available("powershell") is True
         assert doctor._shell_available("zsh") is False
 
-        monkeypatch.setattr(shutil, "which", lambda name: "/x/powershell" if name == "powershell" else None)
+        monkeypatch.setattr("agentworks.programs.resolve_program", only("powershell"))
         assert doctor._shell_available("powershell") is True
 
 
@@ -324,7 +333,7 @@ class TestRequiredToolsOpenSSHResolver:
         from agentworks import doctor
         from agentworks.execution.client import SSHClient
 
-        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr("agentworks.programs.resolve_program", lambda name: f"/usr/bin/{name}")
         monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: SSHClient("/opt/ssh/bin/ssh", (9, 9)))
 
         group = doctor._check_required_tools()
@@ -342,7 +351,7 @@ class TestRequiredToolsOpenSSHResolver:
         def refuse() -> None:
             raise ClientUnsupported("no supported OpenSSH client:\n  /usr/bin/ssh: OpenSSH 8.4 is too old")
 
-        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr("agentworks.programs.resolve_program", lambda name: f"/usr/bin/{name}")
         monkeypatch.setattr("agentworks.execution.resolve_ssh", refuse)
 
         group = doctor._check_required_tools()
@@ -360,7 +369,10 @@ class TestRequiredToolsOpenSSHResolver:
         def refuse() -> None:
             raise ClientUnsupported("no supported OpenSSH client:\n  no OpenSSH client was found")
 
-        monkeypatch.setattr("shutil.which", lambda name: None)
+        def missing(name: str) -> str:
+            raise FileNotFoundError(name)
+
+        monkeypatch.setattr("agentworks.programs.resolve_program", missing)
         monkeypatch.setattr("agentworks.execution.resolve_ssh", refuse)
 
         group = doctor._check_required_tools()

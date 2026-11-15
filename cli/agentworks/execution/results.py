@@ -30,6 +30,7 @@ class NotDeliveredReason(StrEnum):
 class UnknownReason(StrEnum):
     CONNECTION = "connection"
     HOST_KEY = "host_key"
+    AUTH_FAILED = "auth_failed"
     TRUNCATED = "truncated"
     DEADLINE = "deadline"
     OUTPUT_LIMIT = "output_limit"

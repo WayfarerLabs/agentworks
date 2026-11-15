@@ -25,16 +25,23 @@ slice 2 consumer uses these, so they are specified only where a later slice's co
 them:
 
 - `elevated` (the `sudo -n` prefix) with `PermissionDenied`, and the base checks that use them
-  (slice 3). Slice 3 must settle one interaction: a sudoers `use_pty` default would turn descriptors
-  1 and 2 into a pty, which agw-launch's stream check (below) refuses;
-- `observation` and retry, with `reachability` (slice 3);
-- the operation log, `oplog.py` with `LOG_DIR` and `OperationLog` (slice 3, with create's Phase A,
-  its first writer). Slice 2 leaves `ssh.LOG_DIR` and its readers alone;
-- `PythonProgram`, `Script.interactive` and `FeatureUnavailable` (slice 4 and later). Measured for
-  that slice: `dash -i FILE` prints a prompt to stderr per line it reads from the file, so an
-  interactive script needs the HLA's startup shell that execs the interpreter, not `-i FILE`;
+  (slice 3, [contract-lld.md](./contract-lld.md)). A sudoers `use_pty` default has no effect when
+  sudo has no terminal, and every elevated request is `ssh -T`, so the stream check (below) is not
+  turned against a pty;
+- `reachability` (slice 3, polling a fixed probe) and the `observation` option with the retry it
+  permits (slice 7, with `detached.observe`);
+- the operation log: `oplog.format_record` and `SSHLogger.record` (slice 3, with create's Phase A,
+  its first caller). `ssh.LOG_DIR`, its readers and `SSHLogger` stay until slice 8;
+- `FeatureUnavailable` (slice 4, with `vm shell --platform`);
+- `PythonProgram` and `Script.interactive` (a later slice). Measured for that slice: `dash -i FILE`
+  prints a prompt to stderr per line it reads from the file, so an interactive script needs the
+  HLA's startup shell that execs the interpreter, not `-i FILE`;
 - stdin and output sinks beyond the operator's stdin for `stream` (slice 5 and later), the Enroll
-  trust mode (slice 3), the host policy (slice 4) and `attach`'s `clear_screen_on_exit` (slice 7).
+  trust mode (slice 3, `enrollment_access`), `attach`'s `clear_screen_on_exit` (slice 7), and three
+  pieces for slice 4's root channel ([platform-lld.md](./platform-lld.md)): the host argv,
+  `build_host_argv`, for Remote Lima's host connection; `PipeSession(nonce=None)`, the unfiltered
+  pass-through that `root_script.run_process` uses; and `spawn`'s `ConnectivityError` naming a
+  program other than the resolved client that cannot start.
 
 ## Module layout
 
@@ -50,14 +57,16 @@ them:
 | `agentworks/execution/attach.py`                 | The two-connection attach under `guarded_terminal`                                                                |
 | `agentworks/execution/forwarding.py`             | The blocking forward                                                                                              |
 | `agentworks/execution/errors.py`                 | Adds `ExecutionIncomplete`, `CommandFailed`, `VMNotReady`, `TrustMismatch`, `ClientUnsupported`, `RequestRefused` |
+| `agentworks/execution/root_script.py` (slice 4)  | `RawRun`, `RootScriptResult`, `run`, `run_process`, `read_host_keys` ([platform-lld.md](./platform-lld.md))       |
+| `agentworks/execution/trust.py` (slice 4)        | Gains `fingerprint(key)`, OpenSSH's `SHA256:` form                                                                |
 | `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                       |
-| `agentworks/vms/manager/platform_shell.py`       | The legacy-touching part of `vm shell --platform`, moved out of `exec.py`; legacy until slice 4                   |
+| `agentworks/vms/manager/platform_shell.py`       | Held `vm shell --platform`'s legacy part until slice 4 deleted it for `native_shell`                              |
 | `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                         |
 | `tests/execution/conformance/`                   | The vectors and their lanes                                                                                       |
 | `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
 
 `trust.py` makes `_literal_path` (`trust.py:122`) public as `literal_path(path, what)`, so the VM
-policy quotes the identity file by the same rules as the store path and its refusal names what it
+policy checks the identity file by the same rules as the store path, and its refusal names what it
 was refusing.
 
 ## The proof modules
@@ -77,15 +86,17 @@ Citations of the proof in this LLD (`carrier.py`, `connection.py`, `_io.py` and 
 | `tests/execution/` proof tests, `conformance.py`, their READMEs | Deleted with their modules, except the process-level cases of `carriers/ssh/test_client.py` (duplex pressure `:146`, EOF on empty input `:164`, capture limits `:174`, short and failed writes `:219` and `:234`, deadline reap `:272`, interruption `:430`, local signals `:449`, descendant handles `:459` and `:507`, the Windows environment `:543`), which are adapted to the pump |
 
 `test_independence.py` stays (HLA D14) with its `prepare()` section replaced: after importing every
-submodule it asserts that none of the six legacy modules is in `sys.modules`.
+submodule it asserts that none of the legacy modules is in `sys.modules`.
 
 ## Client resolution
 
 `client.resolve_ssh() -> SSHClient` is cached for the process and returns the absolute path and the
-parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can launch a bare name.
+parsed `(major, minor)`. Every spawn in the package takes the `SSHClient`, so none of it launches a
+bare name; the legacy transports find `ssh` and `scp` along `PATH` through
+`programs.resolve_program` (below) until slice 8 deletes them.
 
-- **POSIX.** The first `ssh` along `PATH`, skipping empty and relative elements. Only that candidate
-  is judged.
+- **POSIX.** The first `ssh` along `PATH`, skipping empty and relative elements, which is
+  `programs.find_program`. Only that candidate is judged.
 - **Windows.** `PATH` is never searched. The candidates, in order, are
   `%SystemRoot%\Sysnative\OpenSSH\ssh.exe`, `%SystemRoot%\System32\OpenSSH\ssh.exe`,
   `%ProgramW6432%\OpenSSH\ssh.exe` and `%ProgramFiles%\OpenSSH\ssh.exe`. Each is skipped when its
@@ -103,9 +114,24 @@ parsed `(major, minor)`. Every spawn takes the `SSHClient`, so no caller can lau
   read or guard, so an unsupported client refuses before anything else. The existing boundaries
   (`require_vm_ssh_boundary`, `gated_vm_boundary`) stay as they are.
 - **Doctor.** `_check_required_tools` (`doctor.py:526`) keeps its PATH presence rows for `ssh`,
-  `scp` and `tailscale`, because the legacy paths still use bare `ssh` and `scp`, and adds a row
-  with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the `ssh` and
-  `scp` rows with the last legacy user.
+  `scp` and `tailscale`, because the legacy paths still find `ssh` and `scp` along `PATH`, and adds
+  a row with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the
+  `ssh` and `scp` rows with the last legacy user.
+
+Every other workstation program `agw` starts by name goes through `programs.resolve_program(name)`,
+the same walk over absolute `PATH` elements (`name.exe` on Windows), which raises
+`FileNotFoundError` as a missing program would: `tailscale` (the workstation preflight, the
+reachability ping, doctor), PowerShell (WSL2's helper and the completion profile query), `op` (the
+1Password backend), `git` (package sources), `taskkill`, VS Code's `code`, the `EDITOR` of
+`config edit` and `resource edit`, and the legacy paths' `ssh` and `scp`. `ssh_process.spawn`
+resolves a bare first argument the same way, which covers local Lima's `limactl`. A name with a
+directory part (`EDITOR=/usr/bin/vim`) is already a path and is returned unchanged. Presence checks
+(the 1Password readiness check, Lima's `limactl` and `ssh` checks, doctor's shell check) use
+`programs.is_installed`, the same lookup, so a program counts as installed exactly when it would
+start. Windows looks a bare name up in the current directory before `PATH`, so a bare name there
+would run whatever the operator's working directory holds. Only `.exe` is appended on Windows, so VS
+Code's `code.cmd` is deliberately not found (a `PATHEXT` lookup would send its arguments through
+`cmd.exe`), and `workspace create --open-vscode` warns there instead of opening the editor.
 
 ## Requests and results
 
@@ -133,7 +159,7 @@ by the error table below; `run(check=True)` is that plus `CommandFailed` for a n
 ```text
 Completed(status)
 NotDelivered(reason)   PYTHON_MISSING | STDLIB_MISSING | LAUNCHER_FAILED | REFUSED(code)
-Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIMIT
+Unknown(reason)        CONNECTION | HOST_KEY | AUTH_FAILED | TRUNCATED | DEADLINE | OUTPUT_LIMIT
 ```
 
 - **`access.run(request, *, check=False) -> Result`.** The client closes ssh's stdin right after the
@@ -160,9 +186,12 @@ Unknown(reason)        CONNECTION | HOST_KEY | TRUNCATED | DEADLINE | OUTPUT_LIM
 `execution.vm_access(vm, config, identity) -> VMAccess`, with `identity` either `Admin()` or
 `Agent(name, linux_user)`. Construction copies the VM name, its tailnet address, the SSH user
 (`admin_username` or the agent's `linux_user`) and the identity file path, and nothing else (R9): no
-key is read, no trust file is opened and nothing is spawned. Its trust is always
-`TrustBinding(TrustMode.VM, vm.name)`; Enroll arrives with slice 3. The operations are `run`,
-`stream`, `attach` and `forward`.
+key is read, no trust file is opened and nothing is spawned. It also holds the identity, which
+refuses an elevated request from an agent before dispatch (`PermissionDenied`), and an optional
+`log` callable that `run` calls with each request and its result. Its trust is
+`TrustBinding(TrustMode.VM, vm.name)`, except the access that `execution.enrollment_access` builds
+for create's first contact, which is Enroll. The operations are `run`, `stream`, `attach` and
+`forward`.
 
 Each operation runs in this order, so everything before the spawn raises with nothing dispatched:
 `resolve_ssh()` (`ClientUnsupported`), encode the request (`ValidationError`), build the options
@@ -179,12 +208,12 @@ database, with the proof's host and user patterns (`connection.py:51-58`).
 **VM policy options.** `-F none` first, so no operator or system configuration applies, then these
 as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leaves to say):
 
-| Group    | Options                                                                                                                                                                                                                       |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity | `IdentityFile="<ssh_private_key>"` and `IdentitiesOnly=yes` (I13). `CertificateFile="<ssh_private_key>/disabled-certificate"`, the 8.5 workaround (`:117-121`). No `IdentityAgent`: the default agent serves an encrypted key |
-| Auth     | `BatchMode=yes`, `PreferredAuthentications=publickey`, `SecurityKeyProvider=none`                                                                                                                                             |
-| Trust    | `trust.ssh_options(TrustBinding(VM, vm.name))`, read at spawn, so a missing record is `TrustMissing` and nothing spawns                                                                                                       |
-| Liveness | `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                                                    |
+| Group    | Options                                                                                                                                                                                                                                                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity | `IdentityFile=<ssh_private_key>` and `IdentitiesOnly=yes` (I13). `CertificateFile=<ssh_private_key>/disabled-certificate`, the 8.5 workaround (`:117-121`). Each path is quoted only when it holds whitespace or an apostrophe (`trust.option_value`). No `IdentityAgent`: the default agent serves an encrypted key |
+| Auth     | `BatchMode=yes`, `PreferredAuthentications=publickey`, `SecurityKeyProvider=none`                                                                                                                                                                                                                                    |
+| Trust    | `trust.ssh_options(TrustBinding(VM, vm.name))`, read at spawn, so a missing record is `TrustMissing` and nothing spawns                                                                                                                                                                                              |
+| Liveness | `ConnectTimeout=30`, `ServerAliveInterval=15`, `ServerAliveCountMax=4` (I7; the constants are `ssh.py:288` and `:296-297`)                                                                                                                                                                                           |
 
 - **What `-F none` already settles.** Password and keyboard-interactive authentication, multiplexing
   (I12), proxies, agent and X11 forwarding, host-key DNS, canonicalization, `KnownHostsCommand`,
@@ -208,11 +237,11 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
 
 **Argv shapes.** `<stage0>` is `/usr/bin/python3 -I -S -c '<program>'` (below).
 
-| Mode                              | Argv                                                                                                         |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                                      |
-| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`                                        |
-| Forward                           | `ssh -F none -N -n [-E <client log> or -v] <options> -o ExitOnForwardFailure=yes -L ... -l <user> -- <host>` |
+| Mode                              | Argv                                                                                                                                           |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`, `stream`, the parking half | `ssh -F none -T -E <client log> <options> -l <user> -- <host> <stage0>`                                                                        |
+| Terminal half of an attach        | `ssh -F none -t <options> -l <user> -- <host> <stage0> <socket path>`, led by `printf '\000';` on a Windows console (Terminal handover, below) |
+| Forward                           | `ssh -F none -N -n [-E <client log> or -v] <options> -o ExitOnForwardFailure=yes -L ... -l <user> -- <host>`                                   |
 
 - **No `-n` on request-bearing connections.** `-n` would replace the request's stdin with the null
   device. ADR 0020's measured alternative, a stdin pipe the client closes, was proven equivalent
@@ -232,7 +261,8 @@ as `-o` (the proof's list at `connection.py:109-153`, cut to what `-F none` leav
   quotes request bytes. The terminal half keeps ssh's diagnostics on the operator's terminal, as
   today. A live cell confirms that `Host key verification failed` and the authentication and
   connection errors land in the file on 8.5, 9.x and Win32-OpenSSH. The client reads this log, to
-  type `Host key verification failed` and to show its last 20 lines in errors.
+  type `Host key verification failed` and `Permission denied (publickey` and to show its last 20
+  lines in errors.
 
 `build_argv` takes the client log path and a `verbose` flag. `verbose` replaces `-E` with `-v` and
 is accepted only for a forward, since in a pipe mode ssh's debug lines would reach the guest's
@@ -241,16 +271,27 @@ stderr after the marker; the terminal half takes neither.
 **Spawning.** One `spawn(argv, ...)` in `ssh_process.py` runs
 `subprocess.Popen(argv, stdin=PIPE, stdout=PIPE, stderr=PIPE, bufsize=0)` (the forward passes no
 pipes) with the proof's Windows environment strip (`_io.py:104-114`, at `fd1256b1f`), and maps a
-failure to start to `ClientUnsupported`. The pump lives in `pump.py`. The pump is the proof's
-single-threaded loop (`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python
-3.12), 64 KiB chunks, a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap,
-and cleanup on `BaseException`. It is argv-agnostic, which is what lets the conformance suite run it
-against a local shell.
+failure of the resolved client to start to `ClientUnsupported`. A client that never uses the
+operator's terminal while another client does passes `share_console=False`, which on Windows starts
+it with `CREATE_NO_WINDOW` so it is not attached to the operator's console, and changes nothing
+elsewhere. Only the parking connection of an attach passes it: left on the console, it turned the
+terminal half's UTF-8 into code-page glyphs on Windows Terminal (issue #889). Clients that keep the
+console keep receiving its Ctrl-C. No child, this one or any other the workstation starts, inherits
+the `env-var` secret backend's `AW_SECRET_` carriers: the entry point moves them out of `os.environ`
+before anything spawns (`env_var.withhold_carriers`), and only that backend reads them afterwards. A
+long-lived child kept one otherwise; the live run found the auth key's carrier in local Lima's host
+agent after a create. The pump lives in `pump.py`. The pump is the proof's single-threaded loop
+(`_io.py:32-205`): non-blocking pipes (supported on Windows pipes from Python 3.12), 64 KiB chunks,
+a 10 ms sleep when nothing moved, the deadline, then kill and a 0.5 s reap, and cleanup on
+`BaseException`. It is argv-agnostic, which is what lets the conformance suite run it against a
+local shell.
 
 - **Who uses it.** `run`, `stream` and the parking connection of an attach reuse the one pump. The
   terminal half (inherited stdio, `subprocess` wait) and the forward (no pipes) do not. The parking
   connection sets `hold_stdin_open`, so the pump sends the request and leaves the pipe open: the
-  parked launcher reads end of file as the client giving up.
+  parked launcher reads end of file as the client giving up. It also sets `share_console=False`, so
+  on Windows a Ctrl-C before `parked` reaches only agw, whose interrupt ends the session and kills
+  the client.
 - **Deadline and output limit.** Either stops the pump and kills the client at once, then reaps for
   0.5 s; only a natural end waits for the client to exit.
 - **Operator stdin for `stream`.** The caller passes `sys.stdin.buffer.raw`. A daemon thread reads
@@ -262,34 +303,36 @@ against a local shell.
   with no stdin passes `None` and the pipe closes right after the request. The thread outlives the
   call blocked in a read; `stream` is the last thing a command does. A stdout consumer that leaves
   (`| head`, quitting `less`) gets the semantics ssh gave it when ssh held the operator's stdout.
-  The client discards the rest of that stream and closes its read end of it once the guest writes to
-  it again, so ssh sees `EPIPE` on the write after that one, and keeps pumping stderr until the
-  channel ends: a writer that keeps writing takes `SIGPIPE` and the channel closes, while a quiet
-  payload runs to its end. Once ssh's write to its stdout fails, the OpenSSH client writes none of
-  the stderr it receives after that, so a quiet payload's end marker must not meet a closed read
-  end, and kept open it does not. A guest that writes once more after its consumer left and then
-  goes quiet has closed the read end, so its end marker is ssh's failed write: the trailer survives
-  only when it reaches ssh in the same batch, and otherwise the result is `Unknown(CONSUMER_LEFT)`.
-  A stderr consumer that leaves, with no trailer yet, ends the request once held stdout is
-  delivered, and ending the session kills the client after its one-second natural-exit wait, which
-  ends the guest's writer: ssh only discards stderr after a failed write and keeps the channel up,
-  and the status travels on stderr, so nothing more could be learned. With the trailer already in
-  hand, stdout is pumped to its end marker and the result is `Completed(N)`. When stdout was
-  abandoned and the stderr trailer still arrives, the result is the guest's own `Completed(N)`;
-  otherwise it is `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the status of a
-  writer killed by `SIGPIPE`. `stream_to_operator` flushes both streams once as it returns, and that
-  flush is how a departure it did not see earlier is detected: a stream whose consumer has gone is
-  pointed at the null device, so interpreter shutdown cannot fail on the bytes left in its buffer.
-  That flush tries both streams and never replaces a failure already in flight.
+  The client discards the next chunk the guest writes to that stream and then closes its read end of
+  it, so ssh sees `EPIPE` on the write after that one, and keeps pumping stderr until the channel
+  ends: a writer that keeps writing takes `SIGPIPE` and the channel closes, while a quiet payload
+  runs to its end. Once ssh's write to its stdout fails, the OpenSSH client writes none of the
+  stderr it receives after that, so a quiet payload's end marker must not meet a closed read end,
+  and kept open it does not. A guest that writes once more after its consumer left and then goes
+  quiet has closed the read end, so its end marker is ssh's failed write: the trailer survives only
+  when it reaches ssh in the same batch, and otherwise the result is `Unknown(CONSUMER_LEFT)`. A
+  stderr consumer that leaves, with no trailer yet, ends the request once held stdout is delivered,
+  and ending the session kills the client after its one-second natural-exit wait, which ends the
+  guest's writer: ssh only discards stderr after a failed write and keeps the channel up, and the
+  status travels on stderr, so nothing more could be learned. With the trailer already in hand,
+  stdout is pumped to its end marker and the result is `Completed(N)`. When stdout was abandoned and
+  the stderr trailer still arrives, the result is the guest's own `Completed(N)`; otherwise it is
+  `Unknown(CONSUMER_LEFT)`, which `stream` alone reports as 141, the status of a writer killed by
+  `SIGPIPE`. `stream_to_operator` flushes both streams once as it returns, and that flush is how a
+  departure it did not see earlier is detected: a stream whose consumer has gone is pointed at the
+  null device (`output.tolerating_dead_sink`), so interpreter shutdown cannot fail on the bytes left
+  in its buffer. That flush tries both streams and never replaces a failure already in flight.
 - **Binary stdio.** Callers pass `sys.stdout.buffer` and `sys.stderr.buffer` (the text layer's
   `newline="\n"` at `cli/_entry.py:38` does not apply), after flushing the text layer (I2).
   `stream_to_operator(access, request)` in `access.py` is that wiring, flush, raw stdin and binary
   buffers, so the commands do not repeat it.
-- **A sink that would block.** Only `BrokenPipeError` and `ConnectionResetError` from a sink mean
-  the consumer ended early, plus `OSError(EINVAL)` on Windows, where CPython reports a pipe whose
-  reader closed that way. A sink that raises `BlockingIOError`, because the operator's own stdout is
-  a non-blocking pipe, keeps its unsent remainder and is retried, so output is never dropped while
-  the command reports success. Any other `OSError` from a sink (`ENOSPC`, `EIO`) propagates.
+- **A sink that would block.** Only `BrokenPipeError`, `ConnectionResetError` and `EIO` (a terminal
+  that hung up) from a sink mean the consumer has gone, plus `OSError(EINVAL)` on Windows, where
+  CPython reports a pipe whose reader closed that way; `output.consumer_left` is the one copy of
+  that rule, shared with the output handlers. A sink that raises `BlockingIOError`, because the
+  operator's own stdout is a non-blocking pipe, keeps its unsent remainder and is retried, so output
+  is never dropped while the command reports success. Any other `OSError` from a sink (`ENOSPC`)
+  propagates.
 
 ## The wire
 
@@ -437,18 +480,18 @@ for `cwd` and `handover`. The shell convention is 127 not found and 126 found bu
 
 The classifier combines both filters with ssh's own exit status:
 
-| Evidence                                                          | Completion                                                                                                      |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                                                     |
-| stdout abandoned by a departed consumer, `exit N` on stderr       | `Completed(N)`                                                                                                  |
-| A departed consumer and no trailer                                | `Unknown(CONSUMER_LEFT)`; `stream` reports 141                                                                  |
-| `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                                                   |
-| No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                                                  |
-| No start marker, ssh exit `STDLIB_MISSING_STATUS`                 | `NotDelivered(STDLIB_MISSING)`                                                                                  |
-| No start marker, ssh exit 0 to 254 otherwise                      | `NotDelivered(LAUNCHER_FAILED)`                                                                                 |
-| No start marker, ssh exit 255, a signal, or a status above 255    | `Unknown(CONNECTION)`, or `Unknown(HOST_KEY)` when the client log holds `Host key verification failed` on a 255 |
-| A start marker, but no `end` or no trailer at exit or end of file | `Unknown(TRUNCATED)`                                                                                            |
-| Deadline reached, or a stream over the pump constant              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                                                    |
+| Evidence                                                          | Completion                                                                                                                                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `end` on stdout and `exit N` on stderr                            | `Completed(N)`; ssh's own status is ignored                                                                                                                                                                        |
+| stdout abandoned by a departed consumer, `exit N` on stderr       | `Completed(N)`                                                                                                                                                                                                     |
+| A departed consumer and no trailer                                | `Unknown(CONSUMER_LEFT)`; `stream` reports 141                                                                                                                                                                     |
+| `end` on stdout and `refused CODE` on stderr                      | `NotDelivered(REFUSED, CODE)`                                                                                                                                                                                      |
+| No start marker, ssh exit 127                                     | `NotDelivered(PYTHON_MISSING)`                                                                                                                                                                                     |
+| No start marker, ssh exit `STDLIB_MISSING_STATUS`                 | `NotDelivered(STDLIB_MISSING)`                                                                                                                                                                                     |
+| No start marker, ssh exit 0 to 254 otherwise                      | `NotDelivered(LAUNCHER_FAILED)`                                                                                                                                                                                    |
+| No start marker, ssh exit 255, a signal, or a status above 255    | `Unknown(CONNECTION)`; `Unknown(HOST_KEY)` when the client log holds `Host key verification failed` on a 255; `Unknown(AUTH_FAILED)` when it holds `Permission denied (publickey` on a 255 and no host-key failure |
+| A start marker, but no `end` or no trailer at exit or end of file | `Unknown(TRUNCATED)`                                                                                                                                                                                               |
+| Deadline reached, or a stream over the pump constant              | `Unknown(DEADLINE)`, `Unknown(OUTPUT_LIMIT)`                                                                                                                                                                       |
 
 - **Ending the client.** Once both streams are done the client closes ssh's stdin, waits up to one
   second for a natural exit and kills it. It never waits for end of file or on a timer, so a
@@ -483,21 +526,21 @@ The classifier combines both filters with ssh's own exit status:
    starts only after `parked`). Past that it kills the connection and raises
    `ExecutionIncomplete(Unknown(DEADLINE))` with the terminal untouched; for an attach the message
    says no shell started, and names a startup file that reads stdin as the usual cause, since such a
-   file would otherwise hold the connection open forever. Then, inside
-   `with guarded_terminal() as guard:`, runs the terminal half. Its stage 0 gets the socket path as
-   `sys.argv[1]`, connects, reads the launcher frame and the envelope frame from the socket, and
-   runs agw-launch in `tty` mode. No guest text reaches a command line.
+   file would otherwise hold the connection open forever. Then, inside `with guarded_terminal():`,
+   runs the terminal half. Its stage 0 gets the socket path as `sys.argv[1]`, connects, reads the
+   launcher frame and the envelope frame from the socket, and runs agw-launch in `tty` mode. No
+   guest text reaches a command line.
 4. The parked launcher waits with `select` on the listener and on its own stdin, for at most 30
    seconds. On a connection it sends the launcher frame (`g`) and the envelope re-serialized with
    `mode: "tty"`, closes the connection, then writes `end` and `exit 0`. On stdin end of file (the
    client closing its pipe) or the timeout it writes `end` and `refused handover`. In every case a
    `finally` removes the socket and the directory, so a failed second connection leaves nothing. The
    trailer lets the client tell a timeout from a drop.
-5. After the second connection returns, still inside the guard, `guard.clean_exit = code == 0`.
-   After the guard, a code of 255 prints the notice "connection ended or the command exited 255;
-   terminal restored" with the existing detail line (I6), reimplemented in `attach.py` because the
-   legacy helper is `transports/ssh.py:77`. The client then closes the parking connection's stdin,
-   pumps it for up to two seconds and ends it.
+5. After the second connection returns, the guard's exit pass restores the terminal. After the
+   guard, a code of 255 prints the notice "connection ended or the command exited 255; terminal
+   restored" with the existing detail line (I6), reimplemented in `attach.py` because the legacy
+   helper is `transports/ssh.py:77`. The client then closes the parking connection's stdin, pumps it
+   for up to two seconds and ends it.
 
 The parking connection fails first on a missing `python3`, a trust mismatch, a refusal or a refused
 connection, so `attach` raises `VMNotReady`, `TrustMismatch`, `RequestRefused` or
@@ -506,6 +549,17 @@ connection's pipes go unread; it writes a few lines, far below a pipe buffer. A 
 second connection returns its code; with the socket gone the operator sees Python's traceback on the
 terminal and code 1, which is accepted for that rare race. There is no `SO_PEERCRED` check: the
 directory is 0700, and the account's own processes can already read its processes (HLA D8).
+
+On a Windows console (stdin and stdout both on the terminal) the terminal half's remote command is
+led by a NUL: `printf '\000'; <stage0> <socket path>`
+(`ssh_process.nul_first_on_a_windows_console`). Before its first raw-mode console write,
+Win32-OpenSSH moves the console so the cursor is at the top of the window if that write contains
+`ESC[2J`, and under ConPTY the move deletes the lines above the cursor without passing them to
+scrollback. A tmux attach's first frame is such a write, and so is a `clear` in a startup file. The
+NUL ends that check's string search, and the terminal discards it. The search runs only in raw mode,
+which needs a pty and so a terminal on stdin; without one the client's console write stops at the
+first NUL, so no NUL is sent. The legacy `ssh -t` attaches (`transports/ssh.py`) and Remote Lima's
+native shell (`capabilities/vm_platform/lima_host.py`) use the same helper.
 
 ## Forward
 
@@ -523,28 +577,39 @@ above and waits for the client, polling `Popen.wait(timeout=0.2)` so Ctrl-C is d
   `TrustMismatch` instead. Under `verbose` there is no log, so no tail and no `TrustMismatch`
   typing. The client always ends on the way out: terminate, one second, kill, and the log is
   removed.
-- **Signals.** The library installs none. `port_forward_vm` installs a `SIGTERM` handler that raises
-  `KeyboardInterrupt` for the duration of the forward and restores the previous handler (today's
-  handlers are never restored, `tailscale.py:180-181`). `port_forward_vm` owns the 0 on an operator
-  stop and returns the client's status for any other end. The legacy returned the terminated
-  client's status (`-15` on POSIX).
+- **Signals.** The library installs none. `port_forward_vm` holds the forward inside the shared
+  `agentworks.interrupts.termination_as_interrupt`, which raises `KeyboardInterrupt` on Ctrl-C and
+  `SIGTERM`, and on `SIGHUP` and `SIGBREAK` where they exist, for the duration of the block, and
+  restores the previous handlers afterwards. A signal the process already ignores stays ignored (so
+  a forward started under `nohup` outlives its terminal); once one signal has arrived, the
+  terminations are ignored until the block exits, so a closed terminal or a second termination
+  cannot cut the cleanup short, while a second Ctrl-C still interrupts; and a block inside another,
+  or off the main thread, changes nothing (`agentworks/interrupts.py`). The unwind's own writes to a
+  terminal that hung up, or to a pipe whose reader went with it, are dropped by
+  `output.tolerating_dead_sink` rather than failing. `port_forward_vm` owns the 0 on an operator
+  stop and returns the client's status for any other end. The clouds' route context opens the same
+  block around every route (`public_ssh.py:272`), so a cloud's firewall allow for a root script or a
+  native shell is removed when the command is ended by either signal. `create_vm` opens one too,
+  first in the stack that spans provisioning and initialization, so either signal runs create's
+  interrupt arms: a cloud's create rolls back its bootstrap allow and its partial VM.
 
 ## Errors
 
-| Error                 | Kind                | Raised for                                                                                              | PR A hint                                                                   |
-| --------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `ClientUnsupported`   | `ConfigError`       | No acceptable OpenSSH, or the resolved client fails to start                                            | The install guidance in the message                                         |
-| `VMNotReady`          | `StateError`        | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                   | `agw vm reinit <vm>`, whose Phase A still runs without python3              |
-| `TrustMismatch`       | `StateError`        | `Unknown(HOST_KEY)`, and the forward's token                                                            | Verify the new key, remove the store file, `import-host-keys --known-hosts` |
-| `RequestRefused`      | `StateError`        | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                        | Fix the working directory or the command                                    |
-| `ExecutionIncomplete` | `ConnectivityError` | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail | A `NotDelivered` command did not start; an `Unknown` one may have run       |
-| `CommandFailed`       | `ExternalError`     | `check=True` with a non-zero status; message has the status, never stream text                          | none                                                                        |
+| Error                 | Kind                 | Raised for                                                                                                                                                                                   | Hint                                                                                                                                  |
+| --------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClientUnsupported`   | `ConfigError`        | No acceptable OpenSSH, or the resolved client fails to start                                                                                                                                 | The install guidance in the message                                                                                                   |
+| `VMNotReady`          | `StateError`         | `NotDelivered(PYTHON_MISSING)` (an unelevated 127) and `NotDelivered(STDLIB_MISSING)`                                                                                                        | `agw vm recover <vm>`, whose repair installs python3                                                                                  |
+| `TrustMismatch`       | `StateError`         | `Unknown(HOST_KEY)`, and the forward's token                                                                                                                                                 | Verify the new key, remove the store file, `import-host-keys --known-hosts`                                                           |
+| `RequestRefused`      | `StateError`         | `NotDelivered(REFUSED)` under `run` and `attach`; names the code                                                                                                                             | Fix the working directory or the command                                                                                              |
+| `ExecutionIncomplete` | `ConnectivityError`  | Any other `NotDelivered` or `Unknown`; carries the `Result`, names which, and shows the client log tail. An `AUTH_FAILED` says the VM did not accept the configured key and that nothing ran | A `NotDelivered` command did not start; an `Unknown` one may have run; `CONNECTION` and `AUTH_FAILED` also name `agw vm recover NAME` |
+| `PermissionDenied`    | `AuthorizationError` | An elevated request on an agent-bound access, before dispatch; names the VM and account, never the request                                                                                   | none                                                                                                                                  |
+| `CommandFailed`       | `ExternalError`      | `check=True` with a non-zero status; message has the status, never stream text                                                                                                               | none                                                                                                                                  |
 
 Errors may show the client log's tail. `TrustMismatch`'s hint names the manual path, since import
 never rewrites an existing record (`trust-lld.md`) and recovery re-establishes only a missing one
-(HLA D4). `TrustMissing` already exists (`errors.py`). `PermissionDenied` and `FeatureUnavailable`
-land with their first consumers. No error message, `repr` or hint holds a stream, an environment
-value or script text.
+(HLA D4). `TrustMissing` already exists (`errors.py`). `FeatureUnavailable` (`StateError`) lands in
+slice 4 with `vm shell --platform`, its first consumer. No error message, `repr` or hint holds a
+stream, an environment value or script text.
 
 ## The migrated commands
 
@@ -567,7 +632,8 @@ the package attribute so one patch reaches every manager.
   interactive call, with the import at `:72`) moves to `platform_shell.py`, still legacy until slice
   4, so `exec.py` imports nothing retired. `vm shell --platform` uses `native_transport`, and
   `native_shell` is slice 4's. `port_forward_vm` moves from `tailscale.py`, which keeps
-  `_ensure_tailscale`'s legacy imports.
+  `_ensure_tailscale`'s legacy imports. Slice 4 then deleted `platform_shell.py` and
+  `_ensure_tailscale`: `vm shell --platform` calls the platform's `native_shell`.
 - **Agent probe.** `_assert_agent_ssh_works` (`agents/manager/_common.py:237`) takes a legacy
   `Transport`, and the sessions and agent-create paths still call it. A new
   `_assert_agent_access_works` in `agents/manager/access.py`, a file under the static check, serves
@@ -596,7 +662,8 @@ the package attribute so one patch reaches every manager.
   - An encrypted key the default agent does not hold can no longer prompt for its passphrase on
     `vm shell` and `agent shell`, since every connection runs with `BatchMode=yes`. Accepted on
     2026-11-01; a connection that fails before the start marker with a passphrase-protected key
-    hints at the agent (HLA D2).
+    hints at the agent (HLA D2), whether the failure reads as a plain connection failure or as an
+    authentication failure.
   - `/etc/environment` and other `pam_env` variables no longer reach the payload, which gets only
     the rebuilt environment. Accepted on 2026-11-01; reinit warns when a VM has pam_env settings
     (HLA D10).
@@ -612,7 +679,7 @@ the package attribute so one patch reaches every manager.
 
 ## Guards, fakes and tests
 
-- **Blocker** (`tests/execution/conftest.py`). An autouse function fixture removes the six legacy
+- **Blocker** (`tests/execution/conftest.py`). An autouse function fixture removes the legacy
   modules and their submodules from `sys.modules`, deletes the attribute on each parent package (so
   `from agentworks import ssh` also fails), and puts a `MetaPathFinder` that raises `ImportError`
   first on `sys.meta_path`. It uses `monkeypatch` so every test restores them. The session fixture
@@ -716,27 +783,27 @@ reorder.
 - **Incident inventory** gains a row (the audit of these entry points' fix history found one more
   behavior to re-prove):
 
-| Row | Behavior                                                                                                                  | Re-proved in |
-| --- | ------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach (`897248ead`, `80c813db4`) | 2            |
+| Row | Behavior                                                                                                                                                                                                                           | Re-proved in |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| I21 | The local terminal is sanitized on entry and restored on exit after a dropped or killed attach, with one payload that leaves the alternate screen without moving the cursor on the primary screen (`897248ead`, `80c813db4`, #889) | 2            |
 
 ## Incident rows slice 2 re-proves
 
-| Row | How                                                                                                                                                  |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| I1  | No `-n`; the client closes its own stdin pipe. Pump test for end of file; live Windows loop of 25 runs each of `true`, `sleep .001` and `echo -n ""` |
-| I2  | Binary pipes and raw or `.buffer` streams; the all-bytes vectors; the Windows-marked pump test; live from Windows                                    |
-| I3  | The V lane drives real guests from each workstation; the resolver refuses MSYS builds, so no Git for Windows tool is in the path                     |
-| I4  | No operation combines input with a terminal; value-free errors tested                                                                                |
-| I5  | Literal argv and the `--` before the destination; the dash-led vector                                                                                |
-| I6  | `attach` tests with a fake terminal check the notice comes after the guard; live                                                                     |
-| I7  | `ssh -G` shows the keepalive and connect options; one live cell drops the network under a `stream`                                                   |
-| I11 | The vector, with a pipe and a socket on stdin                                                                                                        |
-| I12 | `ssh -G` shows no multiplexing with the policy argv, and the live 8.5 and Windows cells repeat it                                                    |
-| I13 | `ssh -G` shows the explicit identity file; live with a key named other than the default on Windows                                                   |
-| I14 | `ssh -G` of the pipe-mode argv shows no pty even with `RequestTTY force` supplied                                                                    |
-| I19 | The agent probe (above)                                                                                                                              |
-| I21 | The terminal guard tests, and live attach killed mid-session                                                                                         |
+| Row | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| I1  | No `-n`; the client closes its own stdin pipe. Pump test for end of file; live Windows loop of 25 runs each of `true`, `sleep .001` and `echo -n ""`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| I2  | Binary pipes and raw or `.buffer` streams; the all-bytes vectors; the Windows-marked pump test; live from Windows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| I3  | The V lane drives real guests from each workstation; the resolver refuses MSYS builds, so no Git for Windows tool is in the path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| I4  | No operation combines input with a terminal; value-free errors tested                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| I5  | Literal argv and the `--` before the destination; the dash-led vector                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| I6  | `attach` tests with a fake terminal check the notice comes after the guard; live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| I7  | `ssh -G` shows the keepalive and connect options; one live cell drops the network under a `stream`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| I11 | The vector, with a pipe and a socket on stdin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| I12 | `ssh -G` shows no multiplexing with the policy argv, and the live 8.5 and Windows cells repeat it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| I13 | `ssh -G` shows the explicit identity file; live with a key named other than the default on Windows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| I14 | `ssh -G` of the pipe-mode argv shows no pty even with `RequestTTY force` supplied                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| I19 | The agent probe (above)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| I21 | The `guarded_terminal` tests, with the tmux pane tests for the cursor and a killed run; the NUL-led terminal command run under each account shell; live attach killed mid-session; and on Windows Terminal, `vm shell` exiting 0 and non-zero with no cursor jump, a detach with `clear_on_detach = "never"`, and a non-ASCII prompt that renders intact. Also on Windows Terminal, for the round 2 retest (expected results from reading the Win32-OpenSSH source, not yet observed), with twelve numbered lines seeded below an `ESC 7` at the top of the screen: the content probe's B2 (`ssh -t` to a remote whose first write enters the alternate screen and clears it, no agw) and B4 (the same between agw's sanitize payloads), expected to lose every line, which would show the client behavior; B5 (the same led by a NUL), expected to keep all twelve with the cursor where it was; and the PR #893 round 1 F1 repro, a `session attach` with `clear_on_detach = "never"` detached with Ctrl-B d, expected to keep all twelve with Terminal Find locating line 6 |
 
 ## Live evidence
 

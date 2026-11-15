@@ -162,7 +162,7 @@ def test_start_console_eager_resolves_before_tmux(
     db._conn.commit()
 
     stub_vm_gates(monkeypatch)
-    monkeypatch.setattr("agentworks.vms.manager._tailscale_rejoin_required", lambda *a, **kw: False)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **kw: None)
     monkeypatch.setattr(
         "agentworks.transports.transport",
         lambda *a, **kw: SimpleNamespace(run=lambda *a, **kw: None, interactive=lambda *a, **kw: 0),
@@ -295,7 +295,7 @@ def test_attach_console_existing_tmux_session_skips_eager_resolve(
     db._conn.commit()
 
     stub_vm_gates(monkeypatch)
-    monkeypatch.setattr("agentworks.vms.manager._tailscale_rejoin_required", lambda *a, **kw: False)
+    monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **kw: None)
     monkeypatch.setattr(
         "agentworks.transports.transport",
         lambda *a, **kw: SimpleNamespace(run=lambda *a, **kw: None, interactive=lambda *a, **kw: 0),

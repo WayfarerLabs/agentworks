@@ -32,7 +32,7 @@ from agentworks.resources.graph import DependencyState, DisabledMark, Enablement
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
-from tests.conftest import registry_with_shell
+from tests.conftest import fake_installed_programs, registry_with_shell
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -342,10 +342,11 @@ def test_typo_in_the_placement_host_is_refused_rather_than_changing_readiness(
 
     typo: dict[str, object] = {"placement": {"mode": "ssh", "hst": "me@box"}}
     for limactl in (None, "/usr/bin/limactl"):
-        monkeypatch.setattr(
-            "shutil.which",
-            lambda name, found=limactl: "/usr/bin/ssh" if name == "ssh" else found,
-        )
+
+        def which(name: str, found: str | None = limactl) -> str | None:
+            return "/usr/bin/ssh" if name == "ssh" else found
+
+        fake_installed_programs(monkeypatch, which)
         # The SHAPE half, asserted on the hook the fold calls: the tag says
         # ssh, so the site is not local, so no limactl verdict is reachable
         # for it however this host is equipped. This is the half the
@@ -389,7 +390,7 @@ def test_not_ready_is_total_over_malformed_config() -> None:
 def test_r5_not_ready_site_with_valid_block_stays_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     """R5, the other direction: a not-ready site with a perfectly valid block
     is still not-ready (a dependency/host verdict, blind to validity)."""
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    fake_installed_programs(monkeypatch, lambda name: None)
     site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", placement={"mode": "local"}))
     registry = _finalized(site)
     assert not registry.graph.is_ready("vm-site", "local")

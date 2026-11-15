@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 
 from agentworks import output as output_mod
-from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot, SessionStatus
+from agentworks.db import PID_STOPPED, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager as session_manager
@@ -87,6 +87,7 @@ def _seed_session(
 ) -> SessionRow:
     if db.get_vm("box") is None:
         db.insert_vm("box", site="test", hostname="box")
+        db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
         db.update_vm_tailscale("box", "100.64.0.10")
         db.insert_workspace("work", "/srv/work", "box", "ws-work")
     db.insert_session(name, "work", "default", SessionMode.ADMIN, socket_path=socket_path)

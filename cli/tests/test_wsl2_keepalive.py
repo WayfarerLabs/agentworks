@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentworks.capabilities.vm_platform import VMPlatform, wsl2
-from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform, WSLCommandFailed
 from agentworks.errors import StateError, UserAbort
 from agentworks.schema import AgwModel
 
@@ -69,13 +69,13 @@ def test_entry_waits_for_same_guest_keeper_acknowledgement(monkeypatch, delay):
         assert process.poll() is None
     assert process.poll() is not None
     assert process.stdout.closed
-    assert called[0][:6] == ["wsl", "--distribution", "distro", "--", "sh", "-c"]
+    assert called[0][:6] == [wsl2._WSL, "--distribution", "distro", "--", "sh", "-c"]
     # Run the actual guest command locally to verify its acknowledgement and
     # exec form instead of pinning the authored shell spelling.
     if sys.platform != "win32":
         actual = original_popen(["sh", "-c", called[0][-1]], stdout=subprocess.PIPE)
         try:
-            wsl2._await_keeper_attachment(actual)
+            wsl2._await_keeper_attachment(actual, "distro")
         finally:
             wsl2._release_keeper(actual)
 
@@ -98,6 +98,49 @@ def test_malformed_or_missing_ack_fails_entry_and_reaps(monkeypatch, code):
         pytest.fail("body entered without keeper acknowledgement")
     assert process.poll() is not None
     assert process.stdout.closed
+
+
+def _spawn_with_keeper_streams(monkeypatch, code: str) -> list[subprocess.Popen[bytes]]:
+    """Run ``code`` as the keeper with the streams the keepalive asks Popen for."""
+    original_popen = subprocess.Popen
+    spawned: list[subprocess.Popen[bytes]] = []
+
+    def spawn(argv, **kwargs):
+        spawned.append(original_popen([sys.executable, "-u", "-c", code], **kwargs))
+        return spawned[0]
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    return spawned
+
+
+@pytest.mark.windows
+def test_a_failing_wsl_exe_is_reported_with_what_it_printed(monkeypatch):
+    """A keeper whose wsl.exe exits non-zero before attaching quotes what it printed on stdout."""
+    # wsl.exe prints its own errors on stdout, in UTF-16 when redirected, and exits non-zero.
+    printed = "\x00".join("There is no distribution with the supplied name.").encode() + b"\r\n"
+    spawned = _spawn_with_keeper_streams(
+        monkeypatch, f"import sys; sys.stdout.buffer.write({printed!r}); sys.stdout.buffer.flush(); sys.exit(1)"
+    )
+    with pytest.raises(WSLCommandFailed) as caught, WSL2Platform("wsl2", {}).vm_active(_fake_vm("missing-distro")):
+        pytest.fail("body entered without keeper acknowledgement")
+    assert "There is no distribution with the supplied name." in str(caught.value)
+    assert "missing-distro" in str(caught.value)
+    assert caught.value.hint
+    assert spawned[0].poll() is not None
+    assert spawned[0].stdout is not None and spawned[0].stdout.closed
+
+
+@pytest.mark.windows
+def test_guest_stderr_before_the_acknowledgement_does_not_refuse_the_hold(monkeypatch):
+    """A guest that writes to stderr before its marker still attaches: only stdout carries the acknowledgement."""
+    spawned = _spawn_with_keeper_streams(
+        monkeypatch,
+        "import sys,time; sys.stderr.buffer.write(b'guest login notice\\n'); sys.stderr.buffer.flush(); "
+        f"{_GUEST_ACK}; time.sleep(30)",
+    )
+    with WSL2Platform("wsl2", {}).vm_active(_fake_vm("distro")):
+        assert spawned[0].poll() is None
+    assert spawned[0].poll() is not None
 
 
 @pytest.mark.windows
@@ -175,8 +218,12 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
     class _Stub(VMPlatform):
         name = "stub"
         description = "stub"
-        contract_version = 1
+        contract_version = 2
         config_model = _StubConfig
+        recovery_needs_guest_sshd = False
+
+        def run_as_root(self, vm: Any, ctx: Any, script: bytes, deadline: float) -> Any:
+            raise NotImplementedError
 
         def create(self, request: Any, ctx: Any) -> Any:
             raise NotImplementedError
@@ -194,9 +241,6 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
             raise NotImplementedError
 
         def display_backend_name(self, vm: Any) -> str:
-            raise NotImplementedError
-
-        def native_transport(self, vm: Any, ctx: Any, *, config: Any = None) -> Any:
             raise NotImplementedError
 
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.

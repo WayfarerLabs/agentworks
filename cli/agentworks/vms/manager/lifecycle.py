@@ -1,15 +1,15 @@
-"""The two full-initialization VM flows: create and reinit.
+"""``vm create``: provision and initialize a new VM. Its sibling, ``vm reinit``, is ``reinit.py``.
 
-Both call into ``agentworks.vms.initializer`` (``bootstrap_vm`` /
+It calls into ``agentworks.vms.initializer`` (``bootstrap_vm`` /
 ``run_initialization`` /
 ``verify_tailscale_available``); see the module-level note near the
 imports below for why those calls are routed through the package object
 rather than a plain top-level import.
 
 ``create_vm`` splits the initializer's two phases across its output
-sections: Phase A (``bootstrap_vm``: record the platform-owned bootstrap,
-verify Tailscale connectivity, and sync SSH config) is the tail of the
-``Provisioning`` section, and Phase B
+sections: Phase A (``bootstrap_vm``: record the platform's address, enroll
+the host key on first contact, check the VM contract, and sync SSH config)
+is the tail of the ``Provisioning`` section, and Phase B
 (``run_initialization``) runs after it as the ``VM Initialization`` /
 ``Admin Initialization`` sections. A single keepalive hold (an
 ``ExitStack`` entered before Phase A, released after Phase B) spans both,
@@ -20,16 +20,17 @@ either phase to the same operator-facing outcome.
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import RetainedProvisioningError
 from agentworks.config import validate_admin_username
-from agentworks.db import SYSTEM_SLUG_KEY, DesiredRuntimeState, InitStatus, ProvisioningStatus
-from agentworks.debian import CURRENT_DEBIAN_RELEASE, DebianRelease, probe_debian_release
+from agentworks.db import DesiredRuntimeState, InitStatus, ProvisioningStatus
+from agentworks.debian import CURRENT_DEBIAN_RELEASE
 from agentworks.errors import (
+    AgentworksError,
     AlreadyExistsError,
     AuthorizationError,
     ConfigError,
@@ -38,21 +39,18 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
     UserAbort,
+    ValidationError,
 )
 from agentworks.execution import trust
+from agentworks.execution.errors import TrustMissing, VMNotReady
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
-from agentworks.linux_users import managed_home
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
-
-from ._helpers import _require_vm
-from .boundary import _warn_legacy_release
-from .pam_env import warn_pam_env_settings
 
 if TYPE_CHECKING:
     from typing import NoReturn
 
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.transports import Transport
 
@@ -67,10 +65,10 @@ if TYPE_CHECKING:
 # ``monkeypatch.setattr(vm_manager, "verify_tailscale_available", ...)``
 # would silently fail to take effect. Every call to one of these four
 # names below therefore goes through ``import agentworks.vms.manager as
-# _mgr`` at call time. ``tailscale.py``'s ``_ensure_tailscale`` needs the
-# same treatment for ``verify_tailscale_available`` / ``rejoin_tailscale``
-# (it is not only ``lifecycle.py`` that consumes these names, despite
-# there being one canonical import site in ``manager/__init__.py``).
+# _mgr`` at call time. ``reinit.py`` and ``recover.py`` give
+# ``verify_tailscale_available`` the same treatment (it is not only
+# ``lifecycle.py`` that consumes these names, despite there being one
+# canonical import site in ``manager/__init__.py``).
 
 
 def _warn_init_cancel(vm_name: str) -> None:
@@ -92,12 +90,17 @@ def _warn_init_cancel(vm_name: str) -> None:
 def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoReturn:
     """Map a non-cancellation failure in either init phase to its outcome.
 
-    A VM whose provisioning is ``failed`` (Phase A marked it so) raises a
+    A VM whose provisioning is not ``complete`` (it never passed Phase A, so
+    reinit and every ordinary command refuse it) raises a
     ``ProvisioningError`` with delete guidance; otherwise the VM provisioned
     but a later step failed, so it raises an ``ExternalError`` (the VM may
     still be usable, reinit guidance). Both carry the ``Details:`` pointer to
     the most recent ``vm-create`` log when one exists. Shared by Phase A and
     Phase B so both fail identically.
+
+    A cause whose hint names ``agw vm recover`` (python3 missing, no host-key
+    record) is not chained on a VM that never completed: recover refuses that
+    VM, so the delete guidance is the only hint.
     """
     from agentworks.ssh import LOG_DIR
 
@@ -107,13 +110,16 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
         log_hint = f"\nDetails: {logs[0]}"
 
     vm = db.get_vm(vm_name)
-    if vm is not None and vm.provisioning_status == ProvisioningStatus.FAILED.value:
-        raise ProvisioningError(
+    if vm is not None and vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
+        failure = ProvisioningError(
             f"provisioning failed: {cause}{log_hint}",
             entity_kind="vm",
             entity_name=vm_name,
-            hint=f"VM '{vm_name}' is in a failed state. Use 'vm delete {vm_name}' to clean up.",
-        ) from cause
+            hint=f"VM '{vm_name}' did not complete provisioning. Use 'vm delete {vm_name}' to clean up.",
+        )
+        if isinstance(cause, (TrustMissing, VMNotReady)):
+            raise failure from None
+        raise failure from cause
     raise ExternalError(
         f"initialization failed: {cause}{log_hint}",
         entity_kind="vm",
@@ -254,6 +260,10 @@ def create_vm(
     resolved_memory = vm_tmpl.memory
     resolved_disk = vm_tmpl.disk
     _mgr.verify_tailscale_available()
+    # Phase A reaches the new VM through agentworks.execution: an unsupported
+    # client refuses here, before the platform builds a VM or the join spends
+    # the auth key.
+    execution.resolve_ssh()
     from agentworks.capabilities.base import OperationScope, ScopeLevel
     from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.readiness import preflight_all
@@ -284,6 +294,17 @@ def create_vm(
     # leaves nothing behind.
     slug = _mgr._resolve_system_slug(db)
 
+    # The VM's OS hostname, computed once at create time and recorded on the
+    # row: {slug}-{name} with a slug, the bare name without. Bounded by
+    # construction: slug max 20 + dash + name max 38 (MAX_VM_NAME_LENGTH)
+    # = 59 characters, inside the 63-char DNS-label limit. The cap is 38
+    # (not 42) because the tighter sink is Azure's virtual-network name
+    # {slug}-{name}-vnet, capped at 64: 20 + 1 + 38 + 5 = 64. See
+    # naming.py MAX_VM_NAME_LENGTH for the MIN-over-sinks derivation. The
+    # pending node's preflight hands it to the platform before any secret
+    # resolves.
+    hostname = f"{slug}-{vm_name}" if slug else vm_name
+
     template_node = vm_template_node(vm_tmpl)
     site_node = vm_site_node(registry, site)
     creation_release = CURRENT_DEBIAN_RELEASE
@@ -291,6 +312,7 @@ def create_vm(
         db,
         vm_name,
         creation_release,
+        hostname,
         template_node,
         site_node,
         cred_nodes,
@@ -340,22 +362,9 @@ def create_vm(
     with output.section("Resolving Secrets"):
         resolver.resolve()
 
-    # Polymorphic post-Tailscale-ready hook. Azure overrides to delete
-    # its ephemeral bootstrap SSH allow rule (closing provisioning
-    # access the instant Tailscale becomes reachable); other platforms
-    # are no-op. It fires deep inside Phase A, so it closes over the same
-    # ``platform_obj`` / ``platform_ctx`` the create op ran with (both
-    # bound below, well before bootstrap_vm invokes this), which is what
-    # delivers the SP credential to the NSG call with no ambient
-    # fallback.
-    def _on_tailscale_ready() -> None:
-        refreshed = db.get_vm(vm_name)
-        assert refreshed is not None
-        platform_obj.post_tailscale_ready(refreshed, platform_ctx)
-
     # The keepalive hold spans BOTH init phases: WSL2 anchors its distro
-    # against idle shutdown between Phase A (wsl.exe transport) and Phase B
-    # (Tailscale SSH); the other platforms' hold is a no-op. It is entered
+    # against idle shutdown through Phase A and Phase B, both over SSH at its
+    # tailnet address; the other platforms' hold is a no-op. It is entered
     # (into ``init_stack``) just before Phase A and released when the stack
     # exits, after Phase B, on every path. Provisioning (platform create +
     # Phase A state recording/connectivity) and Initialization (Phase B) are
@@ -365,9 +374,14 @@ def create_vm(
     from contextlib import ExitStack
 
     from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.interrupts import termination_as_interrupt
 
     setup_failures: list[SetupFailure] = []
     with ExitStack() as init_stack:
+        # First in, so last out: SIGTERM and SIGHUP unwind like Ctrl-C through
+        # every interrupt arm below (a cloud's create rolls back its bootstrap
+        # allow and its partial VM) and through the stack's own exits.
+        init_stack.enter_context(termination_as_interrupt())
         setup_guard = init_stack.enter_context(native_mutation_guard(db.path, vm_name))
         from agentworks.harness_setup.lifecycle import require_prepared_setup
 
@@ -384,14 +398,10 @@ def create_vm(
             # own); lima and wsl2 have nothing to authenticate, so it is a
             # silent no-op for them. The credentials' write-step runup stays
             # deferred into initialization, under the skip-and-degrade policy.
-            from agentworks.secrets.line_safety import (
-                LineOrientedSecretUse,
-                require_line_safe_secret,
-            )
+            from .boundary import require_tailscale_auth_key
 
-            tailscale_auth_key = require_line_safe_secret(
+            tailscale_auth_key = require_tailscale_auth_key(
                 scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key),
-                use=LineOrientedSecretUse.TAILSCALE,
                 secret_name=vm_tmpl.tailscale_auth_key,
             )
             from agentworks.git_credentials import (
@@ -402,16 +412,6 @@ def create_vm(
             credential_ops = credential_requests(cred_nodes, scoped_ctx)
             git_redactions = credential_redactions(cred_nodes, resolver.values)
             site_node.runup(scoped_ctx(site_node.secret_refs()))
-
-            # The VM's OS hostname, computed once at create time and recorded on the
-            # row: {slug}-{name} with a slug, the bare name without. Bounded by
-            # construction: slug max 20 + dash + name max 38 (MAX_VM_NAME_LENGTH)
-            # = 59 characters, inside the 63-char DNS-label limit. The cap is 38
-            # (not 42) because the tighter sink is Azure's virtual-network name
-            # {slug}-{name}-vnet, capped at 64: 20 + 1 + 38 + 5 = 64. See
-            # config/validation.py MAX_VM_NAME_LENGTH for the MIN-over-sinks
-            # derivation.
-            hostname = f"{slug}-{vm_name}" if slug else vm_name
 
             # Create DB record with as-provisioned resource values. This is the
             # pending VM's realization artifact (what teardown deletes), so the
@@ -446,8 +446,8 @@ def create_vm(
             # Reset the host-key store file now that the name is ours, so a
             # reused name never inherits a key: it is left empty and private,
             # and Phase A's first connection writes the VM's key into it.
-            # Nothing else writes it before then, so the unwinds below need no
-            # store cleanup.
+            # Every unwind below removes it with the row (the pending node's
+            # teardown); a retained or kept row keeps it, as delete removes it.
             try:
                 trust.begin_enrollment(vm_name)
             except BaseException:
@@ -504,6 +504,10 @@ def create_vm(
 
             init_stack.callback(_close_create_logger)
 
+            # The provisioning trust file exists for the platform's create
+            # alone: cloud provisioning reaches the VM at its public address
+            # before it is in the store, and nothing after create does.
+            provisioning_files = ExitStack()
             try:
                 request = ProvisionRequest(
                     vm_name=vm_name,
@@ -513,11 +517,7 @@ def create_vm(
                     admin_username=resolved_admin_username,
                     ssh_public_key=prepared_ssh.public_text,
                     ssh_private_key=config.operator.ssh_private_key,
-                    # Cloud provisioning reaches the VM at its public address,
-                    # before it is in the store. The file is deleted when the
-                    # stack unwinds, after Phase B, because core keeps using
-                    # the create-time transport until Phase A.
-                    provisioning_trust=init_stack.enter_context(trust.provisioning_binding(vm_name)),
+                    provisioning_trust=provisioning_files.enter_context(trust.provisioning_binding(vm_name)),
                     tailscale_auth_key=tailscale_auth_key,
                     progress=logger,
                     cpus=resolved_cpus,
@@ -535,10 +535,12 @@ def create_vm(
                 # detail one notch deeper).
                 output.info(f"Creating VM '{vm_name}' on vm-site '{site}' ({creation_release.value})...")
             except BaseException:
+                provisioning_files.close()
                 log.unwind()
                 raise
             try:
-                result = platform_obj.create(request, platform_ctx)
+                with provisioning_files:
+                    result = platform_obj.create(request, platform_ctx)
             except RetainedProvisioningError as e:
                 # Rollback could not prove the backend clean. Persist the
                 # platform's exact identifiers and keep the provisional row so
@@ -573,9 +575,10 @@ def create_vm(
                 log.unwind()
                 output.warn(f"Log: {logger.display_path}")
                 raise
-            except (AuthorizationError, ConfigError, StateError, TokenRejectedError):
+            except (AuthorizationError, ConfigError, StateError, TokenRejectedError, ValidationError):
                 # These failures are already typed with their owning
-                # platform's remediation.
+                # platform's remediation (a ValidationError is a request the
+                # platform refuses before it mutates anything).
                 # A compliant platform has not mutated, or has rolled back,
                 # so only the provisional row remains to unwind.
                 log.unwind()
@@ -586,6 +589,8 @@ def create_vm(
                     f"provisioning failed: {e}\nDetails: {logger.display_path}",
                     entity_kind="vm",
                     entity_name=vm_name,
+                    # The wrapped error's own guidance (a rerun, the admin console) still applies.
+                    hint=e.hint if isinstance(e, AgentworksError) else None,
                 ) from e
             db.record_vm_started(vm_name)
             # The platform's rollback window closes here: its create returned
@@ -601,44 +606,15 @@ def create_vm(
                 render_overlay_outcome(overlay_outcome)
                 raise
 
-            # A platform's success return does not prove the guest's identity,
-            # so core independently observes the live release over the returned
-            # transport. Metadata is
-            # already durable: if attestation fails after the platform closed
-            # its rollback window, the failed row still addresses the backend
-            # for an explicit delete.
-            try:
-                output.info(f"Confirming Debian release {creation_release.value}...")
-                observed_release = probe_debian_release(
-                    result.native_transport,
-                    expected=creation_release,
-                )
-            except (KeyboardInterrupt, UserAbort):
-                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-                output.warn(
-                    f"VM '{vm_name}' exists but its Debian release was not verified; "
-                    f"run 'agw vm delete {vm_name}' to remove it."
-                )
-                raise
-            except Exception as e:
-                db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
-                raise StateError(
-                    f"Agentworks could not verify VM '{vm_name}' as Debian {creation_release.value} "
-                    f"after vm-platform/{platform_obj.name} returned success",
-                    entity_kind="vm",
-                    entity_name=vm_name,
-                    hint=f"Run 'agw vm delete {vm_name}' to remove the unverified VM, then update the platform.",
-                ) from e
-
-            db.update_vm_debian_release(vm_name, observed_release)
-
-            # -- Phase A: record + verify connectivity (the tail of Provisioning) --
-            # Past the unwind window: if anything below fails, the VM exists on
-            # the remote host and is kept (debuggable, reinit-able). The hold is
-            # entered here so it spans Phase A and Phase B; the row exists (the
-            # insert above), so no power-state convergence is threaded, only the
-            # hold-span. The manager closes the Provisioning section explicitly
-            # after Phase A returns.
+            # -- Phase A: first contact and the VM contract (the tail of Provisioning) --
+            # Past the unwind window: the VM exists on the backend, so it is
+            # kept, and only an attested one is ever marked complete. Metadata
+            # is already durable, so a failed row still addresses the backend
+            # for an explicit delete. The hold is entered here so it spans
+            # Phase A and Phase B; the row exists (the insert above), so no
+            # power-state convergence is threaded, only the hold-span. The
+            # manager closes the Provisioning section explicitly after Phase A
+            # returns.
             init_row = db.get_vm(vm_name)
             assert init_row is not None, "create_vm inserted the row before init"
             try:
@@ -646,24 +622,37 @@ def create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                ts_target, home = _mgr.bootstrap_vm(
+                ts_target, home, observed_release = _mgr.bootstrap_vm(
                     db,
                     config,
                     vm_name,
-                    result.native_transport,
                     platform_obj,
                     platform_ctx,
                     logger,
                     admin_username=resolved_admin_username,
-                    tailscale_ip=result.tailscale_ip,
-                    on_tailscale_ready=_on_tailscale_ready,
+                    tailnet_address=result.tailnet_address,
+                    expected_release=creation_release,
                 )
                 output.info("Provisioning complete.")
             except (KeyboardInterrupt, UserAbort):
                 # An operator abort must never downgrade to a
                 # Provisioning/External error; re-raise as itself after the
                 # recovery-guidance warning.
-                _warn_init_cancel(vm_name)
+                # Phase A writes complete only once the VM contract passed, and every
+                # ordinary command refuses a VM that is not complete, so the status
+                # chooses the guidance and nothing needs marking here. A read that
+                # fails must not replace the interrupt, and the delete wording is
+                # the safe one when the status is unknown.
+                try:
+                    row = db.get_vm(vm_name)
+                except Exception:
+                    row = None
+                if row is None or row.provisioning_status != ProvisioningStatus.COMPLETE.value:
+                    output.warn(
+                        f"VM '{vm_name}' exists but was not verified; run 'agw vm delete {vm_name}' to remove it."
+                    )
+                else:
+                    _warn_init_cancel(vm_name)
                 render_overlay_outcome(overlay_outcome)
                 raise
             except Exception as e:
@@ -706,13 +695,9 @@ def create_vm(
     # Provisioning completed; this re-sync captures any state Phase B changed
     # (nothing today) and stays silent (announce=False) to avoid a duplicate
     # line.
-    try:
-        from agentworks.ssh_config import sync_ssh_config
+    from agentworks.ssh_config import sync_ssh_config_or_warn
 
-        sync_ssh_config(config, db, announce=False)
-    except Exception as e:
-        output.warn(f"SSH config sync failed: {e}")
-        output.info("VM is likely still usable.")
+    sync_ssh_config_or_warn(config, db, announce=False)
 
     # Final status is set by run_initialization (COMPLETE or PARTIAL). The
     # terminal outcome line renders at column 0 via result().
@@ -730,310 +715,3 @@ def create_vm(
 
         suffix = setup_completion_suffix(read_native_setup(db, "vm", vm_name))
         output.result(f"VM '{vm_name}' is ready{suffix}.")
-
-
-def reinit_vm(
-    db: Database,
-    config: Config,
-    name: str,
-    *,
-    interaction: TtyInteractionPolicy,
-) -> None:
-    """Re-run initialization on a VM that has already been provisioned.
-
-    Requires provisioning_status == complete and a valid Tailscale
-    connection. Orchestrated: the graph derives from the VM's row and
-    the admin template's declared credentials; the activation gate
-    replaces this command's ``keep_active`` use, opening BEFORE the
-    preflight sweep (its just-in-time values seed the boundary
-    resolver); tokens are delivered scoped to each node's declared
-    names. Nothing here is created, so there is no realization log and
-    nothing to unwind; a failed init leaves the VM re-runnable, as
-    before.
-    """
-    import agentworks.vms.manager as _mgr
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.transports import transport
-
-    # build_registry runs first so framework miss-policies surface
-    # before any template / DB / VM business logic.
-    registry = load_request_registry(config, live_database=db)
-
-    vm = _require_vm(db, name)
-    from agentworks.harness_setup.locking import native_mutation_guard
-
-    with native_mutation_guard(db.path, name) as guard:
-        selected = _require_vm(db, name)
-        if selected.vm_uuid != vm.vm_uuid:
-            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
-        vm = selected
-        if vm.debian_release is not None:
-            _warn_legacy_release(vm)
-
-        from agentworks.capabilities.base import OperationScope, ScopeLevel
-        from agentworks.git_credentials.nodes import git_credential_node
-        from agentworks.orchestration.activation import (
-            activation_gate,
-            gate_secret_resolver,
-        )
-        from agentworks.orchestration.readiness import preflight_all
-        from agentworks.orchestration.secrets import ScopedSecrets, secret_union
-        from agentworks.orchestration.walk import walk
-        from agentworks.secrets.resolver import Resolver
-        from agentworks.vms.nodes import live_vm_node
-
-        resolver = Resolver(config, registry, interaction=interaction)
-
-        # BUILD before any secret collection: a stranded site fails here
-        # (inside the live node's site edge) with the manifest hint instead
-        # of after git-token prompts. Construction is cheap; the walk union
-        # below is the boundary's source, nothing resolves yet.
-        vm_node = live_vm_node(db, config, registry, vm, held_native_guard=guard)
-
-        # Resolve the VM's template so init uses the right values
-        from agentworks.instance_specs import decode_stored_vm_overlays, ensure_effective_references_enabled
-        from agentworks.legacy_claude import legacy_component
-        from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_base
-        from agentworks.vms.template import effective_references
-        from agentworks.vms.templates import resolve_template_with_provenance
-
-        original_overlay = db.instance_state.get_desired_overlay("vm", vm.name)
-        base = resolve_admin_base(registry, vm.admin_template).value.active_harness_integrations
-        stored_overlays = (
-            None if original_overlay is None else decode_stored_vm_overlays(original_overlay, legacy_user_base=base)
-        )
-        legacy_conversion = (
-            (original_overlay, stored_overlays.payload)
-            if original_overlay is not None
-            and stored_overlays is not None
-            and legacy_component(original_overlay) is not None
-            else None
-        )
-        stored_vm_overlay = None if stored_overlays is None else stored_overlays.vm
-        layered_reinit_vm_tmpl = resolve_template_with_provenance(
-            registry,
-            vm.template,
-            overlay=None if stored_vm_overlay is None else stored_vm_overlay.declaration,
-            instance_name=vm.name,
-        )
-        reinit_vm_tmpl = layered_reinit_vm_tmpl.value
-        ensure_effective_references_enabled(
-            registry,
-            effective_references(reinit_vm_tmpl, ("vm", vm.name), layered_reinit_vm_tmpl.provenance),
-        )
-
-        # Refuse a recipe drawing on a disabled plugin's declarable resource before
-        # the reinit realize (Phase 7, LLD b). Drift guard:
-        # tests/agents/test_recipe_gate_drift.py. The admin-template recipe is gated
-        # below, once it is resolved.
-        from agentworks.resources.access import ensure_recipe_enabled
-
-        ensure_recipe_enabled(registry, "vm-template", reinit_vm_tmpl.name)
-
-        if vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
-            raise StateError(
-                f"VM '{name}' provisioning is '{vm.provisioning_status}', not 'complete'. Cannot reinitialize.",
-                entity_kind="vm",
-                entity_name=name,
-            )
-
-        if vm.tailscale_host is None:
-            raise StateError(
-                f"VM '{name}' has no Tailscale IP",
-                entity_kind="vm",
-                entity_name=name,
-            )
-
-        # Resolve the admin-template the VM was created with (NULL column =
-        # reserved ``default``), not always ``default``. Mirror create's
-        # clean error if the operator has since removed the declaration, so a
-        # dropped admin-template surfaces as a typed error naming the selector
-        # rather than a raw KeyError traceback. This cheap row + registry
-        # check bails before the Tailscale probe below.
-        selected_admin_template = "default" if vm.admin_template is None else vm.admin_template
-        from agentworks.vms.admin import effective_references as admin_effective_references
-        from agentworks.vms.admin_templates import resolve_template_with_provenance as resolve_admin_template
-
-        layered_admin = resolve_admin_template(
-            registry,
-            selected_admin_template,
-            overlay=None if stored_overlays is None else stored_overlays.admin,
-            instance_name=vm.name,
-        )
-        admin = layered_admin.value
-        ensure_effective_references_enabled(
-            registry,
-            admin_effective_references(admin, ("vm", vm.name), layered_admin.provenance),
-        )
-
-        # Gate the selected admin-template's recipe too, before backend work
-        # (Phase 7, LLD b).
-        ensure_recipe_enabled(registry, "admin-template", selected_admin_template)
-
-        # Validate the configured public/private pair after all cheap declaration
-        # and recipe checks, but before the applied-state boundary, activation,
-        # secret resolution, or transport construction. Authorized-key
-        # reconciliation repeats this read immediately before its remote write so
-        # a path replacement during the operation still fails safely.
-        from agentworks.vms.applied_state import prepare_configured_ssh_identity
-
-        prepare_configured_ssh_identity(
-            config.operator.ssh_public_key,
-            config.operator.ssh_private_key,
-        )
-
-        # Reinit is the one establishment path that may operate on a historic VM
-        # with no SSH evidence. Known drift still refuses before activation or
-        # transport construction.
-        _mgr.require_vm_ssh_boundary(db, config, vm, allow_not_recorded=True)
-
-        _mgr.verify_tailscale_available()
-        cred_nodes = tuple(git_credential_node(registry, cred_name) for cred_name in admin.git_credentials)
-
-        # The reinit graph: the live VM (whose row's site field is its edge
-        # to the vm-site node) plus each declared credential as its own
-        # root. The vm-template is deliberately NOT a node here: its
-        # Tailscale key is not part of reinit's planned ops (a broken
-        # node's rejoin resolves it on the gate's own conditional repair
-        # path), so it must not join the boundary union.
-        nodes = walk(vm_node, *cred_nodes)
-        for secret_name in secret_union(nodes):
-            resolver.register_name(secret_name)
-
-        from agentworks.harness_setup.lifecycle import prepare_vm_setup
-
-        setup_inputs = prepare_vm_setup(db, registry, name=name, template=reinit_vm_tmpl, admin=admin)
-        for setup_input in setup_inputs:
-            setup_input.register(resolver, registry)
-
-        scope = OperationScope(
-            level=ScopeLevel.VM,
-            system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-            vm=name,
-        )
-
-        def scoped_ctx(
-            secret_names: tuple[str, ...],
-            *,
-            admin_target: Transport | None = None,
-            agent_target: Transport | None = None,
-        ) -> RunContext:
-            return RunContext(
-                config=config,
-                operation_scope=scope,
-                admin_target=admin_target,
-                agent_target=agent_target,
-                secrets=ScopedSecrets(resolver.values, secret_names),
-            )
-
-        setup_failures: list[SetupFailure] = []
-        with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
-            # Credentials and active setup env/config secrets share one eager
-            # boundary. Install-command runners keep their existing environment.
-            with output.section("Preflight"):
-                from agentworks.git_credentials import announce_git_credentials
-
-                output.info(f"Checking vm-site/{vm.site}...")
-                announce_git_credentials(cred_nodes)
-                preflight_all(
-                    nodes,
-                    RunContext(config=config, operation_scope=scope),
-                    registry=registry,
-                    interaction=interaction,
-                )
-
-            with output.section("Resolving Secrets"):
-                resolver.resolve()
-
-            # No command-root runup at reinit: reinit reaches the VM over
-            # Tailscale SSH and never calls the platform API in its planned
-            # ops, and the git-credential runup is deferred into the
-            # Initialization phase (the skip-and-degrade policy at the
-            # write step). So the next banner the operator sees is
-            # Initialization.
-            from agentworks.git_credentials import (
-                credential_redactions,
-                credential_requests,
-            )
-
-            credential_ops = credential_requests(cred_nodes, scoped_ctx)
-            git_redactions = credential_redactions(cred_nodes, resolver.values)
-
-            # Build Tailscale SSH target with logging
-            from agentworks.ssh import SSHLogger
-
-            # The activation gate and any conditional Tailscale rejoin finish
-            # before this logger exists. The rejoin path separately enforces that
-            # its auth-key-bearing transport has no logger, so this operation log's
-            # redaction set includes credentials and every resolved setup input
-            # before any incremental initialization log write.
-            logger = SSHLogger(
-                name,
-                "vm-reinit",
-                redactions=tuple(dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))),
-            )
-            ts_target = transport(vm, config, default_timeout=60, logger=logger)
-
-            home = managed_home(vm.admin_username)
-
-            # try/finally ensures the SSH logger is closed exactly once,
-            # AFTER any warning output. Matches the pattern used by agent
-            # create / reinit and workspace create / rehome.
-            try:
-                try:
-                    verified_release = _mgr.verified_vm_release(db, vm, ts_target)
-                    _warn_newly_observed_legacy(vm, verified_release)
-                    warn_pam_env_settings(ts_target, name)
-                    _mgr.run_initialization(
-                        db,
-                        config,
-                        registry,
-                        reinit_vm_tmpl,
-                        admin,
-                        name,
-                        ts_target,
-                        credential_ops,
-                        home,
-                        vm.admin_username,
-                        logger,
-                        debian_release=verified_release,
-                        operation=_mgr.VMInitializationOperation.VM_REINIT,
-                        setup_guard=guard,
-                        setup_failures=setup_failures,
-                        legacy_conversion=legacy_conversion,
-                        setup_inputs=setup_inputs,
-                        setup_values=resolver.values,
-                    )
-                except KeyboardInterrupt:
-                    output.warn(
-                        f"Cancelling vm reinit '{name}'. The VM may be in a partial state. "
-                        f"Re-run 'vm reinit {name}' to retry. Log: {logger.display_path}"
-                    )
-                    raise
-                except Exception:
-                    output.warn(f"Log: {logger.display_path}")
-                    raise
-            finally:
-                logger.close()
-
-        refreshed_vm = db.get_vm(name)
-        assert refreshed_vm is not None
-        # Terminal outcome line at column 0 via result().
-        if setup_failures:
-            output.info(f"Log: {logger.display_path}")
-        raise_setup_failures(setup_failures)
-        if refreshed_vm.init_status == InitStatus.PARTIAL.value:
-            output.result(f"VM '{name}' reinitialized (with warnings, see above)")
-            output.info(f"Log: {logger.display_path}")
-        else:
-            from agentworks.harness_setup.outcomes import setup_completion_suffix
-            from agentworks.harness_setup.state import read_native_setup
-
-            suffix = setup_completion_suffix(read_native_setup(db, "vm", name))
-            output.result(f"VM '{name}' reinitialized{suffix}.")
-
-
-def _warn_newly_observed_legacy(vm: VMRow, observed: DebianRelease) -> None:
-    """Warn after observation only when the command entered with an unknown row."""
-    if vm.debian_release is None:
-        _warn_legacy_release(replace(vm, debian_release=observed))

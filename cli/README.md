@@ -156,9 +156,13 @@ the site's placement host for an ssh-placed site); WSL2 the distro plus its inst
 second Ctrl-C abandons that cleanup, printing what to remove manually: the resource group and name
 prefix, the node and VMID, or the exact removal command (`limactl delete --force <name>`, run on the
 placement host for an ssh-placed site, or `wsl --unregister <name>` plus deleting the install
-directory it names). Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of
-`vm create`) it prints a recovery hint: the next command to run (`vm reinit`, `vm delete --force`,
-...). Every cancellation exits with the conventional SIGINT exit code (130).
+directory it names). On AWS, Proxmox, Lima and WSL2, a cleanup that is abandoned this way, or that
+fails or cannot show the backend removed, after a failure or a Ctrl-C alike, keeps the VM in a
+failed state with the identifiers of what may remain, so `agw vm delete <name>` can finish the
+removal; that `vm create` exits with status 1, not 130. Where rollback isn't possible (`vm reinit`,
+`agent reinit`, the init phase of `vm create`) it prints a recovery hint: the next command to run
+(`vm reinit`, `vm delete --force`, ...). Every other cancellation exits with the conventional SIGINT
+exit code (130).
 
 ## Commands
 
@@ -203,10 +207,10 @@ running children without clearing their targets. There is no background controll
 
 Batch session start/restart and reconciliation collect eligible workload secrets before any deferred
 runtime changes. A required workload secret failure prevents that complete deferred batch; VM
-activation and conditional repair may already have completed. An infrastructure credential failure
-blocks only dependent families unless an eligible workload also requires that name. Accepted targets
-survive later execution failure or cancellation. Dry run changes no targets or runtimes and does not
-preview or resolve workload secrets, though provider observation may require credentials. Read
+activation may already have completed. An infrastructure credential failure blocks only dependent
+families unless an eligible workload also requires that name. Accepted targets survive later
+execution failure or cancellation. Dry run changes no targets or runtimes and does not preview or
+resolve workload secrets, though provider observation may require credentials. Read
 [Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption, failure
 boundaries, WSL2 access limits, and rollback.
 
@@ -332,12 +336,11 @@ Actual resolution makes one bounded, source-first pass. Each source receives eve
 candidate in the batch. Ordinary missing values and sources blocked by TTY access fall through;
 invalid mappings, authentication errors, provider rejection, transport errors, and timeouts are hard
 failures for that secret and do not fall through. Values remain inside the resolution path and are
-never part of inspection results. Commands resolve their statically planned secrets before mutation,
-except deliberately lazy conditional work such as Tailscale repair. A complete batch that is already
-terminal stops before opening another provider source; other skipped names report the core-only
-`batch-doomed-before-interaction` reason. Static viability never predicts from TTY access; the
-backend receives that exact fact and decides whether it is limiting. Explicit partial reveal
-continues independent names.
+never part of inspection results. Commands resolve their statically planned secrets before mutation.
+A complete batch that is already terminal stops before opening another provider source; other
+skipped names report the core-only `batch-doomed-before-interaction` reason. Static viability never
+predicts from TTY access; the backend receives that exact fact and decides whether it is limiting.
+Explicit partial reveal continues independent names.
 
 Preflight uses the same provider-aware preview contract as the inspection commands, fixed at no
 operator impact. It may read a provider and safely discard a value, but it cannot prompt or perform
@@ -596,9 +599,12 @@ as the VM admin, not root, and explicitly use `sudo` for privileged work.
 
 VM creation follows a two-phase lifecycle tracked by separate status columns:
 
-1. **Provisioning** (`provisioning_status`): one-time, platform-specific, over the provisioning
-   transport (Lima shell, SSH, or WSL2 exec): create user, install system packages, add SSH key,
-   install and join Tailscale
+1. **Provisioning** (`provisioning_status`): one-time and platform-specific: create user, install
+   system packages, add SSH key, install and join Tailscale. The platform runs these through a
+   provider's boot payload or its own root channel (`limactl shell` for Lima, `wsl.exe` for WSL2,
+   SSH to the public address for AWS, Azure and GCP, the QEMU guest agent for Proxmox), and always
+   joins Tailscale through that channel. Core then connects over Tailscale SSH, records the host key
+   and checks the VM contract; provisioning is complete only once that passes
 
 2. **Initialization** (`init_status`): repeatable via `vm reinit`, over Tailscale SSH: configure apt
    sources, install apt packages, install snap packages, install mise, set shell, reconcile SSH
@@ -613,13 +619,13 @@ refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initia
 current config and both stored final layers. See
 [Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
 
-Agentworks records the configured SSH identity only after a VM create or reinit proves the admin
-`authorized_keys` result. It does not synthesize evidence for VMs created before this tracking was
-introduced. Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH
-commands will use it. If the configured key no longer works, use `agw vm shell NAME --platform`
-where the platform offers a usable recovery transport, restore the configured public key, and
-reinitialize. Some platform transports also depend on the configured key; use provider-native
-recovery or recreate the VM when that path cannot connect.
+Agentworks records the configured SSH identity only after a VM create, reinit or recover proves the
+VM accepts it. It does not synthesize evidence for VMs created before this tracking was introduced.
+Such a VM needs one successful `agw vm reinit NAME` before ordinary canonical SSH commands will use
+it. If the configured key no longer works, or you changed it, `agw vm recover NAME` restores the
+configured public key through the platform's own channel and records it once the VM answers over SSH
+with it. On a cloud that channel is SSH with the same key, so use the provider's console or recreate
+the VM when the VM refuses it.
 
 Agentworks verifies each VM's SSH host key against its own per-VM store, never trusting a first
 connection. A VM created before the store existed needs a one-time `agw vm import-host-keys --all`;
@@ -750,6 +756,13 @@ convention `AW_SECRET_<UPPER_SNAKE_CASE>` derived from the secret's name. The Ta
 credential using its default reference (`git-token-<name>`) reads from `AW_SECRET_GIT_TOKEN_<NAME>`;
 and so on. Override the convention per secret via the secret's `backend_mappings`
 (`env-var: CUSTOM_NAME`).
+
+`agw` takes every `AW_SECRET_` variable out of its own environment as it starts, keeping the values
+for the `env-var` backend, so no program it runs (`ssh`, `limactl` and the host agent Lima leaves
+running, `wsl.exe`, `op`, your editor) inherits one. A variable that a mapping names outside the
+`AW_SECRET_` prefix is your own and is passed on like the rest of your environment. This covers
+children only: the environment `agw` itself started with stays readable, for as long as it runs, to
+your own user and to root (`/proc/<pid>/environ`, `ps eww`).
 
 Use `agw secret list` to see the exact env var name for each declared or auto-declared secret, and
 `agw secret describe <name>` for the full per-secret view (origin, usages, backend mappings,

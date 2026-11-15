@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import shutil
@@ -9,17 +10,23 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 
 from agentworks.errors import ConfigError, ValidationError
 from agentworks.execution import ssh_process, trust
 from agentworks.execution.client import SSHClient
+from agentworks.execution.envelope import StreamFilter, new_nonce
 from agentworks.execution.errors import TrustMissing
+from agentworks.execution.pump import StopReason
 from agentworks.execution.requests import Forward
+from agentworks.execution.results import Unknown, UnknownReason
 from agentworks.execution.ssh_process import ArgvMode, Destination, VMPolicy, build_argv, stage0_command
 from agentworks.execution.trust import TrustBinding, TrustMode
-from tests.conftest import seed_vm_trust
+from tests.conftest import pretend_windows_console, requires_posix_shell, seed_vm_trust
+from tests.execution.conformance.lanes import SHELLS, require_shell
 
 SSH = shutil.which("ssh")
 needs_ssh = pytest.mark.skipif(SSH is None, reason="requires an installed OpenSSH client")
@@ -124,6 +131,32 @@ def test_the_client_log_is_read_from_its_end(tmp_path: Path) -> None:
     assert ssh_process.client_log_text(tmp_path / "missing") == ""
 
 
+@pytest.mark.parametrize(
+    ("log_text", "expected"),
+    [
+        ("agentworks@100.64.0.9: Permission denied (publickey).\n", UnknownReason.AUTH_FAILED),
+        ("agentworks@100.64.0.9: Permission denied (publickey,password).\n", UnknownReason.AUTH_FAILED),
+        ("ssh: connect to host 100.64.0.9 port 22: Connection refused\n", UnknownReason.CONNECTION),
+    ],
+)
+def test_a_refused_key_in_the_client_log_is_an_authentication_failure(
+    tmp_path: Path, log_text: str, expected: UnknownReason
+) -> None:
+    log = tmp_path / "log"
+    log.write_text(log_text)
+    session = SimpleNamespace(
+        stdout=StreamFilter(new_nonce()),
+        stderr=StreamFilter(new_nonce()),
+        exit_status=255,
+        stdout_abandoned=False,
+        stderr_abandoned=False,
+    )
+
+    result = ssh_process.outcome(session, StopReason.EOF, log)  # type: ignore[arg-type]
+
+    assert result.completion == Unknown(expected)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="signal statuses are POSIX")
 def test_a_client_killed_by_a_signal_reports_128_plus_the_signal() -> None:
     program = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
@@ -177,9 +210,24 @@ def test_an_identity_file_ssh_would_expand_is_refused_by_name(tmp_path: Path) ->
 # -- ssh -G: what the installed client would really do ---------------------------------
 
 
+@pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
+def test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted(key_dir: str, tmp_path: Path) -> None:
+    """The ssh shipped with Git for Windows refuses a quoted value without whitespace (#898)."""
+    key = (tmp_path / key_dir / "id_ed25519").as_posix()
+    quote = '"' if key_dir != "keys" else ""
+
+    argv = argv_for(Path(key))
+
+    assert f"IdentityFile={quote}{key}{quote}" in argv
+    assert f"CertificateFile={quote}{key}/disabled-certificate{quote}" in argv
+
+
 @needs_ssh
-def test_the_policy_takes_effect(tmp_path: Path) -> None:
-    key = tmp_path / "dir with space" / "id_ed25519"
+@pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
+def test_the_policy_takes_effect(key_dir: str, tmp_path: Path) -> None:
+    """The installed client may accept a quoted value without whitespace too, so this
+    cannot reproduce #898 alone; ``test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted`` guards that."""
+    key = tmp_path / key_dir / "id_ed25519"
 
     config = effective_config(argv_for(key))
 
@@ -267,3 +315,99 @@ def test_stage0_is_one_short_line_that_no_account_shell_rewrites() -> None:
     assert command.startswith("/usr/bin/python3 -I -S -c '")
     assert command.endswith(f"{program}'")
     assert stage0_command("/tmp/agw-handover-ab/s").endswith("' /tmp/agw-handover-ab/s")
+
+
+# -- The host policy -------------------------------------------------------------------
+
+
+def host_argv(mode: Literal[ArgvMode.PIPE, ArgvMode.TERMINAL] = ArgvMode.PIPE) -> list[str]:
+    return ssh_process.build_host_argv(SSHClient(SSH or "/usr/bin/ssh", (9, 2)), "me@gpu-box", mode, "limactl list")
+
+
+def test_a_host_argv_puts_the_host_after_the_option_fence_and_the_command_last() -> None:
+    argv = host_argv()
+
+    assert argv[-3:] == ["--", "me@gpu-box", "limactl list"]
+    assert "-F" not in argv
+
+
+@needs_ssh
+def test_a_host_argv_honors_the_operators_configuration(tmp_path: Path) -> None:
+    operator_config = tmp_path / "config"
+    operator_config.write_text("Host gpu-box\n  ForwardAgent yes\n  Port 2222\n")
+    argv = host_argv()
+
+    config = effective_config([argv[0], "-F", str(operator_config), *argv[1:]])
+
+    assert config["forwardagent"] == ["yes"]
+    assert config["port"] == ["2222"]
+    assert config["stricthostkeychecking"] == ["accept-new"]
+    assert config["connecttimeout"] == ["30"]
+    assert config["serveraliveinterval"] == ["15"]
+    assert config["requesttty"] == ["false"]
+
+
+@needs_ssh
+def test_only_a_piped_host_connection_is_batch_mode(tmp_path: Path) -> None:
+    empty = tmp_path / "config"
+    empty.write_text("")
+
+    def config_for(mode: ArgvMode) -> dict[str, list[str]]:
+        argv = host_argv(mode)
+        return effective_config([argv[0], "-F", str(empty), *argv[1:]])
+
+    assert config_for(ArgvMode.PIPE)["batchmode"] == ["yes"]
+    assert config_for(ArgvMode.TERMINAL)["batchmode"] == ["no"]
+    assert config_for(ArgvMode.TERMINAL)["requesttty"] in (["yes"], ["true"])  # the rendering differs by version
+
+
+# -- The interactive remote command on a Windows console -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("platform", "stdin_tty", "stdout_tty", "led"),
+    [
+        ("win32", True, True, True),
+        ("win32", False, True, False),  # no pty, so no raw mode: the client's console write would stop at the NUL
+        ("win32", True, False, False),  # the NUL would land in the redirected output
+        ("linux", True, True, False),
+    ],
+)
+def test_an_interactive_remote_command_is_led_by_a_nul_only_on_a_windows_console(
+    monkeypatch: pytest.MonkeyPatch, platform: str, stdin_tty: bool, stdout_tty: bool, led: bool
+) -> None:
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr("sys.platform", platform)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: stdin_tty)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: stdout_tty)
+
+    command = ssh_process.nul_first_on_a_windows_console("tmux attach -t s1")
+
+    assert command == ("printf '\\000'; tmux attach -t s1" if led else "tmux attach -t s1")
+
+
+def test_a_closed_or_missing_stream_is_not_a_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    pretend_windows_console(monkeypatch)
+    closed = io.StringIO()
+    closed.close()
+    monkeypatch.setattr("sys.stdout", closed)
+    assert ssh_process.nul_first_on_a_windows_console("x") == "x"
+
+    pretend_windows_console(monkeypatch)
+    monkeypatch.setattr("sys.stdin", None)
+    assert ssh_process.nul_first_on_a_windows_console("x") == "x"
+
+
+@requires_posix_shell
+@pytest.mark.parametrize("shell", SHELLS)
+def test_a_nul_led_command_writes_the_nul_first_and_keeps_its_exit_status(
+    monkeypatch: pytest.MonkeyPatch, shell: str
+) -> None:
+    with monkeypatch.context() as windows:
+        pretend_windows_console(windows)
+        led = ssh_process.nul_first_on_a_windows_console("cd / && printf hi && exit 9")
+
+    completed = subprocess.run([require_shell(shell), "-c", led], capture_output=True, timeout=30, check=False)
+
+    assert completed.stdout == b"\0hi"
+    assert completed.returncode == 9

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -222,36 +223,46 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
 
 
 @pytest.mark.windows
-def test_format_entry_quotes_spaces_in_identity_file(tmp_path: Path) -> None:
-    import re
+@pytest.mark.parametrize(("key_dir", "quoted"), [("keys", False), ("my keys", True), ("o'brien", True)])
+def test_the_identity_file_is_quoted_only_when_ssh_would_split_or_unquote_it(
+    key_dir: str, quoted: bool, tmp_path: Path
+) -> None:
+    from agentworks.ssh_config import _identity_value
 
-    from agentworks.ssh_config import _format_entry
+    key = tmp_path / key_dir / "id_ed25519"
+    key.parent.mkdir()
+    key.write_text("")
 
-    # Use Path("/home/my user/...") for the space; on Windows resolve() will
-    # prefix it with the current drive, so assert structurally rather than
-    # against an exact string.
-    entry = _format_entry(
-        alias="test",
-        hostname="1.2.3.4",
-        user="me",
-        identity_file=Path("/home/my user/keys/id_ed25519"),
-        vm_name="web",
-    )
-    m = re.search(r'IdentityFile "([^"]*my user[^"]*id_ed25519)"', entry)
-    assert m is not None, f"expected quoted path containing space, got: {entry!r}"
+    value = _identity_value(key)
+
+    assert value is not None
+    assert value.startswith('"') == quoted
+    assert value.strip('"').endswith(f"/{key_dir}/id_ed25519")
 
 
-def test_format_entry_no_quotes_without_spaces(tmp_path: Path) -> None:
-    from agentworks.ssh_config import _format_entry
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize("key_dir", ["100%", "a$b", 'a"b', "a\\b"])
+def test_an_identity_file_ssh_would_misread_is_left_out_with_a_warning(
+    key_dir: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config, ssh_dir = _mock_config(tmp_path)
+    key = tmp_path / key_dir / "id_ed25519"
+    key.parent.mkdir()
+    key.write_text("")
+    config.operator.ssh_private_key = key
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = [_mock_agent("claude", "agt-claude", "web")]
 
-    entry = _format_entry(
-        alias="test",
-        hostname="1.2.3.4",
-        user="me",
-        identity_file=Path("/home/user/.ssh/id_ed25519"),
-        vm_name="web",
-    )
-    assert '"' not in entry
+    _rebuild_config_dir(config, db)
+
+    blocks = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())
+    assert set(blocks) == {"awvm--web", "awagent--claude"}
+    assert not any("IdentityFile" in block for block in blocks.values())
+    assert len(captured_output.warnings) == 1
 
 
 def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
@@ -479,7 +490,7 @@ def test_store_options_appear_exactly_for_vms_with_a_record(tmp_path: Path, rebu
     assert set(blocks) == {"awvm--known", "awagent--agent-known", "awvm--fresh", "awagent--agent-fresh"}
     for alias in ("awvm--known", "awagent--agent-known"):
         assert "    HostKeyAlias agentworks-vm-known\n" in blocks[alias]
-        assert f'    UserKnownHostsFile "{trust.store_file("known").as_posix()}"\n' in blocks[alias]
+        assert f"    UserKnownHostsFile {trust.store_file('known').as_posix()}\n" in blocks[alias]
         assert "    StrictHostKeyChecking yes\n" in blocks[alias]
         assert "    UpdateHostKeys no\n" in blocks[alias]
         assert "    HashKnownHosts no\n" in blocks[alias]
@@ -517,12 +528,13 @@ def test_an_entry_gains_and_loses_the_store_options_with_the_record(tmp_path: Pa
 
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+@pytest.mark.parametrize("store_name", ["store", "store with space", "o'brien"])
 def test_the_installed_client_resolves_the_managed_entry_against_the_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    store_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.execution import trust
 
-    store = tmp_path / "store with space"
+    store = tmp_path / store_name
     monkeypatch.setattr(trust, "STORE_DIR", store)
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
