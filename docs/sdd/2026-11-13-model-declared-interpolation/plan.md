@@ -45,8 +45,8 @@ examples.
 - [x] Update the runtime-context reference, schema README and affected component docs.
 - [x] Resolve the compatibility-cutoff documentation alignment with issue #878 as an explicit scoped
       decision, preserving the operator's two-minor-release policy.
-- [ ] Run appropriate behavioral tests and required gates; review generated field output.
-- [ ] Run independent project, complexity and correctness reviews for implementation.
+- [x] Run appropriate behavioral tests and required gates; review generated field output.
+- [x] Run independent project, complexity and correctness reviews for implementation.
 - [ ] Hand off the exact green head through the standard PR-level validation process.
 - [ ] Complete the SDD only after implementation, review and accepted validation; add its lockfile
       in the final delivery state.
@@ -135,3 +135,24 @@ runners' success/skip/failure paths and two located unavailable-context checks. 
 passed, and six real CLI discovery/explanation/sample/schema commands exited zero in an isolated
 home. The PATH element advertises interpolation and the home remained empty. Full-suite and final
 private-review results are still pending at this checkpoint.
+
+### 2026-11-15 implementation validation
+
+The composed implementation at `e0284d19c2bac49cc140a2cecc8e5fef5156c20c` passed the full
+non-integration suite: 13,766 tests passed, 58 skipped and 15 subtests passed in 361.86 seconds.
+The test selection matches CI and used four workers plus the Python 3.11 conformance interpreter.
+Independent project, complexity and generic correctness reviews are clean on that exact head,
+including PATH consumption, documentation, encoder removal and the Claude merge intersection.
+
+Ruff, formatting across 1,107 files, strict Mypy across 1,071 source/test files, typer isolation,
+repository file quality, locked-SDD protection and Rulesync drift checks passed. Website Python
+tests (160), Node tests (103) and deterministic double builds for both site bases passed. The first
+local build invocation refused an output path inside the checkout; the corrected temporary-output
+builds passed and removed their outputs. Six actual CLI commands passed in an isolated home, as
+recorded above. No managed backend resources or model calls were used; these checks do not claim
+live VM initialization coverage.
+
+Implementation is complete for the six migrated declarations and eleven accepted additions. The
+PR handoff records final CI and requests independent integration validation. SDD closeout and its
+lockfile remain open until that PR-level evidence is accepted; neither is claimed by the private
+quality loop.
