@@ -29,8 +29,8 @@ The actual consuming instance remains the artifact owner, including when declara
 from templates. A named bundle remains source-selection provenance. Use the existing empty bundle
 field for owner-declared content and render that absence explicitly as direct declaration; do not
 register a synthetic resource or reserve an operator-visible name. Acquisition provenance remains
-independent: `inline` describes unfetched content, while workstation/Git sources retain their normal
-evidence.
+independent: `inline` describes content authored as bytes, while workstation/Git sources retain
+their normal evidence.
 
 The declaration fingerprint includes effective direct definitions only when nonempty. Preserve the
 existing exact bundle-only digest input when direct content contributes nothing. Existing input
