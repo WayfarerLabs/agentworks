@@ -6,6 +6,7 @@ here records each command and answers it the way the host would.
 
 from __future__ import annotations
 
+import shutil
 import stat
 import subprocess
 import sys
@@ -126,7 +127,8 @@ def test_remote_template_staging_is_mode_0600_stdin_and_verified_cleanup(host: _
 
     staged = [call for call in host.calls if "template.yaml" in call[0] and "cat >" in call[0]]
     assert host.calls[0] == ("umask 077 && mktemp -d /tmp/agentworks-lima-template.XXXXXXXXXX", None)
-    assert staged == [(f"umask 077 && cat > {_REMOTE_TEMPLATE_DIR}/template.yaml", _PROVIDER_YAML)]
+    template = f"{_REMOTE_TEMPLATE_DIR}/template.yaml"
+    assert staged == [(f"touch {template} && chmod 600 {template} && cat > {template}", _PROVIDER_YAML)]
     assert host.calls[-1] == (f"rm -rf -- {_REMOTE_TEMPLATE_DIR} && test ! -e {_REMOTE_TEMPLATE_DIR}", None)
     assert not any(_PROVIDER_YAML in command for command in host.commands)
 
@@ -159,15 +161,12 @@ def test_remote_template_rejects_untrusted_allocation_path(monkeypatch: pytest.M
     assert "/tmp/other" not in repr(caught.value)
 
 
-def test_remote_template_uses_private_random_directory_not_predictable_path(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A precreated legacy path is untouched by random private staging."""
-    remote_root = tmp_path / "remote"
-    remote_root.mkdir()
-    predictable_path = remote_root / "agentworks-myvm.yaml"
-    predictable_path.write_text("legacy provider data\n")
+def _stage_template_in_a_local_shell(monkeypatch: pytest.MonkeyPatch, remote_root: Path) -> list[tuple[int, int, str]]:
+    """Run ``_create_remote``'s placement-host commands in a local ``sh`` under ``remote_root``.
+
+    Returns the staging directory's mode, the template's mode and its content,
+    read just before the directory is removed.
+    """
     staged_snapshots: list[tuple[int, int, str]] = []
     monkeypatch.setattr(lima_mod, "_REMOTE_TEMPLATE_ROOT", str(remote_root))
     monkeypatch.setattr(LimaHost, "run_detached", lambda self, command, **kwargs: DetachedResult(0, ""))
@@ -189,14 +188,46 @@ def test_remote_template_uses_private_random_directory_not_predictable_path(
     monkeypatch.setattr(LimaHost, "run", _run)
 
     _create_remote()
+    return staged_snapshots
+
+
+def test_remote_template_uses_private_random_directory_not_predictable_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A precreated legacy path is untouched by random private staging."""
+    remote_root = tmp_path / "remote"
+    remote_root.mkdir()
+    predictable_path = remote_root / "agentworks-myvm.yaml"
+    predictable_path.write_text("legacy provider data\n")
+
+    staged_snapshots = _stage_template_in_a_local_shell(monkeypatch, remote_root)
 
     if sys.platform == "win32":
-        # The local (git-bash) shell has no Unix mode bits for umask 077 to land on.
+        # The local (git-bash) shell has no Unix mode bits for mktemp and chmod to land on.
         assert [content for _, _, content in staged_snapshots] == [_PROVIDER_YAML]
     else:
         assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
     assert predictable_path.read_text() == "legacy provider data\n"
     assert list(remote_root.glob("agentworks-lima-template.*")) == []
+
+
+def test_remote_template_stays_private_under_an_inherited_default_acl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A default ACL on the staging root overrides the umask for new files."""
+    setfacl = shutil.which("setfacl")
+    if setfacl is None:
+        pytest.skip("setfacl is required to provision the ACL fixture")
+    remote_root = tmp_path / "remote"
+    remote_root.mkdir()
+    if subprocess.run([setfacl, "-d", "-m", "g::rwx,o::rwx", str(remote_root)], capture_output=True).returncode:
+        pytest.skip("the test file system does not support default ACLs")
+
+    staged_snapshots = _stage_template_in_a_local_shell(monkeypatch, remote_root)
+
+    assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
 
 
 def test_remote_template_cleanup_interrupt_preserves_active_failure_and_order(host: _Host) -> None:

@@ -112,8 +112,14 @@ class LimaHost:
         return ssh_process.run_terminal(self._argv(command, mode=ssh_process.ArgvMode.TERMINAL))
 
     def upload(self, path: str, content: str) -> None:
-        """Write ``content`` to ``path``, mode 0600, through stdin, never an argument."""
-        self.run(f"umask 077 && cat > {shlex.quote(path)}", input=content)
+        """Write ``content`` to ``path``, mode 0600, through stdin, never an argument.
+
+        The file is created and set to 0600 before any content arrives: a
+        default ACL inherited from the parent directory overrides the umask, so
+        only an explicit ``chmod`` pins the mode.
+        """
+        quoted = shlex.quote(path)
+        self.run(f"touch {quoted} && chmod 600 {quoted} && cat > {quoted}", input=content)
 
     # -- Detached commands, for work that must outlive the connection --------------------
 

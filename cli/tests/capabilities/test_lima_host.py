@@ -6,6 +6,7 @@ import contextlib
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -147,6 +148,28 @@ def test_a_command_given_input_exposes_no_output() -> None:
     with pytest.raises(LimaCommandFailed) as caught:
         LimaHost(None).run("sh -c 'cat; exit 3'", input="tskey-reflected")
     assert "tskey-reflected" not in str(caught.value)
+
+
+@pytest.mark.skipif(not Path("/bin/sh").exists(), reason="runs the host command in a POSIX shell")
+def test_an_upload_is_mode_0600_under_an_inherited_default_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A default ACL on the directory, such as one on ``/var/tmp``, overrides the umask for new files."""
+    setfacl = shutil.which("setfacl")
+    if setfacl is None:
+        pytest.skip("setfacl is required to provision the ACL fixture")
+    if subprocess.run([setfacl, "-d", "-m", "g::rwx,o::rwx", str(tmp_path)], capture_output=True).returncode:
+        pytest.skip("the test file system does not support default ACLs")
+
+    def in_a_local_shell(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        completed = subprocess.run(["sh", "-c", command], input=input, capture_output=True, text=True, check=False)
+        return _Completed(completed.returncode, completed.stdout, completed.stderr)
+
+    monkeypatch.setattr(LimaHost, "_execute", in_a_local_shell)
+    target = tmp_path / "agentworks-lima-myvm.sh"
+
+    LimaHost("vm-host").upload(str(target), "echo hi\n")
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert target.read_text() == "echo hi\n"
 
 
 def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
