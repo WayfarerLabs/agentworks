@@ -327,7 +327,10 @@ def _identity_value(identity_file: Path) -> str | None:
     try:
         trust.literal_path(identity_file, "SSH identity file")
     except ConfigError as e:
-        output.warn(f"IdentityFile left out of the SSH config entries: {e}")
+        output.warn(
+            f"IdentityFile left out of the SSH config entries: {e}. Your own ssh offers its default keys "
+            "for those aliases instead; move the key to a plain path."
+        )
         return None
     return trust.option_value(_to_ssh_path(identity_file, Path.home()))
 
