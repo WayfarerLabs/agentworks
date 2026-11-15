@@ -210,6 +210,7 @@ def test_an_identity_file_ssh_would_expand_is_refused_by_name(tmp_path: Path) ->
 # -- ssh -G: what the installed client would really do ---------------------------------
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
 def test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted(key_dir: str, tmp_path: Path) -> None:
     """The ssh shipped with Git for Windows refuses a quoted value without whitespace (#898)."""
@@ -223,6 +224,7 @@ def test_only_an_identity_path_ssh_would_split_or_unquote_is_quoted(key_dir: str
 
 
 @needs_ssh
+@pytest.mark.windows
 @pytest.mark.parametrize("key_dir", ["keys", "dir with space", "o'brien"])
 def test_the_policy_takes_effect(key_dir: str, tmp_path: Path) -> None:
     """The installed client may accept a quoted value without whitespace too, so this
@@ -231,18 +233,18 @@ def test_the_policy_takes_effect(key_dir: str, tmp_path: Path) -> None:
 
     config = effective_config(argv_for(key))
 
-    assert config["identityfile"] == [str(key)]  # quoting held for a path with a space (I13)
+    assert config["identityfile"] == [key.as_posix()]  # quoting held for a path with a space (I13)
     assert config["identitiesonly"] == ["yes"]
     assert config["batchmode"] == ["yes"]
     assert config["preferredauthentications"] == ["publickey"]
     assert config["user"] == ["agentworks"]
     assert config["hostkeyalias"] == [trust.host_key_alias("box")]
-    assert config["userknownhostsfile"] == [str(trust.store_file("box"))]
+    assert config["userknownhostsfile"] == [trust.store_file("box").as_posix()]
     assert config["stricthostkeychecking"] == ["true"]
-    assert config["globalknownhostsfile"] == ["/dev/null"]
+    assert config["globalknownhostsfile"] == [trust._NULL_DEVICE]
     assert config["updatehostkeys"] == ["false"]
     assert config["hashknownhosts"] == ["no"]
-    assert config["certificatefile"] == [f"{key}/disabled-certificate"]
+    assert config["certificatefile"] == [f"{key.as_posix()}/disabled-certificate"]
 
 
 @needs_ssh
