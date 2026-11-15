@@ -87,25 +87,6 @@ def test_list_failure_identifies_the_consumed_field_and_element() -> None:
     assert caught.value.entity_name == "owner.args[1]"
 
 
-def test_inserted_encoding_keeps_authored_source_and_one_pass_data_distinct() -> None:
-    encoded: list[str] = []
-
-    def encode(value: str) -> str:
-        encoded.append(value)
-        return f"<{value}>"
-
-    result = render_scalar_field(
-        Consumer,
-        "value",
-        "$HOME/$${agw:user_name}/${agw:workspace_dir}",
-        {"workspace_dir": "${agw:user_name}"},
-        location="profile.path",
-        encode_inserted=encode,
-    )
-    assert result == "$HOME/<${agw:>user_name}/<${agw:user_name}>"
-    assert encoded == ["${agw:", "${agw:user_name}"]
-
-
 def test_scalar_shorthand_derives_interpolation_from_its_target_field() -> None:
     schema = PlaintextEnvEntry.model_json_schema()
     scalar_arm, object_arm = schema["anyOf"]

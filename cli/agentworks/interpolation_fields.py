@@ -9,7 +9,7 @@ from agentworks.interpolation import render_template
 from agentworks.schema.interpolation import field_interpolation
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from pydantic import BaseModel
 
@@ -23,7 +23,6 @@ def render_scalar_field(
     *,
     location: str,
     legacy_placeholders: Mapping[str, str] | None = None,
-    encode_inserted: Callable[[str], str] | None = None,
 ) -> str: ...
 
 
@@ -36,7 +35,6 @@ def render_scalar_field(
     *,
     location: str,
     legacy_placeholders: Mapping[str, str] | None = None,
-    encode_inserted: Callable[[str], str] | None = None,
 ) -> None: ...
 
 
@@ -48,7 +46,6 @@ def render_scalar_field(
     *,
     location: str,
     legacy_placeholders: Mapping[str, str] | None = None,
-    encode_inserted: Callable[[str], str] | None = None,
 ) -> str | None:
     """Render an annotated string field at its consuming boundary.
 
@@ -69,7 +66,6 @@ def render_scalar_field(
         values,
         field=location,
         legacy_placeholders=legacy_placeholders,
-        encode_inserted=encode_inserted,
     )
 
 
@@ -81,7 +77,6 @@ def render_list_field(
     *,
     location: str,
     legacy_placeholders: Mapping[str, str] | None = None,
-    encode_inserted: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Render opted-in string elements without changing authored list order."""
     if field_interpolation(model.model_fields[field_name]) != "items":
@@ -96,7 +91,6 @@ def render_list_field(
             values,
             field=f"{location}[{index}]",
             legacy_placeholders=legacy_placeholders,
-            encode_inserted=encode_inserted,
         )
         for index, item in enumerate(value)
     ]

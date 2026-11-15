@@ -66,12 +66,17 @@ class _InstallCommandEntry(DeclaredResource):
     repeat-safe itself or paired with completion checks that reliably skip it
     after success because init and reinit may invoke the resource again."""
 
-    path: list[str] = Field(default_factory=list)
+    path: list[Annotated[str, Interpolated()]] = Field(default_factory=list)
     """Directories written to the target user's managed profile after install
     commands run, including commands skipped by completion checks. Later shells
     that source the profile prepend these directories to ``PATH``; child processes
-    inherit them. A leading ``~`` resolves to that user's home. Install commands
-    themselves use the login shell's existing ``PATH``."""
+    inherit them. Interpolation uses the consuming user's VM/user identity (plus
+    agent identity for agents), without workspace/session context, before checks
+    or installation. A leading ``~`` becomes ``$HOME``; each entry is written as
+    ``export PATH="<entry>:$PATH"`` without additional escaping. Shell variables
+    and other shell syntax are interpreted when the profile is sourced. Paths
+    are written after the batch; install commands themselves use the login
+    shell's existing ``PATH``. See ``agw guide show concept-templating``."""
 
     test_exec: Annotated[str | None, Interpolated()] = Field(default=None, examples=["my-tool"])
     """Optional completion check for whether this command is already on

@@ -18,7 +18,7 @@ are driven for real.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -2237,11 +2237,8 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
         *,
         field: str,
         legacy_placeholders: Mapping[str, str] | None = None,
-        encode_inserted: Callable[[str], str] | None = None,
     ) -> str:
-        result = original_render(
-            text, values, field=field, legacy_placeholders=legacy_placeholders, encode_inserted=encode_inserted
-        )
+        result = original_render(text, values, field=field, legacy_placeholders=legacy_placeholders)
         rendered.append(result)
         return result
 

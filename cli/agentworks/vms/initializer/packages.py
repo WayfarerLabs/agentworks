@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES
-from agentworks.interpolation_fields import render_scalar_field
+from agentworks.interpolation_fields import render_list_field, render_scalar_field
 from agentworks.ssh import SSHError, SSHLogger
 
 from .mise import MISE_GPG_KEY_PATH, MISE_GPG_KEY_URL, MISE_SOURCE_FILE, MISE_SOURCE_LINE
@@ -292,6 +292,9 @@ def _run_install_commands(
             continue
         logger.step(f"{label} {i}/{total}: {name}")
 
+        owner = _install_command_owner(entry)
+        paths = render_list_field(type(entry), "path", entry.path, context, location=f"{owner}.path")
+
         # Skip if already installed (short timeout -- this should be instant)
         test_cmd = _build_test_command(entry, shell, home, context=context)
         if test_cmd:
@@ -300,13 +303,12 @@ def _run_install_commands(
                 if check.returncode == 0:
                     output.info(f"{label} {i}/{total} ({name}): already installed, skipping")
                     logger.output(f"{name}: already installed ({test_cmd}), skipping")
-                    path_additions.extend(entry.path)
+                    path_additions.extend(paths)
                     continue
             except SSHError as e:
                 # Timeout or connection issue -- assume not installed, proceed
                 logger.output(f"{name}: install check failed ({e}), assuming not installed")
 
-        owner = _install_command_owner(entry)
         command = render_scalar_field(type(entry), "command", entry.command, context, location=f"{owner}.command")
         truncated = command[:60]
         output.info(f"{label} {i}/{total} ({name}): {truncated}...")
@@ -322,6 +324,6 @@ def _run_install_commands(
             logger.warning(msg)
             output.warn(msg)
         else:
-            path_additions.extend(entry.path)
+            path_additions.extend(paths)
 
     return path_additions
