@@ -23,9 +23,9 @@ selection provenance and declaration freshness can change. The next supported ow
 the current declaration and reconciles through the existing integration operation.
 
 Omission and empty maps inherit. `declare: null` clears inherited direct content, while
-`bundles: []` affects only bundle references. Existing named bundle inheritance is unchanged.
-Direct content does not add a workspace reinit or automatic descendant refresh operation. Normal
-deferral timing and cleanup limitations still apply.
+`bundles: []` affects only bundle references. Existing named bundle inheritance is unchanged. Direct
+content does not add a workspace reinit or automatic descendant refresh operation. Normal deferral
+timing and cleanup limitations still apply.
 
 Compatibility tests must compare known bundle-only fingerprint inputs and captured IDs, rather than
 only comparing two calls through a newly modified implementation. Inspection and replacement output

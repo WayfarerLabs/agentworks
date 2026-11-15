@@ -40,16 +40,16 @@ uses ordinary owning setup and cleanup; there is no new state store or lifecycle
 Inspection projects declarations through the same effective selection order as capture without
 opening sources. Keep named-bundle contribution fields meaningful and add a small explicit indicator
 for direct contribution/selection where needed. Captured provenance describes captured content;
-current declaration selection describes current intent. A stale capture must not falsely turn
-direct content into an undeclared artifact or claim new content was captured.
+current declaration selection describes current intent. A stale capture must not falsely turn direct
+content into an undeclared artifact or claim new content was captured.
 
 ## Validation and delivery
 
-Boundary tests cover all five types, every owner resolver, template and instance null/empty behavior,
-whole-entry override, normalized identity, legacy fingerprint stability, capture bounds and offline
-inspection. Existing schema extraction/emission and resource graph paths must expose the new input
-without creating a bundle dependency for direct content. Representative lifecycle tests prove
-delivery and removal use existing routing and claims.
+Boundary tests cover all five types, every owner resolver, template and instance null/empty
+behavior, whole-entry override, normalized identity, legacy fingerprint stability, capture bounds
+and offline inspection. Existing schema extraction/emission and resource graph paths must expose the
+new input without creating a bundle dependency for direct content. Representative lifecycle tests
+prove delivery and removal use existing routing and claims.
 
 This follows the repository's established bundle and schema-merge patterns; no new external format
 or dependency is introduced, so separate prior-art research is unnecessary. The additive transition

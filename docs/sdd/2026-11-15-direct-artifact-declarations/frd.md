@@ -17,9 +17,10 @@ artifact pipeline.
 ## Requirements
 
 1. **Authoring.** Every existing owning `artifacts` block accepts `declare`, containing the same
-   five type maps as a bundle: `hints`, `rules`, `skills`, `agents`, and `mcp_servers`. Entry validation
-   and supported content sources are identical. Direct declarations accept no resource metadata,
-   inheritance list, nested bundle references, unknown fields, or per-entry null tombstones.
+   five type maps as a bundle: `hints`, `rules`, `skills`, `agents`, and `mcp_servers`. Entry
+   validation and supported content sources are identical. Direct declarations accept no resource
+   metadata, inheritance list, nested bundle references, unknown fields, or per-entry null
+   tombstones.
 2. **Selection.** Resolve selected named bundles in their existing order, then apply the effective
    direct declarations. Within one owner, a later same-type/key definition replaces the complete
    earlier artifact, retaining ordinary replacement evidence and warnings for changed content.
