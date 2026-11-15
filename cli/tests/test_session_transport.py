@@ -23,6 +23,7 @@ from agentworks.db import Database, ProvisioningStatus
 from agentworks.execution.access import Admin, Agent
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint, access_run_command
+from tests._runtime_probes import owner_probe_line
 from tests.vm_access_support import (
     access_over_target,
     check_result,
@@ -172,7 +173,7 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
     class _RemovalTarget(_Target):
         def run(self, cmd: str, *_args: object, **_kwargs: object) -> _Result:
             self.log.append((self.label, cmd))
-            if cmd.startswith("test -e "):
+            if owner_probe_line(cmd).startswith("test -e "):
                 result = _Result()
                 result.ok = False
                 result.returncode = 1
@@ -855,7 +856,7 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
         """Admin transport whose fresh tmux session holds a dead pane."""
 
         def run(self, cmd: str, *_args: object, **_kwargs: object) -> _ScriptedResult:
-            if cmd.startswith("test -e "):
+            if owner_probe_line(cmd).startswith("test -e "):
                 return _ScriptedResult(ok=False)
             if "#{pane_dead}" in cmd:
                 return _ScriptedResult(ok=True, stdout="AGW_RUNTIME_PANE=1 2\n")

@@ -16,7 +16,7 @@ import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot
 from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError, StateError, UserAbort
-from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT, ProbeStatus, access_run_command
+from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT, ProbeStatus, socket_owner_run_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -38,8 +38,11 @@ DEDICATED_TEARDOWN_EXIT_POLL_SECONDS = 0.05
 class DedicatedTeardownPlan:
     """Complete immutable authority for one dedicated remote teardown.
 
-    Every request runs on ``access``, as root when ``elevated``, each one
-    dispatch bounded by ``deadline`` seconds (``None``: unbounded).
+    Every request runs on ``access`` as ``owner``, the account that owns the
+    session's server, guarded on ``socket_path`` (``socket_owner_run_command``):
+    when ``elevated``, the admin's access to another account's session, it is
+    elevated only to switch to ``owner``. Each is one dispatch bounded by
+    ``deadline`` seconds (``None``: unbounded).
     """
 
     session_name: str
@@ -47,6 +50,7 @@ class DedicatedTeardownPlan:
     run_id: str | None
     vm_name: str
     socket_path: str
+    owner: str
     stored_pid: int
     stored_boot_id: str
     stored_start_ticks: int
@@ -57,7 +61,13 @@ class DedicatedTeardownPlan:
 
     @property
     def run_command(self) -> RunCommand:
-        return access_run_command(self.access, deadline=self.deadline, elevated=self.elevated)
+        return socket_owner_run_command(
+            self.access,
+            socket_path=self.socket_path,
+            owner=self.owner,
+            switch_user=self.elevated,
+            deadline=self.deadline,
+        )
 
 
 class _SubmissionGate:
@@ -154,10 +164,10 @@ def prepare_dedicated_teardown(
     Persisted rows are a process boundary. Both synchronous callers and the
     batch coordinator supply complete-fingerprint rows; invalid state fails
     closed instead of inventing work. ``access`` is the owner's, or the
-    admin's with ``target_owns_session=False``, whose requests then run as
-    root.
+    admin's with ``target_owns_session=False``, whose requests then elevate
+    only to switch to the owner.
     """
-    socket_path = _validated_socket_path(db, session)
+    socket = _validated_socket(db, session)
     pid = _validated_pid(session)
     if session.boot_id is None or session.tmux_server_start_ticks is None:
         raise StateError(
@@ -174,7 +184,8 @@ def prepare_dedicated_teardown(
         session_uuid=session.session_uuid,
         run_id=session.run_id,
         vm_name=vm_name,
-        socket_path=socket_path,
+        socket_path=socket.path,
+        owner=socket.owner,
         stored_pid=pid,
         stored_boot_id=boot_id,
         stored_start_ticks=start_ticks,
@@ -386,8 +397,11 @@ def teardown_dedicated_session(
 
     expected = SessionRuntimeSnapshot.from_session(session)
     if not has_complete_runtime_fields(session):
-        socket_path = _validated_socket_path(db, session)
-        run_command = access_run_command(access, deadline=None, elevated=not target_owns_session)
+        socket = _validated_socket(db, session)
+        socket_path = socket.path
+        run_command = socket_owner_run_command(
+            access, socket_path=socket_path, owner=socket.owner, switch_user=not target_owns_session, deadline=None
+        )
         require_socket_path(socket_path, run_command=run_command)
         probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=socket_path)
         if session.pid == PID_STOPPED and probe.status is ProbeStatus.ABSENT:

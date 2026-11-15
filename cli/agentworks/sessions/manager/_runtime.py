@@ -257,7 +257,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     from agentworks.sessions.tmux import startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
-    from agentworks.sessions.manager._teardown import _validated_socket_path
+    from agentworks.sessions.manager._teardown import _validated_socket
 
     current = require_session_launch_identity(definition)
     if current.workspace_name != definition.workspace.name:
@@ -272,10 +272,10 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     try:
         status = observe_session_runtime(current, admin=admin, db=db)
     except StateError:
-        if not can_checkpoint_session(current, vm=definition.vm, admin=admin):
+        if not can_checkpoint_session(current, vm=definition.vm, admin=admin, db=db):
             raise
         status = SessionStatus.UNKNOWN
-    if status is SessionStatus.UNKNOWN and can_checkpoint_session(current, vm=definition.vm, admin=admin):
+    if status is SessionStatus.UNKNOWN and can_checkpoint_session(current, vm=definition.vm, admin=admin, db=db):
         return PreparedSessionLaunch(
             definition=definition,
             admin_access=admin,
@@ -301,10 +301,11 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
                 if _mgr._needs_repair(current):
                     recovered_startup = True  # status proved the interrupted launch's ownership
                 else:
+                    socket = _validated_socket(db, current)
                     protection = startup_protection_enabled(
                         current.name,
-                        socket_path=_validated_socket_path(db, current),
-                        run_command=_mgr.observation_run_command(admin, current),
+                        socket_path=socket.path,
+                        run_command=_mgr.owner_run_command(admin, current, socket),
                     )
                     if protection is None:
                         raise StateError(
@@ -387,10 +388,10 @@ def prepare_session_stop(
         try:
             status = observe_session_runtime(session, admin=admin, db=db)
         except StateError:
-            if not can_checkpoint_session(session, vm=vm, admin=admin):
+            if not can_checkpoint_session(session, vm=vm, admin=admin, db=db):
                 raise
             status = SessionStatus.UNKNOWN
-        checkpoint_only = status is SessionStatus.UNKNOWN and can_checkpoint_session(session, vm=vm, admin=admin)
+        checkpoint_only = status is SessionStatus.UNKNOWN and can_checkpoint_session(session, vm=vm, admin=admin, db=db)
     if status is SessionStatus.UNKNOWN and not checkpoint_only:
         raise StateError("session runtime state is unknown", entity_kind="session", entity_name=session.name)
     if status is SessionStatus.BROKEN and not force:

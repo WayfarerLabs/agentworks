@@ -16,6 +16,7 @@ from agentworks.execution.access import Admin
 from agentworks.runtime_state import reconcile_session
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _status
+from tests._runtime_probes import owner_probe_line
 from tests.runtime_state.test_composition import REFUSE, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 from tests.runtime_state.test_public_stop import _running
@@ -43,6 +44,7 @@ class _Target:
         self.vm = vm
 
     def run(self, command: str, **kwargs: object) -> SimpleNamespace:
+        command = owner_probe_line(command)
         if "kill-server" in command:
             words = shlex.split(command)
             resident = self.model.by_socket(words[words.index("-S") + 1])

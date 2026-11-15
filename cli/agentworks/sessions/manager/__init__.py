@@ -187,10 +187,10 @@ from ._status import (
     check_session_status as check_session_status,
 )
 from ._status import (
-    observation_run_command as observation_run_command,
+    observe_session_statuses as observe_session_statuses,
 )
 from ._status import (
-    observe_session_statuses as observe_session_statuses,
+    owner_run_command as owner_run_command,
 )
 
 __all__ = [

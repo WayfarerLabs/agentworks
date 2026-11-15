@@ -464,7 +464,9 @@ def session_description(
     output.info(f"Checking session '{name}' runtime...")
     status = SessionStatus.UNKNOWN
     if session.socket_path is None:
-        status = _mgr.check_session_status(session)
+        # A legacy row's status needs no read: a live one is the canonical refusal, any other unknown.
+        if session.pid is not None and session.boot_id is not None:
+            raise _mgr._legacy_session_status_error(session)
     else:
         from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 

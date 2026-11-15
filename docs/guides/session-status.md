@@ -29,14 +29,14 @@ reachable VM. A pending launch with no recorded PID requires additional bounded 
 native attempt identity and stable process fingerprint. These reads do not adopt the runtime or
 repair its row. Incomplete or indeterminate evidence stays `UNKNOWN`. Every read runs on the VM
 admin's access as one request, sent once, with a 10-second deadline. A legacy row on the shared
-server is always an admin session, so its read runs on that same access. Every tmux read, of one
-session or of a batch, runs as the account that owns the session's server: an agent's reads are
-elevated only to switch to that agent. Each socket path is checked against its owner's directory
+server is always an admin session, so its read runs on that same access. Every read of a session's
+dedicated server, and every step of tearing it down, runs as the account that owns that server: an
+agent's are elevated only to switch to that agent, because root must never act as a client of a tmux
+server another account controls. Each socket path is also checked against its owner's directory
 first, and a socket that is a link, is not a socket, or belongs to another account is never read and
 shows as `UNKNOWN`. For one session, a stored socket path outside its owner's directory stops the
-command before anything is read. The boot and process reads, which use no socket, run as root for an
-agent's runtime. A listing that cannot read a VM shows its sessions as `UNKNOWN` and warns once with
-the reason.
+command before anything is read. A listing that cannot read a VM shows its sessions as `UNKNOWN` and
+warns once with the reason.
 
 The listings, `session describe` and the reads that prepare a start or restart write no operation
 log. A command that reads status inside its own operation (`session attach`, `logs`, `delete`,

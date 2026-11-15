@@ -165,7 +165,8 @@ def _teardown_session(
     """Destroy one managed session runtime and verify its absence.
 
     ``access`` is the session owner's, or the admin's with
-    ``target_owns_session=False``, whose requests then run as root.
+    ``target_owns_session=False``, whose requests then elevate only to switch
+    to the owner: root is never a client of the session's tmux server.
     """
     if session.socket_path is None:
         if session.pid == PID_STOPPED:

@@ -8,6 +8,8 @@ probe asks for and runs the probe as the test's own user.
 
 from __future__ import annotations
 
+import os
+import pwd
 import shlex
 import shutil
 import socket
@@ -36,7 +38,8 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest socket and tmux commands")
 
-OWNER = "agt-sockets"
+OWNER = pwd.getpwuid(os.getuid()).pw_name
+"""The socket directory's owner: this account, which owns every socket the fixture makes."""
 
 
 @pytest.fixture
@@ -89,6 +92,7 @@ def test_dedicated_worker_preserves_non_socket_paths(
             run_id=None,
             vm_name="vm",
             socket_path=str(candidate),
+            owner=pwd.getpwuid(os.getuid()).pw_name,
             stored_pid=101,
             stored_boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             stored_start_ticks=201,

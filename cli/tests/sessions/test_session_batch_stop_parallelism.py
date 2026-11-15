@@ -72,6 +72,7 @@ def _plan(
         run_id=None,
         vm_name=vm_name,
         socket_path=socket_path or f"/run/agentworks/admin-tmux-sockets/agentworks/{name}.sock",
+        owner="agentworks",
         stored_pid=pid or 1000 + ordinal,
         stored_boot_id=BOOT_ID,
         stored_start_ticks=start_ticks or 2000 + ordinal,

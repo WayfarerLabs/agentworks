@@ -532,3 +532,20 @@ def test_recovery_only_action_never_widens_after_preparation(tmp_path, monkeypat
         execute_session_start(prepared, secret_values={}, graph_secret_values={})
     assert _session(db) == before
     db.close()
+
+
+def test_launch_preparation_reads_a_running_agent_sessions_startup_protection_as_the_agent(tmp_path, monkeypatch):
+    from tests.sessions.test_owner_reads import _admin, _Reply, assert_tmux_runs_as_the_agent
+    from tests.vm_access_support import install_access_recorder
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    definition = _launch_definition(db)
+    admin = _admin({"@agentworks-launch-pane": _Reply(stdout="off")})
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = admin.answer
+
+    prepared = prepare_session_launch(definition)
+
+    assert prepared.noop
+    assert_tmux_runs_as_the_agent(recorder.access())
+    db.close()

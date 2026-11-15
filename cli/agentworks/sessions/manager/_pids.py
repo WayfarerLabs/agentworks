@@ -122,7 +122,8 @@ def _repair_session_pid(
     """Core repair logic for a single session. Returns True if the DB was updated.
 
     Every read runs on ``admin`` as one dispatch within the observation
-    deadline, as root for an agent session's dedicated server. Raises
+    deadline, a dedicated server's as its owner after its socket path is
+    validated against the owner's directory (``owner_run_command``). Raises
     StateError if the session is alive but PID/boot_id can't be recovered,
     or ConnectivityError if the VM is unreachable.
     """
@@ -195,7 +196,10 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        run_command = _mgr.observation_run_command(admin, session)
+        from agentworks.sessions.manager._teardown import _validated_socket
+
+        socket = _validated_socket(db, session)
+        run_command = _mgr.owner_run_command(admin, session, socket)
         require_socket_path(sock, run_command=run_command)
         probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=sock)
         if probe.status is ProbeStatus.PRESENT:

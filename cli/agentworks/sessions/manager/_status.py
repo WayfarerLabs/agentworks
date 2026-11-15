@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import shlex
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -19,7 +18,8 @@ from agentworks.errors import (
 )
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.requests import Bytes, Script, Shell
-from agentworks.sessions.manager._teardown import ManagedSocket, _validated_socket
+from agentworks.sessions.manager import _teardown
+from agentworks.sessions.manager._teardown import ManagedSocket
 from agentworks.sessions.tmux import (
     CommandOutcome,
     ProbeStatus,
@@ -29,6 +29,7 @@ from agentworks.sessions.tmux import (
     runtime_probe_command,
     runtime_probe_payload,
     runtime_probe_stderr,
+    socket_owner_run_command,
 )
 from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS, cancelling_futures
 
@@ -38,47 +39,28 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.execution.access import VMAccess
-    from agentworks.sessions.tmux import CommandResult, RunCommand
+    from agentworks.sessions.tmux import RunCommand
 
 _PID_PRESENT_FACT = "present"
 _PID_ABSENT_FACT = "absent"
 
 
-def observation_run_command(admin: VMAccess, session: SessionRow) -> RunCommand:
-    """The admin's bounded reads of ``session``'s runtime: each one dispatch within the observation deadline.
-
-    An agent session's reads run as root, the admin's existing read boundary
-    over an agent-owned server, even before startup shared its socket.
-    """
-    return access_run_command(
-        admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=session.mode == SessionMode.AGENT.value
-    )
-
-
 def owner_run_command(admin: VMAccess, session: SessionRow, socket: ManagedSocket) -> RunCommand:
-    """The admin's bounded reads of ``session``'s tmux server, each run as the server's owner behind a socket guard.
+    """The admin's bounded reads of ``session``'s runtime, each run as its tmux server's owner.
 
-    The guard refuses a socket path that is a link, exists but is not a
-    socket, or is owned by another account than ``socket.owner``; a refused
-    read exits 1 with no frame, which reads as unknown. An agent session's
-    reads elevate only to drop to its owner through ``runuser``, so no tmux
-    read runs as root against a socket in the agent's own directory; an admin
-    session's run as the admin, its owner. Each is one dispatch within the
-    observation deadline.
+    Every read, tmux or not, goes through ``socket_owner_run_command`` on
+    the validated ``socket``: an agent session's elevate only to drop to the
+    agent, an admin session's run as the admin, and a socket the guard
+    refuses reads as unknown. Each is one dispatch within the observation
+    deadline.
     """
-    q_socket, q_owner = shlex.quote(socket.path), shlex.quote(socket.owner)
-    guard = (
-        f"test ! -L {q_socket} && {{ test ! -e {q_socket} || "
-        f'{{ test -S {q_socket} && test "$(stat -c %U -- {q_socket})" = {q_owner}; }}; }}'
+    return socket_owner_run_command(
+        admin,
+        socket_path=socket.path,
+        owner=socket.owner,
+        switch_user=session.mode == SessionMode.AGENT.value,
+        deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS,
     )
-    elevated = session.mode == SessionMode.AGENT.value
-    run = access_run_command(admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=elevated)
-
-    def as_owner(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> CommandResult:
-        line = f"runuser -u {q_owner} -- sh -c {shlex.quote(command)}" if elevated else command
-        return run(f"{guard} && {{ {line}; }}", check=check, env=env)
-
-    return as_owner
 
 
 def _pid_probe_script(pid: int) -> str:
@@ -114,17 +96,16 @@ def _get_boot_id(run_command: RunCommand) -> str | None:
 def check_session_status(
     session: SessionRow,
     *,
-    admin: VMAccess | None = None,
-    db: Database | None = None,
+    admin: VMAccess,
+    db: Database,
 ) -> SessionStatus:
     """Determine session status. Dispatches by session type.
 
     A dedicated session's socket path is validated against its owner's
     directory first (``_validated_socket``, which raises ``StateError``), and
-    its tmux reads run as that owner (``owner_run_command``). Every read runs
-    on ``admin`` as one dispatch within the observation deadline; one that
-    does not complete raises
-    its typed error (``ExecutionIncomplete`` for a missed deadline), which a
+    every read runs as that owner (``owner_run_command``), on ``admin``, as
+    one dispatch within the observation deadline; one that does not complete
+    raises its typed error (``ExecutionIncomplete`` for a missed deadline), which a
     listing reports as unknown and a lifecycle command surfaces before it
     changes anything.
 
@@ -139,9 +120,7 @@ def check_session_status(
     operator restart.
     """
     if session.socket_path is not None:
-        if admin is None or db is None:
-            raise TypeError("dedicated session status requires the admin's access and the database")
-        return _check_dedicated_session(session, admin=admin, socket=_validated_socket(db, session))
+        return _check_dedicated_session(session, admin=admin, socket=_teardown._validated_socket(db, session))
     if session.pid is None or session.boot_id is None:
         return SessionStatus.UNKNOWN
     raise _legacy_session_status_error(session)
@@ -166,13 +145,11 @@ def _check_dedicated_session(session: SessionRow, *, admin: VMAccess, socket: Ma
     admin and agent sessions after the env-and-secrets SDD migrated admin
     sessions to per-session sockets.
 
-    The tmux reads run as the server's owner; the boot id and pid reads,
-    which touch no socket, run as ``observation_run_command`` does.
+    Every read runs as the server's owner (``owner_run_command``).
     """
     socket_path = socket.path
-    run_command = observation_run_command(admin, session)
-    tmux_run = owner_run_command(admin, session, socket)
-    session_presence = probe_tmux_session(session.name, run_command=tmux_run, socket_path=socket_path)
+    run_command = owner_run_command(admin, session, socket)
+    session_presence = probe_tmux_session(session.name, run_command=run_command, socket_path=socket_path)
     if session_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if session_presence is ProbeStatus.PRESENT:
@@ -180,7 +157,7 @@ def _check_dedicated_session(session: SessionRow, *, admin: VMAccess, socket: Ma
             return SessionStatus.RUNNING
         return SessionStatus.UNKNOWN
 
-    server_presence = probe_tmux_server(run_command=tmux_run, socket_path=socket_path)
+    server_presence = probe_tmux_server(run_command=run_command, socket_path=socket_path)
     if server_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if server_presence is ProbeStatus.PRESENT:
@@ -534,7 +511,7 @@ def observe_session_statuses(
             vm_admins[ws.vm_name] = _mgr._identity_access(vm, config, None, logger=None)
         if s.socket_path is not None:
             try:
-                socket_owners[s.name] = _validated_socket(db, s).owner
+                socket_owners[s.name] = _teardown._validated_socket(db, s).owner
             except StateError as exc:
                 output.warn(f"Session status is unavailable: {exc}.")
                 continue

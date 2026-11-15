@@ -25,6 +25,7 @@ from agentworks.sessions.multi_console import (
     reorder_sessions,
 )
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests._runtime_probes import owner_probe_line
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
@@ -70,7 +71,7 @@ def _mark_stopped(db: Database, name: str, target: _FakeTarget, monkeypatch: pyt
     original = target.run
 
     def run(command: str, **kwargs: object) -> _FakeResult:
-        if command == f"test -e {q_socket}":
+        if owner_probe_line(command) == f"test -e {q_socket}":
             return _FakeResult(returncode=1)
         return original(command, **kwargs)
 

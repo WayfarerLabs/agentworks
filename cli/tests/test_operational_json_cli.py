@@ -531,10 +531,12 @@ def _seed_session_rows(db: Database) -> None:
     db.insert_vm("box", site="site", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
-    db.insert_session("live", "ws", "missing-template", SessionMode.ADMIN)
+    # Each socket sits in the VM admin's (``insert_vm``'s default ``agentworks``) managed directory.
+    sockets = "/run/agentworks/admin-tmux-sockets/agentworks"
+    db.insert_session("live", "ws", "missing-template", SessionMode.ADMIN, socket_path=f"{sockets}/live.sock")
     db.insert_session("stopped", "ws", "missing-template", SessionMode.ADMIN)
     db.update_session_runtime(
-        "stopped", socket_path="/tmp/stopped.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        "stopped", socket_path=f"{sockets}/stopped.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
     )
 
 

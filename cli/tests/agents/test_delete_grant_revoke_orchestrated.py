@@ -40,6 +40,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
+from tests._runtime_probes import owner_probe_line
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
 from tests.vm_access_support import install_access_recorder, route_vm_access_to_target
 
@@ -138,7 +139,7 @@ class _FakeAdminTarget:
 
     def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
         self.commands.append(cmd)
-        if cmd.startswith("test -e "):
+        if owner_probe_line(cmd).startswith("test -e "):
             return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
         return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 

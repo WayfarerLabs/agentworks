@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.db import SessionMode
 from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary, operation_log
@@ -169,7 +170,7 @@ def delete_workspace(
                         ensure_pids_batch,
                     )
 
-                    # The admin tears an agent's session down as root and owns the console windows.
+                    # The admin tears an agent's session down as that agent and owns the console windows.
                     admin = _identity_access(vm, config, None, logger=log)
                     sessions = db.list_sessions(workspace_name=name)
                     sessions = ensure_pids_batch(sessions, db=db, config=config)
@@ -181,7 +182,7 @@ def delete_workspace(
                             _teardown_session(
                                 session,
                                 access=admin,
-                                target_owns_session=session.agent_name is None,
+                                target_owns_session=session.mode == SessionMode.ADMIN.value,
                                 db=db,
                                 force=True,
                                 legacy_running_authorized=True,

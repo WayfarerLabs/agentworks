@@ -156,15 +156,20 @@ class _Owners:
         return SimpleNamespace(admin_username="admin")
 
 
-def _check(session: SessionRow, *, admin: RecordingVMAccess) -> SessionStatus:
-    """``check_session_status`` of ``session``, a dedicated one's socket moved into its owner's managed directory."""
+def _owned(session: SessionRow) -> SessionRow:
+    """``session`` with a dedicated socket moved into its owner's managed directory, as ``_Owners`` names it."""
     from dataclasses import replace
     from pathlib import PurePosixPath
 
-    if session.socket_path is not None:
-        root, owner = (AGENT_SOCKET_ROOT, "agt") if session.mode == "agent" else (ADMIN_SOCKET_ROOT, "admin")
-        session = replace(session, socket_path=f"{root}/{owner}/{PurePosixPath(session.socket_path).name}")
-    return check_session_status(session, admin=admin, db=_Owners())  # type: ignore[arg-type]
+    if session.socket_path is None:
+        return session
+    root, owner = (AGENT_SOCKET_ROOT, "agt") if session.mode == "agent" else (ADMIN_SOCKET_ROOT, "admin")
+    return replace(session, socket_path=f"{root}/{owner}/{PurePosixPath(session.socket_path).name}")
+
+
+def _check(session: SessionRow, *, admin: RecordingVMAccess) -> SessionStatus:
+    """``check_session_status`` of ``session``, its socket in its owner's managed directory."""
+    return check_session_status(_owned(session), admin=admin, db=_Owners())  # type: ignore[arg-type]
 
 
 def _batch_row(
@@ -558,12 +563,12 @@ def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(
         lambda *args, **kwargs: pytest.fail("indeterminate fingerprint entered absence proof"),
     )
 
-    class _NoMutationDB:
+    class _NoMutationDB(_Owners):
         def compare_and_set_session_runtime_repair(self, *args: object, **kwargs: object) -> None:
             pytest.fail("indeterminate repair mutated session runtime state")
 
     with pytest.raises(StateError):
-        _repair_session_pid(session, admin=_admin(target), db=_NoMutationDB())  # type: ignore[arg-type]
+        _repair_session_pid(_owned(session), admin=_admin(target), db=_NoMutationDB())  # type: ignore[arg-type]
 
     assert calls == [True]
 
@@ -587,11 +592,11 @@ def test_repair_can_converge_without_pre_table_narration(
         lambda *args, **kwargs: True,
     )
 
-    class _DB:
+    class _DB(_Owners):
         def compare_and_set_session_runtime_repair(self, expected: SessionRuntimeSnapshot, **kwargs: object) -> None:
             updates.append({"name": expected.name, **kwargs})
 
-    assert _repair_session_pid(session, admin=_admin(_FakeTarget()), db=_DB(), announce=False)  # type: ignore[arg-type]
+    assert _repair_session_pid(_owned(session), admin=_admin(_FakeTarget()), db=_DB(), announce=False)  # type: ignore[arg-type]
     assert len(updates) == 1
     assert captured_output.lines == []
 
@@ -713,12 +718,12 @@ def test_agent_repair_does_not_treat_sudo_refusal_as_absence(
         }
     )
 
-    class _NoMutationDB:
+    class _NoMutationDB(_Owners):
         def compare_and_set_session_runtime_repair(self, *args: object, **kwargs: object) -> None:
             pytest.fail("sudo refusal mutated session runtime state")
 
     with pytest.raises(ConnectivityError):
-        _repair_session_pid(session, admin=_admin(target), db=_NoMutationDB())  # type: ignore[arg-type]
+        _repair_session_pid(_owned(session), admin=_admin(target), db=_NoMutationDB())  # type: ignore[arg-type]
 
 
 def test_reachable_server_without_canonical_session_is_residual() -> None:
@@ -1279,7 +1284,7 @@ def test_session_observer_reports_a_vm_it_cannot_reach_once_and_observes_the_oth
 def test_ensure_pid_raises_on_unresolvable() -> None:
     from agentworks.sessions.manager import _ensure_pid
 
-    session = _session("s1", pid=None, socket_path="/sock", mode="agent")
+    session = _owned(_session("s1", pid=None, socket_path="/sock", mode="agent"))
 
     class _FailTarget:
         def run(self, command, *, check=True, sudo=False, timeout=None):
@@ -1290,7 +1295,7 @@ def test_ensure_pid_raises_on_unresolvable() -> None:
                 return _FakeResult(ok=False, stdout="")
             return _FakeResult(ok=True)
 
-    class _FakeDb:
+    class _FakeDb(_Owners):
         def get_session(self, name):
             return session
 

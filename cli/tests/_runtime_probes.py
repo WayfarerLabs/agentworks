@@ -10,8 +10,23 @@ from typing import Protocol
 _FRAME = re.compile(r"printf '\\nAGW_RUNTIME_([A-Z]+)='; (?:printf '\\nAGW_RUNTIME_STDERR=' >&2; )?")
 
 
+_SOCKET_GUARD = re.compile(
+    r"test ! -L (\S+) && \{ test ! -e \1 \|\| \{ test -S \1 && "
+    r'test "\$\(stat -c %U -- \1\)" = (\S+); \}; \} && \{ (?P<line>.*); \}',
+    re.DOTALL,
+)
+
+
 def owner_probe_line(command: str) -> str:
-    """The line a stale-socket probe runs as the socket's owner (``runuser -u O -- sh -c LINE``), else ``command``."""
+    """The line a socket-owner request runs as the socket's owner, else ``command``.
+
+    Unwraps ``tmux.as_socket_owner_line``'s guard and, when present, its
+    ``runuser -u O -- sh -c LINE``, as the stale-socket probe and every
+    owner read send them.
+    """
+    guarded = _SOCKET_GUARD.fullmatch(command)
+    if guarded is not None:
+        command = guarded["line"]
     if re.search(r"runuser -u \S+ -- sh -c ", command) is None:
         return command
     words = shlex.split(command)

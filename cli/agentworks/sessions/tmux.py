@@ -124,7 +124,7 @@ class CommandOutcome:
         return self.returncode == 0
 
 
-def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bool) -> Callable[..., CommandOutcome]:
+def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bool) -> RunCommand:
     """The tmux probes' ``RunCommand`` over ``access``: each line runs as one ``/bin/sh`` script with its ``env``.
 
     A completion that is not ``Completed`` raises its typed error; with
@@ -140,6 +140,45 @@ def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bo
         )
 
     return run
+
+
+def as_socket_owner_line(command: str, *, socket_path: str, owner: str, switch_user: bool) -> str:
+    """``command`` behind a guard on ``socket_path``, run as ``owner``: the line ``socket_owner_run_command`` sends.
+
+    The guard refuses a path that is a link, exists but is not a socket, or is
+    a socket another account than ``owner`` owns: the line then exits 1 and
+    prints nothing. With ``switch_user`` the caller's line runs as root and
+    ``command`` runs as ``owner`` through ``runuser``; without it the caller
+    already is ``owner``.
+    """
+    q_socket, q_owner = shlex.quote(socket_path), shlex.quote(owner)
+    guard = (
+        f"test ! -L {q_socket} && {{ test ! -e {q_socket} || "
+        f'{{ test -S {q_socket} && test "$(stat -c %U -- {q_socket})" = {q_owner}; }}; }}'
+    )
+    line = f"runuser -u {q_owner} -- sh -c {shlex.quote(command)}" if switch_user else command
+    return f"{guard} && {{ {line}; }}"
+
+
+def socket_owner_run_command(
+    access: VMAccess, *, socket_path: str, owner: str, switch_user: bool, deadline: float | None
+) -> RunCommand:
+    """A ``RunCommand`` over ``access`` whose every line touches a tmux server only as the account that owns it.
+
+    Root is never a tmux client of a server another account controls: a
+    client acts on what its server sends it with the client's own rights,
+    and no check of the socket's path or owner changes that. So a caller
+    reaching another account's server (``switch_user``) elevates only to drop
+    to ``owner``, and every line, owner's or not, is guarded on the socket
+    (``as_socket_owner_line``).
+    """
+    run = access_run_command(access, deadline=deadline, elevated=switch_user)
+
+    def as_owner(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> CommandResult:
+        line = as_socket_owner_line(command, socket_path=socket_path, owner=owner, switch_user=switch_user)
+        return run(line, check=check, env=env)
+
+    return as_owner
 
 
 @dataclass(frozen=True)
@@ -437,17 +476,11 @@ def _cleanup_stale_sockets_under(files: Files, dir_path: str, *, owner: str) -> 
     removed = 0
     for sock_path in paths:
         q_sock = shlex.quote(sock_path)
-        socket_guard = f"test -S {q_sock} && ! test -L {q_sock}"
-
-        def probe(
-            command: str, *, check: bool = True, env: dict[str, str] | None = None, guard: str = socket_guard
-        ) -> CommandResult:
-            # Root runs only the guard; tmux runs as the socket's owner.
-            as_owner = f"runuser -u {shlex.quote(owner)} -- sh -c {shlex.quote(command)}"
-            return as_root(f"{guard} && {{ {as_owner}; }}", check=check, env=env)
-
+        probe = socket_owner_run_command(
+            access, socket_path=sock_path, owner=owner, switch_user=True, deadline=deadline
+        )
         absent = probe_tmux_server(run_command=probe, socket_path=sock_path) is ProbeStatus.ABSENT
-        if absent and as_root(f"{socket_guard} && rm -f -- {q_sock}", check=False).ok:
+        if absent and as_root(f"test -S {q_sock} && ! test -L {q_sock} && rm -f -- {q_sock}", check=False).ok:
             removed += 1
     return removed
 

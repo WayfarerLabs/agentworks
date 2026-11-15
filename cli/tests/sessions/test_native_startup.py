@@ -20,7 +20,7 @@ from agentworks.db import SessionRow, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
-from agentworks.sessions.manager import _status
+from agentworks.sessions.manager import _teardown
 from agentworks.sessions.manager._pids import _repair_session_pid
 from agentworks.sessions.manager._status import batch_check_status, check_session_status
 from agentworks.sessions.manager._teardown import ManagedSocket
@@ -128,9 +128,11 @@ def native(monkeypatch):
         # Cross-user access is independently tested; no system users are created.
         monkeypatch.setattr(tmux, "_grant_server_access", lambda *a: None)
         # The native socket lives in this fixture's directory, outside the managed
-        # socket roots, and this account owns it, so status reads run as this account.
+        # socket roots, and this account owns it, so every read and teardown runs as this account.
         owner = pwd.getpwuid(os.getuid()).pw_name
-        monkeypatch.setattr(_status, "_validated_socket", lambda db, session: ManagedSocket(session.socket_path, owner))
+        monkeypatch.setattr(
+            _teardown, "_validated_socket", lambda db, session: ManagedSocket(session.socket_path, owner)
+        )
         try:
             yield target
         finally:

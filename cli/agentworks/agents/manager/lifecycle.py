@@ -380,7 +380,7 @@ def delete_agent(
                     from agentworks.execution.access import Admin
                     from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
 
-                    # The admin tears the agent's sessions down as root and owns the console windows.
+                    # The admin tears the agent's sessions down as the agent and owns the console windows.
                     admin = execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
                     agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
                     # Snapshot console memberships before db.delete_session cascades them.
