@@ -26,11 +26,21 @@ from agentworks.ssh_config import (
 from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
 
+needs_ssh = pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+
 
 def _directive(ssh_config: Path) -> str:
     directive = _include_directive(ssh_config)
     assert directive is not None
     return directive
+
+
+def _resolved_hostname(ssh_config: Path, alias: str) -> str:
+    """The HostName the installed client resolves for ``alias``; ``-G`` never connects."""
+    out = subprocess.run(
+        ["ssh", "-G", "-F", str(ssh_config), alias], capture_output=True, text=True, timeout=10, check=True
+    ).stdout
+    return dict(line.split(" ", 1) for line in out.splitlines())["hostname"]
 
 
 def test_ssh_host_alias_default_prefix() -> None:
@@ -99,24 +109,76 @@ def test_ensure_include_noop_if_present_elsewhere(tmp_path: Path) -> None:
     assert ssh_config.read_text() == original
 
 
-def test_an_include_line_written_unquoted_is_replaced_in_place(tmp_path: Path) -> None:
-    """Earlier releases wrote a pattern with a space unquoted, which ssh split into two."""
-    ssh_config = tmp_path / "my keys" / "config"
+@pytest.mark.parametrize("parent", ["my keys", "o'brien"])
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_every_include_line_written_unquoted_is_rewritten_in_place(parent: str, newline: str, tmp_path: Path) -> None:
+    """Earlier releases wrote the pattern unquoted; the correct line may already be there too."""
+    ssh_config = tmp_path / parent / "config"
     ssh_config.parent.mkdir()
     directive = _directive(ssh_config)
     unquoted = directive.replace('"', "")
-    ssh_config.write_text(f"Host *\n    Foo bar\n\n{unquoted}\n")
+    lines = [unquoted, "", "Host *", "    Foo bar", "", directive, "Match all", f"    {unquoted}"]
+    ssh_config.write_bytes(newline.join([*lines, ""]).encode())
 
     _ensure_include(ssh_config, directive)
 
-    assert ssh_config.read_text() == f"Host *\n    Foo bar\n\n{directive}\n"
+    expected = [directive, "", "Host *", "    Foo bar", "", directive, "Match all", f"    {directive}"]
+    assert ssh_config.read_bytes() == newline.join([*expected, ""]).encode()
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_commented_out_include_does_not_count(newline: str, tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    directive = _directive(ssh_config)
+    original = f"# {directive}{newline}Host *{newline}"
+    ssh_config.write_bytes(original.encode())
+
+    _ensure_include(ssh_config, directive)
+
+    added = f"# Added by agentworks{newline}{directive}{newline}{newline}"
+    assert ssh_config.read_bytes() == (added + original).encode()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_a_symlinked_config_is_updated_through_its_link(tmp_path: Path) -> None:
+    """A dotfiles checkout often owns ~/.ssh/config; the rewrite must not replace the link with a copy."""
+    target = tmp_path / "dotfiles" / "ssh-config"
+    target.parent.mkdir()
+    target.write_text("Host *\n    Foo bar\n")
+    ssh_config = tmp_path / ".ssh" / "config"
+    ssh_config.parent.mkdir()
+    ssh_config.symlink_to(target)
+    directive = _directive(ssh_config)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.is_symlink()
+    assert directive in target.read_text().splitlines()
+
+
+@needs_ssh
+def test_the_installed_client_reads_the_file_once_a_stale_include_with_an_apostrophe_is_rewritten(
+    tmp_path: Path,
+) -> None:
+    """An unquoted apostrophe makes ssh reject the whole file, so adding a correct line would fix nothing."""
+    config, _ = _mock_config(tmp_path / "o'brien")
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_text(f"{_directive(ssh_config).replace(chr(34), '')}\n")
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert _resolved_hostname(ssh_config, "awvm--web") == "100.64.0.1"
 
 
 def test_remove_legacy_section(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     ssh_config.write_text(f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old-vm\n    HostName 1.2.3.4\n")
 
-    _remove_legacy_section(ssh_config, _directive(ssh_config))
+    _remove_legacy_section(ssh_config)
 
     content = ssh_config.read_text()
     assert _LEGACY_MARKER not in content
@@ -129,7 +191,7 @@ def test_remove_legacy_section_noop_if_absent(tmp_path: Path) -> None:
     original = "Host *\n    Foo bar\n"
     ssh_config.write_text(original)
 
-    _remove_legacy_section(ssh_config, _directive(ssh_config))
+    _remove_legacy_section(ssh_config)
 
     assert ssh_config.read_text() == original
 
@@ -242,6 +304,41 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     assert _LEGACY_MARKER not in content
     assert "Foo bar" in content
     assert _directive(config.operator.ssh_config) in content
+
+
+def test_a_stale_include_beside_a_legacy_section_is_rewritten_and_the_section_removed(tmp_path: Path) -> None:
+    config, _ = _mock_config(tmp_path / "my keys")
+    ssh_config = config.operator.ssh_config
+    directive = _directive(ssh_config)
+    unquoted = directive.replace('"', "")
+    ssh_config.write_text(
+        f"{unquoted}\n\nHost *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old\n    HostName 1.2.3.4\n"
+    )
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert ssh_config.read_text() == f"{directive}\n\nHost *\n    Foo bar\n"
+
+
+def test_an_include_inside_the_legacy_section_is_restored_when_the_section_goes(tmp_path: Path) -> None:
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    directive = _directive(ssh_config)
+    ssh_config.write_text(
+        f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\n{directive}\nHost awvm--old\n    HostName 1.2.3.4\n"
+    )
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = ssh_config.read_text()
+    assert _LEGACY_MARKER not in content
+    assert content.splitlines().count(directive) == 1
 
 
 @pytest.mark.windows
@@ -656,26 +753,33 @@ def test_the_installed_client_reaches_the_managed_entries_through_the_include(pa
     db.list_agents.return_value = []
     _rebuild_config_dir(config, db)
 
-    # -G resolves the configuration and exits; it never connects. An Include
-    # that names nothing leaves the alias as the host name.
-    out = subprocess.run(
-        ["ssh", "-G", "-F", str(config.operator.ssh_config), "awvm--web"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=True,
-    ).stdout
-    settings = dict(line.split(" ", 1) for line in out.splitlines())
+    # An Include that names nothing leaves the alias as the host name.
+    assert _resolved_hostname(config.operator.ssh_config, "awvm--web") == "100.64.0.1"
 
-    assert settings["hostname"] == "100.64.0.1"
+
+@needs_ssh
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize("parent", ["100%d", "a$b", "a${HOME}b"])
+def test_include_expands_no_tokens_or_variables_so_such_a_directory_is_included(parent: str, tmp_path: Path) -> None:
+    config, _ = _mock_config(tmp_path / parent)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert _resolved_hostname(config.operator.ssh_config, "awvm--web") == "100.64.0.1"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
-def test_a_config_directory_ssh_would_misread_gets_no_include_with_a_warning(
+@pytest.mark.parametrize("parent", ["b[1]x", "g*x", "q?x", 'a"b', "a\\b", "a\tb"])
+def test_a_config_directory_an_include_cannot_name_gets_no_include_with_a_warning(
+    parent: str,
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    config, ssh_dir = _mock_config(tmp_path / "100%")
+    config, ssh_dir = _mock_config(tmp_path / parent)
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]

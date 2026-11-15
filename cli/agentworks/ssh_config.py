@@ -52,24 +52,29 @@ def _to_ssh_path(path: Path) -> str:
     return posix
 
 
+# What ssh misreads in an Include pattern's directory. Include expands no
+# ``%`` tokens or environment variables, so only these matter: a double quote
+# or backslash ends or escapes the quoting, a control character ends the line,
+# and a glob character makes the pattern match other directories or none.
+_INCLUDE_UNSAFE = frozenset('"\\*?[')
+
+
 def _include_directive(ssh_config: Path) -> str | None:
     """The Include directive for config.d, or ``None`` with a warning when ssh would misread its path.
 
-    The resolved directory must pass :func:`trust.literal_path`, the rule for
-    every path ssh is given, and the pattern is written through
-    :func:`trust.option_value`, so a directory with a space stays one
-    pattern instead of splitting into two that match nothing. Computed once
-    per rebuild, so the warning appears once.
+    The pattern is written through :func:`trust.option_value`, so a directory
+    with a space or an apostrophe stays one pattern. A directory holding a
+    character in ``_INCLUDE_UNSAFE`` or a control character gets no directive.
+    Computed once per rebuild, so the warning appears once.
     """
     # Resolved, as the directive has always been written, so a line an
     # earlier rebuild added still matches.
     config_d = (ssh_config.parent / _CONFIG_DIR_NAME).resolve()
-    try:
-        trust.literal_path(config_d, "SSH config directory")
-    except ConfigError as e:
+    if any(char in _INCLUDE_UNSAFE or ord(char) < 32 or ord(char) == 127 for char in config_d.as_posix()):
         output.warn(
-            f"Include directive left out of {format_host_path(ssh_config)}, so ssh reads none of the "
-            f"managed entries: {e}"
+            f"Include directive left out of {format_host_path(ssh_config)}, so ssh reads none of the managed "
+            f"entries: '{format_host_path(config_d)}' holds a quote, backslash, control character or "
+            "'*', '?' or '[', which an Include pattern cannot name literally"
         )
         return None
     return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
@@ -191,13 +196,12 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     prefix = config.operator.ssh_host_prefix
     agent_prefix = config.operator.ssh_agent_host_prefix
 
-    # Ensure Include directive at top of ssh_config
+    # Clean up legacy managed section if present, then ensure the Include
+    # directive, so a directive inside that section is restored, not lost.
+    _remove_legacy_section(ssh_config)
     directive = _include_directive(ssh_config)
     if directive is not None:
         _ensure_include(ssh_config, directive)
-
-    # Clean up legacy managed section if present
-    _remove_legacy_section(ssh_config, directive)
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
@@ -252,52 +256,56 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 def _ensure_include(ssh_config: Path, directive: str) -> None:
     """Ensure ``directive`` is present in ssh_config.
 
-    Adds it at the top if not present. If the user has moved it elsewhere
-    in the file, their placement is respected. A line holding the same
-    pattern unquoted, which ssh split at its whitespace, is replaced in place.
+    Adds it at the top if no line holds it. If the user has moved it
+    elsewhere in the file, their placement is respected. The file keeps its
+    line endings.
     """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
-    include_block = f"{_INCLUDE_COMMENT}\n{directive}"
-
     if not ssh_config.exists():
-        ssh_config.write_text(f"{include_block}\n")
+        _write_user_config(ssh_config, f"{_INCLUDE_COMMENT}\n{directive}\n")
         return
 
-    content = ssh_config.read_text()
-    if directive in content:
-        return  # already present (with or without comment)
-
-    # Earlier releases wrote the pattern unquoted, which ssh split at its
-    # whitespace. Replace that line in place rather than leave it beside this one.
-    unquoted = directive.replace('"', "")
+    content = _read_user_config(ssh_config)
     lines = content.splitlines(keepends=True)
-    stale = [i for i, line in enumerate(lines) if line.strip() == unquoted]
-    if unquoted != directive and stale:
-        for i in stale:
-            lines[i] = lines[i].replace(unquoted, directive)
-        ssh_config.write_text("".join(lines))
+    # Earlier releases wrote the pattern unquoted. With an apostrophe in it,
+    # ssh rejects the whole file, so a correct line beside it would fix
+    # nothing; with whitespace, the line names nothing. Rewrite it in place.
+    unquoted = directive.replace('"', "")
+    rewritten = [line.replace(unquoted, directive) if line.strip() == unquoted else line for line in lines]
+    if any(line.strip() == directive for line in rewritten):
+        if rewritten != lines:
+            _write_user_config(ssh_config, "".join(rewritten))
         return
 
-    # Insert at top
-    ssh_config.write_text(f"{include_block}\n\n{content}")
+    newline = "\r\n" if "\r\n" in content else "\n"
+    _write_user_config(ssh_config, f"{_INCLUDE_COMMENT}{newline}{directive}{newline}{newline}{content}")
 
 
-def _remove_legacy_section(ssh_config: Path, directive: str | None) -> None:
-    """Remove the legacy managed section from ssh_config if present, keeping ``directive``."""
+def _remove_legacy_section(ssh_config: Path) -> None:
+    """Remove the legacy managed section from ssh_config if present."""
     if not ssh_config.exists():
         return
 
-    content = ssh_config.read_text()
+    content = _read_user_config(ssh_config)
     marker_idx = content.find(_LEGACY_MARKER)
     if marker_idx == -1:
         return
 
     # Keep everything before the marker
-    user_section = content[:marker_idx].rstrip("\n")
-    if user_section:
-        ssh_config.write_text(user_section + "\n")
-    else:
-        ssh_config.write_text(f"{directive}\n" if directive is not None else "")
+    user_section = content[:marker_idx].rstrip("\r\n")
+    newline = "\r\n" if "\r\n" in content else "\n"
+    _write_user_config(ssh_config, user_section + newline if user_section else "")
+
+
+def _read_user_config(ssh_config: Path) -> str:
+    """The operator's SSH config with its line endings as written."""
+    with open(ssh_config, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def _write_user_config(ssh_config: Path, content: str) -> None:
+    """Replace the operator's SSH config atomically, through a symlink to it, line endings as given."""
+    atomic_write_text(ssh_config.resolve(), content, newline="")
 
 
 # -- Legacy approach (managed section in ssh_config) -----------------------
