@@ -38,11 +38,21 @@ def _directive(ssh_config: Path) -> str:
 
 
 def _resolved_hostname(ssh_config: Path, alias: str) -> str:
-    """The HostName the installed client resolves for ``alias``; ``-G`` never connects."""
-    out = subprocess.run(
-        ["ssh", "-G", "-F", str(ssh_config), alias], capture_output=True, text=True, timeout=10, check=True
-    ).stdout
-    return dict(line.split(" ", 1) for line in out.splitlines())["hostname"]
+    """The HostName the installed client resolves for ``alias``; ``-G`` never connects.
+
+    A failure shows which client ran, its verbose account of reading the
+    configuration and the files it read, since clients and their rules differ
+    by platform and version.
+    """
+    argv = ["ssh", "-G", "-F", str(ssh_config), alias]
+    completed = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+    if completed.returncode != 0:
+        verbose = subprocess.run([*argv[:2], "-vvv", *argv[2:]], capture_output=True, text=True, timeout=10)
+        files = {path: path.read_text() for path in (ssh_config, *sorted((ssh_config.parent / "config.d").glob("*")))}
+        pytest.fail(
+            f"{shutil.which('ssh')} -G exited {completed.returncode}\nverbose stderr: {verbose.stderr}\nfiles: {files}"
+        )
+    return dict(line.split(" ", 1) for line in completed.stdout.splitlines())["hostname"]
 
 
 def test_ssh_host_alias_default_prefix() -> None:
@@ -291,7 +301,8 @@ def _mock_config(tmp_path: Path) -> tuple[MagicMock, Path]:
     config.operator.ssh_config_dir = True
     config.operator.ssh_host_prefix = "awvm--"
     config.operator.ssh_agent_host_prefix = "awagent--"
-    config.operator.ssh_private_key = Path("/home/user/.ssh/id_ed25519")
+    # Absolute on every platform, so the entries carry an IdentityFile line.
+    config.operator.ssh_private_key = tmp_path / "id_ed25519"
     return config, ssh_dir
 
 
