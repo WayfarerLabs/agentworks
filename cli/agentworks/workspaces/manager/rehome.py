@@ -29,6 +29,11 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
+# The exclusive target mkdir's status for "the target already exists": mkdir
+# fails with 1, and neither sudo, bash, nor ssh produces 3 on its own.
+_TARGET_EXISTS_EXIT = 3
+
+
 def rehome_workspace(
     db: Database,
     config: Config,
@@ -197,7 +202,8 @@ def _rehome_vm(
 
         # Verify target does not exist. This check only gives the clear early
         # refusal; the exclusive mkdir below is what keeps an existing target
-        # (including one the admin cannot see into) from being copied into.
+        # (including one under a parent the admin cannot search) from being
+        # copied into.
         dst_check = probe_presence(
             target,
             f"test -d {shlex.quote(new_path)}",
@@ -244,9 +250,26 @@ def _rehome_vm(
             try:
                 # Create the target directory as root, exclusively, so a target
                 # that exists fails here whatever the check above saw; then chown
-                # it to admin so rsync can write.
+                # it to admin so rsync can write. An existing target was never
+                # ours, so it raises without the partial-state hint.
                 target.run(f"mkdir -p -- {shlex.quote(str(PurePosixPath(new_path).parent))}", sudo=True)
-                target.run(f"mkdir -- {np}", sudo=True)
+                reserved = target.run(
+                    f"mkdir -- {np} && exit 0; s=$?; "
+                    f"if test -e {np} || test -L {np}; then exit {_TARGET_EXISTS_EXIT}; fi; exit $s",
+                    sudo=True,
+                    check=False,
+                )
+                if reserved.returncode == _TARGET_EXISTS_EXIT:
+                    raise StateError(
+                        f"target directory {new_path} already exists on VM",
+                        entity_kind="workspace",
+                        entity_name=ws_name,
+                    )
+                if not reserved.ok:
+                    raise SSHError(
+                        f"could not create target directory {new_path} on VM "
+                        f"(exit {reserved.returncode}): {reserved.stderr.strip()}"
+                    )
                 target.run(f"chown {vm.admin_username} {np}", sudo=True)
 
                 # Copy with rsync (fall back to cp -a). Trailing slash matters for
