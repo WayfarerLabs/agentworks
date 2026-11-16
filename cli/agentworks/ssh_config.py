@@ -319,8 +319,11 @@ def _read_user_config(ssh_config: Path) -> str:
 def _write_user_config(ssh_config: Path, content: str) -> None:
     """Write the operator's SSH config through a symlink to it, line endings and undecodable bytes as given.
 
-    An existing file is replaced atomically and keeps its mode, owner and
-    group; a new one is created the way any file is, under the umask.
+    An existing file keeps its mode, owner and group: it is replaced
+    atomically, or, when this user may not give the replacement that owner or
+    group, rewritten in place with a copy of the original kept until the
+    rewrite succeeds (:func:`atomic_write_text`). A new file is created the way
+    any file is, under the umask.
     """
     target = ssh_config.resolve()
     if target.exists():
