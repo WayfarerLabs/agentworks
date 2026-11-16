@@ -23,9 +23,9 @@ requirements.
 | Existing boundary                                | Evidence                                 | Design consequence                                                               |
 | ------------------------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------------- |
 | Five explicit maps and named bundle inheritance  | `cli/agentworks/artifacts/bundle.py:35`  | Add source ingestion; preserve map composition and owner identity                |
-| Local/Git bounded acquisition                    | `cli/agentworks/package_sources.py:123`  | Reuse the existing source grammar, limits and revision cache                     |
+| Local/Git bounded acquisition                    | `cli/agentworks/package_sources.py:127`  | Reuse the existing source grammar, limits and revision cache                     |
 | Git reads committed objects                      | `cli/agentworks/package_sources.py:403`  | Resolve once; no executable checkout is required                                 |
-| File capture and canonical normalization         | `cli/agentworks/artifacts/capture.py:59` | Directory discovery feeds the current canonical entry validators                 |
+| File capture and canonical normalization         | `cli/agentworks/artifacts/capture.py:63` | Directory discovery feeds the current canonical entry validators                 |
 | MCP file source selects one named server         | `cli/agentworks/artifacts/mcp.py:165`    | Discovery needs all-server selection while keeping the same definition validator |
 | Local relative source currently uses process cwd | `cli/agentworks/package_sources.py:177`  | Define migration for declaration-relative bases explicitly                       |
 

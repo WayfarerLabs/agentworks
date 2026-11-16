@@ -30,7 +30,8 @@ No checkboxes claim completed acceptance, implementation or review in this initi
 - [ ] Add the approved Agent Plugins profile through the same boundary. Prove supported semantics
       and explicit errors for unsupported package/runtime behavior.
 - [ ] Retain member/definition provenance for offline inspection; preserve owner/type/key identity,
-      unchanged explicit-only fingerprints, supported persisted reads and native cleanup behavior.
+      fingerprints where source meaning is unchanged, supported persisted reads and native cleanup
+      behavior. Include declaration bases where relative resolution depends on them.
 - [ ] Ship permanent artifact guide, schema reference, module README and safe runnable examples
       alongside the behavior. Permanent guidance must not depend on this SDD.
 

@@ -39,10 +39,11 @@ its definitions, discoveries and relative members from those committed objects. 
 references against their source context; do not turn them into independent floating Git fetches.
 Explicit cross-repository references acquire their own context within the same budgets.
 
-Imported definitions cannot use absolute workstation paths or home expansion to read the importing
-operator's files. Local operator-authored definitions can retain explicit absolute workstation
-sources. Source text is data: loading it grants no commands, resource registration or integration
-activation.
+Git-imported definitions cannot use absolute workstation paths or home expansion to read the
+importing operator's files. Local operator-authored definitions, including explicitly imported local
+documents, can retain absolute workstation sources. Nested imports retain the restriction of their
+Git source context. Source text is data: loading it grants no commands, resource registration or
+integration activation.
 
 The containment boundary and existing-path migration remain explicit review decisions below. Local
 directory snapshots retain the current changed-during-capture checks; they do not promise a
@@ -81,14 +82,18 @@ second dependency graph in the first push.
 
 The LLD must settle exact YAML and whether multiple imports are needed inside one bundle. If an
 ordered source collection is used, it must explicitly document inheritance and replacement; it must
-not accidentally repeat the activation-list inheritance defect. This checkpoint does not publish an
-unreviewed schema as settled configuration.
+not accidentally repeat the activation-list inheritance defect. This checkpoint does not publish a
+schema as settled configuration before its review.
 
-Imported/discovered maps are the bundle's base and explicit entries override them. Child bundle
-entries replace parent entries; later selected bundles replace earlier entries, then owner direct
-declarations apply if that feature has landed. Preserve existing diagnostics and complete-entry
-replacement. Reject ambiguous discovery within a source instead of using filesystem traversal order
-as precedence. Source adapters do not add per-resource namespaces inside an owning scope.
+Within each declaring bundle layer, imported/discovered maps apply before that layer's explicit
+entries. Fold those layers parent to child: a child's discovered entry can replace a parent's
+explicit entry, and the child's explicit entry wins over both. Inherited entries retain their
+declaring source context. Later selected bundles replace earlier entries, then owner direct
+declarations apply if that feature has landed. The LLD must define source-field inheritance and
+clearing without accidentally replaying an inherited source over its parent's explicit entries.
+Preserve existing diagnostics and complete-entry replacement. Reject ambiguous discovery within a
+source instead of using filesystem traversal order as precedence. Source adapters do not add
+per-resource namespaces inside an owning scope.
 
 ## Capture, state and inspection
 
@@ -102,11 +107,15 @@ state then handles changed or withdrawn entries idempotently. Source acquisition
 the previous capture as historical evidence, not as a successful fallback.
 
 The capture model must retain enough source provenance to explain definition and discovered-member
-selection after temporary acquisition storage is gone. Preserve old explicit-only fingerprints and
-supported capture reads; version persisted structures only if their interpretation actually changes.
-Inspection uses captured discovery results. It can report a changed local declaration without
-fetching a branch or rescanning a directory, and cannot claim that recorded members are the latest
-remote inventory. No new strict ancestor-freshness gate is introduced.
+selection after temporary acquisition storage is gone. Preserve old fingerprints where effective
+source meaning is unchanged, including unchanged inline and absolute definitions. Include the known
+declaring base and source selectors in declaration fingerprints wherever they change relative
+resolution. Resolved commits and discovered inventory belong to capture evidence; offline
+fingerprinting does not query a remote branch. Preserve supported capture reads and version
+persisted structures only if their interpretation actually changes. Inspection uses captured
+discovery results. It can report a changed local declaration without fetching a branch or walking a
+directory, and cannot claim that recorded members are the latest remote inventory. No new strict
+ancestor-freshness gate is introduced.
 
 ## Decisions before implementation
 
