@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shlex
 import shutil
 import signal
 import stat
@@ -189,8 +190,28 @@ def test_an_upload_is_mode_0600_under_an_inherited_default_acl(tmp_path: Path, m
     assert target.read_text() == "echo hi\n"
 
 
+def test_an_upload_runs_under_an_explicit_sh_whatever_the_login_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The host command runs under the user's login shell, which may be fish or csh."""
+    commands: list[str] = []
+
+    def record(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        commands.append(command)
+        return _Completed(0, "", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", record)
+
+    LimaHost("vm-host").upload("/var/tmp/my dir/agentworks-lima-myvm.sh", "echo hi\n")
+
+    (command,) = commands
+    argv = shlex.split(command)
+    assert argv[:2] == ["/bin/sh", "-c"]
+    assert argv[3:] == ["sh", "/var/tmp/my dir", "/var/tmp/my dir/agentworks-lima-myvm.sh"]
+
+
 @needs_posix_sh
-def test_an_upload_replaces_an_existing_file_under_noclobber(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_upload_replaces_an_existing_file_when_the_login_shell_sets_noclobber(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The wrapper is rewritten on every create, and a host user's startup files may ``set -C``."""
     target = tmp_path / "agentworks-lima-myvm.sh"
     target.write_text("old\n")
