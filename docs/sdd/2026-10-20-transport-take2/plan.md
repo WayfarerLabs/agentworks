@@ -559,6 +559,9 @@ reads a legacy transport.
       then a final source-line pass, with one mise install helper and one install-command runner
       shared by both accounts.
 - [x] Collateral: guides or reference pages whose described init behavior changes.
+- [x] `dotfiles_destination` is checked at use, in `sync_dotfiles`, as rendered for the account,
+      since main's interpolation made it a template (lead ruling, merge of main into PR C). This
+      supersedes the template validation named in the Migrate box above.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
 Definition of done: create and reinit run entirely on the new transport.
