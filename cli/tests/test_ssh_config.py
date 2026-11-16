@@ -128,11 +128,25 @@ def test_every_include_line_written_unquoted_is_rewritten_in_place(parent: str, 
     assert ssh_config.read_bytes() == newline.join([*expected, ""]).encode()
 
 
+@pytest.mark.parametrize("parent", ["keys", "my keys"])
+@pytest.mark.parametrize("comment", ["# {directive}", "#{unquoted}", "    #  {unquoted}"])
+def test_the_managed_include_commented_out_is_an_opt_out(parent: str, comment: str, tmp_path: Path) -> None:
+    ssh_config = tmp_path / parent / "config"
+    ssh_config.parent.mkdir()
+    directive = _directive(ssh_config)
+    original = comment.format(directive=directive, unquoted=directive.replace('"', "")) + "\nHost *\n"
+    ssh_config.write_text(original)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_text() == original
+
+
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
-def test_a_commented_out_include_does_not_count(newline: str, tmp_path: Path) -> None:
+def test_any_other_comment_naming_the_include_does_not_count(newline: str, tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     directive = _directive(ssh_config)
-    original = f"# {directive}{newline}Host *{newline}"
+    original = f"# see {directive}{newline}Host *{newline}"
     ssh_config.write_bytes(original.encode())
 
     _ensure_include(ssh_config, directive)

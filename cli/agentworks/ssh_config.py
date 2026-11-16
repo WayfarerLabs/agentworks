@@ -257,8 +257,10 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     """Ensure ``directive`` is present in ssh_config.
 
     Adds it at the top if no line holds it. If the user has moved it
-    elsewhere in the file, their placement is respected. The file keeps its
-    line endings.
+    elsewhere in the file, their placement is respected, and a line that is
+    the directive commented out (``# Include ...``, quoted or not) is the
+    operator's opt-out: it counts as present and is left as it is. The file
+    keeps its line endings.
     """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
     if not ssh_config.exists():
@@ -272,13 +274,20 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     # nothing; with whitespace, the line names nothing. Rewrite it in place.
     unquoted = directive.replace('"', "")
     rewritten = [line.replace(unquoted, directive) if line.strip() == unquoted else line for line in lines]
-    if any(line.strip() == directive for line in rewritten):
+    opted_out = any(_commented_out(line) in (directive, unquoted) for line in lines)
+    if opted_out or any(line.strip() == directive for line in rewritten):
         if rewritten != lines:
             _write_user_config(ssh_config, "".join(rewritten))
         return
 
     newline = "\r\n" if "\r\n" in content else "\n"
     _write_user_config(ssh_config, f"{_INCLUDE_COMMENT}{newline}{directive}{newline}{newline}{content}")
+
+
+def _commented_out(line: str) -> str | None:
+    """What ``line`` comments out, or ``None`` when it is not a comment."""
+    stripped = line.strip()
+    return stripped[1:].strip() if stripped.startswith("#") else None
 
 
 def _remove_legacy_section(ssh_config: Path) -> None:
