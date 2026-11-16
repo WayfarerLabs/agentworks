@@ -7,6 +7,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -50,9 +51,25 @@ def _resolved_hostname(ssh_config: Path, alias: str) -> str:
         verbose = subprocess.run([*argv[:2], "-vvv", *argv[2:]], capture_output=True, text=True, timeout=10)
         files = {path: path.read_text() for path in (ssh_config, *sorted((ssh_config.parent / "config.d").glob("*")))}
         pytest.fail(
-            f"{shutil.which('ssh')} -G exited {completed.returncode}\nverbose stderr: {verbose.stderr}\nfiles: {files}"
+            f"{shutil.which('ssh')} -G exited {completed.returncode} under Python {sys.version}\n"
+            f"verbose stderr: {verbose.stderr}\nfiles: {files}{_acls(ssh_config.parent)}"
         )
     return dict(line.split(" ", 1) for line in completed.stdout.splitlines())["hostname"]
+
+
+def _acls(ssh_dir: Path) -> str:
+    """On Windows, what icacls shows for ``ssh_dir``, the two directories above it and everything inside it.
+
+    Win32-OpenSSH refuses an included file whose ACL grants anyone beyond the
+    user, SYSTEM and Administrators, and a file's ACL comes from these
+    directories.
+    """
+    if sys.platform != "win32":
+        return ""
+    paths = [ssh_dir.parent.parent, ssh_dir.parent, ssh_dir, *sorted(ssh_dir.rglob("*"))]
+    shown = (subprocess.run(["icacls", str(path)], capture_output=True, text=True) for path in paths)
+    lines = (line for run in shown for line in (run.stdout + run.stderr).splitlines())
+    return "\nacls:\n" + "\n".join(line for line in lines if line and not line.startswith("Successfully processed"))
 
 
 def test_ssh_host_alias_default_prefix() -> None:
@@ -870,7 +887,10 @@ def _give_the_acl_of_a_profiles_ssh_directory(directory: Path) -> None:
     if sys.platform != "win32":
         return
     grants = [f"{os.environ['USERNAME']}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"]
-    subprocess.run(["icacls", str(directory), "/inheritance:r", "/grant:r", *grants], check=True, capture_output=True)
+    done = subprocess.run(
+        ["icacls", str(directory), "/inheritance:r", "/grant:r", *grants], check=True, capture_output=True, text=True
+    )
+    print(f"TEMPORARY icacls grant: {done.stdout}{done.stderr}")  # noqa: T201
 
 
 @pytest.mark.windows
@@ -879,6 +899,15 @@ def _give_the_acl_of_a_profiles_ssh_directory(directory: Path) -> None:
 def test_the_installed_client_reaches_the_managed_entries_through_the_include(parent: str, tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path / parent)
     _give_the_acl_of_a_profiles_ssh_directory(ssh_dir)
+    # TEMPORARY probes: the ACL each way of creating a file or directory under .ssh gets.
+    probe = ssh_dir / "probe"
+    probe.mkdir()
+    (probe / "written").write_text("")
+    fd, name = tempfile.mkstemp(dir=probe, prefix="mkstemp-")
+    os.close(fd)
+    fd, name = tempfile.mkstemp(dir=probe)
+    os.close(fd)
+    Path(name).replace(probe / "replaced")
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
