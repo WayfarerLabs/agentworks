@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import pwd
 import shlex
 import shutil
 import subprocess
@@ -25,6 +24,7 @@ from agentworks.sessions.manager._pids import _repair_session_pid
 from agentworks.sessions.manager._status import batch_check_status, check_session_status
 from agentworks.sessions.manager._teardown import ManagedSocket
 from agentworks.ssh import SSHError, SSHResult
+from tests.conftest import current_user_name
 from tests.vm_access_support import Admin, RecordingVMAccess, access_over_target
 
 from .test_create_start_restart_orchestrated import (
@@ -93,7 +93,7 @@ class NativeTarget:
 
     def batch_status(self, sessions: list[SessionRow]) -> dict[str, SessionStatus]:
         """``batch_check_status`` on :meth:`access`, every row's socket owner this account, which owns the server."""
-        owner = pwd.getpwuid(os.getuid()).pw_name
+        owner = current_user_name()
         return batch_check_status(sessions, admin=self.access(), owners={session.name: owner for session in sessions})
 
     def native(self, command: str) -> SSHResult:
@@ -129,7 +129,7 @@ def native(monkeypatch):
         monkeypatch.setattr(tmux, "_grant_server_access", lambda *a: None)
         # The native socket lives in this fixture's directory, outside the managed
         # socket roots, and this account owns it, so every read and teardown runs as this account.
-        owner = pwd.getpwuid(os.getuid()).pw_name
+        owner = current_user_name()
         monkeypatch.setattr(
             _teardown, "_validated_socket", lambda db, session: ManagedSocket(session.socket_path, owner)
         )

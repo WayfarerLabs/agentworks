@@ -11,7 +11,6 @@ required where passwordless sudo is granted (CI) and skipped elsewhere.
 from __future__ import annotations
 
 import os
-import pwd
 import shutil
 import subprocess
 import sys
@@ -25,6 +24,7 @@ from agentworks.db import SessionMode, SessionRow, SessionStatus
 from agentworks.execution.requests import Bytes, Script
 from agentworks.execution.results import Completed, Result
 from agentworks.sessions.manager._status import batch_check_status
+from tests.conftest import current_user_name
 from tests.execution.conformance.lanes import sudo_granted, unavailable
 from tests.vm_access_support import Admin, Call, RecordingVMAccess
 
@@ -57,7 +57,7 @@ def statuses(rows: list[SessionRow], *, owner: str | None = None) -> dict[str, S
     """
     access = RecordingVMAccess([], Admin())
     access.answer = as_root
-    owner = owner or pwd.getpwuid(os.getuid()).pw_name
+    owner = owner or current_user_name()
     return batch_check_status(rows, admin=access, owners={row.name: owner for row in rows})
 
 

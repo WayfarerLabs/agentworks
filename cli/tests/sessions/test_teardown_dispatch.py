@@ -6,8 +6,6 @@ each request recorded on its way through the access.
 
 from __future__ import annotations
 
-import os
-import pwd
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -19,6 +17,7 @@ from agentworks.execution.requests import Script
 from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.sessions import tmux
 from agentworks.sessions.manager._teardown import DedicatedTeardownPlan, execute_dedicated_teardown
+from tests.conftest import current_user_name
 from tests.vm_access_support import Admin, RecordingVMAccess, access_over_target
 
 from .test_native_startup import _NATIVE_CAPTURE, NativeTarget, launch
@@ -36,7 +35,7 @@ def _plan(native: NativeTarget, access: RecordingVMAccess, *, force: bool = Fals
         run_id=None,
         vm_name="box",
         socket_path=native.socket,
-        owner=pwd.getpwuid(os.getuid()).pw_name,
+        owner=current_user_name(),
         stored_pid=fingerprint.pid,
         stored_boot_id=fingerprint.boot_id,
         stored_start_ticks=fingerprint.start_ticks,

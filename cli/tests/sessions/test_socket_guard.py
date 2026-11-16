@@ -9,7 +9,6 @@ checked through the shell's quoting as well as against a real socket.
 from __future__ import annotations
 
 import os
-import pwd
 import shutil
 import socket
 import subprocess
@@ -24,10 +23,10 @@ import pytest
 from agentworks.errors import ExternalError
 from agentworks.sessions.manager._teardown import _remove_stale_socket
 from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, as_socket_owner_line
+from tests.conftest import current_user_name
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="runs the guard under a Linux /bin/sh")
 
-ME = pwd.getpwuid(os.getuid()).pw_name
 ODD_OWNER = "o'b c"
 
 
@@ -58,12 +57,12 @@ def bound_socket(path: Path) -> socket.socket:
 
 
 def test_a_missing_path_runs_the_command(root: Path) -> None:
-    assert run(root, root / "missing.sock", ME) == (0, True)
+    assert run(root, root / "missing.sock", current_user_name()) == (0, True)
 
 
 def test_a_socket_the_owner_owns_runs_the_command(root: Path) -> None:
     with bound_socket(root / "s.sock"):
-        assert run(root, root / "s.sock", ME) == (0, True)
+        assert run(root, root / "s.sock", current_user_name()) == (0, True)
 
 
 def test_a_socket_another_account_owns_is_refused(root: Path) -> None:
@@ -74,12 +73,12 @@ def test_a_socket_another_account_owns_is_refused(root: Path) -> None:
 def test_a_link_to_the_owners_socket_is_refused(root: Path) -> None:
     with bound_socket(root / "s.sock"):
         (root / "link.sock").symlink_to(root / "s.sock")
-        assert run(root, root / "link.sock", ME) == (SOCKET_GUARD_REFUSED, False)
+        assert run(root, root / "link.sock", current_user_name()) == (SOCKET_GUARD_REFUSED, False)
 
 
 def test_a_regular_file_is_refused(root: Path) -> None:
     (root / "file.sock").write_text("")
-    assert run(root, root / "file.sock", ME) == (SOCKET_GUARD_REFUSED, False)
+    assert run(root, root / "file.sock", current_user_name()) == (SOCKET_GUARD_REFUSED, False)
 
 
 def test_an_owner_name_with_a_quote_and_a_space_is_compared_whole(root: Path) -> None:
@@ -92,14 +91,14 @@ def test_an_owner_name_with_a_quote_and_a_space_is_compared_whole(root: Path) ->
     with bound_socket(root / "s.sock"):
         assert run(root, root / "s.sock", ODD_OWNER, path_dirs=path_dirs) == (0, True)
         assert run(root, root / "s.sock", "o'b", path_dirs=path_dirs) == (SOCKET_GUARD_REFUSED, False)
-        assert run(root, root / "s.sock", ME, path_dirs=path_dirs) == (SOCKET_GUARD_REFUSED, False)
+        assert run(root, root / "s.sock", current_user_name(), path_dirs=path_dirs) == (SOCKET_GUARD_REFUSED, False)
 
 
 def test_a_refusal_with_a_reason_says_so_on_stderr_and_one_without_stays_silent(root: Path) -> None:
     (root / "file.sock").write_text("")
     for refusal, says in ((None, False), ("not attaching", True)):
         line = as_socket_owner_line(
-            "true", socket_path=str(root / "file.sock"), owner=ME, switch_user=False, refusal=refusal
+            "true", socket_path=str(root / "file.sock"), owner=current_user_name(), switch_user=False, refusal=refusal
         )
         completed = subprocess.run(["/bin/sh", "-c", line], capture_output=True, check=False)
         assert (completed.returncode, bool(completed.stderr.strip())) == (SOCKET_GUARD_REFUSED, says)
@@ -125,7 +124,7 @@ def test_a_refused_check_after_removal_is_never_read_as_removed(root: Path) -> N
         if calls:
             path.symlink_to(root / "elsewhere")
         calls.append(command)
-        line = as_socket_owner_line(command, socket_path=str(path), owner=ME, switch_user=False)
+        line = as_socket_owner_line(command, socket_path=str(path), owner=current_user_name(), switch_user=False)
         done = subprocess.run(["/bin/sh", "-c", line], capture_output=True, text=True, check=False)
         return _Result(done.stdout, done.stderr, done.returncode)
 

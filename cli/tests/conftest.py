@@ -75,6 +75,18 @@ requires_posix_shell = pytest.mark.skipif(
 )
 
 
+def current_user_name() -> str:
+    """This process's account name from the passwd database, as a socket's owner reads.
+
+    ``pwd`` is POSIX-only, so it is imported here: a module importing it at
+    top level fails to collect on the Windows controller, even when every
+    test in it is skipped there.
+    """
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
 class _Terminal(io.StringIO):
     """A text stream that reports itself as a terminal."""
 

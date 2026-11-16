@@ -8,8 +8,6 @@ probe asks for and runs the probe as the test's own user.
 
 from __future__ import annotations
 
-import os
-import pwd
 import shlex
 import shutil
 import socket
@@ -31,6 +29,7 @@ from agentworks.sessions.manager._teardown import (
     execute_dedicated_teardown,
 )
 from agentworks.sessions.tmux import _cleanup_stale_sockets_under, access_run_command
+from tests.conftest import current_user_name
 from tests.native_setup_fixtures import LocalFixtureTransport
 
 if TYPE_CHECKING:
@@ -38,7 +37,6 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest socket and tmux commands")
 
-OWNER = pwd.getpwuid(os.getuid()).pw_name
 """The socket directory's owner: this account, which owns every socket the fixture makes."""
 
 
@@ -57,7 +55,7 @@ def target() -> Iterator[LocalFixtureTransport]:
 
 
 def cleanup(target: LocalFixtureTransport, directory: str) -> int:
-    return _cleanup_stale_sockets_under(target.files(), directory, owner=OWNER)
+    return _cleanup_stale_sockets_under(target.files(), directory, owner=current_user_name())
 
 
 def probed_as(target: LocalFixtureTransport) -> list[str]:
@@ -92,7 +90,7 @@ def test_dedicated_worker_preserves_non_socket_paths(
             run_id=None,
             vm_name="vm",
             socket_path=str(candidate),
-            owner=pwd.getpwuid(os.getuid()).pw_name,
+            owner=current_user_name(),
             stored_pid=101,
             stored_boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             stored_start_ticks=201,
@@ -194,7 +192,7 @@ def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_so
         assert removed == 1
         assert not dead.exists()
         assert live.is_socket()
-        assert probed_as(target) == [OWNER, OWNER]
+        assert probed_as(target) == [current_user_name(), current_user_name()]
         alive = subprocess.run([binary, "-S", str(live), "list-sessions"], env=native_environment, check=False)
         assert alive.returncode == 0
     finally:
@@ -328,5 +326,5 @@ def test_unknown_native_presence_or_failed_unlink_does_not_claim_removal(
 def test_invalid_expected_directory_is_rejected_before_dispatch(target: LocalFixtureTransport, directory: str) -> None:
     files = target.files()
     with pytest.raises(StateError):
-        _cleanup_stale_sockets_under(files, directory, owner=OWNER)
+        _cleanup_stale_sockets_under(files, directory, owner=current_user_name())
     assert files.access.requests() == []  # type: ignore[attr-defined]
