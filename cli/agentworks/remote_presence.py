@@ -42,12 +42,13 @@ _STDERR_TAIL_LINES = 5
 
 
 def sudo_safe_test(condition: str) -> str:
-    """A probe command that exits 0 when ``condition`` holds and :data:`SUDO_SAFE_ABSENT_EXIT` when it does not.
+    """A probe command that reports ``condition``'s false (1) as :data:`SUDO_SAFE_ABSENT_EXIT`.
 
-    Use it for a ``test`` probe run under ``sudo=True``, whose own false status
-    (1) a ``sudo -n`` refusal would also produce.
+    Every other status passes through unchanged, so ``test``'s own error (2)
+    still reads as an unanswered probe. Use it for a ``test`` probe run under
+    ``sudo=True``, whose false status a ``sudo -n`` refusal would also produce.
     """
-    return f"if {condition}; then exit 0; else exit {SUDO_SAFE_ABSENT_EXIT}; fi"
+    return f"{{ {condition}; }}; s=$?; [ $s -eq 1 ] && exit {SUDO_SAFE_ABSENT_EXIT}; exit $s"
 
 
 def probe_presence(

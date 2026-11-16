@@ -283,7 +283,7 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
         commands.append(command)
         if command.startswith("getent"):
             return SimpleNamespace(ok=existing == "user", returncode=0 if existing == "user" else 2)
-        if command.startswith("if test"):
+        if "test -e" in command:
             return SimpleNamespace(ok=existing == "home", returncode=0 if existing == "home" else 3)
         if existing == "race":
             raise RuntimeError("useradd: name taken")
@@ -311,6 +311,7 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
         (2, 255, SSHError),  # user absent, but ssh never ran the home probe
         (1, 3, ExternalError),  # getent answered neither found (0) nor not-found (2)
         (2, 1, ExternalError),  # a sudo -n refusal, not "home absent" (3)
+        (2, 2, ExternalError),  # test answered neither true (0) nor false
     ],
 )
 def test_exclusive_agent_user_refuses_an_unanswered_probe(vm, monkeypatch, getent_exit, home_exit, error):
@@ -321,7 +322,7 @@ def test_exclusive_agent_user_refuses_an_unanswered_probe(vm, monkeypatch, geten
         commands.append(command)
         if command.startswith("getent"):
             return SimpleNamespace(ok=getent_exit == 0, returncode=getent_exit, stdout="", stderr="")
-        if command.startswith("if test"):
+        if "test -e" in command:
             return SimpleNamespace(ok=home_exit == 0, returncode=home_exit, stdout="", stderr="")
         return SimpleNamespace(ok=True, returncode=0, stdout="")
 
