@@ -27,16 +27,19 @@ added valid artifact is included at the next owning capture without changing the
 declaration. Removing it participates in ordinary state-tracked cleanup. There is no filesystem
 watcher, continuous Git polling or implied workspace reinitialization.
 
-Select candidates before content capture. Ordinary non-artifact neighbors are ignored; malformed
-selected artifacts fail validation. Mixed-directory selection reuses the per-type discovery path.
-The HLA names the supported owning refresh operations and their effects.
+Select the known type locations before content capture, then discover artifacts from each captured
+type directory. Ordinary regular-file neighbors are ignored as artifacts but count toward capture
+limits; links or submodules anywhere in a selected directory fail capture. Malformed selected
+artifacts fail validation. Mixed-directory selection reuses the per-type path without capturing
+unrelated root locations. The HLA names the supported owning refresh operations and their effects.
 
 ### R2. Import bundle definitions
 
-A local named bundle can reference a bundle definition on the workstation or in Git. The remote
-definition can itself select directories, so moving an enumerated manifest into Git is not the only
-supported solution. Loading a definition does not register other resource kinds, run setup or enable
-integrations. Source selection remains explicit; there is no automatically inherited default bundle.
+A local named bundle can reference a bundle definition on the workstation or in Git. The imported
+definition can itself select one type directory or a mixed-layout directory, so moving an enumerated
+manifest into Git is not the only supported solution. Loading a definition does not register other
+resource kinds, run setup or enable integrations. Source selection remains explicit; there is no
+automatically inherited default bundle.
 
 ### R3. Resolve from the declaring bundle
 

@@ -3,22 +3,23 @@
 ## Approach
 
 Respond to the [draft requirements](frd.md) with one ingestion boundary in front of existing
-normalization. Resolve source addresses, select component locations and discover candidates before
-capturing their content. A whole-directory layout is shorthand for those same per-type selections.
-Native integration facets receive the existing owner maps.
+normalization. Resolve source addresses, select component locations and capture each type directory
+with the existing reader. Discover artifacts from those captured members. A whole-directory layout
+is shorthand for the same per-type selections. Native integration facets receive existing owner
+maps.
 
 ```mermaid
 flowchart LR
     L["Workstation source"] --> R["Bounded source addressing and metadata"]
     G["Git repository, ref and subpath"] --> R
-    R --> D["Select component paths and discover candidates"]
+    R --> D["Select known type locations"]
     R --> B["Capture selected bundle definition"]
     R --> P["Read Agent Plugins manifest/profile"]
     B -->|Relative selections| D
     P -->|Supported component selections| D
-    D --> A["Capture selected artifact content"]
+    D --> A["Capture selected type directories and explicit content"]
     B -->|Inline entries| A
-    A --> N["Canonical per-type maps"]
+    A --> N["Discover and normalize canonical per-type maps"]
     E["Effective explicit bundle maps"] -->|Override source entries| N
     N --> C["Existing owner capture, routing and integration facets"]
 ```
@@ -29,8 +30,8 @@ select a named bundle; no source is intrinsically VM-, user-, workspace- or sess
 ## Relative references
 
 A relative reference retains the base of the document that declared it, including through
-inheritance. Prefer normalizing references once when that document is interpreted: local paths
-become file-relative source addresses; Git members retain their repository, document directory and
+inheritance. Normalize references once when that document is interpreted: local paths become
+file-relative source addresses; Git members retain their repository, document directory and
 requested ref. Normalization is lexical and does not read artifact content or follow filesystem
 links. Never flatten raw relative strings and then resolve them against the last child document.
 
@@ -42,10 +43,11 @@ Explicit independent Git sources in workstation-authored declarations remain wit
 Whether a Git-imported definition may introduce another repository using workstation Git
 authentication is an open import/trust decision; same-repository path resolution does not settle it.
 
-Git-imported definitions cannot use absolute workstation paths or home expansion to read the
-importing operator's files. Local operator-authored definitions, including explicitly imported local
-documents, can retain absolute workstation sources. Any permitted nested operation retains its
-Git-origin restriction. Source text is data: loading it grants no commands, resource registration or
+The proposed import boundary prohibits Git-imported definitions from using workstation paths or home
+expansion to read the importing operator's files. Local operator-authored definitions, including
+explicitly imported local documents, retain absolute workstation sources. Any permitted nested
+operation retains its Git-origin restriction. This boundary is part of the unanswered import
+contract below. Source text is data: loading it grants no commands, resource registration or
 integration activation.
 
 Phase 2 applies the same file-relative interpretation to artifact references in bundles and owner
@@ -55,8 +57,9 @@ existing relative strings, stored instance overlays and declarations without a f
 implementation. Preserve authored/reference provenance where normalization changes the resolved
 view. There is no silent cwd fallback. Containment remains an operator decision below.
 
-Local capture retains changed-during-read checks and must check observed changes to candidate
-selection. It does not promise an atomic filesystem transaction across the collection.
+Local capture retains the existing reader's two-pass changed-during-read checks for each selected
+directory. Discovery uses that immutable captured set, with no separate enumeration or race check.
+Capture does not promise an atomic filesystem transaction across separate type directories.
 
 ## Discovery profiles
 
@@ -72,19 +75,21 @@ proposed layout into the same per-type discovery path:
 | `agents/*.md`             | One persona per immediate file; filename stem and metadata name agree                         |
 | `mcp.json` or `mcp.jsonc` | All named canonical MCP entries; both present is an ambiguity error                           |
 
-Select those locations before content capture. The existing root reader rejects `.git`, links and
-submodules and counts every selected blob; a repository-root capture followed by filtering cannot
-implement this layout. Bounded metadata enumeration identifies candidates, then the existing package
-reader captures selected files and complete skill directories. Do not loosen package path or link
-checks to make root capture succeed.
+Select those fixed locations before content capture, then capture each selected type directory once
+with the existing reader and split its captured members by the table's patterns. The reader rejects
+`.git`, links and submodules and counts every selected blob, including non-artifact neighbors inside
+that directory. Unrelated mixed-root locations are not captured. A repository-root capture followed
+by filtering cannot implement this layout; do not loosen package path or link checks to make it
+work.
 
 For text/persona files, discovery considers the documented extension and canonical filename shape;
 ordinary neighbors such as `README.md` and `.gitkeep` are not candidates. A skill candidate is an
-immediate real directory with `SKILL.md`; a directory without it is ignored. Once selected, invalid
-content, name/metadata disagreement or an unsupported link fails canonical capture. Skill support
-files belong to their skill, not to recursive artifact discovery. An explicitly selected missing
-directory is an error; missing optional locations in the mixed layout are empty maps. A valid empty
-collection can retire its previously managed entries.
+immediate real directory with `SKILL.md`; a directory without it is ignored as an artifact. Once
+selected, invalid content or name/metadata disagreement fails canonical validation. Skill support
+files belong to their skill, not to recursive artifact discovery. Links/submodules anywhere inside a
+selected type directory fail the preceding capture, even in a non-artifact neighbor. An explicitly
+selected missing directory is an error; missing optional locations in the mixed layout are empty
+maps. A valid empty collection can retire its previously managed entries.
 
 Agent Plugins is a separate import profile, not an alternative spelling for this five-type layout.
 Its published version supplies fixed skill and MCP locations. Unknown extension content does not
@@ -103,7 +108,16 @@ Capture expands the one effective selector, then overlays the effective explicit
 parent's explicit rule still overrides discovery when a child replaces the source; the child can
 replace that explicit rule normally. This is deliberately different from folding discovered entries
 under every unflattened inheritance layer. It preserves ordinary bundle inheritance without a
-source-leaf exception. The LLD must include this worked precedence case and the exact source schema.
+source-leaf exception. The existing map contract cannot clear a single inherited explicit entry to
+reveal discovery; a child must replace that entry. The LLD must include this worked precedence case
+and the exact source schema.
+
+An imported document has the same five explicit maps and at most one directory selector, selecting
+one type or the mixed layout. Its discovered entries are overlaid by its own explicit entries, then
+by the importing wrapper's effective explicit maps. It cannot contain a list of source selectors.
+Imported registry inheritance and further definition imports remain decisions below. Changed-content
+overrides retain the existing warning and replacement provenance, including intentional explicit
+overrides of discovery; no second collision policy is added.
 
 Later selected bundles replace earlier entries, then owner direct declarations apply after PR 908.
 Preserve complete-entry replacement, diagnostics and each reference's declaring base. Reject
@@ -127,8 +141,9 @@ the previous capture as historical evidence, not as a successful fallback.
 Offline declaration identity covers known selectors, explicit maps and normalized declaring bases.
 Imported definition bodies, resolved commits and discovered membership are capture evidence, even
 when the imported definition is a local file. Changing a remote branch cannot change offline
-identity without acquisition. Preserve old fingerprints for unchanged inline and absolute
-declarations; the relative-path transition must specify its identity changes explicitly.
+identity without acquisition. Omit an unset source selector from the hashed payload to preserve old
+fingerprints for unchanged inline and absolute declarations; the relative-path transition must
+specify its identity changes explicitly.
 
 Record each discovered member's own subpath through existing `ArtifactProvenance`. Discovery alone
 does not require a codec change. The LLD must establish how imported-definition provenance is
@@ -151,6 +166,9 @@ These operations retain their ordinary authorization and effects; inspection rem
 
 ## Decisions before implementation
 
+Accept the overall FRD and design before any implementation phase starts. The plan's working cut
+points let each increment run and validate on its own; they do not bypass that approval gate.
+
 1. **Containment and imported inheritance.** The current recommendation, still awaiting operator
    disposition, is normal file-relative local paths and Git-relative paths anywhere inside the
    pinned repository, including `../skills` from `team/bundle.yaml`. Reject escape past that root;
@@ -158,9 +176,10 @@ These operations retain their ordinary authorization and effects; inspection rem
    Also recommend rejecting imported workstation-registry `inherits` and nested definition imports
    initially; the local wrapper can use ordinary registered inheritance/ordered bundle selection.
    The operator can choose a different import contract before implementation. Also settle the
-   authority of Git-imported definitions to add other repositories, distinct from locally authored
-   references. This defines the import contract, not a new runtime approval prompt. Existing
-   cwd-relative artifact strings need a documented migration to shared file-relative interpretation.
+   proposed prohibition on Git-imported workstation reads and the authority to add other
+   repositories, distinct from locally authored references. This defines the import contract, not a
+   new runtime approval prompt. Existing cwd-relative artifact strings need a documented migration
+   to shared file-relative interpretation.
 2. **Agent Plugins MCP profile.** Skill discovery can use the ordinary skill pipeline. MCP may
    additionally require installed package files, a package working directory and persistent package
    data. Current canonical MCP records do not carry that lifecycle. Recommend an initial profile

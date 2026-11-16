@@ -33,9 +33,10 @@ PR 908 adds direct owner declarations separately. This design can be reviewed on
 implementation must refresh to the merged result before relying on its shared declaration schema.
 
 The root reader is deliberately strict: local `.git` paths and links are rejected, and the Git
-reader rejects links/submodules throughout its selected tree. Select component paths and discovery
-candidates before capturing content; whole-root capture cannot be fixed by filtering afterward.
-Current bundle inheritance is already flattened offline before capture, so discovery should use one
+reader rejects links/submodules throughout its selected tree. Select known type locations, capture
+each with that reader, then discover from its captured members. Non-artifact neighbors count toward
+the selected directory's limits. Whole-root capture cannot be fixed by filtering afterward. Current
+bundle inheritance is already flattened offline before capture, so discovery should use one
 effective selector and the existing explicit-map result instead of adding a second inheritance fold.
 Definition contents and membership cannot enter offline fingerprints without reading a source.
 

@@ -8,9 +8,11 @@ Implementation follows the direct-declaration effort, not a change to its handed
 default implementation vehicle is the same feature branch/PR after design review. If another effort
 needs the design on main, request promotion through the standard SDD process first.
 
-The phases below are working cut points, not an automatic PR series. Directory discovery can be
-validated without imported definitions or a plugin runtime. This draft does not claim completed
-design acceptance or implementation; private checkpoint evidence lives in its handoffs.
+The phases below are working cut points, not an automatic PR series or separate approval gates.
+Accept the overall requirements/design, including the open decisions, before phase 1 starts.
+Directory discovery can then run and validate without implementing definition imports or a plugin
+runtime first. This draft does not claim completed design acceptance or implementation; private
+checkpoint evidence lives in its handoffs.
 
 ## Design checkpoint
 
@@ -28,15 +30,17 @@ design acceptance or implementation; private checkpoint evidence lives in its ha
 - [ ] Add the bundle-only selector using ordinary offline inheritance and whole-selector
       replacement/null clearing. Keep shared direct definitions as explicit maps. Use the existing
       source grammar in this phase; do not change relative-path meaning for only one artifact form.
-- [ ] Add bounded candidate selection before content capture for each type, on workstation and Git
-      sources. Expand the mixed layout into those same selections. Reuse revision resolution,
-      canonical validation, normalization and the existing capture operation.
+- [ ] Select known type locations on workstation and Git sources, capture each type directory once
+      with the existing reader, then discover entries from captured members. Expand the mixed layout
+      into those same selections. Keep neighbor accounting/link rejection, revision resolution,
+      canonical validation, normalization and existing changed-during-read checks.
 - [ ] Overlay the effective explicit maps after discovery, then use existing ordered owner bundle
       composition. Prove stable names, ambiguity/error behavior, add/change/remove and no partial
       successful capture without inventing a second inheritance fold.
 - [ ] Reuse member provenance and supported capture reads. Make captured versus unknown collection
       membership clear in offline inspection. Preserve unchanged explicit-only fingerprints and
-      native identities; do not bump the codec solely for directory discovery.
+      native identities; omit an unset selector from declaration hashing and do not bump the codec
+      solely for directory discovery.
 - [ ] Ship the phase's permanent guide/reference/examples with its code and validate the working
       directory-only increment before adding definition imports.
 
@@ -45,12 +49,14 @@ design acceptance or implementation; private checkpoint evidence lives in its ha
 - [ ] Specify the migration for existing cwd-relative artifact references across bundles, owner
       templates and stored instance overlays. Cover inherited entries, independent overrides and
       declarations without a file base. Preserve authored provenance and avoid a silent fallback.
-- [ ] Normalize references at the declaring-document boundary where possible without acquiring
-      content; verify inherited bases and same-repository/ref cache reuse. Include known base
-      changes in offline declaration identity while keeping imported bodies/revisions out of it.
+- [ ] Normalize references at the declaring-document boundary without acquiring content; verify
+      inherited bases and same-repository/ref cache reuse. Include known base changes in offline
+      declaration identity while keeping imported bodies/revisions out of it.
 - [ ] Import a workstation/Git bundle definition under the accepted containment/inheritance/depth
       and cross-repository trust contract. It can select directories and explicit artifacts. Reject
-      unsupported nesting or bound/reject cycles if deeper definition imports were accepted.
+      unsupported nesting or bound/reject cycles if deeper definition imports were accepted. Use the
+      five-map/one-directory-selector content shape: discovery, imported explicit entries, then the
+      wrapper's explicit entries, retaining existing changed-content override warnings.
 - [ ] Retain definition provenance and recorded membership for inspection without claiming a current
       remote inventory. Define any necessary persisted-format transition and retain supported reads.
 - [ ] Ship migration guidance, remote/local worked examples and boundary/cleanup tests with this
@@ -72,7 +78,9 @@ design acceptance or implementation; private checkpoint evidence lives in its ha
 - [ ] Exercise local and Git variants of all discovery/import paths. Test add/change/remove,
       inherited relative bases, cross-directory invocation, duplicate names, malformed content,
       escaping paths, rejected nesting or accepted-depth cycles, acquisition bounds and a moving Git
-      ref during capture. Ignore ordinary neighbors but fail malformed selected candidates.
+      ref during capture. Ignore ordinary neighbors as artifacts while accounting for their bytes;
+      reject links/submodules anywhere in a selected type directory and malformed selected
+      artifacts.
 - [ ] Verify inspection performs no source acquisition and exposes metadata rather than content or
       credential values. Exercise existing bundles, direct declarations if landed, multiple scopes
       and bundle-to-source transitions without native identity churn.
