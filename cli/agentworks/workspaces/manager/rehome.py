@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -179,7 +180,13 @@ def _rehome_vm(
 
         # Verify source exists
         src_check = probe_presence(
-            target, f"test -d {shlex.quote(old_path)}", absent_exit=TEST_FALSE_EXIT, vm_name=vm.name, timeout=10
+            target,
+            f"test -d {shlex.quote(old_path)}",
+            absent_exit=TEST_FALSE_EXIT,
+            timeout=10,
+            vm_name=vm.name,
+            entity_kind="workspace",
+            entity_name=ws_name,
         )
         if src_check is None:
             raise StateError(
@@ -188,9 +195,17 @@ def _rehome_vm(
                 entity_name=ws_name,
             )
 
-        # Verify target does not exist
+        # Verify target does not exist. This check only gives the clear early
+        # refusal; the exclusive mkdir below is what keeps an existing target
+        # (including one the admin cannot see into) from being copied into.
         dst_check = probe_presence(
-            target, f"test -d {shlex.quote(new_path)}", absent_exit=TEST_FALSE_EXIT, vm_name=vm.name, timeout=10
+            target,
+            f"test -d {shlex.quote(new_path)}",
+            absent_exit=TEST_FALSE_EXIT,
+            timeout=10,
+            vm_name=vm.name,
+            entity_kind="workspace",
+            entity_name=ws_name,
         )
         if dst_check is not None:
             raise StateError(
@@ -227,8 +242,11 @@ def _rehome_vm(
         # an outer except.
         try:
             try:
-                # Create target directory as root and chown to admin so rsync can write
-                target.run(f"mkdir -p {np}", sudo=True)
+                # Create the target directory as root, exclusively, so a target
+                # that exists fails here whatever the check above saw; then chown
+                # it to admin so rsync can write.
+                target.run(f"mkdir -p -- {shlex.quote(str(PurePosixPath(new_path).parent))}", sudo=True)
+                target.run(f"mkdir -- {np}", sudo=True)
                 target.run(f"chown {vm.admin_username} {np}", sudo=True)
 
                 # Copy with rsync (fall back to cp -a). Trailing slash matters for
@@ -243,8 +261,16 @@ def _rehome_vm(
                     target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
 
                 # Verify copy succeeded
-                verify = target.run(f"test -d {np}", check=False, timeout=10)
-                if not verify.ok:
+                verify = probe_presence(
+                    target,
+                    f"test -d {np}",
+                    absent_exit=TEST_FALSE_EXIT,
+                    timeout=10,
+                    vm_name=vm.name,
+                    entity_kind="workspace",
+                    entity_name=ws_name,
+                )
+                if verify is None:
                     raise ExternalError(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
