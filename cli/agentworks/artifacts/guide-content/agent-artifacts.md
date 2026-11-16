@@ -6,17 +6,17 @@ index-order: 45
 # Agent artifacts
 
 Artifact bundles supply hints, rules, standard skills, agents (agent personas), and MCP server
-definitions without making producers depend on a particular harness. An owning scope selects
-bundles; explicitly activated integration facets decide native placement or defer to a later facet.
-For the scope/facet model, activation, environment, and prerequisites, see
-`agw guide show concept-harness-integrations`.
+definitions without making producers depend on a particular harness. An owning scope selects bundles
+or authors direct content with `artifacts.declare`; explicitly activated integration facets decide
+native placement or defer to a later facet. For the scope/facet model, activation, environment, and
+prerequisites, see `agw guide show concept-harness-integrations`.
 
 Start with `agw resource explain artifact-bundle` and `agw resource sample artifact-bundle`. Use the
-owning template's `resource explain` output for `artifacts.bundles` and integration activation.
-`agw artifact show --help` lists read-only inspection selectors. Inspection includes the chosen
-owner and its actual ancestors, including artifacts already handled upstream, without showing bodies
-or fetching content. Recorded application is evidence of a past operation, not current model
-context.
+owning template's `resource explain` output for `artifacts.bundles`, `artifacts.declare` and
+integration activation. `agw artifact show --help` lists read-only inspection selectors. Inspection
+includes the chosen owner and its actual ancestors, including artifacts already handled upstream,
+without showing bodies or fetching content. Recorded application is evidence of a past operation,
+not current model context.
 
 MCP application records registration only. It does not attest to authentication, a connection, tool
 discovery or model use. Acquiring a source never executes its server. See the MCP format and native
@@ -25,6 +25,8 @@ support sections below before authorizing setup or native authentication.
 <!-- agw:include path="artifacts/README.md" heading="Select an owner and a handler" -->
 
 <!-- agw:include path="artifacts/README.md" heading="A minimal bundle and consumer" -->
+
+<!-- agw:include path="artifacts/README.md" heading="Declare content at its owner" -->
 
 <!-- agw:include path="artifacts/README.md" heading="Two concurrent sessions" -->
 

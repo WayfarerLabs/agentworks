@@ -306,7 +306,7 @@ def commit_session_artifacts(
     )
     if state.records:
         write_native_setup(db, "session", name, state, operation="session-start")
-    if prepared.setup_inputs.artifacts.bundles or state.records:
+    if prepared.setup_inputs.artifacts or state.records:
         write_capture(db, "session", name, "session", prepared.capture, operation="session-start")
     db.set_session_run_id(name, context.run_id)
 

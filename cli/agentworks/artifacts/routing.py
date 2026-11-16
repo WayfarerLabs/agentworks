@@ -91,10 +91,10 @@ def inspect_owner_artifacts(
     try:
         captured = inputs.artifact_snapshot or read_captures(db, inputs.kind, inputs.name).get(inputs.component)
         desired = declaration_digest(registry, inputs.artifacts)
-        if captured is None and inputs.artifacts.bundles:
-            capture_status, reason = "missing", "Artifact bundles have not been captured for this owner."
+        if captured is None and inputs.artifacts:
+            capture_status, reason = "missing", "Artifact declarations have not been captured for this owner."
         elif captured is not None and captured.declaration != desired:
-            capture_status, reason = "stale", "Captured artifacts do not match the owner's current bundle declarations."
+            capture_status, reason = "stale", "Captured artifacts do not match the owner's current declarations."
     except UnsupportedArtifactCaptureVersionError as error:
         capture_status, reason, repair_hint = "unavailable", f"{error}.", error.hint
     except (ConfigError, StateError, KeyError) as error:

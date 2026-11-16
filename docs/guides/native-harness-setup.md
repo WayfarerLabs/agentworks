@@ -68,10 +68,11 @@ preserve work outside the workspace first; see the
 ## MCP registrations
 
 Select connections through an artifact bundle's `mcp_servers` map and the owner's
-`artifacts.bundles` block. Explicit integration activation is still required, including default
-configuration. See the
-[artifact format and examples](../../cli/agentworks/artifacts/README.md#mcp-servers) for the strict
-stdio/Streamable HTTP profile, workstation/Git sources and unresolved env references. MCP
+`artifacts.bundles` block, or declare them directly under `artifacts.declare.mcp_servers`. This lets
+one template keep a connection beside its env declarations while retaining the same capture and
+native handling. Explicit integration activation is still required, including default configuration.
+See the [artifact format and examples](../../cli/agentworks/artifacts/README.md#mcp-servers) for the
+strict stdio/Streamable HTTP profile, workstation/Git sources and unresolved env references. MCP
 definitions register connections; they do not install executables or dependencies, authenticate, run
 a server, connect to an endpoint or grant tool permissions. Native clients keep their own trust,
 approval and runtime authentication behavior.

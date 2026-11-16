@@ -172,7 +172,7 @@ class SessionTemplate(DeclaredResource):
     ``{name: shell, command: htop}``. Omission inherits the selected workload."""
 
     artifacts: ArtifactsConfig | None = None
-    """Artifact bundles selected at this scope; an omitted selection inherits."""
+    """Bundle selections and direct artifact definitions at this scope; omission inherits."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported in this session, as a plaintext value

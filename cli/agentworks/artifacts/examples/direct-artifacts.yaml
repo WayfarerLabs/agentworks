@@ -1,0 +1,51 @@
+# Declarations only: copying this file creates no instances or native processes.
+# Select the base or child template through the normal authorized agent workflow.
+apiVersion: agentworks/v1
+kind: artifact-bundle
+metadata:
+  name: shared-guidance
+spec:
+  hints:
+    setup:
+      text: Shared tooling is provisioned for this user.
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: direct-base
+spec:
+  artifacts:
+    bundles: [shared-guidance]
+    declare:
+      hints:
+        setup:
+          text: This user's toolchain is available through mise.
+      rules:
+        review:
+          text: Check the relevant tests before handing off a change.
+  harness_integrations:
+    shell: {}
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: direct-child
+spec:
+  inherits: [direct-base]
+  artifacts:
+    # Clear bundle references; keep the inherited direct hint and rule.
+    bundles: []
+    declare:
+      hints:
+        project:
+          text: Keep the change focused on the selected project.
+---
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: direct-cleared
+spec:
+  inherits: [direct-base]
+  artifacts:
+    # Keep shared-guidance; clear all inherited direct declarations.
+    declare: null

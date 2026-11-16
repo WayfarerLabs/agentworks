@@ -158,7 +158,7 @@ class AdminConfig(DeclaredResource):
     A null entry disables that integration."""
 
     artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
-    """Artifact bundles selected for the VM admin user."""
+    """Bundle selections and direct artifact definitions for the VM admin user."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported whenever a shell is opened as the

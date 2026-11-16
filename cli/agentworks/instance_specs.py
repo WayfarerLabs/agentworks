@@ -590,9 +590,9 @@ def _validate_json_tree(value: object) -> None:
     while pending:
         item, path = pending.pop()
         if item is None:
-            # Each call validates one owning component. Only direct activation-map
-            # entries use null as an opt-out; nested config and other fields do not.
-            if len(path) == 2 and path[0] == "harness_integrations":
+            # Each call validates one owning component. Null opts out of an
+            # activation or clears that component's inherited direct artifacts.
+            if (len(path) == 2 and path[0] == "harness_integrations") or path == ("artifacts", "declare"):
                 continue
             location = ".".join(path) or "<root>"
             raise ValidationError(f"instance spec cannot contain null at {location}")
