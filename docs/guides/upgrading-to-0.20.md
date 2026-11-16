@@ -262,6 +262,13 @@ has started.
   `"`, a backslash or a control character is refused by these commands, and is left out of the
   managed SSH config entries with a warning, so the operator's own `ssh` offers its default keys for
   those hosts. Move the key to a plain path.
+- **Managed SSH config lines are written for your own `ssh` to read exactly.** Each managed
+  `IdentityFile` line holds the configured key path, absolute. The `Include` line added to
+  `~/.ssh/config` is quoted when its directory holds a space or an apostrophe, and such a line an
+  earlier release wrote unquoted is rewritten in place. When the directory holds a quote, a
+  backslash, a control character, `*`, `?` or `[`, no `Include` line is added and a warning says so,
+  so your own `ssh` does not see the managed entries until `ssh_config` moves to a plain path. To
+  stop Agentworks adding the line, comment it out; the commented line is left as it is.
 - **Windows passes arguments through unexpanded.** `agw` no longer expands `*`, `?`, `~`, `%VAR%` or
   `$VAR` in its own arguments on Windows, which it did before forwarding them, even after `--`. A
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a
