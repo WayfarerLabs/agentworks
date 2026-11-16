@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import Database
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.manager import SessionTmuxServer
 from agentworks.sessions.multi_console import _attach_loop_wrapper, attach_console
+from agentworks.sessions.tmux import tmux_attach_cmd, tmux_cmd
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
 from tests.console_helpers import create_console_record
@@ -18,24 +20,24 @@ if TYPE_CHECKING:
 
 
 def test_attach_loop_uses_exact_session_targets() -> None:
-    wrapper = _attach_loop_wrapper("backend", "/tmp/backend.sock", owner=None)
+    wrapper = _attach_loop_wrapper("backend", SessionTmuxServer("/tmp/backend.sock", None))
     assert "tmux -S /tmp/backend.sock has-session -t '=backend'" in wrapper
     assert "tmux -S /tmp/backend.sock attach -t '=backend'" in wrapper
 
 
 def _assert_clients_run_as_owner(wrapper: str, socket_path: str, owner: str, session: str) -> None:
-    """Probes switch to ``owner``; the one attach also gets a terminal of its own."""
+    """Every client is the owner-switched probe, but for the one owner-switched attach."""
     clients = wrapper.count(f"tmux -S {socket_path} ")
-    probe = f"sudo -n /usr/sbin/runuser -u {owner} -- tmux -S {socket_path} has-session -t '={session}'"
+    probe = tmux_cmd(f"has-session -t '={session}'", socket_path, owner=owner)
     probes = wrapper.count(f"{probe} </dev/null >/dev/null ")
-    attach = f"cd / && sudo -n /usr/sbin/runuser --pty -u {owner} -- tmux -S {socket_path} attach -t '={session}'\n"
-    assert probes > 0 and wrapper.count(attach) == 1
+    attach = tmux_attach_cmd(session, socket_path, owner=owner)
+    assert probes > 0 and wrapper.count(f"{attach}\n") == 1
     assert clients == probes + 1
 
 
 def test_attach_loop_runs_every_agent_server_client_as_the_owner() -> None:
     socket_path = "/run/agentworks/agent-tmux-sockets/agt-alice/backend.sock"
-    wrapper = _attach_loop_wrapper("backend", socket_path, owner="agt-alice")
+    wrapper = _attach_loop_wrapper("backend", SessionTmuxServer(socket_path, "agt-alice"))
     _assert_clients_run_as_owner(wrapper, socket_path, "agt-alice", "backend")
 
 

@@ -14,6 +14,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
+from tests._runtime_probes import server_for
 
 from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
@@ -63,8 +64,8 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
         native.native(f"rename-session -t '=s1' {native_name}")
     before = db.get_session("s1")
     assert before is not None
-    assert manager.check_session_status(before, target=native, admin_username="admin") is SessionStatus.UNKNOWN
-    assert manager.batch_check_status([before], target=native, admin_username="admin") == {"s1": SessionStatus.UNKNOWN}
+    assert manager.check_session_status(before, target=native, server=server_for(before)) is SessionStatus.UNKNOWN
+    assert manager.batch_check_status([(before, server_for(before))], target=native) == {"s1": SessionStatus.UNKNOWN}
     fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
     events.clear()
     first = len(native.calls)
@@ -471,7 +472,7 @@ def test_recorded_native_runtime_keeps_running_and_residual_inventory(tmp_path, 
     assert row is not None
     expected = SessionStatus.RUNNING if native_name == "s1" else SessionStatus.RESIDUAL
     try:
-        assert manager.check_session_status(row, target=native, admin_username="admin") is expected
-        assert manager.batch_check_status([row], target=native, admin_username="admin") == {"s1": expected}
+        assert manager.check_session_status(row, target=native, server=server_for(row)) is expected
+        assert manager.batch_check_status([(row, server_for(row))], target=native) == {"s1": expected}
     finally:
         db.close()

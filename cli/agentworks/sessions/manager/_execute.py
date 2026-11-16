@@ -15,7 +15,7 @@ from agentworks.sessions.manager._lifecycle import (
     _mark_runtime_unknown,
     _redacted_launch_errors,
 )
-from agentworks.sessions.manager._teardown import _validated_socket_path
+from agentworks.sessions.manager._tmux_server import require_session_tmux_server, resolve_session_tmux_server
 from agentworks.ssh import SSHLogger
 
 if TYPE_CHECKING:
@@ -40,6 +40,7 @@ def execute_session_start(
     from agentworks.sessions.manager._runtime import require_session_launch_identity
 
     session = require_session_launch_identity(definition)
+    server = resolve_session_tmux_server(db, session)
     ws, vm = definition.workspace, definition.vm
     name, template, session_node, scope = session.name, definition.template, definition.session_node, definition.scope
     replace_running, force, intent = definition.replace_running, definition.force, definition.intent
@@ -51,11 +52,11 @@ def execute_session_start(
     from agentworks.sessions.manager._runtime_observation import checkpoint_session_identity
 
     if prepared.checkpoint_only:
-        checkpoint_session_identity(db, session, vm=vm, admin_target=admin_target)
+        checkpoint_session_identity(db, session, vm=vm, admin_target=admin_target, server=server)
     observed_now = observe_session_runtime(
         session,
         admin_target=admin_target,
-        admin_username=vm.admin_username,
+        server=server,
         session_target=session_target if is_legacy else None,
     )
     if observed_now is SessionStatus.UNKNOWN:
@@ -82,12 +83,10 @@ def execute_session_start(
     # Evidence repair is deferred until every eligible workload has valid values.
     if not is_legacy or session.pid in {None, PID_STOPPED}:
         session = _mgr._ensure_pid(session, target=admin_target, db=db)
-        is_legacy = session.socket_path is None
-    status = (
-        _mgr.check_session_status(session, target=admin_target, admin_username=vm.admin_username)
-        if not is_legacy
-        else observed_now
-    )
+        # Repair can give an old admin row its dedicated socket.
+        server = resolve_session_tmux_server(db, session)
+        is_legacy = server is None
+    status = _mgr.check_session_status(session, target=admin_target, server=server) if not is_legacy else observed_now
     if status is SessionStatus.UNKNOWN:
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
     if status is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING:
@@ -130,7 +129,7 @@ def execute_session_start(
                 require_socket_path,
             )
 
-            socket_path = _validated_socket_path(db, session)
+            socket_path = require_session_tmux_server(db, session).socket_path
             require_socket_path(socket_path, run_command=session_run_command)
             probe = capture_tmux_server_fingerprint(target=session_target, socket_path=socket_path)
             observed = probe.fingerprint
@@ -240,7 +239,7 @@ def execute_session_start(
             observed_now = observe_session_runtime(
                 session,
                 admin_target=admin_target,
-                admin_username=vm.admin_username,
+                server=resolve_session_tmux_server(db, session),
                 session_target=session_target if is_legacy else None,
             )
             if observed_now is SessionStatus.UNKNOWN or (

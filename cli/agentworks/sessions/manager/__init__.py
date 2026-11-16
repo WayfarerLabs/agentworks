@@ -172,19 +172,10 @@ from ._status import (
     _get_boot_id as _get_boot_id,
 )
 from ._status import (
-    _has_recorded_tmux_owner as _has_recorded_tmux_owner,
-)
-from ._status import (
     _legacy_session_status_error as _legacy_session_status_error,
 )
 from ._status import (
     _pid_presence as _pid_presence,
-)
-from ._status import (
-    _recorded_session_tmux_owner as _recorded_session_tmux_owner,
-)
-from ._status import (
-    _session_tmux_owner as _session_tmux_owner,
 )
 from ._status import (
     batch_check_status as batch_check_status,
@@ -194,6 +185,15 @@ from ._status import (
 )
 from ._status import (
     observe_session_statuses as observe_session_statuses,
+)
+from ._tmux_server import (
+    SessionTmuxServer as SessionTmuxServer,
+)
+from ._tmux_server import (
+    require_session_tmux_server as require_session_tmux_server,
+)
+from ._tmux_server import (
+    resolve_session_tmux_server as resolve_session_tmux_server,
 )
 
 __all__ = [
@@ -216,6 +216,9 @@ __all__ = [
     "check_session_status",
     "batch_check_status",
     "observe_session_statuses",
+    "SessionTmuxServer",
+    "resolve_session_tmux_server",
+    "require_session_tmux_server",
     "ensure_pids_batch",
     "filter_sessions",
     "_ensure_pid",

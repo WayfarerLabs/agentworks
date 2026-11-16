@@ -689,7 +689,7 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target, admin_username: SessionStatus.RUNNING,
+        lambda session, *, target, server: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -753,7 +753,7 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target, admin_username: SessionStatus.RUNNING,
+        lambda session, *, target, server: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -781,7 +781,7 @@ def test_describe_session_observes_without_a_vm_hold(
     events: list[str] = []
     _record_holds(monkeypatch, events)
 
-    def _probe(session: object, *, target: object, admin_username: str) -> object:
+    def _probe(session: object, *, target: object, server: object) -> object:
         del session, target
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")

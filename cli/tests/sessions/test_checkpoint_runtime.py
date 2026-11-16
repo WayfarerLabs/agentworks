@@ -12,6 +12,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
+from tests._runtime_probes import server_for
 from tests.sessions.test_create_start_restart_orchestrated import _create_stubs
 from tests.sessions.test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from tests.sessions.test_native_startup import _NATIVE_CAPTURE, launch
@@ -119,7 +120,9 @@ def test_runtime_observer_bounds_admin_and_legacy_owning_transports(tmp_path, mo
     from agentworks.transports import Transport
 
     db = _create_stubs(tmp_path, monkeypatch, [])
-    db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
+    db.insert_session(
+        "s1", "ws1", "claude", SessionMode.ADMIN, socket_path="/run/agentworks/admin-tmux-sockets/admin/s1.sock"
+    )
     row = db.get_session("s1")
     assert row is not None
     calls = []
@@ -131,12 +134,12 @@ def test_runtime_observer_bounds_admin_and_legacy_owning_transports(tmp_path, mo
 
     target = cast("Transport", Target())
 
-    def inspect(session, *, target, admin_username):
+    def inspect(session, *, target, server):
         target.run("inspect", check=False)
         return SessionStatus.RUNNING
 
     monkeypatch.setattr(manager, "check_session_status", inspect)
-    manager.observe_session_runtime(row, admin_target=target, admin_username="admin")
+    manager.observe_session_runtime(row, admin_target=target, server=server_for(row))
 
     def legacy(name, *, run_command, socket_path):
         run_command("legacy", check=False)
@@ -144,7 +147,7 @@ def test_runtime_observer_bounds_admin_and_legacy_owning_transports(tmp_path, mo
 
     monkeypatch.setattr(tmux, "probe_tmux_session", legacy)
     manager.observe_session_runtime(
-        replace(row, socket_path=None, pid=4242), admin_target=target, session_target=target, admin_username="admin"
+        replace(row, socket_path=None, pid=4242), admin_target=target, session_target=target, server=None
     )
     assert calls and all(
         options["timeout"] == GUEST_OBSERVATION_TIMEOUT_SECONDS

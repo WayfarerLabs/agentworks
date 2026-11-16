@@ -189,13 +189,10 @@ def final_observations(invocation: RuntimeInvocation) -> None:
                 )
                 if admin is None:
                     raise StateError("guest stop is awaiting parent shutdown")
-                vm_row = invocation.db.get_vm(session_vm_name(invocation, current))
-                if vm_row is None:
-                    raise StateError("session VM disappeared before final observation")
                 observed = sessions.observe_session_runtime(
                     current,
                     admin_target=admin,
-                    admin_username=vm_row.admin_username,
+                    server=sessions.resolve_session_tmux_server(invocation.db, current),
                     session_target=prepared.session_target if prepared is not None and prepared.legacy else None,
                 )
             else:

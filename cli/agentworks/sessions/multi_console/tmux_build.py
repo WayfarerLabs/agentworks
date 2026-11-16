@@ -410,10 +410,10 @@ def _add_session_window(
         output.warn(f"workspace for session '{member.session_name}' is missing; skipping window")
         return SessionWindowBuild(built=False)
 
-    from agentworks.sessions.manager import _recorded_session_tmux_owner
+    from agentworks.sessions.manager import resolve_session_tmux_server
 
     try:
-        owner = _recorded_session_tmux_owner(db, session) if session.socket_path is not None else None
+        server = resolve_session_tmux_server(db, session)
     except StateError as exc:
         output.warn(f"session '{session.name}' has no valid tmux socket ({exc}); skipping window")
         return SessionWindowBuild(built=False)
@@ -421,7 +421,7 @@ def _add_session_window(
     runtime_name = tmux_name or tmux_session_name(console_name)
     q_con = exact_tmux_target(runtime_name)
     q_session = shlex.quote(session.name)
-    wrapper = _attach_loop_wrapper(session.name, session.socket_path, owner=owner)
+    wrapper = _attach_loop_wrapper(session.name, server)
 
     # When appending a new member, target an explicit index one past the last
     # window so it lands at the tail rather than in a reclaimed low slot (see

@@ -75,17 +75,6 @@ class _SubmissionGate:
         return not self._aborted.is_set()
 
 
-def _validated_socket_path(db: Database, session: SessionRow) -> str:
-    """Validate persisted socket identity before destructive use.
-
-    The path must satisfy the one owner rule and name the directory of the
-    session's own agent or VM admin (``_recorded_session_tmux_owner``).
-    """
-    _mgr._recorded_session_tmux_owner(db, session)
-    assert session.socket_path is not None
-    return session.socket_path
-
-
 def _validated_pid(session: SessionRow) -> int:
     """Return a positive stored PID for a concurrency-eligible row."""
     pid = session.pid
@@ -114,8 +103,7 @@ def prepare_dedicated_teardown(
     batch coordinator supply complete-fingerprint rows; invalid state fails
     closed instead of inventing work.
     """
-    socket_path = _validated_socket_path(db, session)
-    owner = None if target_owns_session else _mgr._recorded_session_tmux_owner(db, session)
+    server = _mgr.require_session_tmux_server(db, session)
     pid = _validated_pid(session)
     if session.boot_id is None or session.tmux_server_start_ticks is None:
         raise StateError(
@@ -132,12 +120,12 @@ def prepare_dedicated_teardown(
         session_uuid=session.session_uuid,
         run_id=session.run_id,
         vm_name=vm_name,
-        socket_path=socket_path,
+        socket_path=server.socket_path,
         stored_pid=pid,
         stored_boot_id=boot_id,
         stored_start_ticks=start_ticks,
         target=target,
-        owner=owner,
+        owner=None if target_owns_session else server.owner,
         force=force,
     )
 
@@ -361,8 +349,9 @@ def teardown_dedicated_session(
 
     expected = SessionRuntimeSnapshot.from_session(session)
     if not has_complete_runtime_fields(session):
-        socket_path = _validated_socket_path(db, session)
-        owner = None if target_owns_session else _mgr._recorded_session_tmux_owner(db, session)
+        server = _mgr.require_session_tmux_server(db, session)
+        socket_path = server.socket_path
+        owner = None if target_owns_session else server.owner
         sudo = owner is not None
         require_socket_path(socket_path, run_command=partial(target.run, sudo=sudo))
         probe = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, owner=owner)

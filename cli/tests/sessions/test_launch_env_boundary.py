@@ -11,6 +11,7 @@ from agentworks.env import EnvEntry, PlaintextEnvEntry
 from agentworks.errors import AgentworksError
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _env
+from tests._runtime_probes import server_for
 
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
@@ -83,7 +84,7 @@ def test_manager_preserves_unreserved_private_prefix_env_in_native_launch(tmp_pa
         row = db.get_session("s1")
         assert (
             row is not None
-            and manager.check_session_status(row, target=native, admin_username="admin") is SessionStatus.RUNNING
+            and manager.check_session_status(row, target=native, server=server_for(row)) is SessionStatus.RUNNING
         )
         assert native.native("show-environment -t '=s1' _AGW_OPERATOR_VALUE").stdout.strip() == (
             "_AGW_OPERATOR_VALUE=operator-value"

@@ -65,6 +65,10 @@ def _session(db: Database) -> SessionRow:
     return row
 
 
+def _server(db: Database) -> manager.SessionTmuxServer | None:
+    return manager.resolve_session_tmux_server(db, _session(db))
+
+
 def _assert_runs_as_owner(command: str, elevated: bool) -> str:
     owned = server_owner_parts(command)
     assert elevated and owned is not None and owned[0] == OWNER, command
@@ -91,14 +95,12 @@ def test_observation_and_checkpoint_fingerprints_probe_as_the_owner(tmp_path, mo
     monkeypatch.setattr(manager, "_get_boot_id", lambda *a: BOOT_ID)
     db._conn.execute("UPDATE sessions SET pid = NULL WHERE name = 's1'")
     db._conn.commit()
-    assert (
-        observe_session_runtime(_session(db), admin_target=_Recorder(), admin_username="admin") is SessionStatus.STOPPED
-    )  # type: ignore[arg-type]
+    assert observe_session_runtime(_session(db), admin_target=_Recorder(), server=_server(db)) is SessionStatus.STOPPED  # type: ignore[arg-type]
     db._conn.execute("UPDATE sessions SET boot_id = NULL WHERE name = 's1'")
     db._conn.commit()
     vm = db.get_vm("vm1")
     assert vm is not None
-    assert can_checkpoint_session(_session(db), vm=vm, admin_target=_Recorder())  # type: ignore[arg-type]
+    assert can_checkpoint_session(_session(db), vm=vm, admin_target=_Recorder(), server=_server(db))  # type: ignore[arg-type]
     assert owners == [OWNER, OWNER]
     db.close()
 
@@ -214,9 +216,7 @@ def test_session_attach_runs_the_client_as_the_owner(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "_prepare_vm", lambda db, *a, **k: _prepared(target, db))
     config = SimpleNamespace(terminal=SimpleNamespace(clear_on_detach="never"))
     manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
-    assert target.interactive_commands == [
-        f"cd / && sudo -n {tmux.RUNUSER_PATH} --pty -u {OWNER} -- tmux -S {SOCKET} attach -t '=s1'"
-    ]
+    assert target.interactive_commands == [tmux.tmux_attach_cmd("s1", SOCKET, owner=OWNER)]
     db.close()
 
 
@@ -278,9 +278,9 @@ def test_status_observation_never_probes_a_socket_outside_its_agents_directory(t
     _seed_misplaced_agent_row(db)
     probed: list[str] = []
 
-    def batch(rows: list[SessionRow], **kwargs: Any) -> dict[str, SessionStatus]:
-        probed.extend(row.name for row in rows)
-        return {row.name: SessionStatus.RUNNING for row in rows}
+    def batch(rows: list[tuple[SessionRow, object]], **kwargs: Any) -> dict[str, SessionStatus]:
+        probed.extend(row.name for row, _server in rows)
+        return {row.name: SessionStatus.RUNNING for row, _server in rows}
 
     monkeypatch.setattr(_status, "batch_check_status", batch)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **k: None)

@@ -110,8 +110,9 @@ def _repair_session_pid(
     )
 
     expected = SessionRuntimeSnapshot.from_session(session)
+    server = _mgr.resolve_session_tmux_server(db, session)
     sock = session.socket_path
-    if sock is None:
+    if server is None:
         presence = probe_tmux_session(
             session.name,
             run_command=target.run,
@@ -165,7 +166,7 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        owner = _mgr._recorded_session_tmux_owner(db, session)
+        sock, owner = server.socket_path, server.owner
         sudo = owner is not None
         require_socket_path(sock, run_command=partial(target.run, sudo=sudo))
         probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, owner=owner)

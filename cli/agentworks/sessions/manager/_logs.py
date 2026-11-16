@@ -36,7 +36,8 @@ def session_logs(
     session = _mgr._require_session(db, name)
     # Refuse a socket outside its owner's directory before any VM work. A
     # legacy row without a socket meets the status check's own refusal.
-    owner = _mgr._recorded_session_tmux_owner(db, session) if session.socket_path is not None else None
+    server = _mgr.resolve_session_tmux_server(db, session)
+    owner = server.owner if server is not None else None
     with _mgr._prepare_vm(
         db,
         config,
@@ -45,12 +46,12 @@ def session_logs(
         interaction=interaction,
     ) as (
         _ws,
-        vm,
+        _vm,
         _run_command,
         _run_as_root,
         target,
     ):
-        status = _mgr.check_session_status(session, target=target, admin_username=vm.admin_username)
+        status = _mgr.check_session_status(session, target=target, server=server)
 
         if status == SessionStatus.STOPPED:
             raise StateError(

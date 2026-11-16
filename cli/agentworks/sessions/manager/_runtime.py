@@ -16,6 +16,7 @@ from ._runtime_observation import (
     require_unaddressed_session_absence,
 )
 from ._runtime_observation import observe_session_runtime as observe_session_runtime
+from ._tmux_server import resolve_session_tmux_server
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -255,26 +256,26 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     from agentworks.sessions.tmux import server_owner_run_command, startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
-    from agentworks.sessions.manager._teardown import _validated_socket_path
 
     current = require_session_launch_identity(definition)
     if current.workspace_name != definition.workspace.name:
         raise StateError(
             "session workspace changed during preparation", entity_kind="session", entity_name=session.name
         )
+    server = resolve_session_tmux_server(db, current)
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     require_vm_ssh_boundary(db, config, definition.vm)
     admin_target = _mgr.transport(definition.vm, config)
     try:
-        status = observe_session_runtime(
-            current, admin_target=admin_target, admin_username=definition.vm.admin_username
-        )
+        status = observe_session_runtime(current, admin_target=admin_target, server=server)
     except StateError:
-        if not can_checkpoint_session(current, vm=definition.vm, admin_target=admin_target):
+        if not can_checkpoint_session(current, vm=definition.vm, admin_target=admin_target, server=server):
             raise
         status = SessionStatus.UNKNOWN
-    if status is SessionStatus.UNKNOWN and can_checkpoint_session(current, vm=definition.vm, admin_target=admin_target):
+    if status is SessionStatus.UNKNOWN and can_checkpoint_session(
+        current, vm=definition.vm, admin_target=admin_target, server=server
+    ):
         return PreparedSessionLaunch(
             definition=definition,
             admin_target=admin_target,
@@ -296,16 +297,14 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
         if not definition.replace_running:
             if definition.intent is HarnessLaunchIntent.FORCE_NEW:
                 raise StateError("session is already running", entity_kind="session", entity_name=session.name)
-            if current.socket_path is not None:
+            if server is not None:
                 if _mgr._needs_repair(current):
                     recovered_startup = True  # status proved the interrupted launch's ownership
                 else:
                     protection = startup_protection_enabled(
                         current.name,
-                        socket_path=_validated_socket_path(db, current),
-                        run_command=server_owner_run_command(
-                            admin_target, _mgr._recorded_session_tmux_owner(db, current)
-                        ),
+                        socket_path=server.socket_path,
+                        run_command=server_owner_run_command(admin_target, server.owner),
                     )
                     if protection is None:
                         raise StateError(
@@ -370,6 +369,9 @@ def prepare_session_stop(
     """Prepare direct teardown, never activating or holding the parent VM."""
     workspace = _mgr._require_workspace(db, session.workspace_name)
     vm = _mgr._require_vm_for_workspace(db, workspace)
+    # A parent that is off runs no tmux client, so only live preparation
+    # needs the row's server.
+    server = None if parent_off else resolve_session_tmux_server(db, session)
     if not parent_off:
         from agentworks.vms.manager import require_vm_ssh_boundary
 
@@ -380,13 +382,13 @@ def prepare_session_stop(
         status = SessionStatus.STOPPED
     else:
         try:
-            status = observe_session_runtime(session, admin_target=admin_target, admin_username=vm.admin_username)
+            status = observe_session_runtime(session, admin_target=admin_target, server=server)
         except StateError:
-            if not can_checkpoint_session(session, vm=vm, admin_target=admin_target):
+            if not can_checkpoint_session(session, vm=vm, admin_target=admin_target, server=server):
                 raise
             status = SessionStatus.UNKNOWN
         checkpoint_only = status is SessionStatus.UNKNOWN and can_checkpoint_session(
-            session, vm=vm, admin_target=admin_target
+            session, vm=vm, admin_target=admin_target, server=server
         )
     if status is SessionStatus.UNKNOWN and not checkpoint_only:
         raise StateError("session runtime state is unknown", entity_kind="session", entity_name=session.name)
@@ -440,7 +442,13 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
         return False
     if prepared.checkpoint_only:
         assert prepared.admin_target is not None
-        checkpoint_session_identity(prepared.db, session, vm=vm, admin_target=prepared.admin_target)
+        checkpoint_session_identity(
+            prepared.db,
+            session,
+            vm=vm,
+            admin_target=prepared.admin_target,
+            server=resolve_session_tmux_server(prepared.db, session),
+        )
     if prepared.observed_status is SessionStatus.STOPPED:
         assert prepared.admin_target is not None
         if _mgr._needs_repair(session) or session.socket_path is None:

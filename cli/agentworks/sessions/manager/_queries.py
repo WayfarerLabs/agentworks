@@ -173,6 +173,8 @@ def _delete_session_runtime(
     selected_session_uuid = session.session_uuid
     from agentworks.sessions.manager._lifecycle import _require_selected_session
 
+    # Refuse a row the owner rule rejects before any VM work.
+    _mgr.resolve_session_tmux_server(db, session)
     with _mgr._prepare_vm(
         db,
         config,
@@ -196,7 +198,11 @@ def _delete_session_runtime(
                 status = SessionStatus.RUNNING
             else:
                 session = _mgr._ensure_pid(session, target=admin_target, db=db)
-                status = _mgr.check_session_status(session, target=admin_target, admin_username=vm.admin_username)
+                # Resolved again from the reloaded row: repair can give an old
+                # admin row its dedicated socket.
+                status = _mgr.check_session_status(
+                    session, target=admin_target, server=_mgr.resolve_session_tmux_server(db, session)
+                )
 
             if status == SessionStatus.UNKNOWN:
                 raise StateError(
@@ -470,11 +476,13 @@ def session_description(
     vm = _mgr._require_vm_for_workspace(db, workspace)
     output.info(f"Checking session '{name}' runtime...")
     status = SessionStatus.UNKNOWN
+    try:
+        server = _mgr.resolve_session_tmux_server(db, session)
+    except StateError:
+        server = None  # Never probed: a row the owner rule refuses stays UNKNOWN.
     if session.socket_path is None:
         status = _mgr.check_session_status(session)
-    elif not _mgr._has_recorded_tmux_owner(db, session):
-        pass  # Never probed: a socket outside its owner's directory stays UNKNOWN.
-    else:
+    elif server is not None:
         from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
         try:
@@ -503,7 +511,7 @@ def session_description(
                     status = _mgr.check_session_status(
                         session,
                         target=cast("Transport", _BoundedStatusTarget(target)),
-                        admin_username=vm.admin_username,
+                        server=server,
                     )
                 except UserAbort:
                     raise
@@ -943,7 +951,8 @@ def attach_session(
     session = _mgr._require_session(db, name)
     # Refuse a socket outside its owner's directory before any VM work. A
     # legacy row without a socket meets the status check's own refusal.
-    owner = _mgr._recorded_session_tmux_owner(db, session) if session.socket_path is not None else None
+    server = _mgr.resolve_session_tmux_server(db, session)
+    owner = server.owner if server is not None else None
     with _mgr._prepare_vm(
         db,
         config,
@@ -952,12 +961,12 @@ def attach_session(
         interaction=interaction,
     ) as (
         _ws,
-        vm,
+        _vm,
         _run_command,
         _run_as_root,
         target,
     ):
-        status = _mgr.check_session_status(session, target=target, admin_username=vm.admin_username)
+        status = _mgr.check_session_status(session, target=target, server=server)
 
         if status == SessionStatus.STOPPED:
             raise StateError(

@@ -5,7 +5,11 @@ from __future__ import annotations
 import copy
 import re
 import shlex
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from agentworks.db import SessionRow
+    from agentworks.sessions.manager import SessionTmuxServer
 
 _FRAME = re.compile(r"printf '\\nAGW_RUNTIME_([A-Z]+)='; (?:printf '\\nAGW_RUNTIME_STDERR=' >&2; )?")
 # ``as_server_owner``: root switches to the owner, who runs the quoted command.
@@ -45,3 +49,12 @@ def framed_runtime_result[T: _NativeResult](command: str, result: T) -> T:
     if "AGW_RUNTIME_STDERR=" in command:
         framed.stderr = "\nAGW_RUNTIME_STDERR=" + result.stderr
     return framed
+
+
+def server_for(row: SessionRow, *, admin_username: str = "admin") -> SessionTmuxServer:
+    """The tmux server ``resolve_session_tmux_server`` validates for a row its own agent owns."""
+    from agentworks.sessions.manager import SessionTmuxServer
+    from agentworks.sessions.tmux import socket_owner
+
+    assert row.socket_path is not None
+    return SessionTmuxServer(row.socket_path, socket_owner(row.socket_path, admin_username=admin_username))
