@@ -59,5 +59,4 @@ retain their existing fingerprints and format; no declaration migration is requi
 
 Permanent artifact guidance and examples describe the authoring contract. Offline inspection
 distinguishes current direct selection from captured bundle provenance, including missing or stale
-captures. Direct content creates no synthetic bundle resource. Agent Plugins package ingestion is
-the operator-approved next separate effort and does not change this delivery's source formats.
+captures. Direct content creates no synthetic bundle resource.

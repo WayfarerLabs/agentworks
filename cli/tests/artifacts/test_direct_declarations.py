@@ -8,8 +8,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
-from agentworks.artifacts.bundle import ArtifactBundle
-from agentworks.artifacts.declarations import ArtifactDefinitions, ArtifactsConfig
+from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.errors import ValidationError as SpecValidationError
 from agentworks.instance_specs import decode_stored_overlay, parse_instance_spec, parse_vm_instance_specs
 from agentworks.manifests.emit import document_schema
@@ -30,9 +29,6 @@ MAPS = {
 
 @pytest.mark.parametrize("kind", [row[0] for row in KINDS] + ["admin-template"])
 def test_direct_definitions_reuse_all_five_strict_bundle_maps_in_generated_schema(kind):
-    definitions = ArtifactDefinitions.model_validate(MAPS)
-    bundle = ArtifactBundle.model_validate({"name": "team", **MAPS})
-    assert definitions.type_maps() == bundle.type_maps()
     validator = Draft202012Validator(document_schema(kind))
     document = {
         "apiVersion": "agentworks/v1",

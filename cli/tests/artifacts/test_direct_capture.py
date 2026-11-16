@@ -209,7 +209,6 @@ def test_inspection_distinguishes_direct_selection_from_captured_origin_without_
     rows = {item.entry: item for item in owner.artifacts}
     assert rows["agent-0"].declared_bundles == ("agent-bundle",)
     assert rows["agent-0"].declared_direct is (stage != "withdrawn")
-    assert rows["agent-0"].selected_bundle == ("agent-bundle" if stage == "withdrawn" else None)
     assert rows["agent-0"].bundle == ("agent-bundle" if stage == "stale" else "")
     assert rows["tools"].native_name == "tools"
     assert rows["tools"].declared is (stage != "withdrawn")

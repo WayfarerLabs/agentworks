@@ -105,7 +105,6 @@ class ArtifactMetadata:
     declared_bundles: tuple[str, ...] = ()
     description: str | None = None
     declared_direct: bool = False
-    selected_bundle: str | None = None
 
 
 @dataclass(frozen=True)
@@ -355,7 +354,6 @@ def _artifact_metadata(
                 selected,
                 item.content.description or None,
                 key in direct,
-                selected[-1] if selected and key not in direct else None,
             )
         )
     rows.extend(
@@ -367,7 +365,6 @@ def _artifact_metadata(
             native_name=name,
             declared_bundles=tuple(bundles),
             declared_direct=(kind, name) in direct,
-            selected_bundle=bundles[-1] if bundles and (kind, name) not in direct else None,
         )
         for (kind, name), bundles in entries.items()
         if (kind, name) not in seen
@@ -457,7 +454,9 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             if artifact.declared_bundles:
                 output.info(f"    Declaration bundles: {', '.join(artifact.declared_bundles)}")
             if artifact.declared:
-                selected = "direct declaration" if artifact.declared_direct else f"bundle '{artifact.selected_bundle}'"
+                selected = (
+                    "direct declaration" if artifact.declared_direct else f"bundle '{artifact.declared_bundles[-1]}'"
+                )
                 output.info(f"    Selected: {selected}")
             for previous in artifact.replacements:
                 output.info(
@@ -524,7 +523,6 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "declared": item.declared,
                         "declared_bundles": list(item.declared_bundles),
                         "declared_direct": item.declared_direct,
-                        "selected_bundle": item.selected_bundle,
                         "input_id": item.input_id,
                         "origin_id": item.origin_id,
                         "native_name": item.native_name,
