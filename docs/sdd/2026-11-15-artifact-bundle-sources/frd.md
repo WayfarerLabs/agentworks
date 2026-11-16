@@ -43,7 +43,9 @@ integrations. Source selection remains explicit; there is no automatically inher
 Relative artifact and directory references resolve against the bundle definition that declared them.
 They do not change meaning with the command's working directory, importing wrapper or child bundle.
 A Git definition's relative references stay in its repository at the same resolved commit. They
-never accidentally select a workstation path. Explicit independent Git sources remain possible.
+never accidentally select a workstation path. Workstation-authored declarations retain explicit
+independent Git sources. Whether Git-imported definitions may introduce additional repositories
+using workstation Git authentication remains part of the open import/trust contract.
 
 Artifact references in owner templates must use the same relative-path meaning as bundle entries.
 Collection ingestion remains a bundle facility; direct owner declarations remain explicit maps. The

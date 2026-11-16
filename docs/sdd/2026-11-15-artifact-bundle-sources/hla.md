@@ -38,7 +38,9 @@ Use the existing workstation capture boundary and Git object reader. Git ingesti
 working checkout or execute repository code. Resolve each repository/ref once per operation and read
 its definitions, discoveries and relative members from those committed objects. Rewritten member
 addresses reuse that operation's repository/ref cache; they must not resolve a floating ref again.
-Explicit independent Git sources remain within the same acquisition budgets.
+Explicit independent Git sources in workstation-authored declarations remain within those budgets.
+Whether a Git-imported definition may introduce another repository using workstation Git
+authentication is an open import/trust decision; same-repository path resolution does not settle it.
 
 Git-imported definitions cannot use absolute workstation paths or home expansion to read the
 importing operator's files. Local operator-authored definitions, including explicitly imported local
@@ -155,8 +157,10 @@ These operations retain their ordinary authorization and effects; inspection rem
    do not add a definition-directory boundary. Agent Plugins retains its format's package boundary.
    Also recommend rejecting imported workstation-registry `inherits` and nested definition imports
    initially; the local wrapper can use ordinary registered inheritance/ordered bundle selection.
-   The operator can choose a different import contract before implementation. Existing cwd-relative
-   artifact strings need a documented migration to the proposed shared file-relative interpretation.
+   The operator can choose a different import contract before implementation. Also settle the
+   authority of Git-imported definitions to add other repositories, distinct from locally authored
+   references. This defines the import contract, not a new runtime approval prompt. Existing
+   cwd-relative artifact strings need a documented migration to shared file-relative interpretation.
 2. **Agent Plugins MCP profile.** Skill discovery can use the ordinary skill pipeline. MCP may
    additionally require installed package files, a package working directory and persistent package
    data. Current canonical MCP records do not carry that lifecycle. Recommend an initial profile

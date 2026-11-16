@@ -49,8 +49,8 @@ design acceptance or implementation; private checkpoint evidence lives in its ha
       content; verify inherited bases and same-repository/ref cache reuse. Include known base
       changes in offline declaration identity while keeping imported bodies/revisions out of it.
 - [ ] Import a workstation/Git bundle definition under the accepted containment/inheritance/depth
-      contract. It can select directories and explicit artifacts. Reject unsupported nesting or
-      bound/reject cycles if deeper definition imports were accepted.
+      and cross-repository trust contract. It can select directories and explicit artifacts. Reject
+      unsupported nesting or bound/reject cycles if deeper definition imports were accepted.
 - [ ] Retain definition provenance and recorded membership for inspection without claiming a current
       remote inventory. Define any necessary persisted-format transition and retain supported reads.
 - [ ] Ship migration guidance, remote/local worked examples and boundary/cleanup tests with this
