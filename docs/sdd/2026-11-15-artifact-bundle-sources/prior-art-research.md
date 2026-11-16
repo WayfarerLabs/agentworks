@@ -32,6 +32,13 @@ requirements.
 PR 908 adds direct owner declarations separately. This design can be reviewed on current main;
 implementation must refresh to the merged result before relying on its shared declaration schema.
 
+The root reader is deliberately strict: local `.git` paths and links are rejected, and the Git
+reader rejects links/submodules throughout its selected tree. Select component paths and discovery
+candidates before capturing content; whole-root capture cannot be fixed by filtering afterward.
+Current bundle inheritance is already flattened offline before capture, so discovery should use one
+effective selector and the existing explicit-map result instead of adding a second inheritance fold.
+Definition contents and membership cannot enter offline fingerprints without reading a source.
+
 ## Claims not relied on
 
 An external package format is not our wire format. No verified claim is made that every current

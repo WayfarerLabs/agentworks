@@ -27,6 +27,10 @@ added valid artifact is included at the next owning capture without changing the
 declaration. Removing it participates in ordinary state-tracked cleanup. There is no filesystem
 watcher, continuous Git polling or implied workspace reinitialization.
 
+Select candidates before content capture. Ordinary non-artifact neighbors are ignored; malformed
+selected artifacts fail validation. Mixed-directory selection reuses the per-type discovery path.
+The HLA names the supported owning refresh operations and their effects.
+
 ### R2. Import bundle definitions
 
 A local named bundle can reference a bundle definition on the workstation or in Git. The remote
@@ -41,8 +45,10 @@ They do not change meaning with the command's working directory, importing wrapp
 A Git definition's relative references stay in its repository at the same resolved commit. They
 never accidentally select a workstation path. Explicit independent Git sources remain possible.
 
-The design must define containment, nested-import behavior and the treatment of existing local
-relative paths before implementation. Diagnostics identify the declaration to fix without exposing
+Artifact references in owner templates must use the same relative-path meaning as bundle entries.
+Collection ingestion remains a bundle facility; direct owner declarations remain explicit maps. The
+design must define containment, definition-import depth and treatment of existing local/stored
+relative paths before implementation. Diagnostics identify the declaration without exposing
 credentials or artifact bodies.
 
 ### R4. Preserve composition and delivery
@@ -59,15 +65,18 @@ No runtime integration should need to understand Git, discovery or bundle docume
 
 ### R5. Bound acquisition and preserve provenance
 
-Capture records the selected source, resolved Git commit and discovered member provenance. One
-operation reads each repository/ref consistently and shares acquisition budgets across nested
-imports, discovered entries and explicit entries. Cycles, invalid names, path escapes, ambiguous
-portable paths and exceeded limits fail clearly. A failed capture does not publish a partial new
-owner capture or silently substitute old content.
+Capture records the selected source, imported-definition provenance, resolved Git commit and
+discovered member provenance. One operation reads each repository/ref consistently and shares
+acquisition budgets across definition reads, discovery and explicit entries. Reject unsupported
+definition nesting; if nested definitions are accepted, reject their cycles. Invalid selected names,
+path escapes, ambiguous portable paths and exceeded limits fail clearly. A failed capture does not
+publish a partial new owner capture or silently substitute old content.
 
 Read-only artifact inspection explains captured source and selection without fetching Git, walking
 the source filesystem, exposing connection values or changing state. Floating refs update only at
-supported owning capture; pinned commits remain reproducible.
+supported owning capture; pinned commits remain reproducible. Imported bodies and inventory are
+captured evidence, not inputs to offline declaration hashing. Unknown inventory must not be
+presented as empty or as removed explicit entries.
 
 ### R6. Support an honest Agent Plugins import
 
