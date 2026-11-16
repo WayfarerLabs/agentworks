@@ -20,7 +20,7 @@ flowchart LR
     D --> A["Capture selected type directories and explicit content"]
     B -->|Inline entries| A
     A --> N["Discover and normalize canonical per-type maps"]
-    E["Effective explicit bundle maps"] -->|Override source entries| N
+    E["Effective explicit bundle maps"] -->|Capture explicit overrides last| A
     N --> C["Existing owner capture, routing and integration facets"]
 ```
 
