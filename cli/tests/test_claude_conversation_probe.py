@@ -203,6 +203,16 @@ def test_probe_execution_failure_never_becomes_fresh(status: int) -> None:
         probe_conversation(_answering(status), _SID)
 
 
+def test_a_failed_find_and_a_failed_startup_get_different_hints() -> None:
+    hints = []
+    for status in (6, 3):
+        with pytest.raises(StateError) as caught:
+            probe_conversation(_answering(status), _SID)
+        hints.append(caught.value.hint)
+
+    assert all(hints) and hints[0] != hints[1]
+
+
 @pytest.mark.parametrize("status", [0, 1])
 @pytest.mark.parametrize(
     "invalid",

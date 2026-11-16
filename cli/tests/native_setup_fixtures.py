@@ -132,9 +132,9 @@ class LocalFixtureTransport(Transport):
         login ``Script`` in the account's own shell and a ``PythonProgram`` run
         here, in the request's working directory or the fixture's home, with the
         fixture's environment and the request's over it; a login script or
-        program runs after the fixture's login shell reads its ``.profile``. A command's line or a script's source joins
-        ``commands``, and each answered request's operation log record joins
-        ``logged_output``.
+        program runs after the fixture's login shell reads its ``.profile``. A
+        command's line or a script's source joins ``commands``, and each
+        answered request's operation log record joins ``logged_output``.
         """
         request = call.request
         if is_command_check(request):

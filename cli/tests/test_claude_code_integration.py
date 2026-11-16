@@ -345,6 +345,7 @@ def test_first_start_mints_and_records_the_session_id() -> None:
     assert isinstance(minted, str) and len(minted) == 36  # a uuid
     assert harness_integration.state == {"session_id": minted}  # persisted via the property
     assert minted in command
+    assert target.requests() == [conversation_request(minted)]  # the probe asked about the minted id
 
 
 def test_resume_reads_the_stored_id_back_verbatim() -> None:
