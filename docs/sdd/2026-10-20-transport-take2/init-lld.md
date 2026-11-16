@@ -59,7 +59,7 @@ core writes (`capabilities/vm_platform/bootstrap_script.py:179`,
 | `vms/initializer/shell_env.py`, `ssh_keys.py`, `packages.py`, `mise.py`, `workspaces_dir.py` | Each helper takes `files: Files`; `ensure_source_line` and `source_files` (new, `shell_env.py`) replace the seven grep-or-append strings and their four file lists                           |
 | `vms/hardening.py`, `vms/tailscale_dns.py`                                                   | On `Files`                                                                                                                                                                                   |
 | `sources.py`                                                                                 | On `Files`; `upload_tree` (one `Script`); `normalize_destination` and `expand_destination`; a local read's `OSError` becomes `SourceRefError`                                                |
-| `vms/admin.py`, `agents/template.py`                                                         | `dotfiles_destination` validated by `normalize_destination` at template load                                                                                                                 |
+| `vms/admin.py`, `agents/template.py`, `vms/initializer/dotfiles.py`                          | `dotfiles_destination` checked by `normalize_destination` as rendered, before the dotfiles sync                                                                                              |
 | `git_config.py`                                                                              | On `Files`                                                                                                                                                                                   |
 | `git_credentials/__init__.py`, `reconcile.py`                                                | `configure_user_git_credentials(access, ...)` loses `target`; the reconcile is a `Script` on the user's access with the archive as bytes                                                     |
 | `agents/initializer.py`, `agents/grants.py`                                                  | On the admin's and the agent's `VMAccess`                                                                                                                                                    |
@@ -481,23 +481,25 @@ access and bound since slice 5.
 
 `dotfiles_destination` is operator configuration expanded today with `.replace("~", home)`, which
 rewrites every `~` in it (`driver.py:568`, `agents/initializer.py:312`).
-`sources.normalize_destination` becomes its validator on both templates (`vms/admin.py:122`,
-`agents/template.py:122`), at template load, stored overlays included: the value is `~/` followed by
-a relative path, a bare relative path (normalized to `~/` and the path, which is what it always
-meant, so a stored `dots` keeps working), or an absolute path; it has no empty, `.` or `..`
-component and no other user's `~`; a trailing `/` is dropped; and `~` or `~/` alone, the home
-itself, is refused, since replacing it would move the home aside. A path in the home that is, holds
-or lies inside one Agentworks manages in that account's home is refused too. `vms/home_layout.py`
-holds a set per account, which `normalize_destination` and `expand_destination` take as `managed`:
-`MANAGED` (the two fragments, `.ssh`, the state directory `.agentworks` and `.agentworks-artifacts`)
-for an agent, and `ADMIN_MANAGED`, which adds the workspace links' `.config/tmuxinator`, for the
-admin, so an admin's `~/.config` is refused and an agent's is not. `.config/mise` is in neither:
-dotfiles may own or override the mise config, since both accounts write it before the dotfiles sync
-and fetch the lockfile and install after it (`docs/guides/mise.md`). Refusals are
-`DestinationError`, an `errors.ValueFreeError` whose message names the accepted forms and no part of
-the value, which `instance_overlay_codec` shows in place of its generic message.
-`expand_destination(value, home)` replaces only the leading `~` and refuses, before any request, an
-absolute value that is the home or one of its ancestors, or that lands on a managed path.
+`sources.normalize_destination` becomes its check, applied by `sync_dotfiles` to the value as
+rendered for the account (the field is `Interpolated()`, so a template can only be checked after
+rendering), before `expand_destination` and any request; a refusal warns like a failed sync. The
+templates store the value as written. The value is `~/` followed by a relative path, a bare relative
+path (normalized to `~/` and the path, which is what it always meant, so a stored `dots` keeps
+working), or an absolute path; it has no empty, `.` or `..` component and no other user's `~`; a
+trailing `/` is dropped; and `~` or `~/` alone, the home itself, is refused, since replacing it
+would move the home aside. A path in the home that is, holds or lies inside one Agentworks manages
+in that account's home is refused too. `vms/home_layout.py` holds a set per account, which
+`normalize_destination` and `expand_destination` take as `managed`: `MANAGED` (the two fragments,
+`.ssh`, the state directory `.agentworks` and `.agentworks-artifacts`) for an agent, and
+`ADMIN_MANAGED`, which adds the workspace links' `.config/tmuxinator`, for the admin, so an admin's
+`~/.config` is refused and an agent's is not. `.config/mise` is in neither: dotfiles may own or
+override the mise config, since both accounts write it before the dotfiles sync and fetch the
+lockfile and install after it (`docs/guides/mise.md`). Refusals are `DestinationError`, a
+`SourceRefError` (so a step failure) whose message names the accepted forms and no part of the
+value. `expand_destination(value, home)` replaces only the leading `~` and refuses, before any
+request, an absolute value that is the home or one of its ancestors, or that lands on a managed
+path.
 
 ### Source lines
 
@@ -1007,7 +1009,7 @@ a shared helper moves every caller of it**, so no helper exists in two forms bet
 - **B, the user files, agents and closure.**
   - New: `ensure_directory`'s owner and elevation, with their tests; `upload_tree`, with the plan's
     tree-upload test; `ensure_source_line` and `source_files`; `normalize_destination` and
-    `expand_destination` on both templates.
+    `expand_destination`, applied to both accounts' rendered destinations before the sync.
   - The Admin Initialization steps; `_harden_admin_home` and the login shell; `mise.py`.
   - The shared user-scope helpers, each with both callers: `_reconcile_authorized_keys` (the
     admin's, `driver.py:223`, and `owner=`, `agents/initializer.py:214-220`);

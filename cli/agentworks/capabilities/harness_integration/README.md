@@ -33,23 +33,23 @@ owned effects to retire is skipped and not marked applied. A config model, inclu
 schema, does not establish facet support. See
 [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
-The harness contract supplies grouped artifact delivery. Core captures each owner's
-`artifacts.bundles` into an immutable `ArtifactGroup` with hints, rules, skills and agents maps.
-`SetupInvocation.artifacts` is an `ArtifactInputs` value: one local group and deferred groups keyed
-by their original owner. `SessionArtifactContext.inputs` uses the same boundary. Later selected
-bundles replace whole same-type/key definitions within an owner; different owners never overwrite
-each other. Normalized content and map keys enforce the same portable lowercase artifact-name
-contract used by declarations and persisted captures. An integration must consume those groups
-without flattening away equal names. Setup methods return an `ArtifactApplication`: concrete native
-files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file or
-generated-section publication and checkpoints confirmed ownership. The integration owns native
-formats, placement, compatibility checks and routing decisions. A successful application reports
-inputs omitted from its deferral list as handled. The integration must fulfill that delivery
-obligation, through native files, launch arguments or another supported native mechanism; omission
-is its handling report, not independent proof of consumption. Core validates the result and warns
-about final-session deferrals. A session deferral targets `session` as a terminal unhandled result;
-it is persisted for inspection and never routed again. Returning the old `None` result is a contract
-error even for an empty invocation.
+The harness contract supplies grouped artifact delivery. Core captures each owner's selected
+`artifacts.bundles` and `artifacts.declare` into an immutable `ArtifactGroup` with hints, rules,
+skills, agents and MCP server maps. `SetupInvocation.artifacts` is an `ArtifactInputs` value: one
+local group and deferred groups keyed by their original owner. `SessionArtifactContext.inputs` uses
+the same boundary. Later selected bundles replace whole same-type/key definitions within an owner,
+followed by effective direct declarations; different owners never overwrite each other. Normalized
+content and map keys enforce the same portable lowercase artifact-name contract used by declarations
+and persisted captures. An integration must consume those groups without flattening away equal
+names. Setup methods return an `ArtifactApplication`: concrete native files plus deferrals for
+inputs requiring a later facet. Core performs guarded whole-file or generated-section publication
+and checkpoints confirmed ownership. The integration owns native formats, placement, compatibility
+checks and routing decisions. A successful application reports inputs omitted from its deferral list
+as handled. The integration must fulfill that delivery obligation, through native files, launch
+arguments or another supported native mechanism; omission is its handling report, not independent
+proof of consumption. Core validates the result and warns about final-session deferrals. A session
+deferral targets `session` as a terminal unhandled result; it is persisted for inspection and never
+routed again. Returning the old `None` result is a contract error even for an empty invocation.
 
 `ArtifactFile.generated_section` selects a bounded Agentworks-generated section in an instruction
 file. Core replaces a complete section while preserving surrounding bytes, ownership, permissions
@@ -320,6 +320,14 @@ missing any of them, naming the plugin:
   config.
 - `name` / `description`: the registry row's identity.
 
+#### Launch Configuration Preflight
+
+`validate_launch_config(config, intent=...)` is an optional class method for local conflicts between
+validated, untagged config and a launch intent. The default accepts every combination. Core calls it
+before accepting desired runtime state. The spec-replacement path also calls it before runtime
+observation, restart consent or persisting the replacement. Implementations perform no target work
+or state mutation here. The launch operation also enforces its policy when called directly.
+
 #### Setup Binding
 
 VM, admin, agent, and workspace templates explicitly select native setup integrations through
@@ -344,7 +352,8 @@ identifies its config and secret references. A removed activation binds with `co
 
 `vm_init`, `user_init`, and `workspace_init` receive their corresponding typed setup invocations.
 The base methods have no native effects or claims. Session construction retains its existing
-arguments and stores them in a `SessionBinding`; setup access to session identity or state raises
+arguments and stores them in a `SessionBinding`, including the existing row's optional
+`last_started_at` for launch-history decisions; setup access to session identity or state raises
 `StateError`. An integration's setup methods read their bound facet model through `_config_as`; its
 existing session `config` property may continue narrowing to the session model.
 
@@ -653,12 +662,13 @@ sessions. Five rules, each earned:
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
 - **Quote generated argv data.** Build a token list and use `shlex.quote` for each generated or
   modeled argument, preserving literal profile names, model values, settings, and workload input.
-- **Render declared template fields in the integration.** Render designated `extra_args` once
-  against the bound context with `self.render_context_argv`. Validate the effective vector and emit
-  those same values with ordinary shell quoting. A workspace path containing an apostrophe remains
-  one argument, and namespace-looking replacement data is not interpreted twice. Shell renders its
-  selected command field as operator-authored source with ordinary shell quoting responsibilities.
-  The manager never interpolates returned commands.
+- **Render declared template fields in the integration.** Annotate string argument elements with
+  `Interpolated()` and render the field against the bound context using
+  `self.render_context_args("extra_args", self.config.extra_args)`. Validate the effective vector
+  and emit those same values with ordinary shell quoting. A workspace path containing an apostrophe
+  remains one argument, and namespace-looking replacement data is not interpreted twice. Shell
+  renders its selected command field as operator-authored source with ordinary shell quoting
+  responsibilities. The manager never interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
   explicit `extra_args` list emitted after generated options keeps the integration useful without
@@ -822,8 +832,8 @@ The checklist beyond code, per the repo rules:
 Known holes the current contract leaves open on purpose, so the boundaries read as deliberate:
 
 - **Features and further artifact types.** Core provisioning prepares scoped env and declared
-  artifact bundles before harness integrations handle or defer them. A future feature-emission stage
-  can fit between core and integrations. Core hint emission and hooks remain later work; see
+  artifacts before harness integrations handle or defer them. A future feature-emission stage can
+  fit between core and integrations. Core hint emission and hooks remain later work; see
   [agent artifacts](../../artifacts/README.md) for the supported artifact types.
 - **Secrets and integration-owned environment.** The declare-and-receive secret plumbing is in place
   but no shipped integration declares a config secret. The session template's `env` chain, including

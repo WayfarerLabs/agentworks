@@ -13,6 +13,9 @@ from unittest.mock import Mock
 
 import pytest
 
+from agentworks.artifacts.bundle import ArtifactBundle
+from agentworks.artifacts.capture import capture_artifacts
+from agentworks.artifacts.declarations import ArtifactDefinitions
 from agentworks.artifacts.mcp import content_from_definition, parse_definition
 from agentworks.artifacts.model import ArtifactComponent, ArtifactInput, ArtifactOrigin, ArtifactProvenance
 from agentworks.artifacts.native.mcp import MCP_CLAIM_ROLE, MCPTool, apply_mcp, render_mcp
@@ -140,6 +143,28 @@ def test_create_adopt_update_and_entry_conflict_are_independent(transport, tool)
     assert table(table(read(path, tool), key), second.content.name)["command"] == "new"
     assert read(path, tool)["foreign"] == {"private": "fixture-secret-value"}
     assert "fixture-secret-value" not in "".join(transport.logged_output)
+
+
+@pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
+def test_bundle_to_direct_keeps_native_mcp_claim_and_entry(transport, tool):
+    definitions = ArtifactDefinitions.model_validate(
+        {"mcp_servers": {"inventory": {"definition": {"type": "stdio", "command": "fixture-server"}}}}
+    )
+    bundle = ArtifactBundle(name="team", mcp_servers=definitions.mcp_servers)
+    origin = ArtifactOrigin("agent", "agent", "fixture")
+    bundled = capture_artifacts([("team", bundle)], origin)
+    direct = capture_artifacts([], origin, declare=definitions)
+    assert bundled.mcp_servers["inventory"].identity == direct.mcp_servers["inventory"].identity
+    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    claims: list[tuple[NativeClaim, ...]] = []
+    call = replace(invocation(transport, claims), artifacts=received(*bundled.items()))
+    apply_mcp(tool, call, destination=str(path))
+    previous = claims[-1]
+    baseline = path.read_bytes()
+    call = replace(call, artifacts=received(*direct.items()), prior=record(previous, tool))
+    result = apply_mcp(tool, call, destination=str(path))
+    assert claims[-1] == previous and not result.deferred
+    assert path.read_bytes() == baseline
 
 
 @pytest.mark.parametrize("modified,unavailable", [(False, False), (True, False), (False, True)])

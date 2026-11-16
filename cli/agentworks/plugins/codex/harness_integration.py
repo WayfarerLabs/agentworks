@@ -136,7 +136,7 @@ from agentworks.plugins._harness_native.native import setup_user, setup_workspac
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.codex.artifacts import defer_session_mcp, outer_artifacts, session_artifacts, vm_artifacts
 from agentworks.plugins.codex.recorder import home_word, install_recorder, notify_value_word, thread_tail
-from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.schema import AgwModel, Interpolated, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -226,7 +226,7 @@ class CodexConfig(AgwModel):
     the target's own configuration remains authoritative by default. A
     child template's declared value replaces its parent's."""
 
-    writable_dirs: list[str] = Field(default_factory=list)
+    writable_dirs: list[Annotated[str, Interpolated()]] = Field(default_factory=list)
     """Extra directories the sandbox may write, each forwarded as
     ``--add-dir``. Inheritance combines parent and child entries."""
 
@@ -246,7 +246,7 @@ class CodexConfig(AgwModel):
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
-    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
+    extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Argv tokens appended after every generated CLI option,
     so they can add unmodeled arguments or override managed ``-c`` values.
     Codex 0.147.0 takes the last value for a repeated ``-c`` key. On a fresh
@@ -515,6 +515,7 @@ class CodexIntegration(HarnessIntegration):
     _dropped_stale: bool = False
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
     _rendered_extra_args: tuple[str, ...] = ()
+    _rendered_writable_dirs: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -698,7 +699,8 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
-        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
+        self._rendered_extra_args = self.render_context_args("extra_args", self.config.extra_args)
+        self._rendered_writable_dirs = self.render_context_args("writable_dirs", self.config.writable_dirs)
         artifact_context = self._session_binding.artifact_context
         access = ctx.admin_access() if self._admin else ctx.agent_access()
         self._artifact_plan, native_root = prepare_session_delivery(
@@ -1258,7 +1260,7 @@ class CodexIntegration(HarnessIntegration):
             tokens += ["-c", f"{_REASONING_EFFORT_KEY}={_toml_basic_string(self.config.reasoning_effort)}"]
         if self.config.vim_mode:
             tokens += ["-c", f"{_VIM_MODE_KEY}=true"]
-        for item in self.config.writable_dirs:
+        for item in self._rendered_writable_dirs:
             tokens += ["--add-dir", item]
         if self.config.web_search is True:
             tokens.append("--search")

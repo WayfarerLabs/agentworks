@@ -286,8 +286,8 @@ Agent artifact declarations and their native placement have a dedicated read-onl
 `agw artifact show --session my-session` includes the session and its actual ancestors;
 `--integration codex` narrows the explanation. It shows capture and application evidence without
 fetching content or exposing bodies. Start with `agw guide show concept-agent-artifacts` or the
-[artifact documentation](agentworks/artifacts/README.md) for bundle sources, explicit facet
-activation, worked manifests, and native delivery limits.
+[artifact documentation](agentworks/artifacts/README.md) for bundle selection, direct declarations,
+sources, explicit facet activation, worked manifests, and native delivery limits.
 
 Bundles include an explicit `mcp_servers` map for portable stdio and Streamable HTTP definitions.
 Workstation/Git JSON(C) sources select a same-named entry from `mcpServers`; only that definition is

@@ -17,6 +17,8 @@ from agentworks import output
 from agentworks.execution.access import Admin, Agent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
+from agentworks.interpolation import runtime_values
+from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
 from agentworks.vms.home_layout import MANAGED
 from agentworks.vms.initializer.dotfiles import sync_dotfiles
@@ -253,11 +255,14 @@ def create_agent_on_vm(
         agent_name=agent_name,
     )
     agent_identity = per_user_identity_env(agent_identity_ctx)
+    context = runtime_values(agent_identity_ctx)
     user_install_commands = kind_dict(registry, "user-install-command")
 
     def write_profile(failed: list[str]) -> None:
         paths = _mise_shims_path(home) + install_command_paths(
-            [name for name in agent_tmpl.user_install_commands if name not in failed], user_install_commands
+            [name for name in agent_tmpl.user_install_commands if name not in failed],
+            user_install_commands,
+            context=context,
         )
         _write_agentworks_profile(agent_files, paths, logger, home=home, shell=agent_shell, identity_env=agent_identity)
 
@@ -309,11 +314,25 @@ def create_agent_on_vm(
 
     # Dotfiles: the same sync as the admin's, as the agent.
     if agent_tmpl.dotfiles_source:
+        from agentworks.agents.template import AgentTemplate
+
         sync_dotfiles(
             agent_files,
             source=agent_tmpl.dotfiles_source,
-            destination=agent_tmpl.dotfiles_destination,
-            install_cmd=agent_tmpl.dotfiles_install_cmd,
+            destination=render_scalar_field(
+                AgentTemplate,
+                "dotfiles_destination",
+                agent_tmpl.dotfiles_destination,
+                context,
+                location=f"agent/{agent_name}.dotfiles_destination",
+            ),
+            install_cmd=render_scalar_field(
+                AgentTemplate,
+                "dotfiles_install_cmd",
+                agent_tmpl.dotfiles_install_cmd,
+                context,
+                location=f"agent/{agent_name}.dotfiles_install_cmd",
+            ),
             shell=agent_shell,
             home=home,
             managed=MANAGED,
@@ -348,6 +367,7 @@ def create_agent_on_vm(
         home,
         logger,
         label="Agent install command",
+        context=context,
     )
     if failed:
         # A failed install command keeps no PATH entry in the profile.

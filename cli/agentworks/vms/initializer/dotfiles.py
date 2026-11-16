@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.execution.requests import Command
-from agentworks.sources import DOTFILES_DEADLINE, expand_destination, fetch_dir, parse_source_ref
+from agentworks.sources import (
+    DOTFILES_DEADLINE,
+    expand_destination,
+    fetch_dir,
+    normalize_destination,
+    parse_source_ref,
+)
 
 from .steps import STEP_FAILURES, warn_step
 
@@ -31,7 +37,10 @@ def sync_dotfiles(
 
     Everything runs as the account ``files`` acts as, whose home is ``home``
     and whose managed paths (``vms.home_layout``) are ``managed``.
-    The sync is ``sources.fetch_dir``. The install runs as ``{shell} -lc``
+    ``destination`` is the operator's value as rendered for this account; it
+    is normalized and checked here (``sources.normalize_destination``, then
+    ``sources.expand_destination``), and a refused one warns like a failed
+    sync, before any request. The sync is ``sources.fetch_dir``. The install runs as ``{shell} -lc``
     with the checkout as its working directory, so it sees the account's
     login environment (its profile fragment, written earlier) and no
     operator environment. Sync and install warn separately, because a failed
@@ -42,7 +51,7 @@ def sync_dotfiles(
     log.step("Dotfiles")
     dest = destination
     try:
-        dest = expand_destination(destination, home, managed=managed)
+        dest = expand_destination(normalize_destination(destination, managed=managed), home, managed=managed)
         ref = parse_source_ref(source)
         output.info(f"Syncing dotfiles from {source}...")
         fetch_dir(ref, files, dest, log=log)

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES
 from agentworks.execution.requests import Command, Script, Shell
+from agentworks.interpolation_fields import render_list_field, render_scalar_field
 
 from .mise import MISE_GPG_KEY_PATH, MISE_GPG_KEY_URL, MISE_SOURCE_FILE, MISE_SOURCE_LINE
 from .steps import STEP_FAILURES, describe_failure, status, warn, warn_step
@@ -230,10 +231,19 @@ def _install_apt_packages(
         warn_step(log, "apt packages failed", error)
 
 
+def _install_command_owner(entry: SystemInstallCommandEntry | UserInstallCommandEntry) -> str:
+    from agentworks.install_commands import SystemInstallCommandEntry
+
+    kind = "system-install-command" if isinstance(entry, SystemInstallCommandEntry) else "user-install-command"
+    return f"{kind}/{entry.name}"
+
+
 def _build_test_command(
     entry: SystemInstallCommandEntry | UserInstallCommandEntry,
     shell: str,
     home: str,
+    *,
+    context: Mapping[str, str],
 ) -> str | None:
     """Build a shell command that passes when every declared test passes.
 
@@ -242,14 +252,18 @@ def _build_test_command(
     Empty tests are ignored. Returning ``None`` when none remain prevents
     an empty conjunction from vacuously skipping the install.
     """
+    owner = _install_command_owner(entry)
+    test_exec = render_scalar_field(type(entry), "test_exec", entry.test_exec, context, location=f"{owner}.test_exec")
+    test_file = render_scalar_field(type(entry), "test_file", entry.test_file, context, location=f"{owner}.test_file")
+    test_dir = render_scalar_field(type(entry), "test_dir", entry.test_dir, context, location=f"{owner}.test_dir")
     commands: list[str] = []
-    if entry.test_exec:
-        commands.append(f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(entry.test_exec)}')} > /dev/null 2>&1")
-    if entry.test_file:
-        path = entry.test_file.replace("~", home, 1) if entry.test_file.startswith("~") else entry.test_file
+    if test_exec:
+        commands.append(f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(test_exec)}')} > /dev/null 2>&1")
+    if test_file:
+        path = test_file.replace("~", home, 1) if test_file.startswith("~") else test_file
         commands.append(f"test -f {shlex.quote(path)}")
-    if entry.test_dir:
-        path = entry.test_dir.replace("~", home, 1) if entry.test_dir.startswith("~") else entry.test_dir
+    if test_dir:
+        path = test_dir.replace("~", home, 1) if test_dir.startswith("~") else test_dir
         commands.append(f"test -d {shlex.quote(path)}")
     return " && ".join(commands) or None
 
@@ -262,14 +276,26 @@ def install_run(shell: str, command: str) -> Command:
 def install_command_paths(
     command_names: list[str],
     entries: Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
+    *,
+    context: Mapping[str, str],
 ) -> list[str]:
     """The ``PATH`` additions the named install commands declare, in order; an undeclared name adds none.
 
     They are declarations, not results, so an account's profile can carry
-    them before any of its install commands run. A caller drops the names
-    :func:`_run_install_commands` reports failed once they have run.
+    them before any of its install commands run. Each entry's ``path`` is
+    rendered with ``context``, the consuming account's runtime context, so an
+    unavailable reference fails here, before the profile is written. A caller
+    drops the names :func:`_run_install_commands` reports failed once they
+    have run.
     """
-    return [path for name in command_names if (entry := entries.get(name)) is not None for path in entry.path]
+    return [
+        path
+        for name in command_names
+        if (entry := entries.get(name)) is not None
+        for path in render_list_field(
+            type(entry), "path", entry.path, context, location=f"{_install_command_owner(entry)}.path"
+        )
+    ]
 
 
 def _run_install_commands(
@@ -281,6 +307,7 @@ def _run_install_commands(
     log: InitLog,
     *,
     label: str = "Install command",
+    context: Mapping[str, str],
 ) -> list[str]:
     """Run install commands from an install-command entry dict as ``files``' identity; the names that failed.
 
@@ -290,6 +317,9 @@ def _run_install_commands(
 
     Phase B runs the system and user install commands as the admin, and agent
     initialization runs the agent's user install commands as the agent.
+    ``context`` is that account's runtime context: each command's completion
+    tests are rendered with it before they run, and its command only when the
+    tests do not skip it.
 
     Runs without env injection: provisioning is hermetic. Install commands
     see static identity and the account's declared ``PATH`` entries
@@ -316,7 +346,7 @@ def _run_install_commands(
         log.step(f"{label} {i}/{total}: {name}")
 
         # Skip if already installed.
-        test_cmd = _build_test_command(entry, shell, home)
+        test_cmd = _build_test_command(entry, shell, home, context=context)
         if test_cmd:
             try:
                 if status(files.access, Script(test_cmd, Shell.SH, deadline=INSTALL_CHECK_DEADLINE)) == 0:
@@ -328,10 +358,13 @@ def _run_install_commands(
                 reason = describe_failure(error, log.sanitize)
                 log.output(f"{name}: install check failed ({reason}), assuming not installed")
 
-        truncated = entry.command[:60]
+        command = render_scalar_field(
+            type(entry), "command", entry.command, context, location=f"{_install_command_owner(entry)}.command"
+        )
+        truncated = command[:60]
         output.info(f"{label} {i}/{total} ({name}): {truncated}...")
         try:
-            files.access.run(install_run(shell, entry.command), check=True)
+            files.access.run(install_run(shell, command), check=True)
         except STEP_FAILURES as error:
             warn_step(log, f"{label.lower()} '{name}' failed: {truncated}...", error)
             failed.append(name)

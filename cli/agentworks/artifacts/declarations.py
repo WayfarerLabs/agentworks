@@ -1,4 +1,4 @@
-"""Operator-authored artifact entries and scoped bundle references."""
+"""Operator-authored artifact entries, direct declarations, and bundle references."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Self
 from pydantic import ConfigDict, Field, ValidationError, ValidatorFunctionWrapHandler, field_validator, model_validator
 
 from agentworks.artifacts.mcp import MCPDefinition, definition_error
+from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import ARTIFACT_NAME_PATTERN, MAX_ARTIFACT_NAME_LENGTH
 from agentworks.package_sources import validate_artifact_source
 from agentworks.schema import AgwModel, MergeStrategy, NonBlankStr, ResourceRef
 from agentworks.sources import SourceRefError
@@ -114,9 +116,42 @@ class MCPServerArtifactSpec(_ArtifactSpec):
 
 type ArtifactSpec = HintArtifactSpec | RuleArtifactSpec | SkillArtifactSpec | AgentArtifactSpec | MCPServerArtifactSpec
 
+ArtifactName = Annotated[str, Field(pattern=ARTIFACT_NAME_PATTERN, max_length=MAX_ARTIFACT_NAME_LENGTH)]
+
+
+class ArtifactDefinitions(AgwModel):
+    """Artifact type maps merge by key; an overridden entry replaces the complete definition."""
+
+    hints: dict[ArtifactName, HintArtifactSpec] = Field(default_factory=dict)
+    """Small setup facts, keyed by canonical artifact name."""
+
+    rules: dict[ArtifactName, RuleArtifactSpec] = Field(default_factory=dict)
+    """Unconditional instructions, keyed by canonical artifact name."""
+
+    skills: dict[ArtifactName, SkillArtifactSpec] = Field(default_factory=dict)
+    """Complete skill directories; each key must match the SKILL.md name."""
+
+    agents: dict[ArtifactName, AgentArtifactSpec] = Field(default_factory=dict)
+    """Agent personas; each key must match the definition's frontmatter name."""
+
+    mcp_servers: dict[ArtifactName, MCPServerArtifactSpec] = Field(default_factory=dict)
+    """Canonical MCP server connections, keyed by artifact name."""
+
+    def type_maps(self) -> tuple[tuple[ArtifactType, Mapping[str, ArtifactSpec]], ...]:
+        return (
+            (ArtifactType.HINT, self.hints),
+            (ArtifactType.RULE, self.rules),
+            (ArtifactType.SKILL, self.skills),
+            (ArtifactType.AGENT, self.agents),
+            (ArtifactType.MCP_SERVER, self.mcp_servers),
+        )
+
+    def __bool__(self) -> bool:
+        return any(entries for _, entries in self.type_maps())
+
 
 class ArtifactsConfig(AgwModel):
-    """Bundle selection at one owning scope."""
+    """Bundle selection and direct artifact definitions at one owning scope."""
 
     bundles: Annotated[
         list[Annotated[str, ResourceRef(kind="artifact-bundle", usage="an artifact bundle")]],
@@ -124,6 +159,14 @@ class ArtifactsConfig(AgwModel):
     ] = Field(default_factory=list)
     """Ordered bundle references. An authored list replaces inherited references;
     an empty list suppresses this owner's inherited selection."""
+
+    declare: ArtifactDefinitions | None = None
+    """Direct definitions applied after selected bundles. Type maps merge by key,
+    replacing each overridden entry completely. Omission or an empty object inherits;
+    null clears inherited direct definitions without changing bundle selection."""
+
+    def __bool__(self) -> bool:
+        return bool(self.bundles or self.declare)
 
     @field_validator("bundles")
     @classmethod

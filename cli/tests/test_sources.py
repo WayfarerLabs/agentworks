@@ -808,10 +808,47 @@ def test_the_workspace_tmuxinator_links_are_refused_for_the_admin_and_not_an_age
     assert expand_destination(f"/home/agent/{value[2:]}", "/home/agent", managed=MANAGED)
 
 
-def test_each_template_applies_its_account_s_set() -> None:
-    with pytest.raises(ValidationError):
-        AdminConfig(name="t", dotfiles_destination="~/.config")
-    assert AgentTemplate(name="t", dotfiles_destination="~/.config").dotfiles_destination == "~/.config"
+def _sync_dotfiles(destination: str, managed: tuple[str, ...]) -> StepGuest:
+    """Sync dotfiles from a git source to ``destination`` in ``/home/a``, as an account whose set is ``managed``."""
+    from agentworks.vms.initializer.dotfiles import sync_dotfiles
+
+    guest = StepGuest(local_files=False)
+    sync_dotfiles(
+        guest.files,
+        source=f"git::{URL}",
+        destination=destination,
+        install_cmd="./install.sh",
+        shell="bash",
+        home="/home/a",
+        managed=managed,
+        log=guest.log,
+    )
+    return guest
+
+
+def test_each_account_s_sync_applies_its_set() -> None:
+    refused = _sync_dotfiles("~/.config", ADMIN_MANAGED)
+    assert refused.access.requests() == [] and len(refused.log.warned) == 1
+
+    accepted = _sync_dotfiles("~/.config", MANAGED)
+    assert accepted.commands()[0] == Command(("test", "-d", "/home/a/.config/.git"), deadline=60)
+
+
+@pytest.mark.parametrize("value", ["~/", ".ssh", "dots/../x", ".agentworks-artifacts/user"])
+def test_the_sync_refuses_an_unsuitable_destination_before_any_request(value: str) -> None:
+    guest = _sync_dotfiles(value, MANAGED)
+
+    assert guest.access.requests() == []
+    assert len(guest.log.warned) == 1
+
+
+@pytest.mark.parametrize(
+    ("value", "path"), [("dots/", "/home/a/dots"), ("~/dots", "/home/a/dots"), ("/srv/d/", "/srv/d")]
+)
+def test_the_sync_checks_out_into_the_normalized_destination(value: str, path: str) -> None:
+    guest = _sync_dotfiles(value, MANAGED)
+
+    assert guest.commands()[0] == Command(("test", "-d", f"{path}/.git"), deadline=60)
 
 
 @pytest.mark.parametrize("value", ["~/.config/mise", "~/.config/mise/dots", "~/.config/nvim", "~/.agentworks-dots"])
@@ -828,11 +865,10 @@ def test_a_refused_destination_names_no_part_of_the_value() -> None:
 
 
 @pytest.mark.parametrize("model", [AdminConfig, AgentTemplate])
-def test_both_templates_refuse_an_unsuitable_destination_at_load(model: type) -> None:
-    with pytest.raises(ValidationError) as refused:
-        model(name="t", dotfiles_destination="~/")
-    assert [error["loc"] for error in refused.value.errors()] == [("dotfiles_destination",)]
-    assert model(name="t", dotfiles_destination="dots/").dotfiles_destination == "~/dots"
+def test_both_templates_store_the_destination_as_written(model: type) -> None:
+    """A destination may be a template, so it is checked as rendered, before the sync, and not at load."""
+    for value in ("dots/", "~/", "${agw:user_home_dir}/dots"):
+        assert model(name="t", dotfiles_destination=value).dotfiles_destination == value
 
 
 @pytest.mark.parametrize("model", [AdminConfig, AgentTemplate])
@@ -874,22 +910,15 @@ def test_a_stored_unparsable_dotfiles_source_is_refused_with_the_accepted_forms(
         assert "ghp-stored-secret" not in str(decoded.value)
 
 
-def test_a_stored_relative_destination_decodes_into_the_home_and_a_refusal_names_the_accepted_forms() -> None:
+def test_a_stored_relative_destination_keeps_meaning_a_path_in_the_home() -> None:
     from agentworks.agents.instance_overlay import decode_overlay
-    from agentworks.errors import ValidationError as OverlayError
     from agentworks.vms.instance_overlay import decode_admin_overlay
 
     for decode in (decode_overlay, decode_admin_overlay):
         stored = decode({"dotfiles_destination": "dotfiles"})
-        assert stored.dotfiles_destination is not None
-        assert expand_destination(stored.dotfiles_destination, "/home/agent", managed=MANAGED) == "/home/agent/dotfiles"
-
-        with pytest.raises(DestinationError) as direct:
-            normalize_destination("~/secret/../x", managed=MANAGED)
-        with pytest.raises(OverlayError) as decoded:
-            decode({"dotfiles_destination": "~/secret/../x"})
-        assert str(direct.value) in str(decoded.value)
-        assert "secret" not in str(decoded.value)
+        assert stored.dotfiles_destination == "dotfiles"
+        normalized = normalize_destination(stored.dotfiles_destination, managed=MANAGED)
+        assert expand_destination(normalized, "/home/agent", managed=MANAGED) == "/home/agent/dotfiles"
 
 
 def test_expand_destination_replaces_only_the_leading_tilde() -> None:

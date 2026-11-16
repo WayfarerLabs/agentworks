@@ -19,6 +19,7 @@ from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.codec import decode_inputs, encode_inputs
 from agentworks.artifacts.declarations import (
     AgentArtifactSpec,
+    ArtifactDefinitions,
     ArtifactSpec,
     HintArtifactSpec,
     RuleArtifactSpec,
@@ -365,8 +366,11 @@ def test_git_committed_objects_complete_revision_shared_and_source_independent(r
             ("second", ArtifactBundle(name="second", skills={"review": spec})),
         ],
         ORIGIN,
+        declare=ArtifactDefinitions(skills={"review": spec}),
     )
     assert sum(args[0] == "fetch" for args in calls) == 1
+    assert items.skills["review"].origin.bundle == ""
+    assert [previous.origin.bundle for previous in items.skills["review"].replacements] == ["first", "second"]
     assert tuple(items.items())[0].provenance.commit == git(repository, "rev-parse", "HEAD").decode().strip()
     assert (
         tuple(items.items())[0].content.digest

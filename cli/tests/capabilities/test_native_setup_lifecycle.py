@@ -10,6 +10,7 @@ from agentworks.agents.initializer import create_new_agent_user
 from agentworks.agents.realize import realize_agent
 from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.declarations import ArtifactDefinitions, ArtifactsConfig, HintArtifactSpec
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.env.entry import EnvEntry
@@ -62,6 +63,30 @@ def test_empty_setup_does_not_resolve_ancestor_env(db, registry, vm, monkeypatch
     assert prepare_agent_setup(db, registry, vm=vm, name="agent", template=ResolvedAgentTemplate("default")) is None
     assert prepare_workspace_setup(db, registry, vm=vm, name="project", template=ResolvedTemplate("default")) is None
     assert prepare_vm_setup(db, registry, name=vm.name, template=resolve_vm({}), admin=AdminConfig()) == ()
+
+
+def test_direct_only_declarations_prepare_every_owning_setup_without_activations(db, registry, vm, monkeypatch):
+    config = ArtifactsConfig(declare=ArtifactDefinitions(hints={"note": HintArtifactSpec(text="direct context")}))
+    parent = resolve_vm({})
+    parent.artifacts = config
+    monkeypatch.setattr("agentworks.vms.templates.resolve_live_template", lambda *a: parent)
+    system, admin = prepare_vm_setup(db, registry, name=vm.name, template=parent, admin=AdminConfig(artifacts=config))
+    agent = prepare_agent_setup(
+        db, registry, vm=vm, name="worker", template=ResolvedAgentTemplate("default", artifacts=config)
+    )
+    workspace = prepare_workspace_setup(
+        db, registry, vm=vm, name="project", template=ResolvedTemplate("default", artifacts=config)
+    )
+    assert agent is not None and workspace is not None
+    owners = (system, admin, agent, workspace)
+    assert [owner.component for owner in owners] == ["vm", "admin", "agent", "workspace"]
+    items = []
+    for owner in owners:
+        assert owner.activations == {} and owner.artifact_snapshot is not None
+        item = owner.artifact_snapshot.inputs.hints["note"]
+        assert item.origin.component == owner.component and item.origin.bundle == ""
+        items.append(item)
+    assert len({item.origin_identity for item in items}) == 4
 
 
 def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, monkeypatch):

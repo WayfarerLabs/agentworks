@@ -37,9 +37,9 @@ the warning before removal. A scheduled issue records work; it does not authoriz
 
 ## Active compatibility windows
 
-| Input                                    | Owner and scope                                                                                 | Canonical input                                | Warning releases       | Planned removal                                                            |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
-| `{{session_name}}`, `{{workspace_name}}` | Shell `command` / `resume_command`, and winning session-scope plaintext env across integrations | `${agw:session_name}`, `${agw:workspace_name}` | CLI 0.20.x through 1.x | 2.0.0, [issue #878](https://github.com/WayfarerLabs/agentworks/issues/878) |
+| Input                                    | Owner and scope                                                                                 | Canonical input                                | Warning releases      | Planned removal                                                             |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------------- | --------------------------------------------------------------------------- |
+| `{{session_name}}`, `{{workspace_name}}` | Shell `command` / `resume_command`, and winning session-scope plaintext env across integrations | `${agw:session_name}`, `${agw:workspace_name}` | CLI 0.20.x and 0.21.x | 0.22.0, [issue #878](https://github.com/WayfarerLabs/agentworks/issues/878) |
 
 Compatibility aliases and canonical references share a single rendering pass. Inserted values remain
 data even if they resemble either syntax. Env compatibility follows the winning declaration's

@@ -23,12 +23,12 @@ def test_instance_spec_options_exist_only_on_supported_lifecycle_commands() -> N
     assert "--spec" in _option_names("agent", "create")
     assert "--spec" in _option_names("agent", "reinit")
     assert {"--spec", "--workspace-spec", "--agent-spec"} <= _option_names("session", "create")
+    assert "--spec" in _option_names("session", "start")
+    assert "--spec" in _option_names("session", "restart")
 
     assert "--spec" not in _option_names("vm", "reinit")
     assert "--spec" not in _option_names("workspace", "repair")
     assert "--spec" not in _option_names("workspace", "copy")
-    assert "--spec" not in _option_names("session", "start")
-    assert "--spec" not in _option_names("session", "restart")
 
 
 def test_vm_reinit_hands_its_admin_options_to_the_manager(monkeypatch: pytest.MonkeyPatch) -> None:

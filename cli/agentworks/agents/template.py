@@ -20,7 +20,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
+from agentworks.schema import CapabilityConfig, Interpolated, NonEmptyStr, ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -127,23 +127,17 @@ class AgentTemplate(DeclaredResource):
 
         return None if value is None else check_source_ref(value, field="dotfiles_source")
 
-    dotfiles_destination: str | None = None
+    dotfiles_destination: Annotated[str | None, Interpolated()] = None
     """Where the fetched dotfiles are checked out: a path in the agent's home
-    (`dots` or `~/dots`), or an absolute path. It may not be the home itself or one
-    of its parents, be, hold or lie inside a path Agentworks manages in the home
-    (`~/.ssh`, `~/.agentworks`, `~/.agentworks-artifacts` and the
-    `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..` component; a
-    trailing `/` is dropped."""
+    (`dots` or `~/dots`), or an absolute path. Supports ${agw:NAME} context
+    substitution. The rendered value is checked before the sync: it may not be
+    the home itself or one of its parents, be, hold or lie inside a path
+    Agentworks manages in the home (`~/.ssh`, `~/.agentworks`,
+    `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments), or have
+    an empty, `.` or `..` component, and a trailing `/` is dropped. A refused
+    destination warns and syncs nothing."""
 
-    @field_validator("dotfiles_destination")
-    @classmethod
-    def _normalize_destination(cls, value: str | None) -> str | None:
-        from agentworks.sources import normalize_destination
-        from agentworks.vms.home_layout import MANAGED
-
-        return None if value is None else normalize_destination(value, managed=MANAGED)
-
-    dotfiles_install_cmd: str | None = None
+    dotfiles_install_cmd: Annotated[str | None, Interpolated()] = None
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool | None = None
@@ -175,7 +169,7 @@ class AgentTemplate(DeclaredResource):
     A null entry disables that integration."""
 
     artifacts: ArtifactsConfig | None = None
-    """Artifact bundles selected at this scope; an omitted selection inherits."""
+    """Bundle selections and direct artifact definitions at this scope; omission inherits."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported for this agent, as a plaintext value

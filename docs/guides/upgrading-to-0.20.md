@@ -521,13 +521,15 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   unpacked beside the destination first, and the previous tree is put back if the upload fails or is
   interrupted; a run killed outright leaves the previous tree beside the destination, and the next
   reinit moves it back. The replacement no longer leaves the reinit partial.
-- **`dotfiles_destination` is checked when the template loads.** It is a path in the home (`dots` or
-  `~/dots`) or an absolute path. It may not name the home itself or one of its parents, may not be,
-  hold or lie inside a path Agentworks manages in that account's home (`~/.ssh`, `~/.agentworks`,
+- **`dotfiles_destination` is checked before the dotfiles sync.** The value, as rendered for the
+  account when it holds `${agw:NAME}` references, is a path in the home (`dots` or `~/dots`) or an
+  absolute path. It may not name the home itself or one of its parents, may not be, hold or lie
+  inside a path Agentworks manages in that account's home (`~/.ssh`, `~/.agentworks`,
   `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments, and for the admin also the
   workspaces' `~/.config/tmuxinator`, so an admin's `~/.config` is refused too), and may not contain
   an empty, `.` or `..` component; a trailing `/` is dropped, and only its leading `~` is expanded.
-  A stored destination such as `dots` keeps meaning `~/dots`.
+  A refused destination warns and syncs nothing. A stored destination such as `dots` keeps meaning
+  `~/dots`.
 - **Git source URLs may not carry credentials.** A `git::https://` source whose URL holds a user
   name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
   without echoing it; declare a `git-credential` resource for the host instead. A subpath with an

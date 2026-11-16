@@ -170,10 +170,10 @@ declarations and stored overlays have a dedicated [migration guide](migrating-cl
 
 ## Core setup and the environment
 
-At each owner, core prepares environment and captures declared artifact bundles before harness
-integration setup. The integration receives the applicable inputs and applies native configuration
-and artifacts or defers artifacts to a later facet. VM/admin setup completes before the final
-authorized-key and successful VM initialization checkpoint. Agent setup follows core user
+At each owner, core prepares environment and captures selected bundles and direct declarations
+before harness integration setup. The integration receives the applicable inputs and applies native
+configuration and artifacts or defers artifacts to a later facet. VM/admin setup completes before
+the final authorized-key and successful VM initialization checkpoint. Agent setup follows core user
 initialization; workspace setup follows directory and repository creation. Creating pending
 resources during session creation runs their owning setup before the session launches.
 
@@ -207,12 +207,13 @@ and automatic hint emission are future work.
 
 ## Artifact handling across facets
 
-An owner selects reusable bundles through `artifacts.bundles`, independently of integration
-activation. Core captures those inputs even when no integration is activated there. A later facet
-reads the capture; it does not reopen workstation files or fetch Git sources for an ancestor.
-Bundles contain `hints`, `rules`, `skills`, `agents` and `mcp_servers` maps. MCP entries describe
-connections, not running services; registration never proves authentication, connectivity, tool
-discovery or model use. Select the consuming user's env/secret declarations separately.
+An owner selects reusable bundles through `artifacts.bundles` or authors its five artifact type maps
+under `artifacts.declare`, independently of integration activation. Core captures those inputs even
+when no integration is activated there. A later facet reads the capture; it does not reopen
+workstation files or fetch Git sources for an ancestor. Both forms contain `hints`, `rules`,
+`skills`, `agents` and `mcp_servers` maps. MCP entries describe connections, not running services;
+registration never proves authentication, connectivity, tool discovery or model use. Select the
+consuming user's env/secret declarations separately.
 
 Core routes an inactive VM facet's inputs to the user facet by default. An activated VM facet can
 choose user, workspace, or session for each deferred input. These routes do not depend on which

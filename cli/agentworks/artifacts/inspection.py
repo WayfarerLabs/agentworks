@@ -104,6 +104,7 @@ class ArtifactMetadata:
     replacements: tuple[ArtifactReplacement, ...] = ()
     declared_bundles: tuple[str, ...] = ()
     description: str | None = None
+    declared_direct: bool = False
 
 
 @dataclass(frozen=True)
@@ -321,13 +322,20 @@ def _artifact_metadata(
         for kind, definitions in declaration.type_maps():
             for name in definitions:
                 entries.setdefault((kind.value, name), []).append(bundle)
+    direct = dict.fromkeys(
+        (kind.value, name)
+        for kind, definitions in (() if config.declare is None else config.declare.type_maps())
+        for name in definitions
+    )
+    for key in direct:
+        entries.setdefault(key, [])
     rows = []
     captured = () if view.captured is None else view.captured.inputs.items()
     seen = set()
     for item in captured:
         key = (item.content.type.value, item.content.name)
         selected = tuple(entries.get(key, ()))
-        declared = bool(selected)
+        declared = key in entries
         seen.add(key)
         rows.append(
             ArtifactMetadata(
@@ -345,10 +353,19 @@ def _artifact_metadata(
                 item.replacements,
                 selected,
                 item.content.description or None,
+                key in direct,
             )
         )
     rows.extend(
-        ArtifactMetadata(bundles[-1], name, kind, True, declared_bundles=tuple(bundles))
+        ArtifactMetadata(
+            "" if (kind, name) in direct else bundles[-1],
+            name,
+            kind,
+            True,
+            native_name=name,
+            declared_bundles=tuple(bundles),
+            declared_direct=(kind, name) in direct,
+        )
         for (kind, name), bundles in entries.items()
         if (kind, name) not in seen
     )
@@ -432,17 +449,18 @@ def render_artifacts(inspection: ArtifactInspection) -> None:
             content = artifact.input_id[:12] if artifact.input_id is not None else "contents unknown"
             revision = artifact.revision or ("not applicable" if artifact.input_id is not None else "unknown")
             current = "declared" if artifact.declared else "removed declaration"
-            output.info(
-                f"  {artifact.type} {artifact.bundle}/{artifact.entry}: {content}; {current}; revision {revision}"
-            )
+            declaration = artifact.bundle or "direct declaration"
+            output.info(f"  {artifact.type} {declaration}/{artifact.entry}: {content}; {current}; revision {revision}")
             if artifact.declared_bundles:
-                output.info(
-                    f"    Declaration bundles: {', '.join(artifact.declared_bundles)}; "
-                    f"selected {artifact.declared_bundles[-1]}"
+                output.info(f"    Declaration bundles: {', '.join(artifact.declared_bundles)}")
+            if artifact.declared:
+                selected = (
+                    "direct declaration" if artifact.declared_direct else f"bundle '{artifact.declared_bundles[-1]}'"
                 )
+                output.info(f"    Selected: {selected}")
             for previous in artifact.replacements:
                 output.info(
-                    f"    Replaced bundle {previous.origin.bundle}: {previous.digest[:12]}; "
+                    f"    Replaced {previous.origin.declaration_label}: {previous.digest[:12]}; "
                     f"source {previous.provenance.source}"
                 )
             if artifact.source is not None:
@@ -504,6 +522,7 @@ def inspection_data(inspection: ArtifactInspection) -> JsonObject:
                         "type": item.type,
                         "declared": item.declared,
                         "declared_bundles": list(item.declared_bundles),
+                        "declared_direct": item.declared_direct,
                         "input_id": item.input_id,
                         "origin_id": item.origin_id,
                         "native_name": item.native_name,

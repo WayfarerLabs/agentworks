@@ -30,6 +30,8 @@ from agentworks.execution.access import Admin
 from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
+from agentworks.interpolation import context_values
+from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
 from agentworks.vms.home_layout import ADMIN_MANAGED
 
@@ -463,6 +465,7 @@ def _phase_b_setup(
         # commands below (which run in it) so they stay in the VM section; the
         # login-shell usermod is a separate admin step further down.
         admin_shell = admin.shell
+        setup_context = context_values(vm_name=vm_name, user=admin_username)
 
         # Non-fatal: system install commands (VM-level, system-wide). Kept in
         # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
@@ -476,6 +479,7 @@ def _phase_b_setup(
             home,
             logger,
             label="System install command",
+            context=setup_context,
         )
 
         # Non-fatal: agent tmux socket directory infrastructure (VM-level:
@@ -535,10 +539,13 @@ def _phase_b_setup(
                 install_command_paths(
                     [name for name in vm_template.system_install_commands if name not in failed_system],
                     system_install_commands,
+                    context=setup_context,
                 )
                 + _mise_shims_path(home)
                 + install_command_paths(
-                    [name for name in admin.user_install_commands if name not in failed_user], user_install_commands
+                    [name for name in admin.user_install_commands if name not in failed_user],
+                    user_install_commands,
+                    context=setup_context,
                 )
             )
 
@@ -573,8 +580,20 @@ def _phase_b_setup(
             sync_dotfiles(
                 files,
                 source=admin.dotfiles_source,
-                destination=admin.dotfiles_destination,
-                install_cmd=admin.dotfiles_install_cmd,
+                destination=render_scalar_field(
+                    type(admin),
+                    "dotfiles_destination",
+                    admin.dotfiles_destination,
+                    setup_context,
+                    location=f"admin/{admin_username}.dotfiles_destination",
+                ),
+                install_cmd=render_scalar_field(
+                    type(admin),
+                    "dotfiles_install_cmd",
+                    admin.dotfiles_install_cmd,
+                    setup_context,
+                    location=f"admin/{admin_username}.dotfiles_install_cmd",
+                ),
                 shell=admin_shell,
                 home=home,
                 managed=ADMIN_MANAGED,
@@ -607,6 +626,7 @@ def _phase_b_setup(
             home,
             logger,
             label="User install command",
+            context=setup_context,
         )
         if failed_user:
             # A failed install command keeps no PATH entry in the profile.

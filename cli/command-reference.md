@@ -16,10 +16,12 @@ authentication may request approval and wait for the configured source timeout.
 An instance spec is an inline JSON object applied as the final layer after a selected template. Use
 `--spec JSON` on `vm create`, `workspace create`, `agent create`, and `session create`. A VM has two
 declarations: `--template` and `--spec` shape the VM, while `--admin-template` and `--admin-spec`
-shape its admin user. `agent reinit` also accepts `--spec JSON`, and `vm reinit` accepts
-`--admin-spec JSON`, because they are the existing-instance commands that can change the bound
-template (`--update-template` and `--admin-template`). No other reinit, repair, start, restart, or
-copy command accepts an instance spec, and a VM's own `--spec` layer cannot change after create.
+shape its admin user. `agent reinit`, `vm reinit`, and named `session start`/`session restart` can
+replace an existing instance layer: `agent reinit` and the session commands accept `--spec JSON`,
+and `vm reinit` accepts `--admin-spec JSON`, because those reinit commands can change the bound
+template (`--update-template` and `--admin-template`). Other reinit, repair, start, restart, or copy
+commands do not accept an instance spec, session bulk operations reject `--spec`, and a VM's own
+`--spec` layer cannot change after create.
 
 The JSON must be one object written directly on the command line. It cannot be a file path, `null`,
 an array, or multiple JSON values. Duplicate keys, non-finite numbers, unknown fields, and the
@@ -38,12 +40,20 @@ agw agent create coder-01 --spec '{"shell":"/bin/bash","mise_activate":true}'
 
 An omitted `--spec` on `agent reinit`, or `--admin-spec` on `vm reinit`, retains the stored layer. A
 supplied object replaces the complete prior layer, and `{}` or an empty value clears it. The
-empty-value shorthand applies only to these reinit options; create commands still require a JSON
-object. A stored layer this release can no longer use, such as one holding a refused source
-reference, can be replaced or cleared this way, while a plain reinit refuses it. Template changes
-and instance-spec changes are validated and persisted together before remote convergence. If that
-remote work fails, the new desired state remains stored so a plain `agent reinit NAME` or
-`vm reinit NAME` can retry it.
+empty-value shorthand applies only to these reinit options; create commands and session
+start/restart require a JSON object. A stored layer this release can no longer use, such as one
+holding a refused source reference, can be replaced or cleared this way, while a plain reinit
+refuses it. Template changes and instance-spec changes are validated and persisted together before
+remote convergence. If that remote work fails, the new desired state remains stored so a plain
+`agent reinit NAME` or `vm reinit NAME` can retry it.
+
+On named `session start` and `session restart`, omitted `--spec` retains the stored layer, supplied
+JSON replaces the complete layer, and `{}` clears it. An empty or whitespace-only argument is
+invalid JSON. Inspect `agw session describe NAME --output json` and preserve any desired fields in
+the replacement. Candidate validation precedes runtime observation and restart consent. Accepted
+desired state is saved under the VM-family guard and remains if subsequent runtime work fails;
+invalid input or cancelled consent leaves the old layer unchanged. `start` on a running session can
+save a replacement without replacing its runtime; use `restart` to apply it immediately.
 
 For compound `session create`, `--spec` applies to the new session. `--workspace-spec` is accepted
 only with `--new-workspace`, and `--agent-spec` only with `--new-agent`; each applies to that
@@ -1194,6 +1204,11 @@ guest call for it, and still observes structurally complete peers. Named describ
 commands remain strict. Relationship-based filters select only rows reachable through the requested
 existing relationship; unfiltered inventory is the broad recovery view.
 
+Named `session start NAME --spec JSON` and `session restart NAME --spec JSON` replace the complete
+stored instance layer before runtime work. Omit the option to retain the layer, or pass `{}` to
+clear every instance override. This option cannot be combined with `--all`; see
+[Instance specs](#instance-specs) for validation, persistence and field-preservation rules.
+
 `session stop`, `session start`, and `session restart` operate on a single session by default. Pass
 `--all` to batch over matching sessions. Ordinary batch start adopts running intent for every
 accepted match, including already-running no-ops; stopped and domain-safe residual runtimes can be
@@ -1505,9 +1520,9 @@ spec:
 strings support context substitution such as `${agw:session_name}`, `${agw:workspace_name}`, and
 `${agw:user_home_dir}`. The namespaced syntax keeps shell variables and Go templates available to
 their own consumers. For existing Shell configurations, `{{session_name}}` and `{{workspace_name}}`
-remain accepted in `command` and `resume_command` throughout CLI 1.x, with removal planned for
-2.0.0. They also remain accepted in winning session-scope plaintext env values for every
-integration. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Affected
+remain accepted in `command` and `resume_command` through CLI 0.20.x and 0.21.x, with removal
+planned for 0.22.0. They also remain accepted in winning session-scope plaintext env values for
+every integration. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Affected
 operations emit one suppressible deprecation notice; `agw doctor` also identifies affected effective
 templates and stored session overrides. Other brace text remains literal. The executables an
 integration requires are checked on the session's launch target before state mutation, so a missing
@@ -1519,18 +1534,24 @@ vocabulary, literal escaping, env precedence, and command quoting rules.
 Those config keys live only inside the `harness_integration` table; spelling any of them at the
 `spec` top level is a load error that points you at the nested shape.
 
-The `claude-code` integration runs Claude Code as the session. Session creation and `--force-new`
-start a new Claude conversation; ordinary `session start` and `session restart` continue the same
-conversation when its transcript still exists on disk (launching fresh when Claude never wrote one).
-It ships as the opt-in `claude` system plugin (see [System Plugins](README.md#system-plugins)),
-disabled by default: a session-template naming it still lists ready, but creating a session on it is
-refused with an "enable plugin `claude`" hint until you add `claude` to `[plugins].system`. (The
-built-in `shell` integration stays the default and needs no opt-in.) Once enabled, it needs only
-that `claude` is installed on the launch target, and announces the chosen action (resume vs new
-session) in the pane, so the decision is never silent. Its config is all optional and documented by
-`agw resource explain harness-integration/claude-code`. The fields that forward a value to `claude`
-are not validated here, because the choice sets are Claude's and they move between its releases; and
-each `extra_args` element is one argv token (shell-quoted, never re-split).
+The `claude-code` integration runs Claude Code as the session. Creation starts a new conversation by
+default, and `--force-new` explicitly requests a new one. Ordinary start/restart resume the stored
+transcript when present, or ordinarily launch fresh when absent. Explicit continuation or parked-job
+evidence naming another UUID refuses launch and supplies recovery settings; missing transcripts
+after a prior start warn. The instance-only `force_uuid` setting adopts an exact existing transcript
+or verifiable live background conversation, including on creation, and suppresses detection while
+set. It conflicts with `--force-new`. Use named start/restart `--spec` to set or remove it,
+preserving any other instance fields; see the
+[Claude recovery guide](../docs/guides/resources.md#harness-integrations). It ships as the opt-in
+`claude` system plugin (see [System Plugins](README.md#system-plugins)), disabled by default: a
+session-template naming it still lists ready, but creating a session on it is refused with an
+"enable plugin `claude`" hint until you add `claude` to `[plugins].system`. (The built-in `shell`
+integration stays the default and needs no opt-in.) Once enabled, it needs only that `claude` is
+installed on the launch target, and announces the chosen action (resume vs new session) in the pane,
+so the decision is never silent. Its config is all optional and documented by
+`agw resource explain harness-integration/claude-code`. The `permission_mode`, `model` and
+`reasoning_effort` choice sets belong to Claude and are forwarded without mirroring them here; each
+`extra_args` element is one argv token (shell-quoted, never re-split).
 
 ```yaml
 apiVersion: agentworks/v1

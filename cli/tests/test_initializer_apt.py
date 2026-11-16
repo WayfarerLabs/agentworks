@@ -22,6 +22,7 @@ from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
+from agentworks.interpolation import context_values
 from agentworks.vms.initializer import (
     MISE_GPG_KEY_PATH,
     MISE_GPG_KEY_URL,
@@ -40,6 +41,7 @@ ARCH = Command(("dpkg", "--print-architecture"), deadline=60)
 APT_UPDATE = Command(("apt-get", "update", "-qq"), elevated=True, deadline=120)
 TEST_KEY = "/etc/apt/keyrings/test.gpg"
 TEST_LIST = "deb [arch=arm64 signed-by=/etc/apt/keyrings/test.gpg] https://example.com stable main\n"
+_INSTALL_CONTEXT = context_values(vm_name="box", user="agentworks")
 
 
 def _key_present(path: str) -> Command:
@@ -315,7 +317,9 @@ def _tool(**tests: str) -> dict[str, UserInstallCommandEntry]:
 
 
 def _run(guest: StepGuest, entries: dict, names: list[str] | None = None) -> None:  # type: ignore[type-arg]
-    _run_install_commands(guest.files, names or list(entries), entries, "zsh", "/home/agentworks", guest.log)
+    _run_install_commands(
+        guest.files, names or list(entries), entries, "zsh", "/home/agentworks", guest.log, context=_INSTALL_CONTEXT
+    )
 
 
 def test_an_install_command_runs_in_the_login_shell() -> None:
@@ -404,8 +408,12 @@ def test_the_declared_paths_are_every_declared_command_s_in_order() -> None:
         "second": UserInstallCommandEntry(name="second", command="two", path=["/opt/two"]),
     }
 
-    assert install_command_paths(["second", "missing", "first"], entries) == ["/opt/two", "/opt/one", "/opt/shared"]
-    assert install_command_paths([], entries) == []
+    assert install_command_paths(["second", "missing", "first"], entries, context=_INSTALL_CONTEXT) == [
+        "/opt/two",
+        "/opt/one",
+        "/opt/shared",
+    ]
+    assert install_command_paths([], entries, context=_INSTALL_CONTEXT) == []
 
 
 @pytest.mark.parametrize("entry_type", [SystemInstallCommandEntry, UserInstallCommandEntry])
@@ -425,11 +433,17 @@ def test_a_failed_install_command_is_reported_so_its_paths_leave_the_profile(
     guest.respond(_install("zsh", "install-broken"), _failed())
     guest.access.answer = lambda call: Result(Completed(0)) if isinstance(call.request, Script) else None
 
-    failed = _run_install_commands(guest.files, list(entries), entries, "zsh", "/home/agentworks", guest.log)
+    failed = _run_install_commands(
+        guest.files, list(entries), entries, "zsh", "/home/agentworks", guest.log, context=_INSTALL_CONTEXT
+    )
 
     assert failed == ["broken"]
     kept = [name for name in entries if name not in failed]
-    assert install_command_paths(kept, entries) == ["~/.first/bin", "~/.present/bin", "~/.last/bin"]
+    assert install_command_paths(kept, entries, context=_INSTALL_CONTEXT) == [
+        "~/.first/bin",
+        "~/.present/bin",
+        "~/.last/bin",
+    ]
     commands = guest.commands()
     assert [command for command in commands if isinstance(command, Command)] == [
         _install("zsh", "install-first"),
@@ -458,7 +472,7 @@ def test_the_completion_test_passes_only_when_every_declared_test_passes(
     (tmp_path / "installed").write_text("") if "file" in present else None
     entry = UserInstallCommandEntry(name="t", command="x", test_exec="sh", test_file="~/installed", test_dir="~/tool")
 
-    command = packages._build_test_command(entry, "sh", str(tmp_path))
+    command = packages._build_test_command(entry, "sh", str(tmp_path), context=_INSTALL_CONTEXT)
 
     assert command is not None
     assert subprocess.run(["/bin/sh", "-c", command], capture_output=True, check=False).returncode == expected

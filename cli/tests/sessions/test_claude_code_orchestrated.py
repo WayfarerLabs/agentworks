@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shlex
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -34,9 +35,10 @@ import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionStatus
+from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result
 from agentworks.plugins.claude import harness_integration as claude_module
-from agentworks.plugins.claude.harness_integration import transcript_probe
+from agentworks.plugins.claude.conversation_probe import conversation_request
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
@@ -73,9 +75,9 @@ _MINTED_SID = "6a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d"
 
 class _ClaudeTarget:
     """Launch-target double for the claude-code op: its access answers the
-    readiness ``command -v claude`` check and ``transcript_probe(sid)``,
-    recording each into a shared event log. ``transcript_present`` decides
-    resume-vs-launch; ``sid`` is the id the op is expected to probe (``None``
+    readiness ``command -v claude`` check and ``conversation_request(sid)``
+    under any launch environment, recording each into a shared event log.
+    ``transcript_present`` decides resume-vs-launch; ``sid`` is the id the op is expected to probe (``None``
     when it should probe none). Its transport answers everything else."""
 
     def __init__(self, events: list[str], *, sid: str | None, transcript_present: bool) -> None:
@@ -90,7 +92,12 @@ class _ClaudeTarget:
         if is_command_check(call.request):
             self._events.append("probe")
             return check_result(call.request, 0)
-        if self._sid is not None and call.request == transcript_probe(self._sid):
+        request = call.request
+        if (
+            self._sid is not None
+            and isinstance(request, Script)
+            and replace(request, env={}) == conversation_request(self._sid)
+        ):
             self._events.append("detect")
             return Result(Completed(0 if self._present else 1))
         return None
@@ -522,4 +529,84 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     assert argv[argv.index("--effort") + 1] == literal
     assert argv[argv.index("--future-path") + 1] == workspace_path
     assert argv[argv.index("--literal") + 1] == "${agw:session_name}"
+    db.close()
+
+
+def test_detachment_refusal_precedes_teardown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.errors import StateError
+    from agentworks.plugins.claude.conversation_probe import ConversationProbe
+    from agentworks.sessions.manager import restart_session
+
+    sid = "939b1597-7c61-5ace-80f4-14617b7b4257"
+    successor = "af0980f9-1111-4222-8333-444444444444"
+    state = {"claude-code": {"session_id": sid}, "other": {"conversation": "untouched"}}
+    db, events, captured = _restart_stubs(tmp_path, monkeypatch, transcript_present=True, stored_state=state)
+    db.record_session_started("s1")
+    before = db.get_session("s1")
+    assert before is not None
+    observed_history: list[str | None] = []
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+
+    original = ClaudeCodeIntegration._conversation
+
+    def observe(self: ClaudeCodeIntegration, *args: object, **kwargs: object) -> tuple[str, bool]:
+        observed_history.append(self._session_binding.last_started_at)
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ClaudeCodeIntegration, "_conversation", observe)
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.probe_conversation",
+        lambda *args, **kwargs: ConversationProbe(True, candidates=(successor,)),
+    )
+    with pytest.raises(StateError):
+        restart_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    assert not captured
+    after = db.get_session("s1")
+    assert after is not None
+    assert after.harness_integration_state == state
+    assert after.pid == before.pid
+    assert after.last_started_at == before.last_started_at
+    assert observed_history == [before.last_started_at]
+    assert before.last_started_at is not None
+    db.close()
+
+
+def test_force_adoption_persists_without_changing_other_namespaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.plugins.claude.conversation_probe import ConversationProbe
+    from agentworks.sessions.manager import restart_session
+
+    old = "939b1597-7c61-5ace-80f4-14617b7b4257"
+    adopted = "af0980f9-1111-4222-8333-444444444444"
+    db, events, captured = _restart_stubs(
+        tmp_path,
+        monkeypatch,
+        transcript_present=True,
+        stored_state={"claude-code": {"session_id": old}, "other": {"x": 1}},
+    )
+    _harness_integration_template(monkeypatch, {"force_uuid": adopted})
+    monkeypatch.setattr(
+        "agentworks.plugins.claude.harness_integration.probe_conversation",
+        lambda *args, **kwargs: ConversationProbe(False, background_exists=True),
+    )
+    restart_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
+    assert f"--resume {adopted}" in captured["command"]
+    after = db.get_session("s1")
+    assert after is not None
+    assert after.harness_integration_state == {"claude-code": {"session_id": adopted}, "other": {"x": 1}}
     db.close()

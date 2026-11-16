@@ -25,8 +25,8 @@ class _ArtifactBundleKind:
     prose: TopicProse = TopicProse(
         title="Artifact bundles",
         overview="""
-        An artifact-bundle declares hints, rules, skills, and agents (agent personas)
-        in four maps keyed by canonical artifact name. Hints provide small pieces of setup context.
+        An artifact-bundle declares hints, rules, skills, agents (agent personas), and MCP servers
+        in five maps keyed by canonical artifact name. Hints provide small pieces of setup context.
         Rules provide standing guidance through native rule files or generated required-read skills;
         availability does not prove that a model loaded or obeyed them. Skills use the standard
         Agent Skills directory format.
@@ -35,8 +35,14 @@ class _ArtifactBundleKind:
         session declarations. An omitted list inherits; a supplied list replaces the
         inherited list, including an empty list. Selections at other scopes remain intact.
 
+        Declare artifacts directly in the same five maps under `artifacts.declare` at any
+        owning scope. Direct definitions apply after the selected bundles. Omission or an
+        empty object inherits direct definitions; `declare: null` clears them independently
+        of the bundle list. Direct definitions are content, not resource references.
+
         Bundle `inherits` merges each type map by key, replacing an overridden definition
-        completely. Within an owner, later selected bundles replace the same type and key.
+        completely. Direct type maps follow the same inheritance rule. Within an owner,
+        later selected bundles and then direct declarations replace the same type and key.
         Contributions from different owning scopes remain separate, including after deferral.
         Skill and persona frontmatter names must agree with their map keys.
 
@@ -46,7 +52,8 @@ class _ArtifactBundleKind:
         Supporting files can retain exact bytes through relative `preserve_bytes` patterns;
         SKILL.md always uses normalized UTF-8 text.
 
-        The owning scope captures bundle contents before its activated harness integrations
+        MCP servers accept exactly one canonical inline `definition` or JSON/JSONC `source`.
+        The owning scope captures artifact contents before its activated harness integrations
         handle or defer them. A bundle is a declaration, not a live instance. Use
         `agw artifact show` to inspect the selected scope and its actual ancestors.
         """,

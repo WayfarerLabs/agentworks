@@ -192,7 +192,7 @@ def _local_dotfiles(tmp_path: Path) -> AdminConfig:
 def test_the_admin_s_dotfiles_are_not_synced_over_its_workspace_tmuxinator_links(
     run_section: Callable[..., None], tmp_path: Path
 ) -> None:
-    """An absolute destination passes load; the admin's set refuses it when initialization expands it."""
+    """The admin's set refuses an absolute destination over the links when initialization checks it."""
     guest = Guest()
     admin = _local_dotfiles(tmp_path).model_copy(update={"dotfiles_destination": f"{HOME}/.config"})
 

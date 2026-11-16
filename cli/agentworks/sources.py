@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks import output
-from agentworks.errors import ExternalError, StateError, ValueFreeError
+from agentworks.errors import ExternalError, StateError
 
 # SourceRefFormError is defined in agentworks.errors, beside the other value-free errors, and re-exported
 # here with check_source_ref, which raises it; the `X as X` shape marks it as explicit for mypy.
@@ -187,7 +187,7 @@ def _extract_ref(query: str) -> str:
     return refs[0]
 
 
-class DestinationError(ValueFreeError):
+class DestinationError(SourceRefError):
     """A ``dotfiles_destination`` that is not one; the message names the accepted forms, never the value."""
 
 
@@ -201,7 +201,8 @@ def normalize_destination(value: str, *, managed: tuple[str, ...]) -> str:
     """``value`` as a dotfiles destination: ``~/`` and a path in the home, or an absolute path.
 
     Boundary: the templates' ``dotfiles_destination``, operator
-    configuration, validated here at load, stored overlays included. A path
+    configuration, checked here as rendered for one account, just before
+    its dotfiles sync (``vms.initializer.dotfiles``). A path
     with no leading ``~/`` or ``/`` is in the home, as it always meant, so
     ``dots`` becomes ``~/dots``. No component may be empty, ``.`` or ``..``
     and ``~user`` is refused; a trailing ``/`` is dropped. The home
@@ -249,10 +250,7 @@ def expand_destination(value: str, home: str, *, managed: tuple[str, ...]) -> st
     if path == home or home.startswith(path.rstrip("/") + "/"):
         raise SourceRefError(f"dotfiles destination {path} is the home {home} or one of its parents")
     if path.startswith(home + "/"):
-        try:
-            _refuse_managed(path[len(home) + 1 :], managed)
-        except DestinationError as refused:
-            raise SourceRefError(str(refused)) from None
+        _refuse_managed(path[len(home) + 1 :], managed)
     return path
 
 

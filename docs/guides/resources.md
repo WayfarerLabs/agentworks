@@ -385,7 +385,7 @@ creating a session on it is refused with an "enable plugin `claude`" hint until 
 `[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one table instead
 of restating command strings: `session create` starts a new Claude conversation, while
 `session start` and `session restart` resume the bound conversation when its transcript still exists
-(and launch fresh when Claude never wrote one):
+(and ordinarily launch fresh when no transcript exists):
 
 ```yaml
 apiVersion: agentworks/v1
@@ -430,6 +430,54 @@ spec:
   every Claude launch, including a real resume, so the resumed process retains those settings. The
   flags, startup parser behavior, and `/goal` composition were checked locally with Claude Code
   2.1.231; Claude still owns agent discovery and validation.
+
+Claude can background a conversation under another UUID, including after the left-arrow agents
+shortcut is pressed while a tool is running. Agentworks checks explicit `continued-in` records and
+`parkedJobId` links before launching Claude. If a full candidate UUID is known, start or restart
+refuses and prints the pinned UUID, candidates, and a recovery setting. It never selects a branch by
+recency or follows a continuation automatically. An explicit `--force-new` still requests a new
+conversation without inspecting the old pin.
+
+To adopt a known conversation on an existing session, replace its instance spec with the recovery
+setting. `--spec` takes inline JSON and is supported only for one named session:
+
+```sh
+agw session restart work --spec \
+  '{"harness_integration":{"name":"claude-code","force_uuid":"af0980f9-1111-4222-8333-444444444444"}}'
+```
+
+Supplied `--spec` replaces the **complete instance spec**, rather than merging into its previous
+values. Inspect `agw session describe work --output json` and retain any other desired instance
+fields in the replacement. The selected session template continues to supply inherited defaults. Do
+not set `force_uuid` on a template: the shared instance-only rule rejects it there.
+
+After adoption, remove `force_uuid` by supplying the complete instance spec without that field. If
+recovery was the only instance override, clear the entire instance spec on the next restart:
+
+```sh
+agw session restart work --spec '{}'
+```
+
+`{}` clears all instance overrides, including any environment or artifact selections. To keep those
+overrides, include them in the replacement instead. Omitting `--spec` retains the stored instance
+spec; `session start work --spec ...` supports the same replacement and clearing rules. A new
+session can adopt an existing conversation through `session create ... --spec ...` as well.
+
+Use a UUID from the refusal or inspect `claude agents --json` on the launch target as the launch
+user. `force_uuid` requires an existing transcript or a live background record for that exact UUID.
+Without a transcript, the Linux process start token and PID namespace must match the native record;
+missing or stale identity evidence fails explicit adoption. It also works when creating a session
+onto an existing conversation. It suppresses detachment checks while set, warns on every use, and
+persists the adopted UUID after verification, before launching the workload. Remove the field after
+adoption to restore detection. It conflicts with an explicit `--force-new`. No conversation is
+stopped or deleted; unselected branches remain available through Claude.
+
+When a previously started session has no transcript, or a parked job's short ID cannot be resolved
+to a full UUID, Agentworks warns and retains its ordinary launch policy. An unused Claude session
+may have no transcript before its first prompt; missing history alone does not establish detachment.
+If history was expected, inspect Claude's agents before choosing a recovery UUID. Unreadable
+optional detection evidence preserves existing behavior; failures to establish transcript existence
+still refuse to guess. `--resume-only` continues to require a resumable conversation.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
 

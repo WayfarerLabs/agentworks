@@ -294,14 +294,23 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     assert result.owners[-1].integrations[0].reason == own_failure.reason
 
 
-def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("example_name", "bundle_name", "artifact_types"),
+    [
+        ("scoped-artifacts.yaml", "team-artifacts", ("hints", "rules", "skills", "agents")),
+        ("direct-artifacts.yaml", "shared-guidance", ("hints",)),
+    ],
+)
+def test_worked_manifests_build_without_acquiring_their_sources(
+    tmp_path, monkeypatch, example_name, bundle_name, artifact_types
+) -> None:
     from importlib.resources import files
 
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from tests.conftest import write_cfg
 
-    example = files("agentworks.artifacts").joinpath("examples/scoped-artifacts.yaml").read_text()
+    example = files("agentworks.artifacts").joinpath(f"examples/{example_name}").read_text()
     path = write_cfg(tmp_path, example, settings='[plugins]\nsystem = ["codex"]\n')
 
     def forbid(*args, **kwargs):
@@ -309,8 +318,8 @@ def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkey
 
     monkeypatch.setattr("agentworks.artifacts.capture.capture_artifacts", forbid)
     registry = load_request_registry(load_config(path), include_live_resources=False, probe_host_readiness=False)
-    bundle = registry.lookup("artifact-bundle", "team-artifacts")
-    assert all(getattr(bundle, kind) for kind in ("hints", "rules", "skills", "agents"))
+    bundle = registry.lookup("artifact-bundle", bundle_name)
+    assert all(getattr(bundle, kind) for kind in artifact_types)
 
 
 def test_removed_bundle_reference_preserves_unknown_and_historical_metadata(db: Database) -> None:

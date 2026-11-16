@@ -128,11 +128,11 @@ class LocalFixtureTransport(Transport):
 
         File operations run their real program here (``run_file_program_locally``),
         the session home probe reads this fixture's home, and every required
-        command is present. Any other ``Command``, a bash or sh ``Script`` and
-        a ``PythonProgram`` run here, in the request's working directory or the
-        fixture's home, with the fixture's environment and the request's over
-        it; a login program runs after the fixture's login shell reads its
-        ``.profile``. A command's line or a script's source joins
+        command is present. Any other ``Command``, a bash or sh ``Script``, a
+        login ``Script`` in the account's own shell and a ``PythonProgram`` run
+        here, in the request's working directory or the fixture's home, with the
+        fixture's environment and the request's over it; a login script or
+        program runs after the fixture's login shell reads its ``.profile``. A command's line or a script's source joins
         ``commands``, and each answered request's operation log record joins
         ``logged_output``.
         """
@@ -148,6 +148,10 @@ class LocalFixtureTransport(Transport):
         elif result is None and isinstance(request, Script) and request.shell in (Shell.BASH, Shell.SH):
             self.commands.append(request.source)
             result = self._spawn([request.shell.value, "-c", request.source], request)
+        elif result is None and isinstance(request, Script) and request.shell is Shell.USER_DEFAULT and request.login:
+            self.commands.append(request.source)
+            flags = "-lic" if request.interactive else "-lc"
+            result = self._spawn([self.environment["SHELL"], flags, request.source], request)
         elif result is None and isinstance(request, PythonProgram):
             program = shlex.join([sys.executable, "-I", "-S", "-c", request.source, *request.args])
             result = self._spawn(

@@ -2,20 +2,24 @@
 
 An `artifact-bundle` declares reusable hints, rules, standard
 [Agent Skills](https://agentskills.io/specification), agents (agent personas), and MCP server
-definitions. An owning resource selects bundles with `artifacts.bundles`; its core setup captures
-their contents before explicitly activated harness integrations handle or defer them.
+definitions. An owning resource selects reusable content with `artifacts.bundles` or authors content
+at that owner with `artifacts.declare`. Core captures both forms before explicitly activated harness
+integrations handle or defer them.
 
 Use `agw resource explain artifact-bundle` for the declaration schema and
 `agw resource sample artifact-bundle` for an editable sample. Use `agw artifact show --help` for
-inspection selectors. [The worked example](examples/scoped-artifacts.yaml) demonstrates declaring
-sources separately from selecting and handling them.
+inspection selectors. [The bundle example](examples/scoped-artifacts.yaml) demonstrates reusable
+sources and handling; [direct declarations](examples/direct-artifacts.yaml) demonstrate owner-local
+content and inheritance.
 
 ## Select an owner and a handler
 
-VM, admin, agent, workspace, and session declarations accept the same `artifacts` block. Omission
-inherits the selected template's bundle references; an authored list replaces them, and
-`bundles: []` suppresses that owner's inherited references. These choices do not suppress another
-scope's inputs.
+VM, admin, agent, workspace, and session declarations accept the same `artifacts` block. Omitted
+fields inherit from the selected templates. An authored `bundles` list replaces inherited bundle
+references; `bundles: []` clears those references. The `declare` object contains the same five type
+maps as a bundle. Its maps inherit by key, with complete-entry replacement on a matching type/key.
+Omission and `declare: {}` preserve inherited direct definitions; `declare: null` clears them.
+Clearing one form leaves the other intact. These choices do not suppress another scope's inputs.
 
 Scopes own resources and lifecycle. A facet is the scoped part of a capability: both the VM admin
 and an agent have a `user` facet, each running as its actual Linux user. An agent does not inherit
@@ -101,6 +105,54 @@ recorded unhandled input identities where available. Ancestor problems are repor
 without blocking launch. An inactive session integration has no setup obligation for that facet.
 Inspection reports recorded application, not a fresh check of native files or model context.
 
+## Declare content at its owner
+
+Use `artifacts.declare` for content that belongs with one template or instance. It accepts the same
+entry fields as a bundle, including workstation and Git `source` values for files and packages. It
+does not accept bundle metadata, `inherits`, or nested bundle references. Named bundles and direct
+definitions can be used together:
+
+```yaml
+artifacts:
+  bundles: [shared-guidance]
+  declare:
+    hints:
+      setup:
+        text: The project toolchain is available through mise.
+    rules:
+      review:
+        source: file::~/agent-content/review.md
+```
+
+Direct definitions apply after the selected bundles. Each artifact still belongs to its actual
+consuming VM, admin, agent, workspace or session, including when its declaration came from a
+template. Direct and bundle-based content share capture, limits, normalization and handling. Moving
+identical content between these forms at the same owner does not rename the artifact or change its
+original-owner identity.
+
+Child templates and instance specs merge each direct type map by key. Adding one hint preserves
+other inherited hints, and overriding a rule replaces its entire definition. For example, a child
+`source` replaces inherited `text`; do not supply both. Empty maps preserve inherited entries. Use
+`declare: null` to clear inherited direct definitions. Use `bundles: []` separately to clear bundle
+references. Neither form clears another owner's content.
+
+For a one-off Shell session, direct content can be supplied through the existing `--spec` option.
+The following creates and starts one session using an existing authorized workspace and agent; it
+creates no VM, agent or workspace. Replace the names and select a Shell session template such as
+`artifact-session` from the minimal example:
+
+```bash
+agw session create release-review --workspace my-workspace --agent my-agent \
+  --template artifact-session \
+  --spec '{"artifacts":{"declare":{"hints":{"task":{"text":"Check the release notes."}}}}}'
+agw artifact show --session release-review --integration shell
+```
+
+Inspection identifies owner-declared content without a bundle name and does not print its body. If
+session creation is outside the authorized work, inspect an existing session instead. Normal
+activation and session workaround requirements still apply to native integrations. Remove this
+example session with `agw session delete release-review` when its work is complete.
+
 ## Two concurrent sessions
 
 Copy [the concurrent-session declarations](examples/concurrent-sessions.yaml) into your operator
@@ -166,10 +218,11 @@ key, replacing an overridden definition completely. A child `source` replaces a 
 `text`; an overridden skill replaces the entire package. Discarded parent sources are not acquired.
 
 Within one owner, later entries in `artifacts.bundles` replace earlier definitions with the same
-type and key. Inspection retains compact evidence of those replacements. Changed content emits a
-warning; identical content stays quiet and still records the winning source. Traversal uses hints,
-rules, skills, agents, then MCP servers, preserving key insertion order within each map. Replacement
-keeps that key's position. Different artifact types do not compete.
+type and key. Effective `artifacts.declare` entries follow all selected bundles and can override
+their matching type/key. Inspection retains compact evidence of those replacements. Changed content
+emits a warning; identical content stays quiet and still records the winning source. Traversal uses
+hints, rules, skills, agents, then MCP servers, preserving key insertion order within each map.
+Replacement keeps that key's position. Different artifact types do not compete.
 
 Each actual owner keeps its own group. A deferred VM group remains a VM group through user and
 session routing; it never becomes part of the receiver's local group. The same type and key from
@@ -297,6 +350,26 @@ rejected. Public literals are allowed; credential literals and direct `{secret: 
 belong in MCP definitions. For example, supply `MCP_DOCS_TOKEN: {secret: docs-token}` through the
 consuming owner's ordinary `env` block after declaring that secret. Never put its value in the
 artifact.
+
+For a connection used only by one template, its definition and env declarations can stay together:
+
+```yaml
+artifacts:
+  declare:
+    mcp_servers:
+      inventory:
+        definition:
+          type: stdio
+          command: inventory-mcp
+          env:
+            MCP_INVENTORY_TOKEN: ${MCP_INVENTORY_TOKEN}
+env:
+  MCP_INVENTORY_TOKEN: { secret: inventory-token }
+```
+
+This is an owner-spec fragment; declare `inventory-token` and provision the executable through the
+ordinary mechanisms before authorizing setup. Adjacent fields do not validate the final runtime
+binding. Native registration does not test the token or execute the server.
 
 References remain unresolved in captures, inspection and native registration. Claude and Grok use
 native interpolation; Codex uses native env forwarding/header binding fields. A workspace definition
@@ -727,9 +800,10 @@ spec:
     enabled_workarounds: [session-skill-plugin]
 ```
 
-Select bundles through the ordinary `artifacts.bundles` block. This declares configuration only;
-application happens during a subsequent managed launch. Native skill invocation/reading is distinct
-from discovering the package, and updating files does not erase previously loaded conversation text.
+Select bundles through `artifacts.bundles` or author content through `artifacts.declare`. This
+declares configuration only; application happens during a subsequent managed launch. Native skill
+invocation/reading is distinct from discovering the package, and updating files does not erase
+previously loaded conversation text.
 
 ## Upgrade existing artifact setup
 

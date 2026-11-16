@@ -97,7 +97,9 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
     session_routes = dict(invocation.selection.session_routes)
     for selected in sorted(invocation.selection.vms, key=lambda vm: vm.name):
         try:
-            guard = invocation.stack.enter_context(native_mutation_guard(invocation.db.path, selected.name))
+            guard = invocation.stack.enter_context(
+                native_mutation_guard(invocation.db.path, selected.name, held=invocation.held_native_guard)
+            )
             current = _vm(invocation.db, selected.name)
             if current.vm_uuid != selected.vm_uuid:
                 raise StateError("VM was replaced during selection", entity_kind="vm", entity_name=selected.name)

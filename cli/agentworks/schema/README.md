@@ -26,6 +26,7 @@ model config. This document covers the derivation layer.
 | D11 | Manifest envelope validation    | `manifests/envelope.py`                            |
 | D12 | YAML 1.1 spelling support       | `manifests/emit.py` spelling tables                |
 | D13 | Layer merge policy              | `merge.py` and model annotation metadata           |
+| D14 | Runtime interpolation           | `interpolation.py`, field markers and adapters     |
 
 The field tree, `explain`, and generated samples consume D3. Add a consumer of D3 when possible
 instead of walking models again.
@@ -61,6 +62,19 @@ The main comparators are:
 
 D6 has no independent comparator against D3: its tests pin error paths as literals rather than
 checking that field documentation can address them.
+
+## Instance-only capability config
+
+Use `Annotated[T, InstanceOnly()]` for a capability config field that must be authored on an
+instance, such as Claude's `force_uuid`. Import the marker from `agentworks.schema`. The shared
+capability declaration validator rejects the field on `*-template` owners, including an explicit
+null. Omission remains valid. Nested model, list, mapping and union fields are checked using the
+validated shape and the authored payload. Effective-config provenance identifies the true field
+declarer, so an instance cannot accidentally inherit an instance-only value from a template.
+
+Ordinary pydantic construction and runtime `validate_own_config` remain owner-free shape checks:
+declaration validation is the boundary that knows whether a value came from a template. The marker
+currently applies to capability config declarations, not arbitrary resource-spec fields.
 
 ## Structural unions
 
@@ -140,6 +154,40 @@ The merger does not validate, construct defaults, coerce, filter, or mutate its 
 values, `null`, unknown keys, and other malformed raw data survive to the existing final Pydantic
 validation boundary. Whole-node replacement is also the safe policy when an author intentionally
 uses a model domain broader than the recursive merge contract can interpret.
+
+## Runtime interpolation
+
+`Interpolated()` is optional `Annotated` metadata for strings, nullable strings and string list
+elements. Mark only fields whose consumer has defined when to render and which invocation facts it
+knows. Model loading does not evaluate templates.
+
+```python
+from typing import Annotated
+
+from agentworks.schema import AgwModel, Interpolated
+
+
+class ToolConfig(AgwModel):
+    directory: Annotated[str, Interpolated()]
+    arguments: list[Annotated[str, Interpolated()]]
+    profile: str
+```
+
+The string node emits `x-agw-interpolation: true`; `FieldDoc.interpolation` carries the
+scalar/element fact to explanation and sample output. Scalar shorthand derives that fact from its
+target field. Invalid marker placement, including a resource or secret reference on the same value,
+is rejected at the model/registration boundary.
+
+Interpolation annotations hidden inside named type aliases are unsupported and rejected. Put the
+marker directly on the field or string element. Ordinary unmarked aliases remain valid.
+
+Consumers use the model-aware adapters in `agentworks.interpolation_fields`, selecting only
+applicable values and supplying their known context and owning field location. An explicit render
+call requires the matching interpolation annotation and fails if it is missing. Unmarked fields
+retain their literal values through ordinary model access. A component may continue to use its own
+literal contract without adopting the pattern. See
+[runtime context](../../../docs/arch/runtime-context.md) for the language, lifecycle, secret
+boundary and destination handling.
 
 ## Adding or changing a derivation
 

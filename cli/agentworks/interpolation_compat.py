@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from agentworks import output
 
-LEGACY_PLACEHOLDER_REMOVAL = "2.0.0"
+LEGACY_PLACEHOLDER_REMOVAL = "0.22.0"
 LEGACY_PLACEHOLDERS = {"{{session_name}}": "session_name", "{{workspace_name}}": "workspace_name"}
 
 

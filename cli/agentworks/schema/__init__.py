@@ -72,6 +72,7 @@ from agentworks.schema.base import (
     reference_marker_error,
 )
 from agentworks.schema.block import CapabilityBlock, CapabilityConfig
+from agentworks.schema.declaration_scope import InstanceOnly
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     config_error_from,
@@ -91,8 +92,11 @@ from agentworks.schema.fields import (
     render_type,
 )
 from agentworks.schema.fill import filled_defaults
+from agentworks.schema.interpolation import field_interpolation, interpolation_marker_error
 from agentworks.schema.markers import (
+    INTERPOLATION_SCHEMA_KEY,
     REF_SCHEMA_KEY,
+    Interpolated,
     RefMarker,
     RefOwner,
     ResourceRef,
@@ -106,6 +110,8 @@ __all__ = [
     "MAPPING_KEY",
     "MAX_ERROR_LINES",
     "REF_SCHEMA_KEY",
+    "INTERPOLATION_SCHEMA_KEY",
+    "Interpolated",
     "SEQUENCE_ELEMENT",
     "UNSET",
     "AgwModel",
@@ -113,6 +119,7 @@ __all__ = [
     "CapabilityBlock",
     "CapabilityConfig",
     "FieldDoc",
+    "InstanceOnly",
     "ModelDoc",
     "MergeStrategy",
     "NonBlankStr",
@@ -130,6 +137,8 @@ __all__ = [
     "element_annotation",
     "extract_references",
     "filled_defaults",
+    "field_interpolation",
+    "interpolation_marker_error",
     "iter_field_docs",
     "located",
     "location_text",
