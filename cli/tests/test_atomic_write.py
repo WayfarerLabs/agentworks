@@ -9,9 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks import atomic_write
 from agentworks.atomic_write import atomic_write_text
-from agentworks.errors import StateError
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX owners and resource limits")
 
@@ -50,25 +48,56 @@ def test_a_rewrite_that_fails_after_truncating_puts_the_original_back(tmp_path: 
     assert sorted(entry.name for entry in tmp_path.iterdir()) == ["config"]
 
 
-def test_a_rewrite_that_cannot_be_undone_names_the_copy_of_the_original(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+# Refuses chown and makes every raw write fail, so both the in-place rewrite
+# and the restore that follows it fail after truncating.
+_REWRITE_AND_RESTORE_FAIL = """
+import os, sys
+from pathlib import Path
+from agentworks.atomic_write import atomic_write_text
+from agentworks.errors import StateError
+
+def refuse(*args, **kwargs):
+    raise PermissionError("refused")
+
+def fail(*args, **kwargs):
+    raise OSError(5, "Input/output error")
+
+os.chown = refuse
+os.write = fail
+try:
+    atomic_write_text(Path(sys.argv[1]), "replacement\\n", preserve_metadata=True)
+except StateError as error:
+    print(error.hint)
+"""
+
+
+def test_a_rewrite_that_cannot_be_undone_names_the_copy_of_the_original(tmp_path: Path) -> None:
     path = tmp_path / "config"
     path.write_bytes(_ORIGINAL)
+
+    completed = subprocess.run(
+        [sys.executable, "-c", _REWRITE_AND_RESTORE_FAIL, str(path)], capture_output=True, text=True, check=True
+    )
+
+    (backup,) = [entry for entry in tmp_path.iterdir() if entry.name != "config"]
+    assert backup.read_bytes() == _ORIGINAL
+    assert backup.name in completed.stdout
+
+
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may write a read-only file")
+def test_a_file_that_refuses_writing_is_left_as_it_was(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A read-only config owned by someone else is the usual way into the in-place fallback."""
+    path = tmp_path / "config"
+    path.write_bytes(_ORIGINAL)
+    path.chmod(0o444)
 
     def refuse(*args: object, **kwargs: object) -> None:
         raise PermissionError("refused")
 
-    def truncate_then_fail(target: Path, data: bytes) -> None:
-        target.write_bytes(b"")
-        raise OSError(5, "Input/output error")
-
     monkeypatch.setattr(os, "chown", refuse)
-    monkeypatch.setattr(atomic_write, "_write_synced", truncate_then_fail)
 
-    with pytest.raises(StateError) as caught:
+    with pytest.raises(PermissionError):
         atomic_write_text(path, "replacement\n", preserve_metadata=True)
 
-    (backup,) = [entry for entry in tmp_path.iterdir() if entry.name != "config"]
-    assert backup.read_bytes() == _ORIGINAL
-    assert backup.name in (caught.value.hint or "")
+    assert path.read_bytes() == _ORIGINAL
+    assert sorted(entry.name for entry in tmp_path.iterdir()) == ["config"]

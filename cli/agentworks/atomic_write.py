@@ -38,7 +38,7 @@ def atomic_write_text(
     if preserve_metadata:
         with contextlib.suppress(FileNotFoundError):
             existing = path.stat()
-    fd, name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     sibling = Path(name)
     try:
         with open(fd, "wb") as f:
@@ -75,25 +75,40 @@ def _take_metadata(sibling: Path, existing: os.stat_result) -> bool:
 
 
 def _rewrite_in_place(path: Path, data: bytes, *, backup: Path) -> None:
-    """Overwrite ``path`` with ``data``, restoring it from ``backup`` if that fails, then remove ``backup``."""
+    """Overwrite ``path`` with ``data``, restoring it from ``backup`` if that fails, then remove ``backup``.
+
+    The file is opened once, without truncating, so a refused open changes
+    nothing and is raised as it is; the rewrite and any restore go through
+    that one descriptor.
+    """
     try:
-        _write_synced(path, data)
-    except BaseException as error:
-        try:
-            _write_synced(path, backup.read_bytes())
-        except BaseException:
-            raise StateError(
-                f"could not rewrite '{format_host_path(path)}' or restore it",
-                hint=f"Its previous content is in '{format_host_path(backup)}'.",
-            ) from error
+        fd = os.open(path, os.O_WRONLY | getattr(os, "O_BINARY", 0))
+    except BaseException:
         backup.unlink()
         raise
+    try:
+        try:
+            _overwrite(fd, data)
+        except BaseException as error:
+            try:
+                _overwrite(fd, backup.read_bytes())
+            except BaseException:
+                raise StateError(
+                    f"could not rewrite '{format_host_path(path)}' or restore it",
+                    hint=f"Its previous content is in '{format_host_path(backup)}'.",
+                ) from error
+            backup.unlink()
+            raise
+    finally:
+        os.close(fd)
     backup.unlink()
 
 
-def _write_synced(path: Path, data: bytes) -> None:
-    """Truncate ``path`` and write ``data`` into the same file, synced to disk."""
-    with open(path, "wb") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
+def _overwrite(fd: int, data: bytes) -> None:
+    """Replace the whole content of the file open at ``fd`` with ``data``, synced to disk."""
+    os.ftruncate(fd, 0)
+    os.lseek(fd, 0, os.SEEK_SET)
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view) :]
+    os.fsync(fd)
