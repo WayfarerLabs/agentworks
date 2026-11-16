@@ -15,7 +15,9 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
+from agentworks.sessions.manager._status import _batch_row_bound_seconds
 from agentworks.sessions.multi_console import console_listing
+from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 from agentworks.vms.manager import inspect
 from tests._runtime_probes import framed_runtime_result
 
@@ -174,9 +176,10 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     class Target:
         def run(self, _command: str, **kwargs: object) -> _Result:
             input_data = kwargs.pop("input_data")
+            # The guest timeout plus the one row's own bound.
             assert kwargs == {
                 "check": False,
-                "timeout": 10,
+                "timeout": GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
                 "retries": 1,
                 "tty": False,
             }

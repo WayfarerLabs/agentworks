@@ -43,9 +43,17 @@ if TYPE_CHECKING:
 
     from ._tmux_server import SessionTmuxServer
 
-# Bounds each tmux client in the batch probe; well inside the request's own
-# GUEST_OBSERVATION_TIMEOUT_SECONDS.
+# Bounds each tmux client in the batch probe. A row runs at most two clients,
+# so its worst case is _batch_row_bound_seconds(), and the batch request
+# grants every row that bound on top of the ordinary guest timeout.
 _BATCH_CLIENT_TIMEOUT_SECONDS = 2
+_BATCH_CLIENT_KILL_SECONDS = 1
+
+
+def _batch_row_bound_seconds() -> int:
+    """The longest one row's tmux clients can take in the batch probe."""
+    return 2 * (_BATCH_CLIENT_TIMEOUT_SECONDS + _BATCH_CLIENT_KILL_SECONDS)
+
 
 _PID_PRESENT_FACT = "present"
 _PID_ABSENT_FACT = "absent"
@@ -260,7 +268,8 @@ def batch_check_status(
     result = target.run(
         cmd,
         check=False,
-        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+        # Each row's own bound, so stuck servers never exhaust another row's time.
+        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS + len(rows) * _batch_row_bound_seconds(),
         retries=GUEST_OBSERVATION_ATTEMPTS,
         tty=False,
         input_data=_batch_probe_data(rows),
@@ -384,10 +393,16 @@ def _batch_probe_data(rows: Sequence[tuple[SessionRow, SessionTmuxServer]]) -> s
 
 
 def _batch_probe_command() -> str:
-    """Build the constant-size loop program for a VM's session rows."""
+    """Build the constant-size loop program for a VM's session rows.
+
+    Every tmux client is bounded, and a row whose has-session times out
+    skips list-sessions, so a row costs at most ``_batch_row_bound_seconds``
+    whatever its server does. Clients take no stdin, so the remaining rows
+    stay out of every server's reach.
+    """
     from agentworks.sessions.tmux import owner_client_command
 
-    client = f'timeout -k 1 {_BATCH_CLIENT_TIMEOUT_SECONDS} tmux -S "$SOCK" "$@" </dev/null'
+    client = f'timeout -k {_BATCH_CLIENT_KILL_SECONDS} {_BATCH_CLIENT_TIMEOUT_SECONDS} tmux -S "$SOCK" "$@" </dev/null'
     as_owner = owner_client_command(client, owner_word='"$OWNER"')
     return (
         "hex() { od -An -tx1 | tr -d ' \\n'; }; "
@@ -397,14 +412,12 @@ def _batch_probe_command() -> str:
         "while read -r N64 S64 PID O64; do "
         'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; '
         'if [ "$O64" != - ]; then OWNER=$(decode "$O64") || exit 90; fi; '
-        # Each client is bounded, so one stuck server costs only its own row,
-        # and takes no stdin, so the remaining rows stay out of every
-        # server's reach.
         f'run_tmux() {{ if [ "$O64" != - ]; then {as_owner}; else {client}; fi; }}; '
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
         'HHEX=$(printf %s "$HERR" | hex); '
-        "SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; "
-        'SHEX=$(printf %s "$SERR" | hex); '
+        # 124 and 137 are timeout's own statuses: the server did not answer.
+        'case "$H" in 124|137) S=$H; SHEX=;; '
+        '*) SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(printf %s "$SERR" | hex);; esac; '
         'if [ "$PID" = - ]; then PFACT=; P=1; '
         'elif [ "$O64" != - ]; then '
         'PFACT=$(sudo -n sh -c "if test -d /proc/$PID; then printf present; '

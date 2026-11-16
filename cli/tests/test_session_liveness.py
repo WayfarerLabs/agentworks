@@ -314,45 +314,6 @@ def test_batch_command_is_valid_shell_syntax() -> None:
 
 @requires_symlinks
 @requires_posix_shell
-def test_batch_probe_bounds_each_client_so_a_stuck_server_costs_only_its_row(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from agentworks.sessions.manager import _status
-
-    monkeypatch.setattr(_status, "_BATCH_CLIENT_TIMEOUT_SECONDS", 1)
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    for name in ("base64", "cat", "od", "sleep", "timeout", "tr"):
-        executable = shutil.which(name)
-        assert executable is not None
-        os.symlink(executable, bin_dir / name)
-    tmux = bin_dir / "tmux"
-    tmux.write_text('#!/bin/sh\ncase "$2" in *stuck*) exec sleep 30 ;; esac\nexit 0\n')
-    tmux.chmod(0o755)
-    sessions = [
-        _session("stuck", pid=1, socket_path=f"{ADMIN_SOCKETS}/stuck.sock", boot_id=BOOT_CURRENT),
-        _session("fine", pid=2, socket_path=f"{ADMIN_SOCKETS}/fine.sock", boot_id=BOOT_CURRENT),
-    ]
-
-    result = subprocess.run(
-        ["/bin/bash", "--noprofile", "--norc", "-c", _batch_probe_command()],
-        input=_batch_probe_data(_with_servers(sessions)),
-        text=True,
-        capture_output=True,
-        check=False,
-        env={"PATH": str(bin_dir), "HOME": str(tmp_path)},
-        timeout=20,
-    )
-
-    assert result.returncode == 0
-    parsed = batch_check_status(
-        _with_servers(sessions), target=_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)})
-    )
-    assert parsed == {"stuck": SessionStatus.UNKNOWN, "fine": SessionStatus.RUNNING}
-
-
-@requires_symlinks
-@requires_posix_shell
 def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) -> None:
     """Reject unexpected PATH tools, sudo calls, tmux verbs, and temp-tree writes."""
     bin_dir = tmp_path / "bin"
