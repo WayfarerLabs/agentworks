@@ -28,7 +28,7 @@ kinds self-register into ``KIND_REGISTRY`` at load.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
 from pydantic import Field, model_validator
 
@@ -36,6 +36,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
 from agentworks.resource_loading import _require_field, _require_list
 from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
+from agentworks.schema import Interpolated
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -60,28 +61,33 @@ class _InstallCommandEntry(DeclaredResource):
     # The example is what a generated sample writes on the one line an
     # operator MUST fill in here: one maintained entry point, not an embedded
     # installer implementation.
-    command: str = Field(examples=["tool-manager install my-tool"])
+    command: Annotated[str, Interpolated()] = Field(examples=["tool-manager install my-tool"])
     """One logical shell invocation, authored as a single-line scalar. It must be
     repeat-safe itself or paired with completion checks that reliably skip it
     after success because init and reinit may invoke the resource again."""
 
-    path: list[str] = Field(default_factory=list)
+    path: list[Annotated[str, Interpolated()]] = Field(default_factory=list)
     """Directories written to the target user's managed profile after install
     commands run, including commands skipped by completion checks. Later shells
     that source the profile prepend these directories to ``PATH``; child processes
-    inherit them. A leading ``~`` resolves to that user's home. Install commands
-    themselves use the login shell's existing ``PATH``."""
+    inherit them. Interpolation uses the consuming user's VM/user identity (plus
+    agent identity for agents), without workspace/session context, before checks
+    or installation. A leading ``~`` becomes ``$HOME``; each entry is written as
+    ``export PATH="<entry>:$PATH"`` without additional escaping. Shell variables
+    and other shell syntax are interpreted when the profile is sourced. Paths
+    are written after the batch; install commands themselves use the login
+    shell's existing ``PATH``. See ``agw guide show concept-templating``."""
 
-    test_exec: str | None = Field(default=None, examples=["my-tool"])
+    test_exec: Annotated[str | None, Interpolated()] = Field(default=None, examples=["my-tool"])
     """Optional completion check for whether this command is already on
     ``PATH``. When multiple non-empty ``test_*`` fields are set, all must pass
     to skip the install."""
 
-    test_file: str | None = None
+    test_file: Annotated[str | None, Interpolated()] = None
     """Optional completion check for whether this file exists. A leading
     ``~`` resolves to the target user's home."""
 
-    test_dir: str | None = None
+    test_dir: Annotated[str | None, Interpolated()] = None
     """Optional completion check for whether this directory exists. A leading
     ``~`` resolves to the target user's home."""
 

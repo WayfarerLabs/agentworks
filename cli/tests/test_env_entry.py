@@ -74,7 +74,7 @@ def test_all_spellings_are_exposed_by_a_structural_one_of() -> None:
     assert len(emitted["oneOf"]) == 2
     plaintext = emitted["$defs"]["PlaintextEnvEntry"]
     secret = emitted["$defs"]["SecretEnvEntry"]
-    assert plaintext["anyOf"][0] == {"type": "string"}
+    assert plaintext["anyOf"][0]["type"] == "string"
     assert plaintext["anyOf"][1]["required"] == ["value"]
     assert set(plaintext["anyOf"][1]["properties"]) == {"value"}
     assert secret["required"] == ["secret"]

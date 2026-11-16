@@ -20,7 +20,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
+from agentworks.schema import CapabilityConfig, Interpolated, NonEmptyStr, ResourceRef
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -119,10 +119,10 @@ class AdminConfig(DeclaredResource):
     dotfiles_source: str | None = None
     """Where to fetch the admin user's dotfiles from. Omit to install none."""
 
-    dotfiles_destination: str = "~/.dotfiles"
+    dotfiles_destination: Annotated[str, Interpolated()] = "~/.dotfiles"
     """Where the fetched dotfiles are checked out."""
 
-    dotfiles_install_cmd: str = "./install.sh"
+    dotfiles_install_cmd: Annotated[str, Interpolated()] = "./install.sh"
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool = True

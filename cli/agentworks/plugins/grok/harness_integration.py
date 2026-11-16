@@ -49,7 +49,7 @@ from agentworks.capabilities.harness_integration.base import (
 )
 from agentworks.errors import StateError
 from agentworks.plugins.grok.artifacts import outer_artifacts, session_artifacts
-from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.schema import AgwModel, Interpolated, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -120,7 +120,7 @@ class GrokBuildConfig(AgwModel):
     )
     """Explicitly enabled session artifact carriers; replaces inherited opt-ins."""
 
-    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
+    extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Argv tokens appended after every managed flag and before
     any fresh positional prompt. Grok Build 1.0.4 rejects repeated managed
     flags, so use this for unmodeled flags rather than overriding a modeled
@@ -289,7 +289,7 @@ class GrokBuildIntegration(HarnessIntegration):
         intent: HarnessLaunchIntent = HarnessLaunchIntent.RESUME_OR_NEW,
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
-        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
+        self._rendered_extra_args = self.render_context_args("extra_args", self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
 

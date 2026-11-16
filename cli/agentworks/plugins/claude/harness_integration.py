@@ -56,7 +56,7 @@ from agentworks.plugins._harness_native.native import setup_user, setup_workspac
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
 from agentworks.plugins.claude.conversation_probe import probe_conversation
-from agentworks.schema import AgwModel, InstanceOnly, MergeStrategy
+from agentworks.schema import AgwModel, InstanceOnly, Interpolated, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -160,7 +160,7 @@ class ClaudeCodeConfig(AgwModel):
     ] = Field(default_factory=list)
     """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
 
-    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
+    extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Appended after every generated CLI option, so it can carry
     any flag this integration does not model. Claude uses the last
     ``--settings`` occurrence, so a raw one here replaces all generated
@@ -418,7 +418,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
         sid, resume = self._conversation(ctx, intent=intent)
-        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
+        self._rendered_extra_args = self.render_context_args("extra_args", self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
         runner = ctx.admin_target() if self._admin else ctx.agent_target()
         self._artifact_plan, native_root = prepare_session_delivery(

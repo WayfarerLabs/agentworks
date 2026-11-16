@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.agents.initializer import _run_agent_install_commands
 from agentworks.install_commands import UserInstallCommandEntry
+from agentworks.interpolation import context_values
 from agentworks.ssh import SSHError
 from tests.conftest import CapturedOutput, requires_posix_shell
 
@@ -43,6 +44,7 @@ def _run_commands(
         agent_tmpl=template,
         home=home,
         identity_env={"AGENTWORKS_AGENT": "dev"},
+        context=context_values(vm_name="box", user="agt-dev", agent_name="dev"),
     )
     return target
 

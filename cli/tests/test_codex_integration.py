@@ -1074,6 +1074,36 @@ def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     assert argv[-2:] == ["--foo", "bar baz"]  # one token stays one token
 
 
+def test_writable_dirs_render_as_argv_data_once_and_keep_authored_config() -> None:
+    source = ["${agw:workspace_dir}/cache", "$${agw:user_home_dir}"]
+    integration = _harness_integration({"writable_dirs": source, "extra_args": ["${agw:workspace_dir}"]}, state={})
+    directory = "/srv/a project's ${agw:user_name}"
+    integration.prepare_context({"workspace_dir": directory}, intent=HarnessLaunchIntent.CREATE)
+
+    argv = _sh_argv(integration.start(_op_ctx(_target()), intent=HarnessLaunchIntent.CREATE), home="/home/me")
+
+    assert [argv[index + 1] for index, token in enumerate(argv) if token == "--add-dir"] == [
+        f"{directory}/cache",
+        "${agw:user_home_dir}",
+    ]
+    assert argv[-1] == directory
+    assert integration.config.writable_dirs == source
+
+
+def test_invalid_writable_dir_reference_fails_before_target_work() -> None:
+    from agentworks.errors import ValidationError
+
+    integration = _harness_integration({"writable_dirs": ["${agw:unknown}"]}, state={})
+    target = _target()
+
+    with pytest.raises(ValidationError) as caught:
+        integration.start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
+
+    assert caught.value.entity_name is not None
+    assert caught.value.entity_name.startswith("session-template/codex.writable_dirs")
+    assert target.commands == []
+
+
 def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     """``extra_args`` is operator-supplied and NOT name-validated, so an
     adversarial value with quotes/metacharacters must be ``shlex.quote``d

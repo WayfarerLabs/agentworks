@@ -2213,7 +2213,7 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.capabilities.harness_integration import shell
+    from agentworks import interpolation_fields
     from agentworks.interpolation import render_template
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.manager import create_session
@@ -2245,7 +2245,7 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     def stop_before_mutation(self: Resolver) -> None:
         raise BeforeMutation
 
-    monkeypatch.setattr(shell, "render_template", record_render)
+    monkeypatch.setattr(interpolation_fields, "render_template", record_render)
     monkeypatch.setattr(Resolver, "resolve", stop_before_mutation)
     with pytest.raises(BeforeMutation):
         create_session(
