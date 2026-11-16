@@ -260,9 +260,7 @@ def _delete_session_runtime(
                     if agent:
                         remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
-            _mgr._regenerate_tmuxinator(db, config, vm, ws)
-
-            # Best-effort console cleanup runs after all DB / tmuxinator state has
+            # Best-effort console cleanup runs after all DB / workspace state has
             # settled. Stale tmux windows are recoverable cosmetic noise; if the
             # helper raises AgentworksError we skip the success message and any
             # created_workspace / created_agent cleanup below -- those would re-use

@@ -126,7 +126,6 @@ def runtime(monkeypatch):
     monkeypatch.setattr(manager, "transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr(manager, "_get_boot_id", lambda target: BOOT)
-    monkeypatch.setattr(manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr(tmux, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux, "finalize_session_start", lambda *a, **k: None)
 

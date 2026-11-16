@@ -330,7 +330,7 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
                 SimpleNamespace(session=SimpleNamespace(history_limit=1), paths=SimpleNamespace(vm_workspaces="/srv")),
                 name="s1",
                 new_workspace=True,
-                workspace_spec='{"tmuxinator":false}',
+                workspace_spec='{"git_user_name":"Ada"}',
                 new_agent=True,
                 agent_spec='{"shell":"zsh"}',
                 vm_name="vm1",
@@ -361,7 +361,7 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
         _fake_owner_realizers(monkeypatch)
         options = {
             "new_workspace": True,
-            "workspace_spec": '{"tmuxinator":false}',
+            "workspace_spec": '{"git_user_name":"Ada"}',
             "new_agent": True,
             "agent_spec": '{"shell":"zsh"}',
             "vm_name": "vm1",

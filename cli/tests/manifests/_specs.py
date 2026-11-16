@@ -49,6 +49,7 @@ def decode(
     return decode_document(
         document(kind, name, spec, description=description, expires=expires),
         issues if issues is not None else [],
+        [],
     )
 
 

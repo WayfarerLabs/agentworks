@@ -38,7 +38,6 @@ from agentworks.vms.templates import resolve_live_template_with_provenance as re
 from agentworks.workspaces.template import WorkspaceTemplate
 from agentworks.workspaces.templates import resolve_from_dict_with_provenance as resolve_workspace
 from agentworks.workspaces.templates import resolve_live_template_with_provenance as resolve_live_workspace
-from agentworks.workspaces.templates import resolve_live_tmuxinator
 from agentworks.workspaces.templates import resolve_template as resolve_workspace_template
 
 if TYPE_CHECKING:
@@ -367,7 +366,7 @@ def test_all_domain_folds_append_the_instance_layer() -> None:
     vm_overlay = cast("VMTemplate", parse_instance_spec("vm", '{"cpus":8,"apt":["git"]}').declaration)
     workspace_overlay = cast(
         "WorkspaceTemplate",
-        parse_instance_spec("workspace", '{"tmuxinator":false}').declaration,
+        parse_instance_spec("workspace", '{"git_user_name":"Ada"}').declaration,
     )
     agent_overlay = cast(
         "AgentTemplate",
@@ -395,8 +394,8 @@ def test_all_domain_folds_append_the_instance_layer() -> None:
         LayerSourceKind.INSTANCE,
     ]
     assert vm.provenance[("cpus",)][-1].resource_kind == "vm"
-    assert workspace.value.tmuxinator is False
-    assert workspace.provenance[("tmuxinator",)][-1].resource_kind == "workspace"
+    assert workspace.value.git_user_name == "Ada"
+    assert workspace.provenance[("git_user_name",)][-1].resource_kind == "workspace"
     assert agent.value.shell == "zsh"
     assert agent.provenance[("mise_packages", 0)][-1].resource_kind == "agent"
     assert session.value.env["MODE"].model_dump() == {"value": "instance"}
@@ -524,7 +523,7 @@ def test_all_live_domain_resolvers_expose_stored_instance_provenance(db: Databas
     registry = Registry.empty()
     overlays = {
         "vm": parse_vm_instance_specs('{"cpus":8}', None),
-        "workspace": parse_instance_spec("workspace", '{"tmuxinator":false}'),
+        "workspace": parse_instance_spec("workspace", '{"git_user_name":"Ada"}'),
         "agent": parse_instance_spec("agent", '{"shell":"zsh"}'),
         "session": parse_instance_spec("session", '{"env":{"MODE":"instance"}}'),
     }
@@ -534,24 +533,12 @@ def test_all_live_domain_resolvers_expose_stored_instance_provenance(db: Databas
 
     resolutions = (
         (resolve_live_vm(db, registry, "vm-1", None), ("cpus",)),
-        (resolve_live_workspace(db, registry, "workspace-1", None), ("tmuxinator",)),
+        (resolve_live_workspace(db, registry, "workspace-1", None), ("git_user_name",)),
         (resolve_live_agent(db, registry, "agent-1", None), ("shell",)),
         (resolve_live_session(db, registry, "session-1", None), ("env", "MODE")),
     )
     for resolution, path in resolutions:
         assert resolution.provenance[path][-1].kind is LayerSourceKind.INSTANCE
-
-
-def test_live_tmuxinator_preserves_missing_base_compatibility_and_honors_explicit_overlay(
-    db: Database,
-) -> None:
-    registry = Registry.empty()
-
-    assert resolve_live_tmuxinator(db, registry, "copied", "copied") is True
-
-    overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
-    db.instance_state.put_desired_overlay("workspace", "copied", overlay.payload)
-    assert resolve_live_tmuxinator(db, registry, "copied", "copied") is False
 
 
 def test_live_workspace_overlay_survives_a_missing_selected_base(db: Database) -> None:
@@ -565,7 +552,7 @@ def test_live_workspace_overlay_survives_a_missing_selected_base(db: Database) -
 
 
 def test_new_workspace_overlay_does_not_hide_an_unknown_selected_template() -> None:
-    overlay = cast("WorkspaceTemplate", parse_instance_spec("workspace", '{"tmuxinator":false}').declaration)
+    overlay = cast("WorkspaceTemplate", parse_instance_spec("workspace", '{"git_user_name":"Ada"}').declaration)
 
     with pytest.raises(NotFoundError):
         resolve_workspace_template(Registry.empty(), "typo", overlay=overlay, instance_name="new-workspace")

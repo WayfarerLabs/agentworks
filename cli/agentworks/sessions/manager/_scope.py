@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
 
@@ -140,32 +139,6 @@ def _require_session(db: Database, name: str) -> SessionRow:
             entity_name=name,
         )
     return session
-
-
-def _regenerate_tmuxinator(
-    db: Database,
-    config: Config,
-    vm: VMRow,
-    ws: WorkspaceRow,
-    *,
-    logger: SSHLogger | None = None,
-) -> None:
-    """Regenerate the workspace tmuxinator config from current session state."""
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.workspaces.templates import resolve_live_tmuxinator
-    from agentworks.workspaces.tmuxinator import generate_config, remove_config
-
-    registry = load_request_registry(config, live_database=db)
-    target = _mgr.transport(vm, config, logger=logger)
-    if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
-        remove_config(target, ws.name, ws.workspace_path)
-        return
-
-    sessions = db.list_sessions(workspace_name=ws.name)
-    # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
-    socket_paths = {s.name: s.socket_path for s in sessions}
-    config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    target.write_file(f"{ws.workspace_path}/.tmuxinator.yml", config_text)
 
 
 def filter_sessions(

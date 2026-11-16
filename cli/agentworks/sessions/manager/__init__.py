@@ -148,9 +148,6 @@ from ._scope import (
     _prepare_vm as _prepare_vm,
 )
 from ._scope import (
-    _regenerate_tmuxinator as _regenerate_tmuxinator,
-)
-from ._scope import (
     _require_session as _require_session,
 )
 from ._scope import (

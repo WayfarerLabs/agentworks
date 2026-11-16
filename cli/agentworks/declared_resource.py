@@ -241,6 +241,15 @@ class DeclaredResource(EnvelopeMetadata):
         """
         return []
 
+    def deprecated_fields(self) -> dict[str, str]:
+        """The deprecated settings this declaration makes, as field name to
+        guidance. Reported as a deprecation wherever an operator authors a
+        declaration: a manifest document (``ManifestSet.deprecations``) or an
+        instance spec (``instance_specs.parse_instance_spec``). Base
+        behavior: none.
+        """
+        return {}
+
     def validate_config(self, context: FinalizeContext) -> None:
         """Throwing correctness check for the resource's own capability
         config sub-block(s): the resource-level counterpart of

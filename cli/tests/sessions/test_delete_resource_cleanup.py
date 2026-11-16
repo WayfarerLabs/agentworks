@@ -751,7 +751,6 @@ def _prep_delete_session(db: Database, monkeypatch: pytest.MonkeyPatch, *, creat
         db._conn.execute("UPDATE sessions SET created_workspace = 1 WHERE name = 's'")
         db._conn.commit()
     monkeypatch.setattr(manager_mod, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
 

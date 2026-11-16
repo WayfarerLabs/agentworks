@@ -30,7 +30,6 @@ class ResolvedTemplate:
 
     name: str
     repo: str | None = None
-    tmuxinator: bool = True
     git_user_name: str | None = None
     git_user_email: str | None = None
     harness_integrations: dict[str, CapabilityConfig] = field(default_factory=dict)
@@ -50,7 +49,7 @@ def resolve_from_dict(
     Selection order:
     1. Explicit template_name
     2. "default" template if it exists
-    3. Built-in empty template (tmuxinator=True, no repo)
+    3. Built-in empty template (no repo)
     """
     return resolve_from_dict_with_provenance(
         templates,
@@ -156,39 +155,6 @@ def resolve_live_template_with_provenance(
             overlay=declaration,
             instance_name=instance_name,
         )
-
-
-def resolve_live_tmuxinator(
-    db: Database,
-    registry: Registry,
-    instance_name: str,
-    template_name: str | None,
-) -> bool:
-    """Resolve the live tmuxinator switch without breaking copied owners.
-
-    Historic copied workspaces use a synthetic or subsequently missing base
-    template. They have always generated tmuxinator config, so preserve that
-    default unless their stored final layer explicitly overrides the switch.
-    Stored-overlay decoding remains strict even when the base is unavailable.
-    """
-    from typing import cast
-
-    from agentworks.instance_specs import get_instance_overlay
-
-    overlay = get_instance_overlay(db, "workspace", instance_name)
-    try:
-        return resolve_template(
-            registry,
-            template_name,
-            overlay=None if overlay is None else cast("WorkspaceTemplate", overlay.declaration),
-            instance_name=instance_name,
-        ).tmuxinator
-    except (ConfigError, NotFoundError, ValueError):
-        if overlay is not None:
-            declared = cast("WorkspaceTemplate", overlay.declaration).tmuxinator
-            if declared is not None:
-                return declared
-        return True
 
 
 def resolve_ws_template_env_or_empty(

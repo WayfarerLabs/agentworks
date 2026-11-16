@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shlex
 from pathlib import PurePosixPath
@@ -14,7 +13,6 @@ from agentworks.errors import AlreadyExistsError
 from agentworks.ssh import SSHError
 from agentworks.transports import transport
 from agentworks.workspaces.acls import apply_workspace_acls
-from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -91,7 +89,6 @@ def create_vm_workspace(
         raise
     attempt: str | None = None
     clone_published = False
-    generated_config: tuple[str, str] | None = None
     try:
         # Create workspace group (idempotent), add admin, and set up directory with setgid
         target.run(f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'", sudo=True)
@@ -171,24 +168,10 @@ def create_vm_workspace(
                     # ~/.gitconfig (git config defaults to global outside a repo).
                     target.run(f"git -C {quoted_workspace} config --local {git_key} {shlex.quote(value)}")
 
-        # Tmuxinator config (no tasks yet at workspace creation time)
-        if template.tmuxinator:
-            tmux_config = generate_config(ws_name, workspace_path)
-            config_path = f"{workspace_path}/.tmuxinator.yml"
-            target.write_file(config_path, tmux_config)
-            generated_config = (config_path, hashlib.sha256(tmux_config.encode()).hexdigest())
-            # Symlink so tmuxinator can find it by console session name
-            session = console_session_name(ws_name)
-            target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-            target.run(
-                f"ln -s -- {shlex.quote(config_path)} ~/.config/tmuxinator/{session}.yml",
-                timeout=10,
-            )
-
         # Canonical workspace ACL, applied last so every entry written above (a
-        # clone, the tmuxinator config) is covered, and future entries inherit via
-        # the default ACL. Shared with workspace repair so the two never drift and
-        # a first repair of this workspace is a no-op.
+        # clone) is covered, and future entries inherit via the default ACL.
+        # Shared with workspace repair so the two never drift and a first
+        # repair of this workspace is a no-op.
         apply_workspace_acls(target, workspace_path)
     except BaseException:
         # A guest clone may survive the controller's cancellation or timeout.
@@ -204,17 +187,6 @@ def create_vm_workspace(
                 )
         # Cleanup steps are independent: an unreachable private attempt must not
         # prevent reclaiming an empty final reservation and its group.
-        if not clone_published and generated_config is not None:
-            from agentworks.native_files import NativeFiles
-
-            try:
-                with NativeFiles(target) as files:
-                    files.remove(generated_config[0], expected=generated_config[1])
-            except BaseException:
-                output.warn(
-                    f"Generated workspace config {generated_config[0]!r} could not be safely removed. "
-                    "Any changed content was retained."
-                )
         try:
             delete_vm_workspace(
                 vm,
@@ -247,13 +219,13 @@ def delete_vm_workspace(
 ) -> None:
     """Delete a workspace from a VM.
 
-    Tears down what :func:`create_vm_workspace` set up: the directory,
-    the tmuxinator symlink, and the workspace's Linux group. ``groupadd``
-    at create time has a symmetric ``groupdel`` here, so a deleted
-    workspace leaves no residual group on the VM (issue #249). Callers
-    pass the recorded ``linux_group`` rather than re-deriving it, so
-    legacy workspaces (older ``ws--`` prefix) drop the group they
-    actually own.
+    Tears down what :func:`create_vm_workspace` set up: the directory and
+    the workspace's Linux group, plus the tmuxinator discovery link earlier
+    releases created for it. ``groupadd`` at create time has a symmetric
+    ``groupdel`` here, so a deleted workspace leaves no residual group on
+    the VM (issue #249). Callers pass the recorded ``linux_group`` rather
+    than re-deriving it, so legacy workspaces (older ``ws--`` prefix) drop
+    the group they actually own.
 
     ``empty_only`` removes only a failed create's empty reservation; an occupied
     or unconfirmed directory and its group stay available for inspection.
@@ -282,8 +254,7 @@ def delete_vm_workspace(
                 return
         else:
             target.run(f"rm -rf {quoted}", sudo=True, timeout=30)
-        session = console_session_name(ws_name)
-        link = f"~/.config/tmuxinator/{session}.yml"
+        link = f"~/.config/tmuxinator/ws-{ws_name}-console.yml"
         target.run(
             f'if test -L {link} && test "$(readlink -- {link})" = '
             f"{shlex.quote(workspace_path + '/.tmuxinator.yml')}; then rm -- {link}; fi",

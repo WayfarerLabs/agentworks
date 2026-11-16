@@ -814,6 +814,8 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     if manifests is not None:
         for issue in manifests.issues:
             g.warn("Manifest", issue)
+        for deprecation in manifests.deprecations:
+            g.warn("Manifest", deprecation)
     if not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # Every settings-side deprecation doctor used to render is retired now,

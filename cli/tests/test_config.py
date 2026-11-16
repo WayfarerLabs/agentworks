@@ -52,7 +52,7 @@ def config_dir(tmp_path: Path) -> Path:
         ManifestDoc("user-install-command", "hello", {"command": "echo hello", "path": ["~/.local/bin"]}),
         ManifestDoc("workspace-template", "default"),
         ManifestDoc("workspace-template", "gruntweave", {"repo": "https://example.com/org/repo.git"}),
-        ManifestDoc("workspace-template", "child", {"inherits": ["gruntweave"], "tmuxinator": False}),
+        ManifestDoc("workspace-template", "child", {"inherits": ["gruntweave"], "git_user_name": "Ada"}),
         ManifestDoc("git-credential", "github", {"provider": {"name": "github", "source": {"mode": "secret"}}}),
         ManifestDoc(
             "git-credential",
@@ -73,7 +73,7 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert registry.lookup("workspace-template", "default").name == "default"
     assert registry.lookup("workspace-template", "gruntweave").repo == "https://example.com/org/repo.git"
     assert registry.lookup("workspace-template", "child").inherits == ["gruntweave"]
-    assert registry.lookup("workspace-template", "child").tmuxinator is False
+    assert registry.lookup("workspace-template", "child").git_user_name == "Ada"
     assert registry.lookup("git-credential", "github").provider.name == "github"
     assert registry.lookup("git-credential", "azdo").provider.config == {
         "org": "my-org",

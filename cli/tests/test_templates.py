@@ -39,7 +39,7 @@ def config(tmp_path: Path):  # type: ignore[no-untyped-def]
         tmp_path,
         ManifestDoc("workspace-template", "default"),
         ManifestDoc("workspace-template", "base", {"repo": "https://example.com/org/base.git"}),
-        ManifestDoc("workspace-template", "child", {"inherits": ["base"], "tmuxinator": False}),
+        ManifestDoc("workspace-template", "child", {"inherits": ["base"], "git_user_name": "Child"}),
         ManifestDoc(
             "workspace-template",
             "grandchild",
@@ -53,28 +53,28 @@ def test_explicit_template(config):  # type: ignore[no-untyped-def]
     result = resolve_template(build_registry(config), "base")
     assert result.name == "base"
     assert result.repo == "https://example.com/org/base.git"
-    assert result.tmuxinator is True
+    assert result.git_user_name is None
 
 
 def test_default_template(config):  # type: ignore[no-untyped-def]
     result = resolve_template(build_registry(config))
     assert result.name == "default"
     assert result.repo is None
-    assert result.tmuxinator is True
+    assert result.git_user_name is None
 
 
 def test_inheritance_overrides(config):  # type: ignore[no-untyped-def]
     result = resolve_template(build_registry(config), "child")
     assert result.name == "child"
     assert result.repo == "https://example.com/org/base.git"  # inherited from base
-    assert result.tmuxinator is False  # overridden by child
+    assert result.git_user_name == "Child"  # overridden by child
 
 
 def test_deep_inheritance(config):  # type: ignore[no-untyped-def]
     result = resolve_template(build_registry(config), "grandchild")
     assert result.name == "grandchild"
     assert result.repo == "https://example.com/org/override.git"  # overridden
-    assert result.tmuxinator is False  # inherited from child
+    assert result.git_user_name == "Child"  # inherited from child
 
 
 def test_builtin_fallback(tmp_path: Path) -> None:
@@ -95,7 +95,6 @@ def test_builtin_fallback(tmp_path: Path) -> None:
     result = resolve_template(build_registry(cfg))
     assert result.name == "default"
     assert result.repo is None
-    assert result.tmuxinator is True
 
 
 def test_unknown_template(config):  # type: ignore[no-untyped-def]

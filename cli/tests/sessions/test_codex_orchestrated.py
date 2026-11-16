@@ -168,7 +168,6 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
 def _restart_stubs(

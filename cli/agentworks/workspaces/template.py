@@ -70,9 +70,10 @@ class WorkspaceTemplate(DeclaredResource):
     """The git repository cloned into workspaces built from this template."""
 
     tmuxinator: bool | None = None
-    """Whether to write a tmuxinator project for the workspace. ``None``
-    inherits and defaults to true when the chain does not set it. Write
-    booleans unquoted; quoted strings such as ``"no"`` are invalid."""
+    """Deprecated, with no effect: Agentworks no longer generates workspace
+    tmuxinator projects. Still accepted so existing declarations load;
+    setting it reports a deprecation. Write booleans unquoted; quoted strings
+    such as ``"no"`` are invalid."""
 
     git_user_name: str | None = None
     """``user.name`` for commits made in this workspace's checkout."""
@@ -91,6 +92,12 @@ class WorkspaceTemplate(DeclaredResource):
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported in this workspace, as a plaintext
     value or a ``{secret: <name>}`` reference per key."""
+
+    def deprecated_fields(self) -> dict[str, str]:
+        """Any explicit ``tmuxinator`` value is a setting with no effect."""
+        if self.tmuxinator is not None:
+            return {"tmuxinator": "workspace tmuxinator projects are no longer generated; remove the setting"}
+        return {}
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of

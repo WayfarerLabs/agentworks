@@ -37,7 +37,6 @@ from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_regenerate_tmuxinator
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from tests.conftest import seed_vm_trust
@@ -88,9 +87,6 @@ class _Target:
         self._missing = missing or set()
 
     def run(self, cmd: str, **kwargs: object) -> _Result:
-        if cmd.startswith("rm -f ") and ".tmuxinator.yml" in cmd:
-            self._events.append("tmuxinator_remove")
-            return _Result()
         if "AGW_RUNTIME_STARTUP=" in cmd:
             result = _Result()
             result.stdout = "\nAGW_RUNTIME_STARTUP=off\n"
@@ -101,7 +97,7 @@ class _Target:
         return _Result()
 
     def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
-        self._events.append(f"tmuxinator_write:{remote_path}")
+        self._events.append(f"write:{remote_path}")
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -262,7 +258,6 @@ def _restart_fixture(
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db, events
 
 
@@ -909,7 +904,6 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db
 
 
@@ -941,42 +935,6 @@ def test_create_retains_unknown_runtime_if_start_observation_write_fails(
     assert session is not None
     assert session.socket_path == "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
     assert session.pid is None and session.boot_id == BOOT_ID
-    db.close()
-
-
-@pytest.mark.parametrize(
-    ("workspace_spec", "expected_event"),
-    [(None, "tmuxinator_write:/home/me/ws1/.tmuxinator.yml"), ('{"tmuxinator":false}', "tmuxinator_remove")],
-)
-def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    workspace_spec: str | None,
-    expected_event: str,
-) -> None:
-    from agentworks.instance_specs import parse_instance_spec
-    from agentworks.sessions import manager as session_manager
-
-    events: list[str] = []
-    db = _seed_db(tmp_path)
-    db._conn.execute("UPDATE workspaces SET template = 'copied' WHERE name = 'ws1'")
-    db._conn.commit()
-    if workspace_spec is not None:
-        overlay = parse_instance_spec("workspace", workspace_spec)
-        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target(events))
-    vm = db.get_vm("vm1")
-    ws = db.get_workspace("ws1")
-    assert vm is not None and ws is not None
-
-    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
-
-    assert expected_event in events
-    if workspace_spec is None:
-        assert "tmuxinator_remove" not in events
-    else:
-        assert not any(event.startswith("tmuxinator_write:") for event in events)
     db.close()
 
 
@@ -1154,7 +1112,7 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
             name="s1",
             spec='{"env":{"SESSION_SPEC":"set"}}',
             new_workspace=True,
-            workspace_spec='{"tmuxinator":false}',
+            workspace_spec='{"git_user_name":"Ada"}',
             new_agent=True,
             agent_spec='{"shell":"zsh"}',
             vm_name="vm1",
@@ -1187,7 +1145,6 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
     db = _create_stubs(tmp_path, monkeypatch, events)
     outcomes: list[OverlayOutcome] = []
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
-    monkeypatch.setattr("agentworks.sessions.manager._regenerate_tmuxinator", _real_regenerate_tmuxinator)
     monkeypatch.setattr(
         "agentworks.workspaces.manager.delete_workspace",
         lambda db_, config, *, name, **kwargs: db_.delete_workspace(name),
@@ -1223,7 +1180,7 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
         name="s1",
         spec='{"env":{"SESSION_SPEC":"set"}}',
         new_workspace=True,
-        workspace_spec='{"tmuxinator":false}',
+        workspace_spec='{"git_user_name":"Ada"}',
         new_agent=True,
         agent_spec='{"shell":"zsh"}',
         vm_name="vm1",
@@ -1231,15 +1188,14 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
     )
 
     assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
-        (OverlayDisposition.SET, ("tmuxinator",)),
+        (OverlayDisposition.SET, ("git_user_name",)),
         (OverlayDisposition.SET, ("shell",)),
         (OverlayDisposition.SET, ("env",)),
     ]
     stored = db.instance_state.get_desired_overlay("session", "s1")
     assert stored is not None
     assert stored.payload == VersionedPayload(1, {"env": {"SESSION_SPEC": {"value": "set"}}})
-    assert "tmuxinator_remove" in events
-    assert not any(event.startswith("tmuxinator_write:") for event in events)
+    assert not any(event.startswith("write:") for event in events)
     db.close()
 
 
@@ -1279,7 +1235,7 @@ def test_compound_child_post_commit_failure_unwinds_owner_and_overlay_without_ou
         monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _fail_workspace)
         create_kwargs = {
             "new_workspace": True,
-            "workspace_spec": '{"tmuxinator":false}',
+            "workspace_spec": '{"git_user_name":"Ada"}',
             "admin": True,
         }
     else:
@@ -1736,7 +1692,6 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
 def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(

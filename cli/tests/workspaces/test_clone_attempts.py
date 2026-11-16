@@ -16,9 +16,8 @@ import pytest
 
 from agentworks.errors import AlreadyExistsError
 from agentworks.ssh import SSHError, SSHResult
-from agentworks.workspaces.backends.vm import create_vm_workspace
+from agentworks.workspaces.backends.vm import create_vm_workspace, delete_vm_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
-from agentworks.workspaces.tmuxinator import console_session_name
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -379,65 +378,61 @@ def test_unpublished_nonrepo_failure_only_removes_empty_reservation(backend, occ
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-@pytest.mark.parametrize("changed", ["none", "config", "config-symlink", "link", "other-file"])
+@pytest.mark.parametrize("changed", ["none", "other-file"])
 @pytest.mark.parametrize("path_suffix", ["", "/", "/./"])
-def test_late_nonrepo_failure_reclaims_only_unchanged_generated_files(
+def test_late_nonrepo_failure_reclaims_only_an_empty_reservation(
     backend, make_config, monkeypatch, cancel, changed, path_suffix
 ):
     target, vm, config, final = backend
     config = make_config(f'\n[paths]\nvm_workspaces = "{final.parent.as_posix()}{path_suffix}"\n')
     original = KeyboardInterrupt() if cancel else SSHError("fixture ACL failure")
-    link = target.home / f".config/tmuxinator/{console_session_name('project')}.yml"
-    preserved = target.root / "preserved"
-    preserved.write_text("operator content\n")
 
     def fail_acl(*args):
-        assert (final / ".tmuxinator.yml").is_file()
-        assert link.is_symlink()
-        if changed == "config":
-            (final / ".tmuxinator.yml").write_text("operator config\n")
-        elif changed == "config-symlink":
-            (final / ".tmuxinator.yml").unlink()
-            (final / ".tmuxinator.yml").symlink_to(preserved)
-        elif changed == "link":
-            link.unlink()
-            link.symlink_to(preserved)
-        elif changed == "other-file":
+        assert not (final / ".tmuxinator.yml").exists()
+        assert not (target.home / ".config/tmuxinator").exists()
+        if changed == "other-file":
             (final / "operator-work").write_text("precious\n")
         raise original
 
     monkeypatch.setattr("agentworks.workspaces.backends.vm.apply_workspace_acls", fail_acl)
     with pytest.raises(type(original)) as caught:
-        create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty", tmuxinator=True))
+        create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
     assert caught.value is original
-    assert preserved.read_text() == "operator content\n"
-    if changed in {"config", "config-symlink", "other-file"}:
+    if changed == "other-file":
         assert final.is_dir() and target.groups
-        if changed == "config-symlink":
-            assert (final / ".tmuxinator.yml").is_symlink()
-            assert (final / ".tmuxinator.yml").resolve() == preserved
-            return
-        expected = final / (".tmuxinator.yml" if changed == "config" else "operator-work")
-        assert expected.read_text() == ("operator config\n" if changed == "config" else "precious\n")
+        assert (final / "operator-work").read_text() == "precious\n"
     else:
         assert not final.exists() and not target.groups
-        if changed == "link":
-            assert link.is_symlink() and link.resolve() == preserved
-        else:
-            assert not link.exists() and not link.is_symlink()
-            monkeypatch.setattr("agentworks.workspaces.backends.vm.apply_workspace_acls", lambda *args: None)
-            assert create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty", tmuxinator=True))
+        monkeypatch.setattr("agentworks.workspaces.backends.vm.apply_workspace_acls", lambda *args: None)
+        assert create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
 
 
-def test_nonrepo_create_preserves_an_existing_tmuxinator_entry(backend):
+def test_create_generates_no_tmuxinator_project_and_keeps_admin_entries(backend):
     target, vm, config, final = backend
-    link = target.home / f".config/tmuxinator/{console_session_name('project')}.yml"
-    link.parent.mkdir(parents=True)
-    link.write_text("operator config\n")
-    with pytest.raises(SSHError):
-        create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty", tmuxinator=True))
-    assert link.read_text() == "operator config\n"
-    assert not final.exists() and not target.groups
+    entries = target.home / ".config/tmuxinator"
+    entries.mkdir(parents=True)
+    own = entries / "ws-project-console.yml"
+    own.write_text("operator config\n")
+
+    create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
+
+    assert own.read_text() == "operator config\n"
+    assert [entry.name for entry in entries.iterdir()] == ["ws-project-console.yml"]
+    assert not (final / ".tmuxinator.yml").exists()
+
+
+def test_delete_removes_the_workspace_discovery_link(backend):
+    target, vm, config, final = backend
+    create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
+    entries = target.home / ".config/tmuxinator"
+    entries.mkdir(parents=True)
+    link = entries / "ws-project-console.yml"
+    link.symlink_to(final / ".tmuxinator.yml")
+
+    delete_vm_workspace(vm, config, "project", str(final), "ws-project")
+
+    assert not final.exists()
+    assert not link.is_symlink()
 
 
 @pytest.mark.parametrize(

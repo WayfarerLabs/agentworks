@@ -288,6 +288,23 @@ def run_initialization(
                 )
 
 
+def _retire_workspace_tmuxinator_projects(db: Database, vm_name: str, ts_target: Transport, logger: SSHLogger) -> None:
+    """Remove the workspace tmuxinator projects and admin discovery links earlier
+    releases generated, for every workspace on this VM. Non-fatal: a failure
+    warns once and reinit continues."""
+    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
+
+    logger.step("Remove leftover workspace tmuxinator projects")
+    try:
+        retire_tmuxinator_projects(
+            ts_target, [workspace.workspace_path for workspace in db.list_workspaces(vm_name=vm_name)]
+        )
+    except SSHError as e:
+        msg = f"Removing leftover workspace tmuxinator projects: {e}"
+        logger.warning(msg)
+        output.warn(msg)
+
+
 def _phase_b_setup(
     db: Database,
     config: Config,
@@ -656,6 +673,11 @@ def _phase_b_setup(
         # Non-fatal: shell rc (interactive shell hooks like mise activate)
         rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
         _write_agentworks_rc(ts_target, rc_snippets, logger)
+
+        # Non-fatal, reinit only (a new VM has none): runs after dotfiles so
+        # nothing installed above can restore a link.
+        if operation is VMInitializationOperation.VM_REINIT:
+            _retire_workspace_tmuxinator_projects(db, vm_name, ts_target, logger)
 
         # Defensive final step: re-ensure source lines in case any earlier
         # step (dotfiles install in particular) overwrote a shell rc file

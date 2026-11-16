@@ -427,6 +427,24 @@ before they resolve the auth key.
   create's rollback included, with the exit status it would have had. Output redirected to a file
   that cannot be written, such as on a full disk, still fails the command.
 
+## Workspace tmuxinator projects are removed
+
+Agentworks no longer generates a tmuxinator project for each workspace. No command has started one
+since `agw workspace console` was retired;
+[named consoles](../../cli/command-reference.md#named-consoles) replace it. Keeping admin-side
+configuration inside workspace content crossed the boundary between the two, so the feature is
+removed rather than repaired.
+
+After upgrading, run `agw vm reinit <vm>` on each VM. Reinit removes the admin's links to the old
+projects and the workspace project files that still start with the generated header, including one a
+repository committed with that header (see
+[Retired workspace tmuxinator projects](idempotency.md#retired-workspace-tmuxinator-projects)). Do
+not start an old project by hand before then.
+
+The workspace-template `tmuxinator` setting still loads but has no effect. Setting it to any value,
+in a manifest or an instance spec, reports a deprecation; remove it. The `tmuxinator` package stays
+in the VM's package list for your own projects.
+
 ## Third-party VM platforms
 
 The vm-platform capability is now contract version 2. Registration matches contract versions

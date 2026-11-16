@@ -117,7 +117,7 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     _seed_vm(db)
     db.insert_workspace("work", "/srv/work", "box", "ws-work")
     db.insert_agent("dev", "box", "agt-dev")
-    workspace_overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
+    workspace_overlay = parse_instance_spec("workspace", '{"git_user_name":"Ada"}')
     agent_overlay = parse_instance_spec("agent", '{"shell":"zsh"}')
     db.instance_state.put_desired_overlay("workspace", "work", workspace_overlay.payload)
     db.instance_state.put_desired_overlay("agent", "dev", agent_overlay.payload)
@@ -129,7 +129,7 @@ def test_workspace_and_agent_descriptions_include_current_final_layers(
     workspace_slot = workspace.instance_state.declarations[0]
     assert workspace_slot.instance_spec.status == "present"
     assert workspace_slot.current.status == "resolved"
-    assert workspace_slot.current.spec["tmuxinator"] is False
+    assert workspace_slot.current.spec["git_user_name"] == "Ada"
     assert workspace.instance_state.lifecycle_evidence == ()
 
     agent_slot = agent.instance_state.declarations[0]
@@ -167,7 +167,7 @@ def test_workspace_and_agent_descriptions_retain_database_facts_when_registry_is
         agent_name="dev",
         socket_path="/tmp/run.sock",
     )
-    workspace_overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
+    workspace_overlay = parse_instance_spec("workspace", '{"git_user_name":"Ada"}')
     agent_overlay = parse_instance_spec("agent", '{"shell":"zsh"}')
     db.instance_state.put_desired_overlay("workspace", "work", workspace_overlay.payload)
     db.instance_state.put_desired_overlay("agent", "dev", agent_overlay.payload)
@@ -186,7 +186,7 @@ def test_workspace_and_agent_descriptions_retain_database_facts_when_registry_is
     assert "operator-value-marker" not in json.dumps(agent_description_data(agent))
 
     for state, expected_spec in (
-        (workspace.instance_state, {"tmuxinator": False}),
+        (workspace.instance_state, {"git_user_name": "Ada"}),
         (agent.instance_state, {"shell": "zsh"}),
     ):
         slot = state.declarations[0]
@@ -285,7 +285,7 @@ def test_workspace_description_retains_unavailable_stored_spec(
 
     _seed_vm(db)
     db.insert_workspace("work", "/srv/work", "box", "ws-work")
-    db.instance_state.put_desired_overlay("workspace", "work", VersionedPayload(9, {"tmuxinator": False}))
+    db.instance_state.put_desired_overlay("workspace", "work", VersionedPayload(9, {"git_user_name": "Ada"}))
 
     description = workspace_description(db, make_config(), "work")
 

@@ -1411,15 +1411,6 @@ is the VM-boot behavior: the mutation commands (`add-sessions`, `remove-sessions
 `reorder-sessions`, `add-shell`) never auto-boot the VM, whereas the explicit attach/repair commands
 (`attach`, `restore-session`) do start a stopped VM, since their job is to bring live state up.
 
-#### Workspace tmuxinator Config
-
-Workspaces with tmuxinator enabled in their template (the default) carry a tmuxinator config
-(`.tmuxinator.yml` in the workspace root, symlinked as `~/.config/tmuxinator/ws-<name>-console.yml`)
-describing a `ws-<name>-console` session: an admin-shell window plus one window per session. It is
-regenerated whenever sessions change. The `agw workspace console` command that attached to it was
-removed (superseded by named consoles); the config remains usable directly on the VM via
-`tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
-
 #### Shells
 
 `vm shell` and `agent shell` open plain login shells with no tmux (optionally rooted in a workspace
