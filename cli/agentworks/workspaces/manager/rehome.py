@@ -15,6 +15,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.path_rendering import format_host_path
+from agentworks.remote_presence import TEST_FALSE_EXIT, probe_presence
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
@@ -177,8 +178,10 @@ def _rehome_vm(
         target = transport(vm, config)
 
         # Verify source exists
-        src_check = target.run(f"test -d {shlex.quote(old_path)}", check=False, timeout=10)
-        if not src_check.ok:
+        src_check = probe_presence(
+            target, f"test -d {shlex.quote(old_path)}", absent_exit=TEST_FALSE_EXIT, vm_name=vm.name, timeout=10
+        )
+        if src_check is None:
             raise StateError(
                 f"source directory {old_path} does not exist on VM",
                 entity_kind="workspace",
@@ -186,8 +189,10 @@ def _rehome_vm(
             )
 
         # Verify target does not exist
-        dst_check = target.run(f"test -d {shlex.quote(new_path)}", check=False, timeout=10)
-        if dst_check.ok:
+        dst_check = probe_presence(
+            target, f"test -d {shlex.quote(new_path)}", absent_exit=TEST_FALSE_EXIT, vm_name=vm.name, timeout=10
+        )
+        if dst_check is not None:
             raise StateError(
                 f"target directory {new_path} already exists on VM",
                 entity_kind="workspace",

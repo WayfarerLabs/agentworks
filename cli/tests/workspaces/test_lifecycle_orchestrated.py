@@ -1598,6 +1598,41 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
 
+@pytest.mark.parametrize("unanswered", ["test -d /srv/ws1", "test -d /dst/ws1"])
+def test_rehome_refuses_when_a_directory_check_did_not_run(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    unanswered: str,
+) -> None:
+    """ssh's transport failure (exit 255) on either directory check is not
+    an answer: in particular it never reads as "target absent", so rehome
+    raises before creating or copying into a target that may exist."""
+    from agentworks.ssh import SSHError
+
+    class _Target(_RehomeTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd == unanswered:
+                self.commands.append(cmd)
+                return SimpleNamespace(ok=False, returncode=255, stdout="", stderr="")
+            return super().run(cmd, **kwargs)
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    fake = _Target()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+
+    with pytest.raises(SSHError):
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert fake.commands[-1] == unanswered
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/srv/ws1"
+
+
 # -- copy: the sequential two-boundary composition ----------------------------
 
 
