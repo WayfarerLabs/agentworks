@@ -808,8 +808,8 @@ def test_the_workspace_tmuxinator_links_are_refused_for_the_admin_and_not_an_age
     assert expand_destination(f"/home/agent/{value[2:]}", "/home/agent", managed=MANAGED)
 
 
-def _sync_dotfiles(destination: str, managed: tuple[str, ...]) -> StepGuest:
-    """Sync dotfiles from a git source to ``destination`` in ``/home/a``, as an account whose set is ``managed``."""
+def _sync_dotfiles(destination: str, managed: tuple[str, ...], *, home: str = "/home/a") -> StepGuest:
+    """Sync dotfiles from a git source to ``destination``, as an account whose home is ``home`` and set ``managed``."""
     from agentworks.vms.initializer.dotfiles import sync_dotfiles
 
     guest = StepGuest(local_files=False)
@@ -819,7 +819,7 @@ def _sync_dotfiles(destination: str, managed: tuple[str, ...]) -> StepGuest:
         destination=destination,
         install_cmd="./install.sh",
         shell="bash",
-        home="/home/a",
+        home=home,
         managed=managed,
         log=guest.log,
     )
@@ -840,6 +840,24 @@ def test_the_sync_refuses_an_unsuitable_destination_before_any_request(value: st
 
     assert guest.access.requests() == []
     assert len(guest.log.warned) == 1
+
+
+@pytest.mark.parametrize(
+    ("value", "home"),
+    [
+        ("~/planted-marker/../x", "/home/a"),
+        ("~/.ssh/planted-marker", "/home/a"),
+        ("/home/planted-marker/a", "/home/planted-marker/a"),
+        ("/home/planted-marker", "/home/planted-marker/a"),
+    ],
+    ids=["form", "managed", "home", "parent"],
+)
+def test_a_refused_destination_never_reaches_the_warning(value: str, home: str) -> None:
+    guest = _sync_dotfiles(value, MANAGED, home=home)
+
+    assert guest.access.requests() == []
+    assert len(guest.log.warned) == 1
+    assert not any("planted-marker" in line for line in (*guest.log.warned, *guest.log.outputs))
 
 
 @pytest.mark.parametrize(

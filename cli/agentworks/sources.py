@@ -201,10 +201,10 @@ def normalize_destination(value: str, *, managed: tuple[str, ...]) -> str:
     """``value`` as a dotfiles destination: ``~/`` and a path in the home, or an absolute path.
 
     Boundary: the templates' ``dotfiles_destination``, operator
-    configuration, checked here as rendered for one account, just before
-    its dotfiles sync (``vms.initializer.dotfiles``). A path
-    with no leading ``~/`` or ``/`` is in the home, as it always meant, so
-    ``dots`` becomes ``~/dots``. No component may be empty, ``.`` or ``..``
+    configuration, checked here as rendered for one account, just before its
+    dotfiles sync (``vms.initializer.dotfiles``). A path with no leading
+    ``~/`` or ``/`` is in the home, as it always meant, so ``dots`` becomes
+    ``~/dots``. No component may be empty, ``.`` or ``..``
     and ``~user`` is refused; a trailing ``/`` is dropped. The home
     itself (``~`` or ``~/``), and a path in it that is, holds or lies inside
     one of ``managed``, the account's set in :mod:`agentworks.vms.home_layout`
@@ -244,11 +244,12 @@ def expand_destination(value: str, home: str, *, managed: tuple[str, ...]) -> st
     Only a leading ``~`` is replaced. An absolute destination that is the
     home or one of its ancestors, or a path in the home that
     :func:`normalize_destination` would refuse for the same ``managed``, is
-    refused before anything is sent.
+    refused before anything is sent, with a :class:`DestinationError` that
+    names no part of ``value`` or ``home``.
     """
     path = home + value[1:] if value.startswith("~/") else value
     if path == home or home.startswith(path.rstrip("/") + "/"):
-        raise SourceRefError(f"dotfiles destination {path} is the home {home} or one of its parents")
+        raise DestinationError("dotfiles_destination may not be the home or one of its parents")
     if path.startswith(home + "/"):
         _refuse_managed(path[len(home) + 1 :], managed)
     return path

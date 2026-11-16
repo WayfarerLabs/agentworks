@@ -8,6 +8,7 @@ from agentworks import output
 from agentworks.execution.requests import Command
 from agentworks.sources import (
     DOTFILES_DEADLINE,
+    DestinationError,
     expand_destination,
     fetch_dir,
     normalize_destination,
@@ -37,21 +38,25 @@ def sync_dotfiles(
 
     Everything runs as the account ``files`` acts as, whose home is ``home``
     and whose managed paths (``vms.home_layout``) are ``managed``.
-    ``destination`` is the operator's value as rendered for this account; it
+    ``destination`` is the operator's value as rendered for this account. It
     is normalized and checked here (``sources.normalize_destination``, then
-    ``sources.expand_destination``), and a refused one warns like a failed
-    sync, before any request. The sync is ``sources.fetch_dir``. The install runs as ``{shell} -lc``
-    with the checkout as its working directory, so it sees the account's
-    login environment (its profile fragment, written earlier) and no
-    operator environment. Sync and install warn separately, because a failed
-    sync skips the install entirely; saying so is the difference between a
+    ``sources.expand_destination``) before any request; a refused one warns
+    without naming it, and nothing is synced or installed. The sync is
+    ``sources.fetch_dir``. The install runs as ``{shell} -lc`` with the
+    checkout as its working directory, so it sees the account's login
+    environment (its profile fragment, written earlier) and no operator
+    environment. Sync and install warn separately, because a failed sync
+    skips the install entirely; saying so is the difference between a
     warning an operator can act on and a later failure that looks unrelated
     to it.
     """
     log.step("Dotfiles")
-    dest = destination
     try:
         dest = expand_destination(normalize_destination(destination, managed=managed), home, managed=managed)
+    except DestinationError as error:
+        warn_step(log, f"dotfiles destination refused, so nothing synced and '{install_cmd}' did not run", error)
+        return
+    try:
         ref = parse_source_ref(source)
         output.info(f"Syncing dotfiles from {source}...")
         fetch_dir(ref, files, dest, log=log)
