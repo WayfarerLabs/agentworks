@@ -52,29 +52,37 @@ def _to_ssh_path(path: Path) -> str:
     return posix
 
 
-# What ssh misreads in an Include pattern's directory. Include expands no
-# ``%`` tokens or environment variables, so only these matter: a double quote
-# or backslash ends or escapes the quoting, a control character ends the line,
-# and a glob character makes the pattern match other directories or none.
-_INCLUDE_UNSAFE = frozenset('"\\*?[')
+# Glob characters, which make an Include pattern match other directories or
+# none, so a directory holding one cannot be named by it.
+_GLOB_CHARACTERS = frozenset("*?[")
 
 
 def _include_directive(ssh_config: Path) -> str | None:
     """The Include directive for config.d, or ``None`` with a warning when ssh would misread its path.
 
     The pattern is written through :func:`trust.option_value`, so a directory
-    with a space or an apostrophe stays one pattern. A directory holding a
-    character in ``_INCLUDE_UNSAFE`` or a control character gets no directive.
-    Computed once per rebuild, so the warning appears once.
+    with a space or an apostrophe stays one pattern. From OpenSSH 9.9, Include
+    expands ``%`` tokens and environment variables, so the directory must pass
+    :func:`trust.literal_path`, the rule for every path ssh is given, and hold
+    no glob character. Computed once per rebuild, so the warning appears once.
     """
     # Resolved, as the directive has always been written, so a line an
     # earlier rebuild added still matches.
     config_d = (ssh_config.parent / _CONFIG_DIR_NAME).resolve()
-    if any(char in _INCLUDE_UNSAFE or ord(char) < 32 or ord(char) == 127 for char in config_d.as_posix()):
+    problem = None
+    try:
+        trust.literal_path(config_d, "SSH config directory")
+    except ConfigError as e:
+        problem = str(e)
+    if problem is None and any(char in _GLOB_CHARACTERS for char in config_d.as_posix()):
+        problem = (
+            f"SSH config directory '{format_host_path(config_d)}' holds '*', '?' or '[', "
+            "which an Include pattern cannot name literally"
+        )
+    if problem is not None:
         output.warn(
             f"Include directive left out of {format_host_path(ssh_config)}, so ssh reads none of the managed "
-            f"entries: '{format_host_path(config_d)}' holds a quote, backslash, control character or "
-            "'*', '?' or '[', which an Include pattern cannot name literally"
+            f"entries: {problem}"
         )
         return None
     return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"

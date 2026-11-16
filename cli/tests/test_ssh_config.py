@@ -862,29 +862,16 @@ def test_the_installed_client_reaches_the_managed_entries_through_the_include(pa
     assert _resolved_hostname(config.operator.ssh_config, "awvm--web") == "100.64.0.1"
 
 
-@needs_ssh
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
-@pytest.mark.parametrize("parent", ["100%d", "a$b", "a${HOME}b"])
-def test_include_expands_no_tokens_or_variables_so_such_a_directory_is_included(parent: str, tmp_path: Path) -> None:
-    config, _ = _mock_config(tmp_path / parent)
-    db = MagicMock()
-    db.get_setting.return_value = None
-    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
-    db.list_agents.return_value = []
-
-    _rebuild_config_dir(config, db)
-
-    assert _resolved_hostname(config.operator.ssh_config, "awvm--web") == "100.64.0.1"
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
-@pytest.mark.parametrize("parent", ["b[1]x", "g*x", "q?x", 'a"b', "a\\b", "a\tb"])
+@pytest.mark.parametrize("parent", ["100%d", "a$b", "a${HOME}b", "b[1]x", "g*x", "q?x", 'a"b', "a\\b", "a\tb"])
 def test_a_config_directory_an_include_cannot_name_gets_no_include_with_a_warning(
     parent: str,
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
+    """OpenSSH 9.9 and later expand ``%`` tokens and ``${VAR}`` in Include; earlier ones do not."""
     config, ssh_dir = _mock_config(tmp_path / parent)
+    config.operator.ssh_private_key = tmp_path / "id_ed25519"
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]

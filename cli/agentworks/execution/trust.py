@@ -153,9 +153,8 @@ def option_value(path_text: str) -> str:
     apostrophe and no whitespace has no form both accept, so that client still
     refuses one; the execution core never runs that client. Every path written
     into an option goes through here, for the ``-o`` arguments and the managed
-    SSH config entries alike. Callers pass a path already checked to hold no
-    double quote that could end the quoting early: :func:`literal_path` output,
-    or the managed Include pattern, which ``ssh_config`` checks by its own rule.
+    SSH config entries alike. Callers pass :func:`literal_path` output, so
+    ``path_text`` holds no double quote that could end the quoting early.
     """
     return f'"{path_text}"' if any(char in " \t'" for char in path_text) else path_text
 
