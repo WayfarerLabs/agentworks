@@ -25,6 +25,7 @@ from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
+from agentworks.ssh import SSHError
 from agentworks.ssh import SSHLogger as _RealSSHLogger
 from agentworks.transports import Transport
 from agentworks.vms.admin import AdminConfig
@@ -281,9 +282,9 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
     def run(command, **kwargs):
         commands.append(command)
         if command.startswith("getent"):
-            return SimpleNamespace(ok=existing == "user")
+            return SimpleNamespace(ok=existing == "user", returncode=0 if existing == "user" else 2)
         if command.startswith("test"):
-            return SimpleNamespace(ok=existing == "home")
+            return SimpleNamespace(ok=existing == "home", returncode=0 if existing == "home" else 1)
         if existing == "race":
             raise RuntimeError("useradd: name taken")
         return SimpleNamespace(ok=True)
@@ -301,6 +302,35 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
         create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
         assert commands[-1] == "useradd -m -U -s /bin/bash agt-a"
     assert not any(command.startswith("userdel") for command in commands)
+
+
+@pytest.mark.parametrize(
+    ("getent_exit", "home_exit", "error"),
+    [
+        (255, None, SSHError),  # ssh never ran the user probe
+        (2, 255, SSHError),  # user absent, but ssh never ran the home probe
+        (1, None, ExternalError),  # getent answered neither found (0) nor not-found (2)
+        (2, 2, ExternalError),  # test answered neither true (0) nor false (1)
+    ],
+)
+def test_exclusive_agent_user_refuses_an_unanswered_probe(vm, monkeypatch, getent_exit, home_exit, error):
+    target = Mock(spec=Transport)
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if command.startswith("getent"):
+            return SimpleNamespace(ok=getent_exit == 0, returncode=getent_exit, stdout="")
+        if command.startswith("test"):
+            assert home_exit is not None, "the home probe must not run after an unanswered user probe"
+            return SimpleNamespace(ok=home_exit == 0, returncode=home_exit, stdout="")
+        return SimpleNamespace(ok=True, returncode=0, stdout="")
+
+    target.run.side_effect = run
+    monkeypatch.setattr("agentworks.agents.initializer.transport", lambda *a, **k: target)
+    with pytest.raises(error):
+        create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
+    assert not any(command.startswith(("useradd", "userdel")) for command in commands)
 
 
 def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm, native, monkeypatch):
