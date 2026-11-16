@@ -67,16 +67,19 @@ class _InstallCommandEntry(DeclaredResource):
     after success because init and reinit may invoke the resource again."""
 
     path: list[Annotated[str, Interpolated()]] = Field(default_factory=list)
-    """Directories written to the target user's managed profile after install
-    commands run, including commands skipped by completion checks. Later shells
-    that source the profile prepend these directories to ``PATH``; child processes
+    """Directories declared for the target user's managed profile. The profile is
+    written from these declarations before that user's login shells run (its
+    dotfiles installer, mise install and user install commands), so they find
+    every declared directory, including those of commands skipped by completion
+    checks. A failed user install command's paths leave the profile after its
+    batch; a failed system install command contributes none. Later shells that
+    source the profile prepend these directories to ``PATH``; child processes
     inherit them. Interpolation uses the consuming user's VM/user identity (plus
-    agent identity for agents), without workspace/session context, before checks
-    or installation. A leading ``~`` becomes ``$HOME``; each entry is written as
-    ``export PATH="<entry>:$PATH"`` without additional escaping. Shell variables
-    and other shell syntax are interpreted when the profile is sourced. Paths
-    are written after the batch; install commands themselves use the login
-    shell's existing ``PATH``. See ``agw guide show concept-templating``."""
+    agent identity for agents), without workspace/session context, and is
+    rendered before checks or installation. A leading ``~`` becomes ``$HOME``;
+    each entry is written as ``export PATH="<entry>:$PATH"`` without additional
+    escaping. Shell variables and other shell syntax are interpreted when the
+    profile is sourced. See ``agw guide show concept-templating``."""
 
     test_exec: Annotated[str | None, Interpolated()] = Field(default=None, examples=["my-tool"])
     """Optional completion check for whether this command is already on

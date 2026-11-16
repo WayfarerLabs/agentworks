@@ -168,12 +168,15 @@ VM/admin initialization knows `user_name`, `user_home_dir` and `vm_name`. Agent 
 knows `agent_name`. Neither has workspace or session context; references to those names fail with
 the owning PATH element identified.
 
-After the install-command batch, contributions from successful commands and commands skipped by
-completion checks are written to `~/.agentworks-profile.sh`. Failed commands contribute no paths.
-The contributions do not update the CLI's PATH or become available between installers in that batch.
-Later shells that source the profile prepend them to PATH; child processes inherit the result.
-Changing a declaration requires the applicable initialization or reinitialization operation to
-rewrite the profile.
+Contributions are declarations: each account's `~/.agentworks-profile.sh` is written from the
+selected commands' rendered `path` lists before that account's dotfiles installer, mise install and
+user install commands run their login shells, so those shells already find every declared directory,
+including those of commands skipped by completion checks. A user install command that fails keeps
+its paths for the rest of that batch, and they leave the profile when the batch finishes. A system
+install command that fails contributes none. The contributions do not update the CLI's PATH. Later
+shells that source the profile prepend them to PATH; child processes inherit the result. Changing a
+declaration requires the applicable initialization or reinitialization operation to rewrite the
+profile.
 
 The profile writer converts a leading `~` to `$HOME` and writes each entry inside a double-quoted
 assignment, followed by the shell's existing `$PATH`. For an agent running as `agt-demo`:

@@ -734,15 +734,16 @@ These helper rules preserve the session-scoped effects rule ([A Note on Scope](#
 
 Read the launch target's access with `ctx.admin_access()` or `ctx.agent_access()`, and build each
 probe with one named function returning
-`Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)` (claude's `transcript_probe`,
-codex's `recorder_probe`, `rollout_probe` and `discovery_probe`, grok's `session_probe`): login and
-interactive startup sources the same dotfiles the pane's shell will (mise activation, PATH
-fragments), so the probe answers for the environment the workload actually gets. Read its exit code
-through `require_completed`, which raises the typed execution error for a probe that may not have
-run, so only a completed probe is ever classified. Prefer shell-neutral inner commands (the
-transcript probe's `find ... -print -quit` avoids bash/zsh divergence on unmatched globs).
-`require_commands` applies harness-specific refusal policy over the neutral
-`check_required_commands` mechanism; reuse it rather than hand-rolling executable checks.
+`Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)` (claude's
+`conversation_probe.conversation_request`, codex's `recorder_probe`, `rollout_probe` and
+`discovery_probe`, grok's `session_probe`): login and interactive startup sources the same dotfiles
+the pane's shell will (mise activation, PATH fragments), so the probe answers for the environment
+the workload actually gets. Read its exit code through `require_completed`, which raises the typed
+execution error for a probe that may not have run, so only a completed probe is ever classified.
+Prefer shell-neutral inner commands (the Claude conversation probe's `find ... -print -quit` avoids
+bash/zsh divergence on unmatched globs). `require_commands` applies harness-specific refusal policy
+over the neutral `check_required_commands` mechanism; reuse it rather than hand-rolling executable
+checks.
 
 #### Testing a Harness Integration
 
@@ -755,12 +756,12 @@ The session layers, with the shipped tests as templates:
 - **Unit (the bulk):** `cli/tests/test_claude_code_integration.py`. Readiness runs against
   `command_check_access` from `cli/tests/vm_access_support.py`, an access whose command checks find
   every command except the ones a test names missing. The detection probe runs against a
-  `RecordingVMAccess` from the same module, answering the probe's own builder (`transcript_probe` of
-  the stored id) with an exit code through `respond`. Cover: config vocabulary (accepts,
-  unknown-field raises, wrong-type raises), both detection directions (probe hit resumes, miss
-  launches fresh, other exit raises), flag mapping and `extra_args` quoting, the visible-decision
-  line, state minting, and the integration's create, resume-only, resume-or-new, and force-new
-  behavior.
+  `RecordingVMAccess` from the same module, answering the probe's own builder
+  (`conversation_request` of the stored id) with an exit code through `respond`. Cover: config
+  vocabulary (accepts, unknown-field raises, wrong-type raises), both detection directions (probe
+  hit resumes, miss launches fresh, other exit raises), flag mapping and `extra_args` quoting, the
+  visible-decision line, state minting, and the integration's create, resume-only, resume-or-new,
+  and force-new behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's
@@ -772,9 +773,10 @@ The session layers, with the shipped tests as templates:
 - **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/restart
   through the orchestrator with a launch-target double whose `answer` the recording access asks for
   each probe. The double matches each probe by equality with its builder's request for the session's
-  seeded id (`transcript_probe(sid)`), so a probe for the wrong id goes unanswered and the test
-  fails. Cover: state persisted to the row, pre-existing blob read back, substitution does not
-  mangle the returned snippet.
+  seeded id (`conversation_request(sid)`), compared with the request's `env` cleared because the
+  launch environment rides on it, so a probe for the wrong id goes unanswered and the test fails.
+  Cover: state persisted to the row, pre-existing blob read back, substitution does not mangle the
+  returned snippet.
 - **Plugin end-to-end:** `cli/tests/plugins/test_claude.py`. Through `build_registry`:
   present-but-disabled row with `system-plugin` origin, gate refusal with the enable hint,
   enablement via `[plugins] system`.
