@@ -415,7 +415,7 @@ def _add_session_window(
     try:
         owner = _recorded_session_tmux_owner(db, session) if session.socket_path is not None else None
     except StateError as exc:
-        output.warn(f"session '{session.name}' has no valid agent socket ({exc}); skipping window")
+        output.warn(f"session '{session.name}' has no valid tmux socket ({exc}); skipping window")
         return SessionWindowBuild(built=False)
 
     runtime_name = tmux_name or tmux_session_name(console_name)

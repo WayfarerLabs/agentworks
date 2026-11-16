@@ -94,14 +94,17 @@ Agentworks runs every tmux client as the account that owns the server. One rule,
 session's stored socket path, names that account. A socket directly inside the VM admin's directory
 under `/run/agentworks/admin-tmux-sockets` is the admin's own, and the admin's connection uses it
 unchanged. A socket directly inside `/run/agentworks/agent-tmux-sockets/<user>` belongs to `<user>`,
-which must be a Linux account name other than `root` and the admin. Status probes, identity repair,
-startup recovery, teardown, `session logs`, `session attach`, named console windows and stale-socket
-cleanup switch to that account first, with `sudo` and `runuser`. Commands that hold the database
-also require it to be the session's own agent or VM admin. Any other path is observed as `UNKNOWN`
-and refused by lifecycle operations, logs and attach. Process reads, socket inspection and socket
-removal still run as root. The one exception is a legacy row without a socket path: its session
-lives on the connecting account's own default tmux server, into which an agent cannot plant a
-server.
+which must be a Linux account name other than `root` and the admin. Clients started from the VM
+admin's connection switch to that account first, with `sudo` and `runuser`: status probes, identity
+repair and observation, the startup-protection check, teardown from `session stop` and
+`session stop --all` and from agent or workspace deletion, `session logs`, `session attach`, named
+console windows and stale-socket cleanup. Startup, startup recovery, and the teardown inside
+`session delete` and `session restart` already connect as the agent. Status, describe, logs, attach
+and lifecycle commands also require the owner to be the session's own agent or VM admin. Any other
+path is observed as `UNKNOWN`, never probed, and refused by lifecycle operations, logs and attach.
+Process reads, socket inspection and socket removal still run as root. The one exception is a legacy
+row without a socket path: its session lives on the connecting account's own default tmux server,
+into which an agent cannot plant a server.
 
 Interactive clients, `session attach` and the attach in a named console window, run as the agent on
 a pseudo-terminal of their own (`runuser --pty`) rather than on the admin's terminal, where the

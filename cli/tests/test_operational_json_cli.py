@@ -534,7 +534,11 @@ def _seed_session_rows(db: Database) -> None:
     db.insert_session("live", "ws", "missing-template", SessionMode.ADMIN)
     db.insert_session("stopped", "ws", "missing-template", SessionMode.ADMIN)
     db.update_session_runtime(
-        "stopped", socket_path="/tmp/stopped.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        "stopped",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/stopped.sock",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
 
 
@@ -579,7 +583,11 @@ def test_session_json_status_is_explicit_and_plain_list_is_local(
     assert unchanged is not None and (unchanged.pid, unchanged.boot_id) == (None, None)
 
     db.update_session_runtime(
-        "live", socket_path="/tmp/live.sock", pid=None, boot_id=None, tmux_server_start_ticks=None
+        "live",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/live.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
 
     def forbidden(*_args: object, **_kwargs: object) -> object:

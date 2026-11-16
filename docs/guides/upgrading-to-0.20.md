@@ -104,9 +104,10 @@ compatibility. Refresh shell completions after upgrading with `agw completion in
 ## Agent session tmux clients run as the agent
 
 Agentworks no longer runs a tmux client as root or as the VM admin against an agent session's tmux
-server. Every such client, from status checks and teardown to `session attach`, `session logs` and
-named console windows, now switches to the agent account with `sudo` and `runuser` first. Attach
-clients run on a terminal of their own (`runuser --pty`). What to expect:
+server. Every such client started from the admin connection, from status checks and `session stop`
+to `session attach`, `session logs` and named console windows, now switches to the agent account
+with `sudo` and `runuser` first. Attach clients run on a terminal of their own (`runuser --pty`).
+What to expect:
 
 - **Guest authentication logs gain entries.** Each switch is a `sudo` invocation plus a `runuser`
   session for the agent account, so `/var/log/auth.log` or the journal records both for every probe,

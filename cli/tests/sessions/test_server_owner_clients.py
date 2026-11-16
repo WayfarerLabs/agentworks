@@ -18,6 +18,7 @@ import pytest
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
+from agentworks.sessions.manager import _status
 from tests._runtime_probes import server_owner_parts
 
 from .test_create_start_restart_orchestrated import BOOT_ID, _restart_fixture
@@ -214,7 +215,7 @@ def test_session_attach_runs_the_client_as_the_owner(tmp_path, monkeypatch):
     config = SimpleNamespace(terminal=SimpleNamespace(clear_on_detach="never"))
     manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert target.interactive_commands == [
-        f"(cd / && sudo -n {tmux.RUNUSER_PATH} --pty -u {OWNER} -- tmux -S {SOCKET} attach -t '=s1')"
+        f"cd / && sudo -n {tmux.RUNUSER_PATH} --pty -u {OWNER} -- tmux -S {SOCKET} attach -t '=s1'"
     ]
     db.close()
 
@@ -245,9 +246,9 @@ def test_logs_and_attach_refuse_a_socket_outside_its_owners_directory(
         agent_name=None if mode == "admin" else "a1",
         socket_path=socket_path,
     )
-    target = _Recorder()
-    monkeypatch.setattr(manager, "_prepare_vm", lambda db, *a, **k: _prepared(target, db))
-    monkeypatch.setattr(tmux, "capture_output", lambda *a, **k: pytest.fail("captured from a refused socket"))
+    # The real order: the refusal comes before any VM work or status probe.
+    monkeypatch.setattr(manager, "check_session_status", _status.check_session_status)
+    monkeypatch.setattr(manager, "_prepare_vm", lambda *a, **k: pytest.fail("VM work before the owner check"))
     config = SimpleNamespace(
         terminal=SimpleNamespace(clear_on_detach="never"), session=SimpleNamespace(history_limit=5)
     )
@@ -256,5 +257,51 @@ def test_logs_and_attach_refuse_a_socket_outside_its_owners_directory(
             manager.attach_session(db, config, name="adm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
         else:
             manager.session_logs(db, config, name="adm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
-    assert target.interactive_commands == [] and target.calls == []
+    db.close()
+
+
+def _seed_misplaced_agent_row(db: Database) -> None:
+    from agentworks.db import SessionMode
+
+    db.insert_session(
+        "adm",
+        "ws1",
+        "claude",
+        SessionMode.AGENT,
+        agent_name="a1",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-other/adm.sock",
+    )
+
+
+def test_status_observation_never_probes_a_socket_outside_its_agents_directory(tmp_path, monkeypatch):
+    db, _ = _restart_fixture(tmp_path, monkeypatch)
+    _seed_misplaced_agent_row(db)
+    probed: list[str] = []
+
+    def batch(rows: list[SessionRow], **kwargs: Any) -> dict[str, SessionStatus]:
+        probed.extend(row.name for row in rows)
+        return {row.name: SessionStatus.RUNNING for row in rows}
+
+    monkeypatch.setattr(_status, "batch_check_status", batch)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **k: None)
+    rows = [row for row in (db.get_session("s1"), db.get_session("adm")) if row is not None]
+    assert _status.observe_session_statuses(rows, db=db, config=SimpleNamespace()) == {
+        "s1": SessionStatus.RUNNING,
+        "adm": SessionStatus.UNKNOWN,
+    }
+    assert probed == ["s1"]
+    db.close()
+
+
+def test_describe_never_probes_a_socket_outside_its_agents_directory(tmp_path, monkeypatch):
+    from agentworks.sessions.manager import _queries
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch)
+    _seed_misplaced_agent_row(db)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **k: None)
+    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("connected to observe a refused socket"))
+    monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: pytest.fail("probed a refused socket"))
+    monkeypatch.setattr(_queries, "_session_structural_description", lambda db, config, name, status: status)
+    status: object = _queries.session_description(db, SimpleNamespace(), name="adm")  # type: ignore[arg-type]
+    assert status is SessionStatus.UNKNOWN
     db.close()

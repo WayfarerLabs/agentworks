@@ -1093,7 +1093,7 @@ def test_session_observer_isolates_one_vm_transport_failure(
             workspace_name,
             "default",
             SessionMode.ADMIN,
-            socket_path=f"/tmp/{session_name}.sock",
+            socket_path=f"/run/agentworks/admin-tmux-sockets/agentworks/{session_name}.sock",
         )
         session = db.get_session(session_name)
         assert session is not None
@@ -1143,7 +1143,11 @@ def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_th
         db.update_vm_tailscale(vm_name, f"100.64.0.{1 if vm_name == 'vm-a' else 2}")
         db.insert_workspace(f"ws-{vm_name}", f"/srv/ws-{vm_name}", vm_name, f"ws-{vm_name}")
         db.insert_session(
-            f"session-{vm_name}", f"ws-{vm_name}", "default", SessionMode.ADMIN, socket_path=f"/tmp/{vm_name}.sock"
+            f"session-{vm_name}",
+            f"ws-{vm_name}",
+            "default",
+            SessionMode.ADMIN,
+            socket_path=f"/run/agentworks/admin-tmux-sockets/agentworks/session-{vm_name}.sock",
         )
         session = db.get_session(f"session-{vm_name}")
         assert session is not None

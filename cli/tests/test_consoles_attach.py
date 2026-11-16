@@ -26,8 +26,9 @@ def test_attach_loop_uses_exact_session_targets() -> None:
 def _assert_clients_run_as_owner(wrapper: str, socket_path: str, owner: str, session: str) -> None:
     """Probes switch to ``owner``; the one attach also gets a terminal of its own."""
     clients = wrapper.count(f"tmux -S {socket_path} ")
-    probes = wrapper.count(f"sudo -n /usr/sbin/runuser -u {owner} -- tmux -S {socket_path} has-session ")
-    attach = f"(cd / && sudo -n /usr/sbin/runuser --pty -u {owner} -- tmux -S {socket_path} attach -t '={session}')"
+    probe = f"sudo -n /usr/sbin/runuser -u {owner} -- tmux -S {socket_path} has-session -t '={session}'"
+    probes = wrapper.count(f"{probe} </dev/null >/dev/null ")
+    attach = f"cd / && sudo -n /usr/sbin/runuser --pty -u {owner} -- tmux -S {socket_path} attach -t '={session}'\n"
     assert probes > 0 and wrapper.count(attach) == 1
     assert clients == probes + 1
 

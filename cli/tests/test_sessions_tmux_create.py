@@ -965,12 +965,21 @@ def test_owner_scoped_probe_switches_account_before_the_client() -> None:
     ]
 
 
+def test_owner_scoped_client_without_a_socket_is_refused() -> None:
+    from agentworks.sessions.tmux import tmux_attach_cmd, tmux_cmd
+
+    with pytest.raises(ValueError):
+        tmux_cmd("has-session", None, owner="agt-owner")
+    with pytest.raises(ValueError):
+        tmux_attach_cmd("s1", None, owner="agt-owner")
+
+
 def test_owner_scoped_attach_gets_a_terminal_of_its_own() -> None:
     from agentworks.sessions.tmux import tmux_attach_cmd, tmux_cmd
 
     assert tmux_attach_cmd("s1", _AGENT_SOCKET, owner=None) == tmux_cmd("attach -t '=s1'", _AGENT_SOCKET)
     assert shlex.split(tmux_attach_cmd("s1", _AGENT_SOCKET, owner="agt-owner")) == [
-        "(cd",
+        "cd",
         "/",
         "&&",
         "sudo",
@@ -985,7 +994,7 @@ def test_owner_scoped_attach_gets_a_terminal_of_its_own() -> None:
         _AGENT_SOCKET,
         "attach",
         "-t",
-        "=s1)",
+        "=s1",
     ]
 
 
@@ -1005,7 +1014,7 @@ def test_server_owner_run_command_runs_the_whole_command_as_the_owner() -> None:
     assert calls == [
         ("tmux -S x list-sessions", {"check": False, "env": None}),
         (
-            "/usr/sbin/runuser -u agt-owner -- /bin/bash -c 'tmux -S x list-sessions; printf done'",
+            "cd / && /usr/sbin/runuser -u agt-owner -- /bin/bash -c 'tmux -S x list-sessions; printf done'",
             {"sudo": True, "check": False, "env": None},
         ),
     ]

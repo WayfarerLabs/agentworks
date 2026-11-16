@@ -472,6 +472,8 @@ def session_description(
     status = SessionStatus.UNKNOWN
     if session.socket_path is None:
         status = _mgr.check_session_status(session)
+    elif not _mgr._has_recorded_tmux_owner(db, session):
+        pass  # Never probed: a socket outside its owner's directory stays UNKNOWN.
     else:
         from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
@@ -939,6 +941,9 @@ def attach_session(
     from agentworks.sessions.tmux import tmux_attach_cmd
 
     session = _mgr._require_session(db, name)
+    # Refuse a socket outside its owner's directory before any VM work. A
+    # legacy row without a socket meets the status check's own refusal.
+    owner = _mgr._recorded_session_tmux_owner(db, session) if session.socket_path is not None else None
     with _mgr._prepare_vm(
         db,
         config,
@@ -983,7 +988,6 @@ def attach_session(
 
         from agentworks.terminal import clear_screen_on_detach
 
-        owner = _mgr._recorded_session_tmux_owner(db, session)
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(

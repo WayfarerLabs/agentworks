@@ -34,6 +34,9 @@ def session_logs(
     if lines is not None and lines < 1:
         raise ValidationError("session log line count must be positive")
     session = _mgr._require_session(db, name)
+    # Refuse a socket outside its owner's directory before any VM work. A
+    # legacy row without a socket meets the status check's own refusal.
+    owner = _mgr._recorded_session_tmux_owner(db, session) if session.socket_path is not None else None
     with _mgr._prepare_vm(
         db,
         config,
@@ -76,7 +79,6 @@ def session_logs(
                 entity_name=name,
             )
 
-        owner = _mgr._recorded_session_tmux_owner(db, session)
         captured = capture_output(
             name,
             run_command=server_owner_run_command(target, owner),

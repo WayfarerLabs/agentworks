@@ -133,6 +133,15 @@ def _recorded_session_tmux_owner(db: Database, session: SessionRow) -> str | Non
     return owner
 
 
+def _has_recorded_tmux_owner(db: Database, session: SessionRow) -> bool:
+    """Whether a socket-bearing row passes ``_recorded_session_tmux_owner``; read-only observers skip it if not."""
+    try:
+        _recorded_session_tmux_owner(db, session)
+    except StateError:
+        return False
+    return True
+
+
 def _get_boot_id(target: Transport) -> str | None:
     """Read the current VM boot ID. Returns None on failure."""
     from agentworks.sessions.tmux import read_boot_id
@@ -562,6 +571,9 @@ def observe_session_statuses(
             except (ConnectivityError, StateError):
                 unavailable_vms.add(ws.vm_name)
                 continue
+        if s.socket_path is not None and not _has_recorded_tmux_owner(db, s):
+            # Never probed: a socket outside its owner's directory stays UNKNOWN.
+            continue
         by_vm.setdefault(ws.vm_name, []).append(s)
         if include_legacy and s.socket_path is None:
             try:

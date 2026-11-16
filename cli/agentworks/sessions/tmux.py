@@ -282,12 +282,13 @@ def _runuser_prefix(owner: str) -> str:
 
 
 def _as_server_owner(command: str, owner: str) -> str:
-    """Wrap a command that runs as root so it runs wholly as ``owner``.
+    """Wrap a command that runs as root so it runs wholly as ``owner``, from ``/``.
 
     Root only performs the account switch; every tmux client inside
-    ``command`` runs as the server's owner.
+    ``command`` runs as the server's owner, outside the caller's working
+    directory.
     """
-    return f"{_runuser_prefix(owner)} /bin/bash -c {shlex.quote(command)}"
+    return f"cd / && {_runuser_prefix(owner)} /bin/bash -c {shlex.quote(command)}"
 
 
 def _run_as_server_owner(
@@ -619,6 +620,8 @@ def tmux_cmd(base: str, socket_path: str | None = None, *, owner: str | None = N
     ``tmux_attach_cmd``; compound commands the transport runs go through
     ``server_owner_run_command``.
     """
+    if owner is not None and socket_path is None:
+        raise ValueError("a tmux client switched to a server's owner needs that server's socket path")
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
     return f"sudo -n {_runuser_prefix(owner)} {cmd}" if owner is not None else cmd
 
@@ -630,12 +633,15 @@ def tmux_attach_cmd(session_name: str, socket_path: str | None, *, owner: str | 
     (``runuser --pty``, which relays window-size changes). An owner-uid
     client left on the admin's terminal would be reachable by the owner's
     other processes, and through it the admin's terminal. ``cd /`` keeps the
-    switched client out of the admin's working directory.
+    switched client out of the admin's working directory; it changes the
+    calling shell's directory too, which no caller relies on.
     """
     attach = tmux_cmd(f"attach -t {exact_tmux_target(session_name)}", socket_path)
     if owner is None:
         return attach
-    return f"(cd / && sudo -n {RUNUSER_PATH} --pty -u {shlex.quote(owner)} -- {attach})"
+    if socket_path is None:
+        raise ValueError("a tmux client switched to a server's owner needs that server's socket path")
+    return f"cd / && sudo -n {RUNUSER_PATH} --pty -u {shlex.quote(owner)} -- {attach}"
 
 
 def exact_tmux_target(name: str) -> str:

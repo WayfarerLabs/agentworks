@@ -173,7 +173,8 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, owner: s
     embedding the raw session_name inside the single-quoted strings is safe.
     """
     q = exact_tmux_target(session_name)
-    has = tmux_cmd(f"has-session -t {q}", socket_path, owner=owner)
+    # The probe needs no stdin or stdout; neither reaches the server's account.
+    has = tmux_cmd(f"has-session -t {q}", socket_path, owner=owner) + " </dev/null >/dev/null"
     att = tmux_attach_cmd(session_name, socket_path, owner=owner)
     return f"""\
 unset TMUX
