@@ -386,7 +386,7 @@ def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
     if not ssh_config.exists():
         return "", entries
 
-    content = ssh_config.read_text()
+    content = _read_user_config(ssh_config)
     marker_idx = content.find(_LEGACY_MARKER)
 
     if marker_idx == -1:
@@ -420,20 +420,22 @@ def _write_legacy(
 ) -> None:
     """Write the SSH config file with operator-managed section + agentworks-managed section.
 
-    ``host_blocks`` are the per-alias Host blocks (VMs and agents).
+    ``host_blocks`` are the per-alias Host blocks (VMs and agents). The
+    managed section takes the line endings the operator's section uses.
     """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
+    newline = "\r\n" if "\r\n" in user_section else "\n"
 
-    parts = [user_section.rstrip("\n")]
+    parts = [user_section.rstrip("\r\n")]
 
     if host_blocks:
         parts.append("")
         parts.append(_LEGACY_MARKER)
         for block in host_blocks:
-            parts.append(block.rstrip("\n"))
+            parts.append(block.rstrip("\n").replace("\n", newline))
 
-    content = "\n".join(parts)
-    if not content.endswith("\n"):
-        content += "\n"
+    content = newline.join(parts)
+    if not content.endswith(newline):
+        content += newline
 
-    ssh_config.write_text(content)
+    _write_user_config(ssh_config, content)

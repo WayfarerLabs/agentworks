@@ -629,6 +629,30 @@ def test_legacy_rebuild_emits_per_agent_blocks(tmp_path: Path) -> None:
     assert "User agt-aider" in content
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_the_legacy_rebuild_keeps_the_operators_bytes_line_endings_and_mode(tmp_path: Path) -> None:
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, _ = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    ssh_config = config.operator.ssh_config
+    operator_section = "# caf\u00e9 in Latin-1\r\nHost *\r\n    Foo bar\r\n".encode("latin-1")
+    ssh_config.write_bytes(operator_section)
+    ssh_config.chmod(0o640)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    written = ssh_config.read_bytes()
+    assert written.startswith(operator_section)
+    assert b"Host awvm--solo\r\n    HostName 100.64.0.9\r\n" in written
+    assert b"\n" not in written.replace(b"\r\n", b"")
+    assert stat.S_IMODE(ssh_config.stat().st_mode) == 0o640
+
+
 def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
     from agentworks.ssh_config import _legacy_rebuild
 
