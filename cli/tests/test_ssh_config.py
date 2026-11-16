@@ -7,7 +7,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -879,18 +878,20 @@ def _give_the_acl_of_a_profiles_ssh_directory(directory: Path) -> None:
     """On Windows, give ``directory`` the DACL a profile's ``~/.ssh`` has: the user, SYSTEM and Administrators.
 
     pytest creates its temporary directories with mode 0o700, which Python on
-    Windows turns into a protected DACL that also grants OWNER RIGHTS
-    (S-1-3-4), and files created below inherit it. Win32-OpenSSH checks the
+    Windows turns into the protected DACL ``D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)
+    (A;OICI;FA;;;OW)``. Directories created below it get those entries, OWNER
+    RIGHTS (S-1-3-4) among them, as explicit entries, not inherited ones
+    (icacls shows no ``(I)`` on them), so removing inheritance keeps them and
+    OWNER RIGHTS has to be removed by name. Win32-OpenSSH checks the
     permissions of every file an Include pulls in and refuses one granting
     OWNER RIGHTS, so a test tree must look like a real profile's instead.
     """
     if sys.platform != "win32":
         return
     grants = [f"{os.environ['USERNAME']}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"]
-    done = subprocess.run(
-        ["icacls", str(directory), "/inheritance:r", "/grant:r", *grants], check=True, capture_output=True, text=True
-    )
-    print(f"TEMPORARY icacls grant: {done.stdout}{done.stderr}")  # noqa: T201
+    argv = ["icacls", str(directory), "/inheritance:r", "/grant:r", *grants, "/remove:g", "*S-1-3-4"]
+    done = subprocess.run(argv, capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 @pytest.mark.windows
@@ -899,15 +900,6 @@ def _give_the_acl_of_a_profiles_ssh_directory(directory: Path) -> None:
 def test_the_installed_client_reaches_the_managed_entries_through_the_include(parent: str, tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path / parent)
     _give_the_acl_of_a_profiles_ssh_directory(ssh_dir)
-    # TEMPORARY probes: the ACL each way of creating a file or directory under .ssh gets.
-    probe = ssh_dir / "probe"
-    probe.mkdir()
-    (probe / "written").write_text("")
-    fd, name = tempfile.mkstemp(dir=probe, prefix="mkstemp-")
-    os.close(fd)
-    fd, name = tempfile.mkstemp(dir=probe)
-    os.close(fd)
-    Path(name).replace(probe / "replaced")
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
