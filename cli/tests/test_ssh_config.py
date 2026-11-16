@@ -858,11 +858,27 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     assert settings["globalknownhostsfile"] == trust._NULL_DEVICE
 
 
+def _give_the_acl_of_a_profiles_ssh_directory(directory: Path) -> None:
+    """On Windows, give ``directory`` the DACL a profile's ``~/.ssh`` has: the user, SYSTEM and Administrators.
+
+    pytest creates its temporary directories with mode 0o700, which Python on
+    Windows turns into a protected DACL that also grants OWNER RIGHTS
+    (S-1-3-4), and files created below inherit it. Win32-OpenSSH checks the
+    permissions of every file an Include pulls in and refuses one granting
+    OWNER RIGHTS, so a test tree must look like a real profile's instead.
+    """
+    if sys.platform != "win32":
+        return
+    grants = [f"{os.environ['USERNAME']}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"]
+    subprocess.run(["icacls", str(directory), "/inheritance:r", "/grant:r", *grants], check=True, capture_output=True)
+
+
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
 @pytest.mark.parametrize("parent", ["home", "home with space", "o'brien"])
 def test_the_installed_client_reaches_the_managed_entries_through_the_include(parent: str, tmp_path: Path) -> None:
-    config, _ = _mock_config(tmp_path / parent)
+    config, ssh_dir = _mock_config(tmp_path / parent)
+    _give_the_acl_of_a_profiles_ssh_directory(ssh_dir)
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
