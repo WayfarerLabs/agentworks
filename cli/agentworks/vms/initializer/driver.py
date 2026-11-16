@@ -590,8 +590,7 @@ def _phase_b_setup(
                 synced = True
             except Exception as e:
                 msg = (
-                    f"dotfiles sync failed, so '{dotfiles_command}' did not run and {dest} "
-                    f"still holds its previous contents: {e}"
+                    f"dotfiles sync failed, so '{dotfiles_command}' did not run and {dest} may be left incomplete: {e}"
                 )
                 logger.warning(msg)
                 output.warn(msg)
