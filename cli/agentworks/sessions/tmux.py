@@ -44,7 +44,7 @@ AGENT_SOCKET_GROUP = "tmux-agent-access"
 # A tmux client carries out requests from the server it connects to with the
 # client's own rights, and does not check who runs that server. So whenever
 # the identity Agentworks connects as does not own a server, its tmux client
-# first switches to the server's owner; root performs the switch.
+# first switches to the server's owner (``owner_client_command``).
 RUNUSER_PATH = "/usr/sbin/runuser"
 
 # AF_UNIX socket paths are capped by ``sizeof(sun_path)`` (Linux <sys/un.h>):
@@ -277,18 +277,28 @@ def socket_owner(socket_path: str, *, admin_username: str) -> str | None:
     )
 
 
-def _runuser_prefix(owner: str) -> str:
-    return f"{RUNUSER_PATH} -u {shlex.quote(owner)} --"
+def owner_client_command(command: str, *, owner_word: str, pty: bool = False) -> str:
+    """Return ``command`` run as a tmux server's owner, from ``/``.
 
-
-def _as_server_owner(command: str, owner: str) -> str:
-    """Wrap a command that runs as root so it runs wholly as ``owner``, from ``/``.
-
-    Root only performs the account switch; every tmux client inside
-    ``command`` runs as the server's owner, outside the caller's working
-    directory.
+    The one spelling of the switch to a server's owner. The VM admin's shell
+    or root runs the result: ``sudo`` lets it switch and ``runuser`` drops to
+    the owner, who runs ``command`` with ``/`` as its working directory.
+    ``owner_word`` is one shell word that expands to the account: a quoted
+    name (``as_server_owner``), or a quoted variable in a guest program.
+    ``pty`` gives an interactive client a terminal of its own (``runuser
+    --pty``, which relays window-size changes): an owner-uid client left on
+    the admin's terminal would be reachable by the owner's other processes,
+    and through it the admin's terminal. The result is one subshell, so it
+    composes with ``!``, redirections and ``$(...)`` and leaves the caller's
+    working directory alone.
     """
-    return f"cd / && {_runuser_prefix(owner)} /bin/bash -c {shlex.quote(command)}"
+    switch = f"{RUNUSER_PATH} --pty" if pty else RUNUSER_PATH
+    return f"(cd / && sudo -n {switch} -u {owner_word} -- {command})"
+
+
+def as_server_owner(command: str, owner: str, *, pty: bool = False) -> str:
+    """``owner_client_command`` for a known account name."""
+    return owner_client_command(command, owner_word=shlex.quote(owner), pty=pty)
 
 
 def _run_as_server_owner(
@@ -302,12 +312,12 @@ def _run_as_server_owner(
     """Run ``command`` against a tmux server as its owner.
 
     ``owner`` is ``None`` when ``target``'s own identity owns the server, and
-    the command runs there unchanged. Otherwise root switches to ``owner``
-    (``_as_server_owner``) to run it.
+    the command runs there unchanged. Otherwise the whole command runs as
+    ``owner`` (``as_server_owner``).
     """
     if owner is None:
         return target.run(command, check=check, env=env)
-    return target.run(_as_server_owner(command, owner), sudo=True, check=check, env=env)
+    return target.run(as_server_owner(f"/bin/bash -c {shlex.quote(command)}", owner), check=check, env=env)
 
 
 def server_owner_run_command(target: Transport, owner: str | None) -> RunCommand:
@@ -494,9 +504,8 @@ def _cleanup_stale_sockets_under(target: Transport, dir_path: str, *, owner: str
         def run(
             command: str, *, check: bool = True, env: dict[str, str] | None = None, guard: str = socket_guard
         ) -> object:
-            return target.run(
-                f"{guard} && {{ {_as_server_owner(command, owner)}; }}", sudo=True, check=check, env=env or {}
-            )
+            owned = as_server_owner(f"/bin/bash -c {shlex.quote(command)}", owner)
+            return target.run(f"{guard} && {owned}", sudo=True, check=check, env=env or {})
 
         if probe_tmux_server(run_command=run, socket_path=sock_path) is ProbeStatus.ABSENT:
             result = target.run(f"{socket_guard} && rm -f -- {q_sock}", sudo=True, check=False)
@@ -616,32 +625,28 @@ def tmux_cmd(base: str, socket_path: str | None = None, *, owner: str | None = N
 
     ``owner`` is for a probe the VM admin's own shell runs against a server
     another account owns, such as an agent session's: the client then runs
-    as ``owner`` through ``sudo`` and ``runuser``. Interactive clients use
+    as ``owner`` (``as_server_owner``). Interactive clients use
     ``tmux_attach_cmd``; compound commands the transport runs go through
     ``server_owner_run_command``.
     """
     if owner is not None and socket_path is None:
         raise ValueError("a tmux client switched to a server's owner needs that server's socket path")
     cmd = f"tmux -S {shlex.quote(socket_path)} {base}" if socket_path else f"tmux {base}"
-    return f"sudo -n {_runuser_prefix(owner)} {cmd}" if owner is not None else cmd
+    return as_server_owner(cmd, owner) if owner is not None else cmd
 
 
 def tmux_attach_cmd(session_name: str, socket_path: str | None, *, owner: str | None) -> str:
     """Build an interactive attach the VM admin's own shell runs.
 
     With ``owner`` the client runs as that account on a terminal of its own
-    (``runuser --pty``, which relays window-size changes). An owner-uid
-    client left on the admin's terminal would be reachable by the owner's
-    other processes, and through it the admin's terminal. ``cd /`` keeps the
-    switched client out of the admin's working directory; it changes the
-    calling shell's directory too, which no caller relies on.
+    (``as_server_owner`` with ``pty``).
     """
     attach = tmux_cmd(f"attach -t {exact_tmux_target(session_name)}", socket_path)
     if owner is None:
         return attach
     if socket_path is None:
         raise ValueError("a tmux client switched to a server's owner needs that server's socket path")
-    return f"cd / && sudo -n {RUNUSER_PATH} --pty -u {shlex.quote(owner)} -- {attach}"
+    return as_server_owner(attach, owner, pty=True)
 
 
 def exact_tmux_target(name: str) -> str:

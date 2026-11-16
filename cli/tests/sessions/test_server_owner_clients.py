@@ -3,7 +3,7 @@
 A tmux client carries out its server's requests with the client's own rights,
 so neither root nor the VM admin may be the client of an agent-owned server.
 Each test drives one caller and checks the shape of every tmux request it
-sends: elevated, then switched to the agent that owns the server.
+sends: switched, from ``/``, to the agent that owns the server.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def _server(db: Database) -> manager.SessionTmuxServer | None:
 
 def _assert_runs_as_owner(command: str, elevated: bool) -> str:
     owned = server_owner_parts(command)
-    assert elevated and owned is not None and owned[0] == OWNER, command
+    assert owned is not None and owned[0] == OWNER, command
     return owned[1]
 
 

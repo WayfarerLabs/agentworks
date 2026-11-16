@@ -385,9 +385,10 @@ def _batch_probe_data(rows: Sequence[tuple[SessionRow, SessionTmuxServer]]) -> s
 
 def _batch_probe_command() -> str:
     """Build the constant-size loop program for a VM's session rows."""
-    from agentworks.sessions.tmux import RUNUSER_PATH
+    from agentworks.sessions.tmux import owner_client_command
 
-    client = f"timeout -k 1 {_BATCH_CLIENT_TIMEOUT_SECONDS}"
+    client = f'timeout -k 1 {_BATCH_CLIENT_TIMEOUT_SECONDS} tmux -S "$SOCK" "$@" </dev/null'
+    as_owner = owner_client_command(client, owner_word='"$OWNER"')
     return (
         "hex() { od -An -tx1 | tr -d ' \\n'; }; "
         'decode() { printf %s "$1" | base64 -d; }; '
@@ -399,8 +400,7 @@ def _batch_probe_command() -> str:
         # Each client is bounded, so one stuck server costs only its own row,
         # and takes no stdin, so the remaining rows stay out of every
         # server's reach.
-        f'run_tmux() {{ if [ "$O64" != - ]; then {client} sudo -n {RUNUSER_PATH} -u "$OWNER" -- tmux -S "$SOCK" "$@" '
-        f'</dev/null; else {client} tmux -S "$SOCK" "$@" </dev/null; fi; }}; '
+        f'run_tmux() {{ if [ "$O64" != - ]; then {as_owner}; else {client}; fi; }}; '
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
         'HHEX=$(printf %s "$HERR" | hex); '
         "SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; "

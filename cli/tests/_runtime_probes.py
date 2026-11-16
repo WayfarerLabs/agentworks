@@ -12,12 +12,12 @@ if TYPE_CHECKING:
     from agentworks.sessions.manager import SessionTmuxServer
 
 _FRAME = re.compile(r"printf '\\nAGW_RUNTIME_([A-Z]+)='; (?:printf '\\nAGW_RUNTIME_STDERR=' >&2; )?")
-# ``as_server_owner``: root switches to the owner, who runs the quoted command.
-_SERVER_OWNER = re.compile(r"/usr/sbin/runuser -u (\S+) -- /bin/bash -c ((?:'[^']*'|\"'\")+)")
+# ``as_server_owner`` around ``/bin/bash -c``: the owner runs the quoted command from ``/``.
+_SERVER_OWNER = re.compile(r"\(cd / && sudo -n \S*runuser -u (\S+) -- /bin/bash -c ((?:'[^']*'|\"'\")+)\)")
 
 
 def server_owner_parts(command: str) -> tuple[str, str] | None:
-    """Return ``(owner, inner command)`` for a command wrapped by ``as_server_owner``."""
+    """Return ``(owner, inner command)`` for a command ``server_owner_run_command`` wrapped."""
     match = _SERVER_OWNER.search(command)
     if match is None:
         return None

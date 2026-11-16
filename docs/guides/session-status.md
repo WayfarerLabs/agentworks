@@ -95,10 +95,10 @@ session's stored socket path, names that account. A socket directly inside the V
 under `/run/agentworks/admin-tmux-sockets` is the admin's own, and the admin's connection uses it
 unchanged. A socket directly inside `/run/agentworks/agent-tmux-sockets/<user>` belongs to `<user>`,
 which must be a Linux account name other than `root` and the admin. Clients started from the VM
-admin's connection switch to that account first, with `sudo` and `runuser`: status probes, identity
-repair and observation, the startup-protection check, teardown from `session stop` and
-`session stop --all` and from agent or workspace deletion, `session logs`, `session attach`, named
-console windows and stale-socket cleanup. Startup, startup recovery, and the teardown inside
+admin's connection switch to that account first, with `sudo` and `runuser`, starting in `/`: status
+probes, identity repair and observation, the startup-protection check, teardown from `session stop`
+and `session stop --all` and from agent or workspace deletion, `session logs`, `session attach`,
+named console windows and stale-socket cleanup. Startup, startup recovery, and the teardown inside
 `session delete` and `session restart` already connect as the agent. Status, describe, logs, attach
 and lifecycle commands also require the owner to be the session's own agent or VM admin. Any other
 path is observed as `UNKNOWN`, never probed, and refused by lifecycle operations, logs and attach.

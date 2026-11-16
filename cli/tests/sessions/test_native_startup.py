@@ -21,7 +21,7 @@ from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager._pids import _repair_session_pid
 from agentworks.sessions.manager._status import check_session_status
 from agentworks.ssh import SSHError, SSHResult
-from tests._runtime_probes import server_for
+from tests._runtime_probes import server_for, server_owner_parts
 
 from .test_create_start_restart_orchestrated import (
     _create_stubs,
@@ -310,7 +310,7 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
         assert row is not None and row.pid is None
         assert Path(native.socket).stat().st_mode & 0o077 == 0
         assert check_session_status(row, target=native, server=server_for(row)) is SessionStatus.UNKNOWN
-        assert any(options.get("sudo") is True for command, options in native.calls if "has-session" in command)
+        assert any(server_owner_parts(command) is not None for command, _ in native.calls if "has-session" in command)
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
         assert _repair_session_pid(row, target=native, db=db)
         recovered = db.get_session("s1")

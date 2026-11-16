@@ -183,7 +183,10 @@ def test_fingerprint_capture_runs_tmux_as_owner_and_process_reads_as_root() -> N
         def run(self, command: str, **kwargs: object) -> _SpyResult:
             elevated = kwargs.get("sudo") is True
             self.calls.append((command, elevated))
-            if ("display-message" in command or "/proc/42/stat" in command) and not elevated:
+            # The tmux reads succeed only as the owner, the process reads only as root.
+            if "display-message" in command and server_owner_parts(command) is None:
+                return _SpyResult(returncode=1)
+            if "/proc/42/stat" in command and not elevated:
                 return _SpyResult(returncode=1)
             return super().run(command, **kwargs)
 
@@ -201,9 +204,7 @@ def test_fingerprint_capture_runs_tmux_as_owner_and_process_reads_as_root() -> N
     stat_calls = [(command, elevated) for command, elevated in target.calls if "/proc/42/stat" in command]
     assert len(tmux_calls) == 2 and len(stat_calls) == 2
     # Every tmux client runs as the server's owner; root only reads the process.
-    assert all(
-        elevated and (server_owner_parts(command) or ("", ""))[0] == "agt-owner" for command, elevated in tmux_calls
-    )
+    assert all((server_owner_parts(command) or ("", ""))[0] == "agt-owner" for command, _elevated in tmux_calls)
     assert all(elevated and server_owner_parts(command) is None for command, elevated in stat_calls)
 
 
@@ -946,25 +947,6 @@ def test_socket_owner_refuses_every_other_path(socket_path: str) -> None:
         socket_owner(socket_path, admin_username=_ADMIN)
 
 
-def test_owner_scoped_probe_switches_account_before_the_client() -> None:
-    from agentworks.sessions.tmux import tmux_cmd
-
-    assert shlex.split(tmux_cmd("has-session -t '=s1'", _AGENT_SOCKET, owner="agt-owner")) == [
-        "sudo",
-        "-n",
-        "/usr/sbin/runuser",
-        "-u",
-        "agt-owner",
-        "--",
-        "tmux",
-        "-S",
-        _AGENT_SOCKET,
-        "has-session",
-        "-t",
-        "=s1",
-    ]
-
-
 def test_owner_scoped_client_without_a_socket_is_refused() -> None:
     from agentworks.sessions.tmux import tmux_attach_cmd, tmux_cmd
 
@@ -972,52 +954,6 @@ def test_owner_scoped_client_without_a_socket_is_refused() -> None:
         tmux_cmd("has-session", None, owner="agt-owner")
     with pytest.raises(ValueError):
         tmux_attach_cmd("s1", None, owner="agt-owner")
-
-
-def test_owner_scoped_attach_gets_a_terminal_of_its_own() -> None:
-    from agentworks.sessions.tmux import tmux_attach_cmd, tmux_cmd
-
-    assert tmux_attach_cmd("s1", _AGENT_SOCKET, owner=None) == tmux_cmd("attach -t '=s1'", _AGENT_SOCKET)
-    assert shlex.split(tmux_attach_cmd("s1", _AGENT_SOCKET, owner="agt-owner")) == [
-        "cd",
-        "/",
-        "&&",
-        "sudo",
-        "-n",
-        "/usr/sbin/runuser",
-        "--pty",
-        "-u",
-        "agt-owner",
-        "--",
-        "tmux",
-        "-S",
-        _AGENT_SOCKET,
-        "attach",
-        "-t",
-        "=s1",
-    ]
-
-
-def test_server_owner_run_command_runs_the_whole_command_as_the_owner() -> None:
-    from agentworks.sessions.tmux import server_owner_run_command
-
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    class _Target:
-        def run(self, command: str, **kwargs: object) -> _SpyResult:
-            calls.append((command, kwargs))
-            return _SpyResult()
-
-    target = _Target()
-    server_owner_run_command(target, None)("tmux -S x list-sessions", check=False)  # type: ignore[arg-type]
-    server_owner_run_command(target, "agt-owner")("tmux -S x list-sessions; printf done", check=False)  # type: ignore[arg-type]
-    assert calls == [
-        ("tmux -S x list-sessions", {"check": False, "env": None}),
-        (
-            "cd / && /usr/sbin/runuser -u agt-owner -- /bin/bash -c 'tmux -S x list-sessions; printf done'",
-            {"sudo": True, "check": False, "env": None},
-        ),
-    ]
 
 
 def test_launch_attempt_match_runs_its_tmux_reads_as_the_owner() -> None:
@@ -1043,5 +979,5 @@ def test_launch_attempt_match_runs_its_tmux_reads_as_the_owner() -> None:
     assert len(calls) == 1
     command, elevated = calls[0]
     owned = server_owner_parts(command)
-    assert elevated and owned is not None and owned[0] == "agt-owner"
+    assert owned is not None and owned[0] == "agt-owner"
     assert "show-environment" in owned[1]

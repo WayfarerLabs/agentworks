@@ -386,8 +386,8 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
         '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
         "  exit 97\n"
         "esac\n"
-        # Root's account switch: only ever to the row's owner, only for tmux.
-        'if [ "$3" != -u ] || [ "$5" != -- ] || [ "$6" != tmux ]; then\n'
+        # Root's account switch: only ever to the row's owner, only for a bounded tmux client.
+        'if [ "$3" != -u ] || [ "$5" != -- ] || [ "$6" != timeout ]; then\n'
         '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
         "  exit 97\n"
         "fi\n"
@@ -701,9 +701,9 @@ def test_agent_status_runs_every_tmux_probe_as_the_owner() -> None:
         (True, False),
         (False, True),
     ]
-    for command, elevated in tmux_calls:
+    for command, _elevated in tmux_calls:
         owned = server_owner_parts(command)
-        assert elevated and owned is not None and owned[0] == AGENT_OWNER
+        assert owned is not None and owned[0] == AGENT_OWNER
 
 
 def test_pending_agent_launch_observation_runs_as_the_owner(monkeypatch: pytest.MonkeyPatch) -> None:

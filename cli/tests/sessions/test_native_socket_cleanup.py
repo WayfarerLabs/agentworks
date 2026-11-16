@@ -41,7 +41,7 @@ def target() -> Iterator[LocalFixtureTransport]:
 
 @pytest.fixture(autouse=True)
 def runuser_log(target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Stand in for root's account switch: record the account, then run the command."""
+    """Stand in for the switch to an owner: record the account, then run the command."""
     log = target.root / "runuser.log"
     shim = target.root / "runuser"
     shim.write_text(
@@ -49,6 +49,12 @@ def runuser_log(target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch) 
     )
     shim.chmod(0o755)
     monkeypatch.setattr("agentworks.sessions.tmux.RUNUSER_PATH", str(shim))
+    # Elevation without privilege: this user stands in for root.
+    bin_dir = target.root / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    sudo = bin_dir / "sudo"
+    sudo.write_text('#!/bin/sh\n[ "$1" = -n ] || exit 97\nshift\nexec "$@"\n')
+    sudo.chmod(0o755)
     return log
 
 
