@@ -283,8 +283,8 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
         commands.append(command)
         if command.startswith("getent"):
             return SimpleNamespace(ok=existing == "user", returncode=0 if existing == "user" else 2)
-        if command.startswith("test"):
-            return SimpleNamespace(ok=existing == "home", returncode=0 if existing == "home" else 1)
+        if command.startswith("if test"):
+            return SimpleNamespace(ok=existing == "home", returncode=0 if existing == "home" else 3)
         if existing == "race":
             raise RuntimeError("useradd: name taken")
         return SimpleNamespace(ok=True)
@@ -307,10 +307,10 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
 @pytest.mark.parametrize(
     ("getent_exit", "home_exit", "error"),
     [
-        (255, None, SSHError),  # ssh never ran the user probe
+        (255, 3, SSHError),  # ssh never ran the user probe
         (2, 255, SSHError),  # user absent, but ssh never ran the home probe
-        (1, None, ExternalError),  # getent answered neither found (0) nor not-found (2)
-        (2, 2, ExternalError),  # test answered neither true (0) nor false (1)
+        (1, 3, ExternalError),  # getent answered neither found (0) nor not-found (2)
+        (2, 1, ExternalError),  # a sudo -n refusal, not "home absent" (3)
     ],
 )
 def test_exclusive_agent_user_refuses_an_unanswered_probe(vm, monkeypatch, getent_exit, home_exit, error):
@@ -320,10 +320,9 @@ def test_exclusive_agent_user_refuses_an_unanswered_probe(vm, monkeypatch, geten
     def run(command, **kwargs):
         commands.append(command)
         if command.startswith("getent"):
-            return SimpleNamespace(ok=getent_exit == 0, returncode=getent_exit, stdout="")
-        if command.startswith("test"):
-            assert home_exit is not None, "the home probe must not run after an unanswered user probe"
-            return SimpleNamespace(ok=home_exit == 0, returncode=home_exit, stdout="")
+            return SimpleNamespace(ok=getent_exit == 0, returncode=getent_exit, stdout="", stderr="")
+        if command.startswith("if test"):
+            return SimpleNamespace(ok=home_exit == 0, returncode=home_exit, stdout="", stderr="")
         return SimpleNamespace(ok=True, returncode=0, stdout="")
 
     target.run.side_effect = run

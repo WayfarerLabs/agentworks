@@ -49,6 +49,7 @@ class _Result:
         self.ok = ok
         self.returncode = returncode
         self.stdout = stdout
+        self.stderr = ""
 
 
 class _RecordingTransport:

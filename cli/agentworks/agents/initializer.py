@@ -18,7 +18,12 @@ from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.interpolation import runtime_values
 from agentworks.interpolation_fields import render_list_field, render_scalar_field
 from agentworks.linux_users import managed_home
-from agentworks.remote_presence import GETENT_NOT_FOUND_EXIT, TEST_FALSE_EXIT, probe_presence
+from agentworks.remote_presence import (
+    GETENT_NOT_FOUND_EXIT,
+    SUDO_SAFE_ABSENT_EXIT,
+    probe_presence,
+    sudo_safe_test,
+)
 from agentworks.transports import transport
 
 if TYPE_CHECKING:
@@ -56,23 +61,25 @@ def create_new_agent_user(
 
     target = transport(vm, config, logger=logger)
     home = managed_home(linux_user)
-    # getent runs first: under sudo, a sudo refusal exits 1, which the home
-    # probe alone could not tell apart from test's "absent".
     if (
         probe_presence(
             target,
             f"getent passwd {shlex.quote(linux_user)}",
             absent_exit=GETENT_NOT_FOUND_EXIT,
-            vm_name=vm.name,
             sudo=True,
+            vm_name=vm.name,
+            entity_kind="agent",
+            entity_name=linux_user,
         )
         is not None
         or probe_presence(
             target,
-            f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}",
-            absent_exit=TEST_FALSE_EXIT,
-            vm_name=vm.name,
+            sudo_safe_test(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}"),
+            absent_exit=SUDO_SAFE_ABSENT_EXIT,
             sudo=True,
+            vm_name=vm.name,
+            entity_kind="agent",
+            entity_name=linux_user,
         )
         is not None
     ):
@@ -169,8 +176,10 @@ def create_agent_on_vm(
         admin_target,
         f"getent passwd {linux_user}",
         absent_exit=GETENT_NOT_FOUND_EXIT,
-        vm_name=vm.name,
         sudo=True,
+        vm_name=vm.name,
+        entity_kind="agent",
+        entity_name=agent_name,
     )
     if passwd_entry is None:
         admin_target.run(f"useradd -m -U -s {shell_path} {linux_user}", sudo=True)
