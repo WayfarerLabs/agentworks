@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import stat
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -24,7 +23,7 @@ from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaP
 from agentworks.capabilities.vm_platform.lima_host import DetachedResult, LimaCommandFailed, LimaHost, _Completed
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
-from tests.conftest import provisioning_trust_for_tests
+from tests.conftest import provisioning_trust_for_tests, requires_posix_shell
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -161,6 +160,7 @@ def test_remote_template_rejects_untrusted_allocation_path(monkeypatch: pytest.M
     assert "/tmp/other" not in repr(caught.value)
 
 
+@requires_posix_shell
 def test_remote_template_uses_private_random_directory_not_predictable_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -192,11 +192,7 @@ def test_remote_template_uses_private_random_directory_not_predictable_path(
 
     _create_remote()
 
-    if sys.platform == "win32":
-        # The local (git-bash) shell has no Unix mode bits for umask 077 to land on.
-        assert [content for _, _, content in staged_snapshots] == [_PROVIDER_YAML]
-    else:
-        assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
+    assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
     assert predictable_path.read_text() == "legacy provider data\n"
     assert list(remote_root.glob("agentworks-lima-template.*")) == []
 
