@@ -29,7 +29,6 @@ def session_logs(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    from agentworks.sessions.manager._teardown import _validated_socket_path
     from agentworks.sessions.tmux import capture_output, server_owner_run_command
 
     if lines is not None and lines < 1:
@@ -43,12 +42,12 @@ def session_logs(
         interaction=interaction,
     ) as (
         _ws,
-        _vm,
+        vm,
         _run_command,
         _run_as_root,
         target,
     ):
-        status = _mgr.check_session_status(session, target=target)
+        status = _mgr.check_session_status(session, target=target, admin_username=vm.admin_username)
 
         if status == SessionStatus.STOPPED:
             raise StateError(
@@ -77,13 +76,12 @@ def session_logs(
                 entity_name=name,
             )
 
-        sock = _validated_socket_path(db, session) if session.socket_path is not None else None
-        owner = _mgr._session_tmux_owner(session) if sock is not None else None
+        owner = _mgr._recorded_session_tmux_owner(db, session)
         captured = capture_output(
             name,
             run_command=server_owner_run_command(target, owner),
             lines=lines or config.session.history_limit,
-            socket_path=sock,
+            socket_path=session.socket_path,
         )
         # Raw data pipe (opaque tmux capture-pane output), not a structured message.
         # Intentionally not routed through the output handler.

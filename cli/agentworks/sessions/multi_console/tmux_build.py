@@ -410,10 +410,10 @@ def _add_session_window(
         output.warn(f"workspace for session '{member.session_name}' is missing; skipping window")
         return SessionWindowBuild(built=False)
 
-    from agentworks.sessions.manager import _session_tmux_owner
+    from agentworks.sessions.manager import _recorded_session_tmux_owner
 
     try:
-        owner = _session_tmux_owner(session) if session.socket_path is not None else None
+        owner = _recorded_session_tmux_owner(db, session) if session.socket_path is not None else None
     except StateError as exc:
         output.warn(f"session '{session.name}' has no valid agent socket ({exc}); skipping window")
         return SessionWindowBuild(built=False)

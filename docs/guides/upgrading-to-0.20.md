@@ -104,25 +104,23 @@ compatibility. Refresh shell completions after upgrading with `agw completion in
 ## Agent session tmux clients run as the agent
 
 Agentworks no longer runs a tmux client as root or as the VM admin against an agent session's tmux
-server. Every such client, from status checks and teardown to `session attach`, `session logs`,
-named console windows and workspace tmuxinator windows, now switches to the agent account with
-`sudo` and `runuser` first. What to expect:
+server. Every such client, from status checks and teardown to `session attach`, `session logs` and
+named console windows, now switches to the agent account with `sudo` and `runuser` first. Attach
+clients run on a terminal of their own (`runuser --pty`). What to expect:
 
-- **Guest authentication logs gain entries.** Each switch is a `sudo` invocation or a `runuser`
-  session for the agent account, so `/var/log/auth.log` or the journal records more of them,
-  including one per poll while a console window waits for a stopped agent session.
+- **Guest authentication logs gain entries.** Each switch is a `sudo` invocation plus a `runuser`
+  session for the agent account, so `/var/log/auth.log` or the journal records both for every probe,
+  including every poll while a console window waits for a stopped agent session.
 - **Attach no longer carries your SSH environment into the agent's server.** `sudo` resets the
   environment, so variables tmux would otherwise copy into the session on attach, such as
   `SSH_AUTH_SOCK`, no longer reach it. Under `sudo`'s default policy `TERM` and the locale variables
   still do.
 - **Existing console windows keep their old attach loop until rebuilt.** Run
-  `agw console restart NAME` for each running named console that shows an agent session. A
-  workspace's `.tmuxinator.yml` is rewritten the next time a session in that workspace is created,
-  started or deleted.
-- **Rows with a misplaced socket path stop being probed.** An agent session whose stored socket path
-  is not directly inside an agent socket directory reports `unknown` status instead of being probed
-  at whatever the path names, and `session logs` and `session attach` refuse it, as teardown already
-  did.
+  `agw console restart NAME` for each running named console that shows an agent session.
+- **Rows with a misplaced socket path stop being probed.** A session's stored socket path must sit
+  directly inside its agent's socket directory or, for an admin session, the VM admin's. Any other
+  path reports `unknown` status instead of being probed at whatever it names, and `session logs`,
+  `session attach` and teardown refuse it, for admin sessions as well as agent sessions.
 
 ## Import existing host keys
 

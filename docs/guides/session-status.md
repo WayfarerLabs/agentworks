@@ -89,22 +89,32 @@ subsequent launch work fails; invalid input or cancelled restart confirmation pr
 spec. Changing a running session's spec through `start` does not itself replace its runtime; use
 `restart` when the running workload must use the replacement immediately.
 
-A tmux client carries out requests from the server it connects to with the client's own rights.
-Agentworks therefore never runs a tmux client as root or as the VM admin against an agent's server.
-Status probes, identity repair, startup recovery, teardown, `session logs`, `session attach`, named
-console windows, workspace tmuxinator windows and stale-socket cleanup all switch to the agent that
-owns the server first, with `sudo` and `runuser`. That agent is the owner of the socket directory
-the session's stored socket path names, which must sit directly inside one agent's directory under
-`/run/agentworks/agent-tmux-sockets`. A row whose path does not is observed as `UNKNOWN` and refused
-by lifecycle operations. Process reads, socket inspection and socket removal still run as root.
+A tmux client carries out requests from the server it connects to with the client's own rights, so
+Agentworks runs every tmux client as the account that owns the server. One rule, applied to a
+session's stored socket path, names that account. A socket directly inside the VM admin's directory
+under `/run/agentworks/admin-tmux-sockets` is the admin's own, and the admin's connection uses it
+unchanged. A socket directly inside `/run/agentworks/agent-tmux-sockets/<user>` belongs to `<user>`,
+which must be a Linux account name other than `root` and the admin. Status probes, identity repair,
+startup recovery, teardown, `session logs`, `session attach`, named console windows and stale-socket
+cleanup switch to that account first, with `sudo` and `runuser`. Commands that hold the database
+also require it to be the session's own agent or VM admin. Any other path is observed as `UNKNOWN`
+and refused by lifecycle operations, logs and attach. Process reads, socket inspection and socket
+removal still run as root. The one exception is a legacy row without a socket path: its session
+lives on the connecting account's own default tmux server, into which an agent cannot plant a
+server.
 
-Access sharing grants read/write tmux access to the socket group's members. Retrying startup
-completion reapplies that access, including restoring a member's read-only entry to read/write. The
-server owner and root already have tmux access and need no explicit grant. Member names are read
-individually from the comma-separated group entry, without shell option or filename expansion. A
-failed group or user lookup or member grant stops sharing rather than reporting successful
-completion; the retained runtime remains available for a later retry unless workload death is
-confirmed.
+Interactive clients, `session attach` and the attach in a named console window, run as the agent on
+a pseudo-terminal of their own (`runuser --pty`) rather than on the admin's terminal, where the
+agent's other processes could reach them.
+
+Startup access sharing grants read/write tmux access to the socket group's members. Agentworks does
+not use that grant to reach agent servers, and it is not a supported way for the VM admin to do so.
+Retrying startup completion reapplies that access, including restoring a member's read-only entry to
+read/write. The server owner and root already have tmux access and need no explicit grant. Member
+names are read individually from the comma-separated group entry, without shell option or filename
+expansion. A failed group or user lookup or member grant stops sharing rather than reporting
+successful completion; the retained runtime remains available for a later retry unless workload
+death is confirmed.
 
 If no process identity can be recovered and the same VM boot is still running, preserve the row and
 inspect the guest. `--force` cannot turn missing identity into evidence of absence. A mutating

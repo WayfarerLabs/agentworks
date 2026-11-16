@@ -153,7 +153,9 @@ def _model(db, runtime, monkeypatch) -> _Memory:
 
     def observe_rows(rows, **kwargs):
         return {
-            row.name: manager.check_session_status(row, target=_Target(model, model.residents[row.name].vm))
+            row.name: manager.check_session_status(
+                row, target=_Target(model, model.residents[row.name].vm), admin_username="admin"
+            )
             for row in rows
         }
 
@@ -199,7 +201,10 @@ def test_inactive_stop_retains_same_boot_memory_identity_for_later_safe_stop(
     assert model.reads == model.transports == model.killed == []
 
     powers["box"] = VMStatus.RUNNING
-    assert manager.check_session_status(inactive, target=_Target(model, "box")) is SessionStatus.RUNNING
+    assert (
+        manager.check_session_status(inactive, target=_Target(model, "box"), admin_username="admin")
+        is SessionStatus.RUNNING
+    )
     rendered.clear()
     reconcile_session(db, config, name="work", interaction=REFUSE)
     result = next(row for row in rendered if row.kind == "session")

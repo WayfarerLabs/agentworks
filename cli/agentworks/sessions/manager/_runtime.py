@@ -267,7 +267,9 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     require_vm_ssh_boundary(db, config, definition.vm)
     admin_target = _mgr.transport(definition.vm, config)
     try:
-        status = observe_session_runtime(current, admin_target=admin_target)
+        status = observe_session_runtime(
+            current, admin_target=admin_target, admin_username=definition.vm.admin_username
+        )
     except StateError:
         if not can_checkpoint_session(current, vm=definition.vm, admin_target=admin_target):
             raise
@@ -301,7 +303,9 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
                     protection = startup_protection_enabled(
                         current.name,
                         socket_path=_validated_socket_path(db, current),
-                        run_command=server_owner_run_command(admin_target, _mgr._session_tmux_owner(current)),
+                        run_command=server_owner_run_command(
+                            admin_target, _mgr._recorded_session_tmux_owner(db, current)
+                        ),
                     )
                     if protection is None:
                         raise StateError(
@@ -376,7 +380,7 @@ def prepare_session_stop(
         status = SessionStatus.STOPPED
     else:
         try:
-            status = observe_session_runtime(session, admin_target=admin_target)
+            status = observe_session_runtime(session, admin_target=admin_target, admin_username=vm.admin_username)
         except StateError:
             if not can_checkpoint_session(session, vm=vm, admin_target=admin_target):
                 raise

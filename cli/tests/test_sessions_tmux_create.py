@@ -903,10 +903,20 @@ def test_confirmed_death_outweighs_expected_sharing_capture_and_cleanup_failures
 _AGENT_SOCKET = "/run/agentworks/agent-tmux-sockets/agt-owner/s1.sock"
 
 
-def test_agent_socket_owner_is_the_directory_account() -> None:
-    from agentworks.sessions.tmux import agent_socket_owner, agent_socket_path
+_ADMIN = "agentworks"
 
-    assert agent_socket_owner(agent_socket_path("agt-owner", "s1")) == "agt-owner"
+
+@pytest.mark.parametrize(
+    ("socket_path", "owner"),
+    [
+        (_AGENT_SOCKET, "agt-owner"),
+        ("/run/agentworks/admin-tmux-sockets/agentworks/s1.sock", None),
+    ],
+)
+def test_socket_owner_names_the_account_whose_directory_holds_the_socket(socket_path: str, owner: str | None) -> None:
+    from agentworks.sessions.tmux import socket_owner
+
+    assert socket_owner(socket_path, admin_username=_ADMIN) == owner
 
 
 @pytest.mark.parametrize(
@@ -918,20 +928,28 @@ def test_agent_socket_owner_is_the_directory_account() -> None:
         "/run/agentworks/agent-tmux-sockets/agt-owner/nested/s1.sock",
         "/run/agentworks/agent-tmux-sockets/../agt-owner/s1.sock",
         "/run/agentworks/agent-tmux-sockets/agt-owner/..",
-        "/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt-owner//s1.sock",
+        "/run/agentworks/agent-tmux-sockets/root/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agentworks/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/Agt-Owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/-owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/" + "a" * 33 + "/s1.sock",
+        "/run/agentworks/admin-tmux-sockets/other-admin/s1.sock",
+        "/run/agentworks/admin-tmux-sockets/agentworks/nested/s1.sock",
     ],
 )
-def test_agent_socket_owner_refuses_paths_outside_one_agent_directory(socket_path: str) -> None:
-    from agentworks.sessions.tmux import agent_socket_owner
+def test_socket_owner_refuses_every_other_path(socket_path: str) -> None:
+    from agentworks.sessions.tmux import socket_owner
 
     with pytest.raises(StateError):
-        agent_socket_owner(socket_path)
+        socket_owner(socket_path, admin_username=_ADMIN)
 
 
-def test_owner_scoped_tmux_command_switches_account_before_the_client() -> None:
+def test_owner_scoped_probe_switches_account_before_the_client() -> None:
     from agentworks.sessions.tmux import tmux_cmd
 
-    assert shlex.split(tmux_cmd("attach -t '=s1'", _AGENT_SOCKET, owner="agt-owner")) == [
+    assert shlex.split(tmux_cmd("has-session -t '=s1'", _AGENT_SOCKET, owner="agt-owner")) == [
         "sudo",
         "-n",
         "/usr/sbin/runuser",
@@ -941,12 +959,34 @@ def test_owner_scoped_tmux_command_switches_account_before_the_client() -> None:
         "tmux",
         "-S",
         _AGENT_SOCKET,
-        "attach",
+        "has-session",
         "-t",
         "=s1",
     ]
-    with pytest.raises(ValueError):
-        tmux_cmd("attach", None, owner="agt-owner")
+
+
+def test_owner_scoped_attach_gets_a_terminal_of_its_own() -> None:
+    from agentworks.sessions.tmux import tmux_attach_cmd, tmux_cmd
+
+    assert tmux_attach_cmd("s1", _AGENT_SOCKET, owner=None) == tmux_cmd("attach -t '=s1'", _AGENT_SOCKET)
+    assert shlex.split(tmux_attach_cmd("s1", _AGENT_SOCKET, owner="agt-owner")) == [
+        "(cd",
+        "/",
+        "&&",
+        "sudo",
+        "-n",
+        "/usr/sbin/runuser",
+        "--pty",
+        "-u",
+        "agt-owner",
+        "--",
+        "tmux",
+        "-S",
+        _AGENT_SOCKET,
+        "attach",
+        "-t",
+        "=s1)",
+    ]
 
 
 def test_server_owner_run_command_runs_the_whole_command_as_the_owner() -> None:
@@ -960,13 +1000,14 @@ def test_server_owner_run_command_runs_the_whole_command_as_the_owner() -> None:
             return _SpyResult()
 
     target = _Target()
-    assert server_owner_run_command(target, None) == target.run  # type: ignore[arg-type]
+    server_owner_run_command(target, None)("tmux -S x list-sessions", check=False)  # type: ignore[arg-type]
     server_owner_run_command(target, "agt-owner")("tmux -S x list-sessions; printf done", check=False)  # type: ignore[arg-type]
     assert calls == [
+        ("tmux -S x list-sessions", {"check": False, "env": None}),
         (
             "/usr/sbin/runuser -u agt-owner -- /bin/bash -c 'tmux -S x list-sessions; printf done'",
-            {"sudo": True, "check": False},
-        )
+            {"sudo": True, "check": False, "env": None},
+        ),
     ]
 
 

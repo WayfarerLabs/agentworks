@@ -90,7 +90,9 @@ def test_observation_and_checkpoint_fingerprints_probe_as_the_owner(tmp_path, mo
     monkeypatch.setattr(manager, "_get_boot_id", lambda *a: BOOT_ID)
     db._conn.execute("UPDATE sessions SET pid = NULL WHERE name = 's1'")
     db._conn.commit()
-    assert observe_session_runtime(_session(db), admin_target=_Recorder()) is SessionStatus.STOPPED  # type: ignore[arg-type]
+    assert (
+        observe_session_runtime(_session(db), admin_target=_Recorder(), admin_username="admin") is SessionStatus.STOPPED
+    )  # type: ignore[arg-type]
     db._conn.execute("UPDATE sessions SET boot_id = NULL WHERE name = 's1'")
     db._conn.commit()
     vm = db.get_vm("vm1")
@@ -212,17 +214,47 @@ def test_session_attach_runs_the_client_as_the_owner(tmp_path, monkeypatch):
     config = SimpleNamespace(terminal=SimpleNamespace(clear_on_detach="never"))
     manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert target.interactive_commands == [
-        tmux.tmux_cmd(f"attach -t {tmux.exact_tmux_target('s1')}", SOCKET, owner=OWNER)
+        f"(cd / && sudo -n {tmux.RUNUSER_PATH} --pty -u {OWNER} -- tmux -S {SOCKET} attach -t '=s1')"
     ]
     db.close()
 
 
-def test_workspace_console_wrapper_runs_agent_clients_as_the_owner(tmp_path, monkeypatch):
-    from agentworks.workspaces.tmuxinator import generate_config
+@pytest.mark.parametrize(
+    ("mode", "socket_path"),
+    [
+        # An admin row outside the VM admin's own directory.
+        ("admin", "/run/agentworks/admin-tmux-sockets/someone-else/adm.sock"),
+        ("admin", "/tmp/adm.sock"),
+        # An agent row in another agent's directory.
+        ("agent", "/run/agentworks/agent-tmux-sockets/agt-other/adm.sock"),
+    ],
+)
+@pytest.mark.parametrize("operation", ["attach", "logs"])
+def test_logs_and_attach_refuse_a_socket_outside_its_owners_directory(
+    tmp_path, monkeypatch, mode, socket_path, operation
+):
+    from agentworks.db import SessionMode
+    from agentworks.errors import StateError
 
     db, _ = _restart_fixture(tmp_path, monkeypatch)
-    config = generate_config("ws1", "/srv/ws1", sessions=[_session(db)])
-    clients = config.count(f"tmux -S {SOCKET} ")
-    assert clients == 2
-    assert config.count(f"sudo -n {tmux.RUNUSER_PATH} -u {OWNER} -- tmux -S {SOCKET} ") == clients
+    db.insert_session(
+        "adm",
+        "ws1",
+        "claude",
+        SessionMode.ADMIN if mode == "admin" else SessionMode.AGENT,
+        agent_name=None if mode == "admin" else "a1",
+        socket_path=socket_path,
+    )
+    target = _Recorder()
+    monkeypatch.setattr(manager, "_prepare_vm", lambda db, *a, **k: _prepared(target, db))
+    monkeypatch.setattr(tmux, "capture_output", lambda *a, **k: pytest.fail("captured from a refused socket"))
+    config = SimpleNamespace(
+        terminal=SimpleNamespace(clear_on_detach="never"), session=SimpleNamespace(history_limit=5)
+    )
+    with pytest.raises(StateError):
+        if operation == "attach":
+            manager.attach_session(db, config, name="adm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+        else:
+            manager.session_logs(db, config, name="adm", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
+    assert target.interactive_commands == [] and target.calls == []
     db.close()

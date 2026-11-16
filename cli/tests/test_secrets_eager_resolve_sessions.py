@@ -328,7 +328,9 @@ def test_session_attach_does_not_eager_resolve(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_basic_db(tmp_path)
-    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
+    db.insert_session(
+        "s1", "ws1", "default", SessionMode.ADMIN, socket_path="/run/agentworks/admin-tmux-sockets/admin/s1.sock"
+    )
     db._conn.execute("UPDATE sessions SET pid = 1234 WHERE name = 's1'")
     db._conn.commit()
 

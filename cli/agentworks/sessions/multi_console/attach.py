@@ -31,7 +31,7 @@ from agentworks.errors import (
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.runtime_time import derive_uptime_seconds, format_uptime
-from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
+from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_attach_cmd, tmux_cmd
 
 from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
 from ._status import ConsoleStatus
@@ -157,7 +157,8 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, owner: s
 
     The snippet runs in the admin's console pane. ``owner`` names the account
     that owns the session's server when that is not the admin (an agent
-    session), and every tmux client in the snippet then runs as ``owner``.
+    session): every tmux client in the snippet then runs as ``owner``, and
+    the attach on a terminal of its own (``tmux_attach_cmd``).
 
     Two phases:
     1. Entry: if the session isn't up yet, clear the pane and show a "Waiting..."
@@ -173,7 +174,7 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, owner: s
     """
     q = exact_tmux_target(session_name)
     has = tmux_cmd(f"has-session -t {q}", socket_path, owner=owner)
-    att = tmux_cmd(f"attach -t {q}", socket_path, owner=owner)
+    att = tmux_attach_cmd(session_name, socket_path, owner=owner)
     return f"""\
 unset TMUX
 

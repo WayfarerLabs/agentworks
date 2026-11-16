@@ -23,13 +23,19 @@ def test_attach_loop_uses_exact_session_targets() -> None:
     assert "tmux -S /tmp/backend.sock attach -t '=backend'" in wrapper
 
 
+def _assert_clients_run_as_owner(wrapper: str, socket_path: str, owner: str, session: str) -> None:
+    """Probes switch to ``owner``; the one attach also gets a terminal of its own."""
+    clients = wrapper.count(f"tmux -S {socket_path} ")
+    probes = wrapper.count(f"sudo -n /usr/sbin/runuser -u {owner} -- tmux -S {socket_path} has-session ")
+    attach = f"(cd / && sudo -n /usr/sbin/runuser --pty -u {owner} -- tmux -S {socket_path} attach -t '={session}')"
+    assert probes > 0 and wrapper.count(attach) == 1
+    assert clients == probes + 1
+
+
 def test_attach_loop_runs_every_agent_server_client_as_the_owner() -> None:
     socket_path = "/run/agentworks/agent-tmux-sockets/agt-alice/backend.sock"
     wrapper = _attach_loop_wrapper("backend", socket_path, owner="agt-alice")
-    clients = wrapper.count("tmux -S ")
-    assert clients > 0
-    assert wrapper.count(f"sudo -n /usr/sbin/runuser -u agt-alice -- tmux -S {socket_path} ") == clients
-    assert f"runuser -u agt-alice -- tmux -S {socket_path} attach -t '=backend'" in wrapper
+    _assert_clients_run_as_owner(wrapper, socket_path, "agt-alice", "backend")
 
 
 def test_console_window_for_agent_session_attaches_as_the_owner(db: Database, fake_target: _FakeTarget) -> None:
@@ -52,10 +58,7 @@ def test_console_window_for_agent_session_attaches_as_the_owner(db: Database, fa
 
     new_window = [c for c in fake_target.commands if "new-window -t '=aw-console-con'" in c]
     assert len(new_window) == 1
-    wrapper = shlex.split(new_window[0])[-1]
-    clients = wrapper.count(f"tmux -S {socket_path} ")
-    assert clients > 0
-    assert wrapper.count(f"sudo -n /usr/sbin/runuser -u agt-alice -- tmux -S {socket_path} ") == clients
+    _assert_clients_run_as_owner(shlex.split(new_window[0])[-1], socket_path, "agt-alice", "b")
 
 
 def test_attach_joins_existing_canonical_runtime_without_building(

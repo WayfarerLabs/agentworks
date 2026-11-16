@@ -60,8 +60,9 @@ def _build_session_target(
     goes via direct agent SSH. Because the returned target always owns
     the session it will operate on, callers can issue destructive commands
     without sudo. Batch paths intentionally don't use this helper; they
-    keep admin's target across all sessions and pass ``sudo=True`` to
-    reach into agent tmux servers (carve-out for batch ops).
+    keep admin's target across all sessions, switch each tmux client to the
+    agent that owns the server (``server_owner_run_command``), and use root
+    only for process reads and socket removal.
     """
     if session.mode == SessionMode.ADMIN.value:
         return admin_target
@@ -164,7 +165,7 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        owner = _mgr._session_tmux_owner(session)
+        owner = _mgr._recorded_session_tmux_owner(db, session)
         sudo = owner is not None
         require_socket_path(sock, run_command=partial(target.run, sudo=sudo))
         probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, owner=owner)

@@ -16,7 +16,7 @@ from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError, ValidationError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
-from agentworks.sessions.manager import _lifecycle, _pids, _teardown
+from agentworks.sessions.manager import _lifecycle, _pids
 from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
 
 from .test_create_start_restart_orchestrated import BOOT_ID, _patch_transports, _requiring_template, _restart_fixture
@@ -37,7 +37,6 @@ pytestmark = pytest.mark.skipif(os.name != "posix", reason="uses Linux guest run
 def bind_native_runtime(db, monkeypatch, native: NativeTarget) -> None:
     native.socket = str(native.root / "agt-a1" / "s1.sock")
     Path(native.socket).parent.mkdir()
-    monkeypatch.setattr(_teardown, "AGENT_SOCKET_ROOT", str(native.root))
     monkeypatch.setattr(tmux, "AGENT_SOCKET_ROOT", str(native.root))
     monkeypatch.setattr(manager, "_teardown_session", _lifecycle._teardown_session)
     _patch_transports(monkeypatch, native, native)
@@ -88,8 +87,8 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         row = db.get_session("s1")
         assert row is not None and row.pid is None
         assert row.boot_id == tmux.read_boot_id(native)
-        assert manager._status.check_session_status(row, target=native) is SessionStatus.RUNNING
-        assert manager.batch_check_status([replace(row, mode="admin")], target=native) == {"s1": SessionStatus.RUNNING}
+        assert manager._status.check_session_status(row, target=native, admin_username="admin") is SessionStatus.RUNNING
+        assert manager.batch_check_status([row], target=native, admin_username="admin") == {"s1": SessionStatus.RUNNING}
         assert db.get_session("s1") == row
         proofs = [options for command, options in native.calls if "AGW_RUNTIME_LAUNCH=" in command]
         assert proofs and all(
@@ -114,7 +113,10 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
             monkeypatch.setattr(
                 manager,
                 "observe_session_statuses",
-                lambda rows, **k: {row.name: manager._status.check_session_status(row, target=native) for row in rows},
+                lambda rows, **k: {
+                    row.name: manager._status.check_session_status(row, target=native, admin_username="admin")
+                    for row in rows
+                },
             )
             manager.start_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
         recovered = db.get_session("s1")
@@ -228,7 +230,6 @@ def test_boot_only_evidence_has_matching_readonly_status_projections(tmp_path, m
         pid=None,
         boot_id=tmux.read_boot_id(native) if same_boot else str(uuid4()),
         socket_path=native.socket,
-        mode="admin",
         tmux_server_start_ticks=None,
     )
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
@@ -236,8 +237,8 @@ def test_boot_only_evidence_has_matching_readonly_status_projections(tmp_path, m
     from agentworks.sessions.manager._status import batch_check_status, check_session_status
 
     try:
-        assert check_session_status(checkpoint, target=native) is expected
-        assert batch_check_status([checkpoint], target=native) == {"s1": expected}
+        assert check_session_status(checkpoint, target=native, admin_username="admin") is expected
+        assert batch_check_status([checkpoint], target=native, admin_username="admin") == {"s1": expected}
         assert db.get_session("s1") == row
     finally:
         db.close()

@@ -689,7 +689,7 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, target, admin_username: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -753,7 +753,7 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, target, admin_username: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -781,7 +781,7 @@ def test_describe_session_observes_without_a_vm_hold(
     events: list[str] = []
     _record_holds(monkeypatch, events)
 
-    def _probe(session: object, *, target: object) -> object:
+    def _probe(session: object, *, target: object, admin_username: str) -> object:
         del session, target
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
@@ -911,7 +911,7 @@ def test_describe_session_preserves_malformed_stored_boot_error(
     _reachable(monkeypatch, True)
     db.update_session_runtime(
         "s1",
-        socket_path="/tmp/s1.sock",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
         pid=42,
         boot_id="malformed",
         tmux_server_start_ticks=100,
@@ -929,7 +929,7 @@ def test_describe_session_preserves_malformed_stored_boot_error(
                     ok=False,
                     returncode=1,
                     stdout="AGW_RUNTIME_SERVER=",
-                    stderr="no server running on /tmp/s1.sock",
+                    stderr="no server running on /run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
                 )
             if "/proc/sys/kernel/random/boot_id" in cmd:
                 return SimpleNamespace(ok=True, returncode=0, stdout=f"AGW_RUNTIME_BOOT={BOOT_ID}\n", stderr="")

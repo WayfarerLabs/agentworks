@@ -22,7 +22,6 @@ from agentworks.execution.errors import TrustMissing
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.runtime_time import derive_uptime_seconds, format_short_uptime, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
-from agentworks.sessions.tmux import exact_tmux_target
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -197,7 +196,7 @@ def _delete_session_runtime(
                 status = SessionStatus.RUNNING
             else:
                 session = _mgr._ensure_pid(session, target=admin_target, db=db)
-                status = _mgr.check_session_status(session, target=admin_target)
+                status = _mgr.check_session_status(session, target=admin_target, admin_username=vm.admin_username)
 
             if status == SessionStatus.UNKNOWN:
                 raise StateError(
@@ -502,6 +501,7 @@ def session_description(
                     status = _mgr.check_session_status(
                         session,
                         target=cast("Transport", _BoundedStatusTarget(target)),
+                        admin_username=vm.admin_username,
                     )
                 except UserAbort:
                     raise
@@ -936,7 +936,7 @@ def attach_session(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
-    from agentworks.sessions.tmux import tmux_cmd
+    from agentworks.sessions.tmux import tmux_attach_cmd
 
     session = _mgr._require_session(db, name)
     with _mgr._prepare_vm(
@@ -947,12 +947,12 @@ def attach_session(
         interaction=interaction,
     ) as (
         _ws,
-        _vm,
+        vm,
         _run_command,
         _run_as_root,
         target,
     ):
-        status = _mgr.check_session_status(session, target=target)
+        status = _mgr.check_session_status(session, target=target, admin_username=vm.admin_username)
 
         if status == SessionStatus.STOPPED:
             raise StateError(
@@ -981,15 +981,12 @@ def attach_session(
                 entity_name=name,
             )
 
-        from agentworks.sessions.manager._teardown import _validated_socket_path
         from agentworks.terminal import clear_screen_on_detach
 
-        q_session = exact_tmux_target(name)
-        socket_path = _validated_socket_path(db, session) if session.socket_path is not None else None
-        owner = _mgr._session_tmux_owner(session) if socket_path is not None else None
+        owner = _mgr._recorded_session_tmux_owner(db, session)
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(
-            tmux_cmd(f"attach -t {q_session}", socket_path, owner=owner),
+            tmux_attach_cmd(name, session.socket_path, owner=owner),
             clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )

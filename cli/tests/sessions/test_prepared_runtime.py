@@ -417,7 +417,7 @@ def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monke
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", cancel)
     target = manager.transport(_vm(db), SimpleNamespace())
     with pytest.raises(UserAbort) as caught:
-        _status._pending_launch_is_owned(pending, target=target)
+        _status._pending_launch_is_owned(pending, target=target, admin_username="admin")
     assert caught.value is failure
     db.close()
 
