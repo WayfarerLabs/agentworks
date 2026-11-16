@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost, _Completed
+from agentworks.capabilities.vm_platform.lima_host import _UPLOAD_SCRIPT, LimaCommandFailed, LimaHost, _Completed
 from agentworks.execution import root_script, ssh_process
 from agentworks.execution.client import SSHClient
 from agentworks.execution.root_script import RawRun
@@ -191,7 +191,7 @@ def test_an_upload_is_mode_0600_under_an_inherited_default_acl(tmp_path: Path, m
 
 
 def test_an_upload_runs_under_an_explicit_sh_whatever_the_login_shell(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The host command runs under the user's login shell, which may be fish or csh."""
+    """The host command runs under the user's login shell, whose syntax the script must not rely on."""
     commands: list[str] = []
 
     def record(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
@@ -206,6 +206,22 @@ def test_an_upload_runs_under_an_explicit_sh_whatever_the_login_shell(monkeypatc
     argv = shlex.split(command)
     assert argv[:2] == ["/bin/sh", "-c"]
     assert argv[3:] == ["sh", "/var/tmp/my dir", "/var/tmp/my dir/agentworks-lima-myvm.sh"]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_the_upload_script_writes_under_noclobber_imported_by_bash(tmp_path: Path) -> None:
+    """bash as /bin/sh imports an exported SHELLOPTS, and mktemp has already created the file it writes."""
+    target = tmp_path / "agentworks-lima-myvm.sh"
+
+    subprocess.run(
+        ["bash", "-c", _UPLOAD_SCRIPT, "sh", str(tmp_path), str(target)],
+        input="echo hi\n",
+        text=True,
+        check=True,
+        env={**os.environ, "SHELLOPTS": "noclobber"},
+    )
+
+    assert target.read_text() == "echo hi\n"
 
 
 @needs_posix_sh

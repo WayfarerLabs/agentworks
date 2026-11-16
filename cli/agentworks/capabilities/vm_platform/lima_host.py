@@ -48,9 +48,11 @@ echo $? > {status_file}
 
 
 # Writes stdin to "$2" through a private temporary file in its directory "$1".
+# ">|" because bash as /bin/sh (macOS) imports an exported SHELLOPTS, so a
+# login shell's noclobber can reach it, and mktemp has already created "$tmp".
 _UPLOAD_SCRIPT = (
     'umask 077 && tmp=$(mktemp "$1/.agw-upload.XXXXXX") && '
-    '{ cat > "$tmp" && mv -f "$tmp" "$2" || { rm -f "$tmp"; false; }; }'
+    '{ cat >| "$tmp" && mv -f "$tmp" "$2" || { rm -f "$tmp"; false; }; }'
 )
 
 
@@ -130,8 +132,10 @@ class LimaHost:
         over a file another user owns. The temporary file is removed if the
         write or the rename fails. Inherited macOS ACL entries are not masked
         by mode bits, so they still apply. The script runs under an explicit
-        ``/bin/sh``, with the paths as its arguments, so the host user's login
-        shell (fish, csh) and its options (``noclobber``) play no part.
+        ``/bin/sh``, with the paths as its arguments, so beyond the
+        ``$SHELL -lc`` layer every host command goes through, which needs a
+        Bourne-family shell or fish, it does not depend on the login shell's
+        syntax.
         """
         self.run(shlex.join(["/bin/sh", "-c", _UPLOAD_SCRIPT, "sh", posixpath.dirname(path), path]), input=content)
 
