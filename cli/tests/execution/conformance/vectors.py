@@ -225,7 +225,7 @@ def consumer_leaves_an_endless_writer(lane: Lane, *, writes_to: str) -> None:
     """The writer takes SIGPIPE when the client closes its end, and the request ends as ssh's did, as 141."""
     pid_file = f"{lane.make_dir()}/pid"
     redirect = ">&2" if writes_to == "stderr" else ""
-    endless = cmd("sh", "-c", f"echo $$ > {pid_file}; exec yes {redirect}", deadline=15)
+    endless = cmd("sh", "-c", f"echo $$ > {shlex.quote(pid_file)}; exec yes {redirect}", deadline=15)
     leaving, other = LeavingSink(2), io.BytesIO()
     started = time.monotonic()
 
@@ -252,7 +252,7 @@ def stderr_consumer_leaves_an_endless_writer(lane: Lane) -> None:
 
 def stdout_consumer_leaves_a_quiet_payload_that_then_ends(lane: Lane) -> None:
     marker = f"{lane.make_dir()}/finished"
-    quiet = cmd("sh", "-c", f"echo hello; sleep 1; echo done > {marker}; exit 4", deadline=15)
+    quiet = cmd("sh", "-c", f"echo hello; sleep 1; echo done > {shlex.quote(marker)}; exit 4", deadline=15)
     started = time.monotonic()
 
     status = lane.access.stream(quiet, stdin=None, stdout=LeavingSink(1), stderr=io.BytesIO())
@@ -297,7 +297,7 @@ def bash_child_reads_no_startup_file(lane: Lane) -> None:
 
 
 def run_over_a_held_streams_child(lane: Lane, *, elevated: bool = False) -> Result:
-    """Run ``echo done`` with a background child that holds both streams open until the run returns.
+    """Run ``echo done`` with a background child that holds both streams open past the run's return.
 
     The child runs while its hold file exists, for up to two minutes, past the request deadline, so a
     launcher that waited for the streams to close would run into the deadline instead of completing.
@@ -512,7 +512,7 @@ def memfd_that_cannot_be_created_is_not_delivered(lane: Lane) -> None:
     )
     marker = f"{account.make_dir()}/ran"
 
-    result = account.run(script(f"touch {marker}"))
+    result = account.run(script(f"touch {shlex.quote(marker)}"))
 
     assert result.completion == NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)
     assert not account.exists(marker)
