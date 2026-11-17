@@ -11,12 +11,13 @@ cleaned up automatically.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.atomic_write import atomic_write_text
-from agentworks.errors import AgentworksError, ConfigError
+from agentworks.errors import AgentworksError, AuthorizationError, ConfigError
 from agentworks.execution import trust
 from agentworks.path_rendering import format_host_path
 
@@ -330,12 +331,16 @@ def _write_user_config(ssh_config: Path, content: str) -> None:
     """Write the operator's SSH config through a symlink to it, line endings and undecodable bytes as given.
 
     An existing file is replaced atomically and keeps its mode, owner and
-    group; one whose owner or group the replacement cannot keep is refused and
-    left as it is (:func:`atomic_write_text`). A new file is created the way
-    any file is, under the umask.
+    group (:func:`atomic_write_text`). One the user may not write, or whose
+    owner or group the replacement cannot keep, is refused with
+    :class:`AuthorizationError` and left as it is: a rename needs only the
+    directory to be writable, so it would override the file's own refusal. A
+    new file is created the way any file is, under the umask.
     """
     target = ssh_config.resolve()
     if target.exists():
+        if not os.access(target, os.W_OK):
+            raise AuthorizationError(f"cannot update '{format_host_path(target)}': this user may not write it")
         atomic_write_text(target, content, newline="", errors="surrogateescape", preserve_metadata=True)
         return
     with open(target, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:

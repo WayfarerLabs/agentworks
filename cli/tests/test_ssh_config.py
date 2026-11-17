@@ -338,6 +338,35 @@ def _db_with_one_vm() -> MagicMock:
     return db
 
 
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may write a read-only file")
+@pytest.mark.parametrize(
+    "shape", ["file", pytest.param("symlink", marks=pytest.mark.skipif(sys.platform == "win32", reason="symlinks"))]
+)
+def test_a_config_the_user_may_not_write_is_refused_and_left_as_it_was(
+    shape: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A rename needs only the directory to be writable, so it must not override the file's own refusal."""
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    original = b"Host *\n    Foo bar\n"
+    target = ssh_config if shape == "file" else tmp_path / "dotfiles-config"
+    target.write_bytes(original)
+    if shape == "symlink":
+        ssh_config.unlink()
+        ssh_config.symlink_to(target)
+    target.chmod(0o444)
+
+    with pytest.raises(AuthorizationError):
+        sync_ssh_config(config, _db_with_one_vm())
+    sync_ssh_config_or_warn(config, _db_with_one_vm())
+
+    assert target.read_bytes() == original
+    assert ssh_config.is_symlink() == (shape == "symlink")
+    assert len(captured_output.warnings) == 1
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX owners")
 def test_a_config_whose_owner_cannot_be_kept_is_refused_with_the_fix_in_the_warning(
     tmp_path: Path,
