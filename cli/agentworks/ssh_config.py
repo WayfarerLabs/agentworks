@@ -82,8 +82,8 @@ def _include_directive(ssh_config: Path) -> str | None:
         )
     if problem is not None:
         output.warn(
-            f"Include directive left out of {format_host_path(ssh_config)}, so ssh reads none of the managed "
-            f"entries: {problem}"
+            f"Include directive not written to {format_host_path(ssh_config)}, so ssh reads the managed "
+            f"entries only through an Include already there: {problem}"
         )
         return None
     return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
