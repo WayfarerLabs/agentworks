@@ -220,8 +220,7 @@ def delete_vm_workspace(
     """Delete a workspace from a VM.
 
     Tears down what :func:`create_vm_workspace` set up: the directory and
-    the workspace's Linux group, plus the tmuxinator discovery link earlier
-    releases created for it. ``groupadd`` at create time has a symmetric
+    the workspace's Linux group. ``groupadd`` at create time has a symmetric
     ``groupdel`` here, so a deleted workspace leaves no residual group on
     the VM (issue #249). Callers pass the recorded ``linux_group`` rather
     than re-deriving it, so legacy workspaces (older ``ws--`` prefix) drop
@@ -254,13 +253,6 @@ def delete_vm_workspace(
                 return
         else:
             target.run(f"rm -rf {quoted}", sudo=True, timeout=30)
-        link = f"~/.config/tmuxinator/ws-{ws_name}-console.yml"
-        target.run(
-            f'if test -L {link} && test "$(readlink -- {link})" = '
-            f"{shlex.quote(workspace_path + '/.tmuxinator.yml')}; then rm -- {link}; fi",
-            check=False,
-            timeout=10,
-        )
         # Remove the workspace's Linux group. check=False so a group that
         # is already gone (or, defensively, one groupdel refuses to remove)
         # is tolerated rather than failing the delete, mirroring the

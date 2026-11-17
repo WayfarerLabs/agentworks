@@ -50,6 +50,10 @@ def effective_references(
     return tuple(refs)
 
 
+TMUXINATOR_FIELD_REMOVAL = "0.22.0"
+"""The release that stops accepting the inert ``tmuxinator`` field (issue #918)."""
+
+
 class WorkspaceTemplate(DeclaredResource):
     """Workspace template definition. Every field is optional, and ``None``
     means "not set here, inherit it" rather than "off"."""
@@ -96,7 +100,12 @@ class WorkspaceTemplate(DeclaredResource):
     def deprecated_fields(self) -> dict[str, str]:
         """Any explicit ``tmuxinator`` value is a setting with no effect."""
         if self.tmuxinator is not None:
-            return {"tmuxinator": "workspace tmuxinator projects are no longer generated; remove the setting"}
+            return {
+                "tmuxinator": (
+                    "it has no effect, since workspace tmuxinator projects are no longer generated, and it "
+                    f"will be removed in {TMUXINATOR_FIELD_REMOVAL}; remove the setting"
+                )
+            }
         return {}
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:

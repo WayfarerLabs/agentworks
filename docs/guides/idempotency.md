@@ -180,8 +180,9 @@ recursively delete the final workspace path based on the naming pattern or a fai
 Releases up to 0.19 generated a tmuxinator project in each workspace (`.tmuxinator.yml`) and linked
 it from the VM admin's `~/.config/tmuxinator/ws-<name>-console.yml`. `vm reinit` removes those admin
 links, without following them, and each workspace's `.tmuxinator.yml` that is a regular file still
-starting with the generated header. Anything else is left alone, and a failure warns without failing
-reinit.
+starting with the generated header. Anything else is left alone. A link, project or workspace
+directory that cannot be read or searched also stays, and like a failed removal it makes reinit warn
+without failing.
 
 ## Workspace repair
 

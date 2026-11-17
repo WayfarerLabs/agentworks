@@ -52,6 +52,7 @@ PLUGIN = "pub-plugin"
 # stores in ``Plugin.manifests``.
 _MANIFEST_ANCHOR = f"{__package__}._manifest_fixture"
 _DIRTY_ANCHOR = f"{__package__}._manifest_dirty_fixture"
+_DEPRECATED_ANCHOR = f"{__package__}._manifest_deprecated_fixture"
 # A real, importable package that ships NO ``manifests/`` subdir: the anchor
 # resolves (so the unimportable-anchor guard never fires) but its curated
 # bundle is missing.
@@ -229,6 +230,17 @@ def test_dirty_bundle_raises_config_error_not_assertion() -> None:
             anchor=_DIRTY_ANCHOR,
             subdir="manifests",
             origin_for=lambda file_name: Origin.built_in(source=f"dirty/{file_name}"),
+        )
+
+
+def test_bundle_with_a_deprecated_setting_is_refused() -> None:
+    """A deprecation in a first-party bundle is a curation bug, refused like an issue."""
+    with pytest.raises(ConfigError, match="issue-free"):
+        publish_manifest_package(
+            registry_with_shell(),
+            anchor=_DEPRECATED_ANCHOR,
+            subdir="manifests",
+            origin_for=lambda file_name: Origin.built_in(source=f"deprecated/{file_name}"),
         )
 
 

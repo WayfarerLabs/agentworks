@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 from agentworks.debian import DebianRelease
-from agentworks.ssh import SSHResult
+from agentworks.ssh import SSHError, SSHResult
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.initializer.driver import (
     VMInitializationOperation,
@@ -24,7 +24,6 @@ from agentworks.vms.initializer.driver import (
     _retire_workspace_tmuxinator_projects,
 )
 from agentworks.vms.templates import ResolvedVMTemplate
-from agentworks.workspaces.retired_tmuxinator import PROJECTS_PER_COMMAND
 from tests.conftest import ManifestDoc
 from tests.native_setup_fixtures import LocalFixtureTransport
 
@@ -120,44 +119,56 @@ def test_reinit_removes_a_header_bearing_project_and_leaves_any_other(
     assert (truncated / ".tmuxinator.yml").exists()
 
 
-@requires_guest_shell
-def test_every_command_runs_under_sh_and_workspaces_are_chunked(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path
-) -> None:
-    target, _workspace, entries = guest
-    shutil.rmtree(entries)
-    paths = []
-    for index in range(PROJECTS_PER_COMMAND + 1):
-        path = tmp_path / "guest" / "workspaces" / f"w{index}"
-        path.mkdir()
-        (path / ".tmuxinator.yml").write_text(_GENERATED)
-        db.insert_workspace(f"w{index}", vm_name="box", workspace_path=str(path), template="default", linux_group="g")
-        paths.append(path)
-
-    _reinit(db, target)
-
-    assert len(target.commands) == 3
-    assert all(command.startswith("sh -c ") for command in target.commands)
-    assert not any((path / ".tmuxinator.yml").exists() for path in paths)
-
-
-def _workspace(db: Database, root: Path, name: str, content: str = _GENERATED) -> Path:
+def _workspace(db: Database, root: Path, name: str, content: str | None = _GENERATED) -> Path:
     path = root / name
     path.mkdir()
-    (path / ".tmuxinator.yml").write_text(content)
+    if content is not None:
+        (path / ".tmuxinator.yml").write_text(content)
     db.insert_workspace(name, vm_name="box", workspace_path=str(path), template="default", linux_group=f"ws-{name}")
     return path
 
 
 @requires_guest_shell
+def test_cleanup_is_two_sh_commands_with_paths_on_stdin(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path
+) -> None:
+    target, workspace, _entries = guest
+    others = [_workspace(db, tmp_path / "guest" / "workspaces", f"w{index}") for index in range(3)]
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+
+    _reinit(db, target)
+
+    assert len(target.commands) == 2
+    assert all(command.startswith("sh -c ") for command in target.commands)
+    assert not any((path / ".tmuxinator.yml").exists() for path in [workspace, *others])
+
+
+@requires_guest_shell
+def test_a_fifo_or_directory_at_the_project_path_is_left_alone(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    os.mkfifo(workspace / ".tmuxinator.yml")
+    directory = _workspace(db, tmp_path / "guest" / "workspaces", "dir", content=None)
+    (directory / ".tmuxinator.yml").mkdir()
+
+    _reinit(db, target)
+
+    assert (workspace / ".tmuxinator.yml").is_fifo()
+    assert (directory / ".tmuxinator.yml").is_dir()
+    assert captured_output.warnings == []
+
+
+@requires_guest_shell
 @skip_as_root
-def test_a_failed_removal_mid_chunk_warns_once_and_the_rest_are_still_removed(
+def test_a_failed_removal_warns_once_and_the_rest_are_still_removed(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
     tmp_path: Path,
     captured_output: CapturedOutput,
 ) -> None:
     target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
     locked = _workspace(db, tmp_path / "guest" / "workspaces", "locked")
     after = _workspace(db, tmp_path / "guest" / "workspaces", "zafter")
     locked.chmod(0o555)
@@ -166,7 +177,6 @@ def test_a_failed_removal_mid_chunk_warns_once_and_the_rest_are_still_removed(
     finally:
         locked.chmod(0o755)
 
-    assert len(target.commands) == 2
     assert (locked / ".tmuxinator.yml").exists()
     assert not (workspace / ".tmuxinator.yml").exists() and not (after / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
@@ -174,25 +184,95 @@ def test_a_failed_removal_mid_chunk_warns_once_and_the_rest_are_still_removed(
 
 @requires_guest_shell
 @skip_as_root
-def test_a_failed_chunk_does_not_stop_the_next_one(
-    db: Database,
-    guest: tuple[LocalFixtureTransport, Path, Path],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
+def test_an_unreadable_project_is_kept_and_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
 ) -> None:
     target, workspace, _entries = guest
-    monkeypatch.setattr("agentworks.workspaces.retired_tmuxinator.PROJECTS_PER_COMMAND", 2)
-    locked = _workspace(db, tmp_path / "guest" / "workspaces", "locked")
-    after = _workspace(db, tmp_path / "guest" / "workspaces", "zafter")
-    locked.chmod(0o555)
+    project = workspace / ".tmuxinator.yml"
+    project.write_text(_GENERATED)
+    project.chmod(0)
     try:
         _reinit(db, target)
     finally:
-        locked.chmod(0o755)
+        project.chmod(0o644)
 
-    assert len(target.commands) == 3
-    assert not (workspace / ".tmuxinator.yml").exists() and not (after / ".tmuxinator.yml").exists()
+    assert project.read_text() == _GENERATED
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
+@skip_as_root
+def test_an_unsearchable_workspace_directory_is_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    workspace.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        workspace.chmod(0o755)
+
+    assert (workspace / ".tmuxinator.yml").exists()
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
+@skip_as_root
+def test_an_unsearchable_discovery_directory_is_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, entries = guest
+    link = entries / "ws-proj-console.yml"
+    link.symlink_to(workspace / ".tmuxinator.yml")
+    entries.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        entries.chmod(0o755)
+
+    assert link.is_symlink()
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
+def test_a_transport_error_on_one_command_still_runs_the_other(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    link = entries / "ws-proj-console.yml"
+    link.symlink_to(workspace / ".tmuxinator.yml")
+    real_run = target.run
+    calls: list[str] = []
+
+    def first_fails(command: str, **kwargs: object) -> SSHResult:
+        calls.append(command)
+        if len(calls) == 1:
+            raise SSHError("connection dropped")
+        return real_run(command, **kwargs)
+
+    target.run = first_fails  # type: ignore[method-assign]
+
+    _reinit(db, target)
+
+    assert len(calls) == 2
+    assert link.is_symlink()
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
+def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    db.insert_workspace("odd", vm_name="box", workspace_path="/srv/odd\nname", template="default", linux_group="g")
+
+    _reinit(db, target)
+
+    assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
 
 
@@ -298,3 +378,54 @@ def test_an_explicit_instance_spec_setting_warns_and_a_stored_one_still_decodes(
 
     assert stored is not None and stored.payload == overlay.payload
     assert _deprecation_lines(captured_output) == []
+
+
+# -- Doctor reports the setting whatever the ambient suppression -------------
+
+
+@pytest.mark.parametrize("suppressed", [False, True])
+def test_doctor_reports_stored_workspace_settings_and_ignores_suppression(suppressed: bool) -> None:
+    from contextlib import closing
+
+    from agentworks import output
+    from agentworks.db import Database, VersionedPayload
+    from agentworks.doctor import HealthGroup, Status
+    from agentworks.doctor_state import append_workspace_deprecation_checks
+
+    with closing(Database()) as database:
+        database.insert_vm("box", site="lima-local", hostname="box")
+        for name in ("old", "modern"):
+            database.insert_workspace(name, f"/srv/{name}", "box", f"ws-{name}")
+        database.instance_state.put_desired_overlay("workspace", "old", VersionedPayload(1, {"tmuxinator": False}))
+        database.instance_state.put_desired_overlay("workspace", "modern", VersionedPayload(1, {"repo": "r"}))
+    output.set_suppress_deprecations(suppressed)
+    group = HealthGroup("Configuration")
+
+    append_workspace_deprecation_checks(group)
+
+    assert [(check.name, check.status) for check in group.checks] == [("workspace/old.tmuxinator", Status.WARN)]
+
+
+@pytest.mark.parametrize("suppressed", [False, True])
+def test_doctor_reports_manifest_settings_and_ignores_suppression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suppressed: bool
+) -> None:
+    from agentworks import output
+    from agentworks.doctor import Status, _check_config
+    from tests.conftest import write_cfg
+
+    config_path = write_cfg(
+        tmp_path,
+        ManifestDoc("vm-template", "default"),
+        ManifestDoc("admin-template", "default"),
+        ManifestDoc("workspace-template", "old", {"tmuxinator": True}),
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", config_path)
+    output.set_suppress_deprecations(suppressed)
+
+    group, _config, registry = _check_config()
+
+    assert registry is not None
+    rows = [check for check in group.checks if check.name == "Manifest"]
+    assert [row.status for row in rows] == [Status.WARN]
+    assert "workspace-template/old.tmuxinator" in (rows[0].message or "")

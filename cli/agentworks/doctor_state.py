@@ -86,6 +86,44 @@ def append_session_template_deprecation_checks(group: HealthGroup, registry: Reg
         )
 
 
+def append_workspace_deprecation_checks(group: HealthGroup) -> None:
+    """Inspect stored workspace declarations for deprecated settings.
+
+    Manifest declarations report through ``ManifestSet.deprecations``; this covers
+    the stored final layers instance specs created. It reads the ordinary current
+    database read-only, and an unavailable live view receives an explicit coverage row.
+    """
+    from agentworks.db import DatabaseDriverError
+    from agentworks.declared_resource import DeclaredResource
+    from agentworks.errors import AgentworksError
+    from agentworks.instance_specs import get_instance_overlay
+
+    coverage = "Stored workspace declaration coverage"
+    try:
+        with _current_database() as (exists, current, latest, database):
+            if not exists:
+                return
+            if current != latest:
+                group.info(coverage, "Stored workspace declarations not checked; see the Database group")
+                return
+            assert database is not None
+            with database.snapshot():
+                for workspace in database.list_workspaces():
+                    owner = f"workspace/{workspace.name}"
+                    try:
+                        overlay = get_instance_overlay(database, "workspace", workspace.name)
+                    except AgentworksError:
+                        group.fail(owner, "Workspace compatibility could not be checked for this declaration")
+                        continue
+                    declaration = None if overlay is None else overlay.declaration
+                    if not isinstance(declaration, DeclaredResource):
+                        continue
+                    for field, guidance in declaration.deprecated_fields().items():
+                        group.warn(f"{owner}.{field}", "Deprecated workspace setting", hint=guidance)
+    except (AgentworksError, DatabaseDriverError, OSError, ValueError):
+        group.fail(coverage, "Stored workspace declarations not checked; see the Database group")
+
+
 def _append_session_template_fields(group: HealthGroup, owner: str, template: ResolvedSessionTemplate) -> None:
     """Inspect session plaintext and validate persisted Shell capability fields.
 

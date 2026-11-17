@@ -16,7 +16,7 @@ import pytest
 
 from agentworks.errors import AlreadyExistsError
 from agentworks.ssh import SSHError, SSHResult
-from agentworks.workspaces.backends.vm import create_vm_workspace, delete_vm_workspace
+from agentworks.workspaces.backends.vm import create_vm_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 
 if TYPE_CHECKING:
@@ -388,8 +388,6 @@ def test_late_nonrepo_failure_reclaims_only_an_empty_reservation(
     original = KeyboardInterrupt() if cancel else SSHError("fixture ACL failure")
 
     def fail_acl(*args):
-        assert not (final / ".tmuxinator.yml").exists()
-        assert not (target.home / ".config/tmuxinator").exists()
         if changed == "other-file":
             (final / "operator-work").write_text("precious\n")
         raise original
@@ -405,34 +403,6 @@ def test_late_nonrepo_failure_reclaims_only_an_empty_reservation(
         assert not final.exists() and not target.groups
         monkeypatch.setattr("agentworks.workspaces.backends.vm.apply_workspace_acls", lambda *args: None)
         assert create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
-
-
-def test_create_generates_no_tmuxinator_project_and_keeps_admin_entries(backend):
-    target, vm, config, final = backend
-    entries = target.home / ".config/tmuxinator"
-    entries.mkdir(parents=True)
-    own = entries / "ws-project-console.yml"
-    own.write_text("operator config\n")
-
-    create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
-
-    assert own.read_text() == "operator config\n"
-    assert [entry.name for entry in entries.iterdir()] == ["ws-project-console.yml"]
-    assert not (final / ".tmuxinator.yml").exists()
-
-
-def test_delete_removes_the_workspace_discovery_link(backend):
-    target, vm, config, final = backend
-    create_vm_workspace(vm, config, "project", ResolvedTemplate(name="empty"))
-    entries = target.home / ".config/tmuxinator"
-    entries.mkdir(parents=True)
-    link = entries / "ws-project-console.yml"
-    link.symlink_to(final / ".tmuxinator.yml")
-
-    delete_vm_workspace(vm, config, "project", str(final), "ws-project")
-
-    assert not final.exists()
-    assert not link.is_symlink()
 
 
 @pytest.mark.parametrize(

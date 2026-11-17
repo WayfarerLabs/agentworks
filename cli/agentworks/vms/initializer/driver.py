@@ -300,7 +300,10 @@ def _retire_workspace_tmuxinator_projects(db: Database, vm_name: str, ts_target:
             ts_target, [workspace.workspace_path for workspace in db.list_workspaces(vm_name=vm_name)]
         )
     except SSHError as e:
-        msg = f"Removing leftover workspace tmuxinator projects: {e}"
+        msg = (
+            f"Leftover workspace tmuxinator projects were not all removed ({e}); what could not be "
+            f"checked or removed stays in place. Inspect it, then rerun 'agw vm reinit {vm_name}'."
+        )
         logger.warning(msg)
         output.warn(msg)
 

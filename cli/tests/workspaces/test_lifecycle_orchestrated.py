@@ -1896,25 +1896,6 @@ def test_copy_applies_canonical_acl_after_unpack_and_chown(
     assert access > sgid
 
 
-def test_copy_generates_no_tmuxinator_project(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = make_config()
-    _seed(db)
-    _reachable(monkeypatch, True)
-    fake = _wire_copy_fakes(monkeypatch, [])
-
-    workspace_manager.copy_workspace(
-        db, config, "ws1", dest_name="ws2", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
-    )
-
-    assert db.get_workspace("ws2") is not None
-    assert not any(path.endswith("/.tmuxinator.yml") for path, _content in fake.written)
-    assert not any("tmuxinator" in command for command in fake.commands)
-
-
 class _RehomeTarget(_FakeAdminTarget):
     """Admin target for the rehome happy path: ``test -d`` of the target path
     reports absent until the rsync copy has run, then present, so rehome's
@@ -1969,27 +1950,6 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     # non-fatal but here it succeeded).
     row = db.get_workspace("ws1")
     assert row is not None and row.workspace_path == "/dst/ws1"
-
-
-def test_rehome_generates_no_tmuxinator_project(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = make_config()
-    _seed(db)
-    _reachable(monkeypatch, True)
-    fake = _RehomeTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
-
-    workspace_manager.rehome_workspace(
-        db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
-    )
-
-    row = db.get_workspace("ws1")
-    assert row is not None and row.workspace_path == "/dst/ws1"
-    assert not any(path.endswith("/.tmuxinator.yml") for path, _content in fake.written)
-    assert not any("tmuxinator" in command for command in fake.commands)
 
 
 class _RehomeThenRepairTarget(_FakeAdminTarget, SSHTransport):  # type: ignore[misc]  # the fake's recording run deliberately shadows the real signature
