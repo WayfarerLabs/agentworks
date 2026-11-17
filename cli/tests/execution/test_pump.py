@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.windows
 
 NONCE = "cd" * 16
-# The pump reaps a client it killed for at most 0.5 s, so on a loaded host the client can still be
-# exiting when the session ends. This wait is far past that and far short of the 30 s the sleeping
+# The pump reaps a client it killed for at most 0.5 s, which a loaded host can outlast. These tests
+# give the pump's own reap this bound instead: far past that, and far short of the 30 s the sleeping
 # clients here would otherwise run, so a client the pump left alive still fails.
 EXIT_GUARD_SECONDS = 10
 
@@ -41,6 +41,11 @@ def start():
 def finish(status=0):
     out.write(P + b"end\\n"); out.flush(); err.write(P + b"exit %d\\n" % status); err.flush()
 """
+
+
+@pytest.fixture(autouse=True)
+def _reap_within_the_exit_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pump, "_REAP_SECONDS", EXIT_GUARD_SECONDS)
 
 
 class Run:
@@ -69,7 +74,7 @@ class Run:
     def assert_closed(self) -> None:
         process = self.session._proc  # noqa: SLF001 - the point is that nothing is left behind
         assert process is not None
-        process.wait(timeout=EXIT_GUARD_SECONDS)
+        assert process.returncode is not None  # the pump reaped it
         assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
 
@@ -211,7 +216,7 @@ def leaving_session(script: str, *, stdout: pump.Sink | None = None, stderr: pum
 def assert_reaped(session: PipeSession) -> None:
     process = session._proc  # noqa: SLF001 - the point is that nothing is left behind
     assert process is not None
-    process.wait(timeout=EXIT_GUARD_SECONDS)
+    assert process.returncode is not None  # the pump reaped it
     assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
 
@@ -479,7 +484,7 @@ def test_an_interruption_cleans_the_client_before_propagating(interruption: type
 
     process = session._proc  # noqa: SLF001
     assert process is not None
-    process.wait(timeout=EXIT_GUARD_SECONDS)
+    assert process.returncode is not None  # the pump reaped it
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process signals have no equivalent Windows return code")
