@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.errors import ConfigError
+from agentworks.errors import AuthorizationError, ConfigError
 from agentworks.execution.ssh_process import VMPolicy
 from agentworks.execution.trust import TrustBinding, TrustMode
 from agentworks.ssh_config import (
@@ -24,6 +24,7 @@ from agentworks.ssh_config import (
     _remove_legacy_section,
     ssh_host_alias,
     sync_ssh_config,
+    sync_ssh_config_or_warn,
 )
 from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
@@ -327,6 +328,40 @@ def test_sync_ssh_config_announce_controls_the_synced_line(tmp_path: Path, captu
     sync_ssh_config(config, db, announce=False)
     assert captured_output.info == before  # no new line
     assert conf.exists()  # still written for correctness
+
+
+def _db_with_one_vm() -> MagicMock:
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+    return db
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX owners")
+def test_a_config_whose_owner_cannot_be_kept_is_refused_with_the_fix_in_the_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    original = b"Host *\n    Foo bar\n"
+    ssh_config.write_bytes(original)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise PermissionError("not permitted")
+
+    monkeypatch.setattr(os, "chown", refuse)
+
+    with pytest.raises(AuthorizationError) as caught:
+        sync_ssh_config(config, _db_with_one_vm())
+    sync_ssh_config_or_warn(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == original
+    assert caught.value.hint is not None
+    (warning,) = captured_output.warnings
+    assert caught.value.hint in warning
 
 
 @pytest.mark.windows

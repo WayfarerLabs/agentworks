@@ -128,12 +128,14 @@ def sync_ssh_config_or_warn(config: Config, db: Database, *, announce: bool = Tr
 
     For a command whose VM work already succeeded: a failed write to the
     local ``~/.ssh/config`` says nothing about the VM's health, so it does not
-    fail the command.
+    fail the command. The warning carries the error's hint, which is how to
+    fix the write.
     """
     try:
         sync_ssh_config(config, db, announce=announce)
     except Exception as e:
-        output.warn(f"SSH config sync failed: {e}")
+        hint = e.hint if isinstance(e, AgentworksError) else None
+        output.warn(f"SSH config sync failed: {e}" + (f". {hint}" if hint else ""))
         output.info("VM is likely still usable.")
 
 
