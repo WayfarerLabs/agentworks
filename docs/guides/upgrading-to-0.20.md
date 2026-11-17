@@ -265,16 +265,14 @@ has started.
 - **Managed SSH config lines are written for your own `ssh` to read exactly.** Each managed
   `IdentityFile` line holds the configured key path, absolute. The `Include` line added to
   `~/.ssh/config` is quoted when its directory holds a space or an apostrophe, and such a line an
-  earlier release wrote unquoted is rewritten in place. When the directory holds `%`, `$`, a quote,
-  a backslash, a control character, `*`, `?` or `[`, no `Include` line is written and a warning says
-  so; your own `ssh` sees the managed entries only through an `Include` already in the file, so move
-  `ssh_config` to a plain path. To stop Agentworks adding the line, comment it out; the commented
-  line is left as it is.
-- **`~/.ssh/config` is replaced, not edited.** Agentworks writes a new copy and renames it over the
-  file (through a symlink to it), keeping its mode, owner, group, line endings and any bytes that
-  are not UTF-8. A file you cannot write is left untouched and the SSH config sync fails, as before.
-  The same holds for one whose owner or group the copy cannot take, such as a file another user owns
-  or one in a group you are not in; the error names the `chown` that makes the file yours.
+  earlier release wrote unquoted is rewritten as the quoted line where it stands. When the directory
+  holds `%`, `$`, a quote, a backslash, a control character, `*`, `?` or `[`, no `Include` line is
+  written and a warning says so; your own `ssh` sees the managed entries only through an `Include`
+  already in the file, so move `ssh_config` to a plain path. To stop Agentworks adding the line,
+  comment it out; the commented line is left as it is.
+- **`~/.ssh/config` keeps its bytes and line endings.** Agentworks still edits the file in place, as
+  before, and now keeps CRLF line endings and any bytes that are not UTF-8. A file you cannot write
+  is reported and left as it was.
 - **Windows passes arguments through unexpanded.** `agw` no longer expands `*`, `?`, `~`, `%VAR%` or
   `$VAR` in its own arguments on Windows, which it did before forwarding them, even after `--`. A
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a
