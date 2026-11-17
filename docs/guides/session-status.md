@@ -25,15 +25,15 @@ establish ownership.
 
 Inspection is read-only. Existing positive-PID rows retain their ordinary presence checks without
 eager identity repair. Batched checks combine the normal probes into one remote request per
-reachable VM. Within that request each tmux client has a 2-second timeout, and a session check that
-times out skips the server check, so a stuck tmux server leaves only its own session `UNKNOWN`. A
-pending launch with no recorded PID requires additional bounded reads to verify its native attempt
-identity and stable process fingerprint. These reads do not adopt the runtime or repair its row.
-Incomplete or indeterminate evidence stays `UNKNOWN`. Each guest call is non-interactive, makes one
-attempt, and has a 10-second timeout; the batched request adds 6 seconds for each session it checks,
-the most one session's clients can take, so stuck servers never use up the time of the others. Calls
-without fact input explicitly close stdin so Windows SSH does not retain the operator's console
-handle after returning the complete result.
+reachable VM. That request probes the VM's sessions side by side and bounds each tmux client with a
+2-second timeout, and a session check that times out skips the server check, so a stuck tmux server
+leaves only its own session `UNKNOWN` and delays no other. A pending launch with no recorded PID
+requires additional bounded reads to verify its native attempt identity and stable process
+fingerprint. These reads do not adopt the runtime or repair its row. Incomplete or indeterminate
+evidence stays `UNKNOWN`. Each guest call is non-interactive, makes one attempt, and has a 10-second
+timeout; the batched request adds 6 seconds, the most one session's clients can take, however many
+sessions it checks. Calls without fact input explicitly close stdin so Windows SSH does not retain
+the operator's console handle after returning the complete result.
 
 Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
 them; the table adds `STATUS`, reports progress before SSH begins, and appends compact uptime to a

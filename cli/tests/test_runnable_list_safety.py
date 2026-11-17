@@ -171,12 +171,11 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     events: list[str] = []
     vm = db.get_vm("box")
     assert vm is not None
-    name_key = base64.b64encode(b"work").decode("ascii")
 
     class Target:
         def run(self, _command: str, **kwargs: object) -> _Result:
             input_data = kwargs.pop("input_data")
-            # The guest timeout plus the one row's own bound.
+            # The guest timeout plus one row's bound, whatever the row count.
             assert kwargs == {
                 "check": False,
                 "timeout": GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
@@ -194,7 +193,7 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
             )
             assert (pid, owner) == ("100", "-")
             events.append("transport-read")
-            return framed_runtime_result(_command, _Result(0, f"S:{name_key}:0::0::0::0:\n"))
+            return framed_runtime_result(_command, _Result(0, "S:1:0::0::0::0:\n"))
 
     def open_transport(*args: object, **kwargs: object) -> Target:
         assert len(args) == 2

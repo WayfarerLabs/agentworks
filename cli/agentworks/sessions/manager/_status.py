@@ -44,10 +44,16 @@ if TYPE_CHECKING:
     from ._tmux_server import SessionTmuxServer
 
 # Bounds each tmux client in the batch probe. A row runs at most two clients,
-# so its worst case is _batch_row_bound_seconds(), and the batch request
-# grants every row that bound on top of the ordinary guest timeout.
+# so its worst case is _batch_row_bound_seconds(); rows are probed
+# concurrently, so the batch request needs that bound only once on top of
+# the ordinary guest timeout.
 _BATCH_CLIENT_TIMEOUT_SECONDS = 2
 _BATCH_CLIENT_KILL_SECONDS = 1
+# Each row reports one line, written in one write. Capping every hex field
+# keeps that line well under PIPE_BUF (4096 bytes on Linux), so concurrent
+# rows' lines never interleave on the shared stdout pipe. An oversized field
+# becomes a newline, which no canonical fact contains.
+_BATCH_FIELD_HEX_LIMIT = 512
 
 
 def _batch_row_bound_seconds() -> int:
@@ -268,8 +274,8 @@ def batch_check_status(
     result = target.run(
         cmd,
         check=False,
-        # Each row's own bound, so stuck servers never exhaust another row's time.
-        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS + len(rows) * _batch_row_bound_seconds(),
+        # Rows run concurrently, so one row's bound covers them all.
+        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
         retries=GUEST_OBSERVATION_ATTEMPTS,
         tty=False,
         input_data=_batch_probe_data(rows),
@@ -277,7 +283,8 @@ def batch_check_status(
     stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "BATCH")
 
     status_map = {session.name: SessionStatus.UNKNOWN for session, _server in rows}
-    rows_by_key = {_encoded_probe_field(session.name): (session, server) for session, server in rows}
+    # Lines arrive in any order, keyed by the row's 1-based position in the request.
+    rows_by_key = {str(index): row for index, row in enumerate(rows, start=1)}
 
     if (
         result.returncode != 0
@@ -301,8 +308,7 @@ def batch_check_status(
         if fields[0] != "S" or key not in rows_by_key or key in frames or not _valid_batch_frame(fields):
             return status_map
         frames[key] = fields
-    if set(frames) != set(rows_by_key):
-        return status_map
+    # A row without a line, such as one whose decoding failed, stays UNKNOWN.
 
     for key, fields in frames.items():
         session, server = rows_by_key[key]
@@ -393,41 +399,47 @@ def _batch_probe_data(rows: Sequence[tuple[SessionRow, SessionTmuxServer]]) -> s
 
 
 def _batch_probe_command() -> str:
-    """Build the constant-size loop program for a VM's session rows.
+    """Build the constant-size program that probes a VM's session rows.
 
-    Every tmux client is bounded, and a row whose has-session times out
-    skips list-sessions, so a row costs at most ``_batch_row_bound_seconds``
-    whatever its server does. Clients take no stdin, so the remaining rows
-    stay out of every server's reach.
+    Each row is probed in a background job that prints one line, prefixed
+    with the row's position, and the program waits for every job, so nothing
+    it starts outlives it. Every tmux client is bounded, and a row whose
+    has-session times out skips list-sessions, so a row costs at most
+    ``_batch_row_bound_seconds`` whatever its server does, and a stuck server
+    delays no other row. Rows take no stdin, so the remaining rows stay out
+    of every server's reach. Nothing is written on the guest.
     """
     from agentworks.sessions.tmux import owner_client_command
 
     client = f'timeout -k {_BATCH_CLIENT_KILL_SECONDS} {_BATCH_CLIENT_TIMEOUT_SECONDS} tmux -S "$SOCK" "$@" </dev/null'
     as_owner = owner_client_command(client, owner_word='"$OWNER"')
     return (
-        "hex() { od -An -tx1 | tr -d ' \\n'; }; "
+        # -v: od otherwise abbreviates repeated 16-byte lines as "*".
+        "hex() { od -An -v -tx1 | tr -d ' \\n'; }; "
+        f'cap() {{ if [ ${{#1}} -le {_BATCH_FIELD_HEX_LIMIT} ]; then printf %s "$1"; else printf 0a; fi; }}; '
         'decode() { printf %s "$1" | base64 -d; }; '
         "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
-        'BOOT_HEX=$(printf %s "$BOOT" | hex); '
-        "while read -r N64 S64 PID O64; do "
-        'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; '
+        'BOOT_HEX=$(cap "$(printf %s "$BOOT" | hex)"); '
+        "probe_row() { "
+        'I=$1; PID=$4; O64=$5; N=$(decode "$2") || exit 90; SOCK=$(decode "$3") || exit 90; '
         'if [ "$O64" != - ]; then OWNER=$(decode "$O64") || exit 90; fi; '
         f'run_tmux() {{ if [ "$O64" != - ]; then {as_owner}; else {client}; fi; }}; '
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
-        'HHEX=$(printf %s "$HERR" | hex); '
+        'HHEX=$(cap "$(printf %s "$HERR" | hex)"); '
         # 124 and 137 are timeout's own statuses: the server did not answer.
         'case "$H" in 124|137) S=$H; SHEX=;; '
-        '*) SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(printf %s "$SERR" | hex);; esac; '
+        '*) SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(cap "$(printf %s "$SERR" | hex)");; esac; '
         'if [ "$PID" = - ]; then PFACT=; P=1; '
         'elif [ "$O64" != - ]; then '
         'PFACT=$(sudo -n sh -c "if test -d /proc/$PID; then printf present; '
         'else printf absent; fi" 2>/dev/null); P=$?; '
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
         'else printf absent; fi" 2>/dev/null); P=$?; fi; '
-        'PHEX=$(printf %s "$PFACT" | hex); '
+        'PHEX=$(cap "$(printf %s "$PFACT" | hex)"); '
         'printf "S:%s:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
-        '"$N64" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; '
-        "done"
+        '"$I" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; }; '
+        "I=0; while read -r N64 S64 PID O64; do I=$((I + 1)); "
+        'probe_row "$I" "$N64" "$S64" "$PID" "$O64" </dev/null & done; wait'
     )
 
 

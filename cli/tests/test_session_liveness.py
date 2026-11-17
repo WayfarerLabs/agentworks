@@ -28,7 +28,6 @@ from agentworks.sessions.manager._status import (
     _batch_probe_command,
     _batch_probe_data,
     _BoundedStatusTarget,
-    _encoded_probe_field,
 )
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid, runtime_probe_command
 from tests._runtime_probes import framed_runtime_result, server_owner_parts
@@ -130,7 +129,7 @@ def _session(
 
 
 def _batch_row(
-    name: str,
+    index: int,
     *,
     has_returncode: int = 0,
     has_diagnostic: str = "",
@@ -142,7 +141,7 @@ def _batch_row(
     pid_fact: str = "present",
 ) -> str:
     return (
-        f"S:{_encoded_probe_field(name)}:{has_returncode}:{has_diagnostic.encode().hex()}:"
+        f"S:{index}:{has_returncode}:{has_diagnostic.encode().hex()}:"
         f"{server_returncode}:{server_diagnostic.encode().hex()}:"
         f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}:{pid_fact.encode().hex()}"
     )
@@ -163,10 +162,10 @@ def test_batch_mixed() -> None:
             "has-session": _FakeResult(
                 ok=True,
                 stdout=(
-                    _batch_row("a1")
+                    _batch_row(1)
                     + "\n"
                     + _batch_row(
-                        "s1",
+                        2,
                         has_returncode=1,
                         has_diagnostic="can't find session: s1",
                         server_returncode=1,
@@ -276,7 +275,9 @@ def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
     completed = subprocess.CompletedProcess(
         [],
         0,
-        stdout=("AGW_RUNTIME_BATCH=" + "\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
+        stdout=(
+            "AGW_RUNTIME_BATCH=" + "\n".join(_batch_row(index) for index, _ in enumerate(sessions, start=1)) + "\n"
+        ).encode(),
         stderr=b"",
     )
     calls: list[tuple[list[str], dict[str, object]]] = []
@@ -326,13 +327,14 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
         os.symlink(executable, bin_dir / name)
 
     tmux = bin_dir / "tmux"
+    # Rows run concurrently, so each fake records a call as one line in one write.
     tmux.write_text(
         "#!/bin/sh\n"
-        'printf tmux >> "$AGW_PROBE_AUDIT"\n'
-        'for arg in "$@"; do printf \'\\t%s\' "$arg" >> "$AGW_PROBE_AUDIT"; done\n'
+        'line="${AGW_AS:+as\t$AGW_AS\t}tmux"\n'
+        'for arg in "$@"; do line="$line\t$arg"; done\n'
         # A client that can read anything from stdin could hand later rows to its server.
-        "if IFS= read -r line; then printf '\\tSTDIN' >> \"$AGW_PROBE_AUDIT\"; fi\n"
-        "printf '\\n' >> \"$AGW_PROBE_AUDIT\"\n"
+        'if IFS= read -r input; then line="$line\tSTDIN"; fi\n'
+        'printf \'%s\\n\' "$line" >> "$AGW_PROBE_AUDIT"\n'
     )
     tmux.chmod(0o755)
 
@@ -352,7 +354,7 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
         '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
         "  exit 97\n"
         "fi\n"
-        'printf \'as\\t%s\\t\' "$4" >> "$AGW_PROBE_AUDIT"\n'
+        "AGW_AS=$4; export AGW_AS\n"
         "shift 5\n"
         'exec "$@"\n'
     )
@@ -427,18 +429,20 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
     assert parsed == {
         session.name: SessionStatus.UNKNOWN if session.pid is None else SessionStatus.RUNNING for session in sessions
     }
-    assert audit.read_text().splitlines() == [
-        f"tmux\t-S\t{ADMIN_SOCKETS}/admin.sock\thas-session\t-t\t=admin",
-        f"tmux\t-S\t{ADMIN_SOCKETS}/admin.sock\tlist-sessions",
-        f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent.sock\thas-session\t-t\t=agent",
-        f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent.sock\tlist-sessions",
-        f"tmux\t-S\t{ADMIN_SOCKETS}/admin-pid.sock\thas-session\t-t\t=admin-pid",
-        f"tmux\t-S\t{ADMIN_SOCKETS}/admin-pid.sock\tlist-sessions",
-        "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
-        f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent-pid.sock\thas-session\t-t\t=agent-pid",
-        f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent-pid.sock\tlist-sessions",
-        "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
-    ]
+    assert sorted(audit.read_text().splitlines()) == sorted(
+        [
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin.sock\thas-session\t-t\t=admin",
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin.sock\tlist-sessions",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent.sock\thas-session\t-t\t=agent",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent.sock\tlist-sessions",
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin-pid.sock\thas-session\t-t\t=admin-pid",
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin-pid.sock\tlist-sessions",
+            "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent-pid.sock\thas-session\t-t\t=agent-pid",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent-pid.sock\tlist-sessions",
+            "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
+        ]
+    )
     assert snapshot() == before
 
 
@@ -865,9 +869,9 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
                 ok=True,
                 stdout="\n".join(
                     (
-                        _batch_row("ok1"),
+                        _batch_row(1),
                         _batch_row(
-                            "stopped1",
+                            2,
                             has_returncode=1,
                             has_diagnostic="can't find session: stopped1",
                             server_returncode=1,
@@ -951,7 +955,7 @@ def test_batch_empty_boot_id_is_unknown() -> None:
                 ok=True,
                 stdout=(
                     _batch_row(
-                        "a1",
+                        1,
                         has_returncode=1,
                         has_diagnostic="can't find session: a1",
                         server_returncode=1,
@@ -970,7 +974,7 @@ def test_batch_empty_boot_id_is_unknown() -> None:
 def test_batch_sudo_refusal_is_unknown() -> None:
     session = _session("a1", pid=100, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     row = _batch_row(
-        "a1",
+        1,
         has_returncode=1,
         has_diagnostic="can't find session: a1",
         server_returncode=1,
@@ -992,14 +996,14 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
     ]
     output = "\n".join(
         _batch_row(
-            name,
+            index,
             has_returncode=1,
             has_diagnostic=f"can't find session: {name}",
             server_returncode=1,
             server_diagnostic=f"no server running on /{name}",
             pid_fact="absent",
         )
-        for name in ("valid", "invalid")
+        for index, name in enumerate(("valid", "invalid"), start=1)
     )
 
     result = batch_check_status(
@@ -1013,16 +1017,15 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
 @pytest.mark.parametrize(
     "result",
     [
-        _FakeResult(returncode=1, stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n", stderr="transport noise"),
-        _FakeResult(stdout=f"unframed\n{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('alpha')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('other')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\nS:{_encoded_probe_field('beta')}:0:not-hex:0::0::0:\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\r\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\x00\n"),
+        _FakeResult(returncode=1, stdout=f"{_batch_row(1)}\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(2)}\n", stderr="transport noise"),
+        _FakeResult(stdout=f"unframed\n{_batch_row(1)}\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(1)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(3)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\nS:2:0:not-hex:0::0::0:\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\r\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(2)}\x00\n"),
     ],
 )
 def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResult) -> None:
@@ -1032,6 +1035,19 @@ def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResu
         "alpha": SessionStatus.UNKNOWN,
         "beta": SessionStatus.UNKNOWN,
     }
+
+
+def test_batch_row_without_a_line_is_unknown_and_spares_its_siblings() -> None:
+    sessions = [
+        _session(name, pid=100 + index, socket_path=f"{ADMIN_SOCKETS}/{name}", boot_id=BOOT_CURRENT)
+        for index, name in enumerate(("alpha", "beta"))
+    ]
+    # Only the second row reported, as when the first row's job failed.
+    output = _batch_row(2) + "\n"
+
+    assert batch_check_status(
+        _with_servers(sessions), target=_FakeTarget({"has-session": _FakeResult(stdout=output)})
+    ) == {"alpha": SessionStatus.UNKNOWN, "beta": SessionStatus.RUNNING}
 
 
 def test_session_observer_isolates_one_vm_transport_failure(
