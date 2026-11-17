@@ -289,8 +289,9 @@ def owner_client_command(command: str, *, owner_word: str, pty: bool = False) ->
     --pty``, which relays window-size changes): an owner-uid client left on
     the admin's terminal would be reachable by the owner's other processes,
     and through it the admin's terminal. The result is one subshell, so it
-    composes with ``!``, redirections and ``$(...)`` and leaves the caller's
-    working directory alone.
+    composes with ``!`` and redirections and leaves the caller's working
+    directory alone. Inside a command substitution it needs a leading space,
+    ``$( (cd / ...))``: written ``$((`` it parses as arithmetic.
     """
     switch = f"{RUNUSER_PATH} --pty" if pty else RUNUSER_PATH
     return f"(cd / && sudo -n {switch} -u {owner_word} -- {command})"

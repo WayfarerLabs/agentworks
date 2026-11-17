@@ -20,9 +20,9 @@ class SessionTmuxServer:
     ``owner`` is ``None`` for the VM admin's own server, which the admin's
     transport reaches directly. Otherwise it names the agent account that
     runs the server, and every tmux client the admin's transport starts
-    against it runs as ``owner``. Built only by
-    ``resolve_session_tmux_server``, so holding one means the row passed the
-    whole owner rule.
+    against it runs as ``owner``. Production code builds it only through
+    ``resolve_session_tmux_server``, so holding one there means the row
+    passed the whole owner rule.
     """
 
     socket_path: str

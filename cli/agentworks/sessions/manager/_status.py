@@ -308,7 +308,7 @@ def batch_check_status(
         if fields[0] != "S" or key not in rows_by_key or key in frames or not _valid_batch_frame(fields):
             return status_map
         frames[key] = fields
-    # A row without a line, such as one whose decoding failed, stays UNKNOWN.
+    # A row without a line, such as one whose job died, stays UNKNOWN.
 
     for key, fields in frames.items():
         session, server = rows_by_key[key]

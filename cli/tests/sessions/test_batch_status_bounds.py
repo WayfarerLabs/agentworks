@@ -31,15 +31,34 @@ OWNER = "agt-owner"
 AGENT_SOCKETS = f"/run/agentworks/agent-tmux-sockets/{OWNER}"
 
 
+# The admin's login shell runs the batch program; each runs without its startup files.
+_SHELLS = {
+    "sh": ("-c",),
+    "dash": ("-c",),
+    "bash": ("--noprofile", "--norc", "-c"),
+    "zsh": ("-f", "-c"),
+}
+
+
+@pytest.fixture(params=sorted(_SHELLS))
+def shell(request: pytest.FixtureRequest) -> list[str]:
+    """The argv prefix that runs a program in one of the shells the admin may log in with."""
+    path = shutil.which(request.param)
+    if path is None:
+        pytest.skip(f"{request.param} is not installed")
+    return [path, *_SHELLS[request.param]]
+
+
 class _LocalGuest:
     """Runs a request in a local shell and fails it, like SSH, when it outlives its timeout."""
 
-    def __init__(self, env: dict[str, str]) -> None:
+    def __init__(self, shell: list[str], env: dict[str, str]) -> None:
+        self._shell = shell
         self._env = env
 
     def run(self, command: str, *, timeout: int, input_data: str, **kwargs: Any) -> SimpleNamespace:
         process = subprocess.Popen(
-            ["/bin/bash", "--noprofile", "--norc", "-c", command],
+            [*self._shell, command],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -86,7 +105,9 @@ def _processes_mentioning(marker: str) -> list[str]:
 
 @requires_symlinks
 @requires_posix_shell
-def test_stuck_servers_leave_only_their_own_rows_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stuck_servers_leave_only_their_own_rows_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str]
+) -> None:
     # A row's worst case is then 2 * (1 + 1) = 4 seconds, and one row's bound on top of the guest
     # timeout is 1 + 4. Each stuck client ignores SIGTERM and so lasts until timeout's SIGKILL, 2
     # seconds: three stuck rows in turn would need 6, so only rows probed side by side fit.
@@ -120,7 +141,9 @@ def test_stuck_servers_leave_only_their_own_rows_unknown(tmp_path: Path, monkeyp
         _row("fine-2", agent=True),
         _row("stuck-3"),
     ]
-    guest = _LocalGuest({"PATH": f"{bin_dir}:/bin:/usr/bin", "HOME": str(tmp_path), "AGW_PROBE_AUDIT": str(audit)})
+    guest = _LocalGuest(
+        shell, {"PATH": f"{bin_dir}:/bin:/usr/bin", "HOME": str(tmp_path), "AGW_PROBE_AUDIT": str(audit)}
+    )
 
     started = time.monotonic()
     statuses = _status.batch_check_status(rows, target=guest)  # type: ignore[arg-type]
@@ -144,7 +167,7 @@ def test_stuck_servers_leave_only_their_own_rows_unknown(tmp_path: Path, monkeyp
 
 @requires_symlinks
 @requires_posix_shell
-def test_a_row_line_stays_under_pipe_buf_whatever_its_clients_print(tmp_path: Path) -> None:
+def test_a_row_line_stays_under_pipe_buf_whatever_its_clients_print(tmp_path: Path, shell: list[str]) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in ("base64", "cat", "od", "timeout", "tr"):
@@ -157,7 +180,7 @@ def test_a_row_line_stays_under_pipe_buf_whatever_its_clients_print(tmp_path: Pa
     tmux.chmod(0o755)
     rows = [_row("loud"), _row("fine")]
     process = subprocess.run(
-        ["/bin/bash", "--noprofile", "--norc", "-c", runtime_probe_command(_status._batch_probe_command(), "BATCH")],
+        [*shell, runtime_probe_command(_status._batch_probe_command(), "BATCH")],
         input=_status._batch_probe_data(rows),
         text=True,
         capture_output=True,
