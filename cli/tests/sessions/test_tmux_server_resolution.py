@@ -14,11 +14,13 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks.agents import manager as agents
 from agentworks.db import SessionMode, SessionStatus
 from agentworks.errors import AgentworksError, StateError
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _queries, _status
 from agentworks.sessions.manager._tmux_server import resolve_session_tmux_server
+from agentworks.workspaces import manager as workspaces
 from tests.runtime_state.test_composition import BOOT, REFUSE, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 
@@ -38,7 +40,8 @@ REFUSED_ROWS = {
     "other-agents-directory": (SessionMode.AGENT, "a", f"{AGENT_ROOT}/agt-b/s.sock"),
     # The row's mode contradicts its socket's directory.
     "agent-row-admin-socket": (SessionMode.AGENT, "a", f"{ADMIN_ROOT}/admin/s.sock"),
-    "admin-row-agent-socket": (SessionMode.ADMIN, None, f"{AGENT_ROOT}/agt-a/s.sock"),
+    # Named for its agent, so only the mode check refuses it.
+    "admin-row-agent-socket": (SessionMode.ADMIN, "a", f"{AGENT_ROOT}/agt-a/s.sock"),
 }
 
 
@@ -55,6 +58,7 @@ class _Recorder:
 
     def __init__(self) -> None:
         self.commands: list[str] = []
+        self.vm_events: list[tuple[str, str]] = []
 
     def run(self, command: str, **kwargs: Any) -> SimpleNamespace:
         self.commands.append(command)
@@ -86,7 +90,16 @@ ENTRY_POINTS: dict[str, Callable[[Database, Any], object]] = {
     "delete": lambda db, config: manager.delete_session(db, config, name="s", yes=True, interaction=REFUSE),
     "logs": lambda db, config: manager.session_logs(db, config, name="s", interaction=REFUSE),
     "attach": lambda db, config: manager.attach_session(db, config, name="s", interaction=REFUSE),
+    "agent delete": lambda db, config: agents.delete_agent(
+        db, config, name="a", force=True, yes=True, interaction=REFUSE
+    ),
+    "workspace delete": lambda db, config: workspaces.delete_workspace(
+        db, config, "ws-box", force=True, yes=True, interaction=REFUSE
+    ),
 }
+
+# These refuse before any VM work at all: no activation, start or keepalive hold.
+BEFORE_VM_WORK = {"stop", "stop --all", "delete", "logs", "attach", "agent delete", "workspace delete"}
 
 OBSERVERS: dict[str, Callable[[Database, Any], object]] = {
     "status": lambda db, config: manager.observe_session_statuses(
@@ -97,9 +110,10 @@ OBSERVERS: dict[str, Callable[[Database, Any], object]] = {
 
 
 @pytest.fixture
-def recorder(runtime: object, monkeypatch: pytest.MonkeyPatch) -> _Recorder:
+def recorder(runtime: tuple[object, object, list[tuple[str, str]]], monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     """The composition runtime, with the real status checks and every transport recorded."""
     target = _Recorder()
+    target.vm_events = runtime[2]
     factory = lambda *a, **k: target  # noqa: E731
     monkeypatch.setattr(manager, "transport", factory)
     monkeypatch.setattr("agentworks.transports.transport", factory)
@@ -113,12 +127,16 @@ def recorder(runtime: object, monkeypatch: pytest.MonkeyPatch) -> _Recorder:
 
 @pytest.mark.parametrize("row", REFUSED_ROWS)
 @pytest.mark.parametrize("entry", ENTRY_POINTS)
-def test_lifecycle_logs_and_attach_refuse_before_any_request_names_the_socket(db, make_config, recorder, row, entry):
+def test_lifecycle_deletes_logs_and_attach_refuse_before_any_request_names_the_socket(
+    db, make_config, recorder, row, entry
+):
     mode, agent, socket_path = REFUSED_ROWS[row]
     _seed(db, mode, agent, socket_path)
     with pytest.raises(AgentworksError):
         ENTRY_POINTS[entry](db, make_config())
     assert not recorder.naming(socket_path)
+    if entry in BEFORE_VM_WORK:
+        assert recorder.vm_events == []
 
 
 @pytest.mark.parametrize("row", REFUSED_ROWS)
