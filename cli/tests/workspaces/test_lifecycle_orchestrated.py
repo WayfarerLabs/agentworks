@@ -1629,6 +1629,7 @@ def test_rehome_refuses_when_a_directory_check_did_not_run(
         )
 
     assert fake.commands[-1] == unanswered
+    assert not any(c.startswith(("mkdir", "rsync", "cp -a")) for c in fake.commands)
     ws = db.get_workspace("ws1")
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
