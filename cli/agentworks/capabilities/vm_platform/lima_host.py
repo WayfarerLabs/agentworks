@@ -50,9 +50,11 @@ echo $? > {status_file}
 # Writes stdin to "$2" through a private temporary file in its directory "$1".
 # ">|" because bash as /bin/sh (macOS) imports an exported SHELLOPTS, so a
 # login shell's noclobber can reach it, and mktemp has already created "$tmp".
+# "[ ! -d ]", which follows a link, because mv would move the file into a
+# directory at "$2", and BSD mv has no -T to refuse that.
 _UPLOAD_SCRIPT = (
-    'umask 077 && tmp=$(mktemp "$1/.agw-upload.XXXXXX") && '
-    '{ cat >| "$tmp" && mv -f "$tmp" "$2" || { rm -f "$tmp"; false; }; }'
+    'tmp=$(mktemp "$1/.agw-upload.XXXXXX") && '
+    '{ cat >| "$tmp" && [ ! -d "$2" ] && mv -f "$tmp" "$2" || { rm -f "$tmp"; false; }; }'
 )
 
 
@@ -129,8 +131,9 @@ class LimaHost:
         default ACL on the directory can widen it, and is then renamed over
         ``path``. The rename replaces a symlink at ``path`` rather than
         following it, and in a sticky directory such as ``/var/tmp`` is refused
-        over a file another user owns. The temporary file is removed if the
-        write or the rename fails. Inherited macOS ACL entries are not masked
+        over a file another user owns. A directory at ``path``, or a symlink to
+        one, is refused. The temporary file is removed if the write or the
+        rename fails or is refused. Inherited macOS ACL entries are not masked
         by mode bits, so they still apply. The script runs under an explicit
         ``/bin/sh``, with the paths as its arguments, so beyond the
         ``$SHELL -lc`` layer every host command goes through, which needs a

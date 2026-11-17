@@ -255,6 +255,26 @@ def test_an_upload_replaces_a_symlink_instead_of_writing_through_it(
 
 
 @needs_posix_sh
+@pytest.mark.parametrize("shape", ["directory", "link to a directory"])
+def test_an_upload_refuses_a_directory_instead_of_moving_into_it(
+    shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mv would move the file inside a directory at the target and report success."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    directory = staging / "template.yaml" if shape == "directory" else tmp_path / "elsewhere"
+    directory.mkdir()
+    if shape != "directory":
+        (staging / "template.yaml").symlink_to(directory)
+
+    with pytest.raises(LimaCommandFailed):
+        _upload_in_a_local_shell(monkeypatch, staging / "template.yaml", "arch: default\n")
+
+    assert sorted(entry.name for entry in staging.iterdir()) == ["template.yaml"]
+    assert list(directory.iterdir()) == []
+
+
+@needs_posix_sh
 def test_a_failed_upload_leaves_no_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     shims = tmp_path / "shims"
     shims.mkdir()
