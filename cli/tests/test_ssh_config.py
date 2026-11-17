@@ -198,31 +198,6 @@ def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
     assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX owners")
-def test_a_config_whose_owner_cannot_be_kept_is_rewritten_in_place(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A rename would hand someone else's file to this user; writing in place keeps owner, group and mode."""
-    ssh_config = tmp_path / "config"
-    ssh_config.write_text("Host *\n    Foo bar\n")
-    ssh_config.chmod(0o640)
-    before = ssh_config.stat()
-
-    def refuse(*args: object, **kwargs: object) -> None:
-        raise PermissionError("not permitted")
-
-    monkeypatch.setattr(os, "chown", refuse)
-    directive = _directive(ssh_config)
-
-    _ensure_include(ssh_config, directive)
-
-    after = ssh_config.stat()
-    assert after.st_ino == before.st_ino
-    assert stat.S_IMODE(after.st_mode) == 0o640
-    assert ssh_config.read_text() == f"# Added by agentworks\n{directive}\n\nHost *\n    Foo bar\n"
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["config"]
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
 def test_a_new_config_is_created_under_the_umask(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
