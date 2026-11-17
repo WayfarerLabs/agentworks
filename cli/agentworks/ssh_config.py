@@ -135,8 +135,10 @@ def sync_ssh_config_or_warn(config: Config, db: Database, *, announce: bool = Tr
     try:
         sync_ssh_config(config, db, announce=announce)
     except Exception as e:
-        hint = e.hint if isinstance(e, AgentworksError) else None
-        output.warn(f"SSH config sync failed: {e}" + (f". {hint}" if hint else ""))
+        message = str(e)
+        if isinstance(e, AgentworksError) and e.hint:
+            message += f"{'' if message.endswith('.') else '.'} {e.hint}"
+        output.warn(f"SSH config sync failed: {message}")
         output.info("VM is likely still usable.")
 
 
