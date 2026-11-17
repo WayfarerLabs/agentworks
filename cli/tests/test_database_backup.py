@@ -1248,5 +1248,7 @@ def test_restore_held_destination_lock_honors_fixed_deadline(
         blocker.close()
     elapsed = time.monotonic() - started
     # The patched deadline ended the wait, not the production one. The rest of the restore has taken
-    # over 2 s on a loaded Windows runner, so only the production deadline is a safe upper bound.
+    # over 2 s on a loaded Windows runner, so only the production deadline is a safe upper bound. The
+    # cost of that bound: it fails a restore that waited out the production deadline, but not one that
+    # overran the patched deadline and still stopped short of the production one.
     assert deadline * 0.75 <= elapsed < BACKUP_DEADLINE_SECONDS
