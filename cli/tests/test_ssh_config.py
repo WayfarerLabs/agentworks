@@ -269,6 +269,15 @@ def test_remove_legacy_section(tmp_path: Path) -> None:
     assert "Foo bar" in content
 
 
+def test_removing_the_legacy_section_keeps_crlf_line_endings(tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    ssh_config.write_bytes(f"Host *\r\n    Foo bar\r\n\r\n{_LEGACY_MARKER}\r\nHost awvm--old-vm\r\n".encode())
+
+    _remove_legacy_section(ssh_config)
+
+    assert ssh_config.read_bytes() == b"Host *\r\n    Foo bar\r\n"
+
+
 def test_remove_legacy_section_noop_if_absent(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     original = "Host *\n    Foo bar\n"
