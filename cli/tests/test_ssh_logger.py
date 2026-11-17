@@ -346,7 +346,14 @@ def test_an_operation_log_shared_by_concurrent_threads_keeps_every_record_and_cl
             sys.setswitchinterval(previous)
         gc.collect()
 
-    assert [warning for warning in caught if issubclass(warning.category, ResourceWarning)] == []
+    # Only this test's own files count: from Python 3.13 an unclosed sqlite connection another test
+    # leaked warns too, whenever the garbage collector happens to reach it during this body.
+    leaked = [
+        warning
+        for warning in caught
+        if issubclass(warning.category, ResourceWarning) and str(tmp_path) in str(warning.message)
+    ]
+    assert leaked == []
     text = Path(log.display_path).expanduser().read_text()
     for worker in range(threads):
         for index in range(writes):
