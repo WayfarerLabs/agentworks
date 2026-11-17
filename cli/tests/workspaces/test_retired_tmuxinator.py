@@ -407,10 +407,13 @@ def test_doctor_reports_stored_workspace_settings_and_ignores_suppression(suppre
 
 
 @pytest.mark.parametrize("suppressed", [False, True])
-def test_doctor_reports_manifest_settings_and_ignores_suppression(
+def test_doctor_reports_manifest_and_stored_settings_and_ignores_suppression(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suppressed: bool
 ) -> None:
+    from contextlib import closing
+
     from agentworks import output
+    from agentworks.db import Database, VersionedPayload
     from agentworks.doctor import Status, _check_config
     from tests.conftest import write_cfg
 
@@ -421,6 +424,10 @@ def test_doctor_reports_manifest_settings_and_ignores_suppression(
         ManifestDoc("workspace-template", "old", {"tmuxinator": True}),
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", config_path)
+    with closing(Database()) as database:
+        database.insert_vm("box", site="lima-local", hostname="box")
+        database.insert_workspace("stored", "/srv/stored", "box", "ws-stored")
+        database.instance_state.put_desired_overlay("workspace", "stored", VersionedPayload(1, {"tmuxinator": True}))
     output.set_suppress_deprecations(suppressed)
 
     group, _config, registry = _check_config()
@@ -429,3 +436,4 @@ def test_doctor_reports_manifest_settings_and_ignores_suppression(
     rows = [check for check in group.checks if check.name == "Manifest"]
     assert [row.status for row in rows] == [Status.WARN]
     assert "workspace-template/old.tmuxinator" in (rows[0].message or "")
+    assert [check.status for check in group.checks if check.name == "workspace/stored.tmuxinator"] == [Status.WARN]
