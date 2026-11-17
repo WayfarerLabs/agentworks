@@ -69,8 +69,9 @@ def _ctx(values: dict[str, str], allowed: tuple[str, ...]) -> RunContext:
 # seconds.
 HANG_GUARD_SECONDS = 30
 # Bounds a runtime path whose waits the test shortened to 0.1 s, or that should not wait at all: room
-# for process startup on a loaded host, yet under the production 10 s helper timeout and lock wait, so
-# a path that fell back to one of those still fails.
+# for process startup on a loaded host, yet under every production wait it stands in for (the 10 s
+# helper timeout, the launcher's 10 s lock wait and the reconciler's 30 s lock wait), so a path that
+# fell back to one of those still fails.
 SHORTENED_WAIT_BOUND_SECONDS = 5
 
 
