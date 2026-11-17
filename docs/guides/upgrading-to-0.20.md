@@ -446,6 +446,10 @@ in a manifest or an instance spec, reports a deprecation in 0.20.x and 0.21.x, a
 reports stored workspace settings that carry it. Remove it: 0.22.0 stops accepting it
 ([issue #918](https://github.com/WayfarerLabs/agentworks/issues/918)).
 
+New VMs no longer get the `tmuxinator` package; add it to a vm-template's `apt` list if you use it.
+Existing VMs keep it, because Agentworks never uninstalls packages; remove it yourself if you do not
+use it.
+
 ## Third-party VM platforms
 
 The vm-platform capability is now contract version 2. Registration matches contract versions

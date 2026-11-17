@@ -862,7 +862,7 @@ class WSL2Platform(VMPlatform):
                         " -o Dpkg::Options::=--force-confnew"
                         " bash bash-completion sudo passwd"
                         " openssh-server curl git ca-certificates"
-                        " tmux tmuxinator"
+                        " tmux"
                         " locales procps iproute2 iputils-ping"
                         " less vim-tiny man-db"
                         " > /dev/null",
