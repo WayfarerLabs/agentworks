@@ -101,7 +101,7 @@ def realize_workspace(
         # unconfirmed or occupied reservations. With workspace_path unset here,
         # this layer must not guess a path and remove that unexplained residue.
         if workspace_path:
-            delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=ssh_logger)
+            delete_vm_workspace(vm, config, workspace_path, workspace_group(name), logger=ssh_logger)
         if vscode_path:
             vscode_path.unlink(missing_ok=True)
 

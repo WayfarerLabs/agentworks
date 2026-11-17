@@ -224,7 +224,7 @@ def delete_workspace(
                 if vm is not None:
                     from agentworks.workspaces.backends.vm import delete_vm_workspace
 
-                    delete_vm_workspace(vm, config, name, ws.workspace_path, ws.linux_group, logger=ssh_logger)
+                    delete_vm_workspace(vm, config, ws.workspace_path, ws.linux_group, logger=ssh_logger)
 
                 # Remove .code-workspace file
                 vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"

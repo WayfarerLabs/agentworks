@@ -68,7 +68,7 @@ def move_case(db, deletion, tmp_path, monkeypatch):
     monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", lambda *a, **k: tmp_path / "x")
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace",
-        lambda vm, config, name, path, group, **kwargs: shutil.rmtree(path),
+        lambda vm, config, path, group, **kwargs: shutil.rmtree(path),
     )
     return target, group
 

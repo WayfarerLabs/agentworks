@@ -191,7 +191,6 @@ def create_vm_workspace(
             delete_vm_workspace(
                 vm,
                 config,
-                ws_name,
                 workspace_path,
                 ws_group,
                 logger=logger,
@@ -210,7 +209,6 @@ def create_vm_workspace(
 def delete_vm_workspace(
     vm: VMRow,
     config: Config,
-    ws_name: str,
     workspace_path: str,
     linux_group: str,
     *,
