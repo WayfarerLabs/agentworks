@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import io
 import os
+import shlex
 import signal
 import subprocess
 import tempfile
@@ -298,17 +299,19 @@ def bash_child_reads_no_startup_file(lane: Lane) -> None:
 def run_over_a_held_streams_child(lane: Lane, *, elevated: bool = False) -> Result:
     """Run ``echo done`` with a background child that holds both streams open until the run returns.
 
-    The vector releases the child afterwards; until then it waits for up to two minutes, past the
-    request deadline, so a launcher that waited for the streams to close would run into the deadline
-    instead of completing.
+    The child runs while its hold file exists, for up to two minutes, past the request deadline, so a
+    launcher that waited for the streams to close would run into the deadline instead of completing.
+    The vector releases it by removing the hold file's directory, so whatever removes that directory
+    first, this vector or the lane's cleanup, ends the child.
     """
-    release = f"{lane.make_dir()}/release"
-    child = f"(i=0; while [ ! -e {release} ] && [ $i -lt 1200 ]; do sleep 0.1; i=$((i+1)); done) &\n"
+    directory = lane.make_dir({"hold": ""})
+    hold = shlex.quote(f"{directory}/hold")
+    child = f"(i=0; while [ -e {hold} ] && [ $i -lt 1200 ]; do sleep 0.1; i=$((i+1)); done) &\n"
     started = time.monotonic()
     try:
         result = lane.run(script(f"{child}echo done", elevated=elevated))
     finally:
-        lane.mkdir(release)
+        lane.remove_dir(directory)
     # Generous for a loaded host, and still short of a launcher that lingers on the child's streams.
     assert time.monotonic() - started < 15
     return result
