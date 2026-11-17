@@ -125,12 +125,19 @@ class Lane:
         raise NotImplementedError
 
     def wait_gone(self, path: str, seconds: float = 5.0) -> bool:
+        return self._poll(lambda: not self.exists(path), seconds)
+
+    def wait_present(self, path: str, seconds: float = 5.0) -> bool:
+        return self._poll(lambda: self.exists(path), seconds)
+
+    @staticmethod
+    def _poll(condition: Callable[[], bool], seconds: float) -> bool:
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            if not self.exists(path):
+            if condition():
                 return True
             time.sleep(0.05)
-        return not self.exists(path)
+        return condition()
 
     # -- The terminal half ---------------------------------------------------
 
