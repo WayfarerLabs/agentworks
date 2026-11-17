@@ -1638,41 +1638,36 @@ def test_rehome_creates_the_target_exclusively(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     """A target the check reports absent (``test -d`` answers 1 under a parent
     the admin cannot search) but that exists is never copied into: the
-    exclusive ``mkdir`` refuses it as an existing target, with no unwind and
-    no partial-state hint, since that directory was never ours."""
+    exclusive ``mkdir`` fails on it, rehome warns that the reservation was not
+    confirmed, and the failure propagates with no unwind and no partial-state
+    hint, since the path may never have been ours."""
     from agentworks.ssh import SSHError
-    from agentworks.workspaces.manager import rehome as rehome_mod
 
     class _Target(_RehomeTarget):
         def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-            if cmd.startswith("mkdir -- /dst/ws1"):
+            if cmd == "mkdir -- /dst/ws1":
                 self.commands.append(cmd)
-                if kwargs.get("check", True):
-                    raise SSHError(f"command failed: {cmd}")
-                return SimpleNamespace(ok=False, returncode=3, stdout="", stderr="")
+                raise SSHError(f"SSH command failed (exit 1): {cmd}\nstderr: File exists")
             return super().run(cmd, **kwargs)
 
-    def _no_hint(*args: object) -> str:
-        raise AssertionError("an existing target must not get the partial-state hint")
-
-    monkeypatch.setattr(rehome_mod, "_rehome_partial_state_hint", _no_hint)
     config = make_config()
     _seed(db)
     _reachable(monkeypatch, True)
     fake = _Target()
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
 
-    with pytest.raises(StateError) as raised:
+    with pytest.raises(SSHError) as raised:
         workspace_manager.rehome_workspace(
             db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
         )
 
     assert raised.value.hint is None
-    assert fake.commands[-2] == "mkdir -p -- /dst"
-    assert fake.commands[-1].startswith("mkdir -- /dst/ws1")
+    assert len(captured_output.warnings) == 1
+    assert fake.commands[-2:] == ["mkdir -p -- /dst", "mkdir -- /dst/ws1"]
     ws = db.get_workspace("ws1")
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
