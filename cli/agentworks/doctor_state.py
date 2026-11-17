@@ -90,8 +90,10 @@ def append_workspace_deprecation_checks(group: HealthGroup) -> None:
     """Inspect stored workspace declarations for deprecated settings.
 
     Manifest declarations report through ``ManifestSet.deprecations``; this covers
-    the stored final layers instance specs created. It reads the ordinary current
-    database read-only, and an unavailable live view receives an explicit coverage row.
+    the stored final layers instance specs created. No command edits those, so
+    their rows are informational with stored-setting guidance. It reads the
+    ordinary current database read-only, and an unavailable live view receives
+    an explicit coverage row.
     """
     from agentworks.db import DatabaseDriverError
     from agentworks.declared_resource import DeclaredResource
@@ -118,8 +120,8 @@ def append_workspace_deprecation_checks(group: HealthGroup) -> None:
                     declaration = None if overlay is None else overlay.declaration
                     if not isinstance(declaration, DeclaredResource):
                         continue
-                    for field, guidance in declaration.deprecated_fields().items():
-                        group.warn(f"{owner}.{field}", "Deprecated workspace setting", hint=guidance)
+                    for field, guidance in declaration.deprecated_fields(stored=True).items():
+                        group.info(f"{owner}.{field}", "Retired workspace setting in stored settings", hint=guidance)
     except (AgentworksError, DatabaseDriverError, OSError, ValueError):
         group.fail(coverage, "Stored workspace declarations not checked; see the Database group")
 

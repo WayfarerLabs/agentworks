@@ -180,6 +180,7 @@ def test_a_failed_removal_warns_once_and_the_rest_are_still_removed(
     assert (locked / ".tmuxinator.yml").exists()
     assert not (workspace / ".tmuxinator.yml").exists() and not (after / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
+    assert str(locked) in captured_output.warnings[0] and str(after) not in captured_output.warnings[0]
 
 
 @requires_guest_shell
@@ -198,6 +199,7 @@ def test_an_unreadable_project_is_kept_and_warned(
 
     assert project.read_text() == _GENERATED
     assert len(captured_output.warnings) == 1
+    assert str(workspace) in captured_output.warnings[0]
 
 
 @requires_guest_shell
@@ -215,17 +217,19 @@ def test_an_unsearchable_workspace_directory_is_warned(
 
     assert (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
+    assert str(workspace) in captured_output.warnings[0]
 
 
 @requires_guest_shell
 @skip_as_root
-def test_an_unsearchable_discovery_directory_is_warned(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+@pytest.mark.parametrize("mode", [0o600, 0o300, 0o500], ids=["unsearchable", "unreadable", "read-only"])
+def test_a_discovery_directory_that_cannot_be_fully_handled_is_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, mode: int
 ) -> None:
     target, workspace, entries = guest
     link = entries / "ws-proj-console.yml"
     link.symlink_to(workspace / ".tmuxinator.yml")
-    entries.chmod(0o600)
+    entries.chmod(mode)
     try:
         _reinit(db, target)
     finally:
@@ -249,7 +253,7 @@ def test_a_transport_error_on_one_command_still_runs_the_other(
     def first_fails(command: str, **kwargs: object) -> SSHResult:
         calls.append(command)
         if len(calls) == 1:
-            raise SSHError("connection dropped")
+            raise SSHError(f"connection dropped running {command}")
         return real_run(command, **kwargs)
 
     target.run = first_fails  # type: ignore[method-assign]
@@ -260,6 +264,7 @@ def test_a_transport_error_on_one_command_still_runs_the_other(
     assert link.is_symlink()
     assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
+    assert "readlink" not in captured_output.warnings[0], "the warning must not carry the script"
 
 
 @requires_guest_shell
@@ -403,7 +408,7 @@ def test_doctor_reports_stored_workspace_settings_and_ignores_suppression(suppre
 
     append_workspace_deprecation_checks(group)
 
-    assert [(check.name, check.status) for check in group.checks] == [("workspace/old.tmuxinator", Status.WARN)]
+    assert [(check.name, check.status) for check in group.checks] == [("workspace/old.tmuxinator", Status.INFO)]
 
 
 @pytest.mark.parametrize("suppressed", [False, True])
@@ -436,4 +441,4 @@ def test_doctor_reports_manifest_and_stored_settings_and_ignores_suppression(
     rows = [check for check in group.checks if check.name == "Manifest"]
     assert [row.status for row in rows] == [Status.WARN]
     assert "workspace-template/old.tmuxinator" in (rows[0].message or "")
-    assert [check.status for check in group.checks if check.name == "workspace/stored.tmuxinator"] == [Status.WARN]
+    assert [check.status for check in group.checks if check.name == "workspace/stored.tmuxinator"] == [Status.INFO]

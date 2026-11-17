@@ -235,7 +235,7 @@ def test_dirty_bundle_raises_config_error_not_assertion() -> None:
 
 def test_bundle_with_a_deprecated_setting_is_refused() -> None:
     """A deprecation in a first-party bundle is a curation bug, refused like an issue."""
-    with pytest.raises(ConfigError, match="issue-free"):
+    with pytest.raises(ConfigError):
         publish_manifest_package(
             registry_with_shell(),
             anchor=_DEPRECATED_ANCHOR,

@@ -75,9 +75,9 @@ class WorkspaceTemplate(DeclaredResource):
 
     tmuxinator: bool | None = None
     """Deprecated, with no effect: Agentworks no longer generates workspace
-    tmuxinator projects. Still accepted so existing declarations load;
-    setting it reports a deprecation. Write booleans unquoted; quoted strings
-    such as ``"no"`` are invalid."""
+    tmuxinator projects. Still accepted so existing declarations load, until
+    0.22.0 removes it; setting it reports a deprecation. Write booleans
+    unquoted; quoted strings such as ``"no"`` are invalid."""
 
     git_user_name: str | None = None
     """``user.name`` for commits made in this workspace's checkout."""
@@ -97,16 +97,23 @@ class WorkspaceTemplate(DeclaredResource):
     """Environment variables exported in this workspace, as a plaintext
     value or a ``{secret: <name>}`` reference per key."""
 
-    def deprecated_fields(self) -> dict[str, str]:
+    def deprecated_fields(self, *, stored: bool = False) -> dict[str, str]:
         """Any explicit ``tmuxinator`` value is a setting with no effect."""
-        if self.tmuxinator is not None:
+        if self.tmuxinator is None:
+            return {}
+        if stored:
             return {
                 "tmuxinator": (
-                    "it has no effect, since workspace tmuxinator projects are no longer generated, and it "
-                    f"will be removed in {TMUXINATOR_FIELD_REMOVAL}; remove the setting"
+                    "it has no effect; it was recorded when the workspace was created, and "
+                    f"{TMUXINATOR_FIELD_REMOVAL} removes it from stored settings, so there is nothing to do"
                 )
             }
-        return {}
+        return {
+            "tmuxinator": (
+                "it has no effect, since workspace tmuxinator projects are no longer generated, and it "
+                f"will be removed in {TMUXINATOR_FIELD_REMOVAL}; remove the setting"
+            )
+        }
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of
