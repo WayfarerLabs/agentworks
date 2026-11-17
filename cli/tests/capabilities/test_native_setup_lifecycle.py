@@ -278,9 +278,12 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
 def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, existing):
     target = Mock(spec=Transport)
     commands = []
+    root_commands = []
 
     def run(command, **kwargs):
         commands.append(command)
+        if kwargs.get("sudo"):
+            root_commands.append(command)
         if command.startswith("getent"):
             return SimpleNamespace(ok=existing == "user", returncode=0 if existing == "user" else 2)
         if "test -e" in command:
@@ -302,6 +305,8 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, monkeypatch, 
         create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
         assert commands[-1] == "useradd -m -U -s /bin/bash agt-a"
     assert not any(command.startswith("userdel") for command in commands)
+    # The account lookup needs no root, so no sudo refusal can stand in for its answer.
+    assert commands[0].startswith("getent") and commands[0] not in root_commands
 
 
 @pytest.mark.parametrize(

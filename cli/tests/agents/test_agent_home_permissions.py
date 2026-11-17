@@ -347,3 +347,10 @@ def test_unanswered_user_probe_raises_before_any_user_mutation(
         _run_create_on_vm(db, config, monkeypatch, user_exists=False, admin=admin)
 
     assert [cmd for cmd, _ in admin.runs] == [f"getent passwd {LINUX_USER}"]
+
+
+def test_user_probe_runs_without_root(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``getent passwd`` needs no root, so the convergence probe runs without
+    sudo and no sudo refusal can stand in for its answer."""
+    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/bash")
+    assert (f"getent passwd {LINUX_USER}", False) in admin.runs
