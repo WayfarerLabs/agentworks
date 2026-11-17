@@ -347,6 +347,7 @@ def _db_with_one_vm() -> MagicMock:
     return db
 
 
+@pytest.mark.windows
 @pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may write a read-only file")
 @pytest.mark.parametrize(
     "shape", ["file", pytest.param("symlink", marks=pytest.mark.skipif(sys.platform == "win32", reason="symlinks"))]
@@ -356,7 +357,7 @@ def test_a_config_the_user_may_not_write_is_refused_and_left_as_it_was(
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """A rename needs only the directory to be writable, so it must not override the file's own refusal."""
+    """On Windows the read-only attribute is the refusal; the warning carries the error's hint."""
     config, _ = _mock_config(tmp_path)
     ssh_config = config.operator.ssh_config
     original = b"Host *\n    Foo bar\n"
@@ -367,39 +368,49 @@ def test_a_config_the_user_may_not_write_is_refused_and_left_as_it_was(
         ssh_config.symlink_to(target)
     target.chmod(0o444)
 
-    with pytest.raises(AuthorizationError):
+    with pytest.raises(AuthorizationError) as caught:
         sync_ssh_config(config, _db_with_one_vm())
     sync_ssh_config_or_warn(config, _db_with_one_vm())
 
     assert target.read_bytes() == original
     assert ssh_config.is_symlink() == (shape == "symlink")
-    assert len(captured_output.warnings) == 1
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX owners")
-def test_a_config_whose_owner_cannot_be_kept_is_refused_with_the_fix_in_the_warning(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    config, _ = _mock_config(tmp_path)
-    ssh_config = config.operator.ssh_config
-    original = b"Host *\n    Foo bar\n"
-    ssh_config.write_bytes(original)
-
-    def refuse(*args: object, **kwargs: object) -> None:
-        raise PermissionError("not permitted")
-
-    monkeypatch.setattr(os, "chown", refuse)
-
-    with pytest.raises(AuthorizationError) as caught:
-        sync_ssh_config(config, _db_with_one_vm())
-    sync_ssh_config_or_warn(config, _db_with_one_vm())
-
-    assert ssh_config.read_bytes() == original
     assert caught.value.hint is not None
     (warning,) = captured_output.warnings
     assert caught.value.hint in warning
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may write into a read-only directory")
+def test_a_writable_config_in_a_read_only_directory_is_updated(tmp_path: Path) -> None:
+    """Only the file's own permissions decide, as for any in-place edit."""
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    ssh_config = ssh_dir / "config"
+    ssh_config.write_text("Host *\n    Foo bar\n")
+    directive = _directive(ssh_config)
+    ssh_dir.chmod(0o555)
+    try:
+        _ensure_include(ssh_config, directive)
+    finally:
+        ssh_dir.chmod(0o755)
+
+    assert ssh_config.read_text() == f"# Added by agentworks\n{directive}\n\nHost *\n    Foo bar\n"
+
+
+@pytest.mark.windows
+def test_a_config_is_edited_in_place_keeping_its_inode_and_hard_links(tmp_path: Path) -> None:
+    """A replacement would leave a hard link holding the old content, and on Windows drop the file's own ACL."""
+    ssh_config = tmp_path / "config"
+    ssh_config.write_text("Host *\n    Foo bar\n")
+    linked = tmp_path / "linked-config"
+    os.link(ssh_config, linked)
+    before = ssh_config.stat().st_ino
+    directive = _directive(ssh_config)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.stat().st_ino == before
+    assert directive in linked.read_text().splitlines()
 
 
 @pytest.mark.windows

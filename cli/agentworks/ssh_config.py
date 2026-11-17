@@ -11,7 +11,7 @@ cleaned up automatically.
 
 from __future__ import annotations
 
-import os
+import errno
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -282,7 +282,7 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     lines = content.splitlines(keepends=True)
     # Earlier releases wrote the pattern unquoted. With an apostrophe in it,
     # ssh rejects the whole file, so a correct line beside it would fix
-    # nothing; with whitespace, the line names nothing. Rewrite it in place.
+    # nothing; with whitespace, the line names nothing. Rewrite that line where it stands.
     unquoted = directive.replace('"', "")
     rewritten = [line.replace(unquoted, directive) if line.strip() == unquoted else line for line in lines]
     opted_out = any(_commented_out(line) in (directive, unquoted) for line in lines)
@@ -328,22 +328,26 @@ def _read_user_config(ssh_config: Path) -> str:
 
 
 def _write_user_config(ssh_config: Path, content: str) -> None:
-    """Write the operator's SSH config through a symlink to it, line endings and undecodable bytes as given.
+    """Write the operator's SSH config in place, through a symlink to it, line endings and undecodable bytes as given.
 
-    An existing file is replaced atomically and keeps its mode, owner and
-    group (:func:`atomic_write_text`). One the user may not write, or whose
-    owner or group the replacement cannot keep, is refused with
-    :class:`AuthorizationError` and left as it is: a rename needs only the
-    directory to be writable, so it would override the file's own refusal. A
-    new file is created the way any file is, under the umask.
+    Editing the file rather than replacing it keeps everything the operator
+    set on it: owner, group, mode, ACL, inode and hard links, as earlier
+    releases did. The write is not atomic. A file this user may not write is
+    refused with :class:`AuthorizationError` before anything is truncated.
     """
     target = ssh_config.resolve()
-    if target.exists():
-        if not os.access(target, os.W_OK):
-            raise AuthorizationError(f"cannot update '{format_host_path(target)}': this user may not write it")
-        atomic_write_text(target, content, newline="", errors="surrogateescape", preserve_metadata=True)
-        return
-    with open(target, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
+    # Only a refused open is the operator's refusal, so the with statement
+    # that closes the file stays outside the try.
+    try:
+        f = open(target, "w", encoding="utf-8", errors="surrogateescape", newline="")  # noqa: SIM115
+    except OSError as error:
+        if not isinstance(error, PermissionError) and error.errno != errno.EROFS:
+            raise
+        raise AuthorizationError(
+            f"cannot update '{format_host_path(target)}': {error.strerror}",
+            hint="Make it writable, then run 'agw config sync-ssh-config'.",
+        ) from error
+    with f:
         f.write(content)
 
 
