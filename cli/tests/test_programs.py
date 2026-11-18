@@ -246,7 +246,12 @@ def _remote_lima_ready() -> bool:
     # The resolver caches the client it accepted, which an earlier test may have found on the real PATH.
     client.resolve_ssh.cache_clear()
     try:
-        return LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "box"}}).is_ready
+        with pytest.MonkeyPatch.context() as patch:
+            # Windows never searches PATH but fixed locations under these; point them where no client is,
+            # so the decoy in the current directory is the only ssh on the workstation, as on POSIX.
+            for variable in ("SystemRoot", "ProgramW6432", "ProgramFiles"):
+                patch.setenv(variable, str(Path.cwd() / "no-client-here"))
+            return LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "box"}}).is_ready
     finally:
         client.resolve_ssh.cache_clear()
 
