@@ -1104,6 +1104,15 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 | Interrupt stops the work                        | In-process: a launch of `("sh", "-c", "sleep 600 & sleep 600")`; `interrupt` leaves no process in its group and the state `EXITED` with 143. Live: backup interrupted on WSL2 and Remote Lima                                                                                                                                                                   |
 | The detached base is never world-writable       | In-process, under the sudo lane: the created `detached` directory is mode 0700                                                                                                                                                                                                                                                                                  |
 
+As built (batch F1), each of the four also runs through the real client: conformance vectors DT1 to
+DT4 (`cli/tests/execution/conformance/detached_vectors.py`) send the real program through the real
+`VMAccess` and agw-launch on lanes L, S and V, elevated, with the base under the worker's temporary
+directory on L and S. DT2 observes, completes and downloads (through `ToFile`) a payload still
+running after its launch's connection closed; `conformance/test_detached_resume.py` stops the S
+lane's sshd while a launch runs, shows the observation is a `reachability.POLLED` outcome while it
+is down, and reads the payload's status and output once it is back. On V the vectors are the
+tester's cell for the base's modes on a real VM.
+
 **Unit, every CI host:**
 
 - `ToFile`: an existing path is refused before dispatch; the file is opened in binary mode, so bytes

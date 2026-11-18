@@ -575,7 +575,7 @@ Definition of done: create and reinit run entirely on the new transport.
   - session environment in the request, and every pane path's terminal handover (HLA D8);
   - the env-newline refusals, the console's env carry across sudo and the legacy probe it deletes;
   - the incident audit of the entry points this slice moves.
-- [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
+- [x] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
 - [x] Bound the session and console status reads and pid repair at 10 seconds and `vm describe`'s
       live resources at 30, each one dispatch, and retire `GUEST_OBSERVATION_ATTEMPTS` and
       `DEDICATED_TEARDOWN_ATTEMPTS` (HLA D5).
@@ -596,7 +596,7 @@ Definition of done: create and reinit run entirely on the new transport.
   - desired runtime state's session teardown and console presence probes
     (`runtime_state/_session_stop.py`, `_prepare.py`, `_preview.py`), which arrived with #885
     ([`sessions-lld.md`](./sessions-lld.md), Delivery batches C and D).
-- [ ] Tests:
+- [x] Tests:
   - a fresh launch never matches an earlier one;
   - observation resumes across a dropped connection;
   - interrupt stops the work;
@@ -614,7 +614,7 @@ Definition of done: create and reinit run entirely on the new transport.
       idempotent initialization step that converts an existing VM on reinit.
 - [x] Move the session callers of `_assert_agent_ssh_works` (`sessions/manager/_create.py`,
       `_create_roll.py`, `_pids.py`) to `_assert_agent_access_works`, and delete the legacy probe.
-- [ ] Move `tests/workspaces/test_lifecycle_orchestrated.py` from substring matches over legacy
+- [x] Move `tests/workspaces/test_lifecycle_orchestrated.py` from substring matches over legacy
       command strings to assertions on the typed requests, as `test_backend_git_identity.py` did in
       batch B. Batch C, once `delete_workspace` has no legacy target left. Split the file by command
       while moving it: at about 2,440 lines it is well past the repository's 1,000-line ceiling.
