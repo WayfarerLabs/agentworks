@@ -342,6 +342,19 @@ def test_an_existing_swapfile_that_is_not_a_swap_area_stops_the_step_untouched(t
 
 
 @requires_posix_shell
+def test_an_existing_inactive_swap_area_is_turned_on_and_not_rebuilt(tmp_path: Path) -> None:
+    swap = _SwapStep(tmp_path)
+    swap.swapfile.write_text("an earlier swap-area\n")
+
+    assert swap.run().returncode == 0
+
+    assert swap.swapfile.read_text() == "an earlier swap-area\n"
+    assert not (swap.root / "swapfile.partial").exists()
+    assert len(swap.swaps.read_text().splitlines()) == 2
+    assert swap.fstab.read_text().splitlines() == [swap.fstab_line]
+
+
+@requires_posix_shell
 def test_an_existing_fstab_line_for_the_swapfile_is_not_added_again(tmp_path: Path) -> None:
     swap = _SwapStep(tmp_path)
     swap.fstab.write_text(f"{swap.swapfile}\tnone\tswap\tdefaults\t0\t0\n")

@@ -185,7 +185,7 @@ if [ "$SWAP_GB" -gt 0 ]; then
     if [ -e /swapfile ]; then
         if ! grep -q '^/swapfile ' /proc/swaps \
             && [ "$(blkid -p -s TYPE -o value /swapfile 2>/dev/null || true)" != swap ]; then
-            echo "##ERROR## /swapfile exists but is not a swap area; move or delete it, then run the bootstrap again"
+            echo "##ERROR## /swapfile is not a swap area; create the VM from an image without one, or with swap 0"
             exit 1
         fi
         SWAP_DONE="swap file already exists"
