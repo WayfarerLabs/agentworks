@@ -1212,7 +1212,9 @@ removes the `setenv` grant; the probe and memo are gone; and its first Negative,
 which cites 0017's refinement and says `SetEnv` remains for paths not yet migrated, is amended in
 the same batch: 0017 is superseded and no request sends environment by `SetEnv`; whether the sshd
 fragment keeps a user stays slice 8's search. (Built: that search ran with D3, found none, and
-superseded ADR 0014, whose `env_keep` fragment went the same way; Delivery, D3.)
+superseded ADR 0014, whose `env_keep` fragment went the same way; Delivery, D3. As built, both ADRs
+point at a successor, ADR 0026, which records the decision that environment travels inside the
+request, since a permanent ADR cannot rest on this SDD's paths.)
 
 ## Collateral
 
@@ -1284,7 +1286,7 @@ collateral it makes stale.
   reaches), so init removes the `AcceptEnv *` fragment too, reloading sshd only when it was there,
   and, with no Agentworks path needing `AGENTWORKS_*` or `AW_*` across sudo (the launcher builds
   each payload's environment itself), the `env_keep` fragment as well, in one `rm -f` with the
-  setenv grant (`_remove_retired_sudoers_fragments`). ADR 0014 is superseded whole.
+  setenv grant (`_remove_retired_sudoers_fragments`). ADR 0026 supersedes ADRs 0014 and 0017 whole.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
   migration. Built (Sessions: the manager).
 - **D3 and D4 share one reinit pass** (decision 9): each guest-state retirement is an idempotent

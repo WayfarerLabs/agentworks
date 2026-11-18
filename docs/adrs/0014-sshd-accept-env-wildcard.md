@@ -4,15 +4,7 @@ Date: 2026-06-13
 
 ## Status
 
-Superseded by the request envelope
-([transport take 2, HLA D3](../sdd/2026-10-20-transport-take2/hla.md#d3-the-request-envelope-r3-r4);
-[`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)). Every request
-carries its environment on the client's stdin, so nothing sends environment through `SetEnv` and
-sshd has none to accept, and nothing needs `AGENTWORKS_*` or `AW_*` kept across sudo: `vm create` no
-longer writes the `AcceptEnv *` or `env_keep` fragment, and `vm reinit` removes both, reloading
-sshd. ADR 0020's closed-stdin path belongs to the legacy transports, which no command uses. ADR
-0017, which refined the `env_keep` decision for console agent panes, is superseded too: a pane takes
-its environment from its parked request, so nothing crosses sudo.
+Superseded by [ADR 0026](0026-environment-travels-inside-the-request.md).
 
 The text below is the record of the decision as it was taken. Where it describes how the CLI sources
 secret values, that mechanism was already superseded by ADR 0016's backend-chain model.
