@@ -149,7 +149,7 @@ def test_interrupted_copy_preserves_source_row_partial_target_and_error(
             return run(command, **kwargs)
         except SSHError as error:
             if error is target.copy_error:
-                raise original
+                raise original from error
             raise
 
     monkeypatch.setattr(target, "run", interrupt)
