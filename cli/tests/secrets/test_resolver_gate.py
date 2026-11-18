@@ -1,11 +1,11 @@
-"""``Resolver.seed``: the gate-to-boundary seam.
+"""``Resolver.resolve_gate``: the gate-to-boundary seam.
 
 The activation gate resolves its narrow just-in-time secrets before
-the boundary pass; seeding hands those values to the operation's
-resolver so (a) the platform's power ops, which read the BOUND
-resolver pre-boundary (proxmox's ``status``), see them immediately,
-and (b) the boundary pass excludes them, so nothing resolves or
-prompts twice in one command.
+the boundary pass, one name at a time, on the operation's resolver, so
+(a) the platform's power ops, which read the BOUND resolver
+pre-boundary (proxmox's ``status``), see them immediately, and (b) the
+boundary pass excludes them, so nothing resolves or prompts twice in
+one command.
 """
 
 from __future__ import annotations
@@ -64,63 +64,47 @@ def _resolver() -> Resolver:
     )
 
 
-def test_seeded_value_is_readable_before_the_boundary_pass(
-    backend: _ResolveSpy,
-) -> None:
+def test_gate_value_is_readable_before_the_boundary_pass(backend: _ResolveSpy) -> None:
     """The seam's whole point: the gate's power ops read the bound
     resolver before the boundary pass runs."""
     resolver = _resolver()
-    resolver.seed({"proxmox-token": "pve"})
+    resolver.resolve_gate("proxmox-token")
     assert not resolver.resolved
-    assert resolver.get("proxmox-token") == "pve"
+    assert resolver.get("proxmox-token") == "ghtok"
 
 
-def test_unseeded_pre_pass_read_still_raises(backend: _ResolveSpy) -> None:
+def test_a_name_no_gate_resolved_still_raises_before_the_pass(backend: _ResolveSpy) -> None:
     resolver = _resolver()
-    resolver.seed({"proxmox-token": "pve"})
+    resolver.resolve_gate("proxmox-token")
     with pytest.raises(StateError, match="before the operation's resolve"):
         resolver.get("git-token-gh")
 
 
-def test_boundary_pass_excludes_seeded_names(backend: _ResolveSpy) -> None:
+def test_boundary_pass_excludes_gate_resolved_names(backend: _ResolveSpy) -> None:
     """No secret resolves twice: the backend loop covers only the
-    un-seeded remainder, and the cache serves both."""
+    remainder the gate did not resolve, and the cache serves both."""
     resolver = _resolver()
     resolver.register_name("git-token-gh")
-    resolver.seed({"proxmox-token": "gate-value"})
+    resolver.resolve_gate("proxmox-token")
     resolver.resolve()
-    assert backend.calls == [["git-token-gh"]]
-    assert resolver.get("proxmox-token") == "gate-value"
-    assert resolver.get("git-token-gh") == "ghtok"
-    assert resolver.values == {
-        "proxmox-token": "gate-value",
-        "git-token-gh": "ghtok",
-    }
+    assert backend.calls == [["proxmox-token"], ["git-token-gh"]]
+    assert resolver.values == {"proxmox-token": "ghtok", "git-token-gh": "ghtok"}
 
 
-def test_all_seeded_resolve_skips_the_backend_loop(backend: _ResolveSpy) -> None:
+def test_boundary_pass_with_only_gate_names_skips_the_backend_loop(backend: _ResolveSpy) -> None:
     resolver = _resolver()
-    resolver.seed({"proxmox-token": "pve"})
+    resolver.resolve_gate("proxmox-token")
     resolver.resolve()
-    assert backend.calls == []
-    assert resolver.values == {"proxmox-token": "pve"}
+    assert backend.calls == [["proxmox-token"]]
+    assert resolver.values == {"proxmox-token": "ghtok"}
 
 
-def test_resolve_stays_idempotent_with_seeded_names(backend: _ResolveSpy) -> None:
+def test_resolve_stays_idempotent_with_gate_names(backend: _ResolveSpy) -> None:
     resolver = _resolver()
-    resolver.seed({"proxmox-token": "pve"})
+    resolver.resolve_gate("proxmox-token")
     resolver.resolve()
-    resolver.resolve()  # no raise: the seeded name is in the cache
-    assert backend.calls == []
-
-
-def test_seeding_after_the_pass_is_a_loud_error(backend: _ResolveSpy) -> None:
-    """Same contract as post-pass registration: a value the pass never
-    covered must not quietly widen the cache."""
-    resolver = _resolver()
-    resolver.resolve()
-    with pytest.raises(StateError, match="seeded after"):
-        resolver.seed({"proxmox-token": "pve"})
+    resolver.resolve()  # no raise: the gate name is in the cache
+    assert backend.calls == [["proxmox-token"]]
 
 
 def test_shared_gate_success_is_reused_by_gates_and_workload_boundary(backend: _ResolveSpy) -> None:
@@ -251,6 +235,4 @@ def test_disposal_prevents_source_access_and_cached_value_reads(
         resolver.resolve()
     with pytest.raises(StateError):
         resolver.register_name("new")
-    with pytest.raises(StateError):
-        resolver.seed({"new": "unused"})
     assert backend.calls == completed_calls

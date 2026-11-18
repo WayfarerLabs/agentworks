@@ -8,7 +8,7 @@ targets), runs ONE :meth:`resolve` pass at the preflight boundary (as
 soon as every participating node's preflight passes), one prompt
 session, and then delivers values downstream through scoped readers
 (``orchestration.secrets.ScopedSecrets`` over :meth:`values`); the
-activation gate's just-in-time values enter through :meth:`seed`.
+activation gate's just-in-time values enter through :meth:`resolve_gate`.
 
 This does not change the no-cross-invocation-cache stance (ADR 0016):
 the cache lives and dies with the operation, exactly like the resolved
@@ -25,7 +25,7 @@ from agentworks.errors import AgentworksError, SecretUnavailableError, StateErro
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Sequence
 
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
@@ -67,7 +67,7 @@ class Resolver:
         self._interaction = interaction
         self._prompt_names = prompt_names
         self._decls: dict[str, SecretDecl] = {}
-        self._seeded: dict[str, str] = {}
+        self._gate_values: dict[str, str] = {}
         self._failed_gates: set[str] = set()
         self._values: dict[str, str] | None = None
         self._closed = False
@@ -79,7 +79,7 @@ class Resolver:
         Consumers remain responsible for clearing their own supplied value copies.
         """
         self._closed = True
-        self._seeded.clear()
+        self._gate_values.clear()
         if self._values is not None:
             self._values.clear()
         self._values = None
@@ -153,36 +153,6 @@ class Resolver:
             return SecretDecl(name=name, description="")
         return found
 
-    def seed(self, values: Mapping[str, str]) -> None:
-        """Pre-seed the boundary pass with values the ACTIVATION GATE
-        already resolved (the one sanctioned resolution outside the
-        boundary pass; see ``orchestration/activation.py``).
-
-        The point is the NO-DOUBLE-RESOLVE property: seeded names
-        register on the operation's resolve set and are excluded from
-        the boundary pass's source loop, so a gate-resolved secret
-        never resolves or prompts twice in one command. (Ops read the
-        gate's scoped reader while the gate runs, and scoped delivery
-        over the boundary cache after it; seeded values also stay
-        readable via :meth:`get` before the pass, part of the same
-        contract.)
-
-        Seeding after the boundary pass is the same contract violation
-        as registering after it (a value the pass never covered), so
-        it raises instead of quietly widening the cache.
-        """
-        self._require_open()
-        if self._values is not None:
-            raise StateError(
-                "secret values were seeded after the operation's resolve "
-                f"pass: {', '.join(sorted(values))}. The activation gate "
-                "resolves and seeds before the boundary; reaching here "
-                "means a caller seeded too late."
-            )
-        for name, value in values.items():
-            self.register_name(name)
-            self._seeded[name] = value
-
     # -- the lifecycle verbs -------------------------------------------
 
     def resolve(self) -> None:
@@ -210,14 +180,14 @@ class Resolver:
         # An independently failed VM may share a credential with an eligible
         # workload. Fail its complete boundary before touching any new source.
         self._check_failed_gates(self._decls)
-        # Gate-seeded values are already resolved (by the gate's own
+        # Gate values are already resolved (by ``resolve_gate``'s own
         # source-chain pass); the boundary loop covers only the rest.
-        missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
+        missing = [decl for name, decl in self._decls.items() if name not in self._gate_values]
         if not missing:
-            resolved = dict(self._seeded)
+            resolved = dict(self._gate_values)
         else:
             batch = self._resolve_declarations(missing)
-            resolved = {**self._seeded, **batch.complete_or_raise()}
+            resolved = {**self._gate_values, **batch.complete_or_raise()}
         self._values = resolved
 
     def resolve_gate(self, name: str) -> str:
@@ -230,7 +200,7 @@ class Resolver:
         if self._values is not None:
             raise StateError("a gate secret cannot resolve after the operation boundary")
         self._check_failed_gates((name,))
-        existing = self._seeded.get(name)
+        existing = self._gate_values.get(name)
         if existing is not None:
             return existing
         decl = self._decls.get(name) or self._decl_for(name)
@@ -246,8 +216,8 @@ class Resolver:
             self._failed_gates.add(name)
             raise
         self.register((decl,))
-        self._seeded[name] = projected[name]
-        return self._seeded[name]
+        self._gate_values[name] = projected[name]
+        return self._gate_values[name]
 
     def _check_failed_gates(self, names: Iterable[str]) -> None:
         failed = sorted(self._failed_gates.intersection(names))
@@ -277,12 +247,12 @@ class Resolver:
 
     def get(self, name: str) -> str:
         """A resolved value, from the boundary pass's cache (or, before
-        the pass, from the activation gate's seed; see :meth:`seed`)."""
+        the pass, a gate value :meth:`resolve_gate` resolved)."""
         self._require_open()
         if self._values is None:
-            seeded = self._seeded.get(name)
-            if seeded is not None:
-                return seeded
+            gate_value = self._gate_values.get(name)
+            if gate_value is not None:
+                return gate_value
             raise StateError(
                 f"secret '{name}' requested before the operation's resolve "
                 "pass ran. The composition root resolves once at the "
