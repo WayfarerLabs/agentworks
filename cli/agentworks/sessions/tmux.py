@@ -399,11 +399,11 @@ def _tmux_presence_from_result(
     stdout = original_stdout if stdout is None else stdout.strip()
     streams = [value for value in (stdout, stderr) if value]
     # A canonical tmux diagnostic is a single line on exactly one stream. The
-    # direct probe transports fold CR to LF on capture (SSH via ``text=True``,
-    # Lima/WSL2 via ``decode_stream``), but the batch presence path hex-encodes
-    # the diagnostic in-guest and reconstitutes it with ``bytes.fromhex`` (see
-    # ``sessions/manager/_status.py``), so those inner bytes never pass through
-    # that folding and a raw CR can survive. Reject either newline form, since
+    # direct probes decode the guest's bytes without folding CR
+    # (``access_run_command``), and the batch presence path hex-encodes the
+    # diagnostic in-guest and reconstitutes it with ``bytes.fromhex`` (see
+    # ``sessions/manager/_status.py``), so a raw CR can survive either way.
+    # Reject either newline form, since
     # regex ``.`` matches ``\r`` and would otherwise misclassify ``a\rb`` as a
     # diagnostic; also reject more than one non-empty stream.
     if len(streams) != 1 or "\n" in streams[0] or "\r" in streams[0]:

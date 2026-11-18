@@ -22,7 +22,6 @@ import agentworks.execution as execution
 from agentworks import output
 from agentworks.errors import ExternalError
 from agentworks.execution import root_script, ssh_process
-from agentworks.subprocess_io import decode_stream, stdin_bytes
 
 if TYPE_CHECKING:
     from agentworks.execution.root_script import RawRun
@@ -293,7 +292,7 @@ class LimaHost:
             stdin = subprocess.DEVNULL if self.is_remote else None
         process = ssh_process.spawn(self._argv(command), stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            stdout, stderr = process.communicate(stdin_bytes(input), timeout=timeout)
+            stdout, stderr = process.communicate(_stdin_bytes(input), timeout=timeout)
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate()
@@ -303,7 +302,39 @@ class LimaHost:
             process.kill()
             process.wait()
             raise
-        return _Completed(process.returncode, decode_stream(stdout), decode_stream(stderr))
+        return _Completed(process.returncode, _decode_stream(stdout), _decode_stream(stderr))
+
+
+def _stdin_bytes(input_text: str | None) -> bytes | None:
+    """``input_text`` for a byte-mode stdin pipe, or ``None`` for no input.
+
+    Text mode rewrites every LF to ``os.linesep`` on the way in, so on Windows
+    a line-oriented payload would reach the child with a CR on every line;
+    bytes are the only cure, since ``subprocess.Popen`` takes no ``newline``.
+    ``surrogateescape`` sends a value that arrived as raw OS bytes back out as
+    those bytes. A payload that still cannot be encoded raises a value-free
+    error: ``UnicodeEncodeError`` carries the whole string, which may be a
+    secret.
+    """
+    if input_text is None:
+        return None
+    try:
+        return input_text.encode("utf-8", errors="surrogateescape")
+    except UnicodeEncodeError:
+        pass
+    # Raised clear of the except block on purpose: ``from None`` would still
+    # leave the original exception, payload and all, on ``__context__``.
+    raise ValueError("stdin payload is not encodable as UTF-8")
+
+
+def _decode_stream(raw: bytes) -> str:
+    """One captured stream as text, decoded as ``text=True, encoding="utf-8", errors="replace"`` would.
+
+    CRLF and lone CR fold to LF, as text mode's universal newlines did, so a
+    caller comparing ``limactl``'s output reads the same text on every
+    workstation.
+    """
+    return raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _is_private_directory(directory: str, prefix: str) -> bool:
