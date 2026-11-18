@@ -102,10 +102,11 @@ def main() -> None:
     except (ConnectivityError, ExternalError) as e:
         # External-system failures: render the one-liner AND persist the
         # full traceback to the error log so postmortem diagnosis can see
-        # the underlying SSH command, platform API response, etc. Type-qualify
-        # the message (Error: SSHError: ...) since these often have messages
-        # that don't carry the failure category in their text. The handler
-        # owns the `Error:` prefix, so the rendered line is `Error: SSHError: ...`.
+        # the underlying request, platform API response, etc. Type-qualify the
+        # message (Error: ExecutionIncomplete: ...) since these often have
+        # messages that don't carry the failure category in their text. The
+        # handler owns the `Error:` prefix, so the rendered line is
+        # `Error: ExecutionIncomplete: ...`.
         error(f"{type(e).__name__}: {e}")
         echo_hint(e)
         if debug_enabled():
