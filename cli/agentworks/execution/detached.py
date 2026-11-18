@@ -77,10 +77,16 @@ class State(StrEnum):
 
 @dataclass(frozen=True)
 class Launch:
-    """One launch: its VM and the id ``new_launch`` chose. Plain data, held by the caller before dispatch."""
+    """One launch: its VM and the id ``new_launch`` chose. Plain data, held by the caller before dispatch.
+
+    ``log_streams`` is its command's: whether the payload's output may reach
+    the operation log. ``observe`` and ``interrupt`` return that output, so
+    they log their streams only when it is true.
+    """
 
     vm_name: str
     id: str
+    log_streams: bool = True
 
 
 @dataclass(frozen=True)
@@ -105,9 +111,12 @@ class Detached:
     def __init__(self, access: VMAccess) -> None:
         self._access = access
 
-    def new_launch(self) -> Launch:
-        """A fresh launch id on this VM. Dispatches nothing, so the caller can discard by id whatever follows."""
-        return Launch(self._access.vm_name, secrets.token_hex(16))
+    def new_launch(self, *, log_streams: bool = True) -> Launch:
+        """A fresh launch id on this VM. Dispatches nothing, so the caller can discard by id whatever follows.
+
+        ``log_streams`` must be the ``log_streams`` of the command launched under it.
+        """
+        return Launch(self._access.vm_name, secrets.token_hex(16), log_streams)
 
     def launch(self, launch: Launch, command: Command) -> None:
         """Start ``command`` as root under ``launch``, returning once the payload has started.
@@ -121,6 +130,8 @@ class Detached:
         that does not complete either, raises ``ExecutionIncomplete`` naming
         the id. An existing id is ``DetachedRefused``, and a command the guest
         cannot execute is ``RequestRefused`` with the ``exec`` failure's code.
+        ``command.log_streams`` must be ``launch.log_streams``, which is what
+        keeps the payload's output out of the log after the launch.
         """
         launch_id = self._checked(launch)
         # A boundary: plugins holding an admin access can call this directly.
@@ -130,6 +141,8 @@ class Detached:
             raise ValidationError("a detached launch is elevated, with no stdin and no working directory")
         if command.deadline is not None:
             raise ValidationError("a detached launch takes no deadline: its observer bounds it")
+        if command.log_streams is not launch.log_streams:
+            raise ValidationError("a detached launch's command logs its streams only as its launch says")
         # The envelope's own rules: the spec travels on stdin, where no envelope checks it.
         spec = json.dumps({"argv": checked_argv(command.argv), "env": checked_env(command.env)}, ensure_ascii=True)
         result = self._access.run(
@@ -201,24 +214,33 @@ class Detached:
             raise ValidationError(f"the launch is not one on VM '{self._access.vm_name}'")
         if not isinstance(launch.id, str) or not _ID.fullmatch(launch.id):
             raise ValidationError("a launch id is 32 lowercase hex digits")
+        if type(launch.log_streams) is not bool:
+            raise ValidationError("a launch's log_streams is true or false")
         return launch.id
 
     @staticmethod
-    def _program(operation: str, launch_id: str, deadline: float, *, stdin: Bytes | None = None) -> PythonProgram:
+    def _program(
+        operation: str, launch_id: str, deadline: float, *, stdin: Bytes | None = None, log_streams: bool = True
+    ) -> PythonProgram:
         return PythonProgram(
             program_source(),
             args=(operation, launch_id),
             elevated=True,
             deadline=deadline,
             stdin=stdin or NoInput(),
+            log_streams=log_streams,
         )
 
     def _run_program(self, operation: str, launch: Launch, deadline: float) -> Result:
-        """Run an operation that answers with an observation, raising for any status but 0."""
-        result = self._access.run(self._program(operation, self._checked(launch), deadline))
+        """Run an operation that answers with an observation, raising for any status but 0.
+
+        The answer carries the payload's output, so it is logged only as the launch says.
+        """
+        request = self._program(operation, self._checked(launch), deadline, log_streams=launch.log_streams)
+        result = self._access.run(request)
         status = result.require_completed(self._access.vm_name)
         if status != 0:
-            raise CommandFailed(self._access.vm_name, status, result, streams_logged=True)
+            raise CommandFailed(self._access.vm_name, status, result, streams_logged=request.log_streams)
         return result
 
     def _observation(self, result: Result) -> Observation:

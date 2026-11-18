@@ -221,14 +221,14 @@ connection that started it. Every request is elevated, so an agent's access refu
 `PermissionDenied`. The guest side is `detached_program.py`, sent as a `PythonProgram` as the file
 program is.
 
-| Method                         | Does                                                                               | Deadline |
-| ------------------------------ | ---------------------------------------------------------------------------------- | -------- |
-| `new_launch()`                 | A fresh `Launch(vm_name, id)`, 32 hex digits chosen on the workstation; no request | none     |
-| `launch(launch, command)`      | Starts an elevated `Command` with no input, working directory or deadline          | 60       |
-| `observe(launch)`              | An `Observation`: state, status, `work/` file sizes, output tail                   | 30       |
-| `interrupt(launch)`            | `SIGTERM` to the payload's group, `SIGKILL` if it outlives 10 seconds; the state   | 30       |
-| `download(launch, name, sink)` | `cat` of `work/<name>` into a `ToFile`                                             | none     |
-| `discard(launch)`              | Removes the launch's directory; refuses a running one                              | 60       |
+| Method                         | Does                                                                                                   | Deadline |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ | -------- |
+| `new_launch(log_streams=True)` | A fresh `Launch(vm_name, id, log_streams)`, the id 32 hex digits chosen on the workstation; no request | none     |
+| `launch(launch, command)`      | Starts an elevated `Command` with no input, working directory or deadline                              | 60       |
+| `observe(launch)`              | An `Observation`: state, status, `work/` file sizes, output tail                                       | 30       |
+| `interrupt(launch)`            | `SIGTERM` to the payload's group, `SIGKILL` if it outlives 10 seconds; the state                       | 30       |
+| `download(launch, name, sink)` | `cat` of `work/<name>` into a `ToFile`                                                                 | none     |
+| `discard(launch)`              | Removes the launch's directory; refuses a running one                                                  | 60       |
 
 Each launch lives in `/var/lib/agentworks/detached/<id>/`: the base is created root-owned, mode
 0700, under a 0755 `/var/lib/agentworks`, and the launch directory and its `work/` (the payload's
@@ -260,6 +260,10 @@ again: after a connection outcome it makes one `observe`, and returns if the lau
 otherwise it raises `ExecutionIncomplete` naming the id. Resuming after a dropped connection is the
 caller's polling loop, since `observe` changes nothing. A caller holds the id from `new_launch`
 before anything is sent, so its `finally` can discard by id whatever `launch` did.
+
+`observe` and `interrupt` return the payload's output, so they log their streams only as the launch
+says: a launch made with `log_streams=False` takes a command with `log_streams=False`, and nothing
+of its output reaches the operation log, a failure's included.
 
 ## Client and policy
 

@@ -220,15 +220,18 @@ already read the agent's processes.
 
 | Operation                                    | What it does                                                                     | Request                                                                           | Deadline |
 | -------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------- |
-| `new_launch() -> Launch`                     | Chooses a fresh id; dispatches nothing                                           | none                                                                              |          |
+| `new_launch(log_streams=True) -> Launch`     | Chooses a fresh id; dispatches nothing                                           | none                                                                              |          |
 | `launch(launch, command: Command) -> None`   | Starts `command` under the launch, returning once the payload has started        | `PythonProgram(DETACHED, ("launch", id))`, elevated; the spec on stdin            | 60       |
 | `observe(launch) -> Observation`             | State, status, `work/` sizes, and the output tail once the launch is not running | `PythonProgram(DETACHED, ("observe", id))`, elevated                              | 30       |
 | `interrupt(launch) -> Observation`           | Stops the payload's process group and returns the state after                    | `PythonProgram(DETACHED, ("interrupt", id))`, elevated                            | 30       |
 | `download(launch, name, to: ToFile) -> None` | Copies `work/<name>` to the workstation                                          | `Command(("cat", "--", f"{launch_dir}/work/{name}"), elevated=True)`, `stdout=to` | none     |
 | `discard(launch) -> None`                    | Removes the launch directory; an absent one is done                              | `PythonProgram(DETACHED, ("discard", id))`, elevated                              | 60       |
 
-`Launch(vm_name, id)` is plain data. `new_launch` and `launch` are separate so the caller holds the
-id before anything is dispatched, and its `finally` can discard by id whatever `launch` did.
+`Launch(vm_name, id, log_streams)` is plain data. `new_launch` and `launch` are separate so the
+caller holds the id before anything is dispatched, and its `finally` can discard by id whatever
+`launch` did. `log_streams` is the launched command's, which `launch` requires to match: `observe`
+and `interrupt` return the payload's output tail, so their requests take it as their own
+`log_streams`, and a launch whose command keeps its streams out of the log keeps its output out too.
 
 `Observation(state, status, work: Mapping[str, int], output_tail: bytes)`, with `state` one of the
 states below, `status` set only for `EXITED`, and `output_tail` (at most
