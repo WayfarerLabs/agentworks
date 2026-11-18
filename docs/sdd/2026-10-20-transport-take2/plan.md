@@ -601,7 +601,7 @@ Definition of done: create and reinit run entirely on the new transport.
   - observation resumes across a dropped connection;
   - interrupt stops the work;
   - the detached base is never world-writable.
-- [ ] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and every
+- [x] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and every
       `LineOrientedSecretUse.ENVIRONMENT` use, in `env/compose.py:73-81` and
       `secrets/orchestration.py:228-232`), now that no path sends environment by `SetEnv`.
 - [x] Delete the console's env carry across sudo, which the handover replaces: the `--preserve-env`

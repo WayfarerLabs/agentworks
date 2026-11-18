@@ -1031,6 +1031,40 @@ In the order they land, each with its tests:
      value with a NUL is refused by the envelope at dispatch (`envelope.py:86`), as today: that is
      after the command's earlier steps, which may have changed state, so the replacement test also
      checks that a NUL value raises `ValidationError` before anything is sent.
+   - (Built in batch E.) As listed, and four more. `render_plaintext`'s refusal of CR and LF
+     (`env/render.py:52-58`), which the list missed, goes too: it refused at command time the
+     plaintext value the decode advisory only warned about. Its NUL refusal stays, so a plaintext
+     NUL is refused while the command validates its targets (`SecretTarget.validate_context`),
+     rather than at dispatch: session create given one is refused with no secret resolved, no row
+     written and no request sent (`sessions/test_create_start_restart_orchestrated.py`).
+     `Resolver._targets`, which only `validate_target_values` read, goes, and so does
+     `_env_entry_issues`, the identity-prefix check folding into `_env_hygiene_issues`. Three paths
+     were made safe first:
+     - The operation log's record stripped every trailing newline of a stream before the sink
+       redacted the block, so a secret ending in two or more line breaks, printed last on stdout
+       with stderr after it, was written in the clear; it now removes only the stream's last newline
+       (`execution/oplog.py:44`).
+     - `secret_redaction_forms` (`secrets/redaction.py`) adds the value without leading or trailing
+       line breaks, as a message or a command substitution shows it, and bash's `$'...'` spelling
+       (`printf %q`, `declare -p`), exact in the C locale and for ASCII text in any locale. One line
+       of a multi-line secret shown on its own is still not redacted, since matching each line would
+       match lines such as a PEM `-----END`; `secrets/README.md` and the runtime-context doc say so.
+     - An env name's check used `re.match`, whose `$` accepts a final newline, so a quoted key
+       `"FOO\n"` loaded and printed as a key on two rows; it is `fullmatch` (`env/entry.py:29`).
+
+     The table cell (`env/show.py:486`) is each backslash and each character in
+     `terminal.TERMINAL_UNSAFE_CATEGORIES` (controls, format characters, lone surrogates, line and
+     paragraph separators; the set the JSON envelope, `sanitize_fact_line` and the secret backends'
+     `safe_identity` already used) as `unicode_escape` spells it. Tests as built: a multi-line
+     secret and plaintext compose exactly (`test_secrets_orchestration.py`); the refusal tests of
+     `test_env_compose.py`, session create and restart and console restart
+     (`sessions/test_console_attach_orchestrated.py`), which the list also missed, now check that
+     the value reaches the composed environment or the new runtime intact; the real-tmux launch test
+     (`sessions/test_native_startup.py`) gets a CR/LF value to the workload byte-exact; the
+     `env show` tests decode the value's one row back to it, for plaintext and for a revealed
+     secret; the sink tests in `test_ssh_logger.py` check the new forms against bash's own output;
+     and the T2 vectors carry a CR/LF value through the handover, beside `environment-bytes` for
+     `run`.
 
 ## Behavior changes for the upgrade guide
 
