@@ -267,9 +267,18 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
         raise failure from exc
 
 
-def remove_ssh_allow(
-    ec2: Any, security_group_id: str, prefixes: Sequence[str], *, hold_interrupts: bool = True
-) -> None:
+def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
+    """:func:`remove_ssh_allow_interruptibly`, with Ctrl-C and the terminations held until it is done.
+
+    A revoke cut short leaves the allow open, so every removal holds them
+    (:func:`~agentworks.interrupts.interrupts_deferred`) except create's
+    rollback.
+    """
+    with interrupts_deferred():
+        remove_ssh_allow_interruptibly(ec2, security_group_id, prefixes)
+
+
+def remove_ssh_allow_interruptibly(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
     """Revoke exactly the TCP/22 allows this operation authorized for
     ``prefixes``, restoring zero inbound exposure through them (the empty-group
     baseline stays, and any concurrent operation's non-overlapping allows are
@@ -283,20 +292,10 @@ def remove_ssh_allow(
     than raising, because every call site must keep unwinding. Only what was
     actually revoked is reported as closed.
 
-    Ctrl-C and the terminations wait for the revoke to finish
-    (:func:`~agentworks.interrupts.interrupts_deferred`), since a revoke cut
-    short leaves the allow open. Only create's rollback passes
-    ``hold_interrupts=False``: there a second Ctrl-C is how the operator
-    abandons a cleanup that hangs, and the create retains what it could not
-    confirm."""
-    if hold_interrupts:
-        with interrupts_deferred():
-            _revoke_ssh_allow(ec2, security_group_id, prefixes)
-    else:
-        _revoke_ssh_allow(ec2, security_group_id, prefixes)
-
-
-def _revoke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
+    It holds no interrupts: only create's rollback calls it directly, since
+    there a second Ctrl-C is how the operator abandons a cleanup that hangs,
+    and the create retains what it could not confirm. Everything else calls
+    :func:`remove_ssh_allow`."""
     warnings: list[str] = []
     revoked: list[str] = []
     for prefix in prefixes:

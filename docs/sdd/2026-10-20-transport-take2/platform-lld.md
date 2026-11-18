@@ -499,38 +499,39 @@ controlling pseudo-terminal (`tests/capabilities/test_wsl2_root_channel.py`).
 ### Proxmox
 
 `guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun`, which the platform calls
-once its identity check passes, is written fresh from the dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest
-agent (`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM
-that has just started (recover starts a stopped one with no wait) has no agent running yet. A ping
-carries no script, so asking again is safe; a token rejection raises `TokenRejectedError` at once,
-any other `ProxmoxAPIError` means not yet (anything else the client raises is a bug and propagates),
-and no answer within `AGENT_WAIT_SECONDS` (120 s), the wait's own bound, raises `ChannelUnreachable`
-saying no script was dispatched, so a VM with no agent fails in about two minutes rather than after
-the repair's 600. The deadline starts once the agent answers: one `guest_agent_exec` of
-`["/bin/bash", "-s"]` with `input-data`, then `guest_agent_exec_status` every two seconds until it
-reports exit or the deadline passes. Each request's wait is bounded by what remains of the deadline
-(the ping's by what remains of its own bound), at most the API's 30-second
-`REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds the TCP connect and each wait for data, not name
-resolution or a whole response, so an API that keeps a response arriving can carry one request past
-the deadline; the `run_as_root` contract states the same limit for any channel over an HTTP API. The
-operator's [2026-11-11 ruling](./frd.md#2026-11-11) keeps that limit documented rather than
-enforced: the API is the site's own server, and a whole-response bound would mean replacing `urllib`
-and the proxy support that comes with it, reaching into private socket attributes, or abandoning a
-worker thread at the deadline. A poll carries only the PID, so a failed one is asked again at the
-next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up, as they do
-for an agent that restarted and lost the PID. Dispatch and status failures raise `ConnectivityError`
-with no stdin in the message (`guest_agent.py:80-118`), except an HTTP 401 or 403, which raises
-`TokenRejectedError` at once; a status failure of either kind says the script may still be running,
-and a status failure from the API adds the API's own error text (an agent that restarted mid-script
-answers `Agent error: PID <pid> does not exist`), since that request carries only the PID. A
-dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput` report
-raises `ConnectivityError` saying the script exited with its output cut short. No failure chains the
-API error, whose request quotes the script. `create` waits for cloud-init through it
+once its identity check passes, is written fresh from the dispatch-and-poll half of
+`plugins/proxmox/transport.py:51-137`. First it pings the guest agent (`guest_agent_ping`,
+`POST .../agent/ping`) every two seconds until it answers, since a VM that has just started (recover
+starts a stopped one with no wait) has no agent running yet. A ping carries no script, so asking
+again is safe; a token rejection raises `TokenRejectedError` at once, any other `ProxmoxAPIError`
+means not yet (anything else the client raises is a bug and propagates), and no answer within
+`AGENT_WAIT_SECONDS` (120 s), the wait's own bound, raises `ChannelUnreachable` saying no script was
+dispatched, so a VM with no agent fails in about two minutes rather than after the repair's 600. The
+deadline starts once the agent answers: one `guest_agent_exec` of `["/bin/bash", "-s"]` with
+`input-data`, then `guest_agent_exec_status` every two seconds until it reports exit or the deadline
+passes. Each request's wait is bounded by what remains of the deadline (the ping's by what remains
+of its own bound), at most the API's 30-second `REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds
+the TCP connect and each wait for data, not name resolution or a whole response, so an API that
+keeps a response arriving can carry one request past the deadline; the `run_as_root` contract states
+the same limit for any channel over an HTTP API. The operator's
+[2026-11-11 ruling](./frd.md#2026-11-11) keeps that limit documented rather than enforced: the API
+is the site's own server, and a whole-response bound would mean replacing `urllib` and the proxy
+support that comes with it, reaching into private socket attributes, or abandoning a worker thread
+at the deadline. A poll carries only the PID, so a failed one is asked again at the next interval;
+only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up, as they do for an agent that
+restarted and lost the PID. Dispatch and status failures raise `ConnectivityError` with no stdin in
+the message (`guest_agent.py:80-118`), except an HTTP 401 or 403, which raises `TokenRejectedError`
+at once; a status failure of either kind says the script may still be running, and a status failure
+from the API adds the API's own error text (an agent that restarted mid-script answers
+`Agent error: PID <pid> does not exist`), since that request carries only the PID. A dispatch
+failure adds none, since its request carries the script. A `_TruncatedQGAOutput` report raises
+`ConnectivityError` saying the script exited with its output cut short. No failure chains the API
+error, whose request quotes the script. `create` waits for cloud-init through it
 (`cloud-init status --wait --long`, the cloud bootstrap's readiness command, a 420 s budget for
 cloud-init counted from the first attempt, each attempt's agent wait before its deadline and no
-retry with less than 60 s of the budget left, status 2 a warning, and any other failure
-quoting cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within
-that budget, since cloud-init can restart the guest agent and the command changes nothing), with no
+retry with less than 60 s of the budget left, status 2 a warning, and any other failure quoting
+cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within that
+budget, since cloud-init can restart the guest agent and the command changes nothing), with no
 separate wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's
 600-second deadline (`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and
 `guest_agent_network` leave the API client. `out-data` and `err-data` are encoded with
@@ -606,19 +607,19 @@ holds Ctrl-C and the terminations until the provider call returns and then deliv
 arrived to the handler it would have reached, so an interrupt that lands mid-removal waits for it.
 AWS's and Azure's `remove_ssh_allow` hold interrupts themselves (slice 8), so every caller gets the
 hold without restating it: the poke's own cleanup, the route's exit and the provisioning close. Only
-AWS create's rollback passes `hold_interrupts=False`, since a second Ctrl-C is how the operator
-abandons that cleanup, and the create then retains what it could not confirm; Azure's rollback
-deletes the NSG instead and never calls it. GCP has no such function: its route's one exit holds the
-shared `delete_matching_firewall`, and `close_provisioning_access_or_warn` holds every platform's
-provisioning close. Only what was actually removed is reported closed: AWS counts a revoke that EC2
-answers with the rule listed under `UnknownIpPermissions`, like `InvalidPermission.NotFound`, as
-nothing revoked, and Azure reports a rule already gone (404) as nothing. Once the route has closed,
-`_public_ssh` calls `close_provisioning_access_or_warn` (contract-lld, Phase A), so a bootstrap
-allow that create's own close left open is removed by the next root-channel operation, `vm recover`,
-`vm rekey`, delete's logout or a platform shell; a close with nothing left to remove is silent.
-Azure's poke removes a rule whose create was interrupted, by the name it chose. `_transient_route`
-is an abstract member of the base, which each cloud supplies and nothing outside the cloud calls.
-Then:
+AWS create's rollback calls the holding-free `remove_ssh_allow_interruptibly` instead, since a
+second Ctrl-C is how the operator abandons that cleanup, and the create then retains what it could
+not confirm; Azure's rollback deletes the NSG instead and never calls it. GCP has no such function:
+its route's one exit holds the shared `delete_matching_firewall`, and
+`close_provisioning_access_or_warn` holds every platform's provisioning close. Only what was
+actually removed is reported closed: AWS counts a revoke that EC2 answers with the rule listed under
+`UnknownIpPermissions`, like `InvalidPermission.NotFound`, as nothing revoked, and Azure reports a
+rule already gone (404) as nothing. Once the route has closed, `_public_ssh` calls
+`close_provisioning_access_or_warn` (contract-lld, Phase A), so a bootstrap allow that create's own
+close left open is removed by the next root-channel operation, `vm recover`, `vm rekey`, delete's
+logout or a platform shell; a close with nothing left to remove is silent. Azure's poke removes a
+rule whose create was interrupted, by the name it chose. `_transient_route` is an abstract member of
+the base, which each cloud supplies and nothing outside the cloud calls. Then:
 
 - `run_as_root`: `trust.require_record(vm.name)` first, so a VM with no record opens no firewall
   rule, then `run_as_root(script, deadline)` inside `_public_ssh` under VM trust.
@@ -1077,15 +1078,17 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   provider call its client's timeout; Azure's long-running operations on the route (the public-IP
   heal, the deny re-pin, the legacy-rule delete and the poke) each wait at most
   `_OPERATION_TIMEOUT_SECONDS` (300 s, the removal's bound too), where they had no bound. A poke
-  whose create does not finish in time raises without another attempt, after giving the create up
-  to `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more and then removing the rule, since a delete
-  racing the create can fail or find nothing and let the rule land after it; if the create still
-  has not finished, a warning names the rule for removal by hand. GCP's firewall insert already had
-  a bound.
+  whose create does not finish in time raises without another attempt, after giving the create up to
+  `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more and then removing the rule, since a delete racing
+  the create can fail or find nothing and let the rule land after it; if the create still has not
+  finished, a warning names the rule for removal by hand. GCP's firewall insert already had a bound.
   Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the agent wait's
   `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
-  the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its 420-second budget, now counted with the agent waits outside each attempt's deadline, and retries only while 60 seconds of it remain, so no attempt is dispatched with almost no time; `guest_agent.run_as_root` refuses a deadline that is not positive before it asks anything.
+  the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
+  420-second budget, now counted with the agent waits outside each attempt's deadline, and retries
+  only while 60 seconds of it remain, so no attempt is dispatched with almost no time;
+  `guest_agent.run_as_root` refuses a deadline that is not positive before it asks anything.
 
 ## Live evidence
 
