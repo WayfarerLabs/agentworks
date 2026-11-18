@@ -2,15 +2,11 @@
 
 `agentworks.execution` is how core runs commands on a managed VM. It reaches the VM only through the
 installed OpenSSH client at the VM's tailnet address, and every request is sent on the client's
-stdin, never on a command line or in the environment. The commands that use it today are `vm exec`,
-`vm shell`, `agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward`, plus create's
-first contact (Phase A), the VM contract (`agentworks.vms.contract`) that create and reinit run,
-`vm confirm-release`, and the wait for a VM to answer (`reachability.wait`) after `vm start`, the
-activation gate's automatic start, `vm rekey` and `vm recover`, VM and agent initialization,
-`vm backup`, `vm describe`'s live resources, and the workspace commands. Everything else still
-reaches VMs through the legacy transport stack (`agentworks.transports`), which this package must
-never import. A platform's own channel is not part of either: core reaches it through
-`VMPlatform.run_as_root` and `native_shell`.
+stdin, never on a command line or in the environment. Every core command that reaches a VM over SSH
+uses it, from create's first contact (Phase A) and the VM contract (`agentworks.vms.contract`) to
+sessions, consoles and backup. No command uses the legacy transport stack (`agentworks.transports`)
+any more, and this package must never import it or `agentworks.ssh`. A platform's own channel is not
+part of this package: core reaches it through `VMPlatform.run_as_root` and `native_shell`.
 
 ## Use
 

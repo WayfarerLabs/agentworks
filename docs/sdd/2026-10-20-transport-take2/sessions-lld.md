@@ -461,11 +461,14 @@ agent it will park for, before the operation's first mutation, and an agent that
 direct-SSH rollout gets that function's reinit hint instead of a failed pane. The earlier
 `sudo --login` panes did not need it; the upgrade guide says so. As built (batch D2),
 `console_access` (`sessions/multi_console/_access.py`) builds the operation's `ConsoleAccess`, the
-admin's access and each checked agent's, from the members whose shells park as an agent: in
-`prepare_console_reconcile` for a build (so `console start`, `restart` and reconciliation refuse
-while preparing), in `create_console` before its first tmux request, in `restore_session` before the
-window or pane it opens, and in `add-shell` and `add-sessions` before their database write when the
-VM has a Tailscale address.
+admin's access and each checked agent's, from the members whose shells park as an agent, and every
+operation calls it before it resolves a pane secret: in `prepare_console_reconcile` for a build (so
+`console start`, `restart` and reconciliation refuse while preparing), and in
+`_prepare_console_access` for `create_console` and `restore_session`, once the VM is active and
+before the boundary resolve, so a refused agent stops them before they can prompt. `add-shell` and
+`add-sessions` first probe the console's tmux, read-only; only a running console has a pane to park,
+so only then do they check the agents, before they resolve or record anything. A stopped console's
+edit, or one whose probe cannot tell, is recorded and its live sync stays best effort, as before D2.
 
 **What replaces the sudo carry.** Today an agent pane runs
 `exec sudo --login --preserve-env=<keys> -u <agent> bash -c '<bootstrap>'`
@@ -490,24 +493,26 @@ live code, each justified by a comment as a conditional-need exception. Per comm
 
 | Command                                   | Today                                                                                 | Becomes                                                                                                                                         |
 | ----------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `console create`                          | resolves every pane's secrets after the gate, always (`crud.py:151-158`)              | `_console_build_secret_targets` (`sessions/multi_console/secrets_env.py:178`) passed as the boundary's `targets`; values from `resolver.values` |
+| `console create`                          | resolves every pane's secrets after the gate, always (`crud.py:151-158`)              | `_console_build_secret_targets` (`sessions/multi_console/secrets_env.py:164`) passed as the boundary's `targets`; values from `resolver.values` |
 | `console restart`                         | the same, always (`multi_console/attach.py:702`)                                      | the same                                                                                                                                        |
 | `console start`                           | the same, but only when the console is not running (`attach.py:699-702`)              | the same, always: a start of a running console now resolves every pane's secrets and creates nothing                                            |
-| `console restore-session`, window missing | every configured shell's secrets after the probes (`restore.py:186-203`)              | `_restore_session_secret_targets(..., indices=all)` (`secrets_env.py:237`) in the boundary; the late resolve goes                               |
+| `console restore-session`, window missing | every configured shell's secrets after the probes (`restore.py:186-203`)              | `_member_secret_targets` (`secrets_env.py:198`), a target per configured shell, in the boundary; the late resolve goes                          |
 | `console restore-session`, panes missing  | only the missing indices' secrets, after the validation guards (`restore.py:385-399`) | the same targets as above, every configured shell; the late resolve goes                                                                        |
 | `console add-sessions`, `add-shell`       | resolve once, with no gate (`crud.py:306`, `:620`)                                    | unchanged                                                                                                                                       |
 
-`_prepare_vm_access` (`multi_console/attach.py`, renamed from `_prepare_vm_target` in batch D2)
-takes `targets` as a function of the `VMRow`, since both builders need the row
-(`sessions/multi_console/secrets_env.py:178`, `:237`) and `_prepare_vm_access` is where it is
-fetched. So the not-found and Tailscale-address refusals stay in one place before the gate, with
-nothing resolved. #885 replaced the `gated_vm_boundary` composition this paragraph first named with
-its prepared runtime (`prepare_vm_runtime`, whose gate secrets resolve through
-`resolver.resolve_gate`) before D2, so as built `_prepare_vm_access` registers the targets on the
-operation's resolver before the gate, runs its one `resolver.resolve()` once the VM is active, and
-yields the row and the admin's access; callers read `resolver.values`. Its docstring's "documented
-conditional-need path" is gone. `console create` and `restore-session` resolve in that one boundary
-pass, before their first tmux request or database write, as ADR 0019 promises.
+`_prepare_console_access` (`multi_console/attach.py`, which replaced `_prepare_vm_target` in batch
+D2) takes `targets` as a function of the `VMRow`, since both builders need the row
+(`sessions/multi_console/secrets_env.py:164`, `:198`; the build's shares the per-member loop of
+`_member_secret_targets`) and `_prepare_console_access` is where it is fetched. So the not-found and
+Tailscale-address refusals stay in one place before the gate, with nothing resolved. #885 replaced
+the `gated_vm_boundary` composition this paragraph first named with its prepared runtime
+(`prepare_vm_runtime`, whose gate secrets resolve through `resolver.resolve_gate`) before D2, so as
+built `_prepare_console_access` registers the targets on the operation's resolver before the gate
+and, once the VM is active, checks the agents of its `members`' shell panes, runs its one
+`resolver.resolve()`, and yields the operation's `ConsoleAccess`; callers read `resolver.values`.
+Its docstring's "documented conditional-need path" is gone. `console create` and `restore-session`
+resolve in that one boundary pass, before their first tmux request or database write, as ADR 0019
+promises.
 
 **`console start` and `restart` as built.** #885 (desired runtime state) reshaped them after this
 table was written: `realize_console` and reconciliation accept the running intent, prepare the
@@ -518,13 +523,14 @@ resolves nothing, which that effort's FRD R7 requires ("already-satisfied target
 request runtime-only secrets"). Batch D2 left that as #885 built it, so the `console start` row
 above is not built: open question 3.
 
-**The cost, stated plainly.** `console start` of a running console, which today asks for nothing,
-resolves every pane secret and may prompt for each; a non-interactive `console start` of a running
-console now fails unless every pane secret resolves. `restore-session` resolves every configured
+**The cost, stated plainly.** `console create` and `restore-session` resolve their panes' secrets
+once the VM is active and before any tmux request. `restore-session` resolves every configured
 shell's secrets even when one pane, or none, is missing, so a non-interactive restore fails on a
 secret it would not have used, which `restore.py:376-384` avoided; and it resolves them before the
-tag validation, so an operator with corrupt tags may be prompted before learning of it. The upgrade
-guide states each.
+tag validation, so an operator with corrupt tags may be prompted before learning of it. Both check
+every pane's agent before that resolve, so `restore-session` refuses an agent that predates the
+direct-SSH rollout even when its pane is not missing. The upgrade guide states each. What
+`console start` of a running console costs depends on open question 3.
 
 ## The requests that move
 
@@ -830,18 +836,22 @@ request that runs tmux is the builder's line; reverting any one call site to a r
 
 Every console request runs on the admin's access (the console's tmux server is the admin's), except
 an agent pane's parking connection and its access check, which run on the agent's.
-`_prepare_vm_access` and `_live_access` (`multi_console/attach.py`, batch D2) yield the admin's
-access; the gate and the SSH boundary are as before, with the pane secrets as the boundary's targets
-(above). A shell pane parks on its identity's access from the operation's `ConsoleAccess`
-(`sessions/multi_console/_access.py`), and a console build's admin access logs to `console-build`
-(`ConsoleAccess.logged`), where a log that fails to close never masks the build's own failure.
+`_prepare_console_access` (`multi_console/attach.py`, batch D2) yields the operation's
+`ConsoleAccess` and `_live_access` the admin's access; the gate and the SSH boundary are as before,
+with the pane secrets as the boundary's targets (above). A shell pane parks on its identity's access
+from the operation's `ConsoleAccess` (`sessions/multi_console/_access.py`), and a console build's
+admin access logs to `console-build` (`ConsoleAccess.logged`), where a log that fails to close never
+masks the build's own failure. The build runs its tmux requests with `check=False` and turns a
+refusal into an `ExternalError` naming the console, with a retry hint where one helps, rather than
+letting `check=True` raise a `CommandFailed`: a refused step is an outcome of the console, not of a
+command, and the staged build tears its staging down and reports which step failed.
 
 | Operation                                 | Today                                                                                                                     | Request                                                                                      | Deadline                                                                                                               |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Presence, the post-teardown probe         | `has-session`, `multi_console/attach.py:207`, `:251`, `:287`                                                              | `Script(Shell.SH)`                                                                           | presence 10, one dispatch, as `kill_session_windows`'s copy already is (`attach.py:335`); the post-teardown probe none |
 | Teardown, staging teardown, kill a window | `kill-session`, `kill-window`, `:244`, `:279`, `:332`                                                                     | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
 | Attach                                    | `target.interactive("tmux attach -t '=aw-console-<c>'")`, `:830-833`                                                      | `attach(TerminalCommand(("tmux", "attach", "-t", "=aw-console-" + name)))`                   | none                                                                                                                   |
-| Build                                     | `new-session` for the admin-shell window, the placeholder, `kill-window`, `rename-session`, `tmux_build.py:563-636` at D1 | the admin-shell window through `park` (above); the rest `Script(Shell.SH)`, `check=True`     | none                                                                                                                   |
+| Build                                     | `new-session` for the admin-shell window, the placeholder, `kill-window`, `rename-session`, `tmux_build.py:563-636` at D1 | the admin-shell window through `park` (above); the rest `Script(Shell.SH)`, `check=False`    | none                                                                                                                   |
 | Session window                            | `new-window ... '<attach loop>'`, `tmux_build.py:426`                                                                     | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
 | Agent access check                        | none                                                                                                                      | `_assert_agent_access_works`, once per agent, before the first mutation                      | its own                                                                                                                |
 | Shell pane                                | `split-window -e K=V ...` with `env=pane_env`, `:282`; tag, `:302`                                                        | `park` on the pane identity's access, then `split-window ... <handover command>` and the tag | parking: 60 to `parked`, 35 to collect                                                                                 |
