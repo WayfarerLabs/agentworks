@@ -35,7 +35,7 @@ import pytest
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, VMAccess
-from agentworks.execution.requests import Command, RunRequest, Script, Shell
+from agentworks.execution.requests import Bytes, Command, RunRequest, Script, Shell
 from agentworks.execution.results import Completed, Result
 from tests.vm_access_support import local_remote_argv, rewrite_launcher, run_requests_locally
 
@@ -171,11 +171,51 @@ class Lane:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
         self.rewrite_launcher(b"handover_wait_seconds = 30", b"handover_wait_seconds = %d" % seconds)
 
+    # -- A pane: a terminal agw does not hold ----------------------------------
+
+    @property
+    def account(self) -> str:
+        """The account the lane's access connects as."""
+        raise NotImplementedError
+
+    def quiet_interactive_startup(self) -> None:
+        """Keep an interactive shell on the lane from reading any startup file of a person's (a no-op on a VM)."""
+
+    def pane(self, command: str, *, term: str | None, keys: bytes) -> Result:
+        """Run ``command`` on a fresh terminal, as tmux runs a pane's command, typing ``keys`` into it.
+
+        The terminal is ``script``'s pty on the guest, and ``term``, when
+        given, is the ``TERM`` its owner sets in the command's environment,
+        as tmux sets ``default-terminal``. The result's stdout is what the
+        terminal showed, echo and prompts included.
+        """
+        env = {} if term is None else {"TERM": term}
+        # script runs the command line through $SHELL -c, as tmux runs a pane's through its default shell.
+        argv = ("script", "-q", "-e", "-c", self.pane_command(command), "/dev/null")
+        return self.access.run(Command(argv, env=env, stdin=Bytes(keys), deadline=60))
+
+    def pane_command(self, command: str) -> str:
+        """``command`` as the guest runs it: the L lane points stage 0 at its own interpreter."""
+        return command
+
 
 class LocalFilesystem(Lane):
     """Lanes whose guest is this machine."""
 
     scratch: Path
+
+    @property
+    def account(self) -> str:
+        return getpass.getuser()
+
+    def quiet_interactive_startup(self) -> None:
+        """Send a launcher whose passwd entry has an empty home of the lane's, not the runner's own.
+
+        An empty ``.zshrc`` there keeps zsh from starting its new-user setup,
+        which would read the keys a vector types.
+        """
+        home = self.make_dir({".zshrc": ""})
+        self.rewrite_launcher(b"home = entry.pw_dir", b"home = " + repr(home).encode())
 
     def make_dir(self, files: Mapping[str, str] | None = None) -> str:
         directory = self.scratch / f"dir-{uuid.uuid4().hex[:8]}"
@@ -311,6 +351,14 @@ class LocalLane(LocalFilesystem):
     def startup(self, name: str, content: str) -> None:
         """Write an account startup file (``.zshenv``, ``.bashrc``) read by the account shell."""
         (self.home / name).write_text(content)
+
+    def quiet_interactive_startup(self) -> None:
+        """As for every local lane, with the lane's shell as the account's, so each shell is tried interactive."""
+        super().quiet_interactive_startup()
+        self.use_lane_shell_as_account_shell()
+
+    def pane_command(self, command: str) -> str:
+        return command.replace(ssh_process.DEFAULT_PYTHON, self.python, 1)
 
     def _remote_argv(self, remote_command: str) -> list[str]:
         return local_remote_argv(remote_command, home=self.home, shell=self.shell, python=self.python)
@@ -459,6 +507,10 @@ class LiveLane(Lane):
         from agentworks.execution import vm_access
 
         return vm_access(self.vm, self.config, Admin(), log=log)
+
+    @property
+    def account(self) -> str:
+        return self.vm.admin_username
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         return VMAccess(

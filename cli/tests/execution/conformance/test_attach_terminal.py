@@ -11,8 +11,7 @@ import pytest
 from agentworks import output
 from agentworks.execution import attach as attach_module
 from agentworks.execution import ssh_process
-from agentworks.execution.errors import RequestRefused
-from agentworks.execution.requests import LoginShell, TerminalCommand
+from agentworks.execution.requests import LoginShell
 from tests.conftest import pretend_windows_console
 
 if TYPE_CHECKING:
@@ -57,15 +56,11 @@ def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
         raise KeyboardInterrupt
 
     token = local_lane.handover_token()
-    try:
-        with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
-            local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
+    with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
+        local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
-        assert events == [("enter", None), ("exit", None)]  # I21
-    finally:
-        # The pump kills the parking client at once here, and in this lane that kills the launcher
-        # itself; over ssh the launcher sees its stdin close and removes the directory.
-        local_lane.remove_dir(f"/tmp/agw-handover-{token}")
+    assert events == [("enter", None), ("exit", None)]  # I21
+    assert local_lane.wait_gone(f"/tmp/agw-handover-{token}")  # the launcher saw the client leave
 
 
 def test_the_terminal_half_runs_the_handover_stage_and_not_the_request(local_lane: LocalLane) -> None:
@@ -127,38 +122,3 @@ def test_a_requested_clear_follows_the_guard_and_precedes_the_notice(
         local_lane.access.attach(LoginShell(cwd=local_lane.workdir), clear_screen_on_exit=True)
 
     assert [kind for kind, _ in events] == ["enter", "exit", "clear", "warn", "detail"]
-
-
-# -- T1: a terminal command --------------------------------------------------------------
-
-
-def test_a_terminal_command_runs_its_argv_from_path_with_the_requested_environment(local_lane: LocalLane) -> None:
-    secret = "sekrit-env-value-5e"
-    command = TerminalCommand(("sh", "-c", 'echo "token=$TOKEN"; pwd'), cwd=local_lane.workdir, env={"TOKEN": secret})
-    with local_lane.terminal() as terminal:
-        code = local_lane.access.attach(command)
-
-    assert code == 0
-    assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), local_lane.workdir.encode()]
-    assert not any(secret in argument for argument in terminal.argv)
-
-
-@pytest.mark.parametrize(
-    ("argv", "status", "code"),
-    [(("agw-no-such-command-5e",), 127, "exec ENOENT"), (("/dev/null",), 126, "exec EACCES")],
-)
-def test_a_terminal_command_that_cannot_run_exits_with_the_shell_status(
-    local_lane: LocalLane, argv: tuple[str, ...], status: int, code: str
-) -> None:
-    with local_lane.terminal() as terminal:
-        assert local_lane.access.attach(TerminalCommand(argv, cwd=local_lane.workdir)) == status
-
-    assert f"agw: refused: {code}".encode() in terminal.stderr
-
-
-def test_a_terminal_command_whose_directory_is_missing_is_refused_before_the_terminal(local_lane: LocalLane) -> None:
-    with local_lane.terminal() as terminal, pytest.raises(RequestRefused) as refused:
-        local_lane.access.attach(TerminalCommand(("true",), cwd="/nonexistent/agw-5e"))
-
-    assert refused.value.code == "cwd"
-    assert terminal.calls == 0

@@ -160,9 +160,10 @@ class PythonProgram(BoundedRequestOptions):
 class LoginShell(RequestOptions):
     """The identity's default shell as an interactive login shell.
 
-    Valid only for ``attach``, and it takes no deadline: the session lasts as
-    long as the operator keeps it. A ``Script`` with an empty source would run
-    the shell on an empty file and exit, which is not a session.
+    Valid only for ``attach`` and ``park``, and it takes no deadline: the
+    session lasts as long as its terminal does. A ``Script`` with an empty
+    source would run the shell on an empty file and exit, which is not a
+    session.
     """
 
 
@@ -170,7 +171,7 @@ class LoginShell(RequestOptions):
 class TerminalCommand(RequestOptions):
     """A literal argv on the operator's terminal, run with no shell. ``argv[0]`` is searched in the guest's ``PATH``.
 
-    Valid only for ``attach``, as :class:`LoginShell` is, and like it takes no
+    Valid only for ``attach``, and like :class:`LoginShell` it takes no
     deadline. The launcher resets the terminal half as it does for a login
     shell and then execs the argv; a command it cannot find exits 127, any
     other ``exec`` failure 126 and a working directory it cannot enter 125.

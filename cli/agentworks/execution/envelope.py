@@ -52,7 +52,6 @@ MAX_STRING_BYTES = 131_071
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _EXIT_LINE = re.compile(r"exit (\d{1,3})")
 _MAX_CLOSING_LINE = 4096
-DEFAULT_TERM = "xterm-256color"
 
 
 _NONCE_BYTES = 16
@@ -96,12 +95,14 @@ def encode(request: Request, *, nonce: str, term: str | None = None, handover: s
     """The envelope for ``request``, unframed.
 
     A :class:`LoginShell` or a :class:`TerminalCommand` travels as a handover,
-    so it needs the ``handover`` token and the operator's ``term``; every
-    other request runs in ``run`` mode and takes neither.
+    so it needs the ``handover`` token. An attach sends the operator's
+    ``term``; a pane's handover (``VMAccess.park``) sends none, and the
+    launcher then takes ``TERM`` from the environment the pane's owner gave
+    it. Every other request runs in ``run`` mode and takes neither.
     """
     if isinstance(request, LoginShell | TerminalCommand):
-        if handover is None or term is None:
-            raise ValueError("a terminal request travels as a handover and needs its token and TERM")
+        if handover is None:
+            raise ValueError("a terminal request travels as a handover and needs its token")
         mode, kind = "park", "shell" if isinstance(request, LoginShell) else "argv"
     else:
         mode, kind = (

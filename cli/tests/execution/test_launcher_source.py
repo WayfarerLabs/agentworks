@@ -31,7 +31,7 @@ def test_the_launcher_defines_only_what_the_client_shares_and_main() -> None:
         else:
             raise AssertionError(f"unexpected module-level statement: {ast.dump(node)[:80]}")
 
-    assert names == {"STDLIB_MISSING_STATUS", "refusal_status", "main"}
+    assert names == {"STDLIB_MISSING_STATUS", "DEFAULT_TERM", "refusal_status", "main"}
     assert not names & STAGE0_GLOBALS
 
 

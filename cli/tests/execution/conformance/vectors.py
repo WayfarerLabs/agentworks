@@ -22,8 +22,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution.agw_launch import DEFAULT_TERM
 from agentworks.execution.errors import ExecutionIncomplete, RequestRefused, TrustMismatch
-from agentworks.execution.requests import Command, LoginShell, Script, Shell, shell_command_line
+from agentworks.execution.requests import Command, LoginShell, Script, Shell, TerminalCommand, shell_command_line
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -460,6 +461,79 @@ def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: La
     assert terminal.calls == 0
 
 
+# -- T1: a terminal command --------------------------------------------------------------
+
+
+def terminal_command_runs_its_argv_from_path_with_the_requested_environment(lane: Lane) -> None:
+    secret = "sekrit-env-value-5e"
+    command = TerminalCommand(("sh", "-c", 'echo "token=$TOKEN"; pwd'), cwd=lane.workdir, env={"TOKEN": secret})
+    with lane.terminal() as terminal:
+        code = lane.access.attach(command)
+
+    assert code == 0
+    assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), lane.workdir.encode()]
+    assert not any(secret in argument for argument in terminal.argv)
+
+
+def terminal_command_that_cannot_run_exits_with_the_shell_status(lane: Lane) -> None:
+    for argv, status, code in [(("agw-no-such-command-5e",), 127, "exec ENOENT"), (("/dev/null",), 126, "exec EACCES")]:
+        with lane.terminal() as terminal:
+            assert lane.access.attach(TerminalCommand(argv, cwd=lane.workdir)) == status, argv
+
+        assert f"agw: refused: {code}".encode() in terminal.stderr, argv
+
+
+def terminal_command_whose_directory_is_missing_is_refused_before_the_terminal(lane: Lane) -> None:
+    with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
+        lane.access.attach(TerminalCommand(("true",), cwd=f"{lane.workdir}/no-such-directory-agw"))
+
+    assert raised.value.code == "cwd"
+    assert terminal.calls == 0
+
+
+# -- T2: a pane's handover ---------------------------------------------------------------
+
+# Typed into the pane's shell. Each probe prints a marker its own echoed line does not hold.
+PANE_KEYS = b"printf '%s2:%s:%s\\n' T \"$TERM\" \"$TOKEN\"\ncase $- in *i*) echo I''NTERACTIVE ;; esac\nexit 0\n"
+PANE_TERM = "screen-256color"
+
+
+def pane_handover(lane: Lane, *, term: str | None, run_as: str | None) -> None:
+    """Park a login shell, run its handover command on a fresh terminal, and check what the shell had."""
+    secret = "sekrit-pane-value-5e"
+    lane.quiet_interactive_startup()
+    token = lane.handover_token()
+
+    with lane.access.park(LoginShell(cwd=lane.workdir, env={"TOKEN": secret})) as handover:
+        command = handover.command(run_as=run_as)
+        shown = lane.pane(command, term=term, keys=PANE_KEYS)
+
+    assert shown.completion == Completed(0), shown
+    assert handover.collected
+    assert secret not in command  # the environment is in the parked request, not on the pane's command line
+    assert f"T2:{term or DEFAULT_TERM}:{secret}".encode() in shown.stdout
+    assert b"INTERACTIVE" in shown.stdout
+    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
+
+
+def pane_takes_term_from_its_owner(lane: Lane) -> None:
+    pane_handover(lane, term=PANE_TERM, run_as=None)
+
+
+def pane_without_term_gets_the_default(lane: Lane) -> None:
+    pane_handover(lane, term=None, run_as=None)
+
+
+def pane_through_sudo_keeps_term_and_is_interactive(lane: Lane) -> None:
+    needs_sudo(lane)
+    pane_handover(lane, term=PANE_TERM, run_as=lane.account)
+
+
+def pane_through_sudo_without_term_gets_the_default(lane: Lane) -> None:
+    needs_sudo(lane)
+    pane_handover(lane, term=None, run_as=lane.account)
+
+
 def memfd_refusing_the_noexec_seal_still_runs_the_script(lane: Lane) -> None:
     # Kernels before 6.3 reject MFD_NOEXEC_SEAL with EINVAL, and so does any kernel for a flag it does not know.
     account = local(lane)
@@ -764,6 +838,17 @@ def build() -> list[Vector]:
             handover_whose_second_connection_never_arrives_leaves_nothing,
         ),
         Vector("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
+        Vector("T1-terminal-command", "LSV", terminal_command_runs_its_argv_from_path_with_the_requested_environment),
+        Vector("T1-terminal-command-cannot-run", "LSV", terminal_command_that_cannot_run_exits_with_the_shell_status),
+        Vector(
+            "T1-terminal-command-missing-directory",
+            "LSV",
+            terminal_command_whose_directory_is_missing_is_refused_before_the_terminal,
+        ),
+        Vector("T2-pane-term-from-owner", "LSV", pane_takes_term_from_its_owner),
+        Vector("T2-pane-default-term", "LSV", pane_without_term_gets_the_default),
+        Vector("T2-pane-through-sudo", "LV", pane_through_sudo_keeps_term_and_is_interactive),
+        Vector("T2-pane-through-sudo-default-term", "LV", pane_through_sudo_without_term_gets_the_default),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
         Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),

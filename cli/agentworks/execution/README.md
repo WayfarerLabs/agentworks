@@ -27,23 +27,24 @@ result = access.run(Command(("systemctl", "is-active", "ssh"), deadline=10), che
 Always call `vm_access` and `resolve_ssh` through the package attribute, as above. Tests replace
 those two attributes once (the `vm_access_recorder` fixture) and every manager follows.
 
-`VMAccess` has four operations, and `files()` (below) for file operations built on `run`:
+`VMAccess` has five operations, and `files()` (below) for file operations built on `run`:
 
 | Operation                                     | Returns                  | Use                                                       |
 | --------------------------------------------- | ------------------------ | --------------------------------------------------------- |
 | `run(request, stdout=, stderr=, check=False)` | `Result`                 | Buffered, into each stream's sink                         |
 | `stream(request, stdin=, stdout=, stderr=)`   | the guest's status       | Live output; `stream_to_operator` wires the process stdio |
 | `attach(request, clear_screen_on_exit=False)` | the exit status          | The operator's terminal, under `guarded_terminal`         |
+| `park(login_shell)`                           | a context manager        | A tmux pane's shell, through its `Handover`               |
 | `forward(forwards, verbose=False)`            | the client's exit status | Blocking `ssh -N -L`; the caller owns the interrupt       |
 
 A request is a `Command` (a literal argv, run with no shell), a `Script` (source text run by `sh`,
 `bash` or the identity's default shell), a `PythonProgram` (core's own Python source and its
 arguments), a `LoginShell` (the identity's default shell as an interactive login shell) or a
 `TerminalCommand` (a literal argv on the operator's terminal, `argv[0]` searched in the guest's
-`PATH`); the last two are valid only for `attach`. Each takes `env` and `cwd` (absolute; `None` is
-the home directory); the first three also take `deadline` (seconds of local waiting; it never claims
-the guest command stopped). `vm exec` sends a `Script` under the identity's default shell, with
-several arguments shell-joined.
+`PATH`); the last two are valid only for `attach`, and `park` takes a `LoginShell`. Each takes `env`
+and `cwd` (absolute; `None` is the home directory); the first three also take `deadline` (seconds of
+local waiting; it never claims the guest command stopped). `vm exec` sends a `Script` under the
+identity's default shell, with several arguments shell-joined.
 
 `Script` and `PythonProgram` take `login` and `interactive`, for a payload that must see the
 environment the account's login or interactive startup builds, as a harness's own shell would. A
@@ -290,6 +291,27 @@ parking client starts off the operator's console (`share_console=False`; `ssh_pr
 why). `clear_screen_on_exit` clears the visible screen after the terminal is restored and before the
 notice about a dropped connection, for a full-screen attach on a terminal that does not restore
 cleanly (`[terminal] clear_on_detach`).
+
+`park` is the parking half alone, for a terminal agw does not hold: a tmux pane on the guest. Both
+share `attach.Parked`, the parking connection.
+
+```python
+with access.park(LoginShell(env=pane_env)) as handover:
+    access.run(Command(("tmux", "new-session", "-d", handover.command()), deadline=30), check=True)
+# leaving the block waits for the pane to collect its request
+```
+
+`Handover.command(run_as=None)` is the pane's command line, the handover form of stage 0 with only
+the token in it; `run_as` puts `sudo -n -u <run_as>` in front for a pane in another account's tmux
+server, and must be the account that parked, the only one that can reach the socket. Leaving the
+block normally waits up to 35 seconds (the launcher's 30 and a margin) for the launcher's trailer
+and sets `handover.collected`; leaving it on an exception (the pane could not be created) closes the
+parking stdin at once, so the launcher cleans up. Either way the connection has ended afterwards.
+
+`TERM` comes from whoever owns the terminal. An attach sends the operator's (`xterm-256color` when
+the workstation has none). A park envelope carries none, because tmux owns a pane's terminal and
+sets `TERM` in the pane's environment, which sudo's `env_reset` keeps; the launcher takes it from
+there, or uses `xterm-256color` when there is none (conformance vector T2).
 
 On a Windows console the terminal half's remote command is led by a NUL, which stops Win32-OpenSSH
 from deleting the operator's lines on its first write; `ssh_process.nul_first_on_a_windows_console`

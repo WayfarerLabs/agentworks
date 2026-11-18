@@ -1,6 +1,6 @@
 """``VMAccess`` stand-ins for tests: a recording fake, and a real access whose guest is this machine.
 
-``RecordingVMAccess`` subclasses ``VMAccess``, overrides its four operations to
+``RecordingVMAccess`` subclasses ``VMAccess``, overrides its operations to
 record what was asked and return a canned outcome, and spawns nothing. The
 ``AccessRecorder`` stands in for ``agentworks.execution.vm_access``,
 ``enrollment_access`` and ``resolve_ssh``, keeping one access object per
@@ -19,6 +19,7 @@ against files the test controls. It needs a POSIX host.
 
 from __future__ import annotations
 
+import contextlib
 import getpass
 import re
 import shlex
@@ -28,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, Agent, Identity, VMAccess
+from agentworks.execution.attach import Handover
 from agentworks.execution.client import SSHClient
 from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import CaptureOutput, DiscardOutput, ToFile
@@ -36,13 +38,17 @@ from agentworks.execution.trust import TrustMode
 from tests.ssh_fixtures import fake_host_key
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Sequence
+    from collections.abc import Callable, Collection, Iterator, Sequence
     from typing import BinaryIO
 
     import pytest
 
     from agentworks.execution.files import Files
-    from agentworks.execution.requests import Forward, OutputSink, RunRequest, TerminalRequest
+    from agentworks.execution.requests import Forward, LoginShell, OutputSink, RunRequest, TerminalRequest
+
+
+PARK_TOKEN = "0" * 16
+"""The handover token every ``RecordingVMAccess.park`` yields."""
 
 
 @dataclass(frozen=True)
@@ -57,7 +63,7 @@ class Call:
 
 
 class RecordingVMAccess(VMAccess):
-    """Records ``run``, ``stream``, ``attach`` and ``forward`` and returns canned outcomes.
+    """Records ``run``, ``stream``, ``attach``, ``park`` and ``forward`` and returns canned outcomes.
 
     ``answer``, when a test sets it, is asked first with each recorded call
     and may return the outcome, which suits a stateful double that answers
@@ -72,7 +78,9 @@ class RecordingVMAccess(VMAccess):
     asked to write to a ``ToFile`` comes back empty too, its bytes written to
     the new file, with one progress report, only for ``Completed(0)``.
     ``stream_status``, ``attach_status`` and ``forward_status`` are returned
-    (or raised) by their operation.
+    (or raised) by their operation. ``park`` yields a handover with the token
+    :data:`PARK_TOKEN` and, on leaving its block, sets ``collected`` to
+    ``park_collected``, or raises it on entering when it is an exception.
     """
 
     def __init__(
@@ -93,6 +101,7 @@ class RecordingVMAccess(VMAccess):
         self.default_outcome: Result | BaseException = Result(Completed(0))
         self.stream_status: int | BaseException = 0
         self.attach_status: int | BaseException = 0
+        self.park_collected: bool | BaseException = True
         self.forward_status: int | BaseException = 0
 
     def run(
@@ -164,6 +173,15 @@ class RecordingVMAccess(VMAccess):
     def attach(self, request: TerminalRequest, *, clear_screen_on_exit: bool = False) -> int:
         self.calls.append(Call(self.identity, "attach", request, {"clear_screen_on_exit": clear_screen_on_exit}))
         return self._status(self.attach_status)
+
+    @contextlib.contextmanager
+    def park(self, request: LoginShell) -> Iterator[Handover]:
+        self.calls.append(Call(self.identity, "park", request))
+        if isinstance(self.park_collected, BaseException):
+            raise self.park_collected
+        handover = Handover(PARK_TOKEN, self._user)
+        yield handover
+        handover.collected = self.park_collected
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:
         self.calls.append(Call(self.identity, "forward", tuple(forwards), {"verbose": verbose}))

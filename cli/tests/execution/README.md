@@ -131,8 +131,22 @@ passwordless `sudo -n` and follows the elevation vectors' rule. `test_files.py` 
 status-to-error mapping and refusals before dispatch over the recording access, and a round trip, a
 link refusal and the private lock over the L lane.
 
-`conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
-the terminal half and a forward, on the same lanes.
+The terminal vectors join the same list:
+
+- T1 (L, S and V): a `TerminalCommand` runs its argv from `PATH` with its environment, which never
+  reaches the terminal half's command line, and one that cannot run or whose directory is missing is
+  refused with the shell's status, the last before the terminal is touched.
+- T2 (L, S and V): a pane's handover. The lane parks a login shell, runs the handover's command on
+  `script`'s pty (as tmux runs a pane's command through its default shell), and types into the
+  shell: it is interactive, has its environment, and takes `TERM` from the pane's environment, or
+  `DEFAULT_TERM` without one. The same through `sudo -n -u` runs on L and V and follows the
+  elevation vectors' rule. On local lanes the account's home is an empty one of the lane's
+  (`quiet_interactive_startup`), so an interactive shell reads no startup file of the runner's; on L
+  the account shell is the lane's own, so the four shells are each covered.
+
+`conformance/test_attach_terminal.py`, `conformance/test_park.py` and `conformance/test_forward.py`
+cover what happens around the terminal half, a pane's handover (including one in a real tmux pane,
+skipped where none is installed) and a forward, on the same lanes.
 
 `conformance/root_vectors.py` holds the root channel's vectors (W1 to W9 in the platform LLD), on
 two lanes of their own. L runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and

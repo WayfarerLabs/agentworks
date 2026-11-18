@@ -21,11 +21,11 @@ from agentworks import output
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
-from agentworks.execution.agw_launch import refusal_status
+from agentworks.execution.agw_launch import DEFAULT_TERM, refusal_status
 from agentworks.execution.detached import Detached
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
 from agentworks.execution.files import Files
-from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, FromFile, NoInput, ToFile
+from agentworks.execution.requests import Bytes, CaptureOutput, DiscardOutput, FromFile, LoginShell, NoInput, ToFile
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.execution.trust import TrustBinding, TrustMode
 
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.attach import Handover
     from agentworks.execution.requests import Forward, OutputSink, RunRequest, TerminalRequest
 
 
@@ -59,15 +60,14 @@ Identity = Admin | Agent
 
 
 class VMAccess:
-    """Run, stream, attach and forward as one identity on one VM.
+    """Run, stream, attach, park and forward as one identity on one VM.
 
     ``identity`` is the account the access was built for, with no default,
     so a directly constructed access chooses; ``run`` and ``stream`` refuse an
     elevated request on an agent-bound one. ``trust_mode`` is ``VM`` except for
     the access :func:`enrollment_access` builds. ``log`` is an operation log's
     record callable (``SSHLogger.record``), which ``run`` calls once per
-    request. ``stream``, ``attach`` and ``forward`` serve operator commands that
-    keep no log.
+    request. ``stream``, ``attach``, ``park`` and ``forward`` keep no log.
     """
 
     def __init__(
@@ -196,7 +196,7 @@ class VMAccess:
         ssh = client.resolve_ssh()
         policy, destination = self._policy(), self._destination()
         token, nonce = envelope.new_handover_token(), envelope.new_nonce()
-        term = os.environ.get("TERM") or envelope.DEFAULT_TERM
+        term = os.environ.get("TERM") or DEFAULT_TERM
         wire = envelope.message(request, nonce=nonce, term=term, handover=token)
         with ssh_process.client_log() as log:
             # Both argvs are built before anything spawns, so a missing trust record raises first.
@@ -222,6 +222,46 @@ class VMAccess:
                     log=log,
                     clear_screen_on_exit=clear_screen_on_exit,
                 )
+
+    @contextlib.contextmanager
+    def park(self, request: LoginShell) -> Iterator[Handover]:
+        """Park a login shell for a terminal agw does not hold, a tmux pane on the guest, and yield its handover.
+
+        Entering parks ``request`` on this identity's connection and raises
+        its typed error, with nothing left on the guest, when it cannot (a
+        working directory it cannot enter is ``RequestRefused`` with code
+        ``cwd``). Inside the block the caller creates the pane with
+        :meth:`~agentworks.execution.attach.Handover.command` as its command;
+        tmux runs it, and its stage 0 collects the request and execs the
+        shell on the pane. Leaving normally waits for that and sets
+        ``collected``; leaving on an exception lets the request go at once
+        (``attach.park``).
+
+        The envelope carries no ``TERM``: the pane's terminal belongs to tmux,
+        which sets ``TERM`` in the pane's environment, and the launcher takes
+        it from there. Like ``attach`` it keeps no operation log.
+
+        Plugins hold an access, so a request that is not a ``LoginShell`` is
+        a ``ValidationError`` before anything resolves: every pane runs a
+        shell.
+        """
+        if not isinstance(request, LoginShell):
+            raise ValidationError(f"park takes a LoginShell, not {type(request).__name__}")
+        ssh = client.resolve_ssh()
+        policy, destination = self._policy(), self._destination()
+        token, nonce = envelope.new_handover_token(), envelope.new_nonce()
+        wire = envelope.message(request, nonce=nonce, handover=token)
+        with ssh_process.client_log() as log, contextlib.ExitStack() as stack:
+            argv = ssh_process.build_argv(
+                ssh, policy, destination, ssh_process.ArgvMode.PIPE, ssh_process.stage0_command(), client_log=log
+            )
+            # Only parking connects; a failure in the caller's block is not this access's to explain.
+            with self._passphrase_hint_on_connection_failure():
+                parking = attach_module.park(
+                    vm_name=self.vm_name, wire=wire, nonce=nonce, argv=argv, log=log, token=token, account=self._user
+                )
+                handover = stack.enter_context(parking)
+            yield handover
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:
         """Forward local ports until the client exits, and return its status."""

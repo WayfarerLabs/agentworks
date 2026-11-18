@@ -6,7 +6,7 @@ first stage (``ssh_process.STAGE0``), which reads it with exact-length reads and
 ``s``, ``f``, ``r``, ``g``) are the globals this file runs in, so it defines
 none of them at module level. It has no import-time effect: it defines
 ``main(f, g)`` and calls it only when run as the first stage's program, so the
-client can import the file for the two definitions it shares without running
+client can import the file for the definitions it shares without running
 anything. Every other import sits in one ``try`` inside ``main``, because the
 client imports this module on Windows, where ``pwd`` does not exist.
 
@@ -20,6 +20,11 @@ release a supported Debian ships.
 STDLIB_MISSING_STATUS = 69
 """Exit status when the standard library is incomplete (Debian's python3-minimal
 has ``os``, ``sys`` and ``socket`` but not ``json``). Written before any marker."""
+
+
+DEFAULT_TERM = "xterm-256color"
+"""The terminal type a terminal half gets when its owner names none: a Windows
+workstation with no ``TERM``, or a pane whose environment has none."""
 
 
 def refusal_status(code: str) -> int:
@@ -124,7 +129,11 @@ def main(f: int, g: bytes) -> None:
             "SHLVL": "1",
         }
         if mode == "tty" and os.isatty(0):
-            env["TERM"] = request["term"]
+            # TERM describes the terminal, so it comes from the terminal's owner: the
+            # envelope's for an attach (the workstation's), and for a pane's handover,
+            # whose envelope carries none, the environment tmux started the pane with.
+            term = request["term"]
+            env["TERM"] = term if term is not None else os.environ.get("TERM") or DEFAULT_TERM
             with contextlib.suppress(OSError):
                 env["SSH_TTY"] = os.ttyname(0)
         runtime_dir = f"/run/user/{uid}"
