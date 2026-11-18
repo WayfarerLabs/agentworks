@@ -121,14 +121,14 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 # removal that closes it. The route opens before the script's deadline starts,
 # so the run_as_root contract needs that bounded by itself. The removal runs
 # with interrupts deferred, so a Ctrl-C can wait this long for it, and up to
-# _UNFINISHED_CREATE_SETTLE_SECONDS longer when a poke's create timed out.
+# _UNFINISHED_CREATE_SETTLE_SECONDS longer when a poke's create had not finished.
 # GCP bounds its firewall operations the same way.
 _OPERATION_TIMEOUT_SECONDS = 300.0
 
-# How much longer a poke whose create timed out waits for that create before
-# it removes the rule, with interrupts deferred: a delete while the create is
-# in flight can fail (AnotherOperationInProgress) or find nothing, and the
-# rule then lands after.
+# How much longer a poke whose create timed out or was interrupted waits for
+# that create before it removes the rule, with interrupts deferred: a delete
+# while the create is in flight can fail (AnotherOperationInProgress) or find
+# nothing, and the rule then lands after.
 _UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
 # The old scheme's standing world-open SSH allow, deleted on
@@ -374,9 +374,10 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     swallowed) before moving on: the create may have succeeded
     server-side even though the client-side wait failed, and only this
     function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path. An interrupt during the create removes the rule
-    the same way and propagates; the route's own exit never runs for a
-    poke that did not return.
+    caller's exit path. A create whose wait runs out or is interrupted
+    is given time to settle before its rule is removed, and the timeout or
+    interrupt then propagates; the route's own exit never runs for a poke
+    that did not return.
     """
     from uuid import uuid4
 
@@ -403,8 +404,8 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
             last_exc = exc
             continue
         except BaseException:
-            # An interrupt mid-create: the rule may exist, and only this name finds it.
-            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            # An interrupt mid-create: the rule may exist or still land, and only this name finds it.
+            _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
             raise
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
@@ -412,18 +413,22 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
 
 
 def _remove_unfinished_allow(
-    network: NetworkManagementClient, rg: str, name: str, rule_name: str, prefixes: list[str], create: Any
+    network: NetworkManagementClient, rg: str, name: str, rule_name: str, prefixes: list[str], create: Any | None
 ) -> None:
-    """Remove the poke's rule whose ``create`` had not finished when its wait ran out, holding interrupts.
+    """Remove the poke's rule whose ``create`` had not finished, holding interrupts.
 
-    The create gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS`` more first, so
-    the delete does not race it. When it still has not finished, the rule may
-    land after the delete, so the warning names it for removal by hand.
+    That is a create whose wait ran out or was interrupted, or one whose
+    request was interrupted before it returned a poller (``create`` is
+    ``None``). The create gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS``
+    more first, so the delete does not race it. When it still has not
+    finished, or there is no poller to wait on, the rule may land after the
+    delete, so the warning names it for removal by hand.
     """
     with interrupts_deferred():
-        with contextlib.suppress(Exception):
-            create.result(timeout=_UNFINISHED_CREATE_SETTLE_SECONDS)
-        settled = create.done()
+        if create is not None:
+            with contextlib.suppress(Exception):
+                create.result(timeout=_UNFINISHED_CREATE_SETTLE_SECONDS)
+        settled = create is not None and create.done()
         remove_ssh_allow(network, rg, name, rule_name, prefixes)
     if not settled:
         output.warn(

@@ -357,6 +357,20 @@ class TestCloseProvisioningAccessHooks:
             platform.close_provisioning_access(vm, RunContext())
 
 
+class _InterruptedWait(_Poller):
+    """A create whose first wait a Ctrl-C cuts short; a later wait sees it finish, or with ``finishes=False`` not."""
+
+    def __init__(self, value: object, *, finishes: bool = True) -> None:
+        super().__init__(value, finishes=finishes)
+        self.waits = 0
+
+    def result(self, timeout: float | None = None) -> object:
+        self.waits += 1
+        if self.waits == 1:
+            raise KeyboardInterrupt
+        return super().result(timeout)
+
+
 class TestTransientRoute:
     def test_enter_heals_missing_public_ip(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A NIC with no public IP (a VM created under the old detach
@@ -522,14 +536,10 @@ class TestTransientRoute:
         rules: _FakeSecurityRules = network.security_rules
         real_create = rules.begin_create_or_update
 
-        class _InterruptedPoller(_Poller):
-            def result(self, timeout: float | None = None) -> object:
-                raise KeyboardInterrupt
-
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
-                return _InterruptedPoller(rule)
+                return _InterruptedWait(rule)
             return poller
 
         monkeypatch.setattr(rules, "begin_create_or_update", _create)
@@ -548,14 +558,10 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
         real_delete = rules.begin_delete
 
-        class _InterruptedPoller(_Poller):
-            def result(self, timeout: float | None = None) -> object:
-                raise KeyboardInterrupt
-
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
-                return _InterruptedPoller(rule)
+                return _InterruptedWait(rule)
             return poller
 
         def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
@@ -572,6 +578,69 @@ class TestTransientRoute:
 
         (attempted,) = rules.transient_names()
         assert ("rg1", "vm1-nsg", attempted) in rules.deletes()
+
+    @pytest.mark.parametrize("settles", [True, False], ids=["settles", "never-settles"])
+    def test_an_interrupted_poke_removes_its_rule_only_after_the_create_settles(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, settles: bool
+    ) -> None:
+        """A delete racing the create can find nothing and let the rule land after it, so the create gets to settle."""
+        network = _install_fakes(monkeypatch).network
+        rules: _FakeSecurityRules = network.security_rules
+        real_create, real_delete = rules.begin_create_or_update, rules.begin_delete
+        created: list[_InterruptedWait] = []
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            poller = real_create(rg, nsg, rule_name, rule)
+            if not rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                return poller
+            created.append(_InterruptedWait(rule, finishes=settles))
+            return created[-1]
+
+        def _delete(rg: str, nsg: str, rule_name: str) -> _Poller:
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                assert created[-1].waits == 2, "the delete must follow a second wait on the create"
+            return real_delete(rg, nsg, rule_name)
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        monkeypatch.setattr(rules, "begin_delete", _delete)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the poke is interrupted")
+
+        (attempted,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", attempted) in rules.deletes()
+        if settles:
+            assert captured_output.warnings == []
+        else:
+            (warning,) = captured_output.warnings
+            assert attempted in warning
+
+    def test_a_poke_interrupted_before_its_create_returned_removes_and_names_its_rule(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """With no poller there is no create to wait for, and the request may still have reached Azure."""
+        network = _install_fakes(monkeypatch).network
+        rules: _FakeSecurityRules = network.security_rules
+        real_create = rules.begin_create_or_update
+        attempted: list[str] = []
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                attempted.append(rule_name)
+                raise KeyboardInterrupt
+            return real_create(rg, nsg, rule_name, rule)
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the poke is interrupted")
+
+        (name,) = attempted
+        assert ("rg1", "vm1-nsg", name) in rules.deletes()
+        (warning,) = captured_output.warnings
+        assert name in warning
 
     def test_poke_attempt_cleanup_failure_warns(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
