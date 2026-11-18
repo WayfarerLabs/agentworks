@@ -31,7 +31,8 @@ them:
 - `reachability` (slice 3, polling a fixed probe) and the `observation` option with the retry it
   permits (slice 7, with `detached.observe`);
 - the operation log: `oplog.format_record` and `SSHLogger.record` (slice 3, with create's Phase A,
-  its first caller). `ssh.LOG_DIR`, its readers and `SSHLogger` stay until slice 8;
+  its first caller). `ssh.LOG_DIR`, its readers and `SSHLogger` stay until slice 8, which moves them
+  to `oplog` (below, "Slice 8: removal");
 - `FeatureUnavailable` (slice 4, with `vm shell --platform`);
 - `PythonProgram` and `Script.interactive` (a later slice). Measured for that slice: `dash -i FILE`
   prints a prompt to stderr per line it reads from the file, so an interactive script needs the
@@ -878,6 +879,28 @@ when no client is found.
 - The log's sink keeping the sanitized record and its file handler in one function for CodeQL's
   clear-text storage query (`b59153d1f`, `8030b035b`). It is a scanner constraint, not behavior; the
   function moves unchanged with its comment.
+
+### The operation log
+
+`SSHLogger` and `LOG_DIR` move from `ssh.py` to `execution/oplog.py`, beside `format_record`, and
+the class becomes `OperationLogFile`: it is the file an operation's log is written to, and the
+`OperationLog` name is already the protocol Phase A types its log as (`vms/initializer/phase_a.py`).
+What it keeps: the redaction set registered before the header (I28), the lock and the per-write
+handler (I91), the traceback on close (I92), `display_path`, `redactions`, `sanitize`, `step`,
+`record`, `output`, `warning`, `log_error` and the warning count. What it drops, with no caller
+left: `log_command` and `log_timeout`, which took the legacy `SSHResult`, and a settable `path`,
+which only backup used before it passed `path=` (`vms/manager/_helpers.py:230`).
+
+`oplog.vm_logs(vm_name, stem=None)` is the one way to find a VM's logs. It matches a file name whole
+against `<vm>-<timestamp>-<stem>.log`, newest first. The timestamp's uppercase `T` and `Z` cannot
+occur in a VM name, which is lowercase (`naming.py:22`), so it marks where the name ends: VM `dev`
+never matches VM `dev-2`'s logs, as the `<vm>-*.log` glob each reader used did. That glob made
+`vm delete dev` remove `dev-2`'s logs and `vm logs dev` show them. Every reader goes through it:
+doctor's failure hint (`doctor_state.py:216`), create's `Details:` pointer
+(`vms/manager/lifecycle.py:105`), the gate's log hint (`vms/manager/_helpers.py:219`), delete's
+cleanup (`vms/manager/power.py:294`) and `vm logs` (`cli/commands/vm.py:531`). Tests patch
+`agentworks.execution.oplog.LOG_DIR`, and a test that replaces the class patches
+`agentworks.execution.oplog.OperationLogFile`, since every constructor imports it at call time.
 
 ## Amendments
 

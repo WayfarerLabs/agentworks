@@ -110,7 +110,9 @@ registered when it was constructed, at its one sink.
 `oplog.LOG_DIR` named `<vm>-<timestamp>-<stem>.log` unless the caller names a path, written on every
 call so a partial log survives a crash, and shared safely by threads of one command. Its `close()`
 writes the traceback of the exception in flight, so an operation's own log holds the error that
-ended it.
+ended it. `oplog.vm_logs(vm_name, stem=None)` finds a VM's logs by that exact name, newest first, so
+VM `dev` never claims VM `dev-2`'s logs; `vm logs`, `vm delete`, doctor and the failure hints read
+them through it.
 
 ## What a request becomes
 

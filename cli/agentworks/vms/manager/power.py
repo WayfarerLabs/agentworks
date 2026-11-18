@@ -293,7 +293,7 @@ def delete_vm(
         # Clean up logs
         from agentworks.execution import oplog
 
-        vm_logs = list(oplog.LOG_DIR.glob(f"{name}-*.log")) if oplog.LOG_DIR.exists() else []
+        vm_logs = oplog.vm_logs(name)
         for log in vm_logs:
             log.unlink(missing_ok=True)
         if vm_logs:

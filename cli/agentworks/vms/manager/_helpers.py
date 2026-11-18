@@ -220,9 +220,7 @@ def _init_log_hint(vm_name: str) -> str:
     """Return a log hint suffix like ' See log: <path>' or empty string."""
     from agentworks.execution import oplog
 
-    if not oplog.LOG_DIR.exists():
-        return ""
-    logs = sorted(oplog.LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+    logs = oplog.vm_logs(vm_name)
     return f" See log: {format_host_path(logs[0])}" if logs else ""
 
 

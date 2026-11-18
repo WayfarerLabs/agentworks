@@ -530,13 +530,7 @@ def vm_logs(
     from agentworks import output
     from agentworks.execution import oplog
 
-    if not oplog.LOG_DIR.exists():
-        output.info("No logs found.")
-        return
-
-    # Collect all logs for this VM: filename is <vm>-<timestamp>-<cmd>.log
-    all_logs = sorted(oplog.LOG_DIR.glob(f"{name}-*.log"), reverse=True)
-    logs = [(str(p), p.name) for p in all_logs]
+    logs = [(str(p), p.name) for p in oplog.vm_logs(name)]
 
     if not logs:
         output.info(f"No SSH logs found for VM '{name}'.")

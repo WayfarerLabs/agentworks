@@ -222,9 +222,7 @@ def _report_contents(
     )
 
     def log_hint(vm_name: str) -> str:
-        if not oplog.LOG_DIR.exists():
-            return ""
-        logs = sorted(oplog.LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+        logs = oplog.vm_logs(vm_name)
         return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:

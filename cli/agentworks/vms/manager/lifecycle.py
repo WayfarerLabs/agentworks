@@ -104,7 +104,7 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
     """
     from agentworks.execution import oplog
 
-    logs = sorted(oplog.LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
+    logs = oplog.vm_logs(vm_name, stem="vm-create")
     log_hint = f"\nDetails: {logs[0]}" if logs else ""
 
     vm = db.get_vm(vm_name)

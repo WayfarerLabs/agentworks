@@ -282,7 +282,7 @@ def test_the_operation_log_never_holds_the_key(
 
     _recover(db, make_config())
 
-    (log,) = oplog.LOG_DIR.glob("box-*-recover.log")
+    (log,) = oplog.vm_logs("box", stem="recover")
     text = log.read_text(encoding="utf-8")
     assert "BackendState" not in text  # the script's source is never written
     assert KEY not in text

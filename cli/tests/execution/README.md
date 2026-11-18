@@ -44,7 +44,7 @@ returns canned outcomes without ssh.
   the confirming probe, over the recording fake.
 - `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
 - `test_operation_log_file.py`: the operation log file's one redacting sink, its close and its
-  sharing between threads.
+  sharing between threads, and finding a VM's logs by their exact name.
 - `test_root_script.py`: the root-script wrapper over fabricated channel output (the status rule,
   the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.
 - `test_run_process.py`: `run_process` over Python children (the deadline, the output limit, a

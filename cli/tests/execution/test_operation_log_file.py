@@ -8,6 +8,7 @@ the shared ``error.log`` at the top of the config dir.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -431,3 +432,50 @@ def test_an_operation_log_shared_by_concurrent_threads_keeps_every_record_and_cl
     for worker in range(threads):
         for index in range(writes):
             assert text.count(f"argv probe w{worker}-{index},") == 1
+
+
+# -- Finding a VM's logs ----------------------------------------------------------------
+
+
+def test_a_vms_logs_are_matched_by_their_exact_name_so_a_longer_name_never_shares_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    own = ["dev-20261101T090000Z-vm-create.log", "dev-20261102T090000Z-vm-reinit.log"]
+    others = [
+        "dev-2-20261103T090000Z-vm-create.log",
+        "dev-20261104T090000Z.log",
+        "dev-backup.log",
+        "dev-20261105T090000Z-vm-create.txt",
+        "error.log",
+    ]
+    for name in own + others:
+        (tmp_path / name).write_text("")
+
+    assert [path.name for path in oplog.vm_logs("dev")] == list(reversed(own))
+    assert [path.name for path in oplog.vm_logs("dev", stem="vm-create")] == [own[0]]
+    assert [path.name for path in oplog.vm_logs("dev-2")] == [others[0]]
+
+
+def test_a_directory_named_like_a_log_is_not_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    (tmp_path / "dev-20261101T090000Z-vm-create.log").mkdir()
+    (tmp_path / "dev-20261102T090000Z-vm-create.log").write_text("")
+
+    assert [path.name for path in oplog.vm_logs("dev")] == ["dev-20261102T090000Z-vm-create.log"]
+
+
+def test_a_log_is_found_by_the_name_it_was_written_under(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    log = OperationLogFile("dev", "workspace-create")
+    log.close()
+    OperationLogFile("dev-2", "workspace-create").close()
+
+    assert oplog.vm_logs("dev", stem="workspace-create") == [log.path]
+
+
+def test_a_missing_log_directory_has_no_logs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "absent")
+
+    assert oplog.vm_logs("dev") == []
+    assert not os.path.exists(tmp_path / "absent")

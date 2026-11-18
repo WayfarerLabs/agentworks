@@ -1,8 +1,9 @@
 """The operation log: one file per operation on a VM, and the record of each request in it.
 
 :class:`OperationLogFile` is the log a command writes, under :data:`LOG_DIR`
-as ``<vm>-<timestamp>-<stem>.log`` unless the caller names its path. Every
-byte the file receives passes through one sink that removes the secrets registered when
+as ``<vm>-<timestamp>-<stem>.log`` unless the caller names its path, and
+:func:`vm_logs` finds a VM's logs by that exact shape. Every byte the file
+receives passes through one sink that removes the secrets registered when
 the log was built, raw, shell-quoted and normalized.
 
 :func:`format_record` turns a request and its result into the block the log
@@ -15,6 +16,7 @@ written either.
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 import sys
 import threading
@@ -36,6 +38,28 @@ LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 """Where an operation log is written unless its caller names a path."""
 
 _TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+# The digits and the uppercase T and Z of _TIMESTAMP_FORMAT. A VM name is
+# lowercase, so no name can contain this, and it anchors where one ends.
+_TIMESTAMP_PATTERN = r"[0-9]{8}T[0-9]{6}Z"
+
+
+def vm_logs(vm_name: str, *, stem: str | None = None) -> list[Path]:
+    """``vm_name``'s logs under :data:`LOG_DIR`, newest first, or only its ``stem`` logs when given.
+
+    A file counts only when its whole name is ``<vm_name>-<timestamp>-<stem>.log``,
+    so VM ``dev`` never claims VM ``dev-2``'s logs, and only when it is a file
+    or a link, which ``vm delete`` can unlink, never a directory so named. A
+    missing directory has none.
+    """
+    if not LOG_DIR.is_dir():
+        return []
+    shape = re.compile(
+        rf"{re.escape(vm_name)}-{_TIMESTAMP_PATTERN}-{re.escape(stem) if stem is not None else '.+'}\.log", re.ASCII
+    )
+    return sorted(
+        (path for path in LOG_DIR.iterdir() if shape.fullmatch(path.name) and (path.is_file() or path.is_symlink())),
+        reverse=True,
+    )
 
 
 class _PropagatingFileHandler(logging.FileHandler):
