@@ -629,7 +629,7 @@ a definitive answer. The opt-in is valid with global `--non-interactive`: termin
 disabled while out-of-band provider work is permitted. Verification deduplicates names in request
 order, prints one row per name, and exits nonzero for every result other than `available`. An
 available row proves current provider presence under the requested impact, not that a narrower
-line-oriented environment, credential, header, or stdin consumer accepts the value.
+line-oriented credential, header, or stdin consumer accepts the value.
 
 Actual resolution is separate. It performs one bounded source-first pass, preserves multiline
 strings, rejects NUL, falls through ordinary missing and blocked sources, and hard-stops a secret on
@@ -1415,12 +1415,16 @@ name. The user's `~/.tmux.conf` (customizable via dotfiles) is loaded first so t
 keybindings (prefix, detach, copy mode, scroll) work for direct `session attach`. Window/pane
 creation, session management, and the command prompt are selectively unbound.
 
-Agent-mode sessions each get their own tmux socket, so every session runs as its own tmux server
-rather than as a window in a shared one. The sockets are grouped in a per-agent directory whose
-ownership keeps one agent from reaching another's (cross-agent isolation), and giving each session
-its own server means it inherits the environment delivered over its own SSH connection instead of
-leaking env across sessions through a shared server. The agent's shell attaches directly to the tmux
-pane PTY, and each socket path is persisted in the database.
+Every session runs as its own tmux server, on a socket of its own, rather than as a window in a
+shared one. An agent session's socket is in that agent's directory under
+`/run/agentworks/agent-tmux-sockets`, which only the agent and root can enter, so one agent cannot
+reach another's servers; its server runs as the agent, with the agent's shells directly on the
+panes' terminals. An admin session's socket is in the VM admin's directory under
+`/run/agentworks/admin-tmux-sockets`. A session's environment, secrets included, travels in its
+launch request, and its server takes it as the global environment every pane inherits, so one
+session's environment never leaks into another's. Each socket path is persisted in the database;
+[Session status internals](../docs/guides/session-status.md) says which account each tmux client
+Agentworks starts runs as.
 
 #### Named Console
 

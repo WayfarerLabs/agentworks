@@ -8,7 +8,11 @@ VM platform plugins must move to vm-platform contract version 2 (see
 [Third-party VM platforms](#third-party-vm-platforms)), and third-party harness integrations, Git
 credential providers and secret backends to new contract versions as well (see
 [their section](#third-party-harness-integrations-git-credential-providers-and-secret-backends)).
-Tmux clients aimed at an agent session's server now run as that agent.
+Tmux clients aimed at an agent session's server now run as that agent. Once the host keys are
+imported, run `agw vm reinit` on each existing VM to retire grants nothing uses any more (see
+[Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)), and
+`agw console restart` on each running named console, whose windows and shells change only when it is
+rebuilt (see [Named consoles](#named-consoles)).
 
 ## Adopt desired runtime state
 
