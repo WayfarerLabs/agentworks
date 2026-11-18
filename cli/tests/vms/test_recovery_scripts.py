@@ -329,7 +329,7 @@ def test_logout_reports_the_logouts_own_status_and_output(guest: Guest, status: 
     guest.set("logout-status", str(status))
 
     platform = _platform(guest)
-    result = log_out(partial(platform.run_as_root, _vm(), RunContext()))
+    result = log_out(partial(platform.run_as_root, _vm(), RunContext()), log=None)
 
     assert result.status == status
     assert guest.called("tailscale") == ["tailscale logout"]

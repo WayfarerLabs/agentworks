@@ -317,7 +317,7 @@ def the_logout_finishes_after_a_hangup_and_its_channel_closing(lane: RootLane) -
     _stub_tailscale_and_systemctl(lane, tmp, slow_logout=True, hangup=True)
     platform = _LanePlatform(lane, prefix=f"export PATH={tmp}:$PATH\n", deadline=1)
 
-    result = log_out(partial(platform.run_as_root, None, None))
+    result = log_out(partial(platform.run_as_root, None, None), log=None)
     landed = _wait(lambda: lane.check(f"test -e {tmp}/logout-done"))
     lane.run(f"rm -rf {tmp}")
 
@@ -361,7 +361,7 @@ def the_repair_runs_to_status_zero(lane: RootLane) -> None:
     _stub_tailscale_and_systemctl(lane, tmp, slow_logout=False)
     stubbed: Any = _LanePlatform(lane, prefix=f"export PATH={tmp}:$PATH\n")
     rekeyed = recovery.rekey(stubbed, vm, RunContext(), auth_key=SECRET, log=None)
-    logged_out = log_out(partial(stubbed.run_as_root, vm, RunContext()))
+    logged_out = log_out(partial(stubbed.run_as_root, vm, RunContext()), log=None)
     lane.run(f"rm -rf {tmp}")
 
     assert repaired.status == 0, repaired.stderr  # W6

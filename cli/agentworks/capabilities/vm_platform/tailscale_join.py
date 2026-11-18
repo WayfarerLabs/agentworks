@@ -216,7 +216,7 @@ def settle_tailnet_address(
 
 
 def log_out(
-    run_as_root: Callable[[bytes, float], RawRun], *, log: Callable[[RunRequest, Result], None] | None = None
+    run_as_root: Callable[[bytes, float], RawRun], *, log: Callable[[RunRequest, Result], None] | None
 ) -> RootScriptResult:
     """Run :data:`LOGOUT_SCRIPT` once, carrying no secret; the caller reads the status and reports it."""
     return root_script.run(run_as_root, LOGOUT_SCRIPT, deadline=LOGOUT_DEADLINE_SECONDS, log=log)
