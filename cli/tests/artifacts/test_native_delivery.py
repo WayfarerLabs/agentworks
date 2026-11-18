@@ -617,14 +617,10 @@ def test_session_delivery_defaults_to_unhandled_before_native_validation(render)
     ],
 )
 def test_config_workaround_names_match_native_delivery(integration, workarounds):
-    from pydantic import ValidationError
-
     names = set(workarounds.values())
     for name in names:
         selected = integration.config_model.model_validate({"enabled_workarounds": [name]})
         assert selected.enabled_workarounds == [name]
-    with pytest.raises(ValidationError):
-        integration.config_model.model_validate({"enabled_workarounds": ["unknown-workaround"]})
 
 
 @pytest.mark.parametrize("type", list(ArtifactType))

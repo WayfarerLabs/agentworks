@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from typing import Annotated
+
+from pydantic import AfterValidator, Field, field_validator
 
 from agentworks.capabilities.harness_integration.settings import SettingsMapping
 from agentworks.schema import AgwModel
+
+
+def _validate_native_entry(value: str) -> str:
+    """Validate one operator-supplied native setup entry at its list index."""
+    if not value.strip() or "\x00" in value:
+        raise ValueError("native setup entries must be nonblank and contain no NUL characters")
+    return value
+
+
+_NativeEntry = Annotated[str, AfterValidator(_validate_native_entry)]
 
 
 class NativeWorkspaceConfig(AgwModel):
@@ -22,18 +34,18 @@ class NativeUserConfig(NativeWorkspaceConfig):
     list inherits; null clears inherited entries.
     """
 
-    marketplaces: list[str] | None = Field(default_factory=list)
+    marketplaces: list[_NativeEntry] | None = Field(default_factory=list)
     """Non-secret marketplace sources accepted by the installed native CLI."""
 
-    plugins: list[str] | None = Field(default_factory=list)
+    plugins: list[_NativeEntry] | None = Field(default_factory=list)
     """Plugin names or unambiguous plugin@marketplace identifiers to install."""
 
     @field_validator("marketplaces", "plugins")
     @classmethod
-    def _unique_nonblank(cls, values: list[str] | None) -> list[str] | None:
-        """Reject ambiguous effective entries before native work."""
+    def _unique_entries(cls, values: list[str] | None) -> list[str] | None:
+        """Reject repeated effective entries before native work."""
         if values is None:
             return None
-        if any(not value.strip() or "\x00" in value for value in values) or len(values) != len(set(values)):
-            raise ValueError("native setup entries must be nonblank and unique")
+        if len(values) != len(set(values)):
+            raise ValueError("native setup entries must be unique")
         return values

@@ -322,21 +322,24 @@ def test_worked_manifests_build_without_acquiring_their_sources(
     assert all(getattr(bundle, kind) for kind in artifact_types)
 
 
-def test_missing_additive_bundle_reference_preserves_unavailable_and_historical_metadata(db: Database) -> None:
+def test_missing_bundle_after_clear_preserves_unavailable_and_historical_metadata(db: Database) -> None:
     from agentworks.artifacts.inspection import inspect_artifacts
     from agentworks.db import VersionedPayload
     from tests.artifacts.test_routing import graph
 
     fixture = graph(db, active=("agent",))
     fixture.save("agent")
+    selection = fixture.registry.lookup("agent-template", "agent").artifacts.bundles
+    assert selection is not None
+    selection.clear()
     db.instance_state.put_desired_overlay(
         "agent", "agent", VersionedPayload(1, {"artifacts": {"bundles": ["missing-bundle"]}})
     )
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     owner = result.owners[-1]
-    assert owner.bundles == ("agent-bundle", "missing-bundle")
+    assert owner.bundles == ("missing-bundle",)
     assert owner.capture_status == "unavailable"
-    assert owner.artifacts and owner.artifacts[0].declared
+    assert owner.artifacts and not owner.artifacts[0].declared
     assert owner.integrations[0].status == "unavailable"
 
 

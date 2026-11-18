@@ -138,6 +138,38 @@ def test_native_config_rejects_ambiguous_entries_before_setup(field, values):
         NativeUserConfig.model_validate({field: values})
 
 
+@pytest.mark.parametrize("integration", ["claude-code", "codex"])
+@pytest.mark.parametrize("field", ["marketplaces", "plugins"])
+@pytest.mark.parametrize("invalid", [" ", "nul\x00entry"])
+@pytest.mark.parametrize("bad_layer", ["base", "child"])
+def test_invalid_native_entry_retains_its_declaring_layer(integration, field, invalid, bad_layer):
+    from agentworks.capabilities.harness_integration.activations import validate_activations
+    from agentworks.config import ConfigError
+
+    parent = AgentTemplate.model_validate(
+        {"name": "base", "harness_integrations": {integration: {field: [invalid if bad_layer == "base" else "parent"]}}}
+    )
+    child = AgentTemplate.model_validate(
+        {
+            "name": "child",
+            "inherits": ["base"],
+            "harness_integrations": {integration: {field: [invalid if bad_layer == "child" else "child"]}},
+        }
+    )
+    result = resolve_agent({"base": parent, "child": child}, "child")
+    with pytest.raises(ValidationError) as invalid_model:
+        NativeUserConfig.model_validate(result.value.harness_integrations[integration].config)
+    assert invalid_model.value.errors()[0]["loc"] == (field, 0 if bad_layer == "base" else 1)
+    with pytest.raises(ConfigError) as invalid_activation:
+        validate_activations(
+            result.value.harness_integrations,
+            facet="user",
+            source=("agent-template", "child"),
+            provenance=result.provenance,
+        )
+    assert ("agent-template/base" in str(invalid_activation.value)) is (bad_layer == "base")
+
+
 @pytest.mark.parametrize("integration,names", SESSION_SELECTIONS)
 def test_session_generated_schema_and_instance_parser_accept_null_selections(integration, names):
     spec = {"harness_integration": {"name": integration, "enabled_workarounds": None}}
