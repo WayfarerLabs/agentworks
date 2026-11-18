@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform.lima_host import LimaHost
+from agentworks.errors import ValidationError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,9 +50,12 @@ def test_an_os_sourced_value_goes_back_out_as_its_original_byte(tmp_path: Path) 
     assert received(tmp_path, "tskey-" + chr(0xDCFF)) == b"tskey-\xff"
 
 
-def test_an_unencodable_payload_stays_out_of_the_raise() -> None:
+def test_an_unencodable_payload_starts_nothing_and_stays_out_of_the_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     """The payload here is a secret, and ``UnicodeEncodeError`` carries it verbatim."""
-    with pytest.raises(ValueError) as caught:
+    from agentworks.execution import ssh_process
+
+    monkeypatch.setattr(ssh_process, "spawn", lambda *args, **kwargs: pytest.fail("a process was started"))
+    with pytest.raises(ValidationError) as caught:
         LimaHost(None).run(python("pass"), input="tskey-auth-swordfish-" + chr(0xD800))
 
     assert "swordfish" not in str(caught.value)

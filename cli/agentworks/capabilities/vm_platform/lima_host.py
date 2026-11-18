@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Literal
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.errors import ExternalError
+from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution import root_script, ssh_process
 
 if TYPE_CHECKING:
@@ -284,15 +284,17 @@ class LimaHost:
 
         A local command with no input inherits stdin, as ``limactl`` always
         has; a remote one reads the null device, so ssh never takes the
-        operator's terminal input.
+        operator's terminal input. ``input`` is encoded before anything
+        starts, so a payload that cannot be sent starts nothing.
         """
+        payload = _stdin_bytes(input)
         if input is not None:
             stdin: int | None = subprocess.PIPE
         else:
             stdin = subprocess.DEVNULL if self.is_remote else None
         process = ssh_process.spawn(self._argv(command), stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            stdout, stderr = process.communicate(_stdin_bytes(input), timeout=timeout)
+            stdout, stderr = process.communicate(payload, timeout=timeout)
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate()
@@ -313,8 +315,8 @@ def _stdin_bytes(input_text: str | None) -> bytes | None:
     bytes are the only cure, since ``subprocess.Popen`` takes no ``newline``.
     ``surrogateescape`` sends a value that arrived as raw OS bytes back out as
     those bytes. A payload that still cannot be encoded raises a value-free
-    error: ``UnicodeEncodeError`` carries the whole string, which may be a
-    secret.
+    ``ValidationError``: ``UnicodeEncodeError`` carries the whole string,
+    which may be a secret.
     """
     if input_text is None:
         return None
@@ -324,7 +326,7 @@ def _stdin_bytes(input_text: str | None) -> bytes | None:
         pass
     # Raised clear of the except block on purpose: ``from None`` would still
     # leave the original exception, payload and all, on ``__context__``.
-    raise ValueError("stdin payload is not encodable as UTF-8")
+    raise ValidationError("stdin payload is not encodable as UTF-8")
 
 
 def _decode_stream(raw: bytes) -> str:
