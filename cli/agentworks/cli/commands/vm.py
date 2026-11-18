@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path  # noqa: TC003  # Typer resolves the runtime annotation.
 from typing import Annotated
 
 import typer
@@ -530,7 +530,7 @@ def vm_logs(
     from agentworks import output
     from agentworks.execution import oplog
 
-    logs = [(str(p), p.name) for p in oplog.vm_logs(name)]
+    logs = oplog.vm_logs(name)
 
     if not logs:
         output.info(f"No operation logs found for VM '{name}'.")
@@ -539,7 +539,8 @@ def vm_logs(
     # Header names the log file (the handler owns any decoration); the raw
     # log body is emitted flush-left so it stays copy-paste faithful.
     display = logs if show_all else logs[:1]
-    for log_path, log_name in display:
-        output.info(log_name)
-        output.info(Path(log_path).read_text().rstrip("\n"))
+    for log in display:
+        output.info(log.name)
+        # The log is written as UTF-8, whatever the workstation's locale.
+        output.info(log.read_text(encoding="utf-8", errors="replace").rstrip("\n"))
         output.info("")
