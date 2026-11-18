@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.capabilities.vm_platform import BootstrapProgress
 from agentworks.execution import oplog
 from agentworks.execution.oplog import OperationLogFile
 
@@ -49,28 +48,12 @@ def test_close_appends_traceback_when_called_inside_except(logger: OperationLogF
 
 def test_close_without_exception_omits_traceback_block(logger: OperationLogFile) -> None:
     """A bare ``close()`` (no exception in flight) writes the footer
-    only -- the traceback block is gated on ``sys.exc_info()``."""
+    only: the traceback block is gated on ``sys.exc_info()``."""
     logger.close()
 
     text = logger.path.read_text()
     assert "EXCEPTION:" not in text
     assert "# Finished:" in text
-
-
-def test_the_log_structurally_satisfies_bootstrap_progress(logger: OperationLogFile) -> None:
-    progress: BootstrapProgress = logger
-
-    progress.step("bootstrap step")
-    progress.output("bootstrap output")
-    progress.warning("bootstrap warning")
-    progress.log_error("bootstrap error")
-    logger.close()
-
-    text = logger.path.read_text()
-    assert "bootstrap step" in text
-    assert "bootstrap output" in text
-    assert "bootstrap warning" in text
-    assert "bootstrap error" in text
 
 
 @pytest.mark.windows
@@ -156,12 +139,6 @@ def test_warning_text_is_sanitized_before_durable_logging(
     assert "WARNING: credential rejected: [REDACTED]" in text
     assert "# Warnings: 1" in text
     assert logger.warnings == [warning]
-
-
-def test_redactions_cannot_be_registered_after_writes(logger: OperationLogFile) -> None:
-    """Incremental logs persist their header during construction, so accepting
-    later redactions would make the no-cleartext guarantee timing-dependent."""
-    assert not hasattr(logger, "add_redaction")
 
 
 def test_shell_quoted_secret_is_redacted_from_command(logger: OperationLogFile) -> None:

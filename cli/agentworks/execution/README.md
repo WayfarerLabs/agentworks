@@ -106,13 +106,13 @@ record, for a payload whose output is file content or a command line that must n
 environment value, script source or input reaches the formatter; the log redacts the secrets
 registered when it was constructed, at its one sink.
 
-`OperationLogFile(vm_name, stem, redactions=(), path=None)` is that log: a file under
-`oplog.LOG_DIR` named `<vm>-<timestamp>-<stem>.log` unless the caller names a path, written on every
-call so a partial log survives a crash, and shared safely by threads of one command. Its `close()`
-writes the traceback of the exception in flight, so an operation's own log holds the error that
-ended it. `oplog.vm_logs(vm_name, stem=None)` finds a VM's logs by that exact name, newest first, so
-VM `dev` never claims VM `dev-2`'s logs; `vm logs`, `vm delete`, doctor and the failure hints read
-them through it.
+`OperationLogFile(vm_name, command_stem, redactions=(), path=None)` is that log: a file under
+`oplog.LOG_DIR` named `<vm>-<timestamp>-<command_stem>.log` unless the caller names a path, written
+on every call so a partial log survives a crash, and shared safely by threads of one command. Its
+`close()` writes the traceback of the exception in flight, so an operation's own log holds the error
+that ended it. `oplog.vm_logs(vm_name, stem=None)` finds a VM's logs by that exact name, newest
+first, so VM `dev` never claims VM `dev-2`'s logs; `vm logs`, `vm delete`, doctor and the failure
+hints read them through it.
 
 ## What a request becomes
 

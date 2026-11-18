@@ -87,9 +87,7 @@ class OperationLogFile:
         path: Path | None = None,
     ) -> None:
         started = datetime.now(tz=UTC)
-        self.vm_name = vm_name
         self._path = path or LOG_DIR / f"{vm_name}-{started.strftime(_TIMESTAMP_FORMAT)}-{command_stem}.log"
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         # Each write opens, writes and closes its own handler under the lock.
         # It orders nothing across processes.
         self._write_lock = threading.Lock()
