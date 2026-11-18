@@ -55,7 +55,7 @@ class NativeGuest:
         self.root = root
         # Inside an owner's directory, as agent sockets are (see the fixture's
         # AGENT_SOCKET_ROOT); admin-mode launches share the same address.
-        self.socket = str(root / "agt-owned" / "s.sock")
+        self.socket = str(root / "agt-owned" / "s1.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
         # Every request the accesses from :meth:`access` were asked, in order.
         self.access_calls: list[Call] = []
@@ -165,7 +165,7 @@ def native(monkeypatch):
 
 def _in_agent_directory(native: NativeGuest, linux_user: str) -> None:
     """Move the fixture socket into the directory of the agent the row names."""
-    native.socket = str(native.root / linux_user / "s.sock")
+    native.socket = str(native.root / linux_user / "s1.sock")
     Path(native.socket).parent.mkdir(exist_ok=True)
 
 

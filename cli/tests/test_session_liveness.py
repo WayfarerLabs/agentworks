@@ -187,14 +187,13 @@ class _Owners:
 
 
 def _owned(session: SessionRow) -> SessionRow:
-    """``session`` with a dedicated socket moved into its owner's managed directory, as ``_Owners`` names it."""
+    """``session`` with a dedicated socket at its own name in its owner's directory, as ``_Owners`` names it."""
     from dataclasses import replace
-    from pathlib import PurePosixPath
 
     if session.socket_path is None:
         return session
     root, owner = (AGENT_SOCKET_ROOT, "agt") if session.mode == "agent" else (ADMIN_SOCKET_ROOT, "admin")
-    return replace(session, socket_path=f"{root}/{owner}/{PurePosixPath(session.socket_path).stem}.sock")
+    return replace(session, socket_path=f"{root}/{owner}/{session.name}.sock")
 
 
 def _check(session: SessionRow, *, admin: RecordingVMAccess) -> SessionStatus:
@@ -1157,7 +1156,7 @@ def test_session_observer_names_each_rows_owner_from_the_database_and_leaves_an_
         "default",
         SessionMode.AGENT,
         agent_name="bot",
-        socket_path=f"{AGENT_SOCKET_ROOT}/agt-bot/t.sock",
+        socket_path=f"{AGENT_SOCKET_ROOT}/agt-bot/theirs.sock",
     )
     # An agent row whose stored socket sits in the admin's directory: probing it as the agent proves nothing.
     db.insert_session(
@@ -1309,7 +1308,7 @@ def test_session_observer_reports_a_vm_it_cannot_reach_once_and_observes_the_oth
             f"ws-{vm_name}",
             "default",
             SessionMode.ADMIN,
-            socket_path=f"{ADMIN_SOCKETS}/{vm_name}.sock",
+            socket_path=f"{ADMIN_SOCKETS}/session-{vm_name}.sock",
         )
         session = db.get_session(f"session-{vm_name}")
         assert session is not None

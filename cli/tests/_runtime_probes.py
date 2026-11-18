@@ -93,4 +93,5 @@ def server_for(row: SessionRow, *, admin_username: str = "admin") -> SessionTmux
     from agentworks.sessions.tmux import socket_owner
 
     assert row.socket_path is not None
-    return SessionTmuxServer(row.socket_path, socket_owner(row.socket_path, admin_username=admin_username))
+    owner = socket_owner(row.socket_path, admin_username=admin_username, session_name=row.name)
+    return SessionTmuxServer(row.socket_path, owner)

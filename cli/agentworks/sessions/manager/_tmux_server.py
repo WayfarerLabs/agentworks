@@ -50,7 +50,7 @@ def resolve_session_tmux_server(db: Database, session: SessionRow) -> SessionTmu
 
     Returns ``None`` for a legacy row without a socket path, whose clients use
     the connecting account's own default server. Otherwise the stored path
-    must satisfy ``socket_owner`` for the session's VM admin, its owner must
+    must satisfy ``socket_owner`` for the session's VM admin and name, its owner must
     match the row's mode, and an agent row's owner must be that agent's own
     Linux account. Raises ``StateError`` when any of these fails: such a row
     is refused or reported unknown, and never probed.
@@ -66,7 +66,7 @@ def resolve_session_tmux_server(db: Database, session: SessionRow) -> SessionTmu
             entity_kind="session",
             entity_name=session.name,
         )
-    owner = socket_owner(socket_path, admin_username=vm.admin_username)
+    owner = socket_owner(socket_path, admin_username=vm.admin_username, session_name=session.name)
     if (owner is not None) != (session.mode == SessionMode.AGENT.value):
         raise StateError(
             f"session '{session.name}' has no managed tmux socket for its mode",

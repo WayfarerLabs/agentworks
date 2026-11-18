@@ -815,7 +815,7 @@ _ADMIN = "agentworks"
 def test_socket_owner_names_the_account_whose_directory_holds_the_socket(socket_path: str, owner: str | None) -> None:
     from agentworks.sessions.tmux import socket_owner
 
-    assert socket_owner(socket_path, admin_username=_ADMIN) == owner
+    assert socket_owner(socket_path, admin_username=_ADMIN, session_name="s1") == owner
 
 
 @pytest.mark.parametrize(
@@ -841,10 +841,13 @@ def test_socket_owner_names_the_account_whose_directory_holds_the_socket(socket_
         "/run/agentworks/agent-tmux-sockets/agt-owner/.sock",
         "/run/agentworks/agent-tmux-sockets/agt-owner/S1.sock",
         "/run/agentworks/admin-tmux-sockets/agentworks/s1;x.sock",
+        # Another session's socket in the owner's own directory.
+        "/run/agentworks/agent-tmux-sockets/agt-owner/s2.sock",
+        "/run/agentworks/admin-tmux-sockets/agentworks/s2.sock",
     ],
 )
 def test_socket_owner_refuses_every_other_path(socket_path: str) -> None:
     from agentworks.sessions.tmux import socket_owner
 
     with pytest.raises(StateError):
-        socket_owner(socket_path, admin_username=_ADMIN)
+        socket_owner(socket_path, admin_username=_ADMIN, session_name="s1")

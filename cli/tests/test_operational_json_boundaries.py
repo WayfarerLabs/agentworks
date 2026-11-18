@@ -53,6 +53,10 @@ def _seed_vm(db: Database) -> None:
     db.update_vm_platform_metadata("box", {"node": "pve1", "vmid": "101", "opaque": "PLATFORM_SECRET"})
 
 
+_SOCKET = "/run/agentworks/admin-tmux-sockets/agentworks/session-a.sock"
+"""``session-a``'s socket, which no machine output names."""
+
+
 def _seed_session(db: Database) -> None:
     _seed_vm(db)
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
@@ -61,12 +65,12 @@ def _seed_session(db: Database) -> None:
         "ws",
         "default",
         SessionMode.ADMIN,
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
+        socket_path=_SOCKET,
         harness_integration_state={"SECRET_HARNESS_STATE": True},
     )
     db.update_session_runtime(
         "session-a",
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
+        socket_path=_SOCKET,
         pid=PID_STOPPED,
         boot_id=None,
         tmux_server_start_ticks=None,
@@ -209,7 +213,7 @@ def test_session_describe_bypasses_activation_for_both_formats(
     _assert_json_envelope_only(machine, "session.describe")
     assert machine.stderr_bytes == b""
     assert chain == []
-    for excluded in (b"SECRET_HARNESS_STATE", b"secret-socket"):
+    for excluded in (b"SECRET_HARNESS_STATE", _SOCKET.encode()):
         assert excluded not in machine.stdout_bytes
 
 
@@ -225,7 +229,7 @@ def test_session_list_status_bypasses_provider_resolution_and_activation(
     _seed_session(db)
     db.update_session_runtime(
         "session-a",
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
+        socket_path=_SOCKET,
         pid=None,
         boot_id=None,
         tmux_server_start_ticks=None,
@@ -255,7 +259,7 @@ def test_session_list_status_bypasses_provider_resolution_and_activation(
     calls.clear()
     db.update_session_runtime(
         "session-a",
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
+        socket_path=_SOCKET,
         pid=None,
         boot_id=None,
         tmux_server_start_ticks=None,

@@ -142,8 +142,8 @@ def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bo
 _LINUX_USERNAME = re.compile(rf"[a-z_][a-z0-9_-]{{0,{LINUX_USERNAME_MAX_LENGTH - 1}}}", re.ASCII)
 
 
-def socket_owner(socket_path: str, *, admin_username: str) -> str | None:
-    """Return the account a tmux client must run as to reach ``socket_path``'s server.
+def socket_owner(socket_path: str, *, admin_username: str, session_name: str) -> str | None:
+    """Return the account a tmux client must run as to reach the server of session ``session_name``.
 
     The one owner rule, applied to a persisted path rather than to anything
     the guest reports. A socket directly inside the VM admin's directory under
@@ -153,17 +153,18 @@ def socket_owner(socket_path: str, *, admin_username: str) -> str | None:
     ``ensure_agent_socket_dir`` gives each agent its own directory, shared
     only with root, so a client running as that account never holds more
     rights than whoever could have created the server. In
-    both, the socket's name is one agentworks generates
-    (``admin_socket_path``, ``agent_socket_path``): a session name, then
-    ``.sock``. Anything else raises ``StateError``.
+    both, the socket's name is the one agentworks gives this session's
+    (``admin_socket_path``, ``agent_socket_path``): ``session_name``, then
+    ``.sock``, so a row never reaches another session's server. Anything
+    else raises ``StateError``.
     """
     path = PurePosixPath(socket_path)
     directory = path.parent
     if (
         str(path) == socket_path
         and path.is_absolute()
-        and path.suffix == ".sock"
-        and NAME_RE.fullmatch(path.stem) is not None
+        and NAME_RE.fullmatch(session_name) is not None
+        and path.name == f"{session_name}.sock"
     ):
         if str(directory.parent) == ADMIN_SOCKET_ROOT and directory.name == admin_username:
             return None
@@ -175,7 +176,8 @@ def socket_owner(socket_path: str, *, admin_username: str) -> str | None:
         ):
             return owner
     raise StateError(
-        f"tmux socket path '{socket_path}' is not inside an agent or the admin's socket directory",
+        f"tmux socket path '{socket_path}' is not the socket of session '{session_name}'"
+        " in an agent's or the admin's socket directory",
         hint="Repair the persisted session row before retrying.",
     )
 

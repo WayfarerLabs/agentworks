@@ -43,6 +43,9 @@ REFUSED_ROWS = {
     "agent-row-admin-socket": (SessionMode.AGENT, "a", f"{ADMIN_ROOT}/admin/s.sock"),
     # Named for its agent, so only the mode check refuses it.
     "admin-row-agent-socket": (SessionMode.ADMIN, "a", f"{AGENT_ROOT}/agt-a/s.sock"),
+    # Another session's socket in the row's own directory.
+    "agent-row-other-sessions-socket": (SessionMode.AGENT, "a", f"{AGENT_ROOT}/agt-a/t.sock"),
+    "admin-row-other-sessions-socket": (SessionMode.ADMIN, "a", f"{ADMIN_ROOT}/admin/t.sock"),
 }
 
 

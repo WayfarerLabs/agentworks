@@ -803,7 +803,8 @@ when the caller's access is not the owner's, root's switch to the owner, `runuse
 reach root's guard and switch through `sudo -n /bin/sh -c` (`as_socket_owner_from_admin`):
 
 - `check_session_status` reads the server its caller resolved with `resolve_session_tmux_server`,
-  which raises before any read for a path outside the owner's directory, and runs every read,
+  which raises before any read for a path other than the session's own socket
+  (`<session name>.sock`) in its owner's directory, and runs every read,
   `_pending_launch_is_owned`'s included, through `owner_run_command`. The boot id and `/proc/<pid>`
   reads are readable as the agent, so they take the same path rather than a root one.
 - Pid repair, the runtime observation's fallback, the checkpoint proof and startup protection

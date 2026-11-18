@@ -261,8 +261,9 @@ def _restart_fixture(
         runtime_status[0] = SessionStatus.STOPPED
         db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(session))
 
-    def launch(*args, **kwargs):
-        result = _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", **kwargs)
+    def launch(session_name, *args, **kwargs):
+        socket_path = f"/run/agentworks/agent-tmux-sockets/agt-a1/{session_name}.sock"
+        result = _acknowledged_launch(events, socket_path, **kwargs)
         runtime_status[0] = SessionStatus.RUNNING
         return result
 
