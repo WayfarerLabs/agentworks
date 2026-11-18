@@ -45,6 +45,8 @@ from agentworks.plugins.azure.network import (
     DENY_ALL_INBOUND_RULE_PRIORITY,
     LEGACY_SSH_RULE_NAME,
     TRANSIENT_ALLOW_RULE_PREFIX,
+    AzureError,
+    _RouteOperationTimeout,
 )
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from tests._azure_platform_support import (
@@ -809,41 +811,73 @@ class TestEnsureDenyRaises:
 class TestRouteOperationsAreBounded:
     """A route opens before the script's deadline starts, so each Azure operation it waits on has a bound."""
 
-    def test_a_poke_whose_create_does_not_finish_removes_its_rule_and_raises_without_retrying(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from agentworks.plugins.azure.network import AzureError
-
+    @staticmethod
+    def _poke_with(
+        monkeypatch: pytest.MonkeyPatch, poller_type: type[_Poller], order: list[str] | None = None
+    ) -> _FakeSecurityRules:
         network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
-        real_create = rules.begin_create_or_update
-        waits: list[float | None] = []
-
-        class _HungPoller(_Poller):
-            def result(self, timeout: float | None = None) -> object:
-                waits.append(timeout)
-                return super().result(timeout)
+        real_create, real_delete = rules.begin_create_or_update, rules.begin_delete
 
         def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
-            return _HungPoller(rule, finishes=False) if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) else poller
+            return poller_type(rule) if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) else poller
+
+        def _delete(rg: str, nsg: str, rule_name: str) -> _Poller:
+            if order is not None and rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                order.append("deleted")
+            return real_delete(rg, nsg, rule_name)
 
         monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        monkeypatch.setattr(rules, "begin_delete", _delete)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
-
-        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
+        with pytest.raises(_RouteOperationTimeout), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when the poke does not finish")
+        return rules
+
+    def test_a_poke_whose_create_finishes_late_is_removed_only_after_it_finishes(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """A delete racing the create can fail or find nothing and let the rule land after it."""
+        order: list[str] = []
+        waits: list[float | None] = []
+
+        class _LatePoller(_Poller):
+            def __init__(self, value: object) -> None:
+                super().__init__(value, finishes=False)
+
+            def result(self, timeout: float | None = None) -> object:
+                waits.append(timeout)
+                if len(waits) == 2:  # the first wait ran out; the create finishes during the second
+                    self._finishes = True
+                    order.append("created")
+                return super().result(timeout)
+
+        rules = self._poke_with(monkeypatch, _LatePoller, order)
+
+        assert order == ["created", "deleted"]
+        assert rules.transient_names()[0] in {d[2] for d in rules.deletes()}
+        assert all(wait is not None for wait in waits)
+        assert captured_output.warnings == []
+
+    def test_a_poke_whose_create_never_finishes_is_removed_and_named_for_removal_by_hand(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        class _HungPoller(_Poller):
+            def __init__(self, value: object) -> None:
+                super().__init__(value, finishes=False)
+
+        rules = self._poke_with(monkeypatch, _HungPoller)
 
         (attempted,) = rules.transient_names()
         assert attempted in {d[2] for d in rules.deletes()}
-        assert all(wait is not None for wait in waits)
+        (warning,) = captured_output.warnings
+        assert attempted in warning
 
     @pytest.mark.parametrize("hung", ["deny", "public-ip"])
     def test_a_heal_or_convergence_that_does_not_finish_fails_the_route_before_any_poke(
         self, monkeypatch: pytest.MonkeyPatch, hung: str
     ) -> None:
-        from agentworks.plugins.azure.network import AzureError
-
         network = _install_fakes(monkeypatch, public_ip_attached=hung != "public-ip").network
         rules: _FakeSecurityRules = network.security_rules
         hung_poller = _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"), finishes=False)
@@ -853,7 +887,9 @@ class TestRouteOperationsAreBounded:
             monkeypatch.setattr(network.public_ip_addresses, "begin_create_or_update", lambda *_args: hung_poller)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
+        with pytest.raises(AzureError) as caught, _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when the route cannot open")
 
+        # Both wrap their failures, the timeout among them.
+        assert isinstance(caught.value.__cause__, _RouteOperationTimeout)
         assert not rules.transient_names()

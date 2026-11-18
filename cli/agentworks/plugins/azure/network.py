@@ -116,16 +116,18 @@ ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
 # the next free slot.
 _POKE_ALLOCATION_ATTEMPTS = 5
 
-# How long a rule removal waits for Azure. It runs with interrupts deferred,
-# so this bound is also how long a Ctrl-C can wait; GCP bounds its firewall
-# operations the same way.
-_RULE_REMOVAL_TIMEOUT_SECONDS = 300.0
+# How long one Azure operation on a route may take, each on its own: the
+# public-IP heal, the NSG convergence and the poke that open it, and the
+# removal that closes it. The route opens before the script's deadline starts,
+# so the run_as_root contract needs that bounded by itself, and the removal
+# runs with interrupts deferred, so this is also how long a Ctrl-C can wait.
+# GCP bounds its firewall operations the same way.
+_OPERATION_TIMEOUT_SECONDS = 300.0
 
-# How long each Azure operation that opens a root channel's route may take
-# (the public-IP heal, the NSG convergence, the poke). The route opens before
-# the script's deadline starts, so the run_as_root contract needs it bounded
-# by itself; GCP bounds its firewall insert the same way.
-_ROUTE_OPERATION_TIMEOUT_SECONDS = 300.0
+# How much longer a poke whose create timed out waits for that create before
+# it removes the rule: a delete while the create is in flight can fail
+# (AnotherOperationInProgress) or find nothing, and the rule then lands after.
+_UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
@@ -182,18 +184,18 @@ def wrap_azure_error(exc: Exception) -> AzureError:
 
 
 class _RouteOperationTimeout(AzureError):
-    """An operation opening a route did not finish within ``_ROUTE_OPERATION_TIMEOUT_SECONDS``."""
+    """An operation opening a route did not finish within ``_OPERATION_TIMEOUT_SECONDS``."""
 
 
 def _finish_route_operation(poller: Any, what: str) -> Any:
-    """``poller``'s result, waiting at most ``_ROUTE_OPERATION_TIMEOUT_SECONDS``, or :class:`_RouteOperationTimeout`.
+    """``poller``'s result, waiting at most ``_OPERATION_TIMEOUT_SECONDS``, or :class:`_RouteOperationTimeout`.
 
     The operation may still finish after the wait ends, so a caller that
     created something removes it.
     """
-    result = poller.result(timeout=_ROUTE_OPERATION_TIMEOUT_SECONDS)
+    result = poller.result(timeout=_OPERATION_TIMEOUT_SECONDS)
     if not poller.done():
-        summary = f"Azure did not finish {what} within {_ROUTE_OPERATION_TIMEOUT_SECONDS:.0f}s"
+        summary = f"Azure did not finish {what} within {_OPERATION_TIMEOUT_SECONDS:.0f}s"
         raise _RouteOperationTimeout(summary, detail=summary)
     return result
 
@@ -381,19 +383,18 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     for _attempt in range(_POKE_ALLOCATION_ATTEMPTS):
         priority = _lowest_free_allow_priority(network, rg, name)
         rule_name = f"{TRANSIENT_ALLOW_RULE_PREFIX}{uuid4().hex[:8]}"
+        poller: Any = None
         try:
-            _finish_route_operation(
-                network.security_rules.begin_create_or_update(
-                    rg,
-                    f"{name}-nsg",
-                    rule_name,
-                    _allow_ssh_rule(rule_name, prefixes, priority),
-                ),
-                f"creating the '{rule_name}' rule on NSG '{name}-nsg'",
+            poller = network.security_rules.begin_create_or_update(
+                rg,
+                f"{name}-nsg",
+                rule_name,
+                _allow_ssh_rule(rule_name, prefixes, priority),
             )
+            _finish_route_operation(poller, f"creating the '{rule_name}' rule on NSG '{name}-nsg'")
         except _RouteOperationTimeout:
             # Another attempt would wait as long again; the rule may still land, so it goes.
-            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
             raise
         except Exception as exc:
             remove_ssh_allow(network, rg, name, rule_name, prefixes)
@@ -406,6 +407,27 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
     raise wrap_azure_error(last_exc) from last_exc
+
+
+def _remove_unfinished_allow(
+    network: NetworkManagementClient, rg: str, name: str, rule_name: str, prefixes: list[str], create: Any
+) -> None:
+    """Remove the poke's rule whose ``create`` had not finished when its wait ran out, holding interrupts.
+
+    The create gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS`` more first, so
+    the delete does not race it. When it still has not finished, the rule may
+    land after the delete, so the warning names it for removal by hand.
+    """
+    with interrupts_deferred():
+        with contextlib.suppress(Exception):
+            create.result(timeout=_UNFINISHED_CREATE_SETTLE_SECONDS)
+        settled = create.done()
+        remove_ssh_allow(network, rg, name, rule_name, prefixes)
+    if not settled:
+        output.warn(
+            f"Azure had not finished creating the '{rule_name}' rule on NSG '{name}-nsg' when it was removed, so it "
+            f"may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that rule by name."
+        )
 
 
 def remove_ssh_allow(
@@ -438,7 +460,7 @@ def remove_ssh_allow(
     Ctrl-C and the terminations wait for the removal to finish
     (:func:`~agentworks.interrupts.interrupts_deferred`), since a removal cut
     short leaves the rule open. So it waits at most
-    ``_RULE_REMOVAL_TIMEOUT_SECONDS`` for Azure, which is as long as the
+    ``_OPERATION_TIMEOUT_SECONDS`` for Azure, which is as long as the
     operator waits; an operation still running then is an outcome nobody saw,
     so it warns that the rule may remain.
     """
@@ -454,7 +476,7 @@ def _delete_ssh_allow(
     scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
     try:
         poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name)
-        poller.result(timeout=_RULE_REMOVAL_TIMEOUT_SECONDS)
+        poller.result(timeout=_OPERATION_TIMEOUT_SECONDS)
     except ResourceNotFoundError:
         return
     except Exception as exc:
@@ -468,7 +490,7 @@ def _delete_ssh_allow(
     if not poller.done():
         output.warn(
             f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
-            f"{_RULE_REMOVAL_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
+            f"{_OPERATION_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
             "the rule and delete it manually if it is still there."
         )
         return
