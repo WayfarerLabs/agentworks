@@ -31,6 +31,7 @@ class SessionTmuxServer:
     owner: str | None
 
     def __post_init__(self) -> None:
+        # The path's rule, read here rather than through ``account``, which tests monkeypatch.
         if self.owner is not None and self.owner != PurePosixPath(self.socket_path).parent.name:
             raise ValueError(f"tmux server owner '{self.owner}' is not the account of socket '{self.socket_path}'")
 

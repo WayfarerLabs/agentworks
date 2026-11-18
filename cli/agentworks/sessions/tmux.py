@@ -240,9 +240,10 @@ def as_socket_owner_line(
     ``SOCKET_GUARD_REFUSED`` without running ``command``, printing ``refusal``
     to stderr when one is given and nothing otherwise. A missing path passes,
     so a probe still reads an absent server. With ``switch_user`` the line
-    runs as root, which checks the socket and then runs ``command`` as
-    ``owner`` (``owner_client_command``); without it the caller already is
-    ``owner``. The batch status script
+    switches to ``owner`` itself, so its caller runs it as root (an elevated
+    request, as ``socket_owner_run_command`` sends it): root checks the
+    socket and then runs ``command`` as ``owner`` (``owner_client_command``).
+    Without it the caller already is ``owner``. The batch status script
     (``_status._batch_probe_command``) runs the same checks per row in its
     own loop.
 
