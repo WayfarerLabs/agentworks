@@ -30,17 +30,21 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
     from agentworks.execution.errors import FeatureUnavailable
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.execution.root_script import RawRun
     from agentworks.execution.trust import HostKey, TrustBinding
 
 
 class BootstrapProgress(Protocol):
-    """Value-free progress sink for create-time VM bootstrap.
+    """Value-free progress sink for create-time VM bootstrap: the create's operation log.
 
-    Platforms can report the bootstrap transcript through this narrow surface
-    without depending on the VM manager or the concrete logger that owns the
-    durable operation log. The manager retains construction and lifecycle
-    ownership of that logger.
+    Platforms report the bootstrap transcript through this narrow surface
+    without depending on the VM manager or the concrete log that owns the
+    durable file. ``record`` is the ``log`` callable a root script takes
+    (``root_script.run``, ``tailscale_join``), so the join and the address
+    read land in the same log with their secret redacted. The manager retains
+    construction and lifecycle ownership of the log.
     """
 
     def step(self, name: str) -> None: ...
@@ -50,6 +54,8 @@ class BootstrapProgress(Protocol):
     def warning(self, msg: str) -> None: ...
 
     def log_error(self, msg: str) -> None: ...
+
+    def record(self, request: RunRequest, result: Result) -> None: ...
 
 
 @dataclass

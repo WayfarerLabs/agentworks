@@ -774,7 +774,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    over SSH. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
    platform-specific reinvention. Join with `tailscale_join.join_tailscale` over `run_as_root`, and
    return the address `settle_tailnet_address` reads over the same channel, inside the create's
-   rollback window so an address that cannot be read rolls the backend back.
+   rollback window so an address that cannot be read rolls the backend back. Pass both
+   `log=request.progress.record` (a cloud passes it to `complete_cloud_bootstrap`), so the join's
+   redacted output lands in the create's operation log, which create's error names.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it

@@ -962,9 +962,12 @@ class WSL2Platform(VMPlatform):
                     deadline=_BOOTSTRAP_DEADLINE_SECONDS,
                     progress=request.progress,
                 )
-                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                request.progress.step("Join Tailscale")
+                join_tailscale(
+                    run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+                )
                 tailnet_address = settle_tailnet_address(
-                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT, log=request.progress.record
                 )
             except Exception as failure:
                 # WSL2's error convention holds: the errors from _wsl and

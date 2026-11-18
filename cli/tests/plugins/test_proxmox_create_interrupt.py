@@ -32,7 +32,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError
-from agentworks.capabilities.vm_platform.tailscale_join import DEFAULT_READINESS_COMMAND
+from agentworks.capabilities.vm_platform.tailscale_join import DEFAULT_READINESS_COMMAND, JOIN_FRAGMENT
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
@@ -46,7 +46,7 @@ from tests._proxmox_fakes import (
     TEMPLATE_VMID,
     FakeProxmoxAPI,
 )
-from tests._root_channel_fakes import Answer, FakeGuest
+from tests._root_channel_fakes import Answer, FakeGuest, logged_payloads
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
@@ -449,6 +449,19 @@ def test_create_waits_for_the_resize_task_before_starting(monkeypatch: pytest.Mo
     platform.create(_request(tailscale=False), RunContext())
 
     assert fake.calls.index(("wait_for_task", "pve1", RESIZE_UPID)) < fake.ops().index("start_vm")
+
+
+def test_create_records_every_root_script_in_its_operation_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cloud-init wait, the bootstrap, the join and the address read."""
+    platform, _fake = _platform_with_fake(monkeypatch)
+    request = _request(tailscale=False)
+
+    platform.create(request, RunContext())
+
+    logged = logged_payloads(cast("MagicMock", request.progress))
+    assert logged[0] == DEFAULT_READINESS_COMMAND
+    assert logged[2:] == [JOIN_FRAGMENT, "tailscale ip -4"]
+    assert len(logged) == 4
 
 
 class TestCloneThatLostItsVMID:

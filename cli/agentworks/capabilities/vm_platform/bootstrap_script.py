@@ -378,9 +378,10 @@ def run_bootstrap(
 
     For a platform with no provider-side payload (WSL2, Proxmox): the script
     holds no secret, so it travels on the channel's stdin like any root
-    script. Each reported step goes to the console and to ``progress``, the
-    create's log, followed by the sizes of the two streams and the streams
-    themselves. Nothing here retries or persists VM state.
+    script. The run is recorded in ``progress``, the create's log, under a
+    ``Bootstrap`` step: its outcome, both streams and the channel's own
+    output. Each step the script reports then goes to the console and to the
+    log. Nothing here retries or persists VM state.
     """
     script = generate_bootstrap_script(
         admin_username=admin_username,
@@ -390,7 +391,8 @@ def run_bootstrap(
         swap=swap,
     )
     output.detail("Running bootstrap script...")
-    result = root_script.run(run_as_root, script, deadline=deadline)
+    progress.step("Bootstrap")
+    result = root_script.run(run_as_root, script, deadline=deadline, log=progress.record)
     stdout = result.stdout.decode("utf-8", errors="replace")
 
     for step in parse_bootstrap_steps(stdout):
@@ -404,12 +406,6 @@ def run_bootstrap(
         if step.error:
             output.warn(f"Error: {step.error}")
             progress.log_error(step.error)
-
-    progress.step("Bootstrap output")
-    progress.output(f"{len(result.stdout)} bytes on stdout, {len(result.stderr)} bytes on stderr")
-    for text in (stdout, result.stderr.decode("utf-8", errors="replace"), result.channel_tail):
-        if text:
-            progress.output(text)
 
     if result.status is None:
         raise ProvisioningError("the outcome of the bootstrap script is unknown")

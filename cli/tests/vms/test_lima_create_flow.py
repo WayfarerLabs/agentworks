@@ -35,7 +35,14 @@ from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, Lim
 from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT, LOGOUT_SCRIPT
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError
-from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload, install_at_run_process
+from tests._root_channel_fakes import (
+    ADDRESS,
+    Answer,
+    FakeGuest,
+    answer_by_payload,
+    install_at_run_process,
+    logged_payloads,
+)
 from tests.conftest import provisioning_trust_for_tests
 
 
@@ -183,10 +190,8 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
 
     monkeypatch.setattr(LimaHost, "run", _fake_run)
 
-    result = LimaPlatform("lima", {"placement": placement}).create(
-        _request(tailscale_auth_key=secret),
-        RunContext(),
-    )
+    request = _request(tailscale_auth_key=secret)
+    result = LimaPlatform("lima", {"placement": placement}).create(request, RunContext())
 
     assert result.tailnet_address == ADDRESS
     assert submitted and len(submitted) == 1
@@ -202,6 +207,8 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     assert [secret.encode() in script for script in guest.scripts] == [False, True, False]
     assert guest.payloads == [_TAILSCALED_WAIT_PAYLOAD, JOIN_FRAGMENT, "tailscale ip -4"]
     assert not any(secret in arg for argv in guest.argvs for arg in argv)
+    # The tailscaled wait, the join and the address read are recorded in the create's operation log.
+    assert logged_payloads(cast("MagicMock", request.progress)) == guest.payloads
 
 
 def test_an_address_that_cannot_be_read_logs_the_node_out_and_removes_the_instance(

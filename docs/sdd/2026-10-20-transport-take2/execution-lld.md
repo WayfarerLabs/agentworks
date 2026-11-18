@@ -902,6 +902,33 @@ cleanup (`vms/manager/power.py:294`) and `vm logs` (`cli/commands/vm.py:531`). T
 `agentworks.execution.oplog.LOG_DIR`, and a test that replaces the class patches
 `agentworks.execution.oplog.OperationLogFile`, since every constructor imports it at call time.
 
+### The join's log
+
+Create's `ProvisionRequest.progress` is already its operation log (`vms/manager/lifecycle.py:522`),
+so `BootstrapProgress` gains `record(request, result)`, the callable `root_script.run` takes as
+`log`, rather than `ProvisionRequest` gaining a second field for the same log. Platforms only call
+the protocol; the manager's log and the tests' `MagicMock` already provide `record`, and the one
+hand-written fake (`cli/tests/_gcp_platform_fakes.py`) adds it.
+
+`join_tailscale`, `read_tailnet_address`, `settle_tailnet_address` and `complete_cloud_bootstrap`
+take `log` with no default, as `vms/recovery.py`'s `rekey` does, so a caller that logs nothing says
+so with `log=None` and a platform cannot skip the log by leaving it out. Every platform that joins
+passes `log=request.progress.record` to its join and its settle: Lima (local and remote), WSL2 and
+Proxmox directly, AWS, Azure and GCP through `complete_cloud_bootstrap`, which records the readiness
+wait too. Lima's `tailscaled` wait and Proxmox's cloud-init wait are recorded the same way, and each
+platform names the step before its join (`progress.step`), so the join's record is labeled as the
+join, not as the last bootstrap step. `run_bootstrap` records its run through `progress.record`
+under a `Bootstrap` step, in place of the sizes and streams it wrote itself: the record holds the
+same streams and the channel's output, and adds the outcome, which the old transcript did not show.
+
+The join's record holds `tailscale up`'s stderr with the key redacted by `root_script.run` itself,
+before the log's own sink redacts it again (I10, I31), and never the script. A failed join raises
+`ProvisioningError`, which create wraps with `Details: <log>` (`vms/manager/lifecycle.py:589`), so
+the error names the log that holds the reason. Tests: the join's record against a real log that
+registered no secret (`test_tailscale_join.py`), create's error naming its log
+(`test_create_vm_dispatch.py`), each platform's create recording its root scripts, and the
+bootstrap's record (`test_run_bootstrap.py`).
+
 ## Amendments
 
 The HLA and the plan carry the choices here that change them.

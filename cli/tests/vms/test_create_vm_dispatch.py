@@ -30,6 +30,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.execution import trust
+from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import (
@@ -399,6 +400,33 @@ def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
 
     assert caught.value.__cause__ is failure
     assert caught.value.hint == getattr(failure, "hint", None)
+
+
+def test_a_failed_join_names_the_create_log_which_holds_tailscale_s_reason(
+    db: Database, make_config, monkeypatch: pytest.MonkeyPatch, captured_output: object, tmp_path: Path
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale
+    from agentworks.execution import oplog
+    from tests._root_channel_fakes import Answer, FakeGuest
+
+    monkeypatch.setattr(oplog, "LOG_DIR", tmp_path / "logs")
+    guest = FakeGuest(lambda payload, seen: Answer(status=1, stderr=b"backend error: invalid key\n"))
+
+    def create(self: LimaPlatform, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        join_tailscale(
+            guest.run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+        )
+        raise AssertionError("the join fails")
+
+    monkeypatch.setattr(LimaPlatform, "create", create)
+
+    with pytest.raises(ProvisioningError) as caught:
+        vm_manager.create_vm(db, make_config(), name="join-fail", interaction=TtyInteractionPolicy.REFUSE)
+
+    (log,) = oplog.vm_logs("join-fail", stem="vm-create")
+    assert format_host_path(log) in str(caught.value)
+    assert "backend error: invalid key" in log.read_text()
 
 
 @pytest.mark.parametrize(

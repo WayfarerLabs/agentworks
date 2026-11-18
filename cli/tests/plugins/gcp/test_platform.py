@@ -35,6 +35,7 @@ from tests._gcp_platform_fakes import (
     gce_platform,
     gce_request,
 )
+from tests._root_channel_fakes import logged_payloads
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +88,8 @@ def test_full_create_retains_secret_free_request_and_joins_once(
     assert request.request_id
     assert [b"AGW_SECRET=" in script for script in guest.scripts] == [False, False, True, False]
     assert guest.payloads == ["true", GCE_READINESS_COMMAND, JOIN_FRAGMENT, "tailscale ip -4"]
+    # Everything after the SSH wait is recorded in the create's operation log.
+    assert logged_payloads(progress) == [GCE_READINESS_COMMAND, JOIN_FRAGMENT, "tailscale ip -4"]
     assert all(TAILSCALE_SENTINEL not in arg for argv in guest.argvs for arg in argv)
     assert result.tailnet_address == "100.64.0.9"
     assert "203.0.113.19" not in repr(result.platform_metadata)

@@ -22,6 +22,7 @@ from agentworks.execution.root_script import RawRun
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from unittest.mock import MagicMock
 
     import pytest
 
@@ -131,3 +132,8 @@ def install_at_run_process(monkeypatch: pytest.MonkeyPatch, guest: FakeGuest) ->
     monkeypatch.setattr(execution, "resolve_ssh", lambda: SSHClient("/usr/bin/ssh", (9, 2)))
     monkeypatch.setattr(root_script, "run_process", guest.run_process)
     return guest
+
+
+def logged_payloads(progress: MagicMock) -> list[str]:
+    """The root scripts a platform recorded in the create's operation log, a ``MagicMock`` ``request.progress``."""
+    return [call.args[0].source for call in progress.record.call_args_list]

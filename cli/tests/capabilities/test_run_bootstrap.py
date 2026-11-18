@@ -27,7 +27,7 @@ def bootstrap(guest: FakeGuest) -> MagicMock:
     return progress
 
 
-def test_the_bootstrap_runs_once_with_no_secret_and_reports_its_steps_and_size() -> None:
+def test_the_bootstrap_runs_once_with_no_secret_and_records_its_run_then_its_steps() -> None:
     guest = FakeGuest(lambda payload, seen: Answer(stdout=STEPS))
 
     progress = bootstrap(guest)
@@ -35,9 +35,10 @@ def test_the_bootstrap_runs_once_with_no_secret_and_reports_its_steps_and_size()
     (script,) = guest.scripts
     assert b"AGW_SECRET" not in script
     assert guest.deadlines == [900]
-    assert [call.args for call in progress.step.call_args_list] == [("Hostname",), ("Mask SVE",), ("Bootstrap output",)]
+    assert [call.args for call in progress.step.call_args_list] == [("Bootstrap",), ("Hostname",), ("Mask SVE",)]
     progress.warning.assert_called_once_with("update-grub failed")
-    assert any(str(len(STEPS)) in str(call.args[0]) for call in progress.output.call_args_list)
+    ((_request, result),) = [call.args for call in progress.record.call_args_list]
+    assert result.stdout == STEPS
 
 
 @pytest.mark.parametrize("answer", [Answer(status=1, stdout=STEPS), Answer(status=None)], ids=["failed", "unknown"])

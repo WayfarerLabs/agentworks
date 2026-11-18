@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +19,10 @@ from agentworks.debian import DebianRelease
 from agentworks.plugins.gcp.platform import GCEPlatform
 from tests._root_channel_fakes import Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
+
+if TYPE_CHECKING:
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
 
 TAILSCALE_SENTINEL = "tskey-hostile-'\"$()"
 SERVICE_SENTINEL = '{"private_key":"service-hostile-\'\\"$()"}'
@@ -284,6 +288,9 @@ class RecordingProgress:
 
     def log_error(self, msg: str) -> None:
         self.events.append(f"error:{msg}")
+
+    def record(self, request: RunRequest, result: Result) -> None:
+        self.events.append(f"record:{result.completion}")
 
 
 def gce_ctx(*ssh_allow_cidrs: str) -> RunContext:

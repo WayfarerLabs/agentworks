@@ -570,7 +570,10 @@ class EC2Platform(PublicAddressPlatform):
             # credential. Wait for it over the VM's root channel, then join
             # once and settle the address.
             target = PublicSSH(public_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
-            tailnet_address = complete_cloud_bootstrap(target, request.tailscale_auth_key, node=request.hostname)
+            request.progress.step("Wait for cloud-init and join Tailscale")
+            tailnet_address = complete_cloud_bootstrap(
+                target, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+            )
         except KeyboardInterrupt:
             output.warn(
                 f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "

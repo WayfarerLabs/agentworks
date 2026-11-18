@@ -45,6 +45,8 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.execution.root_script import RawRun
 
 BOOTSTRAP_DEADLINE_SECONDS = 600
@@ -415,7 +417,8 @@ class ProxmoxPlatform(VMPlatform):
                 # the VM's root channel
                 run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
                 output.detail("Waiting for cloud-init...")
-                _wait_for_cloud_init(run_as_root, newid)
+                request.progress.step("Wait for cloud-init")
+                _wait_for_cloud_init(run_as_root, newid, log=request.progress.record)
                 run_bootstrap(
                     run_as_root,
                     admin_username=request.admin_username,
@@ -425,9 +428,12 @@ class ProxmoxPlatform(VMPlatform):
                     deadline=BOOTSTRAP_DEADLINE_SECONDS,
                     progress=request.progress,
                 )
-                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                request.progress.step("Join Tailscale")
+                join_tailscale(
+                    run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+                )
                 tailnet_address = settle_tailnet_address(
-                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT, log=request.progress.record
                 )
             except Exception as failure:
                 # Re-raised unwrapped after rollback: the manager preserves
@@ -573,7 +579,9 @@ def _clone_names(vm: VMRow) -> tuple[str, ...]:
     return (vm.hostname,)
 
 
-def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
+def _wait_for_cloud_init(
+    run_as_root: Callable[[bytes, float], RawRun], vmid: int, *, log: Callable[[RunRequest, Result], None] | None
+) -> None:
     """Wait for cloud-init to finish inside the VM; :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns.
 
     The wait is the cloud bootstrap's own command, so a failure quotes
@@ -581,13 +589,13 @@ def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: in
     channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
     runs out: cloud-init can restart the guest agent mid-run (Proxmox's
     ``ciupgrade``), and ``cloud-init status --wait`` changes nothing, so
-    running it again is safe.
+    running it again is safe. ``log`` records each wait that ran to an outcome.
     """
     expires = time.monotonic() + CLOUD_INIT_DEADLINE_SECONDS
     while True:
         try:
             result = root_script.run(
-                run_as_root, DEFAULT_READINESS_COMMAND, deadline=max(expires - time.monotonic(), 0.1)
+                run_as_root, DEFAULT_READINESS_COMMAND, deadline=max(expires - time.monotonic(), 0.1), log=log
             )
             break
         except ConnectivityError:

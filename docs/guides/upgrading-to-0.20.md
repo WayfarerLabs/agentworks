@@ -938,13 +938,15 @@ would change; the default accepts every hostname.
   transport. The address is required. `create()` joins Tailscale once through `run_as_root` with
   `tailscale_join.join_tailscale`, reads the node's address with `settle_tailnet_address`, and
   returns it. Core validates it, reaches the VM over SSH there, and checks the live Debian release
-  itself.
-- **A cloud's create finishes through `complete_cloud_bootstrap(target, auth_key, node=...)`.** Its
-  `target` is a `public_ssh.PublicSSH` to the VM's public address under
-  `request.provisioning_trust`. It waits with
-  `PublicSSH.wait_until_answering(seconds=..., retry_refused_key=True)`, where a refused key raises
-  `public_ssh.KeyRefused` and is retried until the bound, since a cloud's guest agent may install
-  the key after sshd starts; then it waits for cloud-init, joins and settles the address. A
+  itself. Pass both calls `log=request.progress.record`: `BootstrapProgress` gains `record`, so the
+  join's output, with the key redacted, lands in the create's operation log, which a failed create
+  names.
+- **A cloud's create finishes through
+  `complete_cloud_bootstrap(target, auth_key, node=..., log=...)`.** Its `target` is a
+  `public_ssh.PublicSSH` to the VM's public address under `request.provisioning_trust`. It waits
+  with `PublicSSH.wait_until_answering(seconds=..., retry_refused_key=True)`, where a refused key
+  raises `public_ssh.KeyRefused` and is retried until the bound, since a cloud's guest agent may
+  install the key after sshd starts; then it waits for cloud-init, joins and settles the address. A
   cloud-init that finished with recoverable errors (exit status 2) warns and lets create carry on;
   any other failure's error quotes the exit status and cloud-init's own detail and errors
   (`cloud-init status --wait --long`), since the rollback then removes the VM.

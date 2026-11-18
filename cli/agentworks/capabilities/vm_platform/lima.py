@@ -56,6 +56,8 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import BootstrapProgress
     from agentworks.db import VMRow
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.execution.root_script import RawRun
     from agentworks.resources.graph import Readiness
 
@@ -138,14 +140,19 @@ _TAILSCALED_WAIT_PAYLOAD = (
 )
 
 
-def _wait_for_tailscaled(run_as_root: Callable[[bytes, float], RawRun], instance_name: str) -> None:
+def _wait_for_tailscaled(
+    run_as_root: Callable[[bytes, float], RawRun],
+    instance_name: str,
+    *,
+    log: Callable[[RunRequest, Result], None] | None,
+) -> None:
     """Wait for ``tailscaled`` to be active before the key is sent, or raise ``ProvisioningError``.
 
     ``limactl start`` and ``limactl restart`` return once the guest's sshd
     answers, not once ``tailscaled`` is up, and a join sent too early fails
-    with the key already spent. The wait carries no key.
+    with the key already spent. The wait carries no key; ``log`` records it.
     """
-    result = root_script.run(run_as_root, _TAILSCALED_WAIT_PAYLOAD, deadline=_TAILSCALED_WAIT_SECONDS + 10)
+    result = root_script.run(run_as_root, _TAILSCALED_WAIT_PAYLOAD, deadline=_TAILSCALED_WAIT_SECONDS + 10, log=log)
     if result.status != 0:
         raise ProvisioningError(
             f"tailscaled did not become active on Lima instance '{instance_name}' within "
@@ -458,12 +465,15 @@ class LimaPlatform(VMPlatform):
                 # The join follows any restart, so nothing but the address read
                 # sits between the join and the settle that logs a failed one out.
                 run_as_root = functools.partial(self._host.run_as_root, instance_name)
-                _wait_for_tailscaled(run_as_root, instance_name)
+                request.progress.step("Wait for tailscaled and join Tailscale")
+                _wait_for_tailscaled(run_as_root, instance_name, log=request.progress.record)
                 output.detail("Joining Tailscale...")
-                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                join_tailscale(
+                    run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+                )
                 output.detail("Retrieving Tailscale IP...")
                 tailnet_address = settle_tailnet_address(
-                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT, log=request.progress.record
                 )
             except Exception as failure:
                 output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")

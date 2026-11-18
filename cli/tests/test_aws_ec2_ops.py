@@ -347,12 +347,16 @@ class TestCreate:
 
     def test_tailscale_path_waits_for_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
+        bootstrap: dict[str, object] = {}
         monkeypatch.setattr(
             "agentworks.plugins.aws.platform.complete_cloud_bootstrap",
-            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+            lambda run_as_root, auth_key, **kwargs: bootstrap.update(kwargs) or "100.64.0.5",
         )
-        result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
+        request = _request(tailscale="tskey-abc")
+        result = _platform().create(request, RunContext(config=_config()))
         assert result.tailnet_address == "100.64.0.5"
+        # The join and the address read are recorded in the create's operation log.
+        assert bootstrap["log"] == request.progress.record
 
 
 class TestCreateRollback:

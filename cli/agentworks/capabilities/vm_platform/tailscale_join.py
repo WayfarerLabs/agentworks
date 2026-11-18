@@ -85,20 +85,27 @@ def readiness_failure(incomplete: str, result: RootScriptResult) -> str:
     return f"{incomplete} ({outcome})" + (f":\n{reason}" if reason else "")
 
 
-def join_tailscale(run_as_root: Callable[[bytes, float], RawRun], auth_key: str, *, node: str) -> None:
+def join_tailscale(
+    run_as_root: Callable[[bytes, float], RawRun],
+    auth_key: str,
+    *,
+    node: str,
+    log: Callable[[RunRequest, Result], None] | None,
+) -> None:
     """Join the VM to the tailnet as ``node`` with ``auth_key``, exactly once.
 
-    A non-zero status raises ``ProvisioningError`` quoting the last lines of
-    ``tailscale up``'s stderr, its reason (an invalid auth key, say), with
-    the key redacted as from every stream; the error reaches the create's
-    operation log as its outcome. A channel that raised
+    ``log`` records the join in the caller's operation log: its outcome and
+    ``tailscale up``'s streams, with the key redacted, never the script. A
+    non-zero status raises ``ProvisioningError`` quoting the last lines of
+    that stderr, its reason (an invalid auth key, say), redacted the same
+    way; create's error names the log. A channel that raised
     :class:`ChannelUnreachable` dispatched nothing, so the node did not join,
     and that raises with the channel's own hint. Any other outcome that
     cannot be established, another ``ConnectivityError`` included, raises
     naming ``node``, since the node may have joined. None retries.
     """
     try:
-        result = root_script.run(run_as_root, JOIN_FRAGMENT, deadline=JOIN_DEADLINE_SECONDS, secret=auth_key)
+        result = root_script.run(run_as_root, JOIN_FRAGMENT, deadline=JOIN_DEADLINE_SECONDS, secret=auth_key, log=log)
     except ChannelUnreachable as error:
         raise ProvisioningError(f"node '{node}' did not join the tailnet: {error}", hint=error.hint) from error
     except ConnectivityError as error:
@@ -123,7 +130,7 @@ def read_tailnet_address(
     run_as_root: Callable[[bytes, float], RawRun],
     *,
     node: str,
-    log: Callable[[RunRequest, Result], None] | None = None,
+    log: Callable[[RunRequest, Result], None] | None,
 ) -> str:
     """The VM's tailnet address from ``tailscale ip -4``, retrying a read that fails.
 
@@ -172,7 +179,7 @@ def settle_tailnet_address(
     *,
     node: str,
     rerun_hint: str,
-    log: Callable[[RunRequest, Result], None] | None = None,
+    log: Callable[[RunRequest, Result], None] | None,
 ) -> str:
     """The joined node's address, or the node logged out and ``ConnectivityError``.
 
@@ -222,6 +229,7 @@ def complete_cloud_bootstrap(
     node: str,
     readiness_command: str = DEFAULT_READINESS_COMMAND,
     readiness_label: str = DEFAULT_READINESS_LABEL,
+    log: Callable[[RunRequest, Result], None] | None,
 ) -> str:
     """Finish a cloud VM's key-free bootstrap: wait for it, join as ``node`` once, and return the settled address.
 
@@ -233,7 +241,8 @@ def complete_cloud_bootstrap(
     :data:`READINESS_REASON_LINES` lines, since the rollback destroys the
     evidence. The default readiness command's
     :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns instead, as Proxmox's wait
-    for cloud-init does.
+    for cloud-init does. ``log`` records the readiness wait, the join and
+    the address reads in the create's operation log.
     """
     output.detail(f"Waiting for {readiness_label} bootstrap to complete (this may take several minutes)...")
     try:
@@ -254,12 +263,14 @@ def complete_cloud_bootstrap(
 
     incomplete = f"{readiness_label} did not complete successfully during create-time bootstrap"
     try:
-        result = root_script.run(target.run_as_root, readiness_command, deadline=READINESS_COMMAND_DEADLINE_SECONDS)
+        result = root_script.run(
+            target.run_as_root, readiness_command, deadline=READINESS_COMMAND_DEADLINE_SECONDS, log=log
+        )
     except ConnectivityError as error:
         raise ProvisioningError(incomplete, hint=error.hint) from error
     if result.status == CLOUD_INIT_RECOVERABLE_STATUS and readiness_command == DEFAULT_READINESS_COMMAND:
         output.warn(f"{readiness_label} completed with recoverable errors; continuing")
     elif result.status != 0:
         raise ProvisioningError(readiness_failure(incomplete, result))
-    join_tailscale(target.run_as_root, auth_key, node=node)
-    return settle_tailnet_address(target.run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT)
+    join_tailscale(target.run_as_root, auth_key, node=node, log=log)
+    return settle_tailnet_address(target.run_as_root, node=node, rerun_hint=CREATE_RERUN_HINT, log=log)

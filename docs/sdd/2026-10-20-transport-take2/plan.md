@@ -650,7 +650,7 @@ module, and `remote_exec.py` is deleted.
       `execution/oplog.py` as `SSHLogger` is deleted, matching log files by the exact
       `<vm>-<timestamp>-<stem>.log` shape so VM `dev` never matches VM `dev-2`'s logs, and update
       the `LOG_DIR` mention in the `transports/ssh.py` docstring.
-- [ ] Once `SSHLogger` is replaced, pass create's operation log to the platforms' join through
+- [x] Once `SSHLogger` is replaced, pass create's operation log to the platforms' join through
       `ProvisionRequest`, so `join_tailscale`'s `root_script.run` records `tailscale up`'s redacted
       stderr, and have a failed join's error name the log. Deferred from slice 4's port, where it
       would have widened the `BootstrapProgress` protocol every plugin implements.

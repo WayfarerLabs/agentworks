@@ -226,6 +226,19 @@ class TestCreateProvisioningOutput:
         assert "for requested" not in line
         assert not captured_output.warnings
 
+    def test_the_bootstrap_records_in_the_creates_operation_log(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._wire(monkeypatch)
+        bootstrap: dict[str, object] = {}
+        monkeypatch.setattr(
+            "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+            lambda run_as_root, auth_key, **kwargs: bootstrap.update(kwargs) or "100.64.0.5",
+        )
+        request = self._request(cpus=2, memory=8)
+
+        self._platform().create(request, RunContext())
+
+        assert bootstrap["log"] == request.progress.record
+
     def test_round_up_warns_and_line_shows_selected_spec(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:

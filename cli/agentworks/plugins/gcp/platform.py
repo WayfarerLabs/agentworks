@@ -412,6 +412,7 @@ class GCEPlatform(PublicAddressPlatform):
                 node=request.hostname,
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
+                log=request.progress.record,
             )
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
