@@ -37,7 +37,7 @@ the platform and record them once you confirm their fingerprints against the VM'
 
 When the failure appears to be below SSH, use `tailscale status` to confirm the workstation is
 connected and can see the VM, then `tailscale ping HOST` with the Tailscale address from
-`agw vm describe NAME`. `agw vm logs NAME` shows the VM's recent SSH logs.
+`agw vm describe NAME`. `agw vm logs NAME` shows the VM's recent operation logs.
 
 When a VM does not answer after `agw vm start`, or Tailscale itself needs repair, run
 `agw vm recover NAME`, which starts the VM first if it is stopped. It works through the platform's

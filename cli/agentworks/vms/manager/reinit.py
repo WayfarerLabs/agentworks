@@ -358,7 +358,7 @@ def reinit_vm(
                 )
                 home = managed_home(vm.admin_username)
 
-                # try/finally ensures the SSH logger is closed exactly once,
+                # try/finally ensures the operation log is closed exactly once,
                 # AFTER any warning output. Matches the pattern used by agent
                 # create / reinit and workspace create / rehome.
                 try:

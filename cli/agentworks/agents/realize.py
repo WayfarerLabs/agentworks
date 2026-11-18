@@ -105,12 +105,12 @@ def realize_agent(
         # exception. Surface them as a warning and let the original error
         # continue to propagate.
         try:
-            delete_agent_on_vm(vm, config, linux_user, logger=ssh_logger)
+            delete_agent_on_vm(vm, config, linux_user, logger=log)
         except Exception as cleanup_err:
             output.warn(
                 f"rollback during agent create failed: {cleanup_err}. "
                 f"VM may have residual user/files for '{linux_user}'. "
-                f"SSH log: {ssh_logger.display_path}"
+                f"Operation log: {log.display_path}"
             )
 
     from agentworks.harness_setup.lifecycle import require_prepared_setup
@@ -118,7 +118,7 @@ def realize_agent(
 
     with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
         require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
-        ssh_logger = OperationLogFile(
+        log = OperationLogFile(
             vm.name,
             "agent-create",
             redactions=tuple(
@@ -128,7 +128,7 @@ def realize_agent(
         # The logger's close() writes a "Finished" footer; defer it via finally so
         # rollback commands are logged BEFORE the footer, not after.
         try:
-            create_new_agent_user(vm, config, linux_user, shell=template.shell, logger=ssh_logger)
+            create_new_agent_user(vm, config, linux_user, shell=template.shell, logger=log)
             try:
                 from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
 
@@ -140,7 +140,7 @@ def realize_agent(
                     linux_user,
                     agent_name=name,
                     credential_requests=credential_requests,
-                    logger=ssh_logger,
+                    logger=log,
                     admin_git_force_safe_directory=resolve_admin_template(
                         db,
                         registry,
@@ -162,7 +162,7 @@ def realize_agent(
                         vm=vm,
                         username=linux_user,
                         values=setup_values or {},
-                        logger=ssh_logger,
+                        logger=log,
                         held=guard,
                         operation="agent-create",
                         buffered=True,
@@ -206,11 +206,11 @@ def realize_agent(
                     f"creating agent: {e}",
                     entity_kind="agent",
                     entity_name=name,
-                    hint=f"SSH log: {ssh_logger.display_path}",
+                    hint=f"Operation log: {log.display_path}",
                 ) from e
         finally:
             try:
-                ssh_logger.close()
+                log.close()
             except BaseException:
                 if not defer_overlay_report:
                     from agentworks.instance_specs import render_retained_creation_overlay

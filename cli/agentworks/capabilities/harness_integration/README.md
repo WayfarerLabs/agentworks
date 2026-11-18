@@ -365,10 +365,10 @@ activations are removed. With neither selections nor applied-state records, setu
 unused environment secrets. Install commands keep their existing environment behavior.
 
 The command registers setup environment and config secrets before its single secret-resolution pass
-and before constructing its SSH logger. An invocation receives the complete scope environment with
-protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that integration's config
-references. VM/admin setup binds references to the live VM owner; agent and workspace setup bind to
-their respective live owners, including resources still pending during session creation.
+and before constructing its operation log. An invocation receives the complete scope environment
+with protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that integration's
+config references. VM/admin setup binds references to the live VM owner; agent and workspace setup
+bind to their respective live owners, including resources still pending during session creation.
 
 A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
 Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace

@@ -132,7 +132,7 @@ def copy_workspace(
                         check=True,
                     )
                 except AgentworksError as error:
-                    error.add_hint(f"SSH log: {source_log.display_path}")
+                    error.add_hint(f"Operation log: {source_log.display_path}")
                     raise
                 except Exception as error:
                     raise _copy_failure(error, source_name, source_log) from error
@@ -169,7 +169,7 @@ def copy_workspace(
                 try:
                     _unpack(db, config, dest_vm, dest_name, archive, lg)
                 except AgentworksError as error:
-                    error.add_hint(f"SSH log: {lg.display_path}")
+                    error.add_hint(f"Operation log: {lg.display_path}")
                     raise
                 except Exception as error:
                     raise _copy_failure(error, dest_name, lg) from error
@@ -180,7 +180,10 @@ def copy_workspace(
 def _copy_failure(error: Exception, ws_name: str, log: OperationLog) -> ExternalError:
     """An untyped failure (a local read or write error) as the copy's error, naming the log."""
     return ExternalError(
-        f"copying workspace: {error}", entity_kind="workspace", entity_name=ws_name, hint=f"SSH log: {log.display_path}"
+        f"copying workspace: {error}",
+        entity_kind="workspace",
+        entity_name=ws_name,
+        hint=f"Operation log: {log.display_path}",
     )
 
 

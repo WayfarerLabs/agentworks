@@ -331,7 +331,7 @@ def delete_agent(
     with native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard) as guard:
         from agentworks.execution.oplog import OperationLogFile
 
-        ssh_logger = OperationLogFile(vm.name, "agent-delete")
+        log = OperationLogFile(vm.name, "agent-delete")
         try:
             output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
             # Refuse a session row the owner rule rejects before any VM work.
@@ -386,7 +386,7 @@ def delete_agent(
                     from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
 
                     # The admin tears the agent's sessions down as the agent and owns the console windows.
-                    admin = execution.vm_access(vm, config, Admin(), log=ssh_logger.record)
+                    admin = execution.vm_access(vm, config, Admin(), log=log.record)
                     agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
                     # Snapshot console memberships before db.delete_session cascades them.
                     console_pairs = [
@@ -430,9 +430,9 @@ def delete_agent(
 
                 granted_workspaces = db.list_granted_workspaces(name)
                 for ws_name in granted_workspaces:
-                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
 
-                delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
+                delete_agent_on_vm(vm, config, agent.linux_user, logger=log)
 
                 db.delete_agent(name)
 
@@ -444,7 +444,7 @@ def delete_agent(
                 output.info(f"Agent '{name}' deleted")
 
         finally:
-            ssh_logger.close()
+            log.close()
 
 
 def reinit_agent(
@@ -696,7 +696,7 @@ def reinit_agent(
                 from agentworks.agents.initializer import create_agent_on_vm
                 from agentworks.execution.oplog import OperationLogFile
 
-                ssh_logger = OperationLogFile(
+                log = OperationLogFile(
                     vm.name,
                     "agent-reinit",
                     redactions=tuple(
@@ -715,7 +715,7 @@ def reinit_agent(
                             agent.linux_user,
                             agent_name=agent.name,
                             credential_requests=credential_ops,
-                            logger=ssh_logger,
+                            logger=log,
                             admin_git_force_safe_directory=resolve_admin_template(
                                 db,
                                 registry,
@@ -736,7 +736,7 @@ def reinit_agent(
                                 vm=vm,
                                 username=agent.linux_user,
                                 values=resolver.values,
-                                logger=ssh_logger,
+                                logger=log,
                                 held=guard,
                                 operation="agent-reinit",
                             )
@@ -780,7 +780,7 @@ def reinit_agent(
                         reconciled = 0
                         for ws_name in db.list_granted_workspaces(name):
                             try:
-                                add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                                add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
                                 reconciled += 1
                             except NotFoundError:
                                 # The only NotFoundError reachable here is the
@@ -825,7 +825,7 @@ def reinit_agent(
                     except KeyboardInterrupt:
                         output.warn(
                             f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
-                            f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.display_path}"
+                            f"Re-run 'agent reinit {name}' to retry. Operation log: {log.display_path}"
                         )
                         raise
                     except AgentworksError as error:
@@ -838,10 +838,10 @@ def reinit_agent(
                             f"reinitializing agent: {e}",
                             entity_kind="agent",
                             entity_name=name,
-                            hint=f"SSH log: {ssh_logger.display_path}",
+                            hint=f"Operation log: {log.display_path}",
                         ) from e
                 finally:
-                    ssh_logger.close()
+                    log.close()
 
                 # Refresh operator SSH config (declarative rebuild; picks up any
                 # config changes that affect the per-agent block).

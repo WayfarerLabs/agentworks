@@ -746,7 +746,7 @@ just a vm-site.
 | `agw vm rekey <name>`                                                | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
 | `agw vm recover <name>`                                              | Repair a VM's SSH access, python3 and Tailscale node           |
 | `agw vm port-forward <name> <ports...>`                              | Forward local port(s) to a VM (like kubectl port-forward)      |
-| `agw vm logs <name>`                                                 | Show SSH logs for a VM                                         |
+| `agw vm logs <name>`                                                 | Show operation logs for a VM                                   |
 | `agw vm import-host-keys (--all \| <name>...)`                       | Import VM host keys from `known_hosts` into the host-key store |
 
 `vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to

@@ -87,7 +87,7 @@ def _value_free_clone_failure(
     error.entity_kind = "workspace"
     error.entity_name = ws_name
     error.hint = (
-        "Inspect the SSH log for the clone's failure. A timed-out or interrupted guest Git process "
+        "Inspect the operation log for the clone's failure. A timed-out or interrupted guest Git process "
         "may still be running in its private attempt directory. "
         "Check the repository address, authentication and VM network access as appropriate. "
         "For private repositories, declare the cloning admin's Git credential on the admin template "

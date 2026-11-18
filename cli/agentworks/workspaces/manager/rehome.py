@@ -219,8 +219,8 @@ def _rehome_vm(
                 raise UserAbort("rehome cancelled")
 
         # The log closes exactly once, however the move ends.
-        with operation_log(vm.name, "workspace-rehome") as ssh_logger:
-            admin = admin_access(vm, config, ssh_logger)
+        with operation_log(vm.name, "workspace-rehome") as log:
+            admin = admin_access(vm, config, log)
             try:
                 # Create target directory as root and chown to admin so rsync can write
                 admin.run(Command(("mkdir", "-p", "--", new_path), elevated=True), check=True)
@@ -274,7 +274,7 @@ def _rehome_vm(
                 try:
                     apply_workspace_acls(admin.files(), new_path)
                 except REQUEST_FAILURES as e:
-                    output.warn(f"ACL setup failed: {describe_failure(e, ssh_logger.sanitize)}")
+                    output.warn(f"ACL setup failed: {describe_failure(e, log.sanitize)}")
 
                 # Only true ancestors of the new path get a+x; its own mode is
                 # the canonical 2770 set above.
@@ -299,7 +299,7 @@ def _rehome_vm(
                 # still authorizes their source, then establish the new pairs.
                 from agentworks.harness_setup.cleanup import rehome_workspace_artifacts
 
-                rehome_workspace_artifacts(db, ws, new_path, admin, redactions=ssh_logger.redactions)
+                rehome_workspace_artifacts(db, ws, new_path, admin, redactions=log.redactions)
 
                 # Update database
                 db.update_workspace_path(ws_name, new_path)
@@ -324,12 +324,12 @@ def _rehome_vm(
                 output.warn(
                     f"Cancelling workspace rehome '{ws_name}'. "
                     f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} "
-                    f"SSH log: {ssh_logger.display_path}"
+                    f"Operation log: {log.display_path}"
                 )
                 raise
             except AgentworksError as e:
                 e.add_hint(
-                    f"SSH log: {ssh_logger.display_path}. {_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
+                    f"Operation log: {log.display_path}. {_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
                 )
                 raise
             except Exception as e:
@@ -338,7 +338,7 @@ def _rehome_vm(
                     entity_kind="workspace",
                     entity_name=ws_name,
                     hint=(
-                        f"SSH log: {ssh_logger.display_path}. "
+                        f"Operation log: {log.display_path}. "
                         f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
                     ),
                 ) from e

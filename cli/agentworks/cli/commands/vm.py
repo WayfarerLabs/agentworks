@@ -526,14 +526,14 @@ def vm_logs(
     name: Annotated[str, typer.Argument(help="VM name")],
     show_all: Annotated[bool, typer.Option("--all", help="Show all logs instead of only the latest")] = False,
 ) -> None:
-    """Show SSH logs for a VM."""
+    """Show operation logs for a VM."""
     from agentworks import output
     from agentworks.execution import oplog
 
     logs = [(str(p), p.name) for p in oplog.vm_logs(name)]
 
     if not logs:
-        output.info(f"No SSH logs found for VM '{name}'.")
+        output.info(f"No operation logs found for VM '{name}'.")
         return
 
     # Header names the log file (the handler owns any decoration); the raw

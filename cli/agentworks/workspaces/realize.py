@@ -101,13 +101,13 @@ def realize_workspace(
         # unconfirmed or occupied reservations. With workspace_path unset here,
         # this layer must not guess a path and remove that unexplained residue.
         if workspace_path:
-            delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=ssh_logger)
+            delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=log)
         if vscode_path:
             vscode_path.unlink(missing_ok=True)
 
     def _safe_cleanup() -> None:
         # Rollback failures must not mask the original KI/exception. Surface
-        # them as a warning (with workspace name and SSH log path for the
+        # them as a warning (with workspace name and operation log path for the
         # user to follow up on) and continue propagating the original error.
         try:
             _cleanup()
@@ -115,7 +115,7 @@ def realize_workspace(
             output.warn(
                 f"rollback during workspace create '{name}' failed: {cleanup_err}. "
                 f"VM may have residual files or VS Code workspace file. "
-                f"SSH log: {ssh_logger.display_path}"
+                f"Operation log: {log.display_path}"
             )
 
     from agentworks.harness_setup.lifecycle import require_prepared_setup
@@ -128,10 +128,10 @@ def realize_workspace(
         # rollback section, making the log misleading.
         with operation_log(
             vm.name, "workspace-create", redactions=tuple((setup_values or {}).values()) if setup_inputs else ()
-        ) as ssh_logger:
+        ) as log:
             try:
                 output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
-                workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
+                workspace_path = create_vm_workspace(vm, config, name, template, logger=log)
 
                 native_setup = None
                 if setup_inputs is not None:
@@ -147,7 +147,7 @@ def realize_workspace(
                         root=workspace_path,
                         linux_group=workspace_group(name),
                         values=setup_values or {},
-                        logger=ssh_logger,
+                        logger=log,
                         held=guard,
                         operation="workspace-create",
                     )
@@ -188,7 +188,7 @@ def realize_workspace(
                 raise
             except AgentworksError as e:
                 _safe_cleanup()
-                e.add_hint(f"SSH log: {ssh_logger.display_path}")
+                e.add_hint(f"Operation log: {log.display_path}")
                 raise
             except Exception as e:
                 _safe_cleanup()
@@ -196,7 +196,7 @@ def realize_workspace(
                     f"creating workspace: {e}",
                     entity_kind="workspace",
                     entity_name=name,
-                    hint=f"SSH log: {ssh_logger.display_path}",
+                    hint=f"Operation log: {log.display_path}",
                 ) from e
 
             from agentworks.instance_specs import report_overlay_outcome
@@ -206,7 +206,7 @@ def realize_workspace(
                 # grant row plus the on-VM group membership per agent. Best-effort
                 # (per-agent failures warn, they do not abort); the invariant,
                 # ordering rationale, and KI handling live with the helper.
-                materialize_grant_all_agents(db, config, vm, name, logger=ssh_logger)
+                materialize_grant_all_agents(db, config, vm, name, logger=log)
 
         from agentworks.harness_setup.outcomes import setup_completion_suffix
 
