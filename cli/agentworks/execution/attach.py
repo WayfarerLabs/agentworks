@@ -10,41 +10,41 @@ terminal. No guest text reaches a command line, and the secret environment
 never touches the terminal half's argv.
 
 :class:`Parked` is that first connection. :func:`attach` is ``Parked`` plus a
-terminal half on the operator's terminal; :func:`park` is ``Parked`` plus a
-:class:`Handover`, whose command line is the terminal half of a terminal agw
+terminal half on the operator's terminal; ``VMAccess.park`` is ``Parked`` plus
+a :class:`Handover`, whose command line is the terminal half of a terminal agw
 does not hold (a tmux pane on the guest).
 """
 
 from __future__ import annotations
 
-import contextlib
-import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.execution import ssh_process
+from agentworks.execution.agw_launch import HANDOVER_WAIT_SECONDS
 from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.pump import Deadline, PipeSession, StopReason
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.terminal import emit_clear, guarded_terminal
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
     from pathlib import Path
 
 PARKING_WAIT_SECONDS = 60
 """How long to wait for the parking connection to report ``parked``, before the terminal is touched.
 
 Its own bound for connecting, authenticating and running the account's startup
-files. The launcher's 30 second handover wait starts only after ``parked``.
+files. The launcher's handover wait (``HANDOVER_WAIT_SECONDS``) starts only
+after ``parked``.
 """
 
 PARKING_SHUTDOWN_SECONDS = 2.0
 """How long to let the parked launcher clean up once the client has closed its end."""
 
-HANDOVER_COLLECT_SECONDS = 35
-"""How long :func:`park` waits for its pane to collect the request: the launcher's 30 second wait and a margin."""
+HANDOVER_COLLECT_SECONDS = HANDOVER_WAIT_SECONDS + 5
+"""How long :meth:`Parked.collect` waits for the trailer: the launcher's handover wait and a margin."""
 
 _SSH_STATUS_CONNECTION_ENDED = 255
 
@@ -108,8 +108,11 @@ class Parked:
         finally:
             self._session.__exit__(None, None, None)
 
-    def collect(self, seconds: float) -> bool:
-        """Wait up to ``seconds`` for the launcher's trailer, end the connection, and say whether it handed over.
+    def collect(self) -> bool:
+        """Wait for the launcher's trailer, end the connection, and say whether it handed over.
+
+        The wait is bounded by :data:`HANDOVER_COLLECT_SECONDS`, past the
+        launcher's own wait, so its ``refused handover`` arrives first.
 
         The parking stdin stays open meanwhile, since closing it would make a
         launcher still waiting for its terminal half give up. ``exit 0`` means
@@ -118,7 +121,7 @@ class Parked:
         """
         self._ended = True
         try:
-            stop = self._session.pump(budget=Deadline.after(seconds))
+            stop = self._session.pump(budget=Deadline.after(HANDOVER_COLLECT_SECONDS))
         finally:
             self._session.end()
         return stop is StopReason.DONE and self._session.stderr.closing == "exit 0"
@@ -128,31 +131,22 @@ class Parked:
 class Handover:
     """A request parked for a terminal agw does not hold, such as a tmux pane on the guest.
 
-    ``account`` is the account that parked it, which owns the socket
-    directory. ``collected`` is set when :func:`park`'s block exits normally:
+    ``collected`` is set when ``VMAccess.park``'s block exits normally:
     whether the pane collected the request within
     :data:`HANDOVER_COLLECT_SECONDS`.
     """
 
     token: str
-    account: str
     collected: bool = False
 
-    def command(self, run_as: str | None = None) -> str:
+    def command(self) -> str:
         """The pane's command line: the handover form of stage 0, which collects the request and runs it.
 
-        ``run_as`` is for a pane whose tmux server belongs to another account
-        than the one that parked: it puts ``sudo -n -u <run_as>`` in front, so
-        the pane connects as the account that parked, the only one that can
-        reach the socket. Its only values are the token and an account name;
-        the environment is in the parked request.
+        Its only value is the token; the environment is in the parked
+        request. The pane must run as the account that parked, the only one
+        that can reach the socket.
         """
-        command = ssh_process.stage0_command(socket_path(self.token))
-        if run_as is None:
-            return command
-        if run_as != self.account:
-            raise ValueError(f"a handover parked by '{self.account}' is collected as '{self.account}', not '{run_as}'")
-        return f"sudo -n -u {shlex.quote(run_as)} {command}"
+        return ssh_process.stage0_command(socket_path(self.token))
 
 
 def attach(
@@ -185,24 +179,6 @@ def attach(
             output.warn("connection ended or the command exited 255; terminal restored.")
             output.detail("Remote state is untouched. Re-run the same command to reattach.")
     return code
-
-
-@contextlib.contextmanager
-def park(
-    *, vm_name: str, wire: bytes, nonce: str, argv: Sequence[str], log: Path, token: str, account: str
-) -> Iterator[Handover]:
-    """Park the request and yield its :class:`Handover`; run its command in the pane inside the block.
-
-    Leaving the block normally waits up to :data:`HANDOVER_COLLECT_SECONDS`
-    for the pane to collect the request and sets :attr:`Handover.collected`.
-    Leaving it on an exception (the pane could not be created) closes the
-    parking stdin at once, so the launcher removes its socket directory and
-    exits. Either way the connection has ended once the block is left.
-    """
-    with Parked(vm_name=vm_name, wire=wire, nonce=nonce, argv=argv, log=log) as parked:
-        handover = Handover(token, account)
-        yield handover
-        handover.collected = parked.collect(HANDOVER_COLLECT_SECONDS)
 
 
 def _ignore(_payload: bytes) -> None:

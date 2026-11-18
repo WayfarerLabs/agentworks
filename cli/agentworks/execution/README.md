@@ -301,21 +301,22 @@ with access.park(LoginShell(env=pane_env)) as handover:
 # leaving the block waits for the pane to collect its request
 ```
 
-`Handover.command(run_as=None)` is the pane's command line, the handover form of stage 0 with only
-the token in it; `run_as` puts `sudo -n -u <run_as>` in front for a pane in another account's tmux
-server, and must be the account that parked, the only one that can reach the socket. Leaving the
-block normally waits up to 35 seconds (the launcher's 30 and a margin) for the launcher's trailer
-and sets `handover.collected`; leaving it on an exception (the pane could not be created) closes the
-parking stdin at once, so the launcher cleans up. Either way the connection has ended afterwards.
+`Handover.command()` is the pane's command line, the handover form of stage 0 with only the token in
+it; the pane runs it as the account that parked, the only one that can reach the socket. Leaving the
+block normally waits up to `HANDOVER_COLLECT_SECONDS` (the launcher's `HANDOVER_WAIT_SECONDS`, 30,
+and a margin) for the launcher's trailer and sets `handover.collected`; leaving it on an exception
+(the pane could not be created) closes the parking stdin at once, so the launcher cleans up. Either
+way the connection has ended afterwards.
 
 The variables that describe the terminal come from whoever owns it, since they say what the shell
-runs on and are no one's environment. An attach sends the operator's `TERM` (`xterm-256color` when
-the workstation has none). A park envelope carries none, because tmux owns a pane's terminal and
-sets `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` in the pane's
-environment; in `tty` mode the launcher takes those five from its inherited environment, with
-`xterm-256color` when `TERM` is absent, and nothing else (conformance vector T2). sudo's `env_reset`
-keeps `TERM`, and neither Debian's sudoers nor agentworks' `env_keep` fragment keeps the other four,
-so a pane behind `sudo -n -u` has only `TERM` of them.
+runs on and are no one's environment. An attach's terminal is the operator's, reached over ssh: its
+envelope sends the operator's `TERM` (`xterm-256color` when the workstation has none), and the shell
+gets `SSH_TTY` for the pty sshd made. A park envelope carries no `TERM`, because tmux owns a pane's
+terminal and sets `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` in the
+pane's environment. For a park envelope only, the launcher's `tty` mode takes those five from its
+inherited environment, with `xterm-256color` when `TERM` is absent, and sets no `SSH_TTY`, since a
+tmux pty is not an SSH terminal. Nothing else comes from the inherited environment, and an attach
+takes none of the five from it (conformance vector T2).
 
 On a Windows console the terminal half's remote command is led by a NUL, which stops Win32-OpenSSH
 from deleting the operator's lines on its first write; `ssh_process.nul_first_on_a_windows_console`

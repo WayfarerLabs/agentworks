@@ -10,6 +10,8 @@ from __future__ import annotations
 import ast
 import io
 import os
+import re
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -22,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import ssh_process
 from agentworks.execution.agw_launch import DEFAULT_TERM
 from agentworks.execution.errors import ExecutionIncomplete, RequestRefused, TrustMismatch
 from agentworks.execution.requests import Command, LoginShell, Script, Shell, TerminalCommand, shell_command_line
@@ -33,7 +36,7 @@ from agentworks.execution.results import (
     UnknownReason,
 )
 from tests.execution.conformance import file_vectors, program_vectors
-from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, needs_sudo
+from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, TerminalHalf, needs_sudo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -496,7 +499,7 @@ def terminal_command_whose_directory_is_missing_is_refused_before_the_terminal(l
 # Typed into the pane's shell. Each probe prints a marker its own echoed line does not hold.
 PANE_KEYS = (
     b'printf \'%s2:%s:%s\\n\' T "$TERM" "$TOKEN"\n'
-    b'printf \'%sX:%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$TERM_PROGRAM_VERSION"\n'
+    b'printf \'%sX:%s|%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$TERM_PROGRAM_VERSION" "$SSH_TTY"\n'
     b"case $- in *i*) echo I''NTERACTIVE ;; esac\n"
     b"exit 0\n"
 )
@@ -510,7 +513,7 @@ TMUX_VARIABLES = {
 }
 
 
-def pane_handover(lane: Lane, *, term: str | None, run_as: str | None) -> bytes:
+def pane_handover(lane: Lane, *, term: str | None) -> bytes:
     """Park a login shell, run its handover command on a fresh terminal, check it, and return what it showed."""
     secret = "sekrit-pane-value-5e"
     lane.quiet_interactive_startup()
@@ -518,7 +521,7 @@ def pane_handover(lane: Lane, *, term: str | None, run_as: str | None) -> bytes:
     owner_env = TMUX_VARIABLES | ({} if term is None else {"TERM": term})
 
     with lane.access.park(LoginShell(cwd=lane.workdir, env={"TOKEN": secret})) as handover:
-        command = handover.command(run_as=run_as)
+        command = handover.command()
         shown = lane.pane(command, owner_env=owner_env, keys=PANE_KEYS)
 
     assert shown.completion == Completed(0), shown
@@ -530,32 +533,51 @@ def pane_handover(lane: Lane, *, term: str | None, run_as: str | None) -> bytes:
     return shown.stdout
 
 
-def tmux_line(values: dict[str, str]) -> bytes:
-    keys = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
-    return ("TX:" + "|".join(values.get(key, "") for key in keys)).encode()
-
-
 def pane_takes_its_terminal_from_its_owner(lane: Lane) -> None:
-    shown = pane_handover(lane, term=PANE_TERM, run_as=None)
+    shown = pane_handover(lane, term=PANE_TERM)
 
-    assert tmux_line(TMUX_VARIABLES) in shown
+    # tmux's variables arrive as tmux set them, and a tmux pty gets no SSH_TTY: it is no SSH terminal.
+    keys = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
+    expected = ("TX:" + "|".join(TMUX_VARIABLES[key] for key in keys) + "|").encode()
+    assert re.search(re.escape(expected) + rb"\r?\n", shown), shown
 
 
 def pane_without_term_gets_the_default(lane: Lane) -> None:
-    pane_handover(lane, term=None, run_as=None)
+    pane_handover(lane, term=None)
 
 
-def pane_through_sudo_keeps_term_and_is_interactive(lane: Lane) -> None:
-    needs_sudo(lane)
-    shown = pane_handover(lane, term=PANE_TERM, run_as=lane.account)
-
-    # sudo's env_reset keeps TERM; no sudoers agentworks writes or Debian ships keeps the others.
-    assert tmux_line({}) in shown
+# What a startup file the attach's terminal half runs exports; none of it is the attach terminal's.
+PLANTED_TERMINAL_VARIABLES = "export TMUX=/tmp/agw-planted,1,0 TMUX_PANE=%9 TERM_PROGRAM=planted\n"
+ATTACH_KEYS = b'printf \'%sA:%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$SSH_TTY"\nexit 0\n'
 
 
-def pane_through_sudo_without_term_gets_the_default(lane: Lane) -> None:
-    needs_sudo(lane)
-    pane_handover(lane, term=None, run_as=lane.account)
+def attach_takes_no_pane_variables_from_its_environment(lane: Lane) -> None:
+    account = local(lane)
+    needs_startup_files(account)
+    account.startup(startup_file(account), PLANTED_TERMINAL_VARIABLES)  # read by the shell that runs stage 0
+    account.quiet_interactive_startup()
+
+    def on_a_pty(argv: list[str], half: TerminalHalf) -> int:
+        # The terminal half on script's pty, as ssh -t gives it one, so the launcher takes its tty path.
+        completed = subprocess.run(
+            ["script", "-q", "-e", "-c", shlex.join(argv), "/dev/null"],
+            input=ATTACH_KEYS,
+            capture_output=True,
+            timeout=60,
+            env=ssh_process.child_environment(),
+            check=False,
+        )
+        half.stdout = completed.stdout
+        return completed.returncode
+
+    with account.terminal(behavior=on_a_pty) as terminal:
+        assert account.access.attach(LoginShell(cwd=account.workdir)) == 0
+
+    marker = re.search(rb"TA:([^|\r\n]*)\|([^|\r\n]*)\|([^|\r\n]*)\|([^\r\n]*)", terminal.stdout)
+    assert marker is not None, terminal.stdout
+    tmux, pane, program, ssh_tty = marker.groups()
+    assert (tmux, pane, program) == (b"", b"", b"")
+    assert ssh_tty.startswith(b"/dev/")  # an attach's terminal is an SSH terminal
 
 
 def memfd_refusing_the_noexec_seal_still_runs_the_script(lane: Lane) -> None:
@@ -871,8 +893,6 @@ def build() -> list[Vector]:
         ),
         Vector("T2-pane-terminal-from-owner", "LSV", pane_takes_its_terminal_from_its_owner),
         Vector("T2-pane-default-term", "LSV", pane_without_term_gets_the_default),
-        Vector("T2-pane-through-sudo", "LV", pane_through_sudo_keeps_term_and_is_interactive),
-        Vector("T2-pane-through-sudo-default-term", "LV", pane_through_sudo_without_term_gets_the_default),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
         Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),
@@ -913,6 +933,7 @@ def build() -> list[Vector]:
             "resets-signals-descriptors-session-variables", "L", signals_descriptors_and_session_variables_are_reset
         ),
         Vector("handover-clean-dispositions", "L", handover_shell_starts_with_clean_dispositions),
+        Vector("T2-attach-takes-no-pane-variables", "L", attach_takes_no_pane_variables_from_its_environment),
         Vector("parking-never-reports", "L", parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone),
         Vector("memfd-noexec-seal-refused", "L", memfd_refusing_the_noexec_seal_still_runs_the_script),
         Vector("memfd-cannot-be-created", "L", memfd_that_cannot_be_created_is_not_delivered),

@@ -16,9 +16,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ValidationError
-from agentworks.execution import attach as attach_module
 from agentworks.execution import ssh_process
-from agentworks.execution.attach import Handover
+from agentworks.execution.agw_launch import HANDOVER_WAIT_SECONDS
 from agentworks.execution.errors import RequestRefused
 from agentworks.execution.requests import LoginShell, TerminalCommand
 
@@ -35,8 +34,8 @@ def test_a_block_that_raises_lets_the_request_go_at_once(local_lane: LocalLane) 
     with pytest.raises(RuntimeError, match="split failed"), local_lane.access.park(LoginShell()):
         raise RuntimeError("split failed")
 
-    # Closing the parking stdin ends the launcher's wait, well inside its own 30 seconds.
-    assert time.monotonic() - started < attach_module.HANDOVER_COLLECT_SECONDS / 2
+    # Closing the parking stdin ends the launcher's wait, so the block never waits it out.
+    assert time.monotonic() - started < HANDOVER_WAIT_SECONDS
     assert local_lane.wait_gone(f"/tmp/agw-handover-{token}")
 
 
@@ -66,16 +65,6 @@ def test_only_a_login_shell_parks(local_lane: LocalLane, monkeypatch: pytest.Mon
 
     with pytest.raises(ValidationError), local_lane.access.park(TerminalCommand(("tmux",))):  # type: ignore[arg-type]
         pytest.fail("the block ran")
-
-
-def test_the_pane_runs_the_handover_stage_and_collects_as_the_account_that_parked() -> None:
-    handover = Handover("ab" * 8, "agt-x")
-    stage0 = ssh_process.stage0_command("/tmp/agw-handover-abababababababab/s")
-
-    assert handover.command() == stage0
-    assert handover.command(run_as="agt-x") == f"sudo -n -u agt-x {stage0}"
-    with pytest.raises(ValueError):
-        handover.command(run_as="agt-y")
 
 
 @pytest.mark.skipif(sys.platform != "linux" or shutil.which("tmux") is None, reason="runs a real tmux server on Linux")

@@ -169,14 +169,9 @@ class Lane:
 
     def shorten_handover_wait(self, seconds: int = 1) -> None:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
-        self.rewrite_launcher(b"handover_wait_seconds = 30", b"handover_wait_seconds = %d" % seconds)
+        self.rewrite_launcher(b"HANDOVER_WAIT_SECONDS = 30", b"HANDOVER_WAIT_SECONDS = %d" % seconds)
 
     # -- A pane: a terminal agw does not hold ----------------------------------
-
-    @property
-    def account(self) -> str:
-        """The account the lane's access connects as."""
-        raise NotImplementedError
 
     def quiet_interactive_startup(self) -> None:
         """Keep an interactive shell on the lane from reading any startup file of a person's (a no-op on a VM)."""
@@ -203,10 +198,6 @@ class LocalFilesystem(Lane):
     """Lanes whose guest is this machine."""
 
     scratch: Path
-
-    @property
-    def account(self) -> str:
-        return getpass.getuser()
 
     def quiet_interactive_startup(self) -> None:
         """Send a launcher whose passwd entry has an empty home of the lane's, not the runner's own.
@@ -507,10 +498,6 @@ class LiveLane(Lane):
         from agentworks.execution import vm_access
 
         return vm_access(self.vm, self.config, Admin(), log=log)
-
-    @property
-    def account(self) -> str:
-        return self.vm.admin_username
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         return VMAccess(

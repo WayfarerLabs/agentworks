@@ -26,6 +26,10 @@ DEFAULT_TERM = "xterm-256color"
 """The terminal type a terminal half gets when its owner names none: a Windows
 workstation with no ``TERM``, or a pane whose environment has none."""
 
+HANDOVER_WAIT_SECONDS = 30
+"""How long a parked launcher waits for its terminal half after ``parked``.
+The client's collect bound (``attach.HANDOVER_COLLECT_SECONDS``) is built on it."""
+
 
 def refusal_status(code: str) -> int:
     """The shell-convention exit status for a refusal code.
@@ -62,9 +66,8 @@ def main(f: int, g: bytes) -> None:
         sys.exit(STDLIB_MISSING_STATUS)
 
     # What tmux sets for a pane besides TERM: its server and pane, and what it is.
-    terminal_owner_variables = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
+    pane_terminal_variables = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
     fixed_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games"
-    handover_wait_seconds = 30
     program_interpreter = "/usr/bin/python3"
     # The lowest descriptor a staged source may take. Startup files close or
     # reuse low descriptors (3 to 9 are the shell's own redirection range), so
@@ -131,17 +134,22 @@ def main(f: int, g: bytes) -> None:
             "SHLVL": "1",
         }
         if mode == "tty" and os.isatty(0):
-            # These describe the terminal the shell runs on, not anyone's environment, so
-            # they come from the terminal's owner. TERM is the envelope's for an attach (the
-            # workstation's); a pane's handover carries none, and tmux set it and the rest
-            # in the environment it started the pane's command with.
+            # The terminal's variables describe the terminal the shell runs on, not anyone's
+            # environment, so they come from the terminal's owner. An attach's terminal is
+            # the workstation's, reached over ssh: TERM is the envelope's and SSH_TTY names
+            # the pty sshd made. A pane's handover (park) carries no TERM: tmux owns that
+            # terminal and set TERM and the rest in the environment it started the pane's
+            # command with, and a tmux pty is not an SSH terminal, so there is no SSH_TTY.
             term = request["term"]
-            env["TERM"] = term if term is not None else os.environ.get("TERM") or DEFAULT_TERM
-            for name in terminal_owner_variables:
-                if name in os.environ:
-                    env[name] = os.environ[name]
-            with contextlib.suppress(OSError):
-                env["SSH_TTY"] = os.ttyname(0)
+            if term is not None:
+                env["TERM"] = term
+                with contextlib.suppress(OSError):
+                    env["SSH_TTY"] = os.ttyname(0)
+            else:
+                env["TERM"] = os.environ.get("TERM") or DEFAULT_TERM
+                for name in pane_terminal_variables:
+                    if name in os.environ:
+                        env[name] = os.environ[name]
         runtime_dir = f"/run/user/{uid}"
         try:
             info = os.stat(runtime_dir)
@@ -307,7 +315,7 @@ def main(f: int, g: bytes) -> None:
                 os.umask(previous)
             server.listen(1)
             emit(1, marker + b"parked\n")
-            until = time.monotonic() + handover_wait_seconds
+            until = time.monotonic() + HANDOVER_WAIT_SECONDS
             while True:
                 left = until - time.monotonic()
                 if left <= 0:

@@ -80,7 +80,7 @@ class RecordingVMAccess(VMAccess):
     ``stream_status``, ``attach_status`` and ``forward_status`` are returned
     (or raised) by their operation. ``park`` yields a handover with the token
     :data:`PARK_TOKEN` and, on leaving its block, sets ``collected`` to
-    ``park_collected``, or raises it on entering when it is an exception.
+    ``park_collected``.
     """
 
     def __init__(
@@ -101,7 +101,7 @@ class RecordingVMAccess(VMAccess):
         self.default_outcome: Result | BaseException = Result(Completed(0))
         self.stream_status: int | BaseException = 0
         self.attach_status: int | BaseException = 0
-        self.park_collected: bool | BaseException = True
+        self.park_collected = True
         self.forward_status: int | BaseException = 0
 
     def run(
@@ -177,9 +177,7 @@ class RecordingVMAccess(VMAccess):
     @contextlib.contextmanager
     def park(self, request: LoginShell) -> Iterator[Handover]:
         self.calls.append(Call(self.identity, "park", request))
-        if isinstance(self.park_collected, BaseException):
-            raise self.park_collected
-        handover = Handover(PARK_TOKEN, self._user)
+        handover = Handover(PARK_TOKEN)
         yield handover
         handover.collected = self.park_collected
 

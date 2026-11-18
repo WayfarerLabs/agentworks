@@ -22,6 +22,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
 from agentworks.execution.agw_launch import DEFAULT_TERM, refusal_status
+from agentworks.execution.attach import Handover
 from agentworks.execution.detached import Detached
 from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PermissionDenied, describe_refusal
 from agentworks.execution.files import Files
@@ -35,7 +36,6 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.execution.attach import Handover
     from agentworks.execution.requests import Forward, OutputSink, RunRequest, TerminalRequest
 
 
@@ -233,16 +233,19 @@ class VMAccess:
         ``cwd``). Inside the block the caller creates the pane with
         :meth:`~agentworks.execution.attach.Handover.command` as its command;
         tmux runs it, and its stage 0 collects the request and execs the
-        shell on the pane. Leaving normally waits for that and sets
-        ``collected``; leaving on an exception lets the request go at once
-        (``attach.park``).
+        shell on the pane. Leaving normally waits for that
+        (``Parked.collect``) and sets ``collected``; leaving on an exception
+        (the pane could not be created) closes the parking stdin at once, so
+        the launcher removes its socket directory and exits. Either way the
+        connection has ended once the block is left.
 
         The envelope carries no ``TERM``: the pane's terminal belongs to tmux,
         which sets ``TERM``, ``TMUX``, ``TMUX_PANE``, ``TERM_PROGRAM`` and
         ``TERM_PROGRAM_VERSION`` in the pane's environment, and the launcher
-        takes them from there, since they describe the terminal the shell runs
-        on rather than anyone's environment. Like ``attach`` it keeps no
-        operation log.
+        takes them from there for a park envelope only, since they describe
+        the terminal the shell runs on rather than anyone's environment. A
+        tmux pty is not an SSH terminal, so the shell gets no ``SSH_TTY``.
+        Like ``attach`` it keeps no operation log.
 
         Plugins hold an access, so a request that is not a ``LoginShell`` is
         a ``ValidationError`` before anything resolves: every pane runs a
@@ -260,11 +263,12 @@ class VMAccess:
             )
             # Only parking connects; a failure in the caller's block is not this access's to explain.
             with self._passphrase_hint_on_connection_failure():
-                parking = attach_module.park(
-                    vm_name=self.vm_name, wire=wire, nonce=nonce, argv=argv, log=log, token=token, account=self._user
+                parked = stack.enter_context(
+                    attach_module.Parked(vm_name=self.vm_name, wire=wire, nonce=nonce, argv=argv, log=log)
                 )
-                handover = stack.enter_context(parking)
+            handover = Handover(token)
             yield handover
+            handover.collected = parked.collect()
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:
         """Forward local ports until the client exits, and return its status."""
