@@ -1,4 +1,4 @@
-"""Phase B's system fragments: the identity profile and zprofile block, sshd, sudoers and skel.
+"""Phase B's system fragments: the identity profile and zprofile block, skel, and the retired sshd and sudoers ones.
 
 Each step runs over a recording admin access whose file operations publish
 to the test's own paths (``tests/phase_b_support.py``), so a test reads what
@@ -33,8 +33,7 @@ def guest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StepGuest:
     for name, relative in (
         ("AGENTWORKS_IDENTITY_PROFILE_PATH", "profile.d/agentworks-identity.sh"),
         ("AGENTWORKS_ZPROFILE_PATH", "zsh/zprofile"),
-        ("AGENTWORKS_SSHD_ACCEPT_ENV_PATH", "sshd_config.d/50-agentworks-accept-env.conf"),
-        ("AGENTWORKS_SUDOERS_ENV_KEEP_PATH", "sudoers.d/50-agentworks-env-keep"),
+        ("RETIRED_SSHD_ACCEPT_ENV_PATH", "sshd_config.d/50-agentworks-accept-env.conf"),
         ("SKEL_BASHRC_PATH", "skel/.bashrc"),
         ("SKEL_ZSHRC_PATH", "skel/.zshrc"),
     ):
@@ -168,7 +167,7 @@ def _rm(path: Path) -> Command:
 
 def _installed_accept_env(guest: StepGuest) -> Path:
     """An installed fragment, which the guest's ``rm`` removes; file operations run locally."""
-    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
+    fragment = _path("RETIRED_SSHD_ACCEPT_ENV_PATH")
     fragment.parent.mkdir()
     fragment.write_bytes(b"AcceptEnv *\n")
 
@@ -202,7 +201,7 @@ def test_no_accept_env_fragment_leaves_sshd_alone(guest: StepGuest) -> None:
 
 
 def test_a_failed_removal_warns_and_never_reloads(guest: StepGuest) -> None:
-    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
+    fragment = _path("RETIRED_SSHD_ACCEPT_ENV_PATH")
     fragment.parent.mkdir()
     fragment.write_bytes(b"AcceptEnv *\n")
     guest.respond(_rm(fragment), _failed(b"rm: cannot remove\n"))
@@ -225,74 +224,40 @@ def test_a_failed_reload_after_the_removal_warns_once(guest: StepGuest) -> None:
     assert str(fragment) in warning
 
 
-# -- sudoers fragments ------------------------------------------------------------------
+# -- The retired sudoers fragments --------------------------------------------------------
 
 
-def test_the_env_keep_fragment_is_staged_validated_then_promoted_and_the_staging_removed(guest: StepGuest) -> None:
-    real = str(_path("AGENTWORKS_SUDOERS_ENV_KEEP_PATH"))
-    staging = real + ".tmp"
-
-    shell_env._write_sudoers_env_keep(guest.files, guest.log)
-
-    assert stat.S_IMODE(Path(staging).stat().st_mode) == 0o440
-    assert guest.writes() == [staging]
-    assert guest.commands() == [
-        Command(("visudo", "-cf", staging), elevated=True, deadline=60),
-        Command(("mv", "-fT", "--", staging, real), elevated=True, deadline=60),
-        Command(("rm", "-f", "--", staging), elevated=True, deadline=60),
-    ]
-    assert guest.log.warned == []
-
-
-def test_the_retired_console_setenv_fragment_is_removed_by_one_elevated_rm() -> None:
+def test_the_retired_sudoers_fragments_are_removed_by_one_elevated_rm() -> None:
     guest = StepGuest(local_files=False)
 
-    shell_env._remove_sudoers_console_setenv(guest.files, guest.log)
+    shell_env._remove_retired_sudoers_fragments(guest.files, guest.log)
 
     [call] = guest.access.calls
+    # The paths earlier releases installed, spelled out: a VM still holds them whatever this module calls them.
     assert call.request == Command(
-        ("rm", "-f", "--", "/etc/sudoers.d/51-agentworks-console-setenv"), elevated=True, deadline=60
+        (
+            "rm",
+            "-f",
+            "--",
+            "/etc/sudoers.d/50-agentworks-env-keep",
+            "/etc/sudoers.d/51-agentworks-console-setenv",
+            "/etc/sudoers.d/50-agentworks-env-keep.tmp",
+            "/etc/sudoers.d/51-agentworks-console-setenv.tmp",
+        ),
+        elevated=True,
+        deadline=60,
     )
     assert call.options["check"]
     assert guest.log.warned == []
 
 
-def test_a_failed_console_setenv_removal_warns_without_raising() -> None:
+def test_a_failed_sudoers_removal_warns_without_raising() -> None:
     guest = StepGuest(local_files=False)
     guest.access.default_outcome = _failed()
 
-    shell_env._remove_sudoers_console_setenv(guest.files, guest.log)
+    shell_env._remove_retired_sudoers_fragments(guest.files, guest.log)
 
     assert len(guest.log.warned) == 1
-
-
-def test_a_rejected_sudoers_fragment_never_reaches_its_real_path(guest: StepGuest) -> None:
-    real = str(_path("AGENTWORKS_SUDOERS_ENV_KEEP_PATH"))
-    staging = real + ".tmp"
-    guest.respond(Command(("visudo", "-cf", staging), elevated=True, deadline=60), _failed(b"syntax error\n"))
-
-    shell_env._write_sudoers_env_keep(guest.files, guest.log)
-
-    assert real not in guest.writes()
-    assert not any(command.argv[0] == "mv" for command in guest.commands())  # type: ignore[union-attr]
-    assert guest.commands()[-1] == Command(("rm", "-f", "--", staging), elevated=True, deadline=60)
-    assert len(guest.log.warned) == 1
-
-
-def test_a_failed_staging_cleanup_keeps_the_rejection_and_is_reported_beside_it(guest: StepGuest) -> None:
-    real = str(_path("AGENTWORKS_SUDOERS_ENV_KEEP_PATH"))
-    staging = real + ".tmp"
-    guest.respond(Command(("visudo", "-cf", staging), elevated=True, deadline=60), _failed(b"syntax error\n"))
-    guest.respond(
-        Command(("rm", "-f", "--", staging), elevated=True, deadline=60),
-        ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))),
-    )
-
-    shell_env._write_sudoers_env_keep(guest.files, guest.log)
-
-    cleanup, rejection = guest.log.warned
-    assert staging in cleanup
-    assert "syntax error" in rejection
 
 
 # -- /etc/skel seeds ----------------------------------------------------------------------

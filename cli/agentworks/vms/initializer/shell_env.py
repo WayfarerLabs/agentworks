@@ -1,14 +1,14 @@
-"""Profile / rc / identity / sudoers / skel fragment writers, and the retired fragments' removal.
+"""Profile / rc / identity / skel fragment writers, and the retired sshd and sudoers fragments' removal.
 
 These write the on-VM shell and system files that make agentworks-managed
-env vars, PATH entries, and identity visible to login shells, interactive
-shells, and sudo. All idempotent (append-if-missing, stage-validate-
-promote, full overwrite), so every function here is safe to re-run on
-``vm reinit``.
+env vars, PATH entries, and identity visible to login shells and
+interactive shells. All idempotent (append-if-missing, full overwrite,
+removal of a path Agentworks owns), so every function here is safe to
+re-run on ``vm reinit``.
 
 Every file is written through the file program: ``Files.write`` for a file
 Agentworks owns whole, ``Files.update`` over what was read for one it edits.
-The system fragments (identity profile, zprofile block, sudoers, skel)
+The system fragments (identity profile, zprofile block, skel)
 are written as root; the per-user profile and rc fragments and the rc files'
 source lines as the account itself, admin or agent. Nothing is written
 through a link: a linked rc file is accepted only when the file it links to
@@ -257,7 +257,7 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
         warn_step(log, "shell configuration failed", error)
 
 
-# -- VM-side identity / sudoers fragments -----------------------------
+# -- VM-side identity fragments, and the retired sshd and sudoers ones --------
 #
 # The on-VM system files agentworks init maintains:
 #
@@ -269,23 +269,27 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
 #     the one opening the shell. Also writes to /etc/zsh/zprofile because
 #     zsh skips /etc/profile.d by default.
 #
-#   /etc/sudoers.d/50-agentworks-env-keep
-#     `Defaults env_keep += "AGENTWORKS_* AW_*"`. Keeps agentworks-managed
-#     vars across a sudo boundary. Validated with `visudo -cf` on a staging
-#     path before install.
-#
-# Init also removes two files earlier releases installed and nothing uses
-# now: /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf (`AcceptEnv *`)
+# Init also removes three files earlier releases installed to carry
+# environment through sshd or across sudo, which nothing does now (ADR 0026):
+# /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf (`AcceptEnv *`),
+# /etc/sudoers.d/50-agentworks-env-keep (`env_keep += "AGENTWORKS_* AW_*"`)
 # and /etc/sudoers.d/51-agentworks-console-setenv (`Defaults:<admin> setenv`).
 
 AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
 AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"
-AGENTWORKS_SSHD_ACCEPT_ENV_PATH = "/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
-AGENTWORKS_SUDOERS_ENV_KEEP_PATH = "/etc/sudoers.d/50-agentworks-env-keep"
+RETIRED_SSHD_ACCEPT_ENV_PATH = "/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
+RETIRED_SUDOERS_FRAGMENTS = (
+    "/etc/sudoers.d/50-agentworks-env-keep",
+    "/etc/sudoers.d/51-agentworks-console-setenv",
+    "/etc/sudoers.d/50-agentworks-env-keep.tmp",
+    "/etc/sudoers.d/51-agentworks-console-setenv.tmp",
+)
+"""The sudoers fragments earlier releases installed, and the staging names their installer used.
 
-# The env_keep allowlist, as sudoers glob patterns.
-AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS = ("AGENTWORKS_*", "AW_*")
-AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH = "/etc/sudoers.d/51-agentworks-console-setenv"
+Initialization removes them all. sudo skips a name with a ``.`` in it, so a
+staging file an interrupted install left was never read, but it is ours to
+clear.
+"""
 
 # Marker comment used to find and replace the identity block in
 # /etc/zsh/zprofile across reinit cycles.
@@ -424,8 +428,9 @@ def _remove_sshd_accept_env(files: Files, log: InitLog) -> None:
     """Remove the retired ``AcceptEnv *`` fragment from sshd_config.d/ and reload sshd when it was there.
 
     Earlier releases installed it so ``ssh -o SetEnv=...`` could carry
-    environment into a guest shell (ADR 0014). Every request now carries its
-    environment in the request itself, so sshd has no environment to accept.
+    environment into a guest shell. Every request now carries its
+    environment in the request itself (ADR 0026), so sshd has no environment
+    to accept.
     Agentworks owns the path outright: on create there is nothing to remove,
     and on reinit the fragment goes and sshd reloads (``systemctl reload``
     validates the merged config first), so the running sshd stops accepting
@@ -435,7 +440,7 @@ def _remove_sshd_accept_env(files: Files, log: InitLog) -> None:
     next reloads or restarts.
     """
     log.step("sshd AcceptEnv removal")
-    path = AGENTWORKS_SSHD_ACCEPT_ENV_PATH
+    path = RETIRED_SSHD_ACCEPT_ENV_PATH
     try:
         if isinstance(files.stat(path, elevated=True), Absent):
             return
@@ -455,82 +460,26 @@ def _remove_sshd_accept_env(files: Files, log: InitLog) -> None:
         )
 
 
-def _install_sudoers_fragment(files: Files, log: InitLog, *, path: str, body: str) -> None:
-    """Install one sudoers.d/ fragment via stage -> validate -> promote.
+def _remove_retired_sudoers_fragments(files: Files, log: InitLog) -> None:
+    """Remove ``RETIRED_SUDOERS_FRAGMENTS`` from sudoers.d/ in one elevated ``rm -f``.
 
-    A broken sudoers fragment can lock the operator out of sudo entirely,
-    so the ``visudo -cf`` validate step is load-bearing: the body is
-    written root-owned 0440 to a ``.tmp`` staging path, validated, and only
-    then moved onto the real path with ``mv -T``, so a directory at the real
-    path never receives the fragment inside it. A rejection raises
-    ``CommandFailed``; callers decide whether that is fatal.
-
-    sudo's /etc/sudoers.d/ loader skips files whose names contain a
-    literal '.', so the ``.tmp`` staging file is ignored even if cleanup
-    races mid-init. Every path tries to remove it; a removal that fails is
-    warned about on its own and leaves a file sudo ignores.
+    Earlier releases installed them to carry environment across sudo: the
+    ``env_keep`` allowlist for ``AGENTWORKS_*`` and ``AW_*``, and the admin's
+    ``setenv`` grant for a console agent pane's ``--preserve-env``. Every
+    request now carries its environment itself, and a pane switches user
+    with a plain ``sudo -n -u`` (ADR 0026), so neither has a user.
+    Agentworks owns these paths outright, so the removal is right on create
+    (nothing there) and on reinit (any release's fragments); sudo reads
+    sudoers.d/ on every invocation, so it takes effect at once. Like the sshd
+    removal it prints nothing: on most runs there is nothing to remove.
     """
-    staging = path + ".tmp"
-    try:
-        files.write(staging, body.encode(), mode=0o440, parent_mode=0o755, elevated=True)
-        files.access.run(Command(("visudo", "-cf", staging), elevated=True, deadline=files.deadline), check=True)
-        files.access.run(
-            Command(("mv", "-fT", "--", staging, path), elevated=True, deadline=files.deadline), check=True
-        )
-    finally:
-        # On the success path the mv already moved the file, so this is a
-        # no-op; on a failure it keeps .tmp files from accumulating. Its
-        # status is not read, and a request that fails is warned about here,
-        # so it never replaces the failure that brought us here.
-        try:
-            files.access.run(Command(("rm", "-f", "--", staging), elevated=True, deadline=files.deadline))
-        except STEP_FAILURES as error:
-            warn_step(log, f"removing the sudoers staging file {staging} failed", error)
-
-
-def _write_sudoers_env_keep(files: Files, log: InitLog) -> None:
-    """Deploy ``env_keep += "AGENTWORKS_* AW_*"`` to sudoers.d/.
-
-    Keeps agentworks-managed vars (``AGENTWORKS_*`` / ``AW_*``) across a
-    sudo boundary, as ADR 0014 decided for the user switch into an agent's
-    shell. No Agentworks path relies on it to carry environment: a console's
-    agent pane takes its environment from its parked request.
-    """
-    log.step("sudoers env_keep")
-    output.info(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
-
-    body = (
-        "# Managed by agentworks -- do not edit.\n"
-        "# Preserves agentworks-managed env vars across sudo; see\n"
-        "# docs/adrs/0014-sshd-accept-env-wildcard.md.\n"
-        f'Defaults env_keep += "{" ".join(AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS)}"\n'
-    )
-    try:
-        _install_sudoers_fragment(files, log, path=AGENTWORKS_SUDOERS_ENV_KEEP_PATH, body=body)
-    except STEP_FAILURES as error:
-        warn_step(log, "sudoers env_keep install failed; re-run 'agw vm reinit' to retry", error)
-
-
-def _remove_sudoers_console_setenv(files: Files, log: InitLog) -> None:
-    """Remove the retired ``Defaults:<admin> setenv`` fragment from sudoers.d/.
-
-    Earlier releases installed it so a console's agent pane could carry its
-    environment across ``sudo --preserve-env``. A pane now takes its
-    environment from its parked request (``agentworks.execution.attach``),
-    so nothing crosses sudo and the grant has no user. Agentworks owns the
-    path outright, so one ``rm -f`` is right on create (nothing there) and on
-    reinit (any release's fragment); sudo reads sudoers.d/ on every
-    invocation, so the removal takes effect at once.
-    """
-    log.step("sudoers console setenv removal")
-    output.info(f"Removing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
+    log.step("Retired sudoers fragments")
     try:
         files.access.run(
-            Command(("rm", "-f", "--", AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH), elevated=True, deadline=files.deadline),
-            check=True,
+            Command(("rm", "-f", "--", *RETIRED_SUDOERS_FRAGMENTS), elevated=True, deadline=files.deadline), check=True
         )
     except STEP_FAILURES as error:
-        warn_step(log, "removing the retired sudoers console setenv fragment failed; re-run 'agw vm reinit'", error)
+        warn_step(log, "removing the retired sudoers fragments failed; re-run 'agw vm reinit'", error)
 
 
 def _write_agentworks_rc(files: Files, shell_snippets: list[str], log: InitLog, *, home: str, shell: str) -> None:

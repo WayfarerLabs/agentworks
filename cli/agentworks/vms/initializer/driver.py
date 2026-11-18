@@ -54,14 +54,13 @@ from .packages import (
 from .shell_env import (
     _ensure_agentworks_files_sourced,
     _harden_admin_home,
+    _remove_retired_sudoers_fragments,
     _remove_sshd_accept_env,
-    _remove_sudoers_console_setenv,
     _set_login_shell,
     _write_agentworks_identity_profile,
     _write_agentworks_profile,
     _write_agentworks_rc,
     _write_skel_seeds,
-    _write_sudoers_env_keep,
 )
 from .ssh_keys import (
     AuthorizedKeysApplied,
@@ -440,13 +439,10 @@ def _phase_b_setup(
         # tailscaled (would disconnect us); takes effect on next cold boot.
         apply_tailscaled_dns_fix(files, logger)
 
-        # Non-fatal: the sudoers env_keep fragment, and the removal of the
-        # sshd and sudoers fragments earlier releases installed for
-        # environment that now travels in each request. None of these files
-        # is a package conffile, so dpkg conffile handling doesn't apply.
+        # Non-fatal: remove the sshd and sudoers fragments earlier releases
+        # installed to carry environment that now travels in each request.
         _remove_sshd_accept_env(files, logger)
-        _write_sudoers_env_keep(files, logger)
-        _remove_sudoers_console_setenv(files, logger)
+        _remove_retired_sudoers_fragments(files, logger)
         vm_row = db.get_vm(vm_name)
         # Init runs against a VM that exists in the DB (bootstrap_vm fetches the
         # row up front). A None here is an internal invariant violation, not a

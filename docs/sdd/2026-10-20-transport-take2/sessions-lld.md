@@ -65,9 +65,8 @@ The session, workspace and backup modules also construct `SSHLogger`
 `vms/backup.py:82`). They take it from `vms.manager.operation_log` instead (below, "Operation
 logs"), so none of them imports `agentworks.ssh`; the logger itself and `LOG_DIR` stay slice 8's.
 
-**Out of this slice.** The `env_keep` fragment of ADR 0014 (slice 8's search; the `AcceptEnv`
-fragment's search ran with batch D3, below), the operation log's move to `execution/oplog.py` (slice
-8), and the other legacy modules.
+**Out of this slice.** The operation log's move to `execution/oplog.py` (slice 8), and the other
+legacy modules.
 
 ## Module layout
 
@@ -202,9 +201,8 @@ with access.park(LoginShell(cwd=full_path, env=pane_env)) as handover:
   such an envelope only, `tty` mode takes those five names from its inherited environment, with
   `DEFAULT_TERM` (shared from `agw_launch.py`) when `TERM` is absent, and sets no `SSH_TTY`, since a
   tmux pty is not an SSH terminal. `park` has no `term` parameter: the rule belongs to the
-  operation, not the caller. sudo's `env_reset` keeps `TERM`, and neither Debian's sudoers nor
-  agentworks' `env_keep` fragment keeps the other four, so an agent pane behind `sudo -n -u` has
-  `TERM` alone of them (amendment A1).
+  operation, not the caller. sudo's `env_reset` keeps `TERM`, and Debian's sudoers keeps none of the
+  other four, so an agent pane behind `sudo -n -u` has `TERM` alone of them (amendment A1).
 - **sudo's pty.** sudo 1.9.14 and later, Debian 13's, defaults to `use_pty`, so an agent pane's
   shell runs on sudo's relayed pty, as today's `sudo --login` pane does; vector T2 runs on Debian 13
   to show the shell is interactive there.
@@ -999,13 +997,14 @@ In the order they land, each with its tests:
      (`sessions/multi_console/secrets_env.py:42`), and every `preserve_memo` parameter. Tests:
      `cli/tests/test_consoles_shell_panes.py`, `cli/tests/_tmux_model.py` and
      `cli/tests/test_tmux_model.py` lose their preserve-env cases and model.
-   - (Built in batch D3.) `_write_sudoers_console_setenv` (`vms/initializer/shell_env.py:545-574`)
-     and its call (`driver.py:387-388`) become `_remove_sudoers_console_setenv(files, log)`: one
-     elevated `Command(("rm", "-f", "--", AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH))`. The installer
-     owns that path outright, so removing it whole is right on create (nothing there) and on reinit
-     (any release's fragment). A failure warns as a step does. Test: its writer test
-     (`cli/tests/test_initializer_system_fragments.py:449`) becomes a recording test of that one
-     request.
+   - (Built in batch D3.) `_write_sudoers_console_setenv` and, once no path needed `AGENTWORKS_*` or
+     `AW_*` across sudo, `_write_sudoers_env_keep`, became one step,
+     `_remove_retired_sudoers_fragments(files, log)` (`vms/initializer/shell_env.py`): one elevated
+     `rm -f` over `RETIRED_SUDOERS_FRAGMENTS`, the two fragments and the `.tmp` staging names the
+     deleted installer used. The installer owned those paths outright, so removing them whole is
+     right on create (nothing there) and on reinit (any release's fragments). A failure warns as a
+     step does. Test: a recording test of that one request (`test_initializer_system_fragments.py`);
+     the installer's staging tests went with `_install_sudoers_fragment`. See Delivery, D3.
    - (Batch D2: `cli/tests/sessions/test_console_pane_handover.py`.) A recording test of console
      build, add-shell and both restore paths asserts that no `tmux` argv or script line holds any
      `pane_env` value, that no admin `run` carries `env`, and that each shell pane parked one
@@ -1213,7 +1212,7 @@ removes the `setenv` grant; the probe and memo are gone; and its first Negative,
 which cites 0017's refinement and says `SetEnv` remains for paths not yet migrated, is amended in
 the same batch: 0017 is superseded and no request sends environment by `SetEnv`; whether the sshd
 fragment keeps a user stays slice 8's search. (Built: that search ran with D3, found none, and
-superseded ADR 0014 but for `env_keep`; Delivery, D3.)
+superseded ADR 0014, whose `env_keep` fragment went the same way; Delivery, D3.)
 
 ## Collateral
 
@@ -1239,19 +1238,19 @@ footer. Nothing here touches the command reference's JSON issue-code contract, w
 
 ## Live evidence
 
-| Check                                                                                                                                                      | Cells                                           | Rows                 |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | -------------------- |
-| Session create, attach, detach, stop, start and delete, admin and agent, with a secret holding a newline in the session environment                        | Remote Lima from Linux, macOS and Windows; WSL2 | I21, I85, decision 3 |
-| Console create, attach, detach, restore-session for a missing pane and a killed attach pane, add-shell for an agent, with agent-scope secrets in that pane | Remote Lima from all three; WSL2                | I6a, I6, I19         |
-| An agent pane's shell is interactive and has `TERM` (vector T2)                                                                                            | a Debian 13 VM                                  | decision 4           |
-| Kill a console attach's `ssh`, then re-attach                                                                                                              | Remote Lima from one workstation                | I6a                  |
-| `session list` with one VM stopped returns within the bound                                                                                                | one cell                                        | I88                  |
-| Backup with a forced disconnect during the archive and during the download                                                                                 | WSL2 (with idle shutdown) and Remote Lima       | I8, I81, I25         |
-| Backup interrupted during the archive and during the download                                                                                              | WSL2 and Remote Lima                            | I82, I20             |
-| Workspace create with a clone, copy between two VMs, rehome and repair                                                                                     | one cell                                        | I67, I87             |
-| `vm reinit` on a VM that has the setenv fragment removes it                                                                                                | one cell                                        | deletion 6           |
-| `vm reinit` on a VM that has the `AcceptEnv *` fragment removes it, and an ssh `SetEnv` of an unlisted name then no longer reaches a shell                 | one cell                                        | D3                   |
-| `vm reinit` on a VM from an earlier release removes `tmux-agent-access` and resets the socket modes; agent sessions then create, attach and log as before  | one cell                                        | D4                   |
+| Check                                                                                                                                                                                                                                | Cells                                           | Rows                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- | -------------------- |
+| Session create, attach, detach, stop, start and delete, admin and agent, with a secret holding a newline in the session environment                                                                                                  | Remote Lima from Linux, macOS and Windows; WSL2 | I21, I85, decision 3 |
+| Console create, attach, detach, restore-session for a missing pane and a killed attach pane, add-shell for an agent, with agent-scope secrets in that pane                                                                           | Remote Lima from all three; WSL2                | I6a, I6, I19         |
+| An agent pane's shell is interactive and has `TERM` (vector T2)                                                                                                                                                                      | a Debian 13 VM                                  | decision 4           |
+| Kill a console attach's `ssh`, then re-attach                                                                                                                                                                                        | Remote Lima from one workstation                | I6a                  |
+| `session list` with one VM stopped returns within the bound                                                                                                                                                                          | one cell                                        | I88                  |
+| Backup with a forced disconnect during the archive and during the download                                                                                                                                                           | WSL2 (with idle shutdown) and Remote Lima       | I8, I81, I25         |
+| Backup interrupted during the archive and during the download                                                                                                                                                                        | WSL2 and Remote Lima                            | I82, I20             |
+| Workspace create with a clone, copy between two VMs, rehome and repair                                                                                                                                                               | one cell                                        | I67, I87             |
+| `vm reinit` on a VM that has the setenv and `env_keep` fragments removes both; then record what `env FOO=1 sudo -n --preserve-env=FOO -u <agent> printenv FOO` does, and that `sudo -n -u <agent> env FOO=1 printenv FOO` prints `1` | one cell                                        | deletion 6           |
+| `vm reinit` on a VM that has the `AcceptEnv *` fragment removes it, and an ssh `SetEnv` of an unlisted name then no longer reaches a shell                                                                                           | one cell                                        | D3                   |
+| `vm reinit` on a VM from an earlier release removes `tmux-agent-access` and resets the socket modes; agent sessions then create, attach and log as before                                                                            | one cell                                        | D4                   |
 
 I57, I80, I83, I84, I86 and I89 depend on failures or races a live run cannot provoke safely, so
 they have tests and no live cell.
@@ -1283,7 +1282,9 @@ collateral it makes stale.
   amended. Built, with slice 8's `AcceptEnv` search brought forward: no request sends environment by
   `SetEnv` (the only `SetEnv` builder left is `agentworks.ssh`'s, whose transports no command
   reaches), so init removes the `AcceptEnv *` fragment too, reloading sshd only when it was there,
-  and ADR 0014 is superseded except for its `env_keep` decision.
+  and, with no Agentworks path needing `AGENTWORKS_*` or `AW_*` across sudo (the launcher builds
+  each payload's environment itself), the `env_keep` fragment as well, in one `rm -f` with the
+  setenv grant (`_remove_retired_sudoers_fragments`). ADR 0014 is superseded whole.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
   migration. Built (Sessions: the manager).
 - **D3 and D4 share one reinit pass** (decision 9): each guest-state retirement is an idempotent
@@ -1330,10 +1331,11 @@ The lead accepted each on 2026-11-12, and the operator ruled on the pane secrets
    lock (complexity review). Passing backup's paths as arguments puts every option before `--` and
    the members after it, which also settles the review's argument-order finding, and leaves no
    truncated-stdin case and no stdin file on the guest to retain.
-9. **One reinit pass for batch D's guest state** (lead, 2026-11-18). The sudoers setenv grant's
-   removal (D3) and the retirement of the admin's group access to agent tmux servers (D4) are each
-   an idempotent initialization step, on create a no-op and on reinit a migration, so a single
-   `agw vm reinit` converges an existing VM.
+9. **One reinit pass for batch D's guest state** (lead, 2026-11-18). The removal of the sshd
+   `AcceptEnv` fragment and the sudoers `env_keep` and setenv fragments (D3) and the retirement of
+   the admin's group access to agent tmux servers (D4) are each an idempotent initialization step,
+   on create a no-op and on reinit a migration, so a single `agw vm reinit` converges an existing
+   VM.
 
 Not taken: streaming tar straight to the workstation instead of detaching it. R6, survival across a
 disconnect, is the operator's requirement.

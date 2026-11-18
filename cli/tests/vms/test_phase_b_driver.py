@@ -39,8 +39,8 @@ from agentworks.vms.hardening import HARDENING_FSTAB_NEW_LINE, HARDENING_FSTAB_P
 from agentworks.vms.initializer import driver
 from agentworks.vms.initializer.packages import apt_install, install_run
 from agentworks.vms.initializer.shell_env import (
-    AGENTWORKS_SSHD_ACCEPT_ENV_PATH,
     AGENTWORKS_ZPROFILE_PATH,
+    RETIRED_SSHD_ACCEPT_ENV_PATH,
     SKEL_BASHRC_PATH,
     SKEL_ZSHRC_PATH,
 )
@@ -107,7 +107,7 @@ class Guest(StepGuest):
             return Result(Completed(0), f"{HARDENING_FSTAB_NEW_LINE}\n".encode())
         if call.request == ADMIN_GROUP:
             return Result(Completed(0), b"agentworks\n")
-        if _file_operation(call.request) == ("stat", AGENTWORKS_SSHD_ACCEPT_ENV_PATH):
+        if _file_operation(call.request) == ("stat", RETIRED_SSHD_ACCEPT_ENV_PATH):
             return ABSENT
         return None
 

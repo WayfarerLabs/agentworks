@@ -149,12 +149,20 @@ state. Until then they stay in place, unused:
 - **The console setenv sudoers grant**, `/etc/sudoers.d/51-agentworks-console-setenv`
   (`Defaults:<admin> setenv`), which carried an agent console shell's environment across `sudo` (see
   [Named consoles](#named-consoles)).
+- **The sudoers `env_keep` fragment**, `/etc/sudoers.d/50-agentworks-env-keep`
+  (`Defaults env_keep += "AGENTWORKS_* AW_*"`), which kept those variables across a `sudo` for an
+  agent console shell. Each shell now gets its environment from its request instead. Once it is
+  removed, your own `sudo` no longer keeps `AGENTWORKS_*` or `AW_*` variables: a command you run
+  with `sudo` sees only what `sudo`'s default policy keeps. Pass the values it needs as part of the
+  command, as in `sudo -u USER env AGENTWORKS_WORKSPACE="$AGENTWORKS_WORKSPACE" command`, which no
+  sudoers policy refuses (`sudo --preserve-env=NAME` may be refused for a name outside sudo's own
+  list). A login shell (`sudo -i`) still gets the VM's identity variables from `/etc/profile.d`.
 - **sshd's environment wildcard**, `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`
   (`AcceptEnv *`), which let an SSH client set any environment variable in a guest shell. Every
   request now carries its environment in the request, so nothing Agentworks runs sends environment
   through ssh. Reinit reloads sshd after removing it, and from then on sshd accepts only the
-  variables the rest of its configuration names (Debian's accepts the locale variables), so an
-  `ssh -o SetEnv=...` or `SendEnv` of your own outside those stops reaching the VM.
+  variables its stock configuration lists, such as the locale ones, so an `ssh -o SetEnv=...` or
+  `SendEnv` of your own outside those stops reaching the VM.
 - **The admin's group access to agent tmux servers.** Earlier releases put the VM admin in the
   `tmux-agent-access` group and shared each agent's tmux socket directory and sockets with it, so
   the admin could connect to an agent's tmux server without switching accounts. Nothing uses that
@@ -576,11 +584,11 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
 
 - **System files are written without following links.** The files initialization owns under `/etc`
   (the cloud-init host-key drop-in, the sysctl baseline, `/etc/fstab`'s `/proc` line, the tailscaled
-  drop-in, the sudoers fragment, the identity profile, the `/etc/zsh/zprofile` block, the skel
-  seeds, the grub SVE drop-in and the apt source lists) are written by the file program, which
-  refuses a symbolic link at the file or any parent; a sudoers fragment is staged that way and
-  renamed into place once `visudo` accepts it. A refused file is a step warning, and the link's
-  target is left as it is.
+  drop-in, the identity profile, the `/etc/zsh/zprofile` block, the skel seeds, the grub SVE drop-in
+  and the apt source lists) are written by the file program, which refuses a symbolic link at the
+  file or any parent. A refused file is a step warning, and the link's target is left as it is.
+  Initialization no longer writes a sudoers fragment
+  ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)).
 - **sshd is reloaded only when its fragment goes.** Initialization no longer writes an sshd fragment
   ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)); it reloads sshd only
   when it removes the old one, where every initialization used to reload sshd.
