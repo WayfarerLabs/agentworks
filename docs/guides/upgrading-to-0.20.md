@@ -154,9 +154,10 @@ state. Until then they stay in place, unused:
   agent console shell. Each shell now gets its environment from its request instead. Once it is
   removed, your own `sudo` no longer keeps `AGENTWORKS_*` or `AW_*` variables: a command you run
   with `sudo` sees only what `sudo`'s default policy keeps. Pass the values it needs as part of the
-  command, as in `sudo -u USER env AGENTWORKS_WORKSPACE="$AGENTWORKS_WORKSPACE" command`, which no
-  sudoers policy refuses (`sudo --preserve-env=NAME` may be refused for a name outside sudo's own
-  list). A login shell (`sudo -i`) still gets the VM's identity variables from `/etc/profile.d`.
+  command, as in `sudo -u USER env AGENTWORKS_WORKSPACE="$AGENTWORKS_WORKSPACE" command`, which
+  needs no sudoers environment grant (`sudo --preserve-env=NAME` may be refused for a name outside
+  sudo's own list). A login shell (`sudo -i`) still gets the VM's identity variables from
+  `/etc/profile.d`.
 - **sshd's environment wildcard**, `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`
   (`AcceptEnv *`), which let an SSH client set any environment variable in a guest shell. Every
   request now carries its environment in the request, so nothing Agentworks runs sends environment
@@ -175,8 +176,8 @@ state. Until then they stay in place, unused:
   warning. An agent session started before the reset keeps running, but from the moment an agent's
   directory is reset, any account but the agent and root is refused a new connection to its servers.
   That includes a console window not yet rebuilt and a tmuxinator config an earlier release
-  generated, which connect as the admin: rebuild the console and keep from starting the old config,
-  as the bullets on
+  generated, which connect as the admin: rebuild the console and do not start the old config, as the
+  bullets on
   [existing console windows and tmuxinator configs](#agent-session-tmux-clients-run-as-the-agent)
   say. A tool of your own that connects to an agent's tmux server as the admin must switch to the
   agent first, as Agentworks does.

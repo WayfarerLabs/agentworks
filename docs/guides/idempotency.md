@@ -88,7 +88,7 @@ links as before. The same holds for agent reinit.
 | Tailscale DNS             | Startup-ordering drop-in rewritten, and systemd reloaded, only when content differs; a failed reload puts the prior drop-in back                                                                                                                 |
 | sshd AcceptEnv            | Removed: the drop-in earlier releases installed is deleted and sshd reloaded; a no-op, with no reload, when it is absent                                                                                                                         |
 | Retired sudoers fragments | Removed: one `rm -f` of the `env_keep` and console `setenv` fragments earlier releases installed, a no-op when they are absent                                                                                                                   |
-| Agent tmux sockets        | The socket root reset to `root:root` `0711` and each agent's directory to the agent's own `0700` when either differs; stale sockets removed; the retired `tmux-agent-access` group deleted                                                       |
+| Agent tmux sockets        | The socket root reset to `root:root` `0711` and each agent's directory to the agent's own `0700` when either differs; stale sockets removed; the retired `tmux-agent-access` group deleted once every directory is reset                         |
 
 ### Additive only
 
