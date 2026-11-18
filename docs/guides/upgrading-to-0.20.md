@@ -564,8 +564,8 @@ steps of runtime reconciliation, reach the VM through the new layer, so they nee
 - **Create** installs `python3` while it provisions the VM, then connects over SSH at the VM's
   tailnet address. The first connection records the host key, and the VM contract's base checks
   follow: the Debian release first, then systemd, passwordless `sudo` for the admin, and the tools
-  Agentworks runs (`install`, `flock`, `nohup`, `setsid`, `tar`). Provisioning is complete only once
-  they pass. A VM that fails them is kept in a failed state, and one whose create is interrupted or
+  Agentworks runs (`install`, `flock`, `setsid`, `tar`). Provisioning is complete only once they
+  pass. A VM that fails them is kept in a failed state, and one whose create is interrupted or
   killed before then is kept with its provisioning incomplete. `vm start`, `vm stop`, `vm rekey`,
   `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
   `vm backup` and `vm confirm-release` refuse either, while `vm describe`, `vm list` and

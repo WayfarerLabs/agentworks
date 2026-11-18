@@ -806,9 +806,9 @@ removal.
 Agentworks then reaches the VM over SSH at that address. Its first connection records the VM's host
 key, and the VM contract's base checks follow on verified connections: the Debian release first,
 then systemd, passwordless `sudo` for the admin, and the base tools Agentworks runs (`install`,
-`flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
-this fails, the VM is kept in a failed state; if create is interrupted first (Ctrl-C, on macOS and
-Linux `SIGTERM` or `SIGHUP`, or on Windows Ctrl-Break), it is kept with its provisioning incomplete.
+`flock`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of this
+fails, the VM is kept in a failed state; if create is interrupted first (Ctrl-C, on macOS and Linux
+`SIGTERM` or `SIGHUP`, or on Windows Ctrl-Break), it is kept with its provisioning incomplete.
 Either way its temporary provisioning access is closed, and `vm start`, `vm stop`, `vm rekey`,
 `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
 `vm backup` and `vm confirm-release` refuse it, as they do a VM a killed create left in progress;

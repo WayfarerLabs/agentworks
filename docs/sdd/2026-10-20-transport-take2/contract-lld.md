@@ -427,7 +427,7 @@ then the elevated request (`RequestCheck`).
 | Row            | Severity | How it is checked                                                                                  |
 | -------------- | -------- | -------------------------------------------------------------------------------------------------- |
 | `systemd`      | FAIL     | Script: `[ -d /run/systemd/system ]`, the test `sd_booted()` uses                                  |
-| `base-tools`   | FAIL     | Script: `command -v` of `install`, `flock`, `nohup`, `setsid` and `tar`                            |
+| `base-tools`   | FAIL     | Script: `command -v` of `install`, `flock`, `setsid` and `tar`                                     |
 | `login-shells` | WARN     | Script: for the admin and each agent, the passwd shell's basename is `sh`, `dash`, `bash` or `zsh` |
 | `pam-env`      | WARN     | Script: the existing probe over `/etc/environment`, `pam_env.conf` and `~/.pam_environment`        |
 | `sudo`         | FAIL     | Own request: `Command(("id", "-u"), elevated=True)`, stdout `0`                                    |
@@ -436,7 +436,12 @@ Every FAIL row means the VM cannot be repaired by initialization, so a failure n
 (`agw vm delete NAME`, then create again) and the table carries no remedy field. The warnings carry
 their own commands. The `base-tools` list is what the transport and slices 5 to 7 call: `install`
 (`vms/hardening.py:182`), `tar` (`vms/backup.py:342`), `setsid` and `nohup` (the detached wrapper,
-HLA D7) and `flock` (the file lock, HLA D6).
+HLA D7) and `flock` (the file lock, HLA D6). As built in slice 7 (paths at the PR C head), `nohup`
+left the list with the detached wrapper, `remote_exec.py`, since nothing on the guest runs it; the
+list is `install` (initialization, `vms/initializer/packages.py:143`), `tar` (backup and workspace
+copy, `vms/backup.py:307`, `workspaces/manager/copy.py:130`), `setsid` (the WSL2 root channel,
+`capabilities/vm_platform/wsl2.py:79`) and `flock` (git credentials,
+`git_credentials/reconcile.py:31`).
 
 Not rows, and why:
 

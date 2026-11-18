@@ -89,14 +89,14 @@ SYSTEMD = ScriptCheck(
     "systemd", Severity.FAIL, '[ -d /run/systemd/system ] || problem systemd "the system was not booted with systemd"'
 )
 
-# What the transport and its callers run: install (hardening), tar (backup),
-# setsid and nohup (the detached wrapper) and flock (the file lock).
+# What Agentworks runs on the guest: install (initialization), tar (backup and
+# workspace copy), setsid (the WSL2 root channel) and flock (git credentials).
 BASE_TOOLS = ScriptCheck(
     "base-tools",
     Severity.FAIL,
     """\
 agw_missing=
-for agw_tool in install flock nohup setsid tar; do
+for agw_tool in install flock setsid tar; do
   command -v "$agw_tool" >/dev/null 2>&1 || agw_missing="$agw_missing $agw_tool"
 done
 [ -z "$agw_missing" ] || problem base-tools "${agw_missing# }"
