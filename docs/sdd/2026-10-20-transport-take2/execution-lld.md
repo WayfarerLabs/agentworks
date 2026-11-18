@@ -62,7 +62,7 @@ them:
 | `agentworks/execution/trust.py` (slice 4)        | Gains `fingerprint(key)`, OpenSSH's `SHA256:` form                                                                |
 | `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                       |
 | `agentworks/vms/manager/platform_shell.py`       | Held `vm shell --platform`'s legacy part until slice 4 deleted it for `native_shell`                              |
-| `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                         |
+| `tests/execution/conftest.py`                    | The legacy-module blocker (deleted in slice 8)                                                                    |
 | `tests/execution/conformance/`                   | The vectors and their lanes                                                                                       |
 | `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
 
@@ -117,7 +117,7 @@ bare name; the legacy transports find `ssh` and `scp` along `PATH` through
 - **Doctor.** `_check_required_tools` (`doctor.py:526`) keeps its PATH presence rows for `ssh`,
   `scp` and `tailscale`, because the legacy paths still find `ssh` and `scp` along `PATH`, and adds
   a row with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the
-  `ssh` and `scp` rows with the last legacy user.
+  `ssh` and `scp` rows with the last legacy user (slice 8 did; "Slice 8: removal" below).
 
 Every other workstation program `agw` starts by name goes through `programs.resolve_program(name)`,
 the same walk over absolute `PATH` elements (`name.exe` on Windows), which raises
@@ -831,12 +831,13 @@ are under `cli/agentworks/` unless they start with `cli/` or `docs/`.
 ### Incident audit
 
 The audit read the fix history of both modules (`git log` on `transports/` and `ssh.py`, 78 and 109
-commits), the bodies of the incident-bearing commits it cites, the issues they link (#117, #199,
-#211, #251, #270, #330, #331, #360, #361, #669, #684, #736, #889, #893, and Win32-OpenSSH #1338),
-ADRs 0014, 0015, 0017 and 0020, whose decisions these modules carried (0003 and 0019 name the
-transports only in passing), and the transport-improv migration strategy's inventory. At `4b4818fb7`
-no production module imports `agentworks.transports`, and only the operation log and its readers
-import `agentworks.ssh`, so nothing the audit found still runs on the legacy path except the log.
+commits), the bodies of the incident-bearing commits it cites, the issues they link (this
+repository's issues 117, 199, 211, 251, 270, 330, 331, 360, 361, 669, 684, 736, 889 and 893, and
+Win32-OpenSSH's 1338), ADRs 0014, 0015, 0017 and 0020, whose decisions these modules carried (0003
+and 0019 name the transports only in passing), and the transport-improv migration strategy's
+inventory. At `4b4818fb7` no production module imports `agentworks.transports`, and only the
+operation log and its readers import `agentworks.ssh`, so nothing the audit found still runs on the
+legacy path except the log.
 
 **Existing rows that rode on these modules.** Each was re-proved on the execution core in the slice
 its row names, and the legacy copy goes with the module: I1 (ADR 0020, #361), I2, I4 (#684), I5, I12
@@ -928,6 +929,56 @@ the error names the log that holds the reason. Tests: the join's record against 
 registered no secret (`test_tailscale_join.py`), create's error naming its log
 (`test_create_vm_dispatch.py`), each platform's create recording its root scripts, and the
 bootstrap's record (`test_run_bootstrap.py`).
+
+### Deletions
+
+- **The modules.** `agentworks.transports` (`__init__.py`, `base.py`, `ssh.py`) and
+  `agentworks.ssh`, with their tests: `cli/tests/transports/`, `cli/tests/test_ssh_input.py` and
+  `cli/tests/test_ssh_missing_client.py`, whose live counterparts are the execution core's own (I1,
+  I2, I4, I5, I14, I93). `subprocess_io.py` stays: Lima's host channel (`lima_host.py:296`) still
+  writes stdin through it.
+- **The suite's doubles.** `tests/native_setup_fixtures.LocalFixtureTransport` subclassed the legacy
+  `Transport` only for methods no test still called. It is `LocalFixtureAccount`, an account on this
+  machine that answers an access's requests, with `shell()` for the few tests that set the fixture
+  up by running git or a native CLI; its pytest fixtures are named `account`. Session tests build
+  `sessions.tmux.CommandOutcome`, which `RunCommand` really returns, instead of `SSHResult`, and
+  tests that raised `SSHError` as a generic connection failure raise `ConnectivityError`, its base.
+  The decoy rows for the legacy `ssh` and `scp` argvs (`cli/tests/test_programs.py`) and the check
+  that `SSHError` is an `AgentworksError` go with the types.
+- **Dead test patches.** Every patch of `agentworks.ssh.LOG_DIR` and `agentworks.ssh.SSHLogger`
+  moved to `oplog` with the log, and no other patch names a deleted module: the suite passes with
+  both gone, and none of its `raising=False` patches names a missing attribute.
+- **`cli/_entry.py`.** There was no `SSHError` branch to delete: `ConnectivityError` and
+  `ExternalError` share one handler that prefixes the type's name, and `SSHError` appeared only as
+  that comment's example. The comment names `ExecutionIncomplete` instead; the rendering is
+  unchanged.
+- **Doctor.** `_check_required_tools` keeps `tailscale`'s `PATH` row and the resolver's verdict; the
+  `ssh` and `scp` presence rows go, since nothing starts either from `PATH` any more.
+- **The independence guards.** The fresh-interpreter guard
+  (`cli/tests/execution/test_independence.py`), the conftest blocker
+  (`cli/tests/execution/conftest.py`), the static check
+  (`cli/tests/test_execution_import_boundary.py`) and the module list they shared
+  (`cli/tests/execution/legacy_modules.py`) can no longer fail: the modules they guard against do
+  not exist, so an import of one fails everywhere (HLA D14).
+
+### Search: no other ssh or scp command line
+
+R10's end state, no core code building its own `ssh` or `scp` command line outside the execution
+core and the platforms' private access, was confirmed at the end of this slice by:
+
+- `git grep -nE "[\"'](ssh|scp|ssh\.exe|scp\.exe)[\"']|\bscp\b|resolve_program\([\"']s|find_program\([\"']s|client\.path"`
+  over `cli/agentworks` outside `execution/`: the hits are a `mode: "ssh"` placement value and
+  Remote Lima's `is_installed("ssh")` readiness check (`capabilities/vm_platform/lima.py`), doctor's
+  resolver row printing the client's path, prose (`errors.py`, `sources.py`'s scp-style git remotes,
+  `shell_env.py`, an `agents/initializer.py` comment), the `systemctl reload ssh` argv run on the
+  guest, and `vm verify-connection`'s `transport="ssh"` label. None builds a workstation command
+  line.
+- every `subprocess.run`, `Popen` and `call` outside `execution/` (18 call sites): git, `wsl.exe`,
+  PowerShell, the operator's editor, `taskkill`, 1Password's `op`, `tailscale`, `ssh-keygen` and VS
+  Code. None starts `ssh` or `scp`.
+- every caller of `ssh_process.build_argv`, `build_host_argv`, `spawn` and `run_terminal` outside
+  `execution/`: `capabilities/vm_platform/public_ssh.py` (the clouds' route) and `lima_host.py`
+  (Remote Lima's host), both platforms' private access, and WSL2's `wsl.exe` terminal.
 
 ## Amendments
 

@@ -654,14 +654,14 @@ module, and `remote_exec.py` is deleted.
       `ProvisionRequest`, so `join_tailscale`'s `root_script.run` records `tailscale up`'s redacted
       stderr, and have a failed join's error name the log. Deferred from slice 4's port, where it
       would have widened the `BootstrapProgress` protocol every plugin implements.
-- [ ] Delete the remaining legacy modules with their tests (slice 4 deletes
+- [x] Delete the remaining legacy modules with their tests (slice 4 deletes
       `agentworks.plugins.proxmox.transport`, slice 5 `agentworks.harness_setup.runner` and
       `agentworks.native_files`, and slice 7 `agentworks.remote_exec`):
   - `agentworks.transports`
   - `agentworks.ssh`
-- [ ] Delete the `SSHError` special case in `cli/_entry.py`.
-- [ ] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
-- [ ] Delete the independence guards that can no longer fail once the legacy modules are gone: the
+- [x] Delete the `SSHError` special case in `cli/_entry.py`.
+- [x] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
+- [x] Delete the independence guards that can no longer fail once the legacy modules are gone: the
       fresh-interpreter guard, the conftest blocker and the static legacy-import check.
 - [ ] Make the managed SSH entries' store options unconditional, with release notes for operators
       who never imported.
@@ -678,7 +678,7 @@ module, and `remote_exec.py` is deleted.
       and waiting for SSH, none of which the deadline bounds (`public_ssh.py`). Choose one reading
       and make the clouds match, or state in the contract that the wait before dispatch has its own
       bound. Raised by #866's round 8 review.
-- [ ] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
+- [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
   - hold interrupts inside each cloud's `remove_ssh_allow` instead of at its call sites, keeping
