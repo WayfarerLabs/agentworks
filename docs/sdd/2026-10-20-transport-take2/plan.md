@@ -612,7 +612,7 @@ Definition of done: create and reinit run entirely on the new transport.
       admin's membership of `tmux-agent-access`, the group-shared modes of the socket root and each
       agent's socket directory, the socket's `chmod g+rwx` and `_grant_server_access`, with an
       idempotent initialization step that converts an existing VM on reinit.
-- [ ] Move the session callers of `_assert_agent_ssh_works` (`sessions/manager/_create.py`,
+- [x] Move the session callers of `_assert_agent_ssh_works` (`sessions/manager/_create.py`,
       `_create_roll.py`, `_pids.py`) to `_assert_agent_access_works`, and delete the legacy probe.
 - [ ] Move `tests/workspaces/test_lifecycle_orchestrated.py` from substring matches over legacy
       command strings to assertions on the typed requests, as `test_backend_git_identity.py` did in
