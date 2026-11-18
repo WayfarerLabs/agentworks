@@ -21,13 +21,18 @@ class SessionTmuxServer:
     ``owner`` is ``None`` for the VM admin's own server, which the admin's
     access reaches directly. Otherwise it names the agent account that runs
     the server, and every tmux client the admin's access starts against it
-    runs as ``owner``. Production code builds it only through
-    ``resolve_session_tmux_server``, so holding one there means the row
-    passed the whole owner rule.
+    runs as ``owner``, which is always the name of the socket's directory:
+    a server built with any other owner raises ``ValueError``. Production code builds it
+    only through ``resolve_session_tmux_server``, so holding one there means
+    the row passed the whole owner rule.
     """
 
     socket_path: str
     owner: str | None
+
+    def __post_init__(self) -> None:
+        if self.owner is not None and self.owner != PurePosixPath(self.socket_path).parent.name:
+            raise ValueError(f"tmux server owner '{self.owner}' is not the account of socket '{self.socket_path}'")
 
     @property
     def account(self) -> str:

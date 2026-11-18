@@ -515,7 +515,13 @@ def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_
             _session("regular", socket_path=str(regular), mode="agent"),
         ]
         rows = [
-            (session, SessionTmuxServer(str(session.socket_path), None if session.mode == "admin" else "agent"))
+            (
+                session,
+                SessionTmuxServer(
+                    str(session.socket_path),
+                    None if session.mode == "admin" else Path(str(session.socket_path)).parent.name,
+                ),
+            )
             for session in sessions
         ]
         environment = os.environ.copy()
