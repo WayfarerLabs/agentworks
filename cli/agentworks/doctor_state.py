@@ -86,12 +86,18 @@ def append_session_template_deprecation_checks(group: HealthGroup, registry: Reg
         )
 
 
+_STORED_HINT = (
+    "it was recorded when the workspace was created, and no command edits stored settings; "
+    "the release that removes the setting migrates them, so there is nothing to do"
+)
+
+
 def append_workspace_deprecation_checks(group: HealthGroup) -> None:
     """Inspect stored workspace declarations for deprecated settings.
 
     Manifest declarations report through ``ManifestSet.deprecations``; this covers
     the stored final layers instance specs created. No command edits those, so
-    their rows are informational with stored-setting guidance. It reads the
+    their rows are informational and say there is nothing to do. It reads the
     ordinary current database read-only, and an unavailable live view receives
     an explicit coverage row.
     """
@@ -120,8 +126,10 @@ def append_workspace_deprecation_checks(group: HealthGroup) -> None:
                     declaration = None if overlay is None else overlay.declaration
                     if not isinstance(declaration, DeclaredResource):
                         continue
-                    for field, guidance in declaration.deprecated_fields(stored=True).items():
-                        group.info(f"{owner}.{field}", "Retired workspace setting in stored settings", hint=guidance)
+                    for field in declaration.deprecated_fields():
+                        group.info(
+                            f"{owner}.{field}", "Retired workspace setting in stored settings", hint=_STORED_HINT
+                        )
     except (AgentworksError, DatabaseDriverError, OSError, ValueError):
         group.fail(coverage, "Stored workspace declarations not checked; see the Database group")
 

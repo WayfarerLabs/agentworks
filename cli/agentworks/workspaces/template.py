@@ -97,17 +97,10 @@ class WorkspaceTemplate(DeclaredResource):
     """Environment variables exported in this workspace, as a plaintext
     value or a ``{secret: <name>}`` reference per key."""
 
-    def deprecated_fields(self, *, stored: bool = False) -> dict[str, str]:
+    def deprecated_fields(self) -> dict[str, str]:
         """Any explicit ``tmuxinator`` value is a setting with no effect."""
         if self.tmuxinator is None:
             return {}
-        if stored:
-            return {
-                "tmuxinator": (
-                    "it has no effect; it was recorded when the workspace was created, and "
-                    f"{TMUXINATOR_FIELD_REMOVAL} removes it from stored settings, so there is nothing to do"
-                )
-            }
         return {
             "tmuxinator": (
                 "it has no effect, since workspace tmuxinator projects are no longer generated, and it "

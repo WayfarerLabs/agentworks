@@ -241,15 +241,13 @@ class DeclaredResource(EnvelopeMetadata):
         """
         return []
 
-    def deprecated_fields(self, *, stored: bool = False) -> dict[str, str]:
+    def deprecated_fields(self) -> dict[str, str]:
         """The deprecated settings this declaration makes, as field name to
         value-free guidance. Reported as a deprecation wherever an operator
         authors a declaration: a manifest document (``ManifestSet.deprecations``)
-        or an instance spec (``instance_specs.parse_instance_spec``).
-
-        ``stored`` asks for the guidance on a stored final layer instead, which
-        no command can edit, so it must not tell the operator to remove the
-        setting. Base behavior: none.
+        or an instance spec (``instance_specs.parse_instance_spec``). Doctor
+        lists the fields set in stored final layers too, with guidance of its
+        own, since no command edits those. Base behavior: none.
         """
         return {}
 
