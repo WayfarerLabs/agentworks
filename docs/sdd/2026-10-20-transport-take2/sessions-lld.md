@@ -1104,14 +1104,16 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 | Interrupt stops the work                        | In-process: a launch of `("sh", "-c", "sleep 600 & sleep 600")`; `interrupt` leaves no process in its group and the state `EXITED` with 143. Live: backup interrupted on WSL2 and Remote Lima                                                                                                                                                                   |
 | The detached base is never world-writable       | In-process, under the sudo lane: the created `detached` directory is mode 0700                                                                                                                                                                                                                                                                                  |
 
-As built (batch F1), each of the four also runs through the real client: conformance vectors DT1 to
-DT4 (`cli/tests/execution/conformance/detached_vectors.py`) send the real program through the real
-`VMAccess` and agw-launch on lanes L, S and V, elevated, with the base under the worker's temporary
-directory on L and S. DT2 observes, completes and downloads (through `ToFile`) a payload still
-running after its launch's connection closed; `conformance/test_detached_resume.py` stops the S
-lane's sshd while a launch runs, shows the observation is a `reachability.POLLED` outcome while it
-is down, and reads the payload's status and output once it is back. On V the vectors are the
-tester's cell for the base's modes on a real VM.
+As built (batch F1), the in-process and recording tests above carry launch identity and interrupt,
+and `test_detached_program.py` also pins the launch directory and `work/` at 0700, all without sudo.
+Two conformance vectors (`cli/tests/execution/conformance/detached_vectors.py`) send the real
+program through the real `VMAccess` and agw-launch, elevated: DT1, on lanes S and V, observes,
+completes and downloads (through `ToFile`) a payload still running after its launch's connection
+closed; DT2, on V only, shows root owns the VM's base and its parent and neither is group- or
+world-writable, the tester's cell for the base on a real VM. `conformance/test_detached_resume.py`
+stops the S lane's sshd while a launch waits for a file, creates the file meanwhile, and shows the
+observation is a `reachability.POLLED` outcome while sshd is down and reads the finished payload's
+status and output once it is back.
 
 **Unit, every CI host:**
 
@@ -1278,12 +1280,13 @@ Each item lands in the batch that makes it stale:
 | `cli/agentworks/sample-config.toml:193-195`                                                                                                                                                                                                                                                              | Env injection leaves the list of line-oriented consumers                                                                                            | E                         |
 | Docstrings: `sessions/tmux.py:66-70`, `:74-80`, `:651-675`; `sessions/multi_console/tmux_build.py:183-203`; `sessions/multi_console/secrets_env.py:152-160`; `multi_console/attach.py:362-366`; `vms/backup.py:268-285`; `plugins/codex/recorder.py:13-16`, `:50-55`; `harness_integration.py:1002-1009` | Describe the request, the handover and `detached` rather than `SetEnv`, `-e`, `--preserve-env` and `run_detached`                                   | the batch that moves each |
 
-As built (batch F1), an audit of `docs/guides/` against the slice found the upgrade guide, the
-session status and runnable status guides and the idempotency table current. Two stale facts outside
-the table were fixed: the command reference's tmux architecture (every session's server on a socket
-of its own, the admin's included, its environment from the launch request) and its list of
-line-oriented secret consumers, which no longer includes the environment. The upgrade guide's
-introduction gained the two follow-up steps its sections ask for.
+As built (batch F1), an audit of `docs/guides/` against the slice found no stale behavior in the
+upgrade guide, the session status and runnable status guides or the idempotency table. Two stale
+facts outside the table were fixed: the command reference's tmux architecture (every session's
+server on a socket of its own, the admin's included, its environment from the launch request) and
+its list of line-oriented secret consumers, which no longer includes the environment. The upgrade
+guide's introduction also gained the two follow-up steps its sections ask for, so they read in one
+place.
 
 Completions: none change. **Contracts.** `ToFile`, `FromFile`, `TerminalCommand`, `park` and
 `detached()` are additive on `VMAccess`, which plugins reach through their run context; every kind
