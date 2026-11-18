@@ -31,7 +31,7 @@ from agentworks.errors import (
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.name_filters import validate_name_filters
 from agentworks.runtime_time import derive_uptime_seconds, format_uptime
-from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_cmd
+from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target, tmux_attach_cmd, tmux_cmd
 
 from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_staging_name
 from ._status import ConsoleStatus
@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions.manager import SessionTmuxServer
     from agentworks.transports import Transport
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
@@ -151,9 +152,16 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
     return vm.admin_username
 
 
-def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
+def _attach_loop_wrapper(session_name: str, server: SessionTmuxServer | None) -> str:
     """Build the shell snippet that holds a console window open for the given
     session.
+
+    The snippet runs in the admin's console pane. ``server`` is the session's
+    tmux server as ``resolve_session_tmux_server`` validated it, ``None`` for
+    a legacy row on the admin's default server. When the server's owner is
+    not the admin (an agent session), every tmux client in the snippet runs
+    as that owner, and the attach on a terminal of its own
+    (``tmux_attach_cmd``).
 
     Two phases:
     1. Entry: if the session isn't up yet, clear the pane and show a "Waiting..."
@@ -168,8 +176,11 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None) -> str:
     embedding the raw session_name inside the single-quoted strings is safe.
     """
     q = exact_tmux_target(session_name)
-    has = tmux_cmd(f"has-session -t {q}", socket_path)
-    att = tmux_cmd(f"attach -t {q}", socket_path)
+    socket_path = server.socket_path if server is not None else None
+    owner = server.owner if server is not None else None
+    # The probe needs no stdin or stdout; neither reaches the server's account.
+    has = tmux_cmd(f"has-session -t {q}", socket_path, owner=owner) + " </dev/null >/dev/null"
+    att = tmux_attach_cmd(session_name, socket_path, owner=owner)
     return f"""\
 unset TMUX
 

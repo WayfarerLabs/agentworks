@@ -1518,7 +1518,9 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
         assert callable(before_spawn)
         before_spawn()
         monkeypatch.setattr("agentworks.sessions.manager.check_session_status", lambda *a, **k: SessionStatus.RUNNING)
-        return ("/tmp/s1.sock", 4243)
+        if kwargs["is_admin"]:
+            return (tmux_mod.admin_socket_path(str(kwargs["admin_username"]), name), 4243)
+        return (tmux_mod.agent_socket_path(linux_user, name), 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
 
@@ -1680,7 +1682,7 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
         events.append("tmux_create")
         monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
         captured_env.update(env or {})
-        return ("/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243)
+        return (tmux_mod.admin_socket_path(str(k["admin_username"]), str(a[0])), 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
     monkeypatch.setattr(
@@ -1940,7 +1942,13 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     overlay = parse_instance_spec("session", '{"env":{"RESUME_SPEC":"set"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
     events: list[str] = []
     captured_env: dict[str, str] = {}
     _stop_the_vm(monkeypatch, events)
@@ -1976,7 +1984,13 @@ def test_restart_validates_stored_overlay_references_before_lifecycle_work(
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     overlay = parse_instance_spec("session", '{"harness_integration": {"name": "missing"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
     events: list[str] = []
     captured_env: dict[str, str] = {}
     _stop_the_vm(monkeypatch, events)
@@ -2004,8 +2018,16 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     environment_value = "session-restart-sentinel\nsecond\n"
     monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
     _seed_stopped_proxmox_vm(db)
-    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.insert_session(
+        "s1", "ws1", "default", SessionMode.ADMIN, socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock"
+    )
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     events: list[str] = []
     captured_env: dict[str, str] = {}

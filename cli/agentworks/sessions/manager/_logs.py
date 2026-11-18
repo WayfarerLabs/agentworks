@@ -29,11 +29,15 @@ def session_logs(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Dump the scrollback buffer for a session."""
-    from agentworks.sessions.tmux import capture_output
+    from agentworks.sessions.tmux import capture_output, server_owner_run_command
 
     if lines is not None and lines < 1:
         raise ValidationError("session log line count must be positive")
     session = _mgr._require_session(db, name)
+    # Refuse a socket outside its owner's directory before any VM work. A
+    # legacy row without a socket meets the status check's own refusal.
+    server = _mgr.resolve_session_tmux_server(db, session)
+    owner = server.owner if server is not None else None
     with _mgr._prepare_vm(
         db,
         config,
@@ -43,11 +47,11 @@ def session_logs(
     ) as (
         _ws,
         _vm,
-        run_command,
+        _run_command,
         _run_as_root,
         target,
     ):
-        status = _mgr.check_session_status(session, target=target)
+        status = _mgr.check_session_status(session, target=target, server=server)
 
         if status == SessionStatus.STOPPED:
             raise StateError(
@@ -76,12 +80,11 @@ def session_logs(
                 entity_name=name,
             )
 
-        sock = session.socket_path
         captured = capture_output(
             name,
-            run_command=run_command,
+            run_command=server_owner_run_command(target, owner),
             lines=lines or config.session.history_limit,
-            socket_path=sock,
+            socket_path=session.socket_path,
         )
         # Raw data pipe (opaque tmux capture-pane output), not a structured message.
         # Intentionally not routed through the output handler.

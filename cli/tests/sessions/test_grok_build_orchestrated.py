@@ -100,7 +100,7 @@ def _capture_tmux(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: 
     def capture(name: str, ws_path: str, command: str, linux_user: str, **kwargs: object) -> tuple[str, int]:
         events.append("tmux_create")
         captured["command"] = command
-        return ("/tmp/s1.sock", 4243)
+        return ("/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", capture)
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
@@ -223,7 +223,7 @@ def test_restart_reads_uuid_and_detects_before_killing_old_workload(
     )
     db.update_session_runtime(
         "s1",
-        socket_path="/tmp/s1.sock",
+        socket_path="/run/agentworks/admin-tmux-sockets/admin/s1.sock",
         pid=4242,
         boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         tmux_server_start_ticks=77,

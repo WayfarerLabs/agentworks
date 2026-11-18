@@ -15,6 +15,7 @@ from agentworks.errors import StateError
 from agentworks.runtime_state import reconcile_session
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _status
+from tests._runtime_probes import server_for
 from tests.runtime_state.test_composition import REFUSE, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 from tests.runtime_state.test_public_stop import _running
@@ -153,7 +154,9 @@ def _model(db, runtime, monkeypatch) -> _Memory:
 
     def observe_rows(rows, **kwargs):
         return {
-            row.name: manager.check_session_status(row, target=_Target(model, model.residents[row.name].vm))
+            row.name: manager.check_session_status(
+                row, target=_Target(model, model.residents[row.name].vm), server=server_for(row)
+            )
             for row in rows
         }
 
@@ -199,7 +202,10 @@ def test_inactive_stop_retains_same_boot_memory_identity_for_later_safe_stop(
     assert model.reads == model.transports == model.killed == []
 
     powers["box"] = VMStatus.RUNNING
-    assert manager.check_session_status(inactive, target=_Target(model, "box")) is SessionStatus.RUNNING
+    assert (
+        manager.check_session_status(inactive, target=_Target(model, "box"), server=server_for(inactive))
+        is SessionStatus.RUNNING
+    )
     rendered.clear()
     reconcile_session(db, config, name="work", interaction=REFUSE)
     result = next(row for row in rendered if row.kind == "session")
