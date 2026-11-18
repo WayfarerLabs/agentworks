@@ -439,7 +439,7 @@ def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServ
         server = subprocess.Popen(
             [sshd, "-D", "-e", "-f", str(config)], stdin=subprocess.DEVNULL, stderr=subprocess.PIPE
         )
-        if _listening(server, port):
+        if _listening(server, port, directory / "sshd.pid"):
             break
         failure = _stop(server)
     else:
@@ -451,16 +451,31 @@ def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServ
         _stop(server)
 
 
-def _listening(server: subprocess.Popen[bytes], port: int) -> bool:
-    """Whether ``server`` accepts connections on ``port`` before it exits or the startup bound passes."""
+def _listening(server: subprocess.Popen[bytes], port: int, pid_file: Path) -> bool:
+    """Whether ``server`` itself listens on ``port`` before it exits or the startup bound passes.
+
+    A connection alone proves nothing: another process holding the port
+    accepts it while this sshd fails to bind and exits. sshd writes its pid
+    file only once it has bound its address, so the file naming this
+    server's pid, with the server still running, is the proof; the
+    connection then shows it accepts.
+    """
     deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
     while server.poll() is None and time.monotonic() < deadline:
-        try:
-            socket.create_connection(("127.0.0.1", port), timeout=1).close()
-            return True
-        except OSError:
-            time.sleep(0.1)
+        if _pid_in(pid_file) == server.pid:
+            with contextlib.suppress(OSError):
+                socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                return server.poll() is None
+        time.sleep(0.1)
     return False
+
+
+def _pid_in(pid_file: Path) -> int | None:
+    """The pid an sshd pid file names, or ``None`` while there is none or it is still being written."""
+    try:
+        return int(pid_file.read_text())
+    except (OSError, ValueError):
+        return None
 
 
 def _stop(server: subprocess.Popen[bytes]) -> bytes:
