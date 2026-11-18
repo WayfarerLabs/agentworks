@@ -101,8 +101,8 @@ def test_install_command_row_is_disabled_system_plugin_by_default(tmp_path: Path
     assert row.origin.plugin == "codex"
     # CODEX_NON_INTERACTIVE prefixes sh (where the script runs), not curl:
     # the script prompts via /dev/tty when a TTY exists, and provisioning
-    # must never let an installer prompt. The defense is independent of the
-    # transport, which no longer forces a TTY.
+    # must never let an installer prompt. The defense is independent of how
+    # the command reaches the VM, which gives it no terminal.
     assert row.command == "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
     assert registry.graph.enablement_of("user-install-command", "codex") is Enablement.disabled
 

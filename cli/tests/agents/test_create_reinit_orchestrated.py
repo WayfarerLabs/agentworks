@@ -1076,7 +1076,7 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
 # therefore pin the reconcile itself (that it runs, over which workspaces,
 # without re-inserting rows), NOT that the recreate branch specifically was
 # taken. Driving the two user-step outcomes would require exercising the real
-# ``create_agent_on_vm`` against a fake transport, which is out of scope here.
+# ``create_agent_on_vm`` against a fake access, which is out of scope here.
 
 
 def _add_workspace(db: Database, name: str) -> None:

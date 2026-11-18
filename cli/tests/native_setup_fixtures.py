@@ -162,16 +162,16 @@ class LocalFixtureAccount:
 
 def fixture_access(
     monkeypatch: pytest.MonkeyPatch,
-    transport: LocalFixtureAccount,
+    account: LocalFixtureAccount,
     *,
     log: Callable[[RunRequest, Result], None] | None = None,
 ) -> VMAccess:
     """A real ``VMAccess`` to the fixture's account: its home, and a login shell that reads only its ``.profile``."""
-    return local_vm_access(monkeypatch, home=transport.home, shell=account_shell(transport.root), log=log)
+    return local_vm_access(monkeypatch, home=account.home, shell=account_shell(account.root), log=log)
 
 
 def invocation(
-    transport: LocalFixtureAccount,
+    account: LocalFixtureAccount,
     claims: list[tuple[NativeClaim, ...]],
     *,
     prior=None,
@@ -179,7 +179,7 @@ def invocation(
     access: VMAccess | None = None,
 ):
     """User setup of the fixture's account, through ``access`` (the fixture's recording access by default)."""
-    access = access or transport.access()
+    access = access or account.access()
     return UserSetupInvocation(
         vm=cast(VMRow, object()),
         access=access,
@@ -187,7 +187,7 @@ def invocation(
         prior=prior,
         checkpoint=claims.append,
         username="fixture",
-        home=str(transport.home),
+        home=str(account.home),
         environment=env or {},
     )
 
@@ -209,10 +209,10 @@ def native_cli_double() -> MagicMock:
 
 
 def native_cli(
-    transport: LocalFixtureAccount, tool: NativeTool, config_root: Path | str, *, env=None, access=None
+    account: LocalFixtureAccount, tool: NativeTool, config_root: Path | str, *, env=None, access=None
 ) -> NativeCLI:
     """A native CLI for the fixture's account, to use as a context manager."""
-    return NativeCLI(tool, invocation(transport, [], env=env, access=access), config_root=str(config_root))
+    return NativeCLI(tool, invocation(account, [], env=env, access=access), config_root=str(config_root))
 
 
 def setup_fixture_user(
@@ -244,18 +244,18 @@ def record(claims: tuple[NativeClaim, ...], tool: NativeTool) -> SetupRecord:
     )
 
 
-def market_fixture(transport: LocalFixtureAccount, tool: NativeTool) -> Path:
+def market_fixture(account: LocalFixtureAccount, tool: NativeTool) -> Path:
     binary = shutil.which(tool)
     if binary is None:
         pytest.skip(f"{tool} CLI is not installed")
-    bindir = transport.root / "bin"
+    bindir = account.root / "bin"
     bindir.mkdir(exist_ok=True)
     (bindir / tool).symlink_to(Path(binary).resolve())
     # npm-installed launchers need Node in the fixture's deliberately small PATH.
     node = shutil.which("node")
     if node is not None and not (bindir / "node").exists():
         (bindir / "node").symlink_to(Path(node).resolve())
-    root = transport.root / "market"
+    root = account.root / "market"
     manifest = root / (".agents/plugins/marketplace.json" if tool == "codex" else ".claude-plugin/marketplace.json")
     manifest.parent.mkdir(parents=True)
     entries = []

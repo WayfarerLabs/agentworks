@@ -10,7 +10,7 @@ on-VM choreography preserved from the imperative bodies.
 
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend power ops, the reachability probe, and the
-admin SSH transport are the fakes.
+admin's access are the fakes.
 """
 
 from __future__ import annotations

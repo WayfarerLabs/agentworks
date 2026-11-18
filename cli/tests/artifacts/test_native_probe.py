@@ -411,7 +411,7 @@ def test_removed_skill_support_directories_do_not_block_remaining_native_skill(t
 
     from tests.native_setup_fixtures import LocalFixtureAccount
 
-    transport = LocalFixtureAccount(tmp_path)
+    account = LocalFixtureAccount(tmp_path)
     root = tmp_path / "home/.claude/skills"
     removed = root / "removed"
     removed.mkdir(parents=True)
@@ -422,7 +422,7 @@ def test_removed_skill_support_directories_do_not_block_remaining_native_skill(t
     remaining.parent.mkdir()
     remaining.write_text("---\nname: review\n---\nbody\n")
     # Removal owns whole files, so successful cleanup preserves support directories.
-    files = transport.files()
+    files = account.files()
     for path in (removed / "SKILL.md", removed / "scripts/nested/check.sh"):
         files.remove_if(str(path), expected=hashlib.sha256(path.read_bytes()).hexdigest())
     assert (removed / "scripts/nested").is_dir()
