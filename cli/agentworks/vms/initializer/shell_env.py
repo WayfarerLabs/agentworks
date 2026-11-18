@@ -469,39 +469,13 @@ def _install_sudoers_fragment(
     body: str,
     label: str,
 ) -> None:
-    """Install one sudoers.d/ fragment via stage -> validate -> promote.
+    """Install a validated fragment, retaining its caller's failure context."""
+    from agentworks.capabilities.vm_platform.sudoers import sudoers_install_script
 
-    ``label`` names the fragment in the error message (e.g. "env_keep").
-    A broken sudoers fragment can lock the operator out of sudo entirely,
-    so the ``visudo -cf`` validate step is load-bearing: the body is
-    written to a ``.tmp`` staging path, validated, and only then moved
-    onto the real path. Raises ``SSHError`` if validation fails; callers
-    decide whether that is fatal.
-
-    The staging path uses a ``.tmp`` suffix; sudo's /etc/sudoers.d/ loader
-    only picks up files whose names don't contain a literal '.' AND match
-    the no-tilde rule, so ``.tmp`` files are safely ignored even if cleanup
-    races mid-init.
-    """
-    q_body = shlex.quote(body)
-    q_path = shlex.quote(path)
-    staging = path + ".tmp"
-    q_staging = shlex.quote(staging)
     try:
-        target.run(
-            f"printf '%s' {q_body} | sudo tee {q_staging} > /dev/null",
-        )
-        target.run(f"sudo chmod 0440 {q_staging}")
-        validate = target.run(f"sudo visudo -cf {q_staging}", check=False)
-        if not validate.ok:
-            raise SSHError(f"visudo -cf rejected the {label} fragment: {validate.stderr.strip()}")
-        target.run(f"sudo mv {q_staging} {q_path}")
-    finally:
-        # Always best-effort-remove the staging path. On the success path
-        # the mv above already moved the file, so rm is a no-op; on any
-        # failure path we don't want orphaned .tmp files accumulating
-        # under /etc/sudoers.d/.
-        target.run(f"sudo rm -f {q_staging}", check=False)
+        target.run(sudoers_install_script(path, body), sudo=True)
+    except SSHError as e:
+        raise SSHError(f"sudoers {label} fragment install failed: {e}") from e
 
 
 def _write_sudoers_admin(
@@ -510,13 +484,13 @@ def _write_sudoers_admin(
     admin_user: str,
 ) -> None:
     """Reconcile the managed admin grant, including its mode, on VM reinit."""
-    from agentworks.capabilities.vm_platform.sudoers import admin_sudoers_script
+    from agentworks.capabilities.vm_platform.sudoers import repair_admin_sudoers_script
 
     logger.step("Admin sudo grant")
     try:
-        target.run(admin_sudoers_script(admin_user, preserve_existing=True), sudo=True)
+        target.run(repair_admin_sudoers_script(admin_user), sudo=True)
     except SSHError as e:
-        msg = f"admin sudo grant install failed: {e}. Re-run `agw vm reinit` to retry."
+        msg = f"admin sudo grant repair failed: {e}. Re-run `agw vm reinit` to retry."
         logger.warning(msg)
         output.warn(msg)
 

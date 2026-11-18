@@ -14,6 +14,7 @@ import pytest
 
 from agentworks.capabilities.vm_platform import bootstrap_script, sudoers
 from agentworks.ssh import SSHError
+from agentworks.vms.initializer import shell_env
 from agentworks.vms.initializer.shell_env import _write_sudoers_admin
 from tests.conftest import requires_posix_shell
 
@@ -45,7 +46,7 @@ def validator(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, grant_directory: 
         "Path(os.environ['VALIDATION_LOG']).write_text(json.dumps({\n"
         "    'mode': staged.stat().st_mode & 0o777,\n"
         "    'body': staged.read_text(),\n"
-        "    'prior': grant.read_text() if grant.exists() else None,\n"
+        "    'prior': grant.read_text() if grant.is_file() else None,\n"
         "}))\n"
         "raise SystemExit(int(os.environ.get('VALIDATION_STATUS', '0')))\n"
     )
@@ -108,6 +109,7 @@ def test_reinit_executes_the_grant_writer_and_warns_on_rejection(
     prior = "test-admin ALL=(root) /usr/bin/true\n"
     grant.write_text(prior)
     grant.chmod(0o644)
+    inode = grant.stat().st_ino
     if reject:
         monkeypatch.setenv("VALIDATION_STATUS", "1")
 
@@ -121,7 +123,8 @@ def test_reinit_executes_the_grant_writer_and_warns_on_rejection(
     logger = MagicMock()
     _write_sudoers_admin(target, logger, "test-admin")
 
-    assert json.loads(validator.read_text())["mode"] == 0o440
+    assert json.loads(validator.read_text())["mode"] == 0o644
+    assert grant.stat().st_ino == inode
     assert grant.read_text() == prior
     assert grant.stat().st_mode & 0o777 == (0o644 if reject else 0o440)
     assert logger.warning.call_count == int(reject)
@@ -175,7 +178,139 @@ def test_grant_passes_real_visudo(monkeypatch: pytest.MonkeyPatch, grant_directo
     prior = "test-admin ALL=(root) /usr/bin/true\n"
     grant.chmod(0o644)
     grant.write_text(prior)
-    subprocess.run(["bash", "-c", sudoers.admin_sudoers_script("test-admin", preserve_existing=True)], check=True)
+    subprocess.run(["bash", "-c", sudoers.repair_admin_sudoers_script("test-admin")], check=True)
     subprocess.run([executable, "-cf", str(grant)], check=True)
     assert grant.read_text() == prior
     assert grant.stat().st_mode & 0o777 == 0o440
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo"])
+def test_reinit_refuses_nonregular_grants_without_reading_them(
+    grant_directory: Path, validator: Path, kind: str
+) -> None:
+    grant = grant_directory / "test-admin"
+    if kind == "directory":
+        grant.mkdir()
+    else:
+        os.mkfifo(grant)
+    before = grant.stat()
+
+    result = subprocess.run(["bash", "-c", sudoers.repair_admin_sudoers_script("test-admin")], check=False, timeout=5)
+
+    assert result.returncode != 0
+    assert not validator.exists()
+    assert grant.stat() == before
+
+
+def test_reinit_preserves_a_symlink_and_the_existing_grant_inode(grant_directory: Path, validator: Path) -> None:
+    existing = grant_directory / "existing"
+    existing.write_text("test-admin ALL=(root) /usr/bin/true\n")
+    existing.chmod(0o644)
+    inode = existing.stat().st_ino
+    grant = grant_directory / "test-admin"
+    grant.symlink_to(existing)
+
+    subprocess.run(["bash", "-c", sudoers.repair_admin_sudoers_script("test-admin")], check=True)
+
+    assert grant.is_symlink()
+    assert existing.stat().st_ino == inode
+    assert existing.stat().st_mode & 0o777 == 0o440
+    assert existing.read_text() == json.loads(validator.read_text())["body"]
+
+
+def test_install_refuses_a_directory_destination_and_cleans_staging(grant_directory: Path, validator: Path) -> None:
+    grant = grant_directory / "test-admin"
+    grant.mkdir()
+
+    result = subprocess.run(["bash", "-c", sudoers.admin_sudoers_script("test-admin")], check=False)
+
+    assert result.returncode != 0
+    assert grant.is_dir() and not list(grant.iterdir())
+    assert list(grant_directory.iterdir()) == [grant]
+
+
+@pytest.mark.parametrize("fragment", ["env_keep", "console_setenv"])
+@pytest.mark.parametrize("reject", [False, True])
+def test_initialization_fragments_use_validated_installation(
+    monkeypatch: pytest.MonkeyPatch, grant_directory: Path, validator: Path, fragment: str, reject: bool
+) -> None:
+    grant = grant_directory / fragment
+    grant.write_text("previous policy\n")
+    grant.chmod(0o644)
+    constant = (
+        "AGENTWORKS_SUDOERS_ENV_KEEP_PATH" if fragment == "env_keep" else "AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH"
+    )
+    monkeypatch.setattr(shell_env, constant, str(grant))
+    if reject:
+        monkeypatch.setenv("VALIDATION_STATUS", "1")
+
+    def run(command: str, *, sudo: bool) -> None:
+        assert sudo
+        result = subprocess.run(["bash", "-c", command], check=False)
+        if result.returncode:
+            raise SSHError("validator rejected fixture")
+
+    target, logger = MagicMock(run=run), MagicMock()
+    if fragment == "env_keep":
+        shell_env._write_sudoers_env_keep(target, logger)
+    else:
+        shell_env._write_sudoers_console_setenv(target, logger, "test-admin")
+
+    observed = json.loads(validator.read_text())
+    assert observed["mode"] == 0o440
+    assert grant.read_text() == ("previous policy\n" if reject else observed["body"])
+    assert grant.stat().st_mode & 0o777 == (0o644 if reject else 0o440)
+    assert logger.warning.call_count == int(reject)
+    assert list(grant_directory.iterdir()) == [grant]
+
+
+def test_reinit_driver_repairs_the_existing_admin_grant(
+    monkeypatch: pytest.MonkeyPatch, grant_directory: Path, validator: Path
+) -> None:
+    from agentworks.debian import DebianRelease
+    from agentworks.vms.initializer import driver
+
+    grant = grant_directory / "test-admin"
+    grant.write_text("test-admin ALL=(root) /usr/bin/true\n")
+    grant.chmod(0o644)
+    for function in (
+        "agentworks.vms.initializer.driver._preserve_ssh_host_keys",
+        "agentworks.vms.initializer.driver._apply_sve_mask",
+        "agentworks.vms.initializer.driver._write_sshd_accept_env",
+        "agentworks.vms.hardening.apply_vm_hardening",
+        "agentworks.vms.tailscale_dns.check_vm_dns",
+        "agentworks.vms.tailscale_dns.apply_tailscaled_dns_fix",
+    ):
+        monkeypatch.setattr(function, lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.resources.access.kind_dict", lambda *a: {})
+    reached_next_step = RuntimeError("fixture stops before unrelated initialization")
+
+    def stop(*args: object) -> None:
+        raise reached_next_step
+
+    monkeypatch.setattr(driver, "_write_sudoers_env_keep", stop)
+
+    def run(command: str, *, sudo: bool) -> None:
+        assert sudo
+        subprocess.run(["bash", "-c", command], check=True)
+
+    with pytest.raises(RuntimeError) as caught:
+        driver._phase_b_setup(
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+            MagicMock(apt_packages=[]),
+            MagicMock(),
+            "test-vm",
+            MagicMock(run=run),
+            (),
+            "/home/test-admin",
+            "test-admin",
+            MagicMock(),
+            debian_release=DebianRelease.BOOKWORM,
+            operation=driver.VMInitializationOperation.VM_REINIT,
+        )
+
+    assert caught.value is reached_next_step
+    assert grant.stat().st_mode & 0o777 == 0o440
+    assert grant.read_text() == json.loads(validator.read_text())["body"]

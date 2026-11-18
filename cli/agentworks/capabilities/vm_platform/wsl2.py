@@ -25,7 +25,6 @@ from agentworks.capabilities.vm_platform.base import (
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import run_bootstrap
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
-from agentworks.capabilities.vm_platform.sudoers import admin_sudoers_script
 from agentworks.capabilities.vm_platform.tailscale_join import (
     CREATE_RERUN_HINT,
     join_tailscale,
@@ -909,19 +908,6 @@ class WSL2Platform(VMPlatform):
                 )
                 _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
                 import shlex
-
-                _wsl(
-                    [
-                        "--distribution",
-                        vm_name,
-                        "--user",
-                        "root",
-                        "--",
-                        "bash",
-                        "-c",
-                        admin_sudoers_script(admin_username),
-                    ]
-                )
 
                 # Configure wsl.conf: default user, systemd and the hostname
                 output.info("Enabling systemd...")
