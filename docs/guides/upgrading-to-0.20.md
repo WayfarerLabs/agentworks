@@ -118,10 +118,11 @@ What to expect:
   still do.
 - **Existing console windows keep their old attach loop until rebuilt.** Run
   `agw console restart NAME` for each running named console that shows an agent session.
-- **Workspace tmuxinator projects are gone.** Agentworks no longer generates them, and
-  `agw vm reinit` removes what earlier releases left (see
-  [Workspace tmuxinator projects are removed](#workspace-tmuxinator-projects-are-removed)). Use
-  named consoles instead.
+- **Workspace tmuxinator projects are no longer generated.** `agw vm reinit` removes what earlier
+  releases left (see
+  [Workspace tmuxinator projects are removed](#workspace-tmuxinator-projects-are-removed)). Until it
+  does, starting one runs plain tmux clients as the VM admin, including against agent sessions'
+  servers. Use named consoles instead.
 - **Rows with a misplaced socket path stop being probed.** A session's stored socket path must sit
   directly inside its agent's socket directory or, for an admin session, the VM admin's. Any other
   path reports `unknown` status instead of being probed at whatever it names, and `session logs`,

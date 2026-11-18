@@ -111,9 +111,10 @@ which an agent cannot plant a server.
 
 Agentworks no longer generates workspace tmuxinator projects. `agw vm reinit` removes the projects
 and admin discovery links earlier releases left (see
-[Retired workspace tmuxinator projects](idempotency.md#retired-workspace-tmuxinator-projects));
-until then, do not start one by hand. Named consoles are the supported way to view several sessions
-together.
+[Retired workspace tmuxinator projects](idempotency.md#retired-workspace-tmuxinator-projects)).
+Until it does, do not start one by hand: starting one runs plain tmux clients as the VM admin,
+including against agent sessions' servers. Named consoles are the supported way to view several
+sessions together.
 
 Interactive clients, `session attach` and the attach in a named console window, run as the agent on
 a pseudo-terminal of their own (`runuser --pty`) rather than on the admin's terminal, where the
