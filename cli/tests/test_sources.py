@@ -619,6 +619,24 @@ def test_a_tree_with_a_locked_directory_is_replaced_on_every_upload(lane: Files,
         subprocess.run(["chmod", "-R", "u+rwx", "--", str(tmp_path)], check=False)
 
 
+def test_replacing_a_tree_leaves_a_surviving_hard_link_s_mode_alone(lane: Files, tmp_path: Path) -> None:
+    """Removal opens up directories only: a file's mode is its inode's, which a link outside the tree shares."""
+    dest = tmp_path / "home" / ".dotfiles"
+    upload_tree(lane, _tree(tmp_path / "local-0", {"locked/rc": b"old"}), str(dest))
+    survivor = tmp_path / "survivor"
+    os.link(dest / "locked" / "rc", survivor)
+    survivor.chmod(0o640)
+    (dest / "locked").chmod(0o555)
+    try:
+        upload_tree(lane, _tree(tmp_path / "local-1", {"locked/rc": b"new"}), str(dest))
+    finally:
+        subprocess.run(["chmod", "-R", "u+rwx", "--", str(dest)], check=False)
+
+    assert _contents(dest) == {"locked/rc": b"new"}
+    assert stat.S_IMODE(survivor.stat().st_mode) == 0o640
+    assert survivor.read_bytes() == b"old"
+
+
 @pytest.mark.parametrize("planted", ["link", "file"])
 def test_upload_tree_refuses_a_link_or_file_at_the_destination(lane: Files, tmp_path: Path, planted: str) -> None:
     target = _tree(tmp_path / "target", {"rc": b"theirs"})
