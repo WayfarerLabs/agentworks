@@ -708,6 +708,9 @@ module, and `remote_exec.py` is deleted.
 - [ ] Complete the evidence matrix, sending any gap to the operator.
 - [ ] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
       and the operator guides) describe the end state, then write `locked.md`.
+  - The docs half is done (`d84924c12`, `f138a6cdc`, `3741269b0`): the permanent docs describe the
+    end state, no permanent artifact cites this SDD, and ADR 0027 carries the design's load-bearing
+    decisions. `locked.md` waits for the evidence matrix.
 
 Definition of done: R10's end state holds, every matrix cell has evidence or an operator
 disposition, and the SDD is locked.
