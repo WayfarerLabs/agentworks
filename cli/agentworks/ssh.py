@@ -343,33 +343,9 @@ SSH_INTERACTIVE_ALIVE_INTERVAL = 15
 SSH_INTERACTIVE_ALIVE_COUNT_MAX = 4
 
 
-def _set_env_args(env: dict[str, str] | None) -> list[str]:
-    """Build the ``-o SetEnv=...`` ssh-client args for a (key, value) dict.
-
-    ssh_config(5) says "for each parameter, the first obtained value will
-    be used" -- so emitting ``-o SetEnv=K=V`` once per pair silently drops
-    every pair after the first. We coalesce all pairs into a single
-    ``-o SetEnv="K1=V1" "K2=V2" ...`` argument; the option's value is
-    parsed by OpenSSH as whitespace-separated VAR=VALUE pairs with
-    double-quote grouping. Values are always quoted (handles spaces, empty
-    values, and embedded ``"``/``\\``) with the standard escapes.
-
-    The remote sshd accepts the pairs under the ``AcceptEnv *`` directive
-    deployed by VM init (see ADR 0014).
-    """
-    if not env:
-        return []
-    pairs = []
-    for key, value in env.items():
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        pairs.append(f'{key}="{escaped}"')
-    return ["-o", "SetEnv=" + " ".join(pairs)]
-
-
 def _ssh_base_args(
     target: SSHTarget,
     *,
-    env: dict[str, str] | None = None,
     tty: bool | None = None,
     close_stdin: bool,
 ) -> list[str]:
@@ -398,7 +374,6 @@ def _ssh_base_args(
         args.extend(["-i", str(target.identity_file)])
     if target.proxy_jump is not None:
         args.extend(["-J", target.proxy_jump])
-    args.extend(_set_env_args(env))
     if target.user:
         args.append(f"{target.user}@{target.host}")
     else:
@@ -415,7 +390,6 @@ def run(
     retries: int = SSH_DEFAULT_RETRIES,
     on_retry: Callable[[int, int], None] | None = None,
     logger: SSHLogger | None = None,
-    env: dict[str, str] | None = None,
     input_text: str | None = None,
     tty: bool | None = None,
 ) -> SSHResult:
@@ -432,10 +406,6 @@ def run(
         retries: Number of attempts (default: SSH_RETRIES).
         on_retry: Optional callback(attempt, max_retries) called before each retry.
         logger: Optional SSHLogger to record command output.
-        env: Env vars to inject via SSH SetEnv. All pairs are coalesced
-            into a single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
-            ``_set_env_args``); agentworks-managed VMs accept these via
-            the ``AcceptEnv *`` directive deployed by VM init.
         input_text: Optional text streamed to the remote command on stdin.
             Cannot be combined with ``logger``. The input value is never
             serialized into argv or an error diagnostic. The returned stdout
@@ -459,7 +429,7 @@ def run(
 
     # An ``input_text`` payload keeps stdin open for the byte-exact write;
     # every other call closes stdin with ``-n``.
-    args = _ssh_base_args(target, env=env, tty=tty, close_stdin=input_text is None)
+    args = _ssh_base_args(target, tty=tty, close_stdin=input_text is None)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
     args.append("--")

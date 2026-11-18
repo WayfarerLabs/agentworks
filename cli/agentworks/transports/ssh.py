@@ -1,7 +1,7 @@
 """SSH transport implementation.
 
 Wraps ``ssh`` / ``scp`` subprocess calls in the ``Transport`` ABC's
-surface. Holds the argv builders, SetEnv handling, sudo-wrap, and
+surface. Holds the argv builders, sudo-wrap, and
 login-shell wrapping for the canonical Tailscale SSH path.
 ``agentworks/ssh.py`` retains a small surface of SSH primitives
 (``SSHTarget`` / ``SSHResult`` / ``SSHError`` / ``SSHLogger`` /
@@ -25,7 +25,6 @@ from agentworks.ssh import (
     SSHError,
     SSHResult,
     SSHTarget,
-    _set_env_args,
     openssh_program,
 )
 from agentworks.ssh import (
@@ -184,7 +183,6 @@ class SSHTransport(Transport):
         *,
         tty: bool | None = None,
         close_stdin: bool,
-        env: dict[str, str] | None = None,
     ) -> list[str]:
         """Build the base ``ssh`` argv with ``BatchMode=yes`` (no remote
         command yet).
@@ -217,7 +215,6 @@ class SSHTransport(Transport):
             args.extend(["-i", str(self.identity_file)])
         if self.proxy_jump is not None:
             args.extend(["-J", self.proxy_jump])
-        args.extend(_set_env_args(env))
         target = f"{self.user}@{self.host}" if self.user else self.host
         args.append(target)
         return args
@@ -236,7 +233,6 @@ class SSHTransport(Transport):
         tty: bool | None = None,
         check: bool = True,
         timeout: int | None = None,
-        env: dict[str, str] | None = None,
         input_text: str | None = None,
         input_data: str | None = None,
         discard_output: bool = False,
@@ -290,7 +286,6 @@ class SSHTransport(Transport):
                 timeout=t,
                 retries=attempts,
                 on_retry=on_retry,
-                env=env,
                 input_text=input_text,
                 # ``ssh_run`` forces a non-TTY channel for any ``input_text``
                 # (it coerces the no-opinion default to ``-T``), so a byte-exact
@@ -305,7 +300,7 @@ class SSHTransport(Transport):
 
         # An ``input_data`` payload keeps stdin open for the write; every
         # other non-payload call closes stdin with ``-n``.
-        args = self._ssh_base_args(tty=tty, close_stdin=input_data is None, env=env)
+        args = self._ssh_base_args(tty=tty, close_stdin=input_data is None)
         # Fence the remote command from ssh's option parser. Some
         # glibc-getopt platforms permute non-options to the end, so an
         # argv element starting with `-` (e.g. `--workspace` flowing
@@ -367,12 +362,7 @@ class SSHTransport(Transport):
             self.logger.log_error(msg)
         raise SSHError(msg) from last_err
 
-    def _interactive(
-        self,
-        command: str,
-        *,
-        env: dict[str, str] | None = None,
-    ) -> int:
+    def _interactive(self, command: str) -> int:
         """Interactive SSH with ``-t`` (allocates a TTY) and no
         ``BatchMode``. Empty ``command`` opens a login shell, which gets no
         NUL lead because sshd's MOTD and lastlog fill its first write; a
@@ -386,7 +376,6 @@ class SSHTransport(Transport):
             args.extend(["-i", str(self.identity_file)])
         if self.proxy_jump is not None:
             args.extend(["-J", self.proxy_jump])
-        args.extend(_set_env_args(env))
         target = f"{self.user}@{self.host}" if self.user else self.host
         args.append(target)
         if command:
@@ -453,12 +442,7 @@ class SSHTransport(Transport):
         if result.returncode != 0:
             raise SSHError(f"scp failed: {result.stderr.strip()}")
 
-    def call_streaming(
-        self,
-        command: str,
-        *,
-        env: dict[str, str] | None = None,
-    ) -> int:
+    def call_streaming(self, command: str) -> int:
         """Run ``command`` over SSH with inherited stdio.
 
         Non-interactive (``BatchMode=yes``, no TTY). Used by
@@ -472,7 +456,6 @@ class SSHTransport(Transport):
             args.extend(["-i", str(self.identity_file)])
         if self.proxy_jump is not None:
             args.extend(["-J", self.proxy_jump])
-        args.extend(_set_env_args(env))
         target = f"{self.user}@{self.host}" if self.user else self.host
         args.append(target)
         args.append("--")  # fence: see run() for rationale

@@ -184,7 +184,7 @@ class _RecordingTransport(Transport):
     """
 
     def __init__(self, *, exit_code: int = 0, raises: bool = False) -> None:
-        self.calls: list[tuple[str, dict[str, str] | None]] = []
+        self.calls: list[str] = []
         self._exit_code = exit_code
         self._raises = raises
 
@@ -194,8 +194,8 @@ class _RecordingTransport(Transport):
     def run(self, *a, **k):  # type: ignore[no-untyped-def] # noqa: ANN002, ANN003, ANN201
         raise NotImplementedError
 
-    def _interactive(self, command: str, *, env: dict[str, str] | None = None) -> int:
-        self.calls.append((command, env))
+    def _interactive(self, command: str) -> int:
+        self.calls.append(command)
         if self._raises:
             raise RuntimeError("connection died")
         return self._exit_code
@@ -221,11 +221,11 @@ def test_abc_reports_nothing_on_a_non_zero_interactive_exit(captured_output) -> 
 
 
 def test_interactive_delegates_to_the_subclass_hook() -> None:
-    """The concrete wrapper is pass-through: command, env, and exit code
-    all survive the trip through the guard."""
+    """The concrete wrapper is pass-through: command and exit code both
+    survive the trip through the guard."""
     t = _RecordingTransport(exit_code=42)
-    assert t.interactive("tmux attach -t s1", env={"K": "V"}) == 42
-    assert t.calls == [("tmux attach -t s1", {"K": "V"})]
+    assert t.interactive("tmux attach -t s1") == 42
+    assert t.calls == ["tmux attach -t s1"]
 
 
 def test_interactive_runs_inside_the_terminal_guard(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -310,7 +310,6 @@ def test_incomplete_subclass_cannot_be_instantiated() -> None:
             tty=None,
             check=True,
             timeout=None,
-            env=None,
             retries=None,
             on_retry=None,
         ):

@@ -464,9 +464,9 @@ def test_agent_create_session_uses_dedicated_socket_and_env(
 def test_admin_create_session_uses_admin_socket(
     spy_target: Files,
 ) -> None:
-    """The Phase 3 SetEnv pivot moves admin sessions to per-session sockets
-    so each session creates a fresh tmux server (no env leak between admin
-    sessions on a shared default server)."""
+    """Admin sessions use per-session sockets, so each session creates a
+    fresh tmux server (no env leak between admin sessions on a shared
+    default server)."""
     spy_run = _SpyRunCommand()
 
     sock, _pid = create_session(

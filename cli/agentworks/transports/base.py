@@ -59,7 +59,6 @@ class Transport(abc.ABC):
         tty: bool | None = None,
         check: bool = True,
         timeout: int | None = None,
-        env: dict[str, str] | None = None,
         input_text: str | None = None,
         input_data: str | None = None,
         discard_output: bool = False,
@@ -71,8 +70,7 @@ class Transport(abc.ABC):
         ``sudo=True`` wraps the command in ``sudo -n bash -c '...'`` so
         compound commands run wholly as root. ``tty=None`` is transport
         default; ``tty=True``/``False`` overrides. ``check=True`` raises
-        on non-zero exit. ``env`` is the per-call env dict, which SSH
-        carries via ``-o SetEnv``. ``input_text`` streams sensitive
+        on non-zero exit. ``input_text`` streams sensitive
         text to the command on stdin; transports omit it from argv, logs,
         returned output, and failure diagnostics, and deliver it byte-exact,
         so a guest ``read -r`` binds exactly the value that was sent. A
@@ -98,18 +96,11 @@ class Transport(abc.ABC):
         timeouts (default 1 attempt).
         """
 
-    def interactive(
-        self,
-        command: str,
-        *,
-        env: dict[str, str] | None = None,
-        clear_screen_on_exit: bool = False,
-    ) -> int:
+    def interactive(self, command: str, *, clear_screen_on_exit: bool = False) -> int:
         """Run an interactive session with a TTY.
 
-        Empty ``command`` opens a login shell on the VM. ``env`` travels
-        via SetEnv. Returns the process exit code; does not raise on
-        remote-command failure.
+        Empty ``command`` opens a login shell on the VM. Returns the
+        process exit code; does not raise on remote-command failure.
 
         ``clear_screen_on_exit`` clears the visible screen after the
         attach ends (see :func:`agentworks.terminal.emit_clear`). Only
@@ -130,7 +121,7 @@ class Transport(abc.ABC):
         forget it. See :mod:`agentworks.terminal`.
         """
         with guarded_terminal():
-            code = self._interactive(command, env=env)
+            code = self._interactive(command)
         if clear_screen_on_exit:
             # The guard's exit pass resets the modes without moving the cursor,
             # on every interactive path. This clear is an additional,
@@ -145,12 +136,7 @@ class Transport(abc.ABC):
         return code
 
     @abc.abstractmethod
-    def _interactive(
-        self,
-        command: str,
-        *,
-        env: dict[str, str] | None = None,
-    ) -> int:
+    def _interactive(self, command: str) -> int:
         """Transport-specific interactive session (see ``interactive``).
 
         Subclasses implement this rather than ``interactive`` so the
@@ -208,12 +194,7 @@ class Transport(abc.ABC):
         """
 
     @abc.abstractmethod
-    def call_streaming(
-        self,
-        command: str,
-        *,
-        env: dict[str, str] | None = None,
-    ) -> int:
+    def call_streaming(self, command: str) -> int:
         """Run a command with inherited stdio (no buffering).
 
         Used by ``vm exec`` and ``agent exec`` so the operator sees

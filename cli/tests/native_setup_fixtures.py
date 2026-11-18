@@ -99,7 +99,7 @@ class LocalFixtureTransport(Transport):
         result = subprocess.run(
             ["bash", "-c", command],
             cwd=self.home,
-            env={**self.environment, **(kwargs.get("env") or {})},
+            env=self.environment,
             input=kwargs.get("input_text", kwargs.get("input_data", "")),
             text=True,
             capture_output=True,

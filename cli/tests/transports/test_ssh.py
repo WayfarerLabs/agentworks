@@ -63,21 +63,6 @@ def test_run_login_shell_wraps_with_dollar_shell_lc() -> None:
         assert argv[-1] == "$SHELL -lc 'echo hi'"
 
 
-def test_run_env_coalesces_into_one_set_env_arg() -> None:
-    """``-o SetEnv=`` is emitted once with all pairs coalesced (ssh_config(5)
-    takes only the first SetEnv occurrence, so a per-pair option drops
-    later pairs silently)."""
-    t = SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks")
-    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
-        mock_run.return_value = _ok_completed()
-        t.run("echo hi", env={"A": "1", "B": "two words"})
-        argv = mock_run.call_args[0][0]
-        set_env_args = [a for a in argv if a.startswith("SetEnv=")]
-        assert len(set_env_args) == 1
-        assert 'A="1"' in set_env_args[0]
-        assert 'B="two words"' in set_env_args[0]
-
-
 def test_run_default_closes_stdin_with_dash_n_and_no_tt() -> None:
     """Non-interactive ``run()`` allocates no TTY and closes stdin with
     ssh's own ``-n``: a stdin-reading remote command then cannot hang and

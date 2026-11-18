@@ -1282,11 +1282,12 @@ collateral it makes stale.
   Built, except the `console start` row of the pane-secret table (open question 3).
 - **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
   amended. Built, with slice 8's `AcceptEnv` search brought forward: no request sends environment by
-  `SetEnv` (the only `SetEnv` builder left is `agentworks.ssh`'s, whose transports no command
-  reaches), so init removes the `AcceptEnv *` fragment too, reloading sshd only when it was there,
-  and, with no Agentworks path needing `AGENTWORKS_*` or `AW_*` across sudo (the launcher builds
-  each payload's environment itself), the `env_keep` fragment as well, in one `rm -f` with the
-  setenv grant (`_remove_retired_sudoers_fragments`). ADR 0026 supersedes ADRs 0014 and 0017 whole.
+  `SetEnv` (the legacy transports' builder, `agentworks.ssh._set_env_args`, which no command
+  reached, is deleted with their `env` parameters and its tests), so init removes the `AcceptEnv *`
+  fragment too, reloading sshd only when it was there, and, with no Agentworks path needing
+  `AGENTWORKS_*` or `AW_*` across sudo (the launcher builds each payload's environment itself), the
+  `env_keep` fragment as well, in one `rm -f` with the setenv grant
+  (`_remove_retired_sudoers_fragments`). ADR 0026 supersedes ADRs 0014 and 0017 whole.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
   migration. Built (Sessions: the manager).
 - **D3 and D4 share one reinit pass** (decision 9): each guest-state retirement is an idempotent

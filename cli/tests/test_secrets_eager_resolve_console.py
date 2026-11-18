@@ -210,8 +210,8 @@ def test_console_build_secret_targets_excludes_session_attach_panes(
     """_console_build_secret_targets enumerates only the panes that
     OPEN NEW SHELLS: the admin shell (when set) and each configured
     helper shell pane. Session-attach windows are deliberately
-    excluded per FRD R4 (they join existing tmux servers; SetEnv on
-    the SSH connection doesn't flow into the existing server's panes).
+    excluded per FRD R4 (they join existing tmux servers, whose panes
+    no environment sent with the attach reaches).
 
     Pins enumeration shape (admin_shell present, helper shells one-per-
     config, no session-attach pane). The per-pane scope-selection
