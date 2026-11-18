@@ -3,7 +3,7 @@ derived graph, the unwind parity oracle (``create_vm``'s rollback), and
 the reinit gate.
 
 Real config, registry, resolver, and backend loop; the platform's
-backend ops, the initializer, and the transports are the fakes, same
+backend ops, the initializer, and the VM access are the fakes, same
 surfaces the imperative oracle tests use.
 """
 

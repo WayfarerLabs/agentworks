@@ -60,7 +60,7 @@ def rehome_workspace(
     """Move a workspace to a new directory path.
 
     ``interaction`` is checked first, ahead of the session-status guard:
-    the guard opens SSH transports and repairs stored PIDs, and the
+    the guard reaches the VM and repairs stored PIDs, and the
     boundary that would otherwise reject the policy is past all of it, so
     a rejected rehome would already have touched the VM and the rows.
     """

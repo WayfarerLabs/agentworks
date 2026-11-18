@@ -4,7 +4,7 @@ shape), the banner and failure parity with the imperative commands, and
 the grant-all reconciliation riding the realization body.
 
 Real config, registry, resolver, and backend loop (env-var backend);
-the platform's backend ops, the reachability probe, the transports,
+the platform's backend ops, the reachability probe, the VM access,
 and the on-VM mutation (``create_agent_on_vm``) are the fakes.
 """
 

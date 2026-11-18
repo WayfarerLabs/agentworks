@@ -2,7 +2,7 @@
 
 Prepare before the command's single secret-resolution boundary. Execute only
 with those prepared inputs and values, under the core mutation's existing guard.
-Install-command transports remain independent of this setup environment.
+Install commands run without this setup environment.
 """
 
 from __future__ import annotations

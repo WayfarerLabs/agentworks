@@ -215,7 +215,7 @@ def reinit_vm(
 
         # Validate the configured public/private pair after all cheap declaration
         # and recipe checks, but before the applied-state boundary, activation,
-        # secret resolution, or transport construction. Authorized-key
+        # secret resolution, or the first connection. Authorized-key
         # reconciliation repeats this read immediately before its remote write so
         # a path replacement during the operation still fails safely.
         from agentworks.vms.applied_state import prepare_configured_ssh_identity
@@ -227,7 +227,7 @@ def reinit_vm(
 
         # Reinit is the one establishment path that may operate on a historic VM
         # with no SSH evidence. Known drift still refuses before activation or
-        # transport construction.
+        # the first connection.
         _mgr.require_vm_ssh_boundary(db, config, vm, allow_not_recorded=True)
 
         _mgr.verify_tailscale_available()

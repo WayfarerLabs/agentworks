@@ -4,7 +4,7 @@ The live publisher projects such an owner identity-only, so every command
 still loads its registry, each refused owner can be repaired in turn, and a
 command acting on the refused owner itself refuses through its own decode.
 Real config, registry and desired state; the platform's backend operations,
-the on-VM mutation and the transports are fakes.
+the on-VM mutation and the VM access are fakes.
 """
 
 from __future__ import annotations

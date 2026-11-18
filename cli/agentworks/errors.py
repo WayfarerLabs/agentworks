@@ -214,7 +214,7 @@ class ProvisioningError(ExternalError):
 
 
 class BackupError(ExternalError):
-    """A backup operation failed (tar, scp, snapshot)."""
+    """A backup operation failed (the guest archive, its download, or a snapshot)."""
 
 
 class ConfigError(AgentworksError):

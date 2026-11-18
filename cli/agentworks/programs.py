@@ -7,8 +7,8 @@ current directory. A program started through :func:`resolve_program`, which
 considers only absolute ``PATH`` elements, is never one planted in whatever
 directory the operator runs ``agw`` from. Every workstation program ``agw``
 starts by name goes through it, and :func:`is_installed` answers whether one
-is there by the same lookup. The OpenSSH client of the execution
-transport has its own resolver (``execution.client``), which uses
+is there by the same lookup. The OpenSSH client the execution core
+starts has its own resolver (``execution.client``), which uses
 :func:`find_program` on POSIX and fixed locations on Windows.
 """
 

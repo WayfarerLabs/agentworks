@@ -328,9 +328,9 @@ def _pinned_options() -> tuple[tuple[str, str], ...]:
 
 
 def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
-    """The ``-o`` arguments for ``ssh`` or ``scp`` under ``trust``.
+    """The ``-o`` arguments for ``ssh`` under ``trust``.
 
-    ``VM`` mode reads the store now, at spawn rather than when the transport was
+    ``VM`` mode reads the store now, at spawn rather than when the access was
     built, and raises :class:`TrustMissing` without a record.
 
     Every VM mode pins the global known-hosts file to the null device and

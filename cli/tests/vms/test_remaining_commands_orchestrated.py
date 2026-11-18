@@ -12,7 +12,7 @@ validation pre-gate.
 
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend power ops, the reachability probe, and the
-SSH/subprocess transports are the fakes.
+VM access and local subprocesses are the fakes.
 """
 
 from __future__ import annotations

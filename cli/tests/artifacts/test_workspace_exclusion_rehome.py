@@ -29,7 +29,7 @@ from tests.vm_access_support import Call
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
 
-class RehomeTransport(Guest):
+class RehomeGuest(Guest):
     """Keep actual copy/Git operations but suppress host ownership and ancestor changes.
 
     ``commands`` holds every command and script the access was asked to run.
@@ -69,7 +69,7 @@ def save(db: Database, name: str, claims: tuple[NativeClaim, ...], files: tuple[
 def move_case(db, deletion, tmp_path, monkeypatch):
     import grp
 
-    target = RehomeTransport(tmp_path / "guest")
+    target = RehomeGuest(tmp_path / "guest")
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     db.update_vm_tailscale("box", "box")
     group = grp.getgrgid(os.getgid()).gr_name

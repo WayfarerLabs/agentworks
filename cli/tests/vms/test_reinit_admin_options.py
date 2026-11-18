@@ -1,7 +1,7 @@
 """``vm reinit --admin-template`` and ``--admin-spec``: retain, replace and clear the admin layer.
 
 Real config, registry and desired state; the initializer and the VM's
-transports are fakes, as in ``test_create_reinit_orchestrated``.
+access are fakes, as in ``test_create_reinit_orchestrated``.
 """
 
 from __future__ import annotations
