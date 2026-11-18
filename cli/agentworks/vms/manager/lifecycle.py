@@ -103,9 +103,10 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
     VM, so the delete guidance is the only hint.
     """
     from agentworks.execution import oplog
+    from agentworks.path_rendering import format_host_path
 
     logs = oplog.vm_logs(vm_name, stem="vm-create")
-    log_hint = f"\nDetails: {logs[0]}" if logs else ""
+    log_hint = f"\nDetails: {format_host_path(logs[0])}" if logs else ""
 
     vm = db.get_vm(vm_name)
     if vm is not None and vm.provisioning_status != ProvisioningStatus.COMPLETE.value:

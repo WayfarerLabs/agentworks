@@ -530,15 +530,13 @@ def _check_required_tools() -> HealthGroup:
     """
     from agentworks.execution import resolve_ssh
     from agentworks.execution.errors import ClientUnsupported
-    from agentworks.programs import resolve_program
+    from agentworks.programs import is_installed
 
     g = HealthGroup("Required tools")
-    try:
-        resolve_program("tailscale")
-    except FileNotFoundError:
-        g.fail("tailscale", "not found")
-    else:
+    if is_installed("tailscale"):
         g.ok("tailscale")
+    else:
+        g.fail("tailscale", "not found")
     try:
         client = resolve_ssh()
     except ClientUnsupported as e:

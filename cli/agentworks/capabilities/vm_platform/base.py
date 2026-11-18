@@ -39,12 +39,12 @@ if TYPE_CHECKING:
 class BootstrapProgress(Protocol):
     """Value-free progress sink for create-time VM bootstrap: the create's operation log.
 
-    Platforms report the bootstrap transcript through this narrow surface
-    without depending on the VM manager or the concrete log that owns the
-    durable file. ``record`` is the ``log`` callable a root script takes
-    (``root_script.run``, ``tailscale_join``), so the join and the address
-    read land in the same log with their secret redacted. The manager retains
-    construction and lifecycle ownership of the log.
+    The surface a platform may write: steps, output, warnings and errors, and
+    ``record``, the ``log`` callable a root script takes (``root_script.run``,
+    ``tailscale_join``), so the join and the address read land in the same
+    log with their secret redacted. It leaves out the log's ``close``: the
+    manager constructs the log and closes it once, after the platform's create
+    and initialization, so a platform must not end it.
     """
 
     def step(self, name: str) -> None: ...
