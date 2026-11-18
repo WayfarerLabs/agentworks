@@ -195,6 +195,15 @@ from ._status import (
 from ._status import (
     owner_run_command as owner_run_command,
 )
+from ._tmux_server import (
+    SessionTmuxServer as SessionTmuxServer,
+)
+from ._tmux_server import (
+    require_session_tmux_server as require_session_tmux_server,
+)
+from ._tmux_server import (
+    resolve_session_tmux_server as resolve_session_tmux_server,
+)
 
 __all__ = [
     "create_session",
@@ -216,6 +225,9 @@ __all__ = [
     "check_session_status",
     "batch_check_status",
     "observe_session_statuses",
+    "SessionTmuxServer",
+    "resolve_session_tmux_server",
+    "require_session_tmux_server",
     "ensure_pids_batch",
     "filter_sessions",
     "_ensure_pid",

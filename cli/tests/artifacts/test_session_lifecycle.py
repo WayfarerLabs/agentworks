@@ -400,7 +400,12 @@ def test_deleted_name_reuses_no_private_run_or_uuid(lifecycle):
     lifecycle.db.delete_session("s1")
     assert all(not path.exists() for path in files)
     replacement = lifecycle.db.insert_session(
-        "s1", "ws1", "claude", SessionMode.AGENT, agent_name="a1", socket_path="/tmp/s1.sock"
+        "s1",
+        "ws1",
+        "claude",
+        SessionMode.AGENT,
+        agent_name="a1",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
     )
     assert replacement.session_uuid != old.session_uuid
     lifecycle.restart()

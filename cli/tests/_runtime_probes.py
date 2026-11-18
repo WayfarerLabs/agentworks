@@ -5,7 +5,11 @@ from __future__ import annotations
 import copy
 import re
 import shlex
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from agentworks.db import SessionRow
+    from agentworks.sessions.manager import SessionTmuxServer
 
 _FRAME = re.compile(r"printf '\\nAGW_RUNTIME_([A-Z]+)='; (?:printf '\\nAGW_RUNTIME_STDERR=' >&2; )?")
 
@@ -25,40 +29,45 @@ def socket_guard(command: str) -> tuple[str, str] | None:
     return shlex.split(guarded[1])[0], shlex.split(guarded[2])[0]
 
 
-# ``as_socket_owner_line``'s switch to the owner: plain, or onto a relay terminal of its own.
-_OWNER_SWITCH = re.compile(r"(?P<relay>cd / && runuser --pty|runuser) -u (?P<owner>\S+) -- sh -c ")
+# ``tmux.owner_client_command`` around ``/bin/sh -c``, as ``as_socket_owner_line`` switches to the
+# owner: plain, or onto a relay terminal of its own.
+_OWNER_SWITCH = re.compile(
+    r"\(cd / && sudo -n \S*runuser(?P<relay> --pty)? -u (?P<owner>\S+) -- /bin/sh -c (?P<line>.*)\)",
+    re.DOTALL,
+)
 
 
 def owner_switch(command: str) -> tuple[str, bool] | None:
     """The owner a guarded line switches to and whether onto a relay terminal, or ``None`` for no switch."""
     guarded = _SOCKET_GUARD.fullmatch(command)
-    switch = _OWNER_SWITCH.match(guarded["line"] if guarded is not None else command)
+    switch = _OWNER_SWITCH.fullmatch(guarded["line"] if guarded is not None else command)
     if switch is None:
         return None
-    return shlex.split(switch["owner"])[0], switch["relay"] != "runuser"
+    return shlex.split(switch["owner"])[0], switch["relay"] is not None
 
 
 def owner_probe_line(command: str) -> str:
     """The line a socket-owner request runs as the socket's owner, else ``command``.
 
     Unwraps ``tmux.as_socket_owner_line``'s guard and, when present, its
-    switch to the owner (``runuser ... -- sh -c LINE``), as the stale-socket
-    probe, every owner read and every attach send them.
+    switch to the owner (``owner_client_command`` around ``/bin/sh -c LINE``),
+    as the stale-socket probe, every owner read and every attach send them.
     """
     guarded = _SOCKET_GUARD.fullmatch(command)
     if guarded is not None:
         command = guarded["line"]
-    switch = _OWNER_SWITCH.match(command)
+    switch = _OWNER_SWITCH.fullmatch(command)
     if switch is None:
         return command
-    return shlex.split(command[switch.end() :])[0]
+    return shlex.split(switch["line"])[0]
 
 
 def runtime_probe_parts(command: str) -> tuple[str, str] | None:
-    match = _FRAME.search(owner_probe_line(command))
+    line = owner_probe_line(command)
+    match = _FRAME.search(line)
     if match is None:
         return None
-    return match.group(1), command[match.end() :]
+    return match.group(1), line[match.end() :]
 
 
 class _NativeResult(Protocol):
@@ -76,3 +85,12 @@ def framed_runtime_result[T: _NativeResult](command: str, result: T) -> T:
     if "AGW_RUNTIME_STDERR=" in command:
         framed.stderr = "\nAGW_RUNTIME_STDERR=" + result.stderr
     return framed
+
+
+def server_for(row: SessionRow, *, admin_username: str = "admin") -> SessionTmuxServer:
+    """The tmux server ``resolve_session_tmux_server`` validates for a row its own agent or admin owns."""
+    from agentworks.sessions.manager import SessionTmuxServer
+    from agentworks.sessions.tmux import socket_owner
+
+    assert row.socket_path is not None
+    return SessionTmuxServer(row.socket_path, socket_owner(row.socket_path, admin_username=admin_username))

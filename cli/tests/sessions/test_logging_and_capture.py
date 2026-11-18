@@ -34,7 +34,8 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(
     else:
         db, events = _restart_fixture(tmp_path, monkeypatch)
         db._conn.execute(
-            "UPDATE sessions SET mode = ?, agent_name = NULL WHERE name = 's1'", (SessionMode.ADMIN.value,)
+            "UPDATE sessions SET mode = ?, agent_name = NULL, socket_path = ? WHERE name = 's1'",
+            (SessionMode.ADMIN.value, "/run/agentworks/admin-tmux-sockets/admin/s1.sock"),
         )
         db._conn.commit()
     stub_build_registry(monkeypatch)

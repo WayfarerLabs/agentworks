@@ -8,6 +8,7 @@ VM platform plugins must move to vm-platform contract version 2 (see
 [Third-party VM platforms](#third-party-vm-platforms)), and third-party harness integrations, Git
 credential providers and secret backends to new contract versions as well (see
 [their section](#third-party-harness-integrations-git-credential-providers-and-secret-backends)).
+Tmux clients aimed at an agent session's server now run as that agent.
 
 ## Adopt desired runtime state
 
@@ -103,6 +104,38 @@ hand. Restoring the database does not undo provider or guest changes made since 
 
 See [Desired runtime state](desired-runtime-state.md) for scope, failure handling and JSON output
 compatibility. Refresh shell completions after upgrading with `agw completion install`.
+
+## Agent session tmux clients run as the agent
+
+Agentworks no longer runs a tmux client as root or as the VM admin against an agent session's tmux
+server. Every such client started from the admin connection, from status checks and `session stop`
+to `session attach`, `session logs` and named console windows, now switches to the agent account
+with `sudo` and `runuser` first. Attach clients run on a terminal of their own (`runuser --pty`).
+What to expect:
+
+- **Guest authentication logs gain entries.** Each switch is a `sudo` invocation plus a `runuser`
+  session for the agent account, so `/var/log/auth.log` or the journal records both for every probe,
+  including every poll while a console window waits for a stopped agent session.
+- **Attach no longer carries your SSH environment into the agent's server.** `sudo` resets the
+  environment, so variables tmux would otherwise copy into the session on attach, such as
+  `SSH_AUTH_SOCK`, no longer reach it. Under `sudo`'s default policy `TERM` and the locale variables
+  still do.
+- **Existing console windows keep their old attach loop until rebuilt.** Run
+  `agw console restart NAME` for each running named console that shows an agent session.
+- **Workspace tmuxinator configs from earlier releases are not covered until rewritten.** A
+  workspace's `.tmuxinator.yml` that an earlier release generated starts plain tmux clients as the
+  VM admin, including against agent sessions' servers. Agentworks rewrites it, with the switch, when
+  a session in that workspace is next created, started, restarted or deleted; until then, do not
+  start it on a VM with agent sessions.
+- **Rows with a misplaced socket path stop being probed.** A session's stored socket path must sit
+  directly inside its agent's socket directory or, for an admin session, the VM admin's, and be
+  named for its session. Any other path reports `unknown` status instead of being probed at whatever
+  it names, and `session logs`, `session attach` and teardown refuse it, for admin sessions as well
+  as agent sessions.
+- **A socket that is not the agent's own is never reached.** Before switching, root checks the
+  socket: one that is a link, is not a socket or belongs to another account reads as `unknown`,
+  `session attach` refuses it with a one-line reason, and a console window for such a session says
+  so once and keeps waiting for it.
 
 ## Import existing host keys
 
@@ -404,15 +437,6 @@ Named consoles keep the older path for now.
   that owns it, where it read admin sessions as the admin and elevated for agent sessions; a session
   whose socket path is a link, is not a socket or belongs to another account shows `unknown`. A
   listing that cannot read a VM now warns once with the reason.
-- **An agent's session is reached only as the agent.** Every read of an agent session's tmux server,
-  its teardown by `session stop --all`, `agent delete` or `workspace delete`, `session attach`,
-  `session logs`, the workspace's tmuxinator window for it and a named console's window for it run
-  as the agent, where these ran as root or as the admin. Neither root nor the admin acts as a client
-  of a tmux server an agent controls. Attaching switches to the agent with `sudo -n`, which the
-  admin already has, and each attach runs on a terminal of its own that `runuser --pty` relays to
-  yours, so no agent process can reach your terminal. An attach that finds the session's socket path
-  is a link, is not a socket or belongs to another account refuses with a one-line reason; a console
-  window for such a session says so once and keeps waiting for it.
 - **Launches are logged as the session's owner.** `session create`, `start` and `restart` write
   every request of the launch, an agent session's requests as the agent included, to the command's
   operation log by shape. `session stop` writes one `session-stop` log per VM and

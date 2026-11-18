@@ -11,11 +11,11 @@ from agentworks.capabilities.harness_integration import require_implemented_star
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import ExternalError, StateError
 from agentworks.orchestration.secrets import ScopedSecrets
-from agentworks.sessions.manager import _teardown
 from agentworks.sessions.manager._lifecycle import (
     _mark_runtime_unknown,
     _redacted_launch_errors,
 )
+from agentworks.sessions.manager._tmux_server import require_session_tmux_server, resolve_session_tmux_server
 from agentworks.sessions.tmux import access_run_command
 from agentworks.vms.manager import operation_log
 
@@ -70,6 +70,7 @@ def _execute_session_start(
     from agentworks.sessions.manager._runtime import require_session_launch_identity
 
     session = require_session_launch_identity(definition)
+    server = resolve_session_tmux_server(db, session)
     ws, vm = definition.workspace, definition.vm
     name, template, session_node, scope = session.name, definition.template, definition.session_node, definition.scope
     replace_running, force, intent = definition.replace_running, definition.force, definition.intent
@@ -82,8 +83,8 @@ def _execute_session_start(
     from agentworks.sessions.manager._runtime_observation import checkpoint_session_identity
 
     if prepared.checkpoint_only:
-        checkpoint_session_identity(db, session, vm=vm, admin=admin_access)
-    observed_now = observe_session_runtime(session, admin=admin_access, db=db)
+        checkpoint_session_identity(db, session, vm=vm, admin=admin_access, server=server)
+    observed_now = observe_session_runtime(session, admin=admin_access, server=server)
     if observed_now is SessionStatus.UNKNOWN:
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
     if observed_now is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING:
@@ -108,8 +109,10 @@ def _execute_session_start(
     # Evidence repair is deferred until every eligible workload has valid values.
     if not is_legacy or session.pid in {None, PID_STOPPED}:
         session = _mgr._ensure_pid(session, admin=admin_access, db=db)
-        is_legacy = session.socket_path is None
-    status = _mgr.check_session_status(session, admin=admin_access, db=db) if not is_legacy else observed_now
+        # Repair can give an old admin row its dedicated socket.
+        server = resolve_session_tmux_server(db, session)
+        is_legacy = server is None
+    status = _mgr.check_session_status(session, admin=admin_access, server=server) if not is_legacy else observed_now
     if status is SessionStatus.UNKNOWN:
         raise StateError("session runtime became unknown before execution", entity_kind="session", entity_name=name)
     if status is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING:
@@ -138,7 +141,7 @@ def _execute_session_start(
             require_socket_path,
         )
 
-        socket_path = _teardown._validated_socket(db, session).path
+        socket_path = require_session_tmux_server(db, session).socket_path
         require_socket_path(socket_path, run_command=session_run_command)
         probe = capture_tmux_server_fingerprint(run_command=session_run_command, socket_path=socket_path)
         observed = probe.fingerprint
@@ -248,7 +251,9 @@ def _execute_session_start(
         output.info(f"{operation.title()}ing session '{name}'...")
 
         session = require_session_launch_identity(definition)
-        observed_now = observe_session_runtime(session, admin=admin_access, db=db)
+        observed_now = observe_session_runtime(
+            session, admin=admin_access, server=resolve_session_tmux_server(db, session)
+        )
         if observed_now is SessionStatus.UNKNOWN or (
             observed_now is SessionStatus.RUNNING and prepared.observed_status is not SessionStatus.RUNNING
         ):

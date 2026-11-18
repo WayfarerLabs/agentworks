@@ -17,6 +17,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
+from agentworks.sessions.manager._status import _batch_row_bound_seconds
 from agentworks.sessions.multi_console import console_listing
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT
 from agentworks.vms.manager import inspect
@@ -176,12 +177,12 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     events: list[str] = []
     vm = db.get_vm("box")
     assert vm is not None
-    name_key = base64.b64encode(b"work").decode("ascii")
 
     def read_status(call: Call) -> Result:
         request = call.request
         assert isinstance(request, Script)
-        assert (call.identity, request.elevated, request.deadline) == (Admin(), True, 10)
+        # The guest timeout plus one row's bound, whatever the row count.
+        assert (call.identity, request.elevated, request.deadline) == (Admin(), True, 10 + _batch_row_bound_seconds())
         assert isinstance(request.stdin, Bytes)
         lines = request.stdin.data.decode().splitlines()
         assert len(lines) == 1
@@ -191,7 +192,7 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
         assert base64.b64decode(encoded_owner, validate=True).decode() == "agentworks"
         assert pid == "100"
         events.append("status-read")
-        return Result(Completed(0), f"\nAGW_RUNTIME_BATCH=S:{name_key}:0::0::0::0:\n".encode())
+        return Result(Completed(0), b"\nAGW_RUNTIME_BATCH=S:1:0::0::0::0:\n")
 
     def require_identity(*_args: object, **_kwargs: object) -> None:
         events.append("ssh-identity")

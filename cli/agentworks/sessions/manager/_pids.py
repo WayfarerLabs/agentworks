@@ -122,8 +122,8 @@ def _repair_session_pid(
     """Core repair logic for a single session. Returns True if the DB was updated.
 
     Every read runs on ``admin`` as one dispatch within the observation
-    deadline, a dedicated server's as its owner after its socket path is
-    validated against the owner's directory (``owner_run_command``). Raises
+    deadline, a dedicated server's as its owner after its socket path passes
+    the owner rule (``resolve_session_tmux_server``, ``owner_run_command``). Raises
     StateError if the session is alive but PID/boot_id can't be recovered,
     or ConnectivityError if the VM is unreachable.
     """
@@ -139,8 +139,8 @@ def _repair_session_pid(
     from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 
     expected = SessionRuntimeSnapshot.from_session(session)
-    sock = session.socket_path
-    if sock is None:
+    server = _mgr.resolve_session_tmux_server(db, session)
+    if server is None:
         # A legacy row's shared server, and the dedicated address it may take, are the admin's.
         run_command: RunCommand = access_run_command(admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False)
         presence = probe_tmux_session(
@@ -196,10 +196,8 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        from agentworks.sessions.manager import _teardown
-
-        socket = _teardown._validated_socket(db, session)
-        run_command = _mgr.owner_run_command(admin, session, socket)
+        sock = server.socket_path
+        run_command = _mgr.owner_run_command(admin, server)
         require_socket_path(sock, run_command=run_command)
         probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=sock)
         if probe.status is ProbeStatus.PRESENT:

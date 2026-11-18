@@ -1,7 +1,8 @@
 """The batch status script against a real tmux server, run as root and reading each row as its owner.
 
-The batch observation runs its whole script elevated, but only to drop to each
-row's socket owner with ``runuser``: no tmux read runs as root, and root first
+The batch observation runs its whole script elevated, but only to switch to
+each row's socket owner (``tmux.owner_client_command``): no tmux read runs as
+root, and root first
 refuses a socket path that is a link, is not a socket, or belongs to another
 account. This runs the script exactly as the probe sends it, under
 ``sudo -n``, against a server this test's user started: the sudo lane,
@@ -23,6 +24,7 @@ import pytest
 from agentworks.db import SessionMode, SessionRow, SessionStatus
 from agentworks.execution.requests import Bytes, Script
 from agentworks.execution.results import Completed, Result
+from agentworks.sessions.manager import SessionTmuxServer
 from agentworks.sessions.manager._status import batch_check_status
 from tests.conftest import current_user_name
 from tests.execution.conformance.lanes import sudo_granted, unavailable
@@ -50,15 +52,18 @@ def as_root(call: Call) -> Result:
     return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
 
 
-def statuses(rows: list[SessionRow], *, owner: str | None = None) -> dict[str, SessionStatus]:
-    """Batch status over the admin's access, its elevated requests run as root here, each row owned by ``owner``.
+def statuses(rows: list[SessionRow]) -> dict[str, SessionStatus]:
+    """Batch status over the admin's access, its elevated requests run as root here.
 
-    ``owner`` defaults to this test's user, who owns the server.
+    Each row's server is the account whose directory holds its socket, as the
+    owner rule names it.
     """
     access = RecordingVMAccess([], Admin())
     access.answer = as_root
-    owner = owner or current_user_name()
-    return batch_check_status(rows, admin=access, owners={row.name: owner for row in rows})
+    return batch_check_status(
+        [(row, SessionTmuxServer(str(row.socket_path), None)) for row in rows],
+        admin=access,
+    )
 
 
 @pytest.fixture
@@ -69,7 +74,9 @@ def server() -> Iterator[str]:
     environment = {key: value for key, value in os.environ.items() if key != "TMUX"}
     # pytest's nested tmp_path is longer than sun_path on some hosts.
     with tempfile.TemporaryDirectory(prefix="agw-batch-root-", dir="/tmp") as directory:
-        socket = str(Path(directory) / "s.sock")
+        # In a directory named for its owner, this test's user, as the owner rule places sockets.
+        (Path(directory) / current_user_name()).mkdir()
+        socket = str(Path(directory) / current_user_name() / "s.sock")
         tmux = ["tmux", "-f", "/dev/null", "-S", socket]
         subprocess.run([*tmux, "new-session", "-d", "-s", SESSION, "sleep 600"], check=True, env=environment)
         try:
@@ -102,7 +109,12 @@ def test_a_missing_session_on_that_server_reads_as_its_absence(server: str) -> N
 
 
 def test_a_socket_owned_by_another_account_than_the_rows_is_never_read(server: str) -> None:
-    assert statuses([row(server)], owner="root") == {SESSION: SessionStatus.UNKNOWN}
+    # The same socket, linked into root's directory: the row names root, but this test's user owns it.
+    other = Path(server).parent.parent / "root"
+    other.mkdir()
+    os.link(server, other / "s.sock")
+
+    assert statuses([row(str(other / "s.sock"))]) == {SESSION: SessionStatus.UNKNOWN}
 
 
 def test_a_link_to_the_owners_socket_is_never_read(server: str) -> None:

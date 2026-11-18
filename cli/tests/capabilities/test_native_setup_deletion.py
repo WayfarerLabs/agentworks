@@ -247,7 +247,12 @@ def test_workspace_delete_keeps_parent_policy_for_unreadable_session_artifacts(
 
     db.update_vm_tailscale("box", "box")
     db.insert_session(
-        "session", "project", "shell", SessionMode.AGENT, agent_name="agent", socket_path="/tmp/session.sock"
+        "session",
+        "project",
+        "shell",
+        SessionMode.AGENT,
+        agent_name="agent",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-agent/session.sock",
     )
     _store_applied_state(db, "session", "session", applied_state)
     monkeypatch.setattr("agentworks.sessions.manager.ensure_pids_batch", lambda sessions, **kwargs: sessions)

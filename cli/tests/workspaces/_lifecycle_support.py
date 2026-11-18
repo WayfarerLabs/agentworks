@@ -101,7 +101,7 @@ def seed_live_session(db: Database, *, name: str, ws: str) -> None:
     db.insert_session(name, ws, "default", SessionMode.ADMIN)
     db.update_session_runtime(
         name,
-        socket_path=f"/tmp/{name}.sock",
+        socket_path=f"/run/agentworks/admin-tmux-sockets/agentworks/{name}.sock",
         pid=4242,
         boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         tmux_server_start_ticks=77,

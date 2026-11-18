@@ -334,6 +334,11 @@ def delete_agent(
         ssh_logger = SSHLogger(vm.name, "agent-delete")
         try:
             output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
+            # Refuse a session row the owner rule rejects before any VM work.
+            from agentworks.sessions.manager import resolve_session_tmux_server
+
+            for session in agent_sessions:
+                resolve_session_tmux_server(db, session)
             if vm_node is None:
                 # The standalone composition root: build the boundary here.
                 from agentworks.bootstrap import load_request_registry

@@ -36,7 +36,7 @@ from agentworks.sessions.tmux import (
     finalize_session_start,
     parse_process_start_ticks,
 )
-from tests._runtime_probes import framed_runtime_result
+from tests._runtime_probes import framed_runtime_result, owner_switch
 from tests.vm_access_support import Admin, Call, RecordingVMAccess, files_over_target
 
 # ---------------------------------------------------------------------------
@@ -302,6 +302,10 @@ def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None
     absent = _CleanupTarget("no server running on /run/agentworks/s.sock")
     assert _cleanup_stale_sockets_under(files_over_target(absent), "/run/agentworks", owner="agt-a") == 1
     assert sum("rm -f -- " in command for command in absent.commands) == 1
+    # The server probe runs as the directory's owner; listing and removal do not.
+    probes = [command for command in absent.commands if "list-sessions" in command]
+    assert len(probes) == 1 and owner_switch(probes[0]) == ("agt-a", False)
+    assert all(owner_switch(command) is None for command in absent.commands if "list-sessions" not in command)
 
 
 def test_post_teardown_probe_retries_one_indeterminate_transition() -> None:
@@ -847,3 +851,58 @@ def test_confirmed_death_outweighs_expected_sharing_capture_and_cleanup_failures
     assert "37" in str(caught.value)
     assert sum("capture-pane" in command for command in calls) == 2
     assert any("kill-server" in command for command in calls)
+
+
+# ---------------------------------------------------------------------------
+# Tmux clients against a server another account owns
+# ---------------------------------------------------------------------------
+
+_AGENT_SOCKET = "/run/agentworks/agent-tmux-sockets/agt-owner/s1.sock"
+
+
+_ADMIN = "agentworks"
+
+
+@pytest.mark.parametrize(
+    ("socket_path", "owner"),
+    [
+        (_AGENT_SOCKET, "agt-owner"),
+        ("/run/agentworks/admin-tmux-sockets/agentworks/s1.sock", None),
+    ],
+)
+def test_socket_owner_names_the_account_whose_directory_holds_the_socket(socket_path: str, owner: str | None) -> None:
+    from agentworks.sessions.tmux import socket_owner
+
+    assert socket_owner(socket_path, admin_username=_ADMIN) == owner
+
+
+@pytest.mark.parametrize(
+    "socket_path",
+    [
+        "/tmp/s1.sock",
+        "relative/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt-owner/nested/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/../agt-owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt-owner/..",
+        "/run/agentworks/agent-tmux-sockets/agt-owner//s1.sock",
+        "/run/agentworks/agent-tmux-sockets/root/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agentworks/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/Agt-Owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/-owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/" + "a" * 33 + "/s1.sock",
+        "/run/agentworks/admin-tmux-sockets/other-admin/s1.sock",
+        "/run/agentworks/admin-tmux-sockets/agentworks/nested/s1.sock",
+        # A name agentworks would not give a session's socket.
+        "/run/agentworks/agent-tmux-sockets/agt-owner/s1",
+        "/run/agentworks/agent-tmux-sockets/agt-owner/.sock",
+        "/run/agentworks/agent-tmux-sockets/agt-owner/S1.sock",
+        "/run/agentworks/admin-tmux-sockets/agentworks/s1;x.sock",
+    ],
+)
+def test_socket_owner_refuses_every_other_path(socket_path: str) -> None:
+    from agentworks.sessions.tmux import socket_owner
+
+    with pytest.raises(StateError):
+        socket_owner(socket_path, admin_username=_ADMIN)

@@ -581,7 +581,11 @@ def test_session_json_status_is_explicit_and_plain_list_is_local(
     assert unchanged is not None and (unchanged.pid, unchanged.boot_id) == (None, None)
 
     db.update_session_runtime(
-        "live", socket_path="/tmp/live.sock", pid=None, boot_id=None, tmux_server_start_ticks=None
+        "live",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/live.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
 
     def forbidden(*_args: object, **_kwargs: object) -> object:

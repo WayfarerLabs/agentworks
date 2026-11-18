@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.db import SessionMode
 from agentworks.errors import AgentworksError, ExternalError, StateError, UserAbort
 from agentworks.sessions.tmux import exact_tmux_target
 
@@ -411,19 +410,18 @@ def _add_session_window(
         output.warn(f"workspace for session '{member.session_name}' is missing; skipping window")
         return SessionWindowBuild(built=False)
 
+    from agentworks.sessions.manager import resolve_session_tmux_server
+
+    try:
+        server = resolve_session_tmux_server(db, session)
+    except StateError as exc:
+        output.warn(f"session '{session.name}' has no valid tmux socket ({exc}); skipping window")
+        return SessionWindowBuild(built=False)
+
     runtime_name = tmux_name or tmux_session_name(console_name)
     q_con = exact_tmux_target(runtime_name)
     q_session = shlex.quote(session.name)
-    agent_owner = None
-    if session.mode == SessionMode.AGENT.value:
-        from agentworks.sessions.manager import _teardown
-
-        try:
-            agent_owner = _teardown._validated_socket(db, session).owner
-        except StateError as error:
-            output.warn(f"{error}; skipping window")
-            return SessionWindowBuild(built=False)
-    wrapper = _attach_loop_wrapper(session.name, session.socket_path, agent_owner=agent_owner)
+    wrapper = _attach_loop_wrapper(session.name, server)
 
     # When appending a new member, target an explicit index one past the last
     # window so it lands at the tail rather than in a reclaimed low slot (see

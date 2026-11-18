@@ -17,6 +17,7 @@ from agentworks.execution.errors import ExecutionIncomplete, TrustMismatch, Trus
 from agentworks.execution.requests import Bytes, Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.sessions.manager import (
+    SessionTmuxServer,
     _needs_repair,
     _repair_session_pid,
     _validated_stored_start_ticks,
@@ -27,7 +28,7 @@ from agentworks.sessions.manager import (
 from agentworks.sessions.manager._status import (
     _batch_probe_command,
     _batch_probe_data,
-    _encoded_probe_field,
+    _batch_row_bound_seconds,
 )
 from agentworks.sessions.tmux import (
     ADMIN_SOCKET_ROOT,
@@ -115,13 +116,31 @@ def _session(
 
 
 def _owner(session: SessionRow) -> str:
-    """The socket owner the controller names for ``session``: the admin, or an agent account of its own."""
+    """The account that runs ``session``'s server in batch tests: the admin, or an agent account of its own."""
     return "admin" if session.mode == "admin" else f"agt-{session.name}"
 
 
+def _managed_socket(session: SessionRow) -> str:
+    """Where ``session``'s socket sits in batch tests: in :func:`_owner`'s managed directory."""
+    root = ADMIN_SOCKET_ROOT if session.mode == "admin" else AGENT_SOCKET_ROOT
+    return f"{root}/{_owner(session)}/{session.name}.sock"
+
+
 def _batch(sessions: list[SessionRow], *, admin: RecordingVMAccess) -> dict[str, SessionStatus]:
-    """``batch_check_status`` with each row's owner as the controller names it."""
-    return batch_check_status(sessions, admin=admin, owners={session.name: _owner(session) for session in sessions})
+    """``batch_check_status`` of the rows with a socket, each moved into its owner's managed directory.
+
+    Rows keep their order, so each row's 1-based position keys its reply line.
+    """
+    from dataclasses import replace
+
+    rows = []
+    for session in sessions:
+        if session.socket_path is not None:
+            row = replace(session, socket_path=_managed_socket(session))
+            rows.append(
+                (row, SessionTmuxServer(_managed_socket(session), None if session.mode == "admin" else _owner(session)))
+            )
+    return batch_check_status(rows, admin=admin)
 
 
 def _stdin_rows(request: Script) -> list[tuple[str, str, str, str]]:
@@ -144,7 +163,10 @@ def _stdin_rows(request: Script) -> list[tuple[str, str, str, str]]:
 
 
 class _Owners:
-    """The database reads ``_validated_socket`` makes: every agent's user is ``agt``, every VM's admin ``admin``."""
+    """The database reads ``resolve_session_tmux_server`` makes.
+
+    Every agent's user is ``agt``, every VM's admin ``admin``.
+    """
 
     def get_agent(self, _name: str) -> SimpleNamespace:
         return SimpleNamespace(linux_user="agt")
@@ -169,11 +191,14 @@ def _owned(session: SessionRow) -> SessionRow:
 
 def _check(session: SessionRow, *, admin: RecordingVMAccess) -> SessionStatus:
     """``check_session_status`` of ``session``, its socket in its owner's managed directory."""
-    return check_session_status(_owned(session), admin=admin, db=_Owners())  # type: ignore[arg-type]
+    from agentworks.sessions.manager import resolve_session_tmux_server
+
+    owned = _owned(session)
+    return check_session_status(owned, admin=admin, server=resolve_session_tmux_server(_Owners(), owned))  # type: ignore[arg-type]
 
 
 def _batch_row(
-    name: str,
+    position: int,
     *,
     has_returncode: int = 0,
     has_diagnostic: str = "",
@@ -185,7 +210,7 @@ def _batch_row(
     pid_fact: str = "present",
 ) -> str:
     return (
-        f"S:{_encoded_probe_field(name)}:{has_returncode}:{has_diagnostic.encode().hex()}:"
+        f"S:{position}:{has_returncode}:{has_diagnostic.encode().hex()}:"
         f"{server_returncode}:{server_diagnostic.encode().hex()}:"
         f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}:{pid_fact.encode().hex()}"
     )
@@ -206,10 +231,10 @@ def test_batch_mixed() -> None:
             "has-session": _FakeResult(
                 ok=True,
                 stdout=(
-                    _batch_row("a1")
+                    _batch_row(1)
                     + "\n"
                     + _batch_row(
-                        "s1",
+                        2,
                         has_returncode=1,
                         has_diagnostic="can't find session: s1",
                         server_returncode=1,
@@ -282,15 +307,22 @@ def test_batch_status_is_one_elevated_request_within_the_deadline_with_each_row_
         _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
         _session("s1", pid=None, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
     ]
-    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('a1')}\n{_batch_row('s1')}\n")})
+    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row(1)}\n{_batch_row(2)}\n")})
     admin = _admin(target)
 
     _batch(sessions, admin=admin)
 
     (request,) = admin.requests()
     assert isinstance(request, Script)
-    assert (request.elevated, request.deadline) == (True, GUEST_OBSERVATION_TIMEOUT_SECONDS)
-    assert _stdin_rows(request) == [("a1", "/sock", "agt-a1", "100"), ("s1", "/sock2", "admin", "-")]
+    # The guest timeout plus one row's bound, since rows are probed side by side.
+    assert (request.elevated, request.deadline) == (
+        True,
+        GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
+    )
+    assert _stdin_rows(request) == [
+        ("a1", f"{AGENT_SOCKET_ROOT}/agt-a1/a1.sock", "agt-a1", "100"),
+        ("s1", f"{ADMIN_SOCKET_ROOT}/admin/s1.sock", "admin", "-"),
+    ]
 
 
 @pytest.mark.parametrize("mode", ["admin", "agent"])
@@ -327,11 +359,17 @@ def test_a_status_read_that_does_not_complete_raises_after_one_dispatch_and_the_
     recorder = install_access_recorder(monkeypatch)
     recorder.answer = lambda call: Result(Unknown(UnknownReason.DEADLINE))
 
+    from agentworks.sessions.manager import resolve_session_tmux_server
+
     with pytest.raises(ExecutionIncomplete):
-        check_session_status(session, admin=recorder.access(), db=db)
+        check_session_status(session, admin=recorder.access(), server=resolve_session_tmux_server(db, session))
     assert observe_session_statuses([session], db=db, config=object()) == {"alpha": SessionStatus.UNKNOWN}
 
-    assert [request.deadline for request in recorder.requests("run")] == [GUEST_OBSERVATION_TIMEOUT_SECONDS] * 2
+    # The batch request adds one row's bound to the deadline, since rows are probed side by side.
+    assert [request.deadline for request in recorder.requests("run")] == [
+        GUEST_OBSERVATION_TIMEOUT_SECONDS,
+        GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
+    ]
 
 
 def test_batch_fleet_sends_a_constant_script_and_every_row_on_its_input() -> None:
@@ -349,7 +387,9 @@ def test_batch_fleet_sends_a_constant_script_and_every_row_on_its_input() -> Non
     admin = RecordingVMAccess([], Admin())
     admin.default_outcome = Result(
         Completed(0),
-        ("\nAGW_RUNTIME_BATCH=" + "\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
+        (
+            "\nAGW_RUNTIME_BATCH=" + "\n".join(_batch_row(index) for index, _ in enumerate(sessions, start=1)) + "\n"
+        ).encode(),
     )
 
     status_map = _batch(sessions, admin=admin)
@@ -358,7 +398,7 @@ def test_batch_fleet_sends_a_constant_script_and_every_row_on_its_input() -> Non
     assert isinstance(request, Script)
     assert request.source == runtime_probe_command(_batch_probe_command(), "BATCH")
     assert _stdin_rows(request) == [
-        (session.name, session.socket_path, _owner(session), str(session.pid)) for session in sessions
+        (session.name, _managed_socket(session), _owner(session), str(session.pid)) for session in sessions
     ]
     assert isinstance(request.stdin, Bytes) and len(request.stdin.data) > 32_767
     assert status_map == {session.name: SessionStatus.RUNNING for session in sessions}
@@ -377,44 +417,48 @@ def test_batch_command_is_valid_shell_syntax() -> None:
 
 @requires_symlinks
 @requires_posix_shell
-def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_trust(tmp_path: Path) -> None:
-    """Only read-only guest operations run, each row's tmux reads run as its owner through ``runuser``, and a
-    socket that is a link, is not a socket, or belongs to another account is never handed to tmux."""
+def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_trust(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only read-only guest operations run, each row's tmux reads run as its owner, and a socket that is
+    a link, is not a socket, or belongs to another account is never handed to tmux."""
     import pwd
     import socket
     import tempfile
     from pathlib import Path
 
+    from agentworks.sessions import tmux as tmux_module
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     audit = tmp_path / "audit"
 
-    for name in ("base64", "cat", "od", "stat", "tr"):
+    for name in ("base64", "cat", "od", "stat", "timeout", "tr"):
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)
 
+    # Each client line names the account the switch ran it as, and is one write, since rows run side by side.
     tmux = bin_dir / "tmux"
     tmux.write_text(
         "#!/bin/sh\n"
-        'printf tmux >> "$AGW_PROBE_AUDIT"\n'
-        'for arg in "$@"; do printf \'\\t%s\' "$arg" >> "$AGW_PROBE_AUDIT"; done\n'
-        "printf '\\n' >> \"$AGW_PROBE_AUDIT\"\n"
+        "line=$(printf 'as\\t%s\\ttmux' \"$AGW_AS\")\n"
+        'for arg in "$@"; do line=$(printf \'%s\\t%s\' "$line" "$arg"); done\n'
+        'printf \'%s\\n\' "$line" >> "$AGW_PROBE_AUDIT"\n'
     )
     tmux.chmod(0o755)
 
-    # Root drops to each row's owner; this stand-in records the account and runs the rest as the caller.
-    runuser = bin_dir / "runuser"
+    # Root switches to each row's owner (tmux.owner_client_command); these stand-ins note the
+    # account and run the rest as the caller.
+    sudo = bin_dir / "sudo"
+    sudo.write_text('#!/bin/sh\n[ "$1" = -n ] || exit 97\nshift\nexec "$@"\n')
+    sudo.chmod(0o755)
+    runuser = tmp_path / "runuser"
     runuser.write_text(
-        '#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\n'
-        'printf \'runuser\\t%s\\n\' "$2" >> "$AGW_PROBE_AUDIT"\nshift 3\nexec "$@"\n'
+        '#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\nAGW_AS=$2\nexport AGW_AS\nshift 3\nexec "$@"\n'
     )
     runuser.chmod(0o755)
-
-    # The script runs elevated as a whole, so it never elevates a row itself.
-    sudo = bin_dir / "sudo"
-    sudo.write_text('#!/bin/sh\nprintf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\nexit 97\n')
-    sudo.chmod(0o755)
+    monkeypatch.setattr(tmux_module, "RUNUSER_PATH", str(runuser))
 
     shell = bin_dir / "sh"
     shell.write_text(
@@ -429,19 +473,23 @@ def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_
     )
     shell.chmod(0o755)
 
+    me = pwd.getpwuid(os.getuid()).pw_name
     # Socket paths must fit sun_path, which pytest's nested tmp_path can exceed.
     sockets = Path(tempfile.mkdtemp(prefix="agw-batch-", dir="/tmp"))
     try:
-        owned = sockets / "owned.sock"
-        foreign = sockets / "foreign.sock"
+        for account in (me, "agt-foreign"):
+            (sockets / account).mkdir()
+        owned = sockets / me / "owned.sock"
+        # This account's socket, in another account's directory.
+        foreign = sockets / "agt-foreign" / "foreign.sock"
         listeners = []
         for path in (owned, foreign):
             listener = socket.socket(socket.AF_UNIX)
             listener.bind(str(path))
             listeners.append(listener)
-        linked = sockets / "linked.sock"
+        linked = sockets / me / "linked.sock"
         linked.symlink_to(owned)
-        regular = sockets / "regular.sock"
+        regular = sockets / me / "regular.sock"
         regular.write_text("")
 
         def snapshot() -> dict[str, tuple[str, bytes | str]]:
@@ -460,17 +508,19 @@ def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_
 
         before = snapshot()
         sessions = [
-            _session("admin", socket_path="/tmp/admin.sock"),
-            _session("agent", socket_path="/tmp/agent.sock", mode="agent"),
-            _session("admin-pid", pid=10101, socket_path="/tmp/admin-pid.sock"),
-            _session("agent-pid", pid=20202, socket_path="/tmp/agent-pid.sock", mode="agent"),
+            _session("admin", socket_path="/tmp/admin/admin.sock"),
+            _session("agent", socket_path="/tmp/agt-agent/agent.sock", mode="agent"),
+            _session("admin-pid", pid=10101, socket_path="/tmp/admin/admin-pid.sock"),
+            _session("agent-pid", pid=20202, socket_path="/tmp/agt-agent-pid/agent-pid.sock", mode="agent"),
             _session("owned", socket_path=str(owned), mode="agent"),
             _session("foreign", socket_path=str(foreign), mode="agent"),
             _session("linked", socket_path=str(linked), mode="agent"),
             _session("regular", socket_path=str(regular), mode="agent"),
         ]
-        owners = {session.name: _owner(session) for session in sessions}
-        owners["owned"] = pwd.getpwuid(os.getuid()).pw_name
+        rows = [
+            (session, SessionTmuxServer(str(session.socket_path), None if session.mode == "admin" else "agent"))
+            for session in sessions
+        ]
         environment = os.environ.copy()
         environment.update(
             {
@@ -489,13 +539,13 @@ def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_
 
         result = subprocess.run(
             ["/bin/bash", "--noprofile", "--norc", "-c", program],
-            input=_batch_probe_data(sessions, owners),
+            input=_batch_probe_data(rows),
             text=True,
             capture_output=True,
             check=False,
             cwd=tmp_path,
             env=environment,
-            timeout=5,
+            timeout=10,
         )
         for listener in listeners:
             listener.close()
@@ -505,39 +555,32 @@ def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_
     assert result.returncode == 0
     assert result.stderr == ""
     refused = {"foreign", "linked", "regular"}
-    frames = {
-        base64_name: fields
-        for base64_name, fields in ((line.split(":")[1], line.split(":")) for line in result.stdout.splitlines())
-    }
-    assert {name for name in owners if frames[_encoded_probe_field(name)][2:5:2] == ["126", "126"]} == refused
-    parsed = _batch(sessions, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)})))
-    assert parsed == {
+    # Each line is keyed by its row's 1-based position.
+    frames = {line.split(":")[1]: line.split(":") for line in result.stdout.splitlines()}
+    assert {
+        session.name for index, session in enumerate(sessions, start=1) if frames[str(index)][2:5:2] == ["126", "126"]
+    } == refused
+    statuses = batch_check_status(rows, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)})))
+    assert statuses == {
         session.name: SessionStatus.UNKNOWN if session.pid is None else SessionStatus.RUNNING for session in sessions
     }
-    assert audit.read_text().splitlines() == [
-        "runuser\tadmin",
-        "tmux\t-S\t/tmp/admin.sock\thas-session\t-t\t=admin",
-        "runuser\tadmin",
-        "tmux\t-S\t/tmp/admin.sock\tlist-sessions",
-        "runuser\tagt-agent",
-        "tmux\t-S\t/tmp/agent.sock\thas-session\t-t\t=agent",
-        "runuser\tagt-agent",
-        "tmux\t-S\t/tmp/agent.sock\tlist-sessions",
-        "runuser\tadmin",
-        "tmux\t-S\t/tmp/admin-pid.sock\thas-session\t-t\t=admin-pid",
-        "runuser\tadmin",
-        "tmux\t-S\t/tmp/admin-pid.sock\tlist-sessions",
-        "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
-        "runuser\tagt-agent-pid",
-        "tmux\t-S\t/tmp/agent-pid.sock\thas-session\t-t\t=agent-pid",
-        "runuser\tagt-agent-pid",
-        "tmux\t-S\t/tmp/agent-pid.sock\tlist-sessions",
-        "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
-        f"runuser\t{owners['owned']}",
-        f"tmux\t-S\t{owned}\thas-session\t-t\t=owned",
-        f"runuser\t{owners['owned']}",
-        f"tmux\t-S\t{owned}\tlist-sessions",
-    ]
+    # Rows run side by side, so only each line's content, not their order, is fixed.
+    assert sorted(audit.read_text().splitlines()) == sorted(
+        [
+            "as\tadmin\ttmux\t-S\t/tmp/admin/admin.sock\thas-session\t-t\t=admin",
+            "as\tadmin\ttmux\t-S\t/tmp/admin/admin.sock\tlist-sessions",
+            "as\tagt-agent\ttmux\t-S\t/tmp/agt-agent/agent.sock\thas-session\t-t\t=agent",
+            "as\tagt-agent\ttmux\t-S\t/tmp/agt-agent/agent.sock\tlist-sessions",
+            "as\tadmin\ttmux\t-S\t/tmp/admin/admin-pid.sock\thas-session\t-t\t=admin-pid",
+            "as\tadmin\ttmux\t-S\t/tmp/admin/admin-pid.sock\tlist-sessions",
+            "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
+            "as\tagt-agent-pid\ttmux\t-S\t/tmp/agt-agent-pid/agent-pid.sock\thas-session\t-t\t=agent-pid",
+            "as\tagt-agent-pid\ttmux\t-S\t/tmp/agt-agent-pid/agent-pid.sock\tlist-sessions",
+            "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
+            f"as\t{me}\ttmux\t-S\t{owned}\thas-session\t-t\t=owned",
+            f"as\t{me}\ttmux\t-S\t{owned}\tlist-sessions",
+        ]
+    )
     assert snapshot() == before
 
 
@@ -904,9 +947,9 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
                 ok=True,
                 stdout="\n".join(
                     (
-                        _batch_row("ok1"),
+                        _batch_row(1),
                         _batch_row(
-                            "stopped1",
+                            2,
                             has_returncode=1,
                             has_diagnostic="can't find session: stopped1",
                             server_returncode=1,
@@ -990,7 +1033,7 @@ def test_batch_empty_boot_id_is_unknown() -> None:
                 ok=True,
                 stdout=(
                     _batch_row(
-                        "a1",
+                        1,
                         has_returncode=1,
                         has_diagnostic="can't find session: a1",
                         server_returncode=1,
@@ -1009,7 +1052,7 @@ def test_batch_empty_boot_id_is_unknown() -> None:
 def test_batch_sudo_refusal_is_unknown() -> None:
     session = _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
     row = _batch_row(
-        "a1",
+        1,
         has_returncode=1,
         has_diagnostic="can't find session: a1",
         server_returncode=1,
@@ -1031,14 +1074,14 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
     ]
     output = "\n".join(
         _batch_row(
-            name,
+            position,
             has_returncode=1,
             has_diagnostic=f"can't find session: {name}",
             server_returncode=1,
             server_diagnostic=f"no server running on /{name}",
             pid_fact="absent",
         )
-        for name in ("valid", "invalid")
+        for position, name in enumerate(("valid", "invalid"), start=1)
     )
 
     result = _batch(sessions, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=output)})))
@@ -1050,16 +1093,15 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
 @pytest.mark.parametrize(
     "result",
     [
-        _FakeResult(returncode=1, stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n", stderr="transport noise"),
-        _FakeResult(stdout=f"unframed\n{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('alpha')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('other')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\nS:{_encoded_probe_field('beta')}:0:not-hex:0::0::0:\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\r\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\x00\n"),
+        _FakeResult(returncode=1, stdout=f"{_batch_row(1)}\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(2)}\n", stderr="transport noise"),
+        _FakeResult(stdout=f"unframed\n{_batch_row(1)}\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(1)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(3)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\nS:2:0:not-hex:0::0::0:\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\r\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(2)}\x00\n"),
     ],
 )
 def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResult) -> None:
@@ -1068,6 +1110,20 @@ def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResu
     assert _batch(sessions, admin=_admin(_FakeTarget({"has-session": result}))) == {
         "alpha": SessionStatus.UNKNOWN,
         "beta": SessionStatus.UNKNOWN,
+    }
+
+
+def test_batch_row_without_a_line_is_unknown_and_spares_its_siblings() -> None:
+    sessions = [
+        _session(name, pid=100 + index, socket_path=f"/{name}", boot_id=BOOT_CURRENT)
+        for index, name in enumerate(("alpha", "beta"))
+    ]
+    # Only the second row reported, as when the first row's job failed.
+    output = _batch_row(2) + "\n"
+
+    assert _batch(sessions, admin=_admin(_FakeTarget({"has-session": _FakeResult(stdout=output)}))) == {
+        "alpha": SessionStatus.UNKNOWN,
+        "beta": SessionStatus.RUNNING,
     }
 
 
@@ -1101,11 +1157,11 @@ def test_session_observer_names_each_rows_owner_from_the_database_and_leaves_an_
         "agentworks.sessions.manager._identity_access",
         lambda vm, _config, _agent, **_kwargs: SimpleNamespace(vm_name=vm.name),
     )
-    probed: list[tuple[list[str], dict[str, str]]] = []
+    probed: list[list[tuple[str, str]]] = []
 
-    def batch(rows: list[SessionRow], *, admin: object, owners: dict[str, str]) -> dict[str, SessionStatus]:
-        probed.append(([row.name for row in rows], dict(owners)))
-        return {row.name: SessionStatus.RUNNING for row in rows}
+    def batch(rows: list[tuple[SessionRow, SessionTmuxServer]], *, admin: object) -> dict[str, SessionStatus]:
+        probed.append([(row.name, server.account) for row, server in rows])
+        return {row.name: SessionStatus.RUNNING for row, _server in rows}
 
     monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
 
@@ -1114,9 +1170,7 @@ def test_session_observer_names_each_rows_owner_from_the_database_and_leaves_an_
         "theirs": SessionStatus.RUNNING,
         "astray": SessionStatus.UNKNOWN,
     }
-    [(rows, owners)] = probed
-    assert rows == ["mine", "theirs"]
-    assert {name: owners[name] for name in rows} == {"mine": "agentworks", "theirs": "agt-bot"}
+    assert probed == [[("mine", "agentworks"), ("theirs", "agt-bot")]]
     assert len(captured_output.warnings) == 1
     assert "astray" in captured_output.warnings[0]
 
@@ -1172,10 +1226,10 @@ def test_session_observer_isolates_one_vm_read_failure_and_says_why_once(
         lambda vm, _config, _agent, **_kwargs: SimpleNamespace(vm_name=vm.name),
     )
 
-    def batch(rows: list[SessionRow], *, admin: object, **_kwargs: object) -> dict[str, SessionStatus]:
+    def batch(rows: list[tuple[SessionRow, SessionTmuxServer]], *, admin: object) -> dict[str, SessionStatus]:
         if admin.vm_name == "vm-b":  # type: ignore[attr-defined]
             raise error
-        return {row.name: SessionStatus.RUNNING for row in rows}
+        return {row.name: SessionStatus.RUNNING for row, _server in rows}
 
     error = make_error()
     monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
@@ -1267,7 +1321,7 @@ def test_session_observer_reports_a_vm_it_cannot_reach_once_and_observes_the_oth
     )
     monkeypatch.setattr(
         "agentworks.sessions.manager._status.batch_check_status",
-        lambda rows, *, admin, **_kwargs: {row.name: SessionStatus.RUNNING for row in rows},
+        lambda rows, *, admin, **_kwargs: {row.name: SessionStatus.RUNNING for row, _server in rows},
     )
 
     assert observe_session_statuses(sessions, db=db, config=object()) == {
@@ -1307,8 +1361,10 @@ def test_single_session_status_refuses_a_socket_path_outside_its_owners_director
     session = _session("s1", pid=42, socket_path="/tmp/s1.sock", mode="agent", boot_id=BOOT_CURRENT)
     admin = _admin(_FakeTarget())
 
+    from agentworks.sessions.manager import resolve_session_tmux_server
+
     with pytest.raises(StateError):
-        check_session_status(session, admin=admin, db=_Owners())  # type: ignore[arg-type]
+        check_session_status(session, admin=admin, server=resolve_session_tmux_server(_Owners(), session))  # type: ignore[arg-type]
 
     assert admin.requests() == []
 
@@ -1319,15 +1375,17 @@ def test_single_session_status_refuses_a_socket_path_outside_its_owners_director
     ("kind", "read"),
     [("owned", True), ("missing", True), ("foreign", False), ("linked", False), ("regular", False)],
 )
-def test_single_session_tmux_reads_run_as_the_owner_behind_the_socket_guard(kind: str, read: bool) -> None:
+def test_single_session_tmux_reads_run_as_the_owner_behind_the_socket_guard(
+    kind: str, read: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An agent session's tmux read elevates only to run as its owner, and never reaches a socket it cannot trust."""
     import pwd
     import socket
     import tempfile
     from pathlib import Path
 
+    from agentworks.sessions import tmux
     from agentworks.sessions.manager._status import owner_run_command
-    from agentworks.sessions.manager._teardown import ManagedSocket
     from agentworks.sessions.tmux import probe_tmux_session
 
     me = pwd.getpwuid(os.getuid()).pw_name
@@ -1343,18 +1401,24 @@ def test_single_session_tmux_reads_run_as_the_owner_behind_the_socket_guard(kind
             '#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\n'
             f'printf "runuser %s\\n" "$2" >> {audit}\nshift 3\nexec "$@"\n'
         )
+        # Root's switch goes through sudo, which this stand-in reduces to running the rest.
+        (bin_dir / "sudo").write_text('#!/bin/sh\n[ "$1" = -n ] || exit 64\nshift\nexec "$@"\n')
         (bin_dir / "tmux").write_text(
             f'#!/bin/sh\nprintf "tmux %s\\n" "$*" >> {audit}\nprintf "no server running on %s\\n" "$2" >&2\nexit 1\n'
         )
-        for shim in ("runuser", "tmux"):
+        for shim in ("runuser", "sudo", "tmux"):
             (bin_dir / shim).chmod(0o755)
-        path = root / "s.sock"
+        monkeypatch.setattr(tmux, "RUNUSER_PATH", str(bin_dir / "runuser"))
+        # The guard checks for the account whose directory holds the socket.
+        owner = "agt-someone-else" if kind == "foreign" else me
+        (root / owner).mkdir()
+        path = root / owner / "s.sock"
         listener = socket.socket(socket.AF_UNIX)
         if kind in {"owned", "foreign"}:
             listener.bind(str(path))
         elif kind == "linked":
-            listener.bind(str(root / "real.sock"))
-            path.symlink_to(root / "real.sock")
+            listener.bind(str(root / owner / "real.sock"))
+            path.symlink_to(root / owner / "real.sock")
         elif kind == "regular":
             path.write_text("")
 
@@ -1368,10 +1432,8 @@ def test_single_session_tmux_reads_run_as_the_owner_behind_the_socket_guard(kind
 
         admin = RecordingVMAccess([], Admin())
         admin.answer = run_here
-        session = _session("s1", pid=42, socket_path=str(path), mode="agent", boot_id=BOOT_CURRENT)
-        owner = "agt-someone-else" if kind == "foreign" else me
         presence = probe_tmux_session(
-            "s1", run_command=owner_run_command(admin, session, ManagedSocket(str(path), owner)), socket_path=str(path)
+            "s1", run_command=owner_run_command(admin, SessionTmuxServer(str(path), owner)), socket_path=str(path)
         )
         listener.close()
         calls = audit.read_text().splitlines() if audit.exists() else []

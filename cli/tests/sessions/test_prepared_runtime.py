@@ -19,6 +19,7 @@ from agentworks.sessions.manager._runtime import (
     prepare_session_launch,
     prepare_session_stop,
 )
+from tests._runtime_probes import server_for
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 from .test_create_start_restart_orchestrated import _restart_fixture
@@ -405,7 +406,6 @@ def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monke
 
     from agentworks.sessions import tmux
     from agentworks.sessions.manager import _status
-    from agentworks.sessions.manager._teardown import _validated_socket
 
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     db.set_session_run_id("s1", str(uuid4()))
@@ -418,9 +418,7 @@ def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monke
 
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", cancel)
     with pytest.raises(UserAbort) as caught:
-        _status._pending_launch_is_owned(
-            pending, admin=RecordingVMAccess([], Admin()), socket=_validated_socket(db, pending)
-        )
+        _status._pending_launch_is_owned(pending, admin=RecordingVMAccess([], Admin()), server=server_for(pending))
     assert caught.value is failure
     db.close()
 

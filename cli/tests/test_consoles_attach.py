@@ -12,6 +12,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.sessions.manager import SessionTmuxServer
 from agentworks.sessions.multi_console import _attach_loop_wrapper, attach_console
 from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
 
 def test_attach_loop_uses_exact_session_targets() -> None:
-    wrapper = _attach_loop_wrapper("backend", "/tmp/backend.sock")
+    wrapper = _attach_loop_wrapper("backend", SessionTmuxServer("/tmp/backend.sock", None))
     assert "tmux -S /tmp/backend.sock has-session -t '=backend'" in wrapper
     assert "tmux -S /tmp/backend.sock attach -t '=backend'" in wrapper
 
@@ -57,7 +58,9 @@ def _console_window_output(tmp_path: Path, *, down_status: int) -> list[str]:
     for name, body in (("sudo", _STUB_SUDO), ("sleep", "#!/bin/sh\n"), ("clear", "#!/bin/sh\n")):
         (stubs / name).write_text(body)
         (stubs / name).chmod(0o755)
-    wrapper = _attach_loop_wrapper("s", "/run/agentworks/agent-tmux-sockets/bot-user/s.sock", agent_owner="bot-user")
+    wrapper = _attach_loop_wrapper(
+        "s", SessionTmuxServer("/run/agentworks/agent-tmux-sockets/bot-user/s.sock", "bot-user")
+    )
     environment = {
         "PATH": f"{stubs}:{os.defpath}",
         "STUB_DIR": str(stubs),

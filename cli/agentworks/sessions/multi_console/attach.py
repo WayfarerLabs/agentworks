@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions.manager import SessionTmuxServer
     from agentworks.transports import Transport
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
@@ -152,7 +153,7 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
     return vm.admin_username
 
 
-def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, agent_owner: str | None = None) -> str:
+def _attach_loop_wrapper(session_name: str, server: SessionTmuxServer | None) -> str:
     """Build the shell snippet that holds a console window open for the given
     session.
 
@@ -168,9 +169,11 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, agent_ow
     console's kill-window binding. Names are validated to [a-z0-9_-]+, so
     embedding the raw session_name inside the single-quoted strings is safe.
 
-    The admin's console runs the wrapper. An agent session's server is the
-    agent's, ``agent_owner``, and no other account is ever its client: each
-    ``has-session`` and ``attach`` elevates only to switch to the agent
+    The admin's console pane runs the wrapper. ``server`` is the session's
+    tmux server as ``resolve_session_tmux_server`` validated it, ``None`` for
+    a legacy row on the admin's default server. An agent session's server is
+    the agent's, ``server.owner``, and no other account is ever its client:
+    each ``has-session`` and ``attach`` elevates only to switch to the agent
     behind the socket guard (``as_socket_owner_from_admin``), the attach on a
     relay terminal of its own. A poll the guard refuses reads as down, and
     the window says why once per refused stretch rather than on every poll.
@@ -178,22 +181,22 @@ def _attach_loop_wrapper(session_name: str, socket_path: str | None, *, agent_ow
     from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, as_socket_owner_from_admin
 
     q = exact_tmux_target(session_name)
+    socket_path = server.socket_path if server is not None else None
+    # The probe needs no stdin or stdout; neither reaches the server's account.
     has = tmux_cmd(f"has-session -t {q}", socket_path)
     att = tmux_cmd(f"attach -t {q}", socket_path)
-    if agent_owner is None:
-        probe = f"agw_up() {{ {has} 2>/dev/null; }}"
+    if server is None or server.owner is None:
+        probe = f"agw_up() {{ {has} </dev/null >/dev/null 2>&1; }}"
     else:
-        if socket_path is None:
-            raise ValueError("an agent session's console window needs its socket path")
-        has = as_socket_owner_from_admin(has, socket_path=socket_path, owner=agent_owner)
-        att = as_socket_owner_from_admin(att, socket_path=socket_path, owner=agent_owner, terminal=True)
+        has = as_socket_owner_from_admin(has, socket_path=server.socket_path, owner=server.owner)
+        att = as_socket_owner_from_admin(att, socket_path=server.socket_path, owner=server.owner, terminal=True)
         reason = shlex.quote(
-            f"Not attaching to session '{session_name}': its tmux socket is not a socket that '{agent_owner}' owns."
+            f"Not attaching to session '{session_name}': its tmux socket is not a socket that '{server.owner}' owns."
         )
         probe = f"""\
 agw_refused=
 agw_up() {{
-    {has} 2>/dev/null
+    {has} </dev/null >/dev/null 2>&1
     agw_rc=$?
     if [ "$agw_rc" -eq {SOCKET_GUARD_REFUSED} ]; then
         [ -n "$agw_refused" ] || echo {reason}

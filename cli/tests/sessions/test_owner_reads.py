@@ -2,7 +2,7 @@
 
 Each path that reaches an agent session's dedicated server from the admin's
 access must send each tmux line through ``as_socket_owner_line``: root's
-socket guard, then ``runuser`` to the owner. These tests drive status, the
+socket guard, then the switch to the owner (``owner_client_command``). These tests drive status, the
 pending-launch proof, pid repair, the runtime observation's fallback, the
 checkpoint proof and teardown for a caller that does not own the session on a
 recording access, and check the shape of every request that runs tmux;
@@ -23,7 +23,7 @@ from agentworks.execution.results import Completed, Result
 from agentworks.sessions import tmux
 from agentworks.sessions.manager import _pids, _runtime_observation, _status, _teardown
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT, as_socket_owner_line
-from tests._runtime_probes import framed_runtime_result, owner_probe_line
+from tests._runtime_probes import framed_runtime_result, owner_probe_line, server_for
 from tests.vm_access_support import Admin, Call, RecordingVMAccess
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ def _sent(admin: RecordingVMAccess, word: str) -> bool:
 
 
 def assert_tmux_runs_as_the_agent(admin: RecordingVMAccess) -> None:
-    """Every request that runs tmux is root's guard and ``runuser`` to the agent around its own line."""
+    """Every request that runs tmux is root's guard and the switch to the agent around its own line."""
     requests = [request for request in admin.requests() if isinstance(request, Script)]
     tmux_requests = [request for request in requests if "tmux " in request.source]
     assert tmux_requests, "the path sent no tmux request"
@@ -99,7 +99,7 @@ def agent_row(db: Database) -> SessionRow:
 def test_status_of_an_agent_session(db: Database, agent_row: SessionRow) -> None:
     admin = _admin({**ABSENT_SERVER, "/proc/4242": _Reply(stdout="absent")})
 
-    assert _status.check_session_status(agent_row, admin=admin, db=db) is SessionStatus.STOPPED
+    assert _status.check_session_status(agent_row, admin=admin, server=server_for(agent_row)) is SessionStatus.STOPPED
     assert_tmux_runs_as_the_agent(admin)
 
 
@@ -107,7 +107,7 @@ def test_status_of_a_pending_launch(db: Database, agent_row: SessionRow) -> None
     pending = replace(agent_row, pid=None, tmux_server_start_ticks=None, run_id="11111111-2222-4333-8444-555555555555")
     admin = _admin({"has-session": _Reply()})
 
-    _status.check_session_status(pending, admin=admin, db=db)
+    _status.check_session_status(pending, admin=admin, server=server_for(pending))
 
     assert _sent(admin, "display-message")
     assert_tmux_runs_as_the_agent(admin)
@@ -127,7 +127,7 @@ def test_runtime_observation_fallback(db: Database, agent_row: SessionRow) -> No
     unrepaired = replace(agent_row, pid=None, tmux_server_start_ticks=None)
     admin = _admin(ABSENT_SERVER)
 
-    _runtime_observation.observe_session_runtime(unrepaired, admin=admin, db=db)
+    _runtime_observation.observe_session_runtime(unrepaired, admin=admin, server=server_for(unrepaired))
 
     assert _sent(admin, "display-message")
     assert_tmux_runs_as_the_agent(admin)
@@ -139,7 +139,7 @@ def test_checkpoint_proof(db: Database, agent_row: SessionRow) -> None:
     assert vm is not None
     admin = _admin(ABSENT_SERVER)
 
-    _runtime_observation.can_checkpoint_session(unbooted, vm=vm, admin=admin, db=db)
+    _runtime_observation.can_checkpoint_session(unbooted, vm=vm, admin=admin, server=server_for(unbooted))
 
     assert_tmux_runs_as_the_agent(admin)
 

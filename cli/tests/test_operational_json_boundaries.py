@@ -61,12 +61,12 @@ def _seed_session(db: Database) -> None:
         "ws",
         "default",
         SessionMode.ADMIN,
-        socket_path="/tmp/SECRET_SOCKET",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
         harness_integration_state={"SECRET_HARNESS_STATE": True},
     )
     db.update_session_runtime(
         "session-a",
-        socket_path="/tmp/SECRET_SOCKET",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
         pid=PID_STOPPED,
         boot_id=None,
         tmux_server_start_ticks=None,
@@ -209,7 +209,7 @@ def test_session_describe_bypasses_activation_for_both_formats(
     _assert_json_envelope_only(machine, "session.describe")
     assert machine.stderr_bytes == b""
     assert chain == []
-    for excluded in (b"SECRET_HARNESS_STATE", b"SECRET_SOCKET"):
+    for excluded in (b"SECRET_HARNESS_STATE", b"secret-socket"):
         assert excluded not in machine.stdout_bytes
 
 
@@ -224,7 +224,11 @@ def test_session_list_status_bypasses_provider_resolution_and_activation(
     config = make_config()
     _seed_session(db)
     db.update_session_runtime(
-        "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
+        "session-a",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
     _wire_cli(monkeypatch, db, config)
     calls = _resolution_spy(monkeypatch)
@@ -250,7 +254,11 @@ def test_session_list_status_bypasses_provider_resolution_and_activation(
 
     calls.clear()
     db.update_session_runtime(
-        "session-a", socket_path="/tmp/SECRET_SOCKET", pid=None, boot_id=None, tmux_server_start_ticks=None
+        "session-a",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/secret-socket.sock",
+        pid=None,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
     human = CliRunner().invoke(app, ["session", "list", "--status", "--output", "human"])
     assert human.exit_code == 0, human.output

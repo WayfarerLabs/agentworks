@@ -14,11 +14,12 @@ import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.errors import ConnectivityError, ExternalError, StateError
 from agentworks.execution.requests import Command, DiscardOutput, Script, Shell
-from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
+from agentworks.naming import LINUX_USERNAME_MAX_LENGTH, NAME_RE
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -39,6 +40,12 @@ DEAD_WORKLOAD_OUTPUT_LINE_CHARS = 500
 # Agent tmux socket infrastructure
 AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
 AGENT_SOCKET_GROUP = "tmux-agent-access"
+
+# A tmux client carries out requests from the server it connects to with the
+# client's own rights, and does not check who runs that server. So whenever
+# the identity Agentworks connects as does not own a server, its tmux client
+# first switches to the server's owner (``owner_client_command``).
+RUNUSER_PATH = "/usr/sbin/runuser"
 
 # AF_UNIX socket paths are capped by ``sizeof(sun_path)`` (Linux <sys/un.h>):
 # 108 bytes. A pathname socket needs a trailing NUL, so the usable path length
@@ -142,6 +149,69 @@ def access_run_command(access: VMAccess, *, deadline: float | None, elevated: bo
     return run
 
 
+# A Linux account name as ``useradd`` accepts it by default, within the length
+# limit agentworks already relies on.
+_LINUX_USERNAME = re.compile(rf"[a-z_][a-z0-9_-]{{0,{LINUX_USERNAME_MAX_LENGTH - 1}}}", re.ASCII)
+
+
+def socket_owner(socket_path: str, *, admin_username: str) -> str | None:
+    """Return the account a tmux client must run as to reach ``socket_path``'s server.
+
+    The one owner rule, applied to a persisted path rather than to anything
+    the guest reports. A socket directly inside the VM admin's directory under
+    ``ADMIN_SOCKET_ROOT`` is the admin's own: ``None``, no switch. A socket
+    directly inside ``AGENT_SOCKET_ROOT/<user>`` belongs to ``<user>``, which
+    must be a Linux account name other than ``root`` and the admin.
+    ``ensure_agent_socket_dir`` gives each agent its own directory, shared
+    only with the admin group and root, so a client running as that account
+    never holds more rights than whoever could have created the server. In
+    both, the socket's name is one agentworks generates
+    (``admin_socket_path``, ``agent_socket_path``): a session name, then
+    ``.sock``. Anything else raises ``StateError``.
+    """
+    path = PurePosixPath(socket_path)
+    directory = path.parent
+    if (
+        str(path) == socket_path
+        and path.is_absolute()
+        and path.suffix == ".sock"
+        and NAME_RE.fullmatch(path.stem) is not None
+    ):
+        if str(directory.parent) == ADMIN_SOCKET_ROOT and directory.name == admin_username:
+            return None
+        owner = directory.name
+        if (
+            str(directory.parent) == AGENT_SOCKET_ROOT
+            and _LINUX_USERNAME.fullmatch(owner)
+            and owner not in {"root", admin_username}
+        ):
+            return owner
+    raise StateError(
+        f"tmux socket path '{socket_path}' is not inside an agent or the admin's socket directory",
+        hint="Repair the persisted session row before retrying.",
+    )
+
+
+def owner_client_command(command: str, *, owner_word: str, pty: bool = False) -> str:
+    """Return ``command`` run as a tmux server's owner, from ``/``.
+
+    The one spelling of the switch to a server's owner. The VM admin's shell
+    or root runs the result: ``sudo`` lets it switch and ``runuser`` drops to
+    the owner, who runs ``command`` with ``/`` as its working directory.
+    ``owner_word`` is one shell word that expands to the account: a quoted
+    name (``as_socket_owner_line``), or a quoted variable in a guest program.
+    ``pty`` gives an interactive client a terminal of its own (``runuser
+    --pty``, which relays window-size changes): an owner-uid client left on
+    the admin's terminal would be reachable by the owner's other processes,
+    and through it the admin's terminal. The result is one subshell, so it
+    composes with ``!`` and redirections and leaves the caller's working
+    directory alone. Inside a command substitution it needs a leading space,
+    ``$( (cd / ...))``: written ``$((`` it parses as arithmetic.
+    """
+    switch = f"{RUNUSER_PATH} --pty" if pty else RUNUSER_PATH
+    return f"(cd / && sudo -n {switch} -u {owner_word} -- {command})"
+
+
 SOCKET_GUARD_REFUSED = 126
 """The status a socket-owner line exits with when its guard refuses the socket.
 
@@ -167,16 +237,16 @@ def as_socket_owner_line(
     ``SOCKET_GUARD_REFUSED`` without running ``command``, printing ``refusal``
     to stderr when one is given and nothing otherwise. A missing path passes,
     so a probe still reads an absent server. With ``switch_user`` the line
-    runs as root and ``command`` runs as ``owner`` through ``runuser``;
-    without it the caller already is ``owner``. The batch status script
+    runs as root, which checks the socket and then runs ``command`` as
+    ``owner`` (``owner_client_command``); without it the caller already is
+    ``owner``. The batch status script
     (``_status._batch_probe_command``) runs the same checks per row in its
     own loop.
 
     ``terminal`` is for an interactive client on the caller's terminal, such
-    as ``tmux attach``: ``runuser --pty`` gives ``command`` a terminal of its
-    own and relays to the caller's, window size changes included, so no
-    process of ``owner``'s ever holds the caller's terminal, and ``cd /``
-    leaves it no hold on the caller's directory either.
+    as ``tmux attach``: ``owner_client_command``'s ``pty`` gives ``command``
+    a terminal of its own and relays to the caller's, window size changes
+    included, so no process of ``owner``'s ever holds the caller's terminal.
     """
     if terminal and not switch_user:
         raise ValueError("a relay terminal is only for a switch to the socket's owner")
@@ -186,12 +256,10 @@ def as_socket_owner_line(
         f'{{ test -S {q_socket} && test "$(stat -c %U -- {q_socket})" = {q_owner}; }}; }}'
     )
     notice = f"printf '%s\\n' {shlex.quote(refusal)} >&2; " if refusal is not None else ""
-    if not switch_user:
-        line = command
-    elif terminal:
-        line = f"cd / && runuser --pty -u {q_owner} -- sh -c {shlex.quote(command)}"
+    if switch_user:
+        line = owner_client_command(f"/bin/sh -c {shlex.quote(command)}", owner_word=q_owner, pty=terminal)
     else:
-        line = f"runuser -u {q_owner} -- sh -c {shlex.quote(command)}"
+        line = command
     return f"{{ {guard}; }} || {{ {notice}exit {SOCKET_GUARD_REFUSED}; }}; {line}"
 
 
@@ -1024,9 +1092,9 @@ def create_session(
         )
 
     # Per-session socket setup. The admin path uses the simpler shape (no
-    # cross-user group magic); the agent path keeps the existing group-shared
-    # plumbing because admin needs attach access to the agent's tmux server
-    # (per the 2026-04-10 agent-tmux-sockets SDD).
+    # cross-user group). The agent path keeps the per-agent directory and the
+    # shared socket group that startup's access grant still targets; agentworks
+    # itself reaches an agent's server only as that agent (``RUNUSER_PATH``).
     if is_admin:
         ensure_admin_socket_root(admin_files, admin_username)
         sock = admin_socket_path(admin_username, session_name)

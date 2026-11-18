@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import SessionMode, SessionStatus
+from agentworks.db import SessionStatus
 from agentworks.db.projections import project_session_mode
 from agentworks.errors import (
     AgentworksError,
@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
+
+    from ._tmux_server import SessionTmuxServer
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,8 @@ def _delete_session_runtime(
     selected_session_uuid = session.session_uuid
     from agentworks.sessions.manager._lifecycle import _require_selected_session
 
+    # Refuse a row the owner rule rejects before any VM work.
+    _mgr.resolve_session_tmux_server(db, session)
     with _mgr._prepare_vm(
         db,
         config,
@@ -190,7 +194,11 @@ def _delete_session_runtime(
                 status = SessionStatus.RUNNING
             else:
                 session = _mgr._ensure_pid(session, admin=admin, db=db)
-                status = _mgr.check_session_status(session, admin=admin, db=db)
+                # Resolved again from the reloaded row: repair can give an old
+                # admin row its dedicated socket.
+                status = _mgr.check_session_status(
+                    session, admin=admin, server=_mgr.resolve_session_tmux_server(db, session)
+                )
 
             if status == SessionStatus.UNKNOWN:
                 raise StateError(
@@ -464,9 +472,15 @@ def session_description(
     vm = _mgr._require_vm_for_workspace(db, workspace)
     output.info(f"Checking session '{name}' runtime...")
     status = SessionStatus.UNKNOWN
+    try:
+        server = _mgr.resolve_session_tmux_server(db, session)
+    except StateError as exc:
+        # Never probed: a row the owner rule refuses stays UNKNOWN.
+        output.warn(f"Session status is unavailable: {exc}.")
+        server = None
     if session.socket_path is None:
         status = _mgr._legacy_session_status(session)
-    else:
+    elif server is not None:
         from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
         try:
@@ -484,7 +498,7 @@ def session_description(
         else:
             try:
                 status = _mgr.check_session_status(
-                    session, admin=_mgr._identity_access(vm, config, None, logger=None), db=db
+                    session, admin=_mgr._identity_access(vm, config, None, logger=None), server=server
                 )
             except UserAbort:
                 raise
@@ -920,6 +934,9 @@ def attach_session(
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
     session = _mgr._require_session(db, name)
+    # Refuse a socket outside its owner's directory before any VM work. A
+    # legacy row without a socket meets the status check's own refusal.
+    server = _mgr.resolve_session_tmux_server(db, session)
     with _mgr._prepare_vm(
         db,
         config,
@@ -927,7 +944,7 @@ def attach_session(
         operation="session-attach",
         interaction=interaction,
     ) as (_ws, _vm, admin, _log):
-        status = _mgr.check_session_status(session, admin=admin, db=db)
+        status = _mgr.check_session_status(session, admin=admin, server=server)
 
         if status == SessionStatus.STOPPED:
             raise StateError(
@@ -961,11 +978,12 @@ def attach_session(
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return admin.attach(
-            _attach_command(db, session), clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach)
+            _attach_command(session, server),
+            clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )
 
 
-def _attach_command(db: Database, session: SessionRow) -> TerminalCommand:
+def _attach_command(session: SessionRow, server: SessionTmuxServer | None) -> TerminalCommand:
     """The admin's terminal command that attaches to ``session``, reaching its tmux server only as its owner.
 
     A legacy row's session is on the admin's own default server and an admin
@@ -977,23 +995,21 @@ def _attach_command(db: Database, session: SessionRow) -> TerminalCommand:
     the admin's.
     """
     from agentworks.execution.requests import TerminalCommand
-    from agentworks.sessions.manager import _teardown
     from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
 
     target = "=" + session.name
-    if session.socket_path is None:
+    if server is None:
         return TerminalCommand(("tmux", "attach", "-t", target))
-    if session.mode != SessionMode.AGENT.value:
-        return TerminalCommand(("tmux", "-S", session.socket_path, "attach", "-t", target))
-    socket = _teardown._validated_socket(db, session)
+    if server.owner is None:
+        return TerminalCommand(("tmux", "-S", server.socket_path, "attach", "-t", target))
     line = as_socket_owner_line(
-        tmux_cmd(f"attach -t {exact_tmux_target(session.name)}", socket.path),
-        socket_path=socket.path,
-        owner=socket.owner,
+        tmux_cmd(f"attach -t {exact_tmux_target(session.name)}", server.socket_path),
+        socket_path=server.socket_path,
+        owner=server.owner,
         switch_user=True,
         terminal=True,
         refusal=(
-            f"Not attaching to session '{session.name}': its tmux socket is not a socket that '{socket.owner}' owns."
+            f"Not attaching to session '{session.name}': its tmux socket is not a socket that '{server.owner}' owns."
         ),
     )
     return TerminalCommand(("sudo", "-n", "/bin/sh", "-c", line))

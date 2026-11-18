@@ -109,7 +109,13 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_vm(db, "vm-a", "100.64.0.11")
-    db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
+    db.insert_session(
+        "s-a",
+        "ws-vm-a",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-a.sock",
+    )
     session = db.get_session("s-a")
     assert session is not None
 
@@ -135,8 +141,20 @@ def test_list_status_reports_identity_refusal_as_unknown_without_access(
     captured_output,  # noqa: ANN001
 ) -> None:
     _seed_vm(db, "vm-a", "100.64.0.11")
-    db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
-    db.update_session_runtime("s-a", socket_path="/tmp/s-a.sock", pid=4321, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.insert_session(
+        "s-a",
+        "ws-vm-a",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-a.sock",
+    )
+    db.update_session_runtime(
+        "s-a",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-a.sock",
+        pid=4321,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
 
     def refuse(*args: object, **kwargs: object) -> None:
         raise VMSSHIdentityPolicyError("SSH identity drift")
@@ -686,7 +704,7 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, admin, db: SessionStatus.RUNNING,
+        lambda session, *, admin, server: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -750,7 +768,7 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, admin, db: SessionStatus.RUNNING,
+        lambda session, *, admin, server: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -968,7 +986,7 @@ def test_describe_session_preserves_malformed_stored_boot_error(
                     ok=False,
                     returncode=1,
                     stdout="AGW_RUNTIME_SERVER=",
-                    stderr="no server running on /tmp/s1.sock",
+                    stderr="no server running on /run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
                 )
             if "/proc/sys/kernel/random/boot_id" in cmd:
                 return SimpleNamespace(ok=True, returncode=0, stdout=f"AGW_RUNTIME_BOOT={BOOT_ID}\n", stderr="")

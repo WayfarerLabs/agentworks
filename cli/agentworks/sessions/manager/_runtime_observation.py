@@ -11,8 +11,6 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import StateError
-from agentworks.sessions.manager import _teardown
-from agentworks.sessions.manager._teardown import ManagedSocket
 from agentworks.sessions.tmux import ProbeStatus, access_run_command
 from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 
@@ -22,26 +20,31 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.execution.access import VMAccess
 
+    from ._tmux_server import SessionTmuxServer
+
 
 def observe_session_runtime(
     session: SessionRow,
     *,
     admin: VMAccess,
-    db: Database,
+    server: SessionTmuxServer | None,
 ) -> SessionStatus:
     """Classify exact presence and stored boot/process absence without evidence writes.
 
-    A legacy row's shared server, the admin's default one, is probed on ``admin``.
+    ``server`` is the row's tmux server as ``resolve_session_tmux_server``
+    validated it, ``None`` for a legacy row without a socket path, whose
+    shared server, the admin's default one, is probed on ``admin``.
     """
     from agentworks.sessions.tmux import capture_tmux_server_fingerprint, probe_tmux_session, require_socket_path
 
     if session.socket_path is not None:
-        status = _mgr.check_session_status(session, admin=admin, db=db)
+        if server is None:
+            raise TypeError("a dedicated session's observation needs its resolved tmux server")
+        status = _mgr.check_session_status(session, admin=admin, server=server)
         if status is SessionStatus.UNKNOWN and _mgr._needs_repair(session) and session.boot_id is not None:
-            socket = _teardown._validated_socket(db, session)
-            run_command = _mgr.owner_run_command(admin, session, socket)
-            require_socket_path(socket.path, run_command=run_command)
-            probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=socket.path)
+            run_command = _mgr.owner_run_command(admin, server)
+            require_socket_path(server.socket_path, run_command=run_command)
+            probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=server.socket_path)
             if probe.status is ProbeStatus.ABSENT and _mgr._prove_stored_runtime_absent(
                 session, run_command=run_command
             ):
@@ -71,10 +74,21 @@ def require_unaddressed_session_absence(session: SessionRow, *, vm: VMRow, admin
     """An old failed admin row may use its canonical address only after native absence."""
     if session.socket_path is not None or session.pid not in {None, PID_STOPPED}:
         return
-    from agentworks.sessions.tmux import admin_socket_path, capture_tmux_server_fingerprint, require_socket_path
+    from agentworks.sessions.tmux import (
+        admin_socket_path,
+        capture_tmux_server_fingerprint,
+        require_socket_path,
+        socket_owner_run_command,
+    )
 
     expected = admin_socket_path(vm.admin_username, session.name)
-    run_command = _mgr.owner_run_command(admin, session, ManagedSocket(expected, vm.admin_username))
+    run_command = socket_owner_run_command(
+        admin,
+        socket_path=expected,
+        owner=vm.admin_username,
+        switch_user=False,
+        deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+    )
     require_socket_path(expected, run_command=run_command)
     probe = capture_tmux_server_fingerprint(run_command=run_command, socket_path=expected)
     if probe.status is not ProbeStatus.ABSENT:
@@ -83,8 +97,13 @@ def require_unaddressed_session_absence(session: SessionRow, *, vm: VMRow, admin
         )
 
 
-def can_checkpoint_session(session: SessionRow, *, vm: VMRow, admin: VMAccess, db: Database) -> bool:
-    """Recognize only the existing exact-absence, missing-boot checkpoint repair."""
+def can_checkpoint_session(
+    session: SessionRow, *, vm: VMRow, admin: VMAccess, server: SessionTmuxServer | None
+) -> bool:
+    """Recognize only the existing exact-absence, missing-boot checkpoint repair.
+
+    ``server`` is as for ``observe_session_runtime``.
+    """
     if session.boot_id is not None or session.pid == PID_STOPPED:
         return False
     from agentworks.sessions.tmux import capture_tmux_server_fingerprint, probe_tmux_session, require_socket_path
@@ -98,19 +117,22 @@ def can_checkpoint_session(session: SessionRow, *, vm: VMRow, admin: VMAccess, d
             return False
         require_unaddressed_session_absence(session, vm=vm, admin=admin)
     else:
-        socket = _teardown._validated_socket(db, session)
-        run_command = _mgr.owner_run_command(admin, session, socket)
-        require_socket_path(socket.path, run_command=run_command)
-        if capture_tmux_server_fingerprint(run_command=run_command, socket_path=socket.path).status is not (
+        if server is None or server.socket_path != session.socket_path:
+            raise TypeError("a checkpoint needs the tmux server resolved from this row")
+        run_command = _mgr.owner_run_command(admin, server)
+        require_socket_path(server.socket_path, run_command=run_command)
+        if capture_tmux_server_fingerprint(run_command=run_command, socket_path=server.socket_path).status is not (
             ProbeStatus.ABSENT
         ):
             return False
     return _mgr._get_boot_id(run_command) is not None
 
 
-def checkpoint_session_identity(db: Database, session: SessionRow, *, vm: VMRow, admin: VMAccess) -> NoReturn:
+def checkpoint_session_identity(
+    db: Database, session: SessionRow, *, vm: VMRow, admin: VMAccess, server: SessionTmuxServer | None
+) -> NoReturn:
     """Re-prove absence, record the existing boot checkpoint, and always refuse launch."""
-    if not can_checkpoint_session(session, vm=vm, admin=admin, db=db):
+    if not can_checkpoint_session(session, vm=vm, admin=admin, server=server):
         raise StateError(
             "runtime identity checkpoint observation changed", entity_kind="session", entity_name=session.name
         )
