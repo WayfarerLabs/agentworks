@@ -75,7 +75,7 @@ operation log's move to `execution/oplog.py` (slice 8), and the other legacy mod
 | `execution/requests.py`                                                                                                  | `FromFile`; `ToFile`; `TerminalCommand`                                                                                                                                    |
 | `execution/access.py`                                                                                                    | `run` accepts `FromFile` and `ToFile`; `attach` takes `LoginShell \| TerminalCommand` and `clear_screen_on_exit` (`terminal.clear_screen_on_detach`); `park`; `detached()` |
 | `execution/attach.py`                                                                                                    | The parking half becomes `Parked`, which `attach` and `park` share                                                                                                         |
-| `execution/envelope.py`, `execution/agw_launch.py`                                                                       | `TerminalCommand` in `tty` mode; a `park` envelope carries no `TERM`, which `tty` mode then takes from its environment                                                     |
+| `execution/envelope.py`, `execution/agw_launch.py`                                                                       | `TerminalCommand` in `tty` mode; a `park` envelope carries no `TERM`, and `tty` mode takes the terminal's variables from its environment                                   |
 | `execution/pump.py`                                                                                                      | A file sink with a progress callback; nothing else (`FromFile` feeds the existing input thread)                                                                            |
 | `execution/detached.py` (new)                                                                                            | `Launch`, `Detached`: `new_launch`, `launch`, `observe`, `interrupt`, `download`, `discard`                                                                                |
 | `execution/detached_program.py` (new)                                                                                    | The guest program `launch`, `observe`, `interrupt` and `discard` run, a `PythonProgram`, as `file_program.py` is                                                           |
@@ -173,27 +173,34 @@ with access.park(LoginShell(cwd=full_path, env=pane_env)) as handover:
 # leaving the block waits for the pane to collect its request
 ```
 
+- **Signature.** `VMAccess.park(request: LoginShell) -> ContextManager[Handover]`. A request that is
+  not a `LoginShell` is a `ValidationError` before anything resolves, since plugins hold an access.
+  Like `attach`, `park` keeps no operation log.
 - **Shared shape.** `attach.py`'s parking connection (`attach.py:65-70`) becomes `Parked`, a context
   manager over the `PipeSession` that waits for `parked` within `PARKING_WAIT_SECONDS` and raises
   the typed error, before anything else happens, when it does not come. `attach` is `Parked` plus
   the terminal half; `park` is `Parked` plus a `Handover`.
 - **`Handover.command(run_as: str | None = None) -> str`** is the pane's command line: the handover
   form of stage 0, `stage0_command(socket_path(token))` (`ssh_process.py:73-86`), with
-  `sudo -n -u <run_as>` in front when the pane's server belongs to another account. Its only values
-  are the token and an account name; the environment is in the parked request.
+  `sudo -n -u <run_as>` in front when the pane's server belongs to another account. `run_as` must be
+  the account that parked (`Handover.account`), the only one that can reach the socket; any other is
+  a `ValueError`. Its only values are the token and an account name; the environment is in the
+  parked request.
 - **Leaving the block.** On a normal exit the client keeps pumping the parking connection until its
   trailer, for at most `HANDOVER_COLLECT_SECONDS = 35` (the launcher's 30-second wait,
   `agw_launch.py:60`, and a margin), and sets `handover.collected` from it: `exit 0` is collected,
   `refused handover` is not. On an exception (the split failed) it closes the parking stdin at once,
   which the launcher treats as the client leaving and cleans up (`agw_launch.py:290-299`). Either
   way the socket directory is gone afterwards.
-- **`TERM`.** An attach sends the operator's `TERM`, because the workstation owns that terminal. A
-  pane's terminal belongs to tmux, which sets `TERM` in the pane's environment from its
-  `default-terminal`, and sudo keeps `TERM` through its `env_reset`. So a `park` envelope carries no
-  `TERM`, and `tty` mode takes `TERM` from its inherited environment for such an envelope, falling
-  back to `DEFAULT_TERM` (`envelope.py:53`) when there is none. `park` has no `term` parameter: the
-  rule belongs to the operation, not the caller. Today's panes get the same value, since
-  `sudo --login` keeps it too (amendment A1).
+- **The terminal's variables.** An attach sends the operator's `TERM`, because the workstation owns
+  that terminal. A pane's terminal belongs to tmux, which sets `TERM` (from its `default-terminal`),
+  `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` in the pane's environment. These
+  describe the terminal the shell runs on, not anyone's environment. So a `park` envelope carries no
+  `TERM`, and `tty` mode takes those five names from its inherited environment, with `DEFAULT_TERM`
+  (shared from `agw_launch.py`) when `TERM` is absent, and nothing else from it. `park` has no
+  `term` parameter: the rule belongs to the operation, not the caller. sudo's `env_reset` keeps
+  `TERM`, and neither Debian's sudoers nor agentworks' `env_keep` fragment keeps the other four, so
+  an agent pane behind `sudo -n -u` has `TERM` alone of them (amendment A1).
 - **sudo's pty.** sudo 1.9.14 and later, Debian 13's, defaults to `use_pty`, so an agent pane's
   shell runs on sudo's relayed pty, as today's `sudo --login` pane does; vector T2 runs on Debian 13
   to show the shell is interactive there.
@@ -419,10 +426,10 @@ handover for each pane it creates:
   on the pane identity's access (the admin's, or the agent's for an agent pane), runs
   `tmux split-window ... <handover.command(run_as=agent or None)>` on the admin's access inside the
   block, and tags the pane.
-- **The admin-shell window** (`tmux_build.py:529`), today `exec $SHELL -l` with no environment,
-  which `sessions/multi_console/secrets_env.py:152-160` records as a known gap: its environment is
-  resolved and never delivered. It now parks the admin pane's environment the same way and runs
-  `new-session -d ... <handover.command()>`, closing the gap.
+- **The admin-shell window** (`tmux_build.py:529`, batch D1) parks the admin pane's environment
+  (`_resolve_admin_env`) on the admin's access and runs `new-session -d ... <handover.command()>`. A
+  failed `new-session` raises inside the block, so the parked request goes at once, and a handover
+  the pane does not collect fails the staged build like any incomplete window.
 
 Windows that run the attach loop (`multi_console/attach.py:155-235`) carry no environment and keep
 their command. No pane path passes `-e`, and none passes `env=` to the admin's `run`.
@@ -1003,9 +1010,10 @@ which patch the late resolve; and `test_consoles_orchestration.py:89`, a start o
 which now resolves every pane secret, the accepted cost.
 
 **The guest programs.** `test_detached_program.py` beside `test_file_program.py`, on Linux CI, both
-interpreters. agw-launch's `TerminalCommand` and the inherited `TERM` join the conformance suite as
-vectors T1 (an argv on the terminal, with its refusals) and T2 (a pane handover through `sudo -n -u`
-under the sudo lane, with `TERM` from the environment and `DEFAULT_TERM` without it), T2 also on a
+interpreters. agw-launch's `TerminalCommand` and the inherited terminal variables join the
+conformance suite as vectors T1 (an argv on the terminal, with its refusals) and T2 (a pane
+handover, with `TERM` and tmux's variables from the environment and `DEFAULT_TERM` without `TERM`,
+directly and through `sudo -n -u` under the sudo lane, where only `TERM` survives), T2 also on a
 Debian 13 VM.
 
 **tmux.** Tests against a real tmux (skipped where none is installed), the first of batch C: the
@@ -1157,6 +1165,18 @@ collateral it makes stale.
 | **D. Consoles and the handover** | `park` and `Parked`; pane secrets in the boundary; the agent access check; the pane and admin-window handovers; every console request, with the console presence probes in `runtime_state/_prepare.py:280`, `:352` and `_preview.py:263`, `:275` (from #885); console attach; the `--preserve-env` carry, `_tmux_env_flags` and `GUEST_OBSERVATION_ATTEMPTS` deleted; `_remove_sudoers_console_setenv`; ADR 0017 superseded and ADR 0014 amended; the slice 6 test bridges and the legacy-target bridges removed, with the target-routed test doubles of about 20 files rewritten as access answers; the admin's standing group access to agent tmux servers retired, with its reinit migration (Sessions: the manager) | L: 650 and 1,150, the tests including that rewrite                      |
 | **E. Closure**                   | The newline refusals and `ENVIRONMENT_REVEAL`, with `env show`'s escaping                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | S: 120 and 200                                                          |
 
+**Batch D lands in pieces**, each green and complete on its own:
+
+- **D1**: `park`, `Parked` and `Handover`, vectors T1 (moved into the list) and T2, and the
+  admin-window handover.
+- **D2**: the consoles onto the access, with a handover per pane and pane secrets in the boundary,
+  deleting the env carry across sudo.
+- **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
+  amended.
+- **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
+  migration.
+- **D5**: the test bridges removed; it may fold into D2.
+
 **Bridges.**
 
 | Bridge                                                                                                                                                                                                                                                                  | Left by | Removed in                                     |
@@ -1164,6 +1184,7 @@ collateral it makes stale.
 | `_scope._regenerate_tmuxinator` builds an admin access beside its legacy target for the tmuxinator write and `remove_config`                                                                                                                                            | B       | C                                              |
 | `delete_workspace` keeps a legacy target for session teardown and `kill_session_windows`                                                                                                                                                                                | B       | C                                              |
 | The console modules pass their legacy `target.run` as a `RunCommand`, and `crud.remove_sessions` builds an admin access beside its target for `kill_session_windows`                                                                                                    | C       | D                                              |
+| The console build carries the admin's access beside its legacy target (`PreparedConsoleReconcile.admin`, `_build_console_tmux(admin=)`, built in `crud.create_console`, `lifecycle.realize_console` and `runtime_state/_prepare.py`) for the admin window's handover    | D1      | D2, where the target goes                      |
 | Slice 6's test bridges `route_vm_access_to_target` and `files_over_target` (`cli/tests/vm_access_support.py`), which run a moved step's requests on a legacy transport double                                                                                           | slice 6 | D, with the last legacy target                 |
 | `access_over_target` (`cli/tests/vm_access_support.py:570`) and `install_fake_target` (`cli/tests/conftest.py:674`, behind the `fake_target` and `console_target_factory` fixtures), which route every `VMAccess` of about 20 test files through a legacy target double | C       | D, rewriting those doubles as access answers   |
 | `kill_session_windows`'s console presence probe (`multi_console/attach.py:335-350`), a copy of `_tmux_session_presence` (`:205`) over the admin's access while the console modules keep their legacy target                                                             | C       | D, where the console probe moves to the access |
@@ -1178,8 +1199,10 @@ The lead accepted each on 2026-11-12, and the operator ruled on the pane secrets
    lead edits slice 8's box.
 3. **`ENVIRONMENT_REVEAL` retires** with the environment refusal, and `env show` escapes every
    value, `\` as `\\` included, since plaintext values with newlines can now reach its table.
-4. **Pane `TERM` comes from the terminal's owner**: only a `park` envelope carries no `TERM`, and
-   `tty` mode then takes it from the inherited environment, falling back to `DEFAULT_TERM`.
+4. **A pane's terminal variables come from the terminal's owner**: only a `park` envelope carries no
+   `TERM`, and `tty` mode takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and
+   `TERM_PROGRAM_VERSION` from the inherited environment, with `DEFAULT_TERM` when `TERM` is absent
+   (lead, 2026-11-18, widening the `TERM`-only rule).
 5. **Two tighter bounds**: the session status and pid-repair reads at 10 seconds, and the batch
    status script elevated as a whole, reading each row as its socket owner after validating its
    socket path (lead, 2026-11-14, replacing root reads against every row's server).
@@ -1198,8 +1221,9 @@ disconnect, is the operator's requirement.
 Edits this LLD needs in the HLA and the plan, for the lead to make:
 
 - **A1, HLA D4** (agw-launch step 4): `TERM` comes from the envelope, except for a `park` envelope,
-  which carries none; `tty` mode then takes it from the inherited environment, set by the terminal's
-  owner (tmux), or `DEFAULT_TERM`.
+  which carries none; `tty` mode then takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and
+  `TERM_PROGRAM_VERSION` from the inherited environment, set by the terminal's owner (tmux), with
+  `DEFAULT_TERM` when `TERM` is absent.
 - **A2, HLA D5**: the "Retries" bullet's `observation=True` option, "an option that arrives with its
   first caller, `detached.observe` in slice 7", goes: `VMAccess` never dispatches a request twice,
   reads are single dispatches with their deadlines, and repetition is the caller's loop
