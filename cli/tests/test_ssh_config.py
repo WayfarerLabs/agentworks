@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -826,16 +827,36 @@ def test_an_entry_is_written_exactly_when_the_execution_core_would_connect_there
 
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
-def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entries(tmp_path: Path) -> None:
-    ssh_dir = tmp_path / "my ssh"
+def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The product's own writers make the ``Include`` and the managed file, and ssh resolves the entry through both.
+
+    ssh checks an included file's permissions, though not the ``-F`` file's. On Windows the directory first gets
+    an owner-only ACL, inherited by what is created in it, as a profile's ``.ssh`` has: the runner's temporary
+    directory carries an ``OWNER RIGHTS`` entry that Win32-OpenSSH refuses, which no profile has.
+    """
+    from tests.conftest import isolate_home
+
+    home = isolate_home(monkeypatch, tmp_path / "home")
+    ssh_dir = home / "my ssh"
     ssh_dir.mkdir()
-    ssh_config = ssh_dir / "config"
-    (ssh_dir / "config.d").mkdir()
-    (ssh_dir / "config.d" / _MANAGED_CONF).write_text("Host awvm--web\n    HostName 100.64.0.9\n")
+    if sys.platform == "win32":
+        subprocess.run(
+            ["icacls", str(ssh_dir), "/inheritance:r", "/grant:r", f"{os.environ['USERNAME']}:(OI)(CI)F"],
+            capture_output=True,
+            check=True,
+        )
+    config, _ = _mock_config(tmp_path)
+    config.operator.ssh_config = ssh_dir / "config"
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.9")]
+    db.list_agents.return_value = []
 
-    _ensure_include(ssh_config)
+    _rebuild_config_dir(config, db)
 
-    assert _resolved(ssh_config, "awvm--web")["hostname"] == "100.64.0.9"
+    assert _resolved(ssh_dir / "config", "awvm--web")["hostname"] == "100.64.0.9"
 
 
 def test_an_unquoted_include_split_at_its_space_is_replaced_where_it_stands(tmp_path: Path) -> None:
