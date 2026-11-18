@@ -104,9 +104,10 @@ every tmux client Agentworks starts runs as the account that owns the server. On
 session's stored socket path, names that account. A socket directly inside the VM admin's directory
 under `/run/agentworks/admin-tmux-sockets` is the admin's own, and the admin's connection uses it
 unchanged. A socket directly inside `/run/agentworks/agent-tmux-sockets/<user>` belongs to `<user>`,
-which must be a Linux account name other than `root` and the admin. Clients started from the VM
-admin's connection switch to that account first, with `sudo` and `runuser`, starting in `/`: status
-probes, identity repair and observation, the startup-protection check, teardown from
+which must be a Linux account name other than `root` and the admin; that directory is the agent's
+alone (mode `0700`), so no other account can connect to a server inside it. Clients started from the
+VM admin's connection switch to that account first, with `sudo` and `runuser`, starting in `/`:
+status probes, identity repair and observation, the startup-protection check, teardown from
 `session stop --all` and from agent or workspace deletion, `session logs`, `session attach`, named
 console windows, the workspace's tmuxinator windows and stale-socket cleanup. Startup, startup
 recovery, and the teardown inside `session stop`, `session delete` and `session restart` already
@@ -127,15 +128,6 @@ restarted or deleted. Do not start such a config on a VM with agent sessions.
 Interactive clients, `session attach` and the attach in a named console window, run as the agent on
 a pseudo-terminal of their own (`runuser --pty`) rather than on the admin's terminal, where the
 agent's other processes could reach them.
-
-Startup access sharing grants read/write tmux access to the socket group's members. Agentworks does
-not use that grant to reach agent servers, and it is not a supported way for the VM admin to do so.
-Retrying startup completion reapplies that access, including restoring a member's read-only entry to
-read/write. The server owner and root already have tmux access and need no explicit grant. Member
-names are read individually from the comma-separated group entry, without shell option or filename
-expansion. A failed group or user lookup or member grant stops sharing rather than reporting
-successful completion; the retained runtime remains available for a later retry unless workload
-death is confirmed.
 
 If no process identity can be recovered and the same VM boot is still running, preserve the row and
 inspect the guest. `--force` cannot turn missing identity into evidence of absence. A mutating

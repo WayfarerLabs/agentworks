@@ -835,6 +835,41 @@ place, it keeps a second, unguarded way for the admin to be a client of a server
 Removing it changes the guest's groups and modes, so it rides batch D with a reinit migration that
 takes the admin out of the group and resets the modes on existing VMs.
 
+Built in batch D4. Nothing else used the group: agents were never members, and no admin path is a
+client of an agent's server. So:
+
+- The socket root is `root:root` `0711` (`tmux.ensure_agent_socket_root`): every agent traverses it
+  to its own directory, and only root lists it. Each agent's directory is the agent's, with its
+  login group, `0700` (`ensure_agent_socket_dir`): an agent's own server works as before,
+  `runuser -u` from root needs no group, and nobody else can reach a socket inside. Both are set
+  with a five-digit mode (`00711`, `00700`), since GNU `chmod` keeps a directory's set-group-ID bit
+  for a four-digit one.
+- `finalize_session_start` loses `is_admin`, the socket's `chmod g+rwx` and `_grant_server_access`;
+  a fresh server's access list holds only its owner, and tmux makes the socket `0600`.
+- The migration is initialization's `_converge_agent_sockets` (`vms/initializer/driver.py`), on
+  create and on reinit. It repairs the root and then every agent's directory, trying each even when
+  an earlier one fails, each failure warning on its own; the directories' own probes convert the old
+  layout, and one still carrying the group is repaired without the "misconfigured" warning, since
+  reinit expects it. Only when all of them were repaired does it run
+  `tmux.retire_agent_socket_group`, one root script,
+  `getent group tmux-agent-access >/dev/null || exit 0; groupdel tmux-agent-access`, whose deletion
+  ends the admin's membership. Otherwise it keeps the group with a warning, for the next reinit: a
+  directory left in the old layout keeps the group's ID and its group bits, and a later `useradd -U`
+  could give that ID to a new agent's private group. A directory's fast path is the agent as owner
+  and `0700`; an old `2770` directory reaches `0700` only through the repair, whose `chown` comes
+  first, so it no longer carries the group by then.
+- A live agent server started before the reinit keeps the admin in its in-memory access list until
+  it restarts, but the directory's `0700` already stops a new connection, and the group's deletion
+  ends the membership for every later login.
+
+Tests: `tests/sessions/test_agent_socket_layout.py` runs the directory requests on this machine and
+reads the modes they leave (a set-group-ID directory from the old layout included), and runs the
+retirement script against stub account tools (group present, absent, and a refused deletion);
+`tests/vms/test_phase_b_driver.py` checks that one agent's failed directory keeps the group while
+the later agents are still repaired, and that the group goes once every directory is;
+`tests/sessions/test_startup_access.py` checks a real agent server's access list holds only its
+owner after startup and its recovery.
+
 `tests/sessions/test_owner_reads.py` drives each path on a recording access and checks that every
 request that runs tmux is the builder's line; reverting any one call site to a root read fails it.
 
@@ -1216,6 +1251,7 @@ footer. Nothing here touches the command reference's JSON issue-code contract, w
 | Workspace create with a clone, copy between two VMs, rehome and repair                                                                                     | one cell                                        | I67, I87             |
 | `vm reinit` on a VM that has the setenv fragment removes it                                                                                                | one cell                                        | deletion 6           |
 | `vm reinit` on a VM that has the `AcceptEnv *` fragment removes it, and an ssh `SetEnv` of an unlisted name then no longer reaches a shell                 | one cell                                        | D3                   |
+| `vm reinit` on a VM from an earlier release removes `tmux-agent-access` and resets the socket modes; agent sessions then create, attach and log as before  | one cell                                        | D4                   |
 
 I57, I80, I83, I84, I86 and I89 depend on failures or races a live run cannot provoke safely, so
 they have tests and no live cell.
@@ -1249,7 +1285,7 @@ collateral it makes stale.
   reaches), so init removes the `AcceptEnv *` fragment too, reloading sshd only when it was there,
   and ADR 0014 is superseded except for its `env_keep` decision.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
-  migration.
+  migration. Built (Sessions: the manager).
 - **D3 and D4 share one reinit pass** (decision 9): each guest-state retirement is an idempotent
   initialization step that runs on create and on reinit, so one `agw vm reinit` brings an existing
   VM to the new state, and the upgrade guide says so once.

@@ -70,7 +70,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
-from .steps import STEP_DEADLINE, STEP_FAILURES, InitLog, warn_step
+from .steps import STEP_DEADLINE, STEP_FAILURES, InitLog, warn, warn_step
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
@@ -294,6 +294,66 @@ def run_initialization(
                 )
 
 
+def _converge_agent_sockets(files: Files, linux_users: list[str], log: InitLog, *, warn_if_missing: bool) -> None:
+    """Repair the agent socket root and every agent's directory, then retire the shared group if all were repaired.
+
+    Each directory is tried even when an earlier one fails, each failure
+    warning on its own. The group goes only once nothing can still carry
+    it: a directory left in the earlier layout keeps the group's ID and its
+    group bits, and a later ``useradd -U`` could give that ID to a new
+    agent's private group. So a failed repair keeps the group, with a
+    warning, for the next reinit to retire.
+    """
+    from agentworks.sessions.tmux import (
+        RETIRED_AGENT_SOCKET_GROUP,
+        cleanup_stale_sockets,
+        ensure_agent_socket_dir,
+        ensure_agent_socket_root,
+        retire_agent_socket_group,
+    )
+
+    log.step("Agent tmux socket directories")
+    output.info("Setting up agent tmux socket infrastructure...")
+    repaired = True
+    try:
+        ensure_agent_socket_root(files, warn_if_missing=warn_if_missing)
+    except STEP_FAILURES as error:
+        warn_step(log, "agent tmux socket root setup failed", error)
+        repaired = False
+    for linux_user in linux_users:
+        try:
+            ensure_agent_socket_dir(files, linux_user)
+        except STEP_FAILURES as error:
+            warn_step(log, f"tmux socket directory setup for {linux_user} failed", error)
+            repaired = False
+            continue
+        try:
+            removed = cleanup_stale_sockets(files, linux_user)
+        except STEP_FAILURES as error:
+            warn_step(log, f"stale tmux socket cleanup for {linux_user} failed", error)
+            continue
+        if removed:
+            output.detail(f"Cleaned up {output.count(removed, 'stale socket')} for {linux_user}")
+
+    log.step("Retired tmux socket group")
+    if not repaired:
+        warn(
+            log,
+            f"kept the retired {RETIRED_AGENT_SOCKET_GROUP} group, since a socket directory above was not "
+            "repaired; the next 'agw vm reinit' retires it",
+        )
+        return
+    try:
+        retire_agent_socket_group(files)
+    except STEP_FAILURES as error:
+        warn_step(
+            log,
+            f"deleting the retired {RETIRED_AGENT_SOCKET_GROUP} group failed; if an account has it as its "
+            "primary group, give that account another, then run 'agw vm reinit'",
+            error,
+        )
+
+
 def _phase_b_setup(
     db: Database,
     config: Config,
@@ -481,32 +541,17 @@ def _phase_b_setup(
             context=setup_context,
         )
 
-        # Non-fatal: agent tmux socket directory infrastructure (VM-level:
-        # shared group, root directory, per-agent subdirectories, all
-        # root-owned system state). No dependency on the admin steps below, so
-        # it closes out the VM phase.
-        try:
-            from agentworks.sessions.tmux import (
-                cleanup_stale_sockets,
-                ensure_agent_socket_dir,
-                ensure_agent_socket_root,
-            )
-
-            logger.step("Agent tmux socket directories")
-            output.info("Setting up agent tmux socket infrastructure...")
-
-            ensure_agent_socket_root(
-                files,
-                admin_username,
-                warn_if_missing=operation is not VMInitializationOperation.VM_CREATE,
-            )
-            for agent in db.list_agents(vm_name=vm_name):
-                ensure_agent_socket_dir(files, agent.linux_user)
-                removed = cleanup_stale_sockets(files, agent.linux_user)
-                if removed:
-                    output.detail(f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}")
-        except STEP_FAILURES as error:
-            warn_step(logger, "agent tmux socket setup failed", error)
+        # Non-fatal: agent tmux socket directory infrastructure (VM-level,
+        # root-made system state), then the retirement of the group earlier
+        # releases used to share agents' servers with the admin, which
+        # converts an existing VM on reinit. No dependency on the admin steps
+        # below, so they close out the VM phase.
+        _converge_agent_sockets(
+            files,
+            [agent.linux_user for agent in db.list_agents(vm_name=vm_name)],
+            logger,
+            warn_if_missing=operation is not VMInitializationOperation.VM_CREATE,
+        )
 
     with output.section("Admin Initialization"):
         # Non-fatal: set default shell (before the USER install commands so

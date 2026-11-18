@@ -1,4 +1,4 @@
-"""Tests for tmuxinator config generation and tmux socket helpers."""
+"""Tests for tmuxinator config generation and the agent socket path."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import os
 import shlex
 import shutil
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -14,20 +13,15 @@ import pytest
 import yaml
 
 from agentworks.db import SessionRow
-from agentworks.execution.files import Files
-from agentworks.execution.results import Result
 from agentworks.sessions.tmux import (
-    AGENT_SOCKET_GROUP,
     AGENT_SOCKET_ROOT,
     agent_socket_path,
     as_socket_owner_line,
-    ensure_agent_socket_dir,
-    ensure_agent_socket_root,
     exact_tmux_target,
     tmux_cmd,
 )
 from agentworks.workspaces.tmuxinator import GENERATED_HEADER, console_session_name, generate_config
-from tests.vm_access_support import Admin, Call, RecordingVMAccess, command_line, guest_result
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 def _pane(config: str, window: str) -> str:
@@ -185,121 +179,11 @@ def test_generate_config_admin_session_no_socket() -> None:
     assert "-S " not in config
 
 
-# -- ensure_agent_socket_root / _dir warning behavior ------------------------
-
-
-@dataclass
-class _ScriptedGuest:
-    """The guest behind the admin's access: canned output for the first probe
-    request (the only one that determines warning behavior), success for the
-    setup requests after it. Records whether each request was elevated."""
-
-    def __init__(self, probe_stdout: str) -> None:
-        self._probe_stdout = probe_stdout
-        self._probe_done = False
-        self.commands: list[str] = []
-        self.sudo_calls: list[bool] = []
-
-    def answer(self, call: Call) -> Result | None:
-        command = command_line(call.request)
-        if command is None:
-            return None
-        self.commands.append(command)
-        self.sudo_calls.append(call.request.elevated)
-        # The first call is the probe (contains "if test -d").
-        if not self._probe_done and "if test -d" in command:
-            self._probe_done = True
-            return guest_result(stdout=self._probe_stdout)
-        return guest_result()
-
-    def files(self) -> Files:
-        """The admin's file operations, their requests answered here."""
-        access = RecordingVMAccess([], Admin())
-        access.answer = self.answer
-        return access.files()
-
-
-def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) -> None:
-    runner = _ScriptedGuest("MISSING")
-    ensure_agent_socket_root(runner.files(), "agentworks")
-    assert any("missing" in w for w in warnings)
-    # Probe uses sudo; getent does not; all setup commands use sudo
-    assert runner.sudo_calls[0] is True  # probe
-    assert runner.sudo_calls[1] is False  # getent (no root needed)
-    assert all(runner.sudo_calls[2:])  # groupadd/usermod/mkdir/chown/chmod
-
-
-def test_ensure_agent_socket_root_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_root(_ScriptedGuest("MISSING").files(), "agentworks", warn_if_missing=False)
-    assert warnings == []
-
-
-def test_ensure_agent_socket_root_misconfigured_warns_even_when_missing_suppressed(
-    warnings: list[str],
-) -> None:
-    ensure_agent_socket_root(_ScriptedGuest("root 755").files(), "agentworks", warn_if_missing=False)
-    assert any("misconfigured" in w for w in warnings)
-
-
-def test_ensure_agent_socket_root_probe_failed_warns_even_when_missing_suppressed(
-    warnings: list[str],
-) -> None:
-    ensure_agent_socket_root(_ScriptedGuest("PROBE_FAILED").files(), "agentworks", warn_if_missing=False)
-    assert any("probe failed" in w for w in warnings)
-
-
-def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _ScriptedGuest(f"{AGENT_SOCKET_GROUP} 2771")
-    ensure_agent_socket_root(runner.files(), "agentworks")
-    assert warnings == []
-    # Fast path: probe + group membership check only (no full setup)
-    assert len(runner.commands) == 2
-    # Both calls must use sudo (probe needs root for stat, usermod needs root)
-    assert all(runner.sudo_calls)
-
-
-def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -> None:
-    runner = _ScriptedGuest("MISSING")
-    ensure_agent_socket_dir(runner.files(), "agt--alice")
-    assert any("agt--alice" in w and "missing" in w for w in warnings)
-    # All commands (probe + full setup) must use sudo
-    assert all(runner.sudo_calls)
-
-
-def test_ensure_agent_socket_dir_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_dir(_ScriptedGuest("MISSING").files(), "agt--alice", warn_if_missing=False)
-    assert warnings == []
-
-
-def test_ensure_agent_socket_dir_misconfigured_warns_even_when_missing_suppressed(
-    warnings: list[str],
-) -> None:
-    ensure_agent_socket_dir(_ScriptedGuest("root root 755").files(), "agt--alice", warn_if_missing=False)
-    assert any("misconfigured" in w for w in warnings)
-
-
-def test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed(
-    warnings: list[str],
-) -> None:
-    ensure_agent_socket_dir(_ScriptedGuest("PROBE_FAILED").files(), "agt--alice", warn_if_missing=False)
-    assert any("probe failed" in w for w in warnings)
-
-
-def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _ScriptedGuest(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
-    ensure_agent_socket_dir(runner.files(), "agt--alice")
-    # Probe must use sudo
-    assert runner.sudo_calls[0] is True
-    assert warnings == []
-    assert len(runner.commands) == 1
-
-
 def test_the_generated_config_is_written_private_to_its_admin() -> None:
     import json
 
     from agentworks.execution.requests import PythonProgram
     from agentworks.workspaces.tmuxinator import write_config
-    from tests.vm_access_support import Admin, RecordingVMAccess
 
     access = RecordingVMAccess([], Admin())
 

@@ -168,7 +168,6 @@ def _execute_session_start(
             name,
             run_command=session_run_command,
             socket_path=socket_path,
-            is_admin=is_admin,
             redactions=logger.redactions,
         )
         output.result(f"Session '{name}' startup recovered")
@@ -366,7 +365,6 @@ def _execute_session_start(
             name,
             run_command=session_run_command,
             socket_path=new_sock,
-            is_admin=is_admin,
             redactions=logger.redactions,
         )
 

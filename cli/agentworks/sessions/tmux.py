@@ -18,7 +18,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.errors import ConnectivityError, ExternalError, StateError
-from agentworks.execution.requests import Command, DiscardOutput, Script, Shell
+from agentworks.execution.requests import Command, Script, Shell
 from agentworks.naming import LINUX_USERNAME_MAX_LENGTH, NAME_RE
 
 if TYPE_CHECKING:
@@ -37,9 +37,19 @@ DEFAULT_HISTORY_LIMIT = 50_000
 DEAD_WORKLOAD_OUTPUT_LINES = 15
 DEAD_WORKLOAD_OUTPUT_LINE_CHARS = 500
 
-# Agent tmux socket infrastructure
+# Agent tmux socket infrastructure: ``AGENT_SOCKET_ROOT``, root's, which every
+# agent only traverses, holds one directory per agent that only the agent and
+# root can enter. No group shares it: nobody but the server's owner is ever a
+# tmux client of an agent's server.
 AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
-AGENT_SOCKET_GROUP = "tmux-agent-access"
+
+RETIRED_AGENT_SOCKET_GROUP = "tmux-agent-access"
+"""The group earlier releases put the admin in, to make it a client of every agent's server.
+
+Initialization deletes it (``retire_agent_socket_group``), and a socket
+directory still carrying it is repaired without a warning, since reinit
+expects to find it.
+"""
 
 # A tmux client carries out requests from the server it connects to with the
 # client's own rights, and does not check who runs that server. So whenever
@@ -157,8 +167,8 @@ def socket_owner(socket_path: str, *, admin_username: str) -> str | None:
     directly inside ``AGENT_SOCKET_ROOT/<user>`` belongs to ``<user>``, which
     must be a Linux account name other than ``root`` and the admin.
     ``ensure_agent_socket_dir`` gives each agent its own directory, shared
-    only with the admin group and root, so a client running as that account
-    never holds more rights than whoever could have created the server. In
+    only with root, so a client running as that account never holds more
+    rights than whoever could have created the server. In
     both, the socket's name is one agentworks generates
     (``admin_socket_path``, ``agent_socket_path``): a session name, then
     ``.sock``. Anything else raises ``StateError``.
@@ -439,62 +449,30 @@ def admin_socket_path(admin_username: str, session_name: str) -> str:
     return f"{ADMIN_SOCKET_ROOT}/{admin_username}/{session_name}.sock"
 
 
-def ensure_agent_socket_root(
-    files: Files,
-    admin_username: str,
-    *,
-    warn_if_missing: bool = True,
-) -> None:
-    """Create the agent tmux socket root directory and group (idempotent).
+def ensure_agent_socket_root(files: Files, *, warn_if_missing: bool = True) -> None:
+    """Create the agent tmux socket root, ``root:root`` 0711 (idempotent).
 
-    Fast-paths when the directory already exists with the correct group and
-    permissions (probe + group membership check). Every request runs on
-    ``files.access``, the admin's, bounded by ``files.deadline``.
+    Every agent traverses it to reach its own directory; only root lists it.
+    Fast-paths when one probe finds it so. Every request runs on
+    ``files.access``, the admin's, as root, bounded by ``files.deadline``.
 
     Pass ``warn_if_missing=False`` when the caller already knows the directory
     won't exist (e.g. first-time VM init), to avoid a misleading warning.
     """
-    access, deadline = files.access, files.deadline
     q_root = shlex.quote(AGENT_SOCKET_ROOT)
-
     stdout = _socket_probe(
         files,
-        f'if test -d {q_root}; then stat -c "%G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; else echo MISSING; fi',
+        f'if test -d {q_root}; then stat -c "%U %G %a" {q_root} 2>/dev/null || echo PROBE_FAILED; '
+        "else echo MISSING; fi",
     )
-    if stdout == f"{AGENT_SOCKET_GROUP} 2771":
-        # Directory is correct, but still ensure admin is in the group.
-        joined = access.run(
-            Command(("usermod", "-aG", AGENT_SOCKET_GROUP, admin_username), elevated=True, deadline=deadline)
-        )
-        if joined.require_completed(access.vm_name) != 0:
-            from agentworks import output
-
-            output.warn(f"Failed to add {admin_username} to {AGENT_SOCKET_GROUP}, tmux socket access may fail")
+    if stdout == "root root 711":
         return
-
-    if stdout == "MISSING":
-        should_warn, state = warn_if_missing, "missing"
-    elif stdout == "PROBE_FAILED":
-        should_warn, state = True, "probe failed"
-    else:
-        should_warn, state = True, "misconfigured"
-
-    if should_warn:
-        from agentworks import output
-
-        output.warn(f"Socket root {AGENT_SOCKET_ROOT} {state}, recreating")
-
-    group = access.run(
-        Command(("getent", "group", AGENT_SOCKET_GROUP), deadline=deadline),
-        stdout=DiscardOutput(),
-        stderr=DiscardOutput(),
-    )
-    if group.require_completed(access.vm_name) != 0:
-        _run_root(files, "/usr/sbin/groupadd", AGENT_SOCKET_GROUP)
-    _run_root(files, "usermod", "-aG", AGENT_SOCKET_GROUP, admin_username)
+    _warn_socket_repair(f"Socket root {AGENT_SOCKET_ROOT}", stdout, warn_if_missing=warn_if_missing)
     _run_root(files, "mkdir", "-p", "--", AGENT_SOCKET_ROOT)
-    _run_root(files, "chown", f"root:{AGENT_SOCKET_GROUP}", "--", AGENT_SOCKET_ROOT)
-    _run_root(files, "chmod", "2771", "--", AGENT_SOCKET_ROOT)
+    _run_root(files, "chown", "root:root", "--", AGENT_SOCKET_ROOT)
+    # The extra leading zero clears a set-group-ID bit: GNU chmod keeps a
+    # directory's for a plain four-digit mode such as 0711.
+    _run_root(files, "chmod", "00711", "--", AGENT_SOCKET_ROOT)
 
 
 def ensure_agent_socket_dir(
@@ -503,10 +481,13 @@ def ensure_agent_socket_dir(
     *,
     warn_if_missing: bool = True,
 ) -> None:
-    """Create a per-agent tmux socket directory (idempotent).
+    """Create ``linux_user``'s tmux socket directory, theirs and 0700 (idempotent).
 
-    Fast-paths when the directory already exists with the correct owner/group
-    and permissions (one probe).
+    Owned by the agent with its login group, so only the agent and root can
+    reach a server inside. Fast-paths when one probe finds it the agent's
+    and 0700. An earlier release's 2770 directory reaches 0700 only through
+    this repair, whose ``chown`` precedes its ``chmod``, so it no longer
+    carries ``RETIRED_AGENT_SOCKET_GROUP`` by then.
     """
     path = agent_socket_dir(linux_user)
     q_path = shlex.quote(path)
@@ -516,24 +497,46 @@ def ensure_agent_socket_dir(
         f'if test -d {q_path}; then stat -c "%U %G %a" {q_path} 2>/dev/null || echo PROBE_FAILED; '
         "else echo MISSING; fi",
     )
-    if stdout == f"{linux_user} {AGENT_SOCKET_GROUP} 2770":
+    fields = stdout.split()
+    if len(fields) == 3 and fields[0] == linux_user and fields[2] == "700":
         return
+    _warn_socket_repair(f"Socket directory for {linux_user}", stdout, warn_if_missing=warn_if_missing)
+    _run_root(files, "mkdir", "-p", "--", path)
+    _run_root(files, "chown", f"{linux_user}:", "--", path)
+    # As for the root: the leading zero clears a set-group-ID bit.
+    _run_root(files, "chmod", "00700", "--", path)
 
-    if stdout == "MISSING":
-        should_warn, state = warn_if_missing, "missing"
-    elif stdout == "PROBE_FAILED":
-        should_warn, state = True, "probe failed"
+
+def _warn_socket_repair(what: str, probed: str, *, warn_if_missing: bool) -> None:
+    """Warn that the socket directory ``what`` names is being recreated, unless nothing is wrong with expecting it.
+
+    A missing directory warns only with ``warn_if_missing``. One still in
+    ``RETIRED_AGENT_SOCKET_GROUP`` is the layout of an earlier release, which
+    the repair converts without a warning.
+    """
+    if probed == "MISSING":
+        state = "missing" if warn_if_missing else None
+    elif probed == "PROBE_FAILED":
+        state = "probe failed"
     else:
-        should_warn, state = True, "misconfigured"
-
-    if should_warn:
+        state = None if RETIRED_AGENT_SOCKET_GROUP in probed.split() else "misconfigured"
+    if state is not None:
         from agentworks import output
 
-        output.warn(f"Socket directory for {linux_user} {state}, recreating")
+        output.warn(f"{what} {state}, recreating")
 
-    _run_root(files, "mkdir", "-p", "--", path)
-    _run_root(files, "chown", f"{linux_user}:{AGENT_SOCKET_GROUP}", "--", path)
-    _run_root(files, "chmod", "2770", "--", path)
+
+def retire_agent_socket_group(files: Files) -> None:
+    """Delete ``RETIRED_AGENT_SOCKET_GROUP`` when it exists (idempotent).
+
+    One root script, which does nothing on a VM this release created.
+    Deleting the group ends every membership, the admin's included. Run it
+    only once no socket directory still carries the group. A refusal
+    raises; the caller's step warns.
+    """
+    q_group = shlex.quote(RETIRED_AGENT_SOCKET_GROUP)
+    script = f"getent group {q_group} >/dev/null || exit 0; groupdel {q_group}"
+    files.access.run(Script(script, Shell.SH, elevated=True, deadline=files.deadline), check=True)
 
 
 def cleanup_stale_sockets(files: Files, linux_user: str) -> int:
@@ -603,10 +606,8 @@ def ensure_admin_socket_root(
 ) -> None:
     """Create the admin tmux socket root directory (idempotent).
 
-    Simpler than ``ensure_agent_socket_root``: admin sockets only need to be
-    accessible to the admin user, so no shared group is involved. The root
-    directory is owned by root at 0755 and the admin's directory under it by
-    the admin at 0700.
+    The root directory is owned by root at 0755 and the admin's directory
+    under it by the admin at 0700.
     """
     admin_dir = f"{ADMIN_SOCKET_ROOT}/{admin_username}"
     q_admin_dir = shlex.quote(admin_dir)
@@ -771,34 +772,6 @@ def require_socket_path(socket_path: str, *, run_command: RunCommand) -> None:
             f"managed tmux socket path '{socket_path}' is unsafe or could not be inspected",
             hint="Preserve the unexpected path and inspect it before retrying runtime recovery.",
         )
-
-
-def _grant_server_access(
-    run_command: RunCommand,
-    socket_path: str,
-) -> None:
-    """Ensure read/write tmux access for every member of the socket group.
-
-    Called as the agent (the tmux server owner). No inner
-    sudo is needed: the agent runs ``tmux server-access`` against its
-    own server. Root and the owner already have intrinsic access. ``-w``
-    adds other missing users and updates existing users, so interrupted
-    startup completion can safely repeat the grant.
-    """
-    q_sock = shlex.quote(socket_path)
-    grp = shlex.quote(AGENT_SOCKET_GROUP)
-    # Command substitution applies comma splitting in both POSIX shells and zsh.
-    run_command(
-        f"agw_socket_group=$(getent group {grp}) || exit $?; "
-        "agw_socket_caller_uid=$(id -u) || exit $?; "
-        "agw_socket_members=${agw_socket_group##*:}; "
-        "set -o noglob || exit $?; IFS=,; "
-        "for u in $(printf '%s' \"$agw_socket_members\"); do "
-        'agw_socket_member_uid=$(id -u -- "$u") || exit $?; '
-        'if [ "$agw_socket_member_uid" = 0 ] || '
-        '[ "$agw_socket_member_uid" = "$agw_socket_caller_uid" ]; then continue; fi; '
-        f'tmux -S {q_sock} server-access -w -- "$u" || exit $?; done',
-    )
 
 
 def _pane_command(command: str, q_path: str) -> str:
@@ -976,21 +949,14 @@ def _ensure_workload_alive(
     *,
     run_command: RunCommand,
     socket_path: str,
-    prior_error: Exception | None = None,
     redactions: Iterable[str] = (),
 ) -> None:
     """Liveness gate: return only if the pane is verifiably alive.
 
-    Dead panes raise the capture-and-kill error. Without confirmed death,
-    preserve any earlier sharing error; otherwise an unverifiable observation
+    Dead panes raise the capture-and-kill error. An unverifiable observation
     raises without touching the server. Cancellation and internal failures propagate.
     """
-    try:
-        liveness, exit_status = _probe_pane_liveness(session_name, run_command=run_command, socket_path=socket_path)
-    except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError):
-        if prior_error is not None:
-            raise prior_error from None
-        raise
+    liveness, exit_status = _probe_pane_liveness(session_name, run_command=run_command, socket_path=socket_path)
     if liveness == "dead":
         _raise_workload_died(
             session_name,
@@ -999,8 +965,6 @@ def _ensure_workload_alive(
             exit_status=exit_status,
             redactions=redactions,
         )
-    if prior_error is not None:
-        raise prior_error
     if liveness == "unverified":
         _raise_workload_unverified(session_name, socket_path=socket_path)
 
@@ -1068,15 +1032,14 @@ def create_session(
             AGENTWORKS_RUN_ID=run_id,
         )
 
-    # Per-session socket setup. The admin path uses the simpler shape (no
-    # cross-user group). The agent path keeps the per-agent directory and the
-    # shared socket group that startup's access grant still targets; agentworks
-    # itself reaches an agent's server only as that agent (``RUNUSER_PATH``).
+    # Per-session socket setup, in the session owner's own directory: the
+    # admin's, or the agent's, which agentworks reaches only as that agent
+    # (``RUNUSER_PATH``).
     if is_admin:
         ensure_admin_socket_root(admin_files, admin_username)
         sock = admin_socket_path(admin_username, session_name)
     else:
-        ensure_agent_socket_root(admin_files, admin_username)
+        ensure_agent_socket_root(admin_files)
         ensure_agent_socket_dir(admin_files, linux_user)
         sock = agent_socket_path(linux_user, session_name)
     q_sock = shlex.quote(sock)
@@ -1154,30 +1117,12 @@ def finalize_session_start(
     *,
     run_command: RunCommand,
     socket_path: str,
-    is_admin: bool,
     redactions: Iterable[str] = (),
 ) -> None:
     """Finish startup only after the caller persisted the server fingerprint."""
     require_socket_path(socket_path, run_command=run_command)
-    grant_error: Exception | None = None
-    if not is_admin:
-        try:
-            run_command(f"chmod g+rwx {shlex.quote(socket_path)}")
-        except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
-            grant_error = error
-    # A confirmed workload failure outranks auxiliary socket-sharing failure.
     redactions = tuple(redactions)
-    _ensure_workload_alive(
-        session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error, redactions=redactions
-    )
-    if not is_admin:
-        try:
-            _grant_server_access(run_command, socket_path)
-        except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:
-            grant_error = error
-    _ensure_workload_alive(
-        session_name, run_command=run_command, socket_path=socket_path, prior_error=grant_error, redactions=redactions
-    )
+    _ensure_workload_alive(session_name, run_command=run_command, socket_path=socket_path, redactions=redactions)
     try:
         run_command(_launch_pane_command("set-option -t AGW_LAUNCH_PANE remain-on-exit off", session_name, socket_path))
     except (ConnectivityError, ExternalError, OSError, subprocess.SubprocessError) as error:

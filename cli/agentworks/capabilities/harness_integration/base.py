@@ -158,8 +158,8 @@ def require_commands(
 
     Without this check, a missing binary surfaces only as a cryptic
     downstream failure: the pane command dies instantly, the fresh
-    per-session tmux server exits, and the next ``server-access``
-    call fails against a now-dead socket. Checking up front turns
+    per-session tmux server exits, and the next tmux request fails
+    against a now-dead socket. Checking up front turns
     that into an actionable error with no partial state to roll
     back (and, for restart, with the old session still running).
 

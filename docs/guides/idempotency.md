@@ -89,6 +89,7 @@ links as before. The same holds for agent reinit.
 | sshd AcceptEnv         | Removed: the drop-in earlier releases installed is deleted and sshd reloaded; a no-op, with no reload, when it is absent                                                                                                                         |
 | sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion                                                                                                                                                                         |
 | sudoers console setenv | Removed: `rm -f` of the fragment earlier releases installed, a no-op when it is absent                                                                                                                                                           |
+| Agent tmux sockets     | The socket root reset to `root:root` `0711` and each agent's directory to the agent's own `0700` when either differs; stale sockets removed; the retired `tmux-agent-access` group deleted                                                       |
 
 ### Additive only
 

@@ -212,7 +212,7 @@ def create_agent_on_vm(
     # been reinited since the socket feature was added. The per-agent
     # dir won't exist for a brand-new agent, so we suppress the
     # "missing" warning; misconfiguration of an existing dir still warns.
-    ensure_agent_socket_root(admin_files, vm.admin_username)
+    ensure_agent_socket_root(admin_files)
     ensure_agent_socket_dir(admin_files, linux_user, warn_if_missing=False)
     removed = cleanup_stale_sockets(admin_files, linux_user)
     if removed:

@@ -155,6 +155,23 @@ state. Until then they stay in place, unused:
   through ssh. Reinit reloads sshd after removing it, and from then on sshd accepts only the
   variables the rest of its configuration names (Debian's accepts the locale variables), so an
   `ssh -o SetEnv=...` or `SendEnv` of your own outside those stops reaching the VM.
+- **The admin's group access to agent tmux servers.** Earlier releases put the VM admin in the
+  `tmux-agent-access` group and shared each agent's tmux socket directory and sockets with it, so
+  the admin could connect to an agent's tmux server without switching accounts. Nothing uses that
+  now (see
+  [Agent session tmux clients run as the agent](#agent-session-tmux-clients-run-as-the-agent)).
+  Reinit resets `/run/agentworks/agent-tmux-sockets` to `root:root` `0711` and each agent's
+  directory under it to the agent's own `0700`, then deletes the group, which ends the admin's
+  membership. If any directory could not be reset, reinit warns and keeps the group for the next
+  reinit. `agent create` and `session create` also reset the directories they use, without a
+  warning. An agent session started before the reset keeps running, but from the moment an agent's
+  directory is reset, any account but the agent and root is refused a new connection to its servers.
+  That includes a console window not yet rebuilt and a tmuxinator config an earlier release
+  generated, which connect as the admin: rebuild the console and keep from starting the old config,
+  as the bullets on
+  [existing console windows and tmuxinator configs](#agent-session-tmux-clients-run-as-the-agent)
+  say. A tool of your own that connects to an agent's tmux server as the admin must switch to the
+  agent first, as Agentworks does.
 
 ## Import existing host keys
 

@@ -95,7 +95,7 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
         assert not any(
             mutation in command
             for command, _ in native.calls[first:]
-            for mutation in ("kill-server", "new-session", "chmod ", "server-access", "remain-on-exit off")
+            for mutation in ("kill-server", "new-session", "remain-on-exit off")
         )
     finally:
         db.close()
@@ -289,7 +289,7 @@ def test_unknown_startup_observation_refuses_before_secrets_and_runtime_mutation
         assert not any(
             mutation in command
             for command, _ in native.calls[first:]
-            for mutation in ("kill-server", "new-session", "chmod ", "server-access", "remain-on-exit off")
+            for mutation in ("kill-server", "new-session", "remain-on-exit off")
         )
     finally:
         db.close()

@@ -33,7 +33,7 @@ from agentworks.execution.errors import (
 from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
-from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
+from agentworks.sessions.tmux import AGENT_SOCKET_ROOT, RETIRED_AGENT_SOCKET_GROUP
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.hardening import HARDENING_FSTAB_NEW_LINE, HARDENING_FSTAB_PATH
 from agentworks.vms.initializer import driver
@@ -169,8 +169,56 @@ def test_a_steady_section_runs_every_step_without_a_warning(run_section: Callabl
     run_section(guest)
 
     assert guest.log.warned == []
-    # The section's last step, the agent socket root, ran (on this guest's empty probe it is rebuilt).
-    assert Command(("chmod", "2771", "--", AGENT_SOCKET_ROOT), elevated=True, deadline=60) in guest.commands()
+    # The section's last steps ran: the agent socket root (on this guest's empty probe it is
+    # rebuilt), then the shared group's retirement.
+    commands = guest.commands()
+    root = commands.index(Command(("chmod", "00711", "--", AGENT_SOCKET_ROOT), elevated=True, deadline=60))
+    [retirement] = _retirements(guest)
+    assert root < commands.index(retirement)
+
+
+def _retirements(guest: Guest) -> list[RunRequest]:
+    return [
+        request
+        for request in guest.commands()
+        if isinstance(request, Script) and f"groupdel {RETIRED_AGENT_SOCKET_GROUP}" in request.source
+    ]
+
+
+def _socket_dir_chmod(linux_user: str) -> Command:
+    return Command(("chmod", "00700", "--", f"{AGENT_SOCKET_ROOT}/{linux_user}"), elevated=True, deadline=60)
+
+
+def test_one_agent_s_failed_socket_directory_keeps_the_group_and_the_others_are_still_repaired(
+    db: Database, run_section: Callable[..., None]
+) -> None:
+    for name in ("a1", "a2", "a3"):
+        db.insert_agent(name, "box", f"agt-{name}")
+    guest = Guest()
+    guest.fail(_is(_socket_dir_chmod("agt-a2")), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    run_section(guest)
+
+    assert _socket_dir_chmod("agt-a1") in guest.commands()
+    assert _socket_dir_chmod("agt-a3") in guest.commands()
+    assert _retirements(guest) == []
+    # The directory's own warning, then the kept group's.
+    assert len(guest.log.warned) == 2
+
+
+def test_the_group_is_retired_once_every_socket_directory_is_repaired(
+    db: Database, run_section: Callable[..., None]
+) -> None:
+    for name in ("a1", "a2"):
+        db.insert_agent(name, "box", f"agt-{name}")
+    guest = Guest()
+
+    run_section(guest)
+
+    commands = guest.commands()
+    [retirement] = _retirements(guest)
+    assert commands.index(_socket_dir_chmod("agt-a2")) < commands.index(retirement)
+    assert guest.log.warned == []
 
 
 def test_skel_seeds_and_the_zprofile_block_are_written_after_apt_installs(

@@ -149,8 +149,6 @@ def native(monkeypatch):
         monkeypatch.setattr(tmux, "ensure_admin_socket_root", lambda *a: None)
         monkeypatch.setattr(tmux, "ensure_agent_socket_root", lambda *a: None)
         monkeypatch.setattr(tmux, "ensure_agent_socket_dir", lambda *a: None)
-        # Cross-user access is independently tested; no system users are created.
-        monkeypatch.setattr(tmux, "_grant_server_access", lambda *a: None)
         # This account owns every native socket, whichever owner's directory holds
         # it, so every socket guard checks for this account.
         owner = current_user_name()
@@ -196,7 +194,7 @@ def test_native_global_config_and_last_n_log_lines(native):
         "exec sleep 30\n"
     )
     socket, _pid = launch(native, f"/bin/sh {shlex.quote(str(script))}")
-    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=True)
+    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket)
     assert native.native("show-option -wAqv -t =s1: remain-on-exit").stdout.strip() == "off"
     assert native.native("show-option -gqv @agentworks-native-config").stdout.strip() == "loaded"
     gate.touch()
@@ -243,7 +241,7 @@ def test_native_dead_pane_captures_saved_screen_and_active_overlay(native):
         return result
 
     with pytest.raises(StateError) as caught:
-        _NATIVE_FINALIZE("s1", run_command=observed_run, socket_path=socket, is_admin=False)
+        _NATIVE_FINALIZE("s1", run_command=observed_run, socket_path=socket)
     assert "saved-marker" in str(caught.value)
     assert "active-marker" in str(caught.value)
     # tmux can observe death before a wait status is available. Preserve the
@@ -251,11 +249,6 @@ def test_native_dead_pane_captures_saved_screen_and_active_overlay(native):
     assert len(observations) == 1 and observations[0] in ("1", "1 23")
     if observations[0] == "1 23":
         assert "23" in str(caught.value)
-    chmod = next(index for index, (cmd, _) in enumerate(native.calls) if "chmod g+rwx" in cmd)
-    finished = chmod + 1
-    check = next(index for index, (cmd, _) in enumerate(native.calls[finished:], finished) if "#{pane_dead}" in cmd)
-    assert chmod < check
-    assert Path(socket).stat().st_mode & 0o070 == 0o070
     assert native.native("list-sessions").returncode != 0
 
 
@@ -378,10 +371,10 @@ def test_real_fingerprint_and_presence_ignore_pre_frame_login_stdout(native, str
     assert fingerprint.status is tmux.ProbeStatus.PRESENT
     assert fingerprint.fingerprint is not None and fingerprint.fingerprint.pid > 0
     assert tmux.probe_tmux_session("s1", run_command=native.run, socket_path=socket) is tmux.ProbeStatus.PRESENT
-    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=True)
+    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket)
 
 
-@pytest.mark.parametrize("fault", ["fingerprint", "grant", "interrupt"])
+@pytest.mark.parametrize("fault", ["fingerprint", "liveness", "interrupt"])
 def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path, monkeypatch, native, fault):
     db = _create_stubs(tmp_path, monkeypatch, [])
     _in_agent_directory(native, "agt-s1")
@@ -392,9 +385,9 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
     monkeypatch.setattr(
         tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
     )
-    failure = KeyboardInterrupt() if fault == "interrupt" else SSHError("controlled sharing failure")
+    failure = KeyboardInterrupt() if fault == "interrupt" else SSHError("controlled liveness failure")
 
-    def grant(*args, **kwargs):
+    def observe_liveness(*args, **kwargs):
         raise failure
 
     monkeypatch.setattr(tmux, "finalize_session_start", _NATIVE_FINALIZE)
@@ -404,7 +397,7 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
         )
     else:
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
-        monkeypatch.setattr(tmux, "_grant_server_access", grant)
+        monkeypatch.setattr(tmux, "_ensure_workload_alive", observe_liveness)
     try:
         with pytest.raises(ExternalError if fault == "fingerprint" else type(failure)) as caught:
             manager.create_session(

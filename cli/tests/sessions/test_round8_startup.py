@@ -123,7 +123,8 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         recovered = db.get_session("s1")
         assert recovered is not None and recovered.pid == original_pid
         assert recovered.tmux_server_start_ticks is not None
-        assert Path(native.socket).stat().st_mode & 0o070 == 0o070
+        # Startup shares the socket with no group.
+        assert Path(native.socket).stat().st_mode & 0o070 == 0
         assert native.native("show-option -wAqv -t %0 remain-on-exit").stdout.strip() == "off"
         assert passed_secrets == [()]
         assert artifact_secrets == [()]
@@ -195,7 +196,7 @@ def test_native_launch_pane_survives_nondefault_indexes_and_new_active_window(na
     gate.touch()
     native.wait_dead()
     with pytest.raises(StateError) as caught:
-        _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=True)
+        _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket)
     assert "launch-marker" in str(caught.value)
     assert native.native("list-sessions").returncode != 0
 
@@ -205,7 +206,7 @@ def test_native_config_precreated_pane_does_not_steal_launch_identity(native):
     config.write_text("set -g remain-on-exit on\nnew-session -d -s existing 'sleep 30'\n")
     socket, _ = launch(native, "sleep 30")
     assert native.native("show-option -gqv @agentworks-launch-pane").stdout.strip() != "%0"
-    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=True)
+    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket)
     assert tmux._probe_pane_liveness("s1", run_command=native.run, socket_path=socket) == ("alive", "")
     # Corrupt metadata must not turn the config-created pane into our workload.
     native.native("set-option -g @agentworks-launch-pane %0")
@@ -270,7 +271,8 @@ def test_native_retry_completes_protected_runtime_with_known_fingerprint(tmp_pat
         manager.start_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
         recovered = db.get_session("s1")
         assert recovered is not None and recovered.pid == row.pid
-        assert Path(native.socket).stat().st_mode & 0o070 == 0o070
+        # Startup shares the socket with no group.
+        assert Path(native.socket).stat().st_mode & 0o070 == 0
         assert tmux.startup_protection_enabled("s1", run_command=native.run, socket_path=native.socket) is False
         assert sum("new-session" in command for command, _ in native.calls) == 1
     finally:

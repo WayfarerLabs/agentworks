@@ -603,8 +603,8 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     """End-to-end through the manager: a session workload that dies instantly
     (the 2026-08-03 incident: `codex -a on-failure` rejected by clap in
     milliseconds) must surface its own captured output in the operator-visible
-    failure, prove runtime absence before rolling back partial state, and
-    skip server-access grants for the dead pane. Drives the REAL tmux.create_session
+    failure and prove runtime absence before rolling back partial state.
+    Drives the REAL tmux.create_session
     against a scripted agent transport whose pane_dead probe answers dead."""
     from agentworks.agents import grants as agent_grants
     from agentworks.agents.manager import access as agent_access
@@ -703,11 +703,6 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     assert db.get_session("s1") is None
     assert not db.has_any_grant("a1", "ws1")
 
-    # Make a dead socket observable before diagnosis, without server grants.
-    assert not any("server-access" in c for c in agent_commands)
-    chmod = next(index for index, command in enumerate(agent_commands) if "chmod g+rwx" in command)
-    death_probe = next(index for index, command in enumerate(agent_commands) if "#{pane_dead}" in command)
-    assert chmod < death_probe
     assert not agent_target.alive
     db.close()
 

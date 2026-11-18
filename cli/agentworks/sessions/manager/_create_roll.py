@@ -454,7 +454,6 @@ def _start_session_slice(
                 name,
                 run_command=session_run_command,
                 socket_path=sock,
-                is_admin=mode == SessionMode.ADMIN,
                 redactions=tuple(secret_values.values()),
             )
             retain_unknown_runtime = False

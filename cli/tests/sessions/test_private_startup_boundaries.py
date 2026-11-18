@@ -42,7 +42,7 @@ def test_legacy_multiwindow_retains_running_noop_and_active_pane_logs(tmp_path, 
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     bind_native_runtime(db, monkeypatch, native)
     fingerprint = record_native_runtime(db, native)
-    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=native.socket, is_admin=False)
+    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=native.socket)
     marker = uuid4().hex
     native.native("set-option -gu @agentworks-launch-pane")
     native.native(f"new-window -n operator {shlex.quote(f'printf {marker}; sleep 30')}")
@@ -102,10 +102,7 @@ def test_redirected_managed_socket_preserves_other_runtime_and_row(tmp_path, mon
         assert_runtime_preserved(db, before, operation="stop_session")
         assert Path(owned_socket).is_symlink()
         assert native.native("list-sessions").ok
-        assert not any(
-            "kill-server" in command or "chmod " in command or "server-access" in command
-            for command, _ in native.calls[first:]
-        )
+        assert not any("kill-server" in command for command, _ in native.calls[first:])
     finally:
         db.close()
 
