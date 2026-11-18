@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
@@ -36,13 +37,18 @@ class ConsoleAction(Enum):
 
 @dataclass(frozen=True)
 class PreparedConsoleReconcile:
-    """A definition and exact runtime observation retained under a family guard."""
+    """A definition and exact runtime observation retained under a family guard.
+
+    ``admin`` is the admin's access, built beside the legacy ``target`` for
+    the admin-shell window's handover until the console modules move to it.
+    """
 
     db: Database
     registry: Registry
     console: ConsoleRow
     vm: VMRow
     target: Transport | None
+    admin: VMAccess
     held_native_guard: NativeMutationGuard
     members: tuple[ConsoleSessionRow, ...]
     layout: str
@@ -132,6 +138,7 @@ def prepare_console_reconcile(
     console: ConsoleRow,
     vm: VMRow,
     target: Transport,
+    admin: VMAccess,
     held_native_guard: NativeMutationGuard,
     replace_running: bool = False,
 ) -> PreparedConsoleReconcile:
@@ -159,6 +166,7 @@ def prepare_console_reconcile(
             console,
             vm,
             target,
+            admin,
             held_native_guard,
             members,
             named_console_template(registry).tmux_layout,
@@ -253,6 +261,7 @@ def execute_console_reconcile(prepared: PreparedConsoleReconcile, *, values: Map
             prepared.registry,
             prepared.console,
             prepared.vm,
+            admin=prepared.admin,
             values=values,
             layout=prepared.layout,
             members=prepared.members,

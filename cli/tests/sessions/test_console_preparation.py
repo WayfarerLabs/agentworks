@@ -9,11 +9,13 @@ import pytest
 import agentworks.bootstrap as bootstrap
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError, UserAbort, ValidationError
+from agentworks.execution.access import Admin
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.console_helpers import create_console_record
+from tests.vm_access_support import RecordingVMAccess
 
 if TYPE_CHECKING:
     from agentworks.db import ConsoleRow, Database, SessionRow, VMRow
@@ -62,6 +64,7 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
             console=console,
             vm=_vm(db),
             target=target,
+            admin=RecordingVMAccess([], Admin()),
             held_native_guard=guard,
         )
         assert prepared.action is action
@@ -88,6 +91,7 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
             console=console,
             vm=_vm(db),
             target=object(),
+            admin=RecordingVMAccess([], Admin()),
             held_native_guard=guard,
         )
 
@@ -110,6 +114,7 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
             console=console,
             vm=_vm(db),
             target=object(),
+            admin=RecordingVMAccess([], Admin()),
             held_native_guard=guard,
         )
         assert not changed
@@ -158,13 +163,16 @@ def test_delete_cancellation_propagates_and_retains_definition(db: Database, mon
     assert db.get_console("con") is not None
 
 
-def test_admin_only_env_is_literal_delivered_and_redacted(db: Database, tmp_path, monkeypatch):
+def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, tmp_path, monkeypatch):
     import shlex
     from uuid import uuid4
 
+    from agentworks.execution.attach import Handover
+    from agentworks.execution.requests import LoginShell
     from agentworks.ssh import SSHResult
     from tests._tmux_model import TmuxModel
     from tests.conftest import _FakeTarget
+    from tests.vm_access_support import PARK_TOKEN
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
@@ -173,6 +181,7 @@ def test_admin_only_env_is_literal_delivered_and_redacted(db: Database, tmp_path
     value = f"prefix'{marker}' $(touch ignored) suffix"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
+    created: list[tuple[str, dict[str, object]]] = []
 
     class Target(_FakeTarget):
         def run(self, command, **kwargs):
@@ -180,11 +189,11 @@ def test_admin_only_env_is_literal_delivered_and_redacted(db: Database, tmp_path
             if self.logger:
                 self.logger.log_command(command, SSHResult(result.returncode, result.stdout, result.stderr))
             if command.startswith("tmux new-session"):
-                assert kwargs["env"] == {"TOKEN": value}
-                assert "TOKEN=" + value in shlex.split(command)
+                created.append((command, kwargs))
             return result
 
     target = Target(model=TmuxModel())
+    admin = RecordingVMAccess([], Admin())
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
@@ -192,14 +201,53 @@ def test_admin_only_env_is_literal_delivered_and_redacted(db: Database, tmp_path
             console=console,
             vm=_vm(db),
             target=target,
+            admin=admin,
             held_native_guard=guard,
         )
         assert mc.execute_console_reconcile(prepared, values={"token": value})
         assert mc.observe_prepared_console(prepared).value == "running"
+    # The value travels in the admin's parked request, and the window runs only the handover's command.
+    assert [(call.operation, call.request) for call in admin.calls] == [("park", LoginShell(env={"TOKEN": value}))]
+    [(command, kwargs)] = created
+    assert shlex.split(command)[-1] == Handover(PARK_TOKEN, "agentworks").command()
+    assert marker not in command
+    assert not kwargs.get("env")
     logs = list(tmp_path.glob("**/*.log"))
     assert logs
     assert all(marker not in log.read_text() for log in logs)
     assert target.logger is None
+
+
+@pytest.mark.parametrize("failure", ["window", "handover"])
+def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Database, tmp_path, monkeypatch, failure):
+    from agentworks.errors import ExternalError
+    from tests._tmux_model import TmuxModel
+    from tests.conftest import _FakeResult, _FakeTarget
+
+    _seed_vm(db)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {})
+    model = TmuxModel()
+
+    class Target(_FakeTarget):
+        def run(self, command, **kwargs):
+            if failure == "window" and command.startswith("tmux new-session"):
+                self.commands.append(command)
+                return _FakeResult(returncode=1, stderr="no server")
+            return super().run(command, **kwargs)
+
+    target = Target(model=model)
+    admin = RecordingVMAccess([], Admin())
+    admin.park_collected = failure != "handover"
+    with pytest.raises(ExternalError):
+        mc._build_console_tmux(target, db, registry, _console(db), _vm(db), admin=admin, values={}, layout="tiled")
+
+    assert [call.operation for call in admin.calls] == ["park"]
+    assert not model.has_session("aw-console-con")
+    assert not any("rename-session" in command for command in target.commands)
+    assert _console(db).last_started_at is None
 
 
 def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, monkeypatch):
@@ -232,6 +280,7 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
             registry,
             _console(db),
             _vm(db),
+            admin=RecordingVMAccess([], Admin()),
             values={},
             layout="tiled",
         )

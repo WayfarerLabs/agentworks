@@ -192,6 +192,9 @@ def create_console(
                     for spec in specs:
                         db.add_console_session(name, spec.name, default_shells(spec.shells))
                 console = _require_console(db, name)
+                import agentworks.execution as execution
+                from agentworks.execution.access import Admin
+
                 from .tmux_build import _build_console_tmux
 
                 try:
@@ -201,6 +204,8 @@ def create_console(
                         registry,
                         console,
                         vm,
+                        # Built beside this module's legacy target until consoles move.
+                        admin=execution.vm_access(vm, config, Admin()),
                         values=secret_values,
                         layout=named_console_template(registry).tmux_layout,
                     )

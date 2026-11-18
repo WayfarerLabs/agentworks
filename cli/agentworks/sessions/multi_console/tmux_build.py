@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.resources.registry import Registry
     from agentworks.transports import Transport
 
@@ -504,12 +505,18 @@ def _build_console_tmux_unlogged(
     console: ConsoleRow,
     vm: VMRow,
     *,
+    admin: VMAccess,
     values: Mapping[str, str],
     layout: str,
     members: Sequence[ConsoleSessionRow] | None = None,
 ) -> None:
-    """Build under a reserved name and publish only a complete console."""
-    from agentworks.sessions.tmux import ProbeStatus, _tmux_env_flags
+    """Build under a reserved name and publish only a complete console.
+
+    ``admin`` is the admin's access, on which the admin-shell window parks its
+    environment; every other request still runs on ``target``.
+    """
+    from agentworks.execution.requests import LoginShell
+    from agentworks.sessions.tmux import ProbeStatus
 
     from .attach import _teardown_console_tmux, _tmux_session_presence
 
@@ -538,30 +545,46 @@ def _build_console_tmux_unlogged(
         )
     _teardown_console_tmux(target, console.name)
     q_staging_create = shlex.quote(staging_name)
+
+    def staging_failed() -> ExternalError:
+        return ExternalError(
+            f"failed to create staging tmux state for console '{console.name}'",
+            entity_kind="console",
+            entity_name=console.name,
+        )
+
     try:
         if console.admin_shell:
             # Window 0 is the admin shell. The literal tmux window name
-            # '--admin--' cannot collide with a valid session name.
+            # '--admin--' cannot collide with a valid session name. Its
+            # environment is parked on the admin's own connection and the
+            # pane's command collects it (the terminal handover), so no value
+            # reaches a tmux argument or the SSH command line.
             pane_env = _mc._resolve_admin_env(db, registry, values=values, vm=vm)
-            env_flags = _tmux_env_flags(pane_env)
-            created = target.run(
-                f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(ADMIN_SHELL_WINDOW)}"
-                f"{env_flags} {shlex.quote('exec $SHELL -l')}",
-                env=pane_env,
-            )
+            with admin.park(LoginShell(env=pane_env)) as handover:
+                created = target.run(
+                    f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
+                    f"{shlex.quote(handover.command())}"
+                )
+                if not created.ok:
+                    raise staging_failed()  # inside the block, so the parked request goes at once
+            if not handover.collected:
+                # The pane never collected its request, so its shell never started.
+                raise ExternalError(
+                    f"the admin shell window of console '{console.name}' did not start its shell",
+                    entity_kind="console",
+                    entity_name=console.name,
+                    hint=f"Retry with `agw console start {console.name}`.",
+                )
             placeholder_used = False
             placeholder = ""
         else:
             # tmux requires one window while the real windows are constructed.
             placeholder = "_PLACEHOLDER"
             created = target.run(f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(placeholder)}")
+            if not created.ok:
+                raise staging_failed()
             placeholder_used = True
-        if not created.ok:
-            raise ExternalError(
-                f"failed to create staging tmux state for console '{console.name}'",
-                entity_kind="console",
-                entity_name=console.name,
-            )
 
         if members:
             output.detail(f"Adding {len(members)} session window(s) to console '{console.name}'...")
@@ -631,11 +654,12 @@ def _build_console_tmux(
     console: ConsoleRow,
     vm: VMRow,
     *,
+    admin: VMAccess,
     values: Mapping[str, str],
     layout: str,
     members: Sequence[ConsoleSessionRow] | None = None,
 ) -> None:
-    """Build with redacted diagnostics and a value-scoped SSH transcript."""
+    """Build with redacted diagnostics and a value-scoped SSH transcript (see ``_build_console_tmux_unlogged``)."""
     from agentworks.harness_setup.outcomes import sanitize_setup_error
     from agentworks.ssh import SSHLogger
 
@@ -649,6 +673,7 @@ def _build_console_tmux(
             registry,
             console,
             vm,
+            admin=admin,
             values=values,
             layout=layout,
             members=members,

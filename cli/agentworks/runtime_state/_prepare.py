@@ -274,8 +274,10 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
 
 
 def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
+    import agentworks.execution as execution
     import agentworks.sessions.manager as sessions
     import agentworks.sessions.multi_console as consoles
+    from agentworks.execution.access import Admin
     from agentworks.sessions.multi_console._status import ConsoleStatus
     from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
@@ -358,6 +360,7 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
                     console=console,
                     vm=vm,
                     target=target,
+                    admin=execution.vm_access(vm, invocation.config, Admin()),
                     held_native_guard=invocation.guards[vm.name],
                 )
                 invocation.console_starts[name] = prepared_console

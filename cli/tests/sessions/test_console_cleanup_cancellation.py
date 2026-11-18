@@ -8,12 +8,14 @@ import pytest
 
 import agentworks.bootstrap as bootstrap
 from agentworks.errors import ExternalError, StateError, UserAbort
+from agentworks.execution.access import Admin
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.multi_console.tmux_build import _build_console_tmux_unlogged
 from tests._consoles_support import _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeTarget
 from tests.console_helpers import create_console_record
+from tests.vm_access_support import RecordingVMAccess
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -65,7 +67,16 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     build = mc._build_console_tmux if logged else _build_console_tmux_unlogged
     expected = cleanup if isinstance(cleanup, (UserAbort, KeyboardInterrupt)) else primary
     with pytest.raises(type(expected)) as caught:
-        build(target, db, registry, db.get_console("con"), db.get_vm("vm1"), values={}, layout="tiled")
+        build(
+            target,
+            db,
+            registry,
+            db.get_console("con"),
+            db.get_vm("vm1"),
+            admin=RecordingVMAccess([], Admin()),
+            values={},
+            layout="tiled",
+        )
 
     assert caught.value is expected
     assert target.cleanup_attempted
@@ -116,6 +127,7 @@ def test_log_close_preserves_failure_priority_and_restores_transport_logger(
             registry,
             db.get_console("con"),
             db.get_vm("vm1"),
+            admin=RecordingVMAccess([], Admin()),
             values={},
             layout="tiled",
         )

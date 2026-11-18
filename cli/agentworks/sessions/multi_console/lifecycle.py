@@ -58,7 +58,9 @@ def realize_console(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Accept running, prepare infrastructure, then resolve and apply one workload."""
+    import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
+    from agentworks.execution.access import Admin
     from agentworks.secrets.resolver import Resolver
     from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
@@ -109,6 +111,7 @@ def realize_console(
                     console=console,
                     vm=vm,
                     target=transport(vm, config),
+                    admin=execution.vm_access(vm, config, Admin()),
                     held_native_guard=guard,
                     replace_running=replace_running,
                 )

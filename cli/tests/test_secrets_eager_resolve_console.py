@@ -26,6 +26,7 @@ from agentworks.sessions.tmux import ProbeStatus
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import seed_vm_trust, stub_vm_gates
+from .vm_access_support import install_access_recorder
 
 __all__ = ["_stub_build_registry"]
 
@@ -167,6 +168,7 @@ def test_start_console_eager_resolves_before_tmux(
         "agentworks.transports.transport",
         lambda *a, **kw: SimpleNamespace(run=lambda *a, **kw: None, interactive=lambda *a, **kw: 0),
     )
+    install_access_recorder(monkeypatch)  # the admin's access for the admin shell's handover
 
     @contextlib.contextmanager
     def _fake_prepare(*a: object, **k: object):  # noqa: ANN202
