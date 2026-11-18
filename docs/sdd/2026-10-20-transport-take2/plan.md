@@ -670,7 +670,8 @@ module, and `remote_exec.py` is deleted.
 - [x] Delete the independence guards that can no longer fail once the legacy modules are gone: the
       fresh-interpreter guard, the conftest blocker and the static legacy-import check.
 - [x] Make the managed SSH entries' store options unconditional, with release notes for operators
-      who never imported.
+      who never imported. `UserKnownHostsFile` names the null device until the VM has a record, so a
+      weaker setting read first can never write a first-use key into the store (trust-lld).
 - [x] Settle how a host path with an apostrophe and no whitespace reaches the ssh shipped with Git
       for Windows, which rejects both the quoted and the bare form of such an option value
       (`execution/trust.py`, `option_value`): refuse that path before writing a managed SSH config

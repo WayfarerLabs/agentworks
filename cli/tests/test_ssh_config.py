@@ -752,7 +752,7 @@ def test_a_home_directory_named_with_an_apostrophe_never_reaches_an_entry(
     assert captured_output.warnings == []
 
 
-@pytest.mark.parametrize("field", ["tailscale_host", "admin_username", "linux_user"])
+@pytest.mark.parametrize("field", ["tailscale_host", "admin_username", "linux_user", "name"])
 def test_a_persisted_value_that_would_add_a_line_leaves_the_vms_entries_out(
     tmp_path: Path,
     field: str,
@@ -762,7 +762,7 @@ def test_a_persisted_value_that_would_add_a_line_leaves_the_vms_entries_out(
     config, ssh_dir = _mock_config(tmp_path)
     vm, other = _mock_vm("web", "100.64.0.1"), _mock_vm("db", "100.64.0.2")
     agent = _mock_agent("claude", "agt-claude", "web")
-    target = agent if field == "linux_user" else vm
+    target = agent if field in ("linux_user", "name") else vm
     setattr(target, field, f"{getattr(target, field)}\n    ProxyCommand sh -c 'evil'")
     db = MagicMock()
     db.get_setting.return_value = None
@@ -775,3 +775,43 @@ def test_a_persisted_value_that_would_add_a_line_leaves_the_vms_entries_out(
     assert set(_managed_blocks(content)) == {"awvm--db"}
     assert "ProxyCommand" not in content
     assert len(captured_output.warnings) == 1
+
+
+@pytest.mark.parametrize(
+    ("host", "user"),
+    [
+        ("100.64.0.1", "svc$"),
+        ("100.64.0.1", "1admin"),
+        (".example", "agentworks"),
+        ("-example", "agentworks"),
+        ("fd7a:115c:a1e0::1", "agentworks"),
+        ("fe80::1%eth0", "agentworks"),
+        ("vm.tailnet.ts.net", "agentworks"),
+    ],
+)
+def test_an_entry_is_written_exactly_when_the_execution_core_would_connect_there(
+    tmp_path: Path,
+    host: str,
+    user: str,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """One rule for a row's host and user: the entries agree with ``Destination``, which every connection builds."""
+    from agentworks.errors import ValidationError
+    from agentworks.execution.ssh_process import Destination
+
+    try:
+        Destination(host, user)
+        accepted = True
+    except ValidationError:
+        accepted = False
+    config, ssh_dir = _mock_config(tmp_path)
+    vm = _mock_vm("web", host)
+    vm.admin_username = user
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [vm]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert (ssh_dir / "config.d" / _MANAGED_CONF).exists() is accepted

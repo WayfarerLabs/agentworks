@@ -15,7 +15,6 @@ what Agentworks' connections trust and refuses a VM with no recorded key.
 
 from __future__ import annotations
 
-import operator
 import re
 import sys
 from pathlib import Path
@@ -24,7 +23,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.atomic_write import atomic_write_text
 from agentworks.errors import AgentworksError, ConfigError, ValidationError
-from agentworks.execution import trust
+from agentworks.execution import ssh_process, trust
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -261,9 +260,12 @@ def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agen
         return []
     agents = db.list_agents(vm_name=vm.name)
     try:
-        # Boundary: these are persisted values, and each becomes a token of a line ssh parses.
-        for value in (vm.tailscale_host, vm.admin_username, *(f(agent) for agent in agents for f in _AGENT_TOKENS)):
-            _require_token(value)
+        # Boundary: these are persisted values, and each becomes a token of a line ssh parses. The host and the
+        # users follow the execution core's own rule for the same rows; an agent's name is also its alias.
+        ssh_process.Destination(vm.tailscale_host, vm.admin_username)
+        for agent in agents:
+            ssh_process.Destination(vm.tailscale_host, agent.linux_user)
+            _require_alias_token(agent.name)
         verification = _verification_lines(vm.name)
     except AgentworksError as e:
         output.warn(f"SSH config entries for VM '{vm.name}' left out: {_with_hint(e)}")
@@ -280,14 +282,13 @@ def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agen
     return entries
 
 
-_AGENT_TOKENS = (operator.attrgetter("name"), operator.attrgetter("linux_user"))
-# A host name, an address or an account name: nothing ssh would split, unquote or end the line at.
-_TOKEN = re.compile(r"[A-Za-z0-9._:-]+")
+# What an alias's name part may hold: nothing ssh would split, unquote, match as a pattern or end the line at.
+_ALIAS_TOKEN = re.compile(r"[A-Za-z0-9._-]+")
 
 
-def _require_token(value: str) -> None:
-    if not _TOKEN.fullmatch(value):
-        raise ValidationError(f"{value!r} is not a host name, an address or an account name ssh can be given")
+def _require_alias_token(name: str) -> None:
+    if not _ALIAS_TOKEN.fullmatch(name):
+        raise ValidationError(f"{name!r} cannot be part of an SSH host alias")
 
 
 def _with_hint(error: AgentworksError) -> str:

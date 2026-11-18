@@ -266,9 +266,20 @@ R8's end state does not depend on every operator importing (`ssh_config._vm_entr
   `agw vm import-host-keys <vm>` and `agw vm recover <vm>`. A record that cannot be read is treated
   as one, so its entries name the store and `ssh` reports the read failure itself. The upgrade guide
   carries the breaking-change note.
-- **Persisted values are checked.** The tailnet address, the admin and agent account names and the
-  agent names each become a token of a line ssh parses, so a value that is not a plain host name,
-  address or account name leaves that VM's entries out with a warning.
+- **A VM with a record stays closed to first-use writes too** (checked against OpenSSH 9.2p1, whose
+  sshd offered ed25519, ECDSA and RSA keys, with only the RSA key recorded). Through the managed
+  entry, `-o StrictHostKeyChecking=accept-new` negotiated the recorded RSA key and verified it.
+  Forcing an unrecorded type (`-o HostKeyAlgorithms=ssh-ed25519`), with `accept-new` on the command
+  line or in a `Host *` block read first, failed with
+  `Host key for agentworks-vm-<name> has changed`; `StrictHostKeyChecking=no` went on to key
+  authentication with password and keyboard-interactive authentication disabled. In every case the
+  store file was unchanged: a key of a type the record lacks counts as changed, which ssh never
+  writes, and `UpdateHostKeys no` stops it learning the others. So no `HostKeyAlgorithms` pin is
+  needed.
+- **Persisted values are checked.** The tailnet address and the admin and agent account names each
+  become a token of a line ssh parses, so they must pass the execution core's own rule for the same
+  rows (`ssh_process.Destination`), and an agent's name, which becomes its alias, must be a plain
+  token. A value that fails leaves that VM's entries out with a warning.
 - **A store path that cannot be written** (`literal_path` refuses it, or the Windows apostrophe rule
   below) leaves out every entry of that VM, with a warning, rather than writing entries that would
   trust whatever answers. It never aborts the rebuild for the other VMs. A key path that cannot be

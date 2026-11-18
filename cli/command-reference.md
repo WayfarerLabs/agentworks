@@ -1162,9 +1162,13 @@ Every entry also carries `HostKeyAlias`, `UserKnownHostsFile` and `StrictHostKey
 reads. For a VM with a host-key record, `UserKnownHostsFile` is the VM's store file. For a VM with
 none it is the null device, and the entries carry a comment naming `agw vm import-host-keys NAME`
 and `agw vm recover NAME`. Your own `ssh` therefore trusts exactly the keys Agentworks has recorded:
-it refuses a VM with no record (`Host key verification failed`) until one is recorded, and even a
-setting of yours that relaxes host-key checking for these hosts cannot write a key into the store.
-See [Host keys](#host-keys).
+it refuses a VM with no record (`Host key verification failed`) until one is recorded. A setting of
+your own that relaxes host-key checking for these hosts (an earlier `Host *` with
+`StrictHostKeyChecking accept-new` or `no`, or the same on the command line) can let `ssh` connect
+without verifying, to a VM with no record or, under `no`, past a key the store does not hold, but it
+never records a key: a VM with no record names no store file, a key the store does not hold counts
+as changed, which `ssh` never writes, and `UpdateHostKeys no` stops it learning others. See
+[Host keys](#host-keys).
 
 Paths in the entries are written relative to `~` when they are under your home directory. A VM whose
 store path cannot be written into an entry gets no entries, with a warning, rather than entries that
