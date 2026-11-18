@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import socket
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -15,7 +14,7 @@ from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
-from agentworks.sessions.manager import _teardown
+from tests._runtime_probes import server_for
 
 from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
@@ -65,8 +64,8 @@ def test_unrecorded_native_server_is_never_adopted_or_destroyed(
         native.native(f"rename-session -t '=s1' {native_name}")
     before = db.get_session("s1")
     assert before is not None
-    assert manager.check_session_status(before, target=native) is SessionStatus.UNKNOWN
-    assert manager.batch_check_status([replace(before, mode="admin")], target=native) == {"s1": SessionStatus.UNKNOWN}
+    assert manager.check_session_status(before, target=native, server=server_for(before)) is SessionStatus.UNKNOWN
+    assert manager.batch_check_status([(before, server_for(before))], target=native) == {"s1": SessionStatus.UNKNOWN}
     fingerprint = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
     events.clear()
     first = len(native.calls)
@@ -208,7 +207,7 @@ def test_unacknowledged_recovery_requires_exact_attempt_and_stable_server(tmp_pa
 def test_failed_admin_launch_recovers_after_boot_absence(tmp_path, monkeypatch, native, old_null_address, operation):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(tmux, "ADMIN_SOCKET_ROOT", str(native.root))
     # The namespaced owner path must agree with the fixture VM admin user.
     vm = db.get_vm("vm1")
     assert vm is not None
@@ -309,7 +308,7 @@ def test_maintenance_socket_guard_covers_the_entire_framed_probe(monkeypatch, na
         return result
 
     monkeypatch.setattr(native, "run", replace_after_enumeration)
-    assert tmux._cleanup_stale_sockets_under(native, str(scan)) == 0
+    assert tmux._cleanup_stale_sockets_under(native, str(scan), owner="agt-owned") == 0
     assert stale.is_symlink()
     assert not observed.exists()
     assert native.native("list-sessions").ok
@@ -355,7 +354,7 @@ def test_old_admin_stopped_null_address_becomes_addressable_after_native_absence
 ):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(tmux, "ADMIN_SOCKET_ROOT", str(native.root))
     native.socket = str(native.root / "admin" / "s1.sock")
     Path(native.socket).parent.mkdir()
     monkeypatch.setattr(tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", launch_options=k))
@@ -473,7 +472,7 @@ def test_recorded_native_runtime_keeps_running_and_residual_inventory(tmp_path, 
     assert row is not None
     expected = SessionStatus.RUNNING if native_name == "s1" else SessionStatus.RESIDUAL
     try:
-        assert manager.check_session_status(row, target=native) is expected
-        assert manager.batch_check_status([replace(row, mode="admin")], target=native) == {"s1": expected}
+        assert manager.check_session_status(row, target=native, server=server_for(row)) is expected
+        assert manager.batch_check_status([(row, server_for(row))], target=native) == {"s1": expected}
     finally:
         db.close()

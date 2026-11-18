@@ -22,7 +22,6 @@ from agentworks.execution.errors import TrustMissing
 from agentworks.list_sorting import nullable_sort_value, sort_rows
 from agentworks.runtime_time import derive_uptime_seconds, format_short_uptime, format_uptime
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
-from agentworks.sessions.tmux import exact_tmux_target
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -174,6 +173,8 @@ def _delete_session_runtime(
     selected_session_uuid = session.session_uuid
     from agentworks.sessions.manager._lifecycle import _require_selected_session
 
+    # Refuse a row the owner rule rejects before any VM work.
+    _mgr.resolve_session_tmux_server(db, session)
     with _mgr._prepare_vm(
         db,
         config,
@@ -197,7 +198,11 @@ def _delete_session_runtime(
                 status = SessionStatus.RUNNING
             else:
                 session = _mgr._ensure_pid(session, target=admin_target, db=db)
-                status = _mgr.check_session_status(session, target=admin_target)
+                # Resolved again from the reloaded row: repair can give an old
+                # admin row its dedicated socket.
+                status = _mgr.check_session_status(
+                    session, target=admin_target, server=_mgr.resolve_session_tmux_server(db, session)
+                )
 
             if status == SessionStatus.UNKNOWN:
                 raise StateError(
@@ -471,9 +476,13 @@ def session_description(
     vm = _mgr._require_vm_for_workspace(db, workspace)
     output.info(f"Checking session '{name}' runtime...")
     status = SessionStatus.UNKNOWN
+    try:
+        server = _mgr.resolve_session_tmux_server(db, session)
+    except StateError:
+        server = None  # Never probed: a row the owner rule refuses stays UNKNOWN.
     if session.socket_path is None:
         status = _mgr.check_session_status(session)
-    else:
+    elif server is not None:
         from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
         try:
@@ -502,6 +511,7 @@ def session_description(
                     status = _mgr.check_session_status(
                         session,
                         target=cast("Transport", _BoundedStatusTarget(target)),
+                        server=server,
                     )
                 except UserAbort:
                     raise
@@ -936,9 +946,13 @@ def attach_session(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
-    from agentworks.sessions.tmux import tmux_cmd
+    from agentworks.sessions.tmux import tmux_attach_cmd
 
     session = _mgr._require_session(db, name)
+    # Refuse a socket outside its owner's directory before any VM work. A
+    # legacy row without a socket meets the status check's own refusal.
+    server = _mgr.resolve_session_tmux_server(db, session)
+    owner = server.owner if server is not None else None
     with _mgr._prepare_vm(
         db,
         config,
@@ -952,7 +966,7 @@ def attach_session(
         _run_as_root,
         target,
     ):
-        status = _mgr.check_session_status(session, target=target)
+        status = _mgr.check_session_status(session, target=target, server=server)
 
         if status == SessionStatus.STOPPED:
             raise StateError(
@@ -983,10 +997,9 @@ def attach_session(
 
         from agentworks.terminal import clear_screen_on_detach
 
-        q_session = exact_tmux_target(name)
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
         return target.interactive(
-            tmux_cmd(f"attach -t {q_session}", session.socket_path),
+            tmux_attach_cmd(name, session.socket_path, owner=owner),
             clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )

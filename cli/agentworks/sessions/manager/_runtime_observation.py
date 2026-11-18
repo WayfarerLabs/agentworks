@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.transports import Transport
 
+    from ._tmux_server import SessionTmuxServer
+
 
 def _bounded(target: Transport) -> Transport:
     from ._status import _BoundedStatusTarget
@@ -27,24 +29,34 @@ def observe_session_runtime(
     session: SessionRow,
     *,
     admin_target: Transport,
+    server: SessionTmuxServer | None,
     session_target: Transport | None = None,
 ) -> SessionStatus:
-    """Classify exact presence and stored boot/process absence without evidence writes."""
+    """Classify exact presence and stored boot/process absence without evidence writes.
+
+    ``server`` is the row's tmux server as ``resolve_session_tmux_server``
+    validated it, ``None`` for a legacy row without a socket path.
+    """
     from agentworks.sessions.tmux import capture_tmux_server_fingerprint, probe_tmux_session, require_socket_path
 
     admin_target = _bounded(admin_target)
     session_target = _bounded(session_target) if session_target is not None else None
-    sudo = session.mode == SessionMode.AGENT.value
     if session.socket_path is not None:
-        status = _mgr.check_session_status(session, target=admin_target)
+        if server is None:
+            raise TypeError("a dedicated session's observation needs its resolved tmux server")
+        status = _mgr.check_session_status(session, target=admin_target, server=server)
         if status is SessionStatus.UNKNOWN and _mgr._needs_repair(session) and session.boot_id is not None:
-            require_socket_path(session.socket_path, run_command=partial(admin_target.run, sudo=sudo))
-            probe = capture_tmux_server_fingerprint(target=admin_target, socket_path=session.socket_path, sudo=sudo)
+            sudo = server.owner is not None
+            require_socket_path(server.socket_path, run_command=partial(admin_target.run, sudo=sudo))
+            probe = capture_tmux_server_fingerprint(
+                target=admin_target, socket_path=server.socket_path, owner=server.owner
+            )
             if probe.status is ProbeStatus.ABSENT and _mgr._prove_stored_runtime_absent(
                 session, target=admin_target, sudo=sudo
             ):
                 return SessionStatus.STOPPED
         return status
+    sudo = session.mode == SessionMode.AGENT.value
     target = session_target or admin_target
     run = target.run if session_target is not None else partial(target.run, sudo=sudo)
     presence = probe_tmux_session(session.name, run_command=run, socket_path=None)
@@ -81,14 +93,18 @@ def require_unaddressed_session_absence(session: SessionRow, *, vm: VMRow, admin
         )
 
 
-def can_checkpoint_session(session: SessionRow, *, vm: VMRow, admin_target: Transport) -> bool:
-    """Recognize only the existing exact-absence, missing-boot checkpoint repair."""
+def can_checkpoint_session(
+    session: SessionRow, *, vm: VMRow, admin_target: Transport, server: SessionTmuxServer | None
+) -> bool:
+    """Recognize only the existing exact-absence, missing-boot checkpoint repair.
+
+    ``server`` is as for ``observe_session_runtime``.
+    """
     if session.boot_id is not None or session.pid == PID_STOPPED:
         return False
     from agentworks.sessions.tmux import capture_tmux_server_fingerprint, probe_tmux_session, require_socket_path
 
     admin_target = _bounded(admin_target)
-    sudo = session.mode == SessionMode.AGENT.value
     if session.socket_path is None:
         if session.pid is not None:
             return False
@@ -96,18 +112,24 @@ def can_checkpoint_session(session: SessionRow, *, vm: VMRow, admin_target: Tran
             return False
         require_unaddressed_session_absence(session, vm=vm, admin_target=admin_target)
     else:
-        require_socket_path(session.socket_path, run_command=partial(admin_target.run, sudo=sudo))
+        if server is None or server.socket_path != session.socket_path:
+            raise TypeError("a checkpoint needs the tmux server resolved from this row")
+        require_socket_path(server.socket_path, run_command=partial(admin_target.run, sudo=server.owner is not None))
         if (
-            capture_tmux_server_fingerprint(target=admin_target, socket_path=session.socket_path, sudo=sudo).status
+            capture_tmux_server_fingerprint(
+                target=admin_target, socket_path=server.socket_path, owner=server.owner
+            ).status
             is not ProbeStatus.ABSENT
         ):
             return False
     return _mgr._get_boot_id(admin_target) is not None
 
 
-def checkpoint_session_identity(db: Database, session: SessionRow, *, vm: VMRow, admin_target: Transport) -> NoReturn:
+def checkpoint_session_identity(
+    db: Database, session: SessionRow, *, vm: VMRow, admin_target: Transport, server: SessionTmuxServer | None
+) -> NoReturn:
     """Re-prove absence, record the existing boot checkpoint, and always refuse launch."""
-    if not can_checkpoint_session(session, vm=vm, admin_target=admin_target):
+    if not can_checkpoint_session(session, vm=vm, admin_target=admin_target, server=server):
         raise StateError(
             "runtime identity checkpoint observation changed", entity_kind="session", entity_name=session.name
         )

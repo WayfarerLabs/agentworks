@@ -745,7 +745,11 @@ def _prep_delete_session(db: Database, monkeypatch: pytest.MonkeyPatch, *, creat
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
     db.update_session_runtime(
-        "s", socket_path="/tmp/s.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        "s",
+        socket_path="/run/agentworks/admin-tmux-sockets/admin/s.sock",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
     if created_workspace:
         db._conn.execute("UPDATE sessions SET created_workspace = 1 WHERE name = 's'")

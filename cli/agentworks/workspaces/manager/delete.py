@@ -99,6 +99,12 @@ def delete_workspace(
             # post-delete cleanup is best-effort and skips when target is None.
             target: Transport | None = None
             console_pairs: list[tuple[str, str]] = []
+            if vm is not None:
+                # Refuse a session row the owner rule rejects before any VM work.
+                from agentworks.sessions.manager import resolve_session_tmux_server
+
+                for session in db.list_sessions(workspace_name=name):
+                    resolve_session_tmux_server(db, session)
             with contextlib.ExitStack() as _keepalive_stack:
                 if vm is not None:
                     if vm_node is None:

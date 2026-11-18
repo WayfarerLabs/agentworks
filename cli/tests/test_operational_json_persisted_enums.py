@@ -35,7 +35,11 @@ def _seed_invalid_persisted_enums(db: Database) -> None:
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
     db.insert_session("session-a", "ws", "default", SessionMode.ADMIN)
     db.update_session_runtime(
-        "session-a", socket_path="/tmp/session-a.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        "session-a",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/session-a.sock",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
     db._conn.execute(
         "UPDATE vms SET provisioning_status = ?, init_status = ? WHERE name = 'box'",

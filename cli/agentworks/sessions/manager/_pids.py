@@ -60,8 +60,9 @@ def _build_session_target(
     goes via direct agent SSH. Because the returned target always owns
     the session it will operate on, callers can issue destructive commands
     without sudo. Batch paths intentionally don't use this helper; they
-    keep admin's target across all sessions and pass ``sudo=True`` to
-    reach into agent tmux servers (carve-out for batch ops).
+    keep admin's target across all sessions, switch each tmux client to the
+    agent that owns the server (``server_owner_run_command``), and use root
+    only for process reads and socket removal.
     """
     if session.mode == SessionMode.ADMIN.value:
         return admin_target
@@ -109,8 +110,9 @@ def _repair_session_pid(
     )
 
     expected = SessionRuntimeSnapshot.from_session(session)
+    server = _mgr.resolve_session_tmux_server(db, session)
     sock = session.socket_path
-    if sock is None:
+    if server is None:
         presence = probe_tmux_session(
             session.name,
             run_command=target.run,
@@ -164,9 +166,10 @@ def _repair_session_pid(
                 entity_name=session.name,
             )
     else:
-        sudo = session.mode == SessionMode.AGENT.value
+        sock, owner = server.socket_path, server.owner
+        sudo = owner is not None
         require_socket_path(sock, run_command=partial(target.run, sudo=sudo))
-        probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, sudo=sudo)
+        probe = capture_tmux_server_fingerprint(target=target, socket_path=sock, owner=owner)
         if probe.status is ProbeStatus.PRESENT:
             fingerprint = probe.fingerprint
             assert fingerprint is not None
@@ -189,7 +192,7 @@ def _repair_session_pid(
                             session_uuid=session.session_uuid,
                             run_id=session.run_id,
                             fingerprint=fingerprint,
-                            sudo=sudo,
+                            owner=owner,
                         )
                     )
                 )
