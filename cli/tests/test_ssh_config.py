@@ -484,7 +484,7 @@ def _entry_path(path: Path) -> str:
 
 
 @pytest.mark.parametrize("rebuild", ["config_dir", "legacy"])
-def test_every_entry_verifies_strictly_and_only_a_recorded_vms_names_its_store(tmp_path: Path, rebuild: str) -> None:
+def test_every_entry_reads_its_store_as_the_global_file_and_writes_nowhere(tmp_path: Path, rebuild: str) -> None:
     from agentworks import ssh_config as ssh_config_module
     from agentworks.execution import trust
 
@@ -505,19 +505,15 @@ def test_every_entry_verifies_strictly_and_only_a_recorded_vms_names_its_store(t
     blocks = _managed_blocks(content)
     assert set(blocks) == {"awvm--known", "awagent--agent-known", "awvm--fresh", "awagent--agent-fresh"}
     for vm_name in ("known", "fresh"):
-        # No record: a weaker setting that takes effect first could otherwise write a first-use key into the store.
-        known_hosts = _entry_path(trust.store_file(vm_name)) if vm_name == "known" else trust.NULL_DEVICE
+        # ssh writes only to the user file, so the store as the global file is read-only to it, record or not.
         for alias in (f"awvm--{vm_name}", f"awagent--agent-{vm_name}"):
             assert f"    HostKeyAlias agentworks-vm-{vm_name}\n" in blocks[alias]
-            assert f"    UserKnownHostsFile {known_hosts}\n" in blocks[alias]
+            assert f"    GlobalKnownHostsFile {_entry_path(trust.store_file(vm_name))}\n" in blocks[alias]
+            assert f"    UserKnownHostsFile {trust.NULL_DEVICE}\n" in blocks[alias]
             assert "    StrictHostKeyChecking yes\n" in blocks[alias]
             assert "    UpdateHostKeys no\n" in blocks[alias]
             assert "    HashKnownHosts no\n" in blocks[alias]
             assert "    CheckHostIP no\n" in blocks[alias]
-            assert f"    GlobalKnownHostsFile {trust.NULL_DEVICE}\n" in blocks[alias]
-    fresh = blocks["awvm--fresh"] + blocks["awagent--agent-fresh"]
-    assert _entry_path(trust.store_file("fresh")) not in fresh
-    assert trust.store_file("fresh").as_posix() not in fresh
     # Only the entries of the VM with no record point the operator at the commands that record one.
     assert not _comment_lines(blocks["awvm--known"])
     assert not _comment_lines(blocks["awagent--agent-known"])
@@ -525,7 +521,7 @@ def test_every_entry_verifies_strictly_and_only_a_recorded_vms_names_its_store(t
     assert len(_comment_lines(blocks["awagent--agent-fresh"])) == 1
 
 
-def test_recording_or_removing_a_key_switches_the_entry_between_the_store_and_nothing(tmp_path: Path) -> None:
+def test_recording_or_removing_a_key_changes_only_the_missing_record_comment(tmp_path: Path) -> None:
     from agentworks.execution import trust
 
     config, ssh_dir = _mock_config(tmp_path)
@@ -538,21 +534,22 @@ def test_recording_or_removing_a_key_switches_the_entry_between_the_store_and_no
     def entry() -> str:
         return _managed_blocks(conf.read_text())["awvm--web"]
 
-    def without_record() -> None:
-        assert f"    UserKnownHostsFile {trust.NULL_DEVICE}\n" in entry()
-        assert _comment_lines(entry())
+    def options() -> list[str]:
+        return [line for line in entry().splitlines() if not line.lstrip().startswith("#")]
 
     _rebuild_config_dir(config, db)
-    without_record()
+    without_record = options()
+    assert _comment_lines(entry())
 
     trust.write_records("web", [fake_host_key()])
     _rebuild_config_dir(config, db)
-    assert f"    UserKnownHostsFile {_entry_path(trust.store_file('web'))}\n" in entry()
+    assert options() == without_record
     assert not _comment_lines(entry())
 
     trust.remove("web")
     _rebuild_config_dir(config, db)
-    without_record()
+    assert options() == without_record
+    assert _comment_lines(entry())
 
 
 # Git for Windows' ssh cannot read an apostrophe path with no whitespace, so the Windows run skips that store.
@@ -591,23 +588,25 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
         ).stdout
         settings = dict(line.split(" ", 1) for line in out.splitlines())
 
-        known_hosts = trust.store_file(vm_name).as_posix() if vm_name == "known" else trust.NULL_DEVICE
         assert settings["hostkeyalias"] == f"agentworks-vm-{vm_name}"
-        assert settings["userknownhostsfile"] == known_hosts
+        assert settings["globalknownhostsfile"] == trust.store_file(vm_name).as_posix()
+        assert settings["userknownhostsfile"] == trust.NULL_DEVICE
         assert settings["stricthostkeychecking"] == "true"
         assert settings["updatehostkeys"] == "false"
         assert settings["hashknownhosts"] == "no"
         assert settings["checkhostip"] == "no"
-        assert settings["globalknownhostsfile"] == trust.NULL_DEVICE
     assert settings["hostname"] == "100.64.0.2"
 
 
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
-def test_a_weaker_setting_read_first_never_makes_the_store_a_first_use_writers_file(
+def test_a_weaker_setting_read_first_still_finds_the_store_only_as_the_file_ssh_never_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ssh takes each option's first value, so an earlier ``Host *`` wins; it must not get the store to write into."""
+    """ssh takes each option's first value, so an earlier ``Host *`` wins; what it accepts or learns goes to nothing.
+
+    ssh writes known hosts only to the first user file, so the store, as the global file, stays read-only to it.
+    """
     from agentworks.execution import trust
     from tests.conftest import isolate_home
 
@@ -615,20 +614,27 @@ def test_a_weaker_setting_read_first_never_makes_the_store_a_first_use_writers_f
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
     db.get_setting.return_value = None
-    db.list_vms.return_value = [_mock_vm("fresh", "100.64.0.2")]
+    db.list_vms.return_value = [_mock_vm("known", "100.64.0.1"), _mock_vm("fresh", "100.64.0.2")]
     db.list_agents.return_value = []
+    trust.write_records("known", [fake_host_key()])
     _rebuild_config_dir(config, db)
     combined = ssh_dir / "combined"
     managed = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
-    combined.write_text(f"Host *\n    StrictHostKeyChecking accept-new\n\n{managed}")
+    combined.write_text(f"Host *\n    StrictHostKeyChecking accept-new\n    UpdateHostKeys yes\n\n{managed}")
 
-    out = subprocess.run(
-        ["ssh", "-G", "-F", str(combined), "awvm--fresh"], capture_output=True, text=True, timeout=10, check=True
-    ).stdout
-    settings = dict(line.split(" ", 1) for line in out.splitlines())
+    for vm_name in ("known", "fresh"):
+        out = subprocess.run(
+            ["ssh", "-G", "-F", str(combined), f"awvm--{vm_name}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout
+        settings = dict(line.split(" ", 1) for line in out.splitlines())
 
-    assert settings["stricthostkeychecking"] == "accept-new"
-    assert settings["userknownhostsfile"] == trust.NULL_DEVICE
+        assert (settings["stricthostkeychecking"], settings["updatehostkeys"]) == ("accept-new", "true")
+        assert settings["userknownhostsfile"] == trust.NULL_DEVICE
+        assert settings["globalknownhostsfile"] == trust.store_file(vm_name).as_posix()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
@@ -748,7 +754,7 @@ def test_a_home_directory_named_with_an_apostrophe_never_reaches_an_entry(
 
     block = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())["awvm--web"]
     assert "    IdentityFile ~/.ssh/id_ed25519\n" in block
-    assert "    UserKnownHostsFile ~/.config/agentworks/known_hosts/vm-web\n" in block
+    assert "    GlobalKnownHostsFile ~/.config/agentworks/known_hosts/vm-web\n" in block
     assert captured_output.warnings == []
 
 

@@ -372,9 +372,10 @@ under the alias `agentworks-vm-<name>`) and the OpenSSH options each trust mode 
 - `ssh_options(trust)` returns the `-o` arguments. They pin the global known-hosts file to the null
   device and turn host-key updates, hashing and IP checks off, so no configuration file can change
   them. VM options are read when a command is spawned, not when the access is built.
-- `pinned_options()` is the settings every VM connection pins, which the managed SSH config entries
-  (`ssh_config.py`) carry too, so the operator's own `ssh` verifies against the store exactly as
-  Agentworks does.
+- `pinned_options()` is the settings every VM connection pins (host-key updates, hashing and IP
+  checks off), which the managed SSH config entries (`ssh_config.py`) carry too. The `-o` arguments
+  also pin the global known-hosts file to the null device; the entries name the store there instead,
+  so the operator's own `ssh` reads it and never writes to it.
 - `begin_enrollment`, `write_records`, `stored_keys` and `remove` are the record's lifecycle. Writes
   are atomic and private.
 

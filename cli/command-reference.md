@@ -1157,18 +1157,17 @@ entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key
 or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
 `agw config sync-ssh-config` to force a rebuild.
 
-Every entry also carries `HostKeyAlias`, `UserKnownHostsFile` and `StrictHostKeyChecking yes`, plus
-`UpdateHostKeys no` and `HashKnownHosts no` so your own `ssh` neither updates nor hashes the file it
-reads. For a VM with a host-key record, `UserKnownHostsFile` is the VM's store file. For a VM with
-none it is the null device, and the entries carry a comment naming `agw vm import-host-keys NAME`
-and `agw vm recover NAME`. Your own `ssh` therefore trusts exactly the keys Agentworks has recorded:
-it refuses a VM with no record (`Host key verification failed`) until one is recorded. A setting of
-your own that relaxes host-key checking for these hosts (an earlier `Host *` with
-`StrictHostKeyChecking accept-new` or `no`, or the same on the command line) can let `ssh` connect
-without verifying, to a VM with no record or, under `no`, past a key the store does not hold, but it
-never records a key: a VM with no record names no store file, a key the store does not hold counts
-as changed, which `ssh` never writes, and `UpdateHostKeys no` stops it learning others. See
-[Host keys](#host-keys).
+Every entry also carries `HostKeyAlias`, `StrictHostKeyChecking yes`, `GlobalKnownHostsFile` (the
+VM's store file) and `UserKnownHostsFile` set to the null device, plus `UpdateHostKeys no` and
+`HashKnownHosts no`. Your own `ssh` reads the store and never writes to it: it writes known hosts
+only to the user file, so anything a setting of yours accepts or learns goes nowhere. Your own `ssh`
+therefore trusts exactly the keys Agentworks has recorded. It refuses a VM with no record
+(`Host key verification failed`) until `agw vm import-host-keys NAME` or `agw vm recover NAME`
+records one, and that VM's entries carry a comment naming both. A setting of your own that relaxes
+host-key checking for these hosts (`StrictHostKeyChecking accept-new` or `no`, or `UpdateHostKeys`,
+in an earlier `Host *` block or on the command line) can let `ssh` connect without verifying, to a
+VM with no record or, under `no`, past a key the store does not hold, but it never records a key in
+the store. See [Host keys](#host-keys).
 
 Paths in the entries are written relative to `~` when they are under your home directory. A VM whose
 store path cannot be written into an entry gets no entries, with a warning, rather than entries that

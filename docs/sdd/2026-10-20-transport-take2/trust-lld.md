@@ -235,47 +235,64 @@ existing ones (`ssh_config._verification_lines`):
 
 ```text
     HostKeyAlias agentworks-vm-<name>
-    UserKnownHostsFile <store file>
+    GlobalKnownHostsFile <store file>
+    UserKnownHostsFile /dev/null
     StrictHostKeyChecking yes
-    GlobalKnownHostsFile /dev/null
-    CheckHostIP no
     UpdateHostKeys no
     HashKnownHosts no
+    CheckHostIP no
 ```
 
-(`NUL` replaces `/dev/null` on Windows.) The pins match `ssh_options` (`trust.pinned_options`): the
-operator's own `ssh` consults only the store for the alias, never writes to it, and never hashes it.
-Every change to a record is followed by `sync_ssh_config`: import, enrollment's existing post-create
-sync (`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase B fails),
-delete (`power.py:340`), and, in slice 4, recovery.
+(`NUL` replaces `/dev/null` on Windows.) The store is the entry's global known-hosts file, which ssh
+reads and never writes: `accept-new`, `StrictHostKeyChecking no` and `UpdateHostKeys` write only to
+the first user file, which is the null device. So no setting of the operator's can write into the
+store, even one read before the entry (an earlier `Host *`, which the legacy layout's trailing
+managed section always follows, or `-o` from a tool such as Ansible), and the store can neither gain
+a first-use key, which `trust.stored_keys` would read as a record that import can never replace, nor
+a union of verified keys, which import deliberately refuses (`vms/manager/host_keys.py:139-141`).
+The other pins match `ssh_options` (`trust.pinned_options`). The execution core's own `-o` arguments
+are unchanged: they pin `GlobalKnownHostsFile` to the null device and name the store, or create's
+provisioning file, as the user file, and `-o` takes precedence over any configuration. Every change
+to a record is followed by `sync_ssh_config`: import, enrollment's existing post-create sync
+(`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase B fails), delete
+(`power.py:340`), and, in slice 4, recovery.
 
 Slices 1 to 7 wrote the block only for a VM with a record, so the operator's own `ssh` kept working
 against their `known_hosts` until they imported. Slice 8 makes it unconditional, as D9 decided, so
 R8's end state does not depend on every operator importing (`ssh_config._vm_entries`):
 
-- **No record.** The entries still carry the block, with `UserKnownHostsFile` set to the null device
-  instead of the store file, so the operator's own `ssh` refuses the VM
+- **No record.** The entries are the same lines. The store holds no key for the alias, so the
+  operator's own `ssh` refuses the VM
   (`No ED25519 host key is known for agentworks-vm-<name> and you have requested strict checking`,
   then `Host key verification failed`, with no prompt) rather than reading `known_hosts` or
-  accepting a key on first use. Naming the null device rather than the store closes a first-use
-  write into the store: ssh takes each option's first value, so a weaker setting read first (an
-  earlier `Host *` with `StrictHostKeyChecking accept-new`, which the legacy layout's trailing
-  managed section always follows, or `-o StrictHostKeyChecking=no` from a tool) would otherwise
-  write the key it accepted into the store file, where `trust.stored_keys` reads it as a record that
-  import can never replace. Each such entry carries one comment naming
-  `agw vm import-host-keys <vm>` and `agw vm recover <vm>`. A record that cannot be read is treated
-  as one, so its entries name the store and `ssh` reports the read failure itself. The upgrade guide
-  carries the breaking-change note.
-- **A VM with a record stays closed to first-use writes too** (checked against OpenSSH 9.2p1, whose
-  sshd offered ed25519, ECDSA and RSA keys, with only the RSA key recorded). Through the managed
-  entry, `-o StrictHostKeyChecking=accept-new` negotiated the recorded RSA key and verified it.
-  Forcing an unrecorded type (`-o HostKeyAlgorithms=ssh-ed25519`), with `accept-new` on the command
-  line or in a `Host *` block read first, failed with
-  `Host key for agentworks-vm-<name> has changed`; `StrictHostKeyChecking=no` went on to key
-  authentication with password and keyboard-interactive authentication disabled. In every case the
-  store file was unchanged: a key of a type the record lacks counts as changed, which ssh never
-  writes, and `UpdateHostKeys no` stops it learning the others. So no `HostKeyAlgorithms` pin is
-  needed.
+  accepting a key on first use. Each such entry carries one comment naming
+  `agw vm import-host-keys <vm>` and `agw vm recover <vm>`; a record that cannot be read gets no
+  comment, since `ssh` reports the read failure itself. A relaxing setting of the operator's own can
+  let `ssh` connect without verifying, but what it accepts goes to the null device. The upgrade
+  guide carries the breaking-change note.
+- **Evidence.** Against OpenSSH 9.2p1, with a private sshd offering ed25519, ECDSA and RSA keys, a
+  key accepted for login, and only the RSA key recorded under the alias in a store directory whose
+  name holds a space:
+  - a recorded VM verified (`Found key in <store>:1`, the alias line, then the command ran);
+  - a record-less VM, whose store file is empty, was refused as above;
+  - `-o StrictHostKeyChecking=accept-new` with `-o HostKeyAlgorithms=ssh-ed25519` failed with
+    `Host key for agentworks-vm-<name> has changed`; `-o UpdateHostKeys=yes` after a successful
+    login left the store alone; a `Host *` block carrying both `StrictHostKeyChecking accept-new`
+    and `UpdateHostKeys yes`, read before the entry, did the same for the recorded VM and, for the
+    record-less one, logged in after `Permanently added ... to the list of known hosts`, which went
+    to the null device;
+  - afterwards the recorded store file was byte-identical and the record-less one still empty;
+  - with the store as `UserKnownHostsFile` instead, the layout this replaces, the same
+    `-o UpdateHostKeys=yes` login grew the store from the one RSA line to RSA, ed25519 and ECDSA.
+
+  `GlobalKnownHostsFile` takes the same value `_entry_value` writes: ssh parses its quoted arguments
+  as it does `UserKnownHostsFile`'s (the run above used a quoted path with a space), and expands `~`
+  in it at use, where `ssh -G` prints it unexpanded (OpenSSH 8.5's `ssh.c` calls
+  `tilde_expand_paths` on `options.system_hostfiles` under "Expand ~ in known host file names", and
+  9.2 opened `~/<dir with a space>/<file>` under the account's home). It gets no `%` or `${}`
+  expansion, which `literal_path` already refuses. The ssh shipped with Git for Windows and native
+  OpenSSH for Windows are builds of the same client, so they read the line the same way.
+
 - **Persisted values are checked.** The tailnet address and the admin and agent account names each
   become a token of a line ssh parses, so they must pass the execution core's own rule for the same
   rows (`ssh_process.Destination`), and an agent's name, which becomes its alias, must be a plain

@@ -312,33 +312,32 @@ def _with_hint(error: AgentworksError) -> str:
 def _verification_lines(vm_name: str) -> str:
     """The option lines that make the operator's own ``ssh`` verify the VM's host key, as entry text.
 
-    A VM with a record verifies against its store file. A VM with none
-    verifies against the null device instead, so its ``ssh`` refuses the VM,
-    and a weaker setting that takes effect first (an earlier ``Host *`` with
-    ``StrictHostKeyChecking accept-new``, or ``-o StrictHostKeyChecking=no``
-    on the command line) can at most accept a key into nothing: it never
-    writes a first-use key into the store, where it would count as a record.
-    Such an entry also carries a comment naming the commands that record one.
-    A record that cannot be read is treated as one: its ssh reports the read
-    failure itself.
+    The store file is the entry's ``GlobalKnownHostsFile`` and the user
+    known-hosts file is the null device. ssh writes only to the user file, so
+    no setting of the operator's that takes effect first (an earlier
+    ``Host *``, or ``-o`` on the command line, with ``StrictHostKeyChecking
+    accept-new`` or ``no`` or ``UpdateHostKeys yes``) can write into the store:
+    whatever it accepts or learns goes nowhere. A VM with no record has no key
+    in its store, so strict checking refuses it; its entries also carry a
+    comment naming the commands that record one. A record that cannot be read
+    gets no comment: ssh reports the read failure itself.
 
-    The pins match the execution core's (:func:`trust.pinned_options`): that
-    ``ssh`` reads no global known-hosts file and never updates or hashes the
-    file it reads. Raises :class:`~agentworks.errors.AgentworksError` when
-    the store path cannot be written into an entry.
+    The other pins match the execution core's (:func:`trust.pinned_options`).
+    Raises :class:`~agentworks.errors.AgentworksError` when the store path
+    cannot be written into an entry.
     """
-    try:
-        recorded = trust.has_record(vm_name)
-    except AgentworksError:
-        recorded = True
-    known_hosts = _entry_value(trust.store_file(vm_name), "host-key store path") if recorded else trust.NULL_DEVICE
     options = (
         f"HostKeyAlias {trust.host_key_alias(vm_name)}",
-        f"UserKnownHostsFile {known_hosts}",
+        f"GlobalKnownHostsFile {_entry_value(trust.store_file(vm_name), 'host-key store path')}",
+        f"UserKnownHostsFile {trust.NULL_DEVICE}",
         "StrictHostKeyChecking yes",
         *(f"{name} {value}" for name, value in trust.pinned_options()),
     )
-    if not recorded:
+    try:
+        missing = not trust.has_record(vm_name)
+    except AgentworksError:
+        missing = False
+    if missing:
         options += (
             f"# No host key is recorded for VM '{vm_name}' yet, so ssh refuses it. Record one with "
             f"'agw vm import-host-keys {vm_name}' or 'agw vm recover {vm_name}'.",

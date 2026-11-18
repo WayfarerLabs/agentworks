@@ -270,16 +270,17 @@ along with the database. VMs created on 0.20 have keys only there, because nothi
 verified `--known-hosts` file) still works as the fallback.
 
 Your own `ssh` refuses those VMs too. Every managed SSH entry (`awvm--NAME`, `awagent--NAME`) now
-verifies the VM's key with `StrictHostKeyChecking yes`, against the store once the VM has a record
-and against nothing until then, so `ssh awvm--NAME`, and `scp`, VS Code Remote-SSH or anything else
-that goes through those aliases, fails with `Host key verification failed` for a VM with no record
+verifies the VM's key with `StrictHostKeyChecking yes` against the store, which it names as the
+global known-hosts file, so `ssh awvm--NAME`, and `scp`, VS Code Remote-SSH or anything else that
+goes through those aliases, fails with `Host key verification failed` for a VM with no record
 instead of trusting `~/.ssh/known_hosts` or accepting the key on first use. The VM's managed entries
 carry a comment naming the fix. Run the import (or `agw vm recover NAME`) and the same aliases work
-again, verifying against the store; your own `ssh` never writes to it. A setting of your own that
-relaxes host-key checking for these aliases (`StrictHostKeyChecking accept-new` or `no` in an
-earlier `Host *` block, or on the command line, as some tools pass it) can let `ssh` connect to a VM
-with no record without verifying it, but it never records a key. If you never import, those aliases
-stay refused.
+again, verifying against the store. Your own `ssh` never writes to the store: the entries give it
+the null device as its own known-hosts file. A setting of your own that relaxes host-key checking
+for these aliases (`StrictHostKeyChecking accept-new` or `no`, or `UpdateHostKeys`, in an earlier
+`Host *` block or on the command line, as some tools pass it) can let `ssh` connect to a VM with no
+record without verifying it, but it never records a key. If you never import, those aliases stay
+refused.
 
 ## New VMs
 

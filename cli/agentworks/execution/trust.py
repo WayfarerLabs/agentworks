@@ -320,9 +320,10 @@ def pinned_options() -> tuple[tuple[str, str], ...]:
     """Settings every VM connection pins, whatever configuration says, as
     (name, value). Shared by the spawn-time ``-o`` arguments and the managed
     SSH entries (``ssh_config.py``), so the operator's own ``ssh`` pins what
-    Agentworks pins."""
+    Agentworks pins. Which known-hosts file each names is theirs to choose:
+    the ``-o`` arguments pin the global one to the null device, and the
+    managed entries name the store there instead."""
     return (
-        ("GlobalKnownHostsFile", NULL_DEVICE),
         ("UpdateHostKeys", "no"),
         ("HashKnownHosts", "no"),
         ("CheckHostIP", "no"),
@@ -358,5 +359,5 @@ def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
             f"HostKeyAlias={host_key_alias(trust.vm_name)}",
             f"StrictHostKeyChecking={checking}",
         ]
-    values += [f"{name}={value}" for name, value in pinned_options()]
+    values += [f"GlobalKnownHostsFile={NULL_DEVICE}", *(f"{name}={value}" for name, value in pinned_options())]
     return tuple(arg for value in values for arg in ("-o", value))
