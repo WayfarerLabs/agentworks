@@ -87,8 +87,8 @@ def append_session_template_deprecation_checks(group: HealthGroup, registry: Reg
 
 
 _STORED_HINT = (
-    "it was recorded when the workspace was created, and no command edits stored settings; "
-    "the release that removes the setting migrates them, so there is nothing to do"
+    "It was recorded when the workspace was created and has no effect. No command edits stored "
+    "settings, so there is nothing to do."
 )
 
 
