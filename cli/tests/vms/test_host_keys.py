@@ -76,8 +76,9 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def synced(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Record each SSH config sync instead of writing one."""
     calls: list[object] = []
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: calls.append(a))
     return calls
@@ -232,7 +233,6 @@ def test_a_matching_subset_of_an_existing_record_is_already_current(
 
     assert _status(outcomes, "web") is ImportStatus.ALREADY_CURRENT
     assert trust.store_file("web").read_bytes() == stored
-    assert synced == []
 
 
 def test_a_differing_key_conflicts_and_is_neither_replaced_nor_unioned(
@@ -404,13 +404,28 @@ def test_a_missing_named_source_is_a_config_error(db: Database, tmp_path: Path) 
         _run(db, "web", known_hosts=tmp_path / "absent")
 
 
-def test_a_missing_default_source_means_nothing_to_import(db: Database, home: Path, synced: list[object]) -> None:
+def test_a_missing_default_source_means_nothing_to_import(db: Database, home: Path) -> None:
     _vm(db, "web", "100.64.0.1")
 
     outcomes = _run(db, "web")
 
     assert _status(outcomes, "web") is ImportStatus.NO_MATCH
-    assert synced == []
+
+
+def test_a_run_that_imports_nothing_still_syncs_the_managed_entries(
+    db: Database, tmp_path: Path, keys: list[HostKey], synced: list[object]
+) -> None:
+    _vm(db, "current", "100.64.0.1")
+    _vm(db, "unmatched", "100.64.0.2")
+    trust.write_records("current", [keys[0]])
+    source = tmp_path / "known_hosts"
+    source.write_text(_line("100.64.0.1", keys[0]))
+
+    outcomes = _run(db, all_vms=True, known_hosts=source)
+
+    assert _status(outcomes, "current") is ImportStatus.ALREADY_CURRENT
+    assert _status(outcomes, "unmatched") is ImportStatus.NO_MATCH
+    assert len(synced) == 1
 
 
 def test_the_default_source_is_the_operators_known_hosts(db: Database, home: Path, keys: list[HostKey]) -> None:

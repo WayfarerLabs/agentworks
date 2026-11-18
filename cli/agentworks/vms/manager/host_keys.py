@@ -158,8 +158,9 @@ def import_host_keys(
     all_vms: bool,
     known_hosts: Path | None,
 ) -> tuple[HostKeyImport, ...]:
-    """Import host keys for the named VMs, or for every VM with ``all_vms``.
+    """Import host keys for the named VMs, or for every VM with ``all_vms``, then sync the SSH config.
 
+    The managed SSH entries are rewritten on every run, whatever was imported.
     ``known_hosts`` names the source file; None means ``~/.ssh/known_hosts``,
     where absence just means nothing to import. A named file that does not
     exist is a :class:`ConfigError`.
@@ -180,12 +181,12 @@ def import_host_keys(
         for vm in vms:
             outcomes.append(_import_one(vm, keygen, source))
     finally:
-        # Whatever was imported before a later VM failed has a record now, so
-        # its managed entries must carry the store options.
-        if any(o.status is ImportStatus.IMPORTED for o in outcomes):
-            from agentworks.ssh_config import sync_ssh_config_or_warn
+        # Every run rewrites the managed SSH entries, imported or not, so they
+        # take the store-verifying shape even when nothing matched, and
+        # whatever was imported before a later VM failed is covered too.
+        from agentworks.ssh_config import sync_ssh_config_or_warn
 
-            sync_ssh_config_or_warn(config, db)
+        sync_ssh_config_or_warn(config, db)
     return tuple(outcomes)
 
 
