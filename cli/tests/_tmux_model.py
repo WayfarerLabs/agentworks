@@ -430,6 +430,8 @@ class TmuxModel:
         fmt = _opt(tokens, "-F") or ""
         if SHELL_INDEX_OPTION in fmt:
             lines = [f"{pid}|{pidx}|{'' if tag is None else tag}" for pid, pidx, tag in rows]
+        elif fmt == "#{pane_dead}":
+            lines = ["0" for _row in rows]  # a modeled pane's process never exits
         else:
             # ``#{pane_index} #{pane_id}`` (space-separated), the layout query form.
             lines = [f"{pidx} {pid}" for pid, pidx, _tag in rows]

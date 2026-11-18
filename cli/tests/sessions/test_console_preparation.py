@@ -218,7 +218,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     assert target.logger is None
 
 
-@pytest.mark.parametrize("failure", ["window", "handover"])
+@pytest.mark.parametrize("failure", ["window", "handover", "gone", "dead"])
 def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Database, tmp_path, monkeypatch, failure):
     from agentworks.errors import ExternalError
     from tests._tmux_model import TmuxModel
@@ -236,6 +236,13 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
             if failure == "window" and command.startswith("tmux new-session"):
                 self.commands.append(command)
                 return _FakeResult(returncode=1, stderr="no server")
+            if command.startswith("tmux list-panes") and "#{pane_dead}" in command:
+                # After collection: the shell ended at once, taking the window, or left a dead pane.
+                self.commands.append(command)
+                if failure == "gone":
+                    return _FakeResult(returncode=1, stderr="can't find session")
+                if failure == "dead":
+                    return _FakeResult(stdout="1\n")
             return super().run(command, **kwargs)
 
     target = Target(model=model)

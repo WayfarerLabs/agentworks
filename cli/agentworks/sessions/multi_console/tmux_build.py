@@ -553,6 +553,12 @@ def _build_console_tmux_unlogged(
             entity_name=console.name,
         )
 
+    def admin_shell_alive() -> bool:
+        """Whether the admin shell window's pane still runs: gone, or dead under ``remain-on-exit``, is not."""
+        q_window = exact_tmux_target(f"{staging_name}:{ADMIN_SHELL_WINDOW}")
+        listed = target.run(f"tmux list-panes -t {q_window} -F '#{{pane_dead}}'", check=False)
+        return listed.ok and listed.stdout.split() == ["0"]
+
     try:
         if console.admin_shell:
             # Window 0 is the admin shell. The literal tmux window name
@@ -568,8 +574,11 @@ def _build_console_tmux_unlogged(
                 )
                 if not created.ok:
                     raise staging_failed()  # inside the block, so the parked request goes at once
-            if not handover.collected:
-                # The pane never collected its request, so its shell never started.
+            # A pane that never collected its request never started its shell. One that did can
+            # still lose it at once (the launcher refusing on the terminal, or a shell that ends
+            # immediately); the listing after collection follows a new connection's round trip,
+            # so it sees that. A shell that ends later is not the build's to see.
+            if not handover.collected or not admin_shell_alive():
                 raise ExternalError(
                     f"the admin shell window of console '{console.name}' did not start its shell",
                     entity_kind="console",
