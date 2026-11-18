@@ -507,18 +507,22 @@ live code, each justified by a comment as a conditional-need exception. Per comm
 | `console add-sessions`, `add-shell`       | resolve once, with no gate (`crud.py:306`, `:620`)                                    | unchanged                                                                                                                                                                         |
 
 As built, two helpers in `multi_console/attach.py` carry the boundary. `_active_console_vm` makes
-the not-found and Tailscale-address refusals before the gate, with nothing resolved, activates the
-VM through its prepared runtime (`prepare_vm_runtime`, whose gate secrets resolve through
-`resolver.resolve_gate`), and yields the VM row and the admin's access. `_console_pane_access` then
-registers the targets of the panes the operation will open
-(`sessions/multi_console/secrets_env.py:164`, `:198`; the build's shares the per-member loop of
-`_member_secret_targets`), checks those panes' agents, runs the one `resolver.resolve()`, and
-returns the operation's `ConsoleAccess`; callers read `resolver.values`. `console create` calls it
-at once with every pane. `restore-session` first observes the console and the window read-only
-(`_observe_window`, `multi_console/restore.py`), refusing what it cannot repair, and calls it with
-only the panes it will open. Both resolve in that one boundary pass, before their first tmux change
-or database write, as ADR 0019 promises. Fix round 1 of PR C split them out of
-`_prepare_console_access`, which registered every configured shell's targets before the gate.
+the not-found and Tailscale-address refusals before the gate, with nothing resolved. When the
+operation knows its panes before it observes anything, as `console create` does, it takes their
+targets as a function of the `VMRow` (`sessions/multi_console/secrets_env.py:164`, `:198`; the
+build's shares the per-member loop of `_member_secret_targets`) and registers them on the
+operation's resolver before the gate, so a refused target leaves a stopped VM stopped. It then
+activates the VM through its prepared runtime (`prepare_vm_runtime`, whose gate secrets resolve
+through `resolver.resolve_gate`) and yields the VM row and the admin's access.
+`_console_pane_access` registers any targets learned once the VM is active, checks the agents of the
+panes the operation will open, runs the one `resolver.resolve()`, and returns the operation's
+`ConsoleAccess`; callers read `resolver.values`. `restore-session` registers nothing before the
+gate: it first observes the console and the window read-only (`_observe_window`,
+`multi_console/restore.py`), refusing what it cannot repair, and passes only the panes it will open
+to `_console_pane_access`. Both commands resolve in that one boundary pass, before their first tmux
+change or database write, as ADR 0019 promises. Fix round 1 of PR C split the helpers out of
+`_prepare_console_access`, which registered every configured shell's targets before the gate for
+restore too.
 
 **`console start` and `restart` as built.** #885 (desired runtime state) reshaped them after this
 table was written: `realize_console` and reconciliation accept the running intent, prepare the
@@ -529,13 +533,15 @@ resolves nothing, which that effort's FRD R7 requires ("already-satisfied target
 request runtime-only secrets") and the operator's 2026-11-18 ruling confirms for every console
 command (open question 3). The `console start` row above records that.
 
-**The cost, stated plainly.** A console command that finds its VM stopped starts it, and resolves
-the gate's secrets, before it knows which panes it will open, since only the active VM can tell it;
-`console start` also records its running intent first. Beyond that, each resolves only what it will
-open: `console create` and `restart` every pane, `console start` of a running console none, and
-`restore-session` only its missing panes, after it has refused a console that is not running or a
-window it cannot repair, so a corrupt window is refused before any pane prompt. Each checks the
-agents of only the panes it will open, before that resolve. The upgrade guide states what changed.
+**The cost, stated plainly.** `console create` knows its panes up front and refuses a pane target
+before it starts a stopped VM. The other console commands that find their VM stopped start it, and
+resolve the gate's secrets, before they know which panes they will open, since only the active VM
+can tell them; `console start` also records its running intent first. Beyond that, each resolves
+only what it will open: `console create` and `restart` every pane, `console start` of a running
+console none, and `restore-session` only its missing panes, after it has refused a console that is
+not running or a window it cannot repair, so a corrupt window is refused before any pane prompt.
+Each checks the agents of only the panes it will open, before that resolve. The upgrade guide states
+what changed.
 
 ## The requests that move
 
@@ -1143,8 +1149,9 @@ status and output once it is back.
   first mutation (no tmux change and no database write precede the resolve; only `create` makes no
   tmux request first). `restore-session` registers only the panes it opens, resolves nothing with
   nothing missing, and refuses an unknown presence probe, duplicate tags or a killed attach pane
-  before it resolves anything. Two refusal pins, a console not found and a VM with no Tailscale
-  address, resolve nothing and dispatch nothing.
+  before it resolves anything. Three refusal pins resolve nothing and dispatch nothing: a console
+  not found, a VM with no Tailscale address, and a `console create` pane target refused while it is
+  built or registered, which also leaves the VM stopped.
 - Stop-all's shared log takes every concurrent plan's records without interleaving.
 
 **Tests that change in batch D because their path no longer calls `resolve_for_command`:**

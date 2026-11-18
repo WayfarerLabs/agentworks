@@ -1,7 +1,8 @@
 """A console command's pane secrets resolve in its one boundary pass, before it changes anything.
 
-``console create`` resolves every pane's targets once the VM is active, before
-its first tmux request or database write. ``restore-session`` first observes the
+``console create`` registers every pane's targets before the activation gate,
+so a refused target leaves a stopped VM stopped, and resolves once the VM is
+active, before its first tmux request or database write. ``restore-session`` first observes the
 window read-only and refuses what it cannot repair, then resolves only the
 targets of the panes it will open, before its first tmux change; with nothing
 missing it resolves nothing (operator ruling of 2026-11-18). ``console start``
@@ -97,6 +98,42 @@ def test_create_resolves_its_panes_before_any_tmux_request_or_database_write(
     assert not [event for event in boundary.before_resolve() if event[0] == "tmux"]
     assert boundary.changes_at_resolve == before
     assert db.get_console("con") is not None
+
+
+@pytest.mark.parametrize("refused_at", ["building", "registering"])
+def test_create_refuses_a_pane_target_before_it_starts_the_vm(
+    db: Database,
+    console_guest_factory: Callable[..., _ScriptedGuest],
+    monkeypatch: pytest.MonkeyPatch,
+    refused_at: str,
+) -> None:
+    """``console create`` knows its panes up front, so a refused target stops it before the activation gate."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    guest = console_guest_factory(TmuxModel())
+    refusal = StateError("the pane target is refused")
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise refusal
+
+    if refused_at == "building":
+        monkeypatch.setattr(mc, "_console_build_secret_targets", refuse)
+    else:
+        monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **k: [PANE])
+        monkeypatch.setattr(Resolver, "register_targets", refuse)
+    for step in ("prepare_vm_runtime", "activate_vm_runtime"):
+        monkeypatch.setattr(f"agentworks.vms.manager.runtime.{step}", lambda *a, **k: pytest.fail("started the VM"))
+    monkeypatch.setattr(Resolver, "resolve", lambda self: pytest.fail("resolved"))
+    before = db._conn.total_changes
+
+    with pytest.raises(StateError) as raised:
+        mc.create_console(
+            db, _StubConfig(), name="con", vm_name="vm1", session_specs=["a+1"], interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert raised.value is refusal
+    assert guest.commands == []
+    assert db._conn.total_changes == before
 
 
 _READS = ("has-session", "list-windows", "list-panes")

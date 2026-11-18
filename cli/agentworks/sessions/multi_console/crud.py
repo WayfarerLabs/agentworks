@@ -235,19 +235,12 @@ def create_console(
                 interaction=interaction,
                 resolver=resolver,
                 held_native_guard=held_native_guard,
-            ) as (vm, admin),
-        ):
-            access = _console_pane_access(
-                db,
-                config,
-                vm,
-                admin,
-                resolver=resolver,
-                targets=_mc._console_build_secret_targets(
+                targets=lambda vm: _mc._console_build_secret_targets(
                     db, registry, console=definition, vm=vm, members=definition.members
                 ),
-                members=definition.members,
-            )
+            ) as (vm, admin),
+        ):
+            access = _console_pane_access(db, config, vm, admin, resolver=resolver, members=definition.members)
             secret_values = resolver.values
             try:
                 _mc._validate_console_build_values(

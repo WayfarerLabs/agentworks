@@ -39,7 +39,7 @@ from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_
 from ._status import ConsoleStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from agentworks.config import Config
     from agentworks.db import ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
@@ -409,14 +409,19 @@ def _active_console_vm(
     interaction: TtyInteractionPolicy,
     held_native_guard: NativeMutationGuard,
     resolver: Resolver,
+    targets: Callable[[VMRow], Sequence[SecretTarget]] | None,
 ) -> Iterator[tuple[VMRow, VMAccess]]:
     """Activate the console's VM and yield its row and the admin's access, held active.
 
     The missing-VM and missing-address refusals come first, with nothing
-    resolved. Activation resolves only its own gate secrets, through
-    ``resolver``. The caller then observes read-only, decides what it will
-    change, and calls :func:`_console_pane_access` for exactly the panes it
-    will open, before its first change.
+    resolved. ``targets``, when the operation knows its panes before it
+    observes anything (``console create``), gives their secret targets from
+    the VM's row; they register on ``resolver`` before the activation gate,
+    so a refused target leaves a stopped VM stopped. Activation resolves
+    only its own gate secrets, through ``resolver``. The caller then observes
+    read-only, decides what it will change, and calls
+    :func:`_console_pane_access` for exactly the panes it will open, before
+    its first change.
     """
     import agentworks.execution as execution
     from agentworks.execution.access import Admin
@@ -443,6 +448,8 @@ def _active_console_vm(
                 held_native_guard=guard,
                 interaction=interaction,
             )
+            if targets is not None:
+                resolver.register_targets(targets(vm), allow_transient_auto_declare=True)
             context = prepare_vm_runtime(
                 db,
                 config,
@@ -467,20 +474,23 @@ def _console_pane_access(
     admin: VMAccess,
     *,
     resolver: Resolver,
-    targets: Sequence[SecretTarget],
     members: Sequence[ConsoleSessionRow],
+    targets: Sequence[SecretTarget] = (),
 ) -> ConsoleAccess:
     """Check the agents of the panes an operation will open, then run its one boundary resolve.
 
-    ``targets`` are the secret targets of the panes the operation will open
-    and ``members`` configure exactly those panes. :func:`console_access`
+    ``members`` configure exactly the panes the operation will open.
+    ``targets`` are their secret targets when the operation learned them
+    only once the VM was active (``restore-session``); targets known up front
+    were already registered before the gate (:func:`_active_console_vm`). :func:`console_access`
     checks the direct SSH of every agent among them, so a refused agent stops
     the operation before the resolve can prompt; then the one resolve runs,
     so every pane value is in ``resolver.values`` before anything changes.
     """
     from ._access import console_access
 
-    resolver.register_targets(targets, allow_transient_auto_declare=True)
+    if targets:
+        resolver.register_targets(targets, allow_transient_auto_declare=True)
     access = console_access(db, config, vm, admin, members)
     resolver.resolve()
     return access

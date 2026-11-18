@@ -319,6 +319,8 @@ def restore_session(
                 interaction=interaction,
                 resolver=resolver,
                 held_native_guard=held_native_guard,
+                # Restore learns which panes it opens only from the active VM.
+                targets=None,
             ) as (vm, admin),
         ):
             run = access_run_command(admin, deadline=None, elevated=False)
@@ -351,8 +353,8 @@ def restore_session(
                 vm,
                 admin,
                 resolver=resolver,
-                targets=_mc._member_secret_targets(db, registry, vm=vm, member=opening),
                 members=[opening],
+                targets=_mc._member_secret_targets(db, registry, vm=vm, member=opening),
             )
             values = resolver.values
             try:
