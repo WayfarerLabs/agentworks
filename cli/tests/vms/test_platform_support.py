@@ -415,8 +415,9 @@ def test_wsl2_not_ready_additionally_needs_wsl_exe(
 def test_lima_not_ready_matches_the_placement_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Lima is supported everywhere; readiness checks the executable
-    used by local or SSH placement without constructing the configuration.
+    """Lima is supported everywhere; readiness checks what local or SSH
+    placement runs without constructing the configuration: ``limactl`` on
+    ``PATH``, or the OpenSSH client the resolver accepts.
 
     Keyed on the TAG saying local, never on a guess: a WRITTEN placement
     that does not say local is not treated as local, so a shape error is
@@ -432,7 +433,14 @@ def test_lima_not_ready_matches_the_placement_dependency(
     the comment on it says why."""
     assert LimaPlatform.unsupported_reason() is None
 
+    from agentworks.execution.client import SSHClient
+    from agentworks.execution.errors import ClientUnsupported
+
+    def refuse() -> SSHClient:
+        raise ClientUnsupported("no supported OpenSSH client")
+
     fake_installed_programs(monkeypatch, lambda name: None)
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", refuse)
     local = _readiness(LimaPlatform, {"placement": {"mode": "local"}})
     assert not local.is_ready
     assert local.reason is not None
@@ -450,6 +458,7 @@ def test_lima_not_ready_matches_the_placement_dependency(
     assert LimaPlatform.not_ready({"placement": "junk"}).is_ready
 
     fake_installed_programs(monkeypatch, lambda name: f"/x/{name}")
+    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: SSHClient("/x/ssh", (9, 9)))
     assert _readiness(LimaPlatform, {"placement": {"mode": "local"}}).is_ready
     assert _readiness(LimaPlatform, {}).is_ready
     assert _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}}).is_ready

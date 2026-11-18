@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import Field, field_validator
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
@@ -246,11 +247,13 @@ class LimaPlatform(VMPlatform):
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
-        """Require local ``limactl`` only for local placement.
+        """Require local ``limactl`` for local placement, and a supported OpenSSH client for SSH placement.
 
-        Reads raw config without constructing the model so readiness stays
-        total. A malformed written placement is left to validation; an
-        omitted placement uses the model's declared default.
+        The SSH placement's host channel runs the client the resolver chose
+        (``execution.resolve_ssh``), so readiness asks the resolver rather
+        than ``PATH``. Reads raw config without constructing the model so
+        readiness stays total. A malformed written placement is left to
+        validation; an omitted placement uses the model's declared default.
         """
         from agentworks.resources.graph import Readiness
 
@@ -264,8 +267,11 @@ class LimaPlatform(VMPlatform):
         from agentworks.programs import is_installed
 
         if not local:
-            if remote and not is_installed("ssh"):
-                return Readiness.blocked("ssh not installed")
+            if remote:
+                try:
+                    execution.resolve_ssh()
+                except ClientUnsupported:
+                    return Readiness.blocked("no supported OpenSSH client")
             return Readiness.ready()
         if not is_installed("limactl"):
             return Readiness.blocked("limactl not installed")

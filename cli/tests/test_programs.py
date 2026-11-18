@@ -241,8 +241,14 @@ def _local_lima_ready() -> bool:
 
 def _remote_lima_ready() -> bool:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution import client
 
-    return LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "box"}}).is_ready
+    # The resolver caches the client it accepted, which an earlier test may have found on the real PATH.
+    client.resolve_ssh.cache_clear()
+    try:
+        return LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "box"}}).is_ready
+    finally:
+        client.resolve_ssh.cache_clear()
 
 
 @pytest.mark.parametrize(
