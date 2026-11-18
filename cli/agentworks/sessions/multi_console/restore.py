@@ -71,13 +71,12 @@ def _reconcile_configured_window_order(
 class _WindowObservation:
     """What restore-session found in one session window, read-only.
 
-    ``window_missing`` means the window is gone and is rebuilt whole, so every
-    configured shell is in ``missing``. Otherwise ``missing`` holds the
-    configured indices with no live pane, and ``base_pidx`` is the live
-    session-attach pane's index.
+    ``base_pidx`` is the live session-attach pane's index, or ``None`` when
+    the window is gone and is rebuilt whole, so every configured shell is in
+    ``missing``. Otherwise ``missing`` holds the configured indices with no
+    live pane.
     """
 
-    window_missing: bool
     missing: tuple[int, ...]
     base_pidx: int | None
 
@@ -132,7 +131,7 @@ def _observe_window(
         # the window from config destroys nothing. This is the only path that
         # (re)creates a window; a window that exists but is broken is never
         # torn down here (see the session-pane check below).
-        return _WindowObservation(window_missing=True, missing=tuple(range(configured_count)), base_pidx=None)
+        return _WindowObservation(missing=tuple(range(configured_count)), base_pidx=None)
 
     # The window exists. Its session-attach pane is the lowest-indexed pane:
     # `tmux new-window` creates it first and leaves it untagged, and every
@@ -226,7 +225,7 @@ def _observe_window(
 
     # tag_values is now a subset of 0..configured_count-1 with no duplicates.
     missing = tuple(sorted(set(range(configured_count)) - set(tag_values)))
-    return _WindowObservation(window_missing=False, missing=missing, base_pidx=base_pidx)
+    return _WindowObservation(missing=missing, base_pidx=base_pidx)
 
 
 def _restorable_session(db: Database, session_name: str) -> tuple[SessionRow, str]:
@@ -328,8 +327,7 @@ def restore_session(
             q_con = exact_tmux_target(tmux_session_name(console_name))
             q_win = shlex.quote(session_name)
 
-            if not observed.window_missing and not observed.missing:
-                assert observed.base_pidx is not None
+            if observed.base_pidx is not None and not observed.missing:
                 window_order_changed = _reconcile_configured_window_order(db, run, console_name)
                 if window_order_changed:
                     output.result(f"Restored configured window order in console '{console_name}'.")
@@ -393,7 +391,7 @@ def _apply_restore(
     q_win = shlex.quote(session_name)
     layout = named_console_template(registry).tmux_layout
 
-    if observed.window_missing:
+    if observed.base_pidx is None:
         output.info(f"window '{session_name}' is missing; rebuilding from config...")
         result = _mc._add_session_window(
             access,
@@ -432,7 +430,6 @@ def _apply_restore(
         output.result(f"Rebuilt window '{session_name}' in console '{console_name}'.")
         return
 
-    assert observed.base_pidx is not None
     session_user = _session_linux_user(db, session, access.vm)
     missing = list(observed.missing)
     output.info(f"Restoring {len(missing)} shell pane(s) in '{session_name}': config indices {missing}.")
