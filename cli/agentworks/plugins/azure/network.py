@@ -119,14 +119,16 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 # How long one Azure operation on a route may take, each on its own: the
 # public-IP heal, the NSG convergence and the poke that open it, and the
 # removal that closes it. The route opens before the script's deadline starts,
-# so the run_as_root contract needs that bounded by itself, and the removal
-# runs with interrupts deferred, so this is also how long a Ctrl-C can wait.
+# so the run_as_root contract needs that bounded by itself. The removal runs
+# with interrupts deferred, so a Ctrl-C can wait this long for it, and up to
+# _UNFINISHED_CREATE_SETTLE_SECONDS longer when a poke's create timed out.
 # GCP bounds its firewall operations the same way.
 _OPERATION_TIMEOUT_SECONDS = 300.0
 
 # How much longer a poke whose create timed out waits for that create before
-# it removes the rule: a delete while the create is in flight can fail
-# (AnotherOperationInProgress) or find nothing, and the rule then lands after.
+# it removes the rule, with interrupts deferred: a delete while the create is
+# in flight can fail (AnotherOperationInProgress) or find nothing, and the
+# rule then lands after.
 _UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
 # The old scheme's standing world-open SSH allow, deleted on
