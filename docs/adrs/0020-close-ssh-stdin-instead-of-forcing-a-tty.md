@@ -9,6 +9,16 @@ default (`force_tty=sys.platform == "win32"`, at nine transport and platform cal
 PR #737. Converges with the runnable-status finite-stdin fix (PR #736), which reached the same
 problem from the status-probe side.
 
+Amended: every Agentworks connection to a VM now sends its request on the OpenSSH client's stdin, a
+pipe that `agw` writes and closes once the request and the caller's input are sent
+([`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)). No request
+connection inherits the operator's console, so none takes `-n`; a port forward, which sends no
+request, still does. A non-interactive request runs under `-T` and an interactive one under `-t`,
+and `-F none` keeps an operator's `RequestTTY` or `ControlMaster` setting from applying. The
+decision (no forced pty, and no stdin left open to the console) stands; `SSHTarget`, `run()` and the
+`input_text` and `input_data` payloads named below are gone, and issue #745's concern no longer
+arises.
+
 ## Context
 
 Every canonical transport built on a Windows controller forced a pty (`ssh -tt`) on every

@@ -8,12 +8,13 @@ Accepted. The resolution mechanism ("env var, then prompt" as a hardcoded sourci
 superseded by ADR 0016's configured `secret-source` model; the decision itself remains CLI-side
 injection with no VM-side secret storage.
 
-Amended for the commands that run through `agentworks.execution` (`vm exec`, `vm shell`,
-`agent exec`, `agent shell`; see
-[`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)): secret
-environment travels in the request on the client's stdin, not as `-o SetEnv` arguments. The decision
-stands, and Negative 2's command-line exposure no longer applies to those commands, since no secret
-appears in any argument vector on either machine.
+Amended: every request Agentworks sends to a VM carries its environment, secrets included, inside
+the request on the SSH client's stdin, never as `-o SetEnv` arguments or on a guest command line
+([ADR 0026](0026-environment-travels-inside-the-request.md);
+[`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)). The decision
+stands, and Negative 2's command-line exposure no longer applies, since no secret appears in any
+argument vector on either machine. The Decision and Positives below describe the `SetEnv` delivery
+that this replaced.
 
 ## Context
 
@@ -237,9 +238,9 @@ None of that requires reopening the core decision documented here.
 
 ## See also
 
-- [SDD: env-and-secrets](../frd.md): functional requirements
-- [SDD: env-and-secrets HLA](../hla.md): high-level architecture
-- [ADR 0003: Tailscale for VM networking](../../../adrs/0003-use-tailscale-for-vm-networking.md) --
-  related trust-anchor reasoning
-- [ADR 0007: Separate agent identity from task execution](../../../adrs/0007-separate-agent-identity-from-task-execution.md)
+- [ADR 0003: Tailscale for VM networking](0003-use-tailscale-for-vm-networking.md): related
+  trust-anchor reasoning
+- [ADR 0007: Separate agent identity from task execution](0007-separate-agent-identity-from-task-execution.md):
   related isolation reasoning
+- [ADR 0026: Environment travels inside the request](0026-environment-travels-inside-the-request.md):
+  how the environment reaches the VM today

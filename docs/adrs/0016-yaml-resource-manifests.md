@@ -219,9 +219,11 @@ teaching surface, while `agw config init/edit/sample` continue to own the perman
 ## Relationship to ADRs 0013 and 0014
 
 ADR 0013's decision (CLI-side secret injection at command time, with no VM-side secret storage) and
-ADR 0014's decision (`AcceptEnv AW_*` wildcard transport via SSH `SetEnv`) both stand unchanged.
-What this ADR supersedes is the resolution _mechanism_ those documents describe in passing: the "env
-var, then prompt" sourcing is the default configured-source chain
+ADR 0014's decision (`AcceptEnv AW_*` wildcard transport via SSH `SetEnv`) both stand unchanged. ADR
+0014 has since been superseded by [ADR 0026](0026-environment-travels-inside-the-request.md), under
+which the environment travels inside the request rather than through `SetEnv`. What this ADR
+supersedes is the resolution _mechanism_ those documents describe in passing: the "env var, then
+prompt" sourcing is the default configured-source chain
 (`[secret_config].sources = ["env-var", "prompt"]`) over synthesized sources. Where 0013/0014 say
 "the CLI resolves secret values", read "the active source chain resolves them through bounded
 `SecretBackend` clients".
