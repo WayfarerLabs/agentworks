@@ -30,7 +30,7 @@ from agentworks.errors import (
 )
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
-from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
+from tests._aws_fakes import Controls, _FakeEC2, client_error, install_fakes, stub_egress, unreachable
 from tests._root_channel_fakes import Answer, FakeGuest, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
@@ -607,6 +607,30 @@ class TestCreateRollback:
         assert guest.payloads == expected_commands
         assert cleanup_calls == [{"InstanceIds": ["i-123"]}]
 
+    def test_a_second_interrupt_during_the_rollbacks_revoke_abandons_the_rollback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every other revoke holds Ctrl-C until it is done; create's rollback is the one a second Ctrl-C abandons."""
+        rec = install_fakes(monkeypatch)
+        _guest_failing(monkeypatch, "true", KeyboardInterrupt("first"))
+        real_revoke = _FakeEC2.revoke_security_group_ingress
+        groups: list[_FakeEC2] = []
+
+        def _interrupted_revoke(self: _FakeEC2, **kwargs: Any) -> object:
+            if not kwargs.get("DryRun"):  # not the poke's permission check
+                groups.append(self)
+                signal.raise_signal(signal.SIGINT)
+            return real_revoke(self, **kwargs)
+
+        monkeypatch.setattr(_FakeEC2, "revoke_security_group_ingress", _interrupted_revoke)
+        with pytest.raises(RetainedProvisioningError) as caught:
+            _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
+
+        assert isinstance(caught.value.__cause__, KeyboardInterrupt)
+        # The interrupt cut the revoke short instead of waiting for it, and nothing after it ran.
+        assert groups[0].ingress["sg-123"]
+        assert "terminate_instances" not in rec.methods()
+
 
 class TestCloseProvisioningHooks:
     def test_the_close_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -878,6 +902,23 @@ class TestSharedTupleConcurrency:
         poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
         remove_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
         remove_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])  # already gone: no error
+        assert ec2.ingress["sg-123"] == {}
+
+    def test_an_interrupt_during_a_remove_waits_for_every_revoke(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        install_fakes(monkeypatch)
+        ec2 = _ec2(_platform())
+        prefixes = [_DETECTED_PREFIX, "198.51.100.0/24"]
+        poke_ssh_allow(ec2, "sg-123", prefixes)
+        revoke = ec2.revoke_security_group_ingress
+
+        def interrupted_revoke(**kwargs: Any) -> Any:
+            signal.raise_signal(signal.SIGINT)
+            return revoke(**kwargs)
+
+        monkeypatch.setattr(ec2, "revoke_security_group_ingress", interrupted_revoke)
+        with pytest.raises(KeyboardInterrupt):
+            remove_ssh_allow(ec2, "sg-123", prefixes)
+
         assert ec2.ingress["sg-123"] == {}
 
 

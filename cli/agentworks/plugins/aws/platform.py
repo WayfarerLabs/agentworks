@@ -46,7 +46,6 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
 )
-from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -469,7 +468,8 @@ class EC2Platform(PublicAddressPlatform):
         def _cleanup_or_retain() -> None:
             try:
                 if bootstrap_ssh_open and security_group_id is not None:
-                    remove_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
+                    # A second Ctrl-C abandons the rollback, which then retains what it could not confirm.
+                    remove_ssh_allow(ec2, security_group_id, ssh_allow_prefixes, hold_interrupts=False)
                 cleanup_created_resources(ec2, instance_id, security_group_id)
             except (Exception, KeyboardInterrupt) as cleanup_error:
                 if isinstance(cleanup_error, EC2Error):
@@ -754,8 +754,7 @@ class EC2Platform(PublicAddressPlatform):
         try:
             yield
         finally:
-            with interrupts_deferred():
-                remove_ssh_allow(ec2, security_group_id, prefixes)
+            remove_ssh_allow(ec2, security_group_id, prefixes)
 
     # -- Helpers ---------------------------------------------------------------
 

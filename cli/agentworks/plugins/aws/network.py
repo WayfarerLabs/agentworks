@@ -241,8 +241,8 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     one prefix at a time so overlap with a concurrent route does not prevent
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
     If an actual authorize fails partway through, or is interrupted, all
-    planned tuples are revoked best-effort before the failure propagates, with
-    interrupts held until the revoke is done.
+    planned tuples are revoked best-effort before the failure propagates
+    (:func:`remove_ssh_allow`, which holds interrupts until it is done).
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
@@ -258,18 +258,18 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
                     continue
                 raise
     except KeyboardInterrupt:
-        # The route's own finally never runs for a poke that did not return, so this revoke is held too.
-        with interrupts_deferred():
-            remove_ssh_allow(ec2, security_group_id, prefixes)
+        # The route's own finally never runs for a poke that did not return, so this revoke cleans up.
+        remove_ssh_allow(ec2, security_group_id, prefixes)
         raise
     except Exception as exc:
         failure = wrap_ec2_error(exc)
-        with interrupts_deferred():
-            remove_ssh_allow(ec2, security_group_id, prefixes)
+        remove_ssh_allow(ec2, security_group_id, prefixes)
         raise failure from exc
 
 
-def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
+def remove_ssh_allow(
+    ec2: Any, security_group_id: str, prefixes: Sequence[str], *, hold_interrupts: bool = True
+) -> None:
     """Revoke exactly the TCP/22 allows this operation authorized for
     ``prefixes``, restoring zero inbound exposure through them (the empty-group
     baseline stays, and any concurrent operation's non-overlapping allows are
@@ -281,7 +281,22 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
     is tolerated silently; any
     other failure warns naming the prefix and the residual exposure rather
     than raising, because every call site must keep unwinding. Only what was
-    actually revoked is reported as closed."""
+    actually revoked is reported as closed.
+
+    Ctrl-C and the terminations wait for the revoke to finish
+    (:func:`~agentworks.interrupts.interrupts_deferred`), since a revoke cut
+    short leaves the allow open. Only create's rollback passes
+    ``hold_interrupts=False``: there a second Ctrl-C is how the operator
+    abandons a cleanup that hangs, and the create retains what it could not
+    confirm."""
+    if hold_interrupts:
+        with interrupts_deferred():
+            _revoke_ssh_allow(ec2, security_group_id, prefixes)
+    else:
+        _revoke_ssh_allow(ec2, security_group_id, prefixes)
+
+
+def _revoke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
     warnings: list[str] = []
     revoked: list[str] = []
     for prefix in prefixes:
