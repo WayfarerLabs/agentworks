@@ -295,14 +295,13 @@ def _retire_workspace_tmuxinator_projects(db: Database, vm_name: str, ts_target:
     from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
 
     logger.step("Remove leftover workspace tmuxinator projects")
-    try:
-        retire_tmuxinator_projects(
-            ts_target, [workspace.workspace_path for workspace in db.list_workspaces(vm_name=vm_name)]
-        )
-    except SSHError as e:
+    failures = retire_tmuxinator_projects(
+        ts_target, [workspace.workspace_path for workspace in db.list_workspaces(vm_name=vm_name)]
+    )
+    if failures:
         msg = (
-            f"Leftover workspace tmuxinator projects were not all removed ({e}); what could not be "
-            f"checked or removed stays in place. Inspect it, then rerun 'agw vm reinit {vm_name}'."
+            f"Leftover workspace tmuxinator projects were not all removed ({'; '.join(failures)}); what "
+            f"could not be checked or removed stays in place. Inspect it, then rerun 'agw vm reinit {vm_name}'."
         )
         logger.warning(msg)
         output.warn(msg)

@@ -94,13 +94,13 @@ def _run(target: Transport, script: str, paths: str | None = None) -> tuple[bool
     return result.ok, result.stdout
 
 
-def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]) -> None:
+def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]) -> list[str]:
     """Remove the admin's generated discovery links and these workspaces' generated projects.
 
     Both commands always run, so one failure never leaves the rest of the VM
-    uncleaned. A path that cannot travel one per line is skipped and counted. Raises
-    one ``SSHError`` naming every failure; what succeeded stays done, and a rerun is
-    safe.
+    uncleaned. A path that cannot travel one per line is skipped and counted. Returns
+    a description of each failure, empty when everything finished; what succeeded
+    stays done, and a rerun is safe.
     """
     sendable = [path for path in workspace_paths if "\n" not in path and "\0" not in path]
     failures: list[str] = []
@@ -123,5 +123,4 @@ def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]
             failures.append(f"the projects in {', '.join(unfinished)} could not be checked or removed")
         elif not ok:
             failures.append("the workspace projects could not all be checked or removed")
-    if failures:
-        raise SSHError("; ".join(failures))
+    return failures
