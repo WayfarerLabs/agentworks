@@ -1046,9 +1046,12 @@ In the order they land, each with its tests:
        (`execution/oplog.py:44`).
      - `secret_redaction_forms` (`secrets/redaction.py`) adds the value without leading or trailing
        line breaks, as a message or a command substitution shows it, and bash's `$'...'` spelling
-       (`printf %q`, `declare -p`), exact in the C locale and for ASCII text in any locale. One line
-       of a multi-line secret shown on its own is still not redacted, since matching each line would
-       match lines such as a PEM `-----END`; `secrets/README.md` and the runtime-context doc say so.
+       (`printf %q`, `declare -p`) in the C locale and in the guest's `C.UTF-8`, where bash prints a
+       printable non-ASCII character raw (glibc's `iswprint`, matched as `str.isprintable` plus the
+       space, format and private-use categories, apart from code points the two Unicode tables
+       assign differently). One line of a multi-line secret shown on its own is still not redacted,
+       since matching each line would match lines such as a PEM `-----END`; `secrets/README.md` and
+       the runtime-context doc say so.
      - An env name's check used `re.match`, whose `$` accepts a final newline, so a quoted key
        `"FOO\n"` loaded and printed as a key on two rows; it is `fullmatch` (`env/entry.py:29`).
 
