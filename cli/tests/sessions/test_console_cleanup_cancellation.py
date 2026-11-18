@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db import Database
-    from tests.conftest import _FakeGuest, _FakeResult
+    from tests.conftest import _FakeResult, _ScriptedGuest
 
 
 _FAILURE_CASES = [
@@ -31,8 +31,8 @@ _FAILURE_CASES = [
 
 
 def _guest(
-    factory: Callable[..., _FakeGuest], model: TmuxModel, *, primary: BaseException, cleanup: BaseException | None
-) -> _FakeGuest:
+    factory: Callable[..., _ScriptedGuest], model: TmuxModel, *, primary: BaseException, cleanup: BaseException | None
+) -> _ScriptedGuest:
     """A modeled guest whose ``new-session`` raises ``primary`` and, after it, every request raises ``cleanup``."""
     guest = factory(model)
     modeled = guest.dispatch
@@ -58,7 +58,7 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     db: Database,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
     logged: bool,
     primary_type: type[BaseException],
     cleanup_type: type[BaseException],
@@ -102,7 +102,7 @@ def test_log_close_preserves_failure_priority(
     db: Database,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
     primary_type: type[BaseException],
     close_type: type[BaseException],
 ) -> None:

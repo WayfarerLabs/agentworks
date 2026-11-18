@@ -21,7 +21,7 @@ from tests._consoles_support import (  # noqa: F401
     _StubConfig,
     _StubVerticalLayoutConfig,
 )
-from tests.conftest import _FakeGuest, _FakeResult
+from tests.conftest import _FakeResult, _ScriptedGuest
 from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 
 def test_apply_layout_preset_emits_simple_select_layout(
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
 ) -> None:
     """Tmux preset layout names go straight to `select-layout`."""
     from agentworks.sessions.multi_console_layout import _apply_layout
@@ -41,7 +41,7 @@ def test_apply_layout_preset_emits_simple_select_layout(
 
 
 def test_apply_layout_aw_session_vertical_queries_then_applies_string(
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
 ) -> None:
     """`aw-session-vertical` queries window geometry + pane IDs, builds a
     custom tmux layout string Python-side, and applies it via
@@ -165,7 +165,7 @@ def test_build_aw_session_vertical_layout_string_under_pane_base_index_one() -> 
 
 
 def test_apply_layout_aw_session_vertical_silent_on_single_pane(
-    fake_guest: _FakeGuest, captured_output: CapturedOutput
+    fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """A session window with zero configured shells has just the session
     pane; nothing to lay out. The apply helper must NOT warn -- this is
@@ -186,7 +186,7 @@ def test_apply_layout_aw_session_vertical_silent_on_single_pane(
 
 
 def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
-    fake_guest: _FakeGuest, captured_output: CapturedOutput
+    fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """Too-small geometry (or anything else the builder refuses) should
     still produce a warning so an operator sees a breadcrumb."""
@@ -204,7 +204,7 @@ def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
 
 
 def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
-    fake_guest: _FakeGuest, captured_output: CapturedOutput
+    fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """Under `pane-base-index 1` the pane list comes back indexed 1..N. The
     default layout must still apply (a real select-layout call) with no
@@ -223,7 +223,7 @@ def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
     assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
 
 
-def test_focus_session_pane_emits_select_pane(fake_guest: _FakeGuest) -> None:
+def test_focus_session_pane_emits_select_pane(fake_guest: _ScriptedGuest) -> None:
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
     _focus_session_pane(fake_guest.run_command(), "'=aw-console-con'", "alpha", 0)
@@ -232,7 +232,7 @@ def test_focus_session_pane_emits_select_pane(fake_guest: _FakeGuest) -> None:
     ]
 
 
-def test_focus_session_pane_targets_base_index(fake_guest: _FakeGuest) -> None:
+def test_focus_session_pane_targets_base_index(fake_guest: _ScriptedGuest) -> None:
     """Under `pane-base-index 1` the session pane reports index 1 and no pane
     ever reports index 0, so focus must target the given base index, not a
     literal 0 (which tmux rejects with `can't find pane: 0`)."""
@@ -244,7 +244,7 @@ def test_focus_session_pane_targets_base_index(fake_guest: _FakeGuest) -> None:
     ]
 
 
-def test_restore_session_focuses_session_pane(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_focuses_session_pane(db: Database, fake_guest: _ScriptedGuest) -> None:
     """restore-session repair ends with the session pane focused."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
@@ -264,7 +264,7 @@ def test_restore_session_focuses_session_pane(db: Database, fake_guest: _FakeGue
     assert "tmux select-pane -t '=aw-console-con':a.0" in fake_guest.commands
 
 
-def test_add_shell_does_not_focus_session_pane(db: Database, fake_guest: _FakeGuest) -> None:
+def test_add_shell_does_not_focus_session_pane(db: Database, fake_guest: _ScriptedGuest) -> None:
     """add-shell is invoked mid-attach; pulling focus away from the
     operator's current pane would be jarring. Layout still re-applies."""
     _seed_vm(db, with_tailscale=True)

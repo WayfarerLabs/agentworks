@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db import Database
-    from tests.conftest import _FakeGuest
+    from tests.conftest import _ScriptedGuest
 
 CON = "aw-console-con"
 BOT = Agent("bot", "bot-user")
@@ -107,7 +107,7 @@ def _add_shell(db: Database, model: TmuxModel) -> Callable[[], None]:
 )
 def test_a_refused_agent_stops_the_operation_before_it_resolves_or_changes_anything(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
     monkeypatch: pytest.MonkeyPatch,
     operation: Callable[[Database, TmuxModel], Callable[[], None]],
 ) -> None:

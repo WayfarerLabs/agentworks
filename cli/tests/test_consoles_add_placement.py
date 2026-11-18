@@ -21,7 +21,7 @@ from tests.console_helpers import create_console_record as create_console
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.conftest import _FakeGuest
+    from tests.conftest import _ScriptedGuest
 
 CON = "aw-console-con"
 
@@ -92,7 +92,7 @@ def test_manager_places_new_block_at_requested_index(
 @pytest.mark.parametrize("start_index", [-1, 4])
 def test_manager_rejects_invalid_index_without_mutation(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     start_index: int,
 ) -> None:
@@ -209,7 +209,7 @@ def test_manager_reports_typed_conflict_when_requested_membership_changes(
 
 def test_live_sync_matches_indexed_database_order(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b", "c", "d"])

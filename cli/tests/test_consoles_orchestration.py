@@ -47,7 +47,7 @@ from agentworks.sessions.multi_console import (
 from agentworks.sessions.multi_console._status import ConsoleStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._runtime_probes import framed_runtime_result
-from tests.conftest import _FakeGuest, _FakeResult
+from tests.conftest import _FakeResult, _ScriptedGuest
 from tests.console_helpers import create_console_record as create_console
 from tests.vm_access_support import Call, command_line
 
@@ -154,7 +154,7 @@ def test_console_start_interrupt_after_publication_tears_down_runtime(
     assert not model.has_session("aw-console-work")
 
 
-def test_running_session_names_raises_on_unreachable(db: Database, fake_guest: _FakeGuest) -> None:
+def test_running_session_names_raises_on_unreachable(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If sessions exist with valid pid+boot_id but the probe returns nothing,
     treat that as a transport failure and raise instead of silently reporting
     'no running sessions'."""
@@ -174,7 +174,7 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_guest: _
 @pytest.mark.parametrize("pid", [None, 100])
 def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     pid: int | None,
 ) -> None:
     from agentworks.sessions.multi_console import running_session_names
@@ -198,7 +198,7 @@ def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
 
 def test_running_session_names_refuses_unproved_live_identity_without_repair(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions import manager
@@ -235,7 +235,7 @@ def test_running_session_names_refuses_unproved_live_identity_without_repair(
 
 def test_running_session_names_refuses_unresolved_incomplete_identity(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
 ) -> None:
     from agentworks.sessions.multi_console import running_session_names
 
@@ -253,7 +253,7 @@ def test_running_session_names_refuses_unresolved_incomplete_identity(
     assert len(fake_guest.commands) == 1
 
 
-def test_running_session_names_uses_live_status_check(db: Database, fake_guest: _FakeGuest) -> None:
+def test_running_session_names_uses_live_status_check(db: Database, fake_guest: _ScriptedGuest) -> None:
     """running_session_names SSH-probes via observe_session_statuses and
     returns only sessions whose live tmux state is running."""
     from agentworks.sessions.multi_console import running_session_names

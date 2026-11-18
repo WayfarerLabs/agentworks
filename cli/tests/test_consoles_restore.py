@@ -25,7 +25,7 @@ from tests._consoles_support import (  # noqa: F401
     _StubVerticalLayoutConfig,
 )
 from tests._tmux_model import TmuxModel
-from tests.conftest import _FakeGuest, _FakeResult
+from tests.conftest import _FakeResult, _ScriptedGuest
 from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ def test_restore_session_errors_when_console_missing(db: Database) -> None:
         )
 
 
-def test_restore_session_errors_when_session_not_member(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_errors_when_session_not_member(db: Database, fake_guest: _ScriptedGuest) -> None:
     """Session must already be a member of the console; restore-session is
     purely additive against the configured list, not a way to add sessions."""
     _seed_vm(db, with_tailscale=True)
@@ -61,7 +61,7 @@ def test_restore_session_errors_when_session_not_member(db: Database, fake_guest
         )
 
 
-def test_restore_session_errors_when_tmux_not_running(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_errors_when_tmux_not_running(db: Database, fake_guest: _ScriptedGuest) -> None:
     """restore-session only repairs a live console; if tmux isn't running it
     instructs the user to attach (which builds the console from scratch)."""
     _seed_vm(db, with_tailscale=True)
@@ -81,7 +81,7 @@ def test_restore_session_errors_when_tmux_not_running(db: Database, fake_guest: 
 # -- restore-session: strict failure paths ---------------------------------
 
 
-def test_restore_session_strict_on_untagged_pane(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_strict_on_untagged_pane(db: Database, fake_guest: _ScriptedGuest) -> None:
     """A window with shell panes lacking the @agentworks-shell-index tag
     cannot be reasoned about; restore-session refuses and points at
     `console restart` to rebuild from scratch."""
@@ -100,7 +100,7 @@ def test_restore_session_strict_on_untagged_pane(db: Database, fake_guest: _Fake
         )
 
 
-def test_restore_session_strict_on_out_of_range_tag(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_strict_on_out_of_range_tag(db: Database, fake_guest: _ScriptedGuest) -> None:
     """A pane tagged with a config index past the current configured range
     (e.g., config shrank or DB was edited) is unsafe to repair; restore-session
     surfaces the inconsistency and points at `restart`."""
@@ -123,7 +123,7 @@ def test_restore_session_strict_on_out_of_range_tag(db: Database, fake_guest: _F
         )
 
 
-def test_restore_session_strict_on_duplicate_tags(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_strict_on_duplicate_tags(db: Database, fake_guest: _ScriptedGuest) -> None:
     """Two panes claiming the same config index can't both be the canonical
     pane for that shell; surface the inconsistency rather than guessing."""
     _seed_vm(db, with_tailscale=True)
@@ -141,7 +141,7 @@ def test_restore_session_strict_on_duplicate_tags(db: Database, fake_guest: _Fak
         )
 
 
-def test_restore_session_strict_message_when_configured_zero(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_strict_message_when_configured_zero(db: Database, fake_guest: _ScriptedGuest) -> None:
     """A session with zero configured shells can still have live shell panes
     (e.g. operator ran `tmux split-window` manually then tagged via DB edit).
     The out-of-range error message must not render the empty range as
@@ -164,7 +164,7 @@ def test_restore_session_strict_message_when_configured_zero(db: Database, fake_
 
 
 def test_restore_session_noop_when_live_matches_config(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """Live == configured: no tmux splits or swaps are issued."""
     _seed_vm(db, with_tailscale=True)
@@ -190,7 +190,7 @@ def test_restore_session_noop_when_live_matches_config(
 # -- restore-session: window-missing rebuild -------------------------------
 
 
-def test_restore_session_rebuilds_missing_window(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_rebuilds_missing_window(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If the session's window is absent from live tmux, restore-session
     rebuilds it via the standard _add_session_window path."""
     _seed_vm(db, with_tailscale=True)
@@ -211,7 +211,7 @@ def test_restore_session_rebuilds_missing_window(db: Database, fake_guest: _Fake
 
 def test_restore_session_rebuild_reconciles_live_window_order(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """A rebuilt window can claim tmux's lowest free index, but the complete
     restore settles session windows back into configured member order."""
@@ -233,7 +233,7 @@ def test_restore_session_rebuild_reconciles_live_window_order(
 
 
 def test_restore_session_rebuild_focuses_session_pane_under_pane_base_index_one(
-    db: Database, fake_guest: _FakeGuest
+    db: Database, fake_guest: _ScriptedGuest
 ) -> None:
     """On the rebuild path, the session pane's index comes from the
     `new-window -P -F '#{pane_index}'` capture, not the live pane listing the
@@ -262,7 +262,7 @@ def test_restore_session_rebuild_focuses_session_pane_under_pane_base_index_one(
 
 
 def test_restore_session_rebuild_raises_when_new_window_fails(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """_add_session_window warns and skips rather than raising when
     `tmux new-window` fails, so restore-session must check that the window was
@@ -285,7 +285,7 @@ def test_restore_session_rebuild_raises_when_new_window_fails(
 
 
 def test_restore_session_rebuild_raises_when_shell_split_fails(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """The rebuild path must escalate symmetrically with the additive path: if
     a shell pane fails to split while rebuilding a missing window, it raises
@@ -311,7 +311,7 @@ def test_restore_session_rebuild_raises_when_shell_split_fails(
 
 
 def test_restore_session_rebuild_raises_when_shell_tag_fails(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """The tag-failure sub-case is the one that bites: a rebuilt window left
     with an untagged shell pane makes the NEXT restore-session hit the
@@ -336,7 +336,7 @@ def test_restore_session_rebuild_raises_when_shell_tag_fails(
     assert not any("Rebuilt window" in m for m in captured_output.info)
 
 
-def test_restore_session_rebuild_refuses_when_session_row_gone(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_rebuild_refuses_when_session_row_gone(db: Database, fake_guest: _ScriptedGuest) -> None:
     """The window-missing path rebuilds from config, but _add_session_window
     only warns and skips when the session row is gone. Check the session up
     front so the operator gets the specific reason rather than a generic
@@ -368,7 +368,7 @@ def test_restore_session_rebuild_refuses_when_session_row_gone(db: Database, fak
 # -- restore-session: refuses rather than destroying live state ------------
 
 
-def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If the operator kills the session-attach pane, tmux renumbers a tagged
     shell down into its slot, so the lowest-indexed pane carries a shell tag
     instead of being untagged. Repairing that means recreating the window,
@@ -401,7 +401,7 @@ def test_restore_session_refuses_when_session_pane_killed(db: Database, fake_gue
 
 
 def test_restore_session_refuses_when_session_pane_killed_leaves_duplicate(
-    db: Database, fake_guest: _FakeGuest
+    db: Database, fake_guest: _ScriptedGuest
 ) -> None:
     """The stuck state seen in the wild: the session pane was killed and a prior
     restore-session (which skipped pane_index 0 unconditionally) added a
@@ -443,7 +443,7 @@ def test_restore_session_refuses_when_session_pane_killed_leaves_duplicate(
 )
 def test_restore_session_never_destroys_live_tmux_state(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     session_spec: str,
     windows: str,
     panes: str,
@@ -479,7 +479,7 @@ def test_restore_session_never_destroys_live_tmux_state(
 
 
 def test_restore_session_healthy_under_pane_base_index_one(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """The console tmux server inherits the admin user's ~/.tmux.conf, so
     `set -g pane-base-index 1` makes the session-attach pane report index 1 and
@@ -507,7 +507,7 @@ def test_restore_session_healthy_under_pane_base_index_one(
 
 
 def test_restore_session_refuses_killed_session_pane_under_pane_base_index_one(
-    db: Database, fake_guest: _FakeGuest
+    db: Database, fake_guest: _ScriptedGuest
 ) -> None:
     """The mirror of the healthy case: under `pane-base-index 1` a killed
     session pane leaves a tagged shell as the lowest-indexed pane, and that is
@@ -528,7 +528,7 @@ def test_restore_session_refuses_killed_session_pane_under_pane_base_index_one(
 
 
 def test_restore_session_reorders_relative_to_the_session_pane(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """Shell config index N belongs one slot after the session pane plus N, so
     under `pane-base-index 1` (session pane at index 1) config index 1 belongs
@@ -575,7 +575,7 @@ def test_restore_session_reorders_relative_to_the_session_pane(
 # -- restore-session: additive shell-pane repair ---------------------------
 
 
-def test_restore_session_raises_when_split_returns_no_pane_id(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_raises_when_split_returns_no_pane_id(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If tmux split-window succeeds but doesn't print a pane id, the pane
     is created but untagged. restore-session must surface this as an error
     so the operator doesn't see exit-0 while a window is left incomplete."""
@@ -596,7 +596,7 @@ def test_restore_session_raises_when_split_returns_no_pane_id(db: Database, fake
         )
 
 
-def test_restore_session_splits_missing_config_indices_and_tags_them(db: Database, fake_guest: _FakeGuest) -> None:
+def test_restore_session_splits_missing_config_indices_and_tags_them(db: Database, fake_guest: _ScriptedGuest) -> None:
     """Live < configured: restore-session identifies missing config indices
     by tag diff, splits each one back in with the correct tag, and applies
     select-layout to redistribute geometry."""
@@ -628,7 +628,7 @@ def test_restore_session_splits_missing_config_indices_and_tags_them(db: Databas
 # -- restore-session: prove-by-consequence against a stateful tmux model ----
 #
 # The tests above pin restore-session's behavior against the stateless
-# `_FakeGuest` (a fixed substring -> response map). That fake cannot
+# `_ScriptedGuest` (a fixed substring -> response map). That fake cannot
 # represent tmux STATE: a kill-window has no effect on a later
 # list-windows, so the destructive-remedy bug the command's contract
 # guards against slipped through green once (see
@@ -685,7 +685,7 @@ def _destructive(commands: list[str]) -> list[str]:
 )
 def test_restore_session_refuses_and_leaves_the_model_intact(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
     base: int,
     pane_tags: tuple[int | None, ...],
     session_spec: str,
@@ -715,7 +715,7 @@ def test_restore_session_refuses_and_leaves_the_model_intact(
 @pytest.mark.parametrize("base", [0, 1])
 def test_restore_session_is_a_noop_on_a_healthy_model(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
     captured_output: CapturedOutput,
     base: int,
 ) -> None:
@@ -740,7 +740,7 @@ def test_restore_session_is_a_noop_on_a_healthy_model(
 
 def test_restore_session_healthy_target_reconciles_live_window_order(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
     captured_output: CapturedOutput,
 ) -> None:
     """A healthy target window still repairs pre-existing console-order drift."""
@@ -783,7 +783,7 @@ def test_restore_session_healthy_target_reconciles_live_window_order(
 )
 def test_restore_session_reports_incomplete_window_order_reconciliation(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
     failure_command: str,
     failure_result: _FakeResult,
 ) -> None:
@@ -810,7 +810,7 @@ def test_restore_session_reports_incomplete_window_order_reconciliation(
 
 def test_restore_session_additively_repairs_a_missing_shell_pane(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """The additive path, proved by consequence: with one of two configured
     shells live, restore-session splits the missing shell back in and tags it,
@@ -838,7 +838,7 @@ def test_restore_session_additively_repairs_a_missing_shell_pane(
 
 def test_restore_session_additive_repair_also_reconciles_window_order(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """One restore repairs a missing shell pane and simultaneous window drift."""
     _seed_vm(db, with_tailscale=True)

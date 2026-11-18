@@ -189,7 +189,7 @@ def test_generate_config_admin_session_no_socket() -> None:
 
 
 @dataclass
-class _FakeGuest:
+class _ScriptedGuest:
     """The guest behind the admin's access: canned output for the first probe
     request (the only one that determines warning behavior), success for the
     setup requests after it. Records whether each request was elevated."""
@@ -220,7 +220,7 @@ class _FakeGuest:
 
 
 def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) -> None:
-    runner = _FakeGuest("MISSING")
+    runner = _ScriptedGuest("MISSING")
     ensure_agent_socket_root(runner.files(), "agentworks")
     assert any("missing" in w for w in warnings)
     # Probe uses sudo; getent does not; all setup commands use sudo
@@ -230,26 +230,26 @@ def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) 
 
 
 def test_ensure_agent_socket_root_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_root(_FakeGuest("MISSING").files(), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(_ScriptedGuest("MISSING").files(), "agentworks", warn_if_missing=False)
     assert warnings == []
 
 
 def test_ensure_agent_socket_root_misconfigured_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_root(_FakeGuest("root 755").files(), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(_ScriptedGuest("root 755").files(), "agentworks", warn_if_missing=False)
     assert any("misconfigured" in w for w in warnings)
 
 
 def test_ensure_agent_socket_root_probe_failed_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_root(_FakeGuest("PROBE_FAILED").files(), "agentworks", warn_if_missing=False)
+    ensure_agent_socket_root(_ScriptedGuest("PROBE_FAILED").files(), "agentworks", warn_if_missing=False)
     assert any("probe failed" in w for w in warnings)
 
 
 def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _FakeGuest(f"{AGENT_SOCKET_GROUP} 2771")
+    runner = _ScriptedGuest(f"{AGENT_SOCKET_GROUP} 2771")
     ensure_agent_socket_root(runner.files(), "agentworks")
     assert warnings == []
     # Fast path: probe + group membership check only (no full setup)
@@ -259,7 +259,7 @@ def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -
 
 
 def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -> None:
-    runner = _FakeGuest("MISSING")
+    runner = _ScriptedGuest("MISSING")
     ensure_agent_socket_dir(runner.files(), "agt--alice")
     assert any("agt--alice" in w and "missing" in w for w in warnings)
     # All commands (probe + full setup) must use sudo
@@ -267,26 +267,26 @@ def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -
 
 
 def test_ensure_agent_socket_dir_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_dir(_FakeGuest("MISSING").files(), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(_ScriptedGuest("MISSING").files(), "agt--alice", warn_if_missing=False)
     assert warnings == []
 
 
 def test_ensure_agent_socket_dir_misconfigured_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_dir(_FakeGuest("root root 755").files(), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(_ScriptedGuest("root root 755").files(), "agt--alice", warn_if_missing=False)
     assert any("misconfigured" in w for w in warnings)
 
 
 def test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed(
     warnings: list[str],
 ) -> None:
-    ensure_agent_socket_dir(_FakeGuest("PROBE_FAILED").files(), "agt--alice", warn_if_missing=False)
+    ensure_agent_socket_dir(_ScriptedGuest("PROBE_FAILED").files(), "agt--alice", warn_if_missing=False)
     assert any("probe failed" in w for w in warnings)
 
 
 def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _FakeGuest(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
+    runner = _ScriptedGuest(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
     ensure_agent_socket_dir(runner.files(), "agt--alice")
     # Probe must use sudo
     assert runner.sudo_calls[0] is True

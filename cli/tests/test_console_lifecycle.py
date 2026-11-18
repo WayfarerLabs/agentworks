@@ -25,7 +25,7 @@ from tests.console_helpers import create_console_record
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.conftest import _FakeGuest
+    from tests.conftest import _ScriptedGuest
 
 
 def _refuse() -> TtyInteractionPolicy:
@@ -34,7 +34,7 @@ def _refuse() -> TtyInteractionPolicy:
 
 def test_create_persists_and_publishes_only_canonical_runtime(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel], _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
@@ -58,7 +58,7 @@ def test_create_persists_and_publishes_only_canonical_runtime(
 
 def test_create_failure_retains_stopped_definition_and_cleans_staging(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
@@ -85,7 +85,7 @@ def test_create_failure_retains_stopped_definition_and_cleans_staging(
 
 def test_create_failure_retains_definition_when_runtime_absence_is_indeterminate(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _ScriptedGuest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import agentworks.sessions.multi_console as multi_console
@@ -121,7 +121,7 @@ def test_create_failure_retains_definition_when_runtime_absence_is_indeterminate
 
 def test_start_is_idempotent_and_stop_removes_both_managed_names(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel], _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
@@ -143,7 +143,7 @@ def test_start_is_idempotent_and_stop_removes_both_managed_names(
 
 def test_attach_never_realizes_an_absent_runtime(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel], _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
@@ -160,7 +160,7 @@ def test_attach_never_realizes_an_absent_runtime(
 
 def test_restart_resolves_inputs_before_destroying_running_runtime(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel], _ScriptedGuest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_vm(db, with_tailscale=True)
@@ -181,7 +181,7 @@ def test_restart_resolves_inputs_before_destroying_running_runtime(
 
 def test_exact_targets_do_not_touch_a_prefix_neighbor(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel], _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
@@ -198,7 +198,7 @@ def test_exact_targets_do_not_touch_a_prefix_neighbor(
 
 def test_console_transport_failure_never_triggers_teardown_or_build(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])

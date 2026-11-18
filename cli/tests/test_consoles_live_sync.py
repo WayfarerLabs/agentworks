@@ -28,7 +28,7 @@ from agentworks.sessions.multi_console import (
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._runtime_probes import owner_probe_line, owner_switch, socket_guard
 from tests._tmux_model import TmuxModel
-from tests.conftest import _FakeGuest, _FakeResult
+from tests.conftest import _FakeResult, _ScriptedGuest
 from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ CON = "aw-console-con"
 pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
-def _mark_stopped(db: Database, name: str, target: _FakeGuest, monkeypatch: pytest.MonkeyPatch) -> None:
+def _mark_stopped(db: Database, name: str, target: _ScriptedGuest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Model a stopped dedicated runtime, including absence observations."""
     import shlex
 
@@ -78,7 +78,7 @@ def _mark_stopped(db: Database, name: str, target: _FakeGuest, monkeypatch: pyte
     monkeypatch.setattr(target, "dispatch", dispatch)
 
 
-def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_guest: _FakeGuest) -> None:
+def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If the console's tmux session isn't alive, no new-window command runs."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b"])
@@ -93,7 +93,7 @@ def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_gu
     assert not any("new-window" in c for c in fake_guest.commands)
 
 
-def test_add_session_live_sync_adds_window_when_alive(db: Database, fake_guest: _FakeGuest) -> None:
+def test_add_session_live_sync_adds_window_when_alive(db: Database, fake_guest: _ScriptedGuest) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
@@ -109,7 +109,9 @@ def test_add_session_live_sync_adds_window_when_alive(db: Database, fake_guest: 
     assert len(splits) == 1
 
 
-def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent(db: Database, fake_guest: _FakeGuest) -> None:
+def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent(
+    db: Database, fake_guest: _ScriptedGuest
+) -> None:
     """The admin's console pane switches to the agent, behind the socket guard, for every probe and attach."""
     socket = "/run/agentworks/agent-tmux-sockets/bot-user/s.sock"
     _seed_vm(db, with_tailscale=True)
@@ -140,7 +142,7 @@ def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent(db: Datab
 
 
 def test_add_session_live_sync_adds_window_for_bare_spec(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """Regression: a bare spec (``add-sessions con b`` -- shells=0) on a
     live console must still add the window. The eager-resolve block is
@@ -167,7 +169,7 @@ def test_add_session_live_sync_adds_window_for_bare_spec(
 
 def test_add_sessions_appends_new_window_last_under_renumber_off(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """Regression for issue #246 (b): with the placeholder retired (index 0
     free) under the stock ``renumber-windows off``, add-sessions must land the
@@ -206,7 +208,7 @@ def test_add_sessions_appends_new_window_last_under_renumber_off(
 
 def test_add_sessions_appends_multiple_new_windows_in_order_at_the_tail(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """Regression for issue #246 (b), multi-add: adding two or more sessions at
     once must land every new window in order at the tail, not in reclaimed low
@@ -241,7 +243,7 @@ def test_add_sessions_appends_multiple_new_windows_in_order_at_the_tail(
 
 def test_add_sessions_reorders_to_config_order_when_new_window_lands_low(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """Even if the append lands the new window in a low slot (e.g. the reorder
     is the only thing that can save order because a prior op left drift), the
@@ -269,7 +271,7 @@ def test_add_sessions_reorders_to_config_order_when_new_window_lands_low(
     assert live_order == db_order == ["a", "b", "c"]
 
 
-def test_remove_session_live_sync_kills_window(db: Database, fake_guest: _FakeGuest) -> None:
+def test_remove_session_live_sync_kills_window(db: Database, fake_guest: _ScriptedGuest) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
@@ -282,7 +284,7 @@ def test_remove_session_live_sync_kills_window(db: Database, fake_guest: _FakeGu
     assert len(kill_windows) == 1
 
 
-def test_reorder_sessions_live_sync_swaps_windows_no_admin_shell(db: Database, fake_guest: _FakeGuest) -> None:
+def test_reorder_sessions_live_sync_swaps_windows_no_admin_shell(db: Database, fake_guest: _ScriptedGuest) -> None:
     """With no admin-shell window, the desired session order maps onto
     every live window index. The helper issues one swap-window per
     out-of-place slot, tracking indices in memory so the second iteration
@@ -308,7 +310,7 @@ def test_reorder_sessions_live_sync_swaps_windows_no_admin_shell(db: Database, f
     ]
 
 
-def test_reorder_sessions_live_sync_holds_admin_shell_fixed(db: Database, fake_guest: _FakeGuest) -> None:
+def test_reorder_sessions_live_sync_holds_admin_shell_fixed(db: Database, fake_guest: _ScriptedGuest) -> None:
     """Permutable slots are derived positively from the session set, so the
     --admin-- window (whose name is not in the desired list) is excluded."""
     _seed_vm(db, with_tailscale=True)
@@ -343,7 +345,7 @@ def test_reorder_sessions_live_sync_holds_admin_shell_fixed(db: Database, fake_g
     assert not any("swap-window" in c and "--admin--" in c for c in fake_guest.commands)
 
 
-def test_reorder_sessions_live_sync_ignores_stray_window(db: Database, fake_guest: _FakeGuest) -> None:
+def test_reorder_sessions_live_sync_ignores_stray_window(db: Database, fake_guest: _ScriptedGuest) -> None:
     """A window with no matching session row (operator-created via raw
     `tmux new-window`, leftover from a rename, etc.) is not a permutable
     slot. The reorder operates only on windows whose names are in the
@@ -375,7 +377,7 @@ def test_reorder_sessions_live_sync_ignores_stray_window(db: Database, fake_gues
     assert not any("swap-window" in c and "scratch" in c for c in fake_guest.commands)
 
 
-def test_reorder_sessions_live_sync_skipped_when_console_absent(db: Database, fake_guest: _FakeGuest) -> None:
+def test_reorder_sessions_live_sync_skipped_when_console_absent(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If the console's tmux session isn't alive, no swap-window calls run.
     DB still updates."""
     _seed_vm(db, with_tailscale=True)
@@ -395,7 +397,7 @@ def test_reorder_sessions_live_sync_skipped_when_console_absent(db: Database, fa
     assert [m.session_name for m in members] == ["b", "a"]
 
 
-def test_reorder_sessions_live_sync_compacts_when_window_missing(db: Database, fake_guest: _FakeGuest) -> None:
+def test_reorder_sessions_live_sync_compacts_when_window_missing(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If the operator killed a session window manually, the surviving
     windows compact toward the front instead of getting stranded at
     later slots. Without this, desired = [c, a, b] with live = [a, b]
@@ -422,7 +424,7 @@ def test_reorder_sessions_live_sync_compacts_when_window_missing(db: Database, f
     assert [m.session_name for m in members] == ["c", "a", "b"]
 
 
-def test_reorder_sessions_live_sync_bails_on_duplicate_window_names(db: Database, fake_guest: _FakeGuest) -> None:
+def test_reorder_sessions_live_sync_bails_on_duplicate_window_names(db: Database, fake_guest: _ScriptedGuest) -> None:
     """If two windows share a name that's in the session set, we can't
     disambiguate which one to swap. Warn with a restart hint and skip
     tmux work; DB is already updated."""
@@ -479,7 +481,7 @@ def test_list_console_memberships_for_session_returns_stored_positions(db: Datab
     assert db.list_console_memberships_for_session("nope") == []
 
 
-def test_kill_session_windows_kills_live_only(db: Database, fake_guest: _FakeGuest) -> None:
+def test_kill_session_windows_kills_live_only(db: Database, fake_guest: _ScriptedGuest) -> None:
     """Pairs are grouped by console; kill-window runs only where the console's
     tmux session is alive."""
     from agentworks.sessions.multi_console import kill_session_windows
@@ -499,7 +501,7 @@ def test_kill_session_windows_kills_live_only(db: Database, fake_guest: _FakeGue
 
 
 def test_kill_session_windows_empty_is_noop(
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
 ) -> None:
     """No pairs -> no SSH probes, no kill-window calls."""
     from agentworks.sessions.multi_console import kill_session_windows
@@ -512,7 +514,7 @@ def test_kill_session_windows_empty_is_noop(
 
 
 def test_kill_session_windows_groups_by_console(
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
 ) -> None:
     """Multiple sessions in one console -> single has-session probe, one
     kill-window per session."""
@@ -535,7 +537,9 @@ def test_kill_session_windows_groups_by_console(
     ]
 
 
-def test_kill_session_windows_transport_failure_warns(fake_guest: _FakeGuest, captured_output: CapturedOutput) -> None:
+def test_kill_session_windows_transport_failure_warns(
+    fake_guest: _ScriptedGuest, captured_output: CapturedOutput
+) -> None:
     """A raised non-Agentworks exception (transport surprise) is swallowed
     with a warning that names the affected consoles."""
     from agentworks.sessions.multi_console import kill_session_windows
@@ -556,7 +560,7 @@ def test_kill_session_windows_transport_failure_warns(fake_guest: _FakeGuest, ca
 
 
 def test_kill_session_windows_agentworks_error_propagates(
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
 ) -> None:
     """AgentworksError is not swallowed by the helper -- callers see it."""
     from agentworks.sessions.multi_console import kill_session_windows
@@ -578,7 +582,7 @@ def test_kill_session_windows_agentworks_error_propagates(
 
 def test_delete_session_kills_console_windows(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -614,7 +618,7 @@ def test_delete_session_kills_console_windows(
 
 def test_delete_session_skips_kill_when_no_member_consoles(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -646,7 +650,7 @@ def test_delete_session_skips_kill_when_no_member_consoles(
 
 def test_delete_session_reports_affected_consoles(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -675,7 +679,7 @@ def test_delete_session_reports_affected_consoles(
 
 def test_delete_session_offers_and_deletes_now_empty_console(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -717,7 +721,7 @@ def test_delete_session_offers_and_deletes_now_empty_console(
 
 def test_delete_session_declined_offer_keeps_empty_console(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -750,7 +754,7 @@ def test_delete_session_declined_offer_keeps_empty_console(
 
 def test_delete_session_does_not_offer_console_with_remaining_sessions(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -788,7 +792,7 @@ def test_delete_session_does_not_offer_console_with_remaining_sessions(
 
 def test_delete_session_leaves_no_dangling_console_reference(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -813,7 +817,7 @@ def test_delete_session_leaves_no_dangling_console_reference(
 
 def test_delete_session_yes_reports_but_keeps_empty_console(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -846,7 +850,7 @@ def test_delete_session_yes_reports_but_keeps_empty_console(
 
 def test_delete_session_warns_when_offered_console_delete_raises(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -1063,7 +1067,7 @@ def test_remove_sessions_non_interactive_without_yes_reports_but_keeps(
 
 def test_delete_workspace_kills_console_windows(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
     tmp_path: Path,
@@ -1116,7 +1120,7 @@ def test_delete_workspace_kills_console_windows(
 
 def test_delete_agent_kills_console_windows(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:

@@ -517,7 +517,7 @@ class _FakeResult:
 
 
 class _SupportsDispatch(Protocol):
-    """The one method ``_FakeGuest`` needs from a stateful tmux model.
+    """The one method ``_ScriptedGuest`` needs from a stateful tmux model.
 
     Typed as a Protocol (rather than importing ``tests._tmux_model.TmuxModel``)
     because that module imports ``_FakeResult`` from here; a concrete import
@@ -527,7 +527,7 @@ class _SupportsDispatch(Protocol):
     def dispatch(self, command: str) -> _FakeResult: ...
 
 
-class _FakeGuest:
+class _ScriptedGuest:
     """The guest a test's recording accesses reach: it answers each request from its command line.
 
     ``answer`` is a ``RecordingVMAccess`` answer (``install_fake_guest``
@@ -749,7 +749,7 @@ def stub_vm_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args, **kwargs: None)
 
 
-def install_fake_guest(monkeypatch: pytest.MonkeyPatch, guest: _FakeGuest) -> _FakeGuest:
+def install_fake_guest(monkeypatch: pytest.MonkeyPatch, guest: _ScriptedGuest) -> _ScriptedGuest:
     """Answer every ``VMAccess`` request from ``guest`` and stub the VM gates.
 
     Shared by the ``fake_guest`` fixture (stateless) and the
@@ -769,14 +769,14 @@ def install_fake_guest(monkeypatch: pytest.MonkeyPatch, guest: _FakeGuest) -> _F
 
 
 @pytest.fixture
-def fake_guest(monkeypatch: pytest.MonkeyPatch) -> _FakeGuest:
-    """Install a stateless ``_FakeGuest`` that answers every ``VMAccess`` request, and stub the VM gates."""
-    return install_fake_guest(monkeypatch, _FakeGuest())
+def fake_guest(monkeypatch: pytest.MonkeyPatch) -> _ScriptedGuest:
+    """Install a stateless ``_ScriptedGuest`` that answers every ``VMAccess`` request, and stub the VM gates."""
+    return install_fake_guest(monkeypatch, _ScriptedGuest())
 
 
 @pytest.fixture
 def console_guest_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - returns a local factory
-    """Return a factory that installs a stateful, model-backed ``_FakeGuest``.
+    """Return a factory that installs a stateful, model-backed ``_ScriptedGuest``.
 
     Usage::
 
@@ -793,8 +793,10 @@ def console_guest_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - re
     to fail while the rest stay stateful.
     """
 
-    def _make(model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None) -> _FakeGuest:
-        return install_fake_guest(monkeypatch, _FakeGuest(responses=responses, model=model))
+    def _make(
+        model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None
+    ) -> _ScriptedGuest:
+        return install_fake_guest(monkeypatch, _ScriptedGuest(responses=responses, model=model))
 
     return _make
 

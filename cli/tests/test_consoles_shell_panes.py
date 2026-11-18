@@ -27,7 +27,7 @@ from agentworks.sessions.multi_console import add_shell, delete_console
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION, _reorder_shell_panes
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
-from tests.conftest import _FakeGuest, _FakeResult
+from tests.conftest import _FakeResult, _ScriptedGuest
 from tests.console_helpers import create_console_record as create_console
 from tests.vm_access_support import PARK_TOKEN, Call, command_line
 
@@ -52,7 +52,7 @@ def _pane_command(split: str) -> list[str]:
     return shlex.split(shlex.split(split)[-1])
 
 
-def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_guest: _FakeGuest) -> None:
+def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_guest: _ScriptedGuest) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
@@ -78,7 +78,7 @@ def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_guest: _Fa
     assert len(layouts) == 1
 
 
-def test_delete_console_live_kills_tmux_session(db: Database, fake_guest: _FakeGuest) -> None:
+def test_delete_console_live_kills_tmux_session(db: Database, fake_guest: _ScriptedGuest) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
@@ -109,7 +109,7 @@ def _seed_agent_session_console(db: Database) -> None:
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
 
-def test_an_agent_pane_parks_as_the_agent_and_switches_to_it(db: Database, fake_guest: _FakeGuest) -> None:
+def test_an_agent_pane_parks_as_the_agent_and_switches_to_it(db: Database, fake_guest: _ScriptedGuest) -> None:
     """The agent's own connection parks the pane's shell, and the admin's tmux runs the handover behind `sudo -n -u`."""
     _seed_agent_session_console(db)
 
@@ -130,7 +130,7 @@ def test_an_agent_pane_parks_as_the_agent_and_switches_to_it(db: Database, fake_
     assert [call.identity for call in splits] == [Admin()]
 
 
-def test_an_admin_pane_parks_as_the_admin_with_no_switch(db: Database, fake_guest: _FakeGuest) -> None:
+def test_an_admin_pane_parks_as_the_admin_with_no_switch(db: Database, fake_guest: _ScriptedGuest) -> None:
     """Admin shell on an admin-mode session: the admin parks and the pane runs the handover itself."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
@@ -145,7 +145,9 @@ def test_an_admin_pane_parks_as_the_admin_with_no_switch(db: Database, fake_gues
     assert "sudo" not in _pane_command(split)
 
 
-def test_an_agent_pane_checks_the_agents_access_before_anything_changes(db: Database, fake_guest: _FakeGuest) -> None:
+def test_an_agent_pane_checks_the_agents_access_before_anything_changes(
+    db: Database, fake_guest: _ScriptedGuest
+) -> None:
     """On a running console, an agent that predates the direct-SSH rollout is refused before the shell is recorded."""
     _seed_agent_session_console(db)
     fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
@@ -165,7 +167,7 @@ def test_an_agent_pane_checks_the_agents_access_before_anything_changes(db: Data
 
 
 def test_a_stopped_console_records_an_agent_pane_without_checking_the_agent(
-    db: Database, fake_guest: _FakeGuest
+    db: Database, fake_guest: _ScriptedGuest
 ) -> None:
     """With no live tmux there is no pane to park, so the shell is recorded and the agent is not asked."""
     _seed_agent_session_console(db)
@@ -183,7 +185,9 @@ def test_a_stopped_console_records_an_agent_pane_without_checking_the_agent(
     assert fake_guest.parks() == []
 
 
-def test_a_console_whose_tmux_cannot_be_read_records_the_shell_then_fails(db: Database, fake_guest: _FakeGuest) -> None:
+def test_a_console_whose_tmux_cannot_be_read_records_the_shell_then_fails(
+    db: Database, fake_guest: _ScriptedGuest
+) -> None:
     """A probe that cannot tell checks no agent: the shell is recorded, then the live sync refuses to guess."""
     _seed_agent_session_console(db)
     fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=1, stderr="lost server")
@@ -201,7 +205,7 @@ def test_a_console_whose_tmux_cannot_be_read_records_the_shell_then_fails(db: Da
 
 
 def test_a_pane_whose_directory_is_gone_opens_in_the_home_directory(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
@@ -221,7 +225,7 @@ def test_a_pane_whose_directory_is_gone_opens_in_the_home_directory(
 
 
 def test_a_refused_split_lets_the_parked_request_go(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
@@ -241,7 +245,7 @@ def test_a_refused_split_lets_the_parked_request_go(
 
 
 def test_a_pane_that_never_collects_its_request_is_a_failed_pane(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
@@ -258,7 +262,7 @@ def test_a_pane_that_never_collects_its_request_is_a_failed_pane(
     assert len(captured_output.warnings) == 1
 
 
-def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, fake_guest: _FakeGuest) -> None:
+def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, fake_guest: _ScriptedGuest) -> None:
     """The pane's composed environment, workspace identity only, is in its parked request and nowhere else.
 
     An add-shell pane is a sidecar shell rooted in the session's workspace,
@@ -283,7 +287,7 @@ def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, fak
 # -- Pane tagging ----------------------------------------------------------
 
 
-def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, fake_guest: _FakeGuest) -> None:
+def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, fake_guest: _ScriptedGuest) -> None:
     """After split-window emits the new pane id, _split_shell_pane sets
     @agentworks-shell-index so restore-session can identify which configured
     shell a given live pane corresponds to."""
@@ -305,7 +309,7 @@ def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, fake_gue
 
 
 def test_split_shell_pane_warns_when_split_returns_no_pane_id(
-    db: Database, fake_guest: _FakeGuest, captured_output: CapturedOutput
+    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """If split-window's stdout is empty (older tmux / weird transport), the
     tag step is skipped and the operator gets a warning that the pane is
@@ -334,7 +338,7 @@ def test_split_shell_pane_warns_when_split_returns_no_pane_id(
 
 
 def test_reorder_shell_panes_puts_tagged_shells_into_config_order(
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """Direct proof of the corrective helper on the exact shape the add-shell
     bug produces: a window whose shell panes sit out of config order (tag 1
@@ -357,7 +361,7 @@ def test_reorder_shell_panes_puts_tagged_shells_into_config_order(
 
 def test_add_shell_reorders_shell_panes_into_config_order(
     db: Database,
-    console_guest_factory: Callable[..., _FakeGuest],
+    console_guest_factory: Callable[..., _ScriptedGuest],
 ) -> None:
     """Regression for issue #246 (a): add-shell must leave the window's shell
     panes in tagged config order.
@@ -393,7 +397,7 @@ def test_add_shell_reorders_shell_panes_into_config_order(
 @pytest.mark.parametrize("failure", ["refused", "incomplete"])
 def test_split_shell_pane_warns_when_set_option_fails(
     db: Database,
-    fake_guest: _FakeGuest,
+    fake_guest: _ScriptedGuest,
     captured_output: CapturedOutput,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,

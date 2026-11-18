@@ -169,7 +169,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     from agentworks.execution.attach import Handover
     from agentworks.execution.requests import LoginShell
     from tests._tmux_model import TmuxModel
-    from tests.conftest import _FakeGuest, install_fake_guest
+    from tests.conftest import _ScriptedGuest, install_fake_guest
     from tests.vm_access_support import PARK_TOKEN
 
     _seed_vm(db)
@@ -179,7 +179,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     value = f"prefix'{marker}' $(touch ignored) suffix"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
-    target = install_fake_guest(monkeypatch, _FakeGuest(model=TmuxModel()))
+    target = install_fake_guest(monkeypatch, _ScriptedGuest(model=TmuxModel()))
     admin = target.admin()
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
@@ -208,7 +208,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
 def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Database, tmp_path, monkeypatch, failure):
     from agentworks.errors import ExternalError
     from tests._tmux_model import TmuxModel
-    from tests.conftest import _FakeGuest, _FakeResult, install_fake_guest
+    from tests.conftest import _FakeResult, _ScriptedGuest, install_fake_guest
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
@@ -217,7 +217,7 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {})
     model = TmuxModel()
 
-    class Guest(_FakeGuest):
+    class Guest(_ScriptedGuest):
         def dispatch(self, command: str) -> _FakeResult:
             if failure == "window" and command.startswith("tmux new-session"):
                 self.commands.append(command)
@@ -245,7 +245,7 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
 
 def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, monkeypatch):
     import agentworks.sessions.multi_console.attach as attach
-    from tests.conftest import _FakeGuest, _FakeResult, install_fake_guest
+    from tests.conftest import _FakeResult, _ScriptedGuest, install_fake_guest
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
@@ -261,7 +261,7 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
         if len(cleanup) > 1:
             raise StateError("cleanup failed")
 
-    class Guest(_FakeGuest):
+    class Guest(_ScriptedGuest):
         def dispatch(self, command: str) -> _FakeResult:
             raise UserAbort("cancelled")
 

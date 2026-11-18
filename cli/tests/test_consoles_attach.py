@@ -24,7 +24,7 @@ from tests.console_helpers import create_console_record
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.conftest import _FakeGuest
+    from tests.conftest import _ScriptedGuest
 
 
 def test_attach_loop_uses_exact_session_targets() -> None:
@@ -87,7 +87,7 @@ def test_a_console_window_says_once_why_the_guard_refuses_its_session(tmp_path: 
 
 def test_attach_joins_existing_canonical_runtime_without_building(
     db: Database,
-    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
+    console_guest_factory: Callable[[TmuxModel], _ScriptedGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
