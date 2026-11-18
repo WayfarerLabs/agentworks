@@ -14,9 +14,10 @@ configuration does not belong in workspace content, so the feature is removed an
 
 Both commands run under ``sh -c`` as the admin, so the admin's login shell never
 parses them, and both always run. A discovery directory that cannot be read or
-searched, a project file that cannot be read and a workspace directory that cannot
-be searched stay in place and count as failures, as does a failed removal; the
-caller warns, naming the workspaces it could not finish.
+searched or that an unsearchable ancestor hides, a project file that cannot be read
+and a workspace directory that cannot be searched stay in place and count as
+failures, as does a failed removal; the caller warns, naming the workspaces it could
+not finish.
 """
 
 from __future__ import annotations
@@ -38,9 +39,18 @@ _UNFINISHED_MARKER = "AGW_TMUXINATOR_UNFINISHED="
 # Each script records a failure in ``rc`` and keeps going, so one entry cannot hide
 # another's failure or stop the rest. A test that is merely false never sets it;
 # being unable to search or read something does.
+#
+# ``[ -d ]`` is also false when an unsearchable ancestor hides the discovery
+# directory, so the links script walks up to the nearest ancestor it can see: the
+# directory is absent only when that ancestor is searchable or not a directory.
 _LINKS_SCRIPT = """\
 dir="$HOME/.config/tmuxinator"
-[ -d "$dir" ] || exit 0
+if [ ! -d "$dir" ]; then
+  seen="$dir"
+  while [ -n "$seen" ] && [ ! -e "$seen" ] && [ ! -L "$seen" ]; do seen="${seen%/*}"; done
+  [ -d "$seen" ] && [ ! -x "$seen" ] && exit 1
+  exit 0
+fi
 [ -x "$dir" ] && [ -r "$dir" ] || exit 1
 rc=0
 for link in "$dir"/ws-*-console.yml; do

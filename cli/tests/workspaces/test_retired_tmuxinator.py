@@ -240,6 +240,39 @@ def test_a_discovery_directory_that_cannot_be_fully_handled_is_warned(
 
 
 @requires_guest_shell
+@skip_as_root
+def test_a_discovery_directory_hidden_by_an_unsearchable_ancestor_is_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, entries = guest
+    link = entries / "ws-proj-console.yml"
+    link.symlink_to(workspace / ".tmuxinator.yml")
+    entries.parent.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        entries.parent.chmod(0o755)
+
+    assert link.is_symlink()
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
+@pytest.mark.parametrize("levels_up", [0, 1], ids=["discovery-directory", "config-directory"])
+def test_a_missing_discovery_directory_is_a_quiet_success(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, levels_up: int
+) -> None:
+    target, workspace, entries = guest
+    shutil.rmtree((entries, entries.parent)[levels_up])
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+
+    _reinit(db, target)
+
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert captured_output.warnings == []
+
+
+@requires_guest_shell
 def test_a_transport_error_on_one_command_still_runs_the_other(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
 ) -> None:

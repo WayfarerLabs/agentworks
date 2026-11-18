@@ -181,8 +181,9 @@ Releases up to 0.19 generated a tmuxinator project in each workspace (`.tmuxinat
 it from the VM admin's `~/.config/tmuxinator/ws-<name>-console.yml`. `vm reinit` removes those admin
 links, without following them, and each workspace's `.tmuxinator.yml` that is a regular file still
 starting with the generated header. Anything else is left alone. A link, project or workspace
-directory that cannot be read or searched also stays, and like a failed removal it makes reinit warn
-without failing.
+directory that cannot be read or searched also stays, as do the links when a directory above
+`~/.config/tmuxinator` that the admin cannot search, such as `~/.config`, hides them. Like a failed
+removal, each makes reinit warn without failing.
 
 ## Workspace repair
 
