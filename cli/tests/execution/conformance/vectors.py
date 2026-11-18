@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import io
 import os
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -221,7 +222,7 @@ def consumer_leaves_an_endless_writer(lane: Lane, *, writes_to: str) -> None:
     """The writer takes SIGPIPE when the client closes its end, and the request ends as ssh's did, as 141."""
     pid_file = f"{lane.make_dir()}/pid"
     redirect = ">&2" if writes_to == "stderr" else ""
-    endless = cmd("sh", "-c", f"echo $$ > {pid_file}; exec yes {redirect}", deadline=15)
+    endless = cmd("sh", "-c", f"echo $$ > {shlex.quote(pid_file)}; exec yes {redirect}", deadline=15)
     leaving, other = LeavingSink(2), io.BytesIO()
     started = time.monotonic()
 
@@ -248,7 +249,7 @@ def stderr_consumer_leaves_an_endless_writer(lane: Lane) -> None:
 
 def stdout_consumer_leaves_a_quiet_payload_that_then_ends(lane: Lane) -> None:
     marker = f"{lane.make_dir()}/finished"
-    quiet = cmd("sh", "-c", f"echo hello; sleep 1; echo done > {marker}; exit 4", deadline=15)
+    quiet = cmd("sh", "-c", f"echo hello; sleep 1; echo done > {shlex.quote(marker)}; exit 4", deadline=15)
     started = time.monotonic()
 
     status = lane.access.stream(quiet, stdin=None, stdout=LeavingSink(1), stderr=io.BytesIO())
