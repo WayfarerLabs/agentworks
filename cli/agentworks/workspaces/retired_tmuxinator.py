@@ -82,8 +82,7 @@ exit "$rc"
 # FIFO, a directory or a link away from ``cmp``, which exits 1 on a difference and 2
 # when it cannot read. A project hidden by an unsearchable directory, whether its
 # workspace or one above it, counts as a failure too. Each workspace the script
-# could not finish is reported on its own marker line. The loop variable is not ``path``,
-# which zsh ties to ``$PATH``.
+# could not finish is reported on its own marker line.
 _PROJECTS_SCRIPT = (
     _HIDDEN_FUNCTION
     + f"""\
