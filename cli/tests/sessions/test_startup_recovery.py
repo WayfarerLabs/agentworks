@@ -151,6 +151,7 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(
     command = "tmux new-session -e " + shlex.quote("TOKEN=" + secret)
     failure = ExternalError(command, hint=command)
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agw", "session", operation, "s1"])
     monkeypatch.delenv("AGW_DEBUG", raising=False)
     register_workload_secret(db, monkeypatch, name="token", value=secret)

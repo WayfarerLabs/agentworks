@@ -48,13 +48,13 @@ def record_unhandled_error(exc: BaseException) -> Path | None:
     log is the fallback for crashes that happen before any operation log is
     constructed (config-load failures, CLI argument errors, etc.).
 
-    The log appends forever -- not currently rotated. Crashes outside an
-    operation are rare; a few MB takes years to accumulate. Add rotation
-    later if it becomes an issue.
+    The log sits beside the operation logs (``oplog.LOG_DIR``) and appends
+    forever, unrotated. Crashes outside an operation are rare; a few MB
+    takes years to accumulate. Add rotation later if it becomes an issue.
     """
-    from agentworks.config import CONFIG_DIR
+    from agentworks.execution import oplog
 
-    log_dir = CONFIG_DIR / "logs"
+    log_dir = oplog.LOG_DIR
     log_path = log_dir / "error.log"
 
     ts = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

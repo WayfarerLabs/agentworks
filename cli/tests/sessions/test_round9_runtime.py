@@ -412,6 +412,7 @@ def test_real_create_lost_ack_repr_secret_is_redacted_in_rollback_and_canonical_
     monkeypatch.setattr(Resolver, "values", property(lambda self: {"token": secret}))
     monkeypatch.setattr(manager, "_resolve_session_env", lambda *a, **k: {"TOKEN": secret})
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agw", "session", "create"])
     original_run = native.run
     failures = []

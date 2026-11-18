@@ -35,7 +35,7 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_record_unhandled_error_writes_traceback_with_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The error log records timestamp, argv, and the full traceback so a
     user-visible one-liner can be backed by a debuggable artifact."""
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "vm", "create", "broken"])
 
     try:
@@ -58,10 +58,10 @@ def test_record_unhandled_error_handles_unusable_log_dir(tmp_path: Path, monkeyp
     """If the log path can't be created, the helper must return None (signal
     to the caller) without raising. The user's one-line error is more
     important than the persisted log."""
-    # Point CONFIG_DIR at a file path so the mkdir + open both fail.
+    # Put the log directory under a file, so the mkdir and open both fail.
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory")
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", blocker)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", blocker / "logs")
 
     try:
         raise ValueError("won't fit")
@@ -118,7 +118,7 @@ def test_main_wrapper_catches_unhandled_exception(tmp_path: Path, monkeypatch: p
         raise RuntimeError("synthetic blowup")
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "kaboom"])
     # Force debug off even if AGW_DEBUG happens to be set in the test env.
     monkeypatch.setenv("AGW_DEBUG", "")
@@ -149,7 +149,7 @@ def test_main_wrapper_lets_click_exceptions_through(tmp_path: Path, monkeypatch:
         raise typer.Exit(code=7)
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "bail"])
 
     with pytest.raises(SystemExit) as exc_info:
@@ -182,7 +182,7 @@ def test_main_wrapper_lets_vendored_abort_through(
         raise typer.Abort()
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "bail"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -226,7 +226,7 @@ def test_main_wrapper_maps_escaped_exit_to_its_carried_code(
         raise exc_factory()
 
     monkeypatch.setattr(cli_mod, "app", fake_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "whatever"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -262,7 +262,7 @@ def test_main_wrapper_maps_escaped_abort_to_exit_1(
         raise exc_factory()
 
     monkeypatch.setattr(cli_mod, "app", fake_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "whatever"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -286,7 +286,7 @@ def test_main_wrapper_keeps_native_choice_failure_as_usage_error(
 
     record_calls: list[BaseException] = []
     monkeypatch.setattr(_entry, "record_unhandled_error", lambda exc: record_calls.append(exc))
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     argv = ["agentworks", *(["--debug"] if debug else []), "completion", "show", "--shell", "fish"]
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setenv("AGW_DEBUG", "")
@@ -325,7 +325,7 @@ def test_main_wrapper_handles_keyboard_interrupt(tmp_path: Path, monkeypatch: py
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "interrupt"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
