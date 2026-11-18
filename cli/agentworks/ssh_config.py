@@ -63,10 +63,14 @@ def _to_ssh_path(path: Path) -> str:
     return posix
 
 
+def _include_pattern(ssh_config: Path) -> str:
+    """The config.d files' glob, as ssh reads a path (:func:`_to_ssh_path`)."""
+    return f"{_to_ssh_path(ssh_config.parent / _CONFIG_DIR_NAME)}/*"
+
+
 def _include_directive(ssh_config: Path) -> str:
-    """Build the Include directive for config.d."""
-    config_d = ssh_config.parent / _CONFIG_DIR_NAME
-    return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
+    """Build the Include directive for config.d, quoted when ssh would split the path."""
+    return f"Include {trust.option_value(_include_pattern(ssh_config))}"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -184,7 +188,9 @@ def _ensure_include(ssh_config: Path) -> None:
     """Ensure the Include directive is present in ssh_config.
 
     Adds it at the top if not present. If the user has moved it elsewhere
-    in the file, their placement is respected.
+    in the file, their placement is respected. An unquoted directive earlier
+    releases wrote for a path ssh splits at its whitespace is replaced in
+    place by the quoted one.
     """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
     directive = _include_directive(ssh_config)
@@ -198,6 +204,14 @@ def _ensure_include(ssh_config: Path) -> None:
     content = ssh_config.read_text()
     if directive in content:
         return  # already present (with or without comment)
+
+    unquoted = f"Include {_include_pattern(ssh_config)}"
+    lines = content.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if unquoted != directive and line.strip() == unquoted:
+            lines[index] = line.replace(unquoted, directive)
+            ssh_config.write_text("".join(lines))
+            return
 
     # Insert at top
     ssh_config.write_text(f"{include_block}\n\n{content}")

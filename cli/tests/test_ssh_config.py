@@ -815,3 +815,35 @@ def test_an_entry_is_written_exactly_when_the_execution_core_would_connect_there
     _rebuild_config_dir(config, db)
 
     assert (ssh_dir / "config.d" / _MANAGED_CONF).exists() is accepted
+
+
+@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entries(tmp_path: Path) -> None:
+    ssh_dir = tmp_path / "my ssh"
+    ssh_dir.mkdir()
+    ssh_config = ssh_dir / "config"
+    (ssh_dir / "config.d").mkdir()
+    (ssh_dir / "config.d" / _MANAGED_CONF).write_text("Host awvm--web\n    HostName 100.64.0.9\n")
+
+    _ensure_include(ssh_config)
+
+    out = subprocess.run(
+        ["ssh", "-G", "-F", str(ssh_config), "awvm--web"], capture_output=True, text=True, timeout=10, check=True
+    ).stdout
+    assert "hostname 100.64.0.9" in out.splitlines()
+
+
+def test_an_unquoted_include_split_at_its_space_is_replaced_where_it_stands(tmp_path: Path) -> None:
+    from agentworks import ssh_config as ssh_config_module
+
+    ssh_dir = tmp_path / "my ssh"
+    ssh_dir.mkdir()
+    ssh_config = ssh_dir / "config"
+    unquoted = f"Include {ssh_config_module._include_pattern(ssh_config)}"
+    ssh_config.write_text(f"Host *\n    ServerAliveInterval 60\n\n{unquoted}\n")
+
+    _ensure_include(ssh_config)
+
+    content = ssh_config.read_text()
+    assert unquoted not in content.splitlines()
+    assert content == f"Host *\n    ServerAliveInterval 60\n\n{_include_directive(ssh_config)}\n"
