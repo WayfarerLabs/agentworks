@@ -251,6 +251,79 @@ def test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diag
     assert text.count("[REDACTED]") == 4
 
 
+def test_record_redacts_a_secret_ending_in_line_breaks_at_the_end_of_a_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.execution.requests import Command
+    from agentworks.execution.results import Completed, Result
+
+    secret = "first-line-4c\nsecond-line-4c\n\n"
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+
+    # The secret is the last of stdout, as `printf %s "$TOKEN"` leaves it, and stderr follows it in the record.
+    logger.record(Command(("printenv", "TOKEN")), Result(Completed(1), f"TOKEN={secret}".encode(), b"warning\n"))
+
+    text = logger.path.read_text()
+    assert "first-line-4c" not in text
+    assert "second-line-4c" not in text
+
+
+@pytest.mark.parametrize(
+    ("secret", "shown"),
+    [
+        # A message that quotes the value, or a command substitution, drops its line breaks.
+        pytest.param("tok-abc-123\n", "error: token tok-abc-123 rejected", id="trailing-newline"),
+        pytest.param("\r\ntok-abc-123\r\n", "token=tok-abc-123", id="surrounding-crlf"),
+    ],
+)
+def test_record_redacts_a_secret_shown_without_its_line_breaks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str, shown: str
+) -> None:
+    from agentworks.execution.requests import Command
+    from agentworks.execution.results import Completed, Result
+
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+
+    logger.record(Command(("tool",)), Result(Completed(1), b"", shown.encode()))
+
+    assert "tok-abc-123" not in logger.path.read_text()
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        pytest.param("line-one-7e\r\n\tline-two-7e 'q' \\ \x01\x1b\x7f", id="controls-quotes-backslash"),
+        pytest.param("line-one-7e caf\u00e9\nline-two-7e", id="non-ascii"),
+    ],
+)
+def test_sanitize_redacts_bash_ansi_c_quoting_of_a_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str
+) -> None:
+    """``printf %q`` and ``declare -p`` spell such a value ``$'...'``; the spelling is bash's, so bash is the oracle."""
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed")
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    script = 'printf "%q\\n" "$1"; declare -p X'
+    shown = subprocess.run(
+        [bash, "-c", script, "bash", secret],
+        env={"LC_ALL": "C", "X": secret},
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8", "surrogateescape")
+
+    sanitized = logger.sanitize(shown)
+
+    assert "line-one-7e" not in sanitized
+    assert "line-two-7e" not in sanitized
+
+
 def test_record_labels_a_request_with_the_latest_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.execution.requests import Command
     from agentworks.execution.results import Completed, Result

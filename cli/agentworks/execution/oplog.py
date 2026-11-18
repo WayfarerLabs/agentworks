@@ -37,7 +37,11 @@ def format_record(request: RunRequest, result: Result, *, label: str) -> str:
     else:
         for name, data in (("stdout", result.stdout), ("stderr", result.stderr)):
             if data:
-                lines += [f"{name}:", data.decode("utf-8", errors="replace").rstrip("\n")]
+                # Only the stream's own last newline gives way to the line join, so the
+                # block holds the stream's text whole: the sink's redaction matches a
+                # secret that ends in line breaks only if every one of them is there.
+                text = data.decode("utf-8", errors="replace")
+                lines += [f"{name}:", text.removesuffix("\n")]
     if result.client_log_tail:
         lines += ["diagnostics:", result.client_log_tail]
     return "\n".join(lines) + "\n\n"

@@ -78,3 +78,10 @@ def test_a_python_program_record_shows_its_arguments_and_holds_no_source() -> No
     assert "script-source" not in record
     assert ENV_VALUE not in record
     assert "/etc/hosts" in record
+
+
+def test_a_stream_keeps_its_trailing_line_breaks_in_the_record() -> None:
+    """Only the stream's own last newline gives way to the record's line join, so redaction sees the text whole."""
+    record = format_record(Command(("true",)), Result(Completed(0), b"out-bytes\n\n\n", b"err-bytes"), label="Step")
+
+    assert "out-bytes\n\n\n" in record
