@@ -421,7 +421,7 @@ the VM once no backup is running.
 `describe` and `list --status`, the batch starts and session reconciliation, and the session
 teardown of `agent delete` and `workspace delete` reach the VM through the new layer, so they need
 what [What these commands need](#what-these-commands-need) lists and read no ssh configuration.
-Named consoles keep the older path for now.
+Named consoles keep the older path for now, apart from the admin shell window below.
 
 - **The session's environment is off the command line.** Its values, secrets included, travel in the
   launch request's environment, which the session's own tmux server takes as its global environment
@@ -450,6 +450,15 @@ Named consoles keep the older path for now.
   starts, instead of by its launch command. The write refuses a symbolic link at the file or a
   parent (a linked `~/.agentworks`, say), which the launch command followed. A refused or failed
   write warns and the session starts anyway, finding its conversation by discovery instead.
+- **A console's admin shell window starts with the launcher's environment.** The window
+  `console create --add-admin-shell` adds takes its resolved values from a request on the admin's
+  own connection instead of `tmux new-session -e` arguments, so they no longer appear on a guest
+  command line. Like the other shells agentworks starts, its shell begins with the environment
+  [What behaves differently](#what-behaves-differently) describes (the fixed `PATH`, no
+  `SSH_CLIENT`, `SSH_CONNECTION` or `pam_env` variables) plus those values, keeps the `TERM`,
+  `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` tmux sets for the pane, and still
+  runs its login startup files. A running console's window changes when the console is rebuilt
+  (`agw console restart`).
 
 ## Create, reinit and the VM contract
 
