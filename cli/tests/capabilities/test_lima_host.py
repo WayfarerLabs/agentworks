@@ -149,31 +149,70 @@ def test_a_command_given_input_exposes_no_output() -> None:
     assert "tskey-reflected" not in str(caught.value)
 
 
-def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
-    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+_RUN_DIRECTORY = "/var/tmp/agw-x.AbCdEf1234"
+_MKTEMP = "umask 077 && mktemp -d /var/tmp/agw-x.XXXXXXXXXX"
+
+
+def test_a_detached_command_stages_its_files_in_a_private_directory_it_removes(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A leftover status file is an interrupted earlier run's: consuming it would report a phantom result."""
+    """Predictable names in a world-writable /var/tmp let another account plant or read a run's files."""
     commands: list[str] = []
-    launched = False
 
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
-        nonlocal launched
         commands.append(command)
-        launched = launched or "nohup " in command
-        if command.startswith("test -f") and command.endswith(".status"):
-            return _Completed(0, "", "")  # stale before the launch, this run's after it
+        if command == _MKTEMP:
+            return _Completed(0, _RUN_DIRECTORY + "\n", "")
         if command.startswith("cat") and ".status" in command:
-            return _Completed(0, "0\n" if launched else "7\n", "")
+            return _Completed(0, "0\n", "")
         return _Completed(0, "", "")
 
     monkeypatch.setattr(LimaHost, "_execute", execute)
     monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.time.sleep", lambda seconds: None)
 
-    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
 
     assert result.exit_code == 0
-    assert sum("nohup " in command for command in commands) == 1
-    assert len(captured_output.warnings) == 1
+    assert commands[0] == _MKTEMP
+    # Every file the run touches is inside the directory, which is removed at the end.
+    touched = [command for command in commands[1:-1] if "/var/tmp/" in command]
+    assert touched and all(f"{_RUN_DIRECTORY}/run." in command for command in touched)
+    assert commands[-1] == f"rm -rf -- {_RUN_DIRECTORY}"
+
+
+def test_a_detached_command_refuses_a_directory_the_host_did_not_make_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[str] = []
+
+    def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        commands.append(command)
+        return _Completed(0, "/var/tmp/agw-x\n", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", execute)
+
+    with pytest.raises(LimaCommandFailed):
+        LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
+    assert commands == [_MKTEMP]
+
+
+def test_a_kill_reaches_only_directories_with_a_runs_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The listing is of directories this user owns; a name a run would not get is left alone."""
+    commands: list[str] = []
+
+    def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        commands.append(command)
+        if command.startswith("find "):
+            return _Completed(0, f"{_RUN_DIRECTORY}\n/var/tmp/agw-x.short\n/var/tmp/agw-x.AbCdEf1234/x\n", "")
+        return _Completed(0, "", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", execute)
+
+    LimaHost("me@gpu-box").kill_detached("/var/tmp/agw-x")
+
+    assert commands[0] == ("find /var/tmp -maxdepth 1 -type d -name 'agw-x.*' -user \"$(id -u)\" -print")
+    assert [command for command in commands[1:] if command.startswith("rm ")] == [f"rm -rf -- {_RUN_DIRECTORY}"]
+    assert all("agw-x.short" not in command for command in commands[1:])
 
 
 def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_command(
@@ -184,15 +223,21 @@ def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_comma
     # A login banner on stdout does not make a dropped connection an answer.
     dropped_after_banner = _Completed(255, "Welcome to gpu-box\n", "Connection closed by gpu-box")
     answers = {
-        "test -f /var/tmp/agw-x.status": [dropped, dropped, _Completed(1, "", ""), _Completed(0, "", "")],
+        f"test -f {_RUN_DIRECTORY}/run.status": [dropped, dropped, _Completed(1, "", ""), _Completed(0, "", "")],
         "ps -p": [dropped, _Completed(0, "", "")],
-        "cat /var/tmp/agw-x.out 2>/dev/null": [dropped_after_banner, dropped, _Completed(0, "limactl output\n", "")],
-        "cat /var/tmp/agw-x.status 2>/dev/null": [dropped, _Completed(0, "0\n", "")],
+        f"cat {_RUN_DIRECTORY}/run.out 2>/dev/null": [
+            dropped_after_banner,
+            dropped,
+            _Completed(0, "limactl output\n", ""),
+        ],
+        f"cat {_RUN_DIRECTORY}/run.status 2>/dev/null": [dropped, _Completed(0, "0\n", "")],
     }
     launched = False
 
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         nonlocal launched
+        if command == _MKTEMP:
+            return _Completed(0, _RUN_DIRECTORY + "\n", "")
         launched = launched or "nohup " in command
         for prefix, queue in answers.items():
             if launched and command.startswith(prefix):
@@ -204,7 +249,7 @@ def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_comma
     monkeypatch.setattr(LimaHost, "_execute", execute)
     monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.time.sleep", lambda seconds: None)
 
-    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
 
     assert (result.exit_code, result.output) == (0, "limactl output\n")
     assert all(len(queue) == 1 for queue in answers.values())  # every dropped answer was asked again
@@ -235,6 +280,8 @@ def test_a_placement_host_that_stops_answering_is_an_unknown_outcome_not_an_exit
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         nonlocal down
         commands.append(command)
+        if command == _MKTEMP:
+            return _Completed(0, _RUN_DIRECTORY + "\n", "")
         down = down or ("nohup " in command if down_from == "launch" else command.startswith("wc -c"))
         if down:
             return _Completed(255, "", "ssh: connect to host gpu-box port 22: Operation timed out")
@@ -243,7 +290,7 @@ def test_a_placement_host_that_stops_answering_is_an_unknown_outcome_not_an_exit
     monkeypatch.setattr(LimaHost, "_execute", execute)
 
     with pytest.raises(LimaCommandFailed) as caught:
-        LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+        LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
 
     assert "gpu-box" in str(caught.value)
     # Down at the launch, nothing is polled; down mid-poll, the poll still waits out its bound.

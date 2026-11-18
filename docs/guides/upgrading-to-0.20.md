@@ -707,6 +707,12 @@ before they resolve the auth key.
   created by 0.20 runs it at create only. Recreate an older Lima VM to stop the reruns; until then,
   `agw vm reinit NAME` after a start restores the lines it adds and removes a replaced key again,
   but not your own edits.
+- **A remote Lima create stages its detached files privately.** The create that runs on a placement
+  host keeps its wrapper, PID, output and status files in a directory of its own under `/var/tmp`,
+  which only the host user can enter and which is removed when the create ends, instead of at
+  `/var/tmp/agentworks-lima-<instance>.*` beside other accounts' files. A rolled-back create and a
+  later `vm delete` find that directory by its prefix and owner. Files an earlier release's
+  interrupted create left at the old names are no longer looked for; remove them on the host.
 - **A WSL2 VM keeps its own hostname.** WSL names a distro after the Windows computer at every start
   unless `/etc/wsl.conf` names it, and a later Tailscale join takes that name too. A WSL2 VM created
   by 0.20 has `hostname` set under `[network]` there; one created before does not. Add it yourself

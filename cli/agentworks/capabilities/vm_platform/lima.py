@@ -535,10 +535,11 @@ class LimaPlatform(VMPlatform):
             raise
 
     @staticmethod
-    def _remote_base_path(instance_name: str) -> str:
-        """run_detached's file identity for this instance's create; the
-        interrupt rollback derives the same path to kill the detached
-        limactl before deleting the instance."""
+    def _remote_detached_prefix(instance_name: str) -> str:
+        """Where run_detached makes this instance's create its private
+        directory; the interrupt rollback and a later delete find it by the
+        same prefix to kill the detached limactl before deleting the
+        instance."""
         return f"/var/tmp/agentworks-lima-{instance_name}"
 
     def _create_remote(
@@ -566,7 +567,7 @@ class LimaPlatform(VMPlatform):
                 f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
             )
             output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
-            result = host.run_detached(lima_cmd, base_path=self._remote_base_path(instance_name), timeout=600)
+            result = host.run_detached(lima_cmd, prefix=self._remote_detached_prefix(instance_name), timeout=600)
             progress.step(f"limactl create and start on '{self._remote_host}'")
             progress.output(result.output)
             if result.exit_code != 0:
@@ -633,7 +634,7 @@ class LimaPlatform(VMPlatform):
             # and erase its output, wrapper, PID, and status before deleting
             # the instance it was mutating.
             with contextlib.suppress(Exception):
-                self._host.kill_detached(self._remote_base_path(instance_name))
+                self._host.kill_detached(self._remote_detached_prefix(instance_name))
         try:
             self._delete_instance(instance_name)
         except Exception as e:
@@ -749,7 +750,7 @@ class LimaPlatform(VMPlatform):
             # mutating, as the create rollback does. Best-effort: the instance's removal is what the
             # row's removal needs.
             with contextlib.suppress(Exception):
-                self._host.kill_detached(self._remote_base_path(instance_name))
+                self._host.kill_detached(self._remote_detached_prefix(instance_name))
         self._delete_instance(instance_name)
         output.info(f"Lima VM '{vm.name}' deleted")
 

@@ -11,6 +11,7 @@ argv, so the operator's SSH configuration for the host applies.
 from __future__ import annotations
 
 import contextlib
+import re
 import shlex
 import subprocess
 import time
@@ -30,6 +31,8 @@ _DETACHED_POLL_SECONDS = 3
 _DETACHED_QUIET_SECONDS = 300
 _DETACHED_READ_ATTEMPTS = 6
 _DETACHED_READ_RETRY_SECONDS = 5
+# The random part of a detached run's private directory name, as mktemp fills it.
+_DETACHED_RANDOM_LENGTH = 10
 # ssh's own status for a connection that failed. A remote command's 255 is indistinguishable,
 # and none of the detached checks below exits 255 by itself.
 _SSH_CONNECTION_FAILED = 255
@@ -117,24 +120,23 @@ class LimaHost:
 
     # -- Detached commands, for work that must outlive the connection --------------------
 
-    def run_detached(self, command: str, *, base_path: str, timeout: int) -> DetachedResult:
+    def run_detached(self, command: str, *, prefix: str, timeout: int) -> DetachedResult:
         """Run ``command`` under ``nohup`` on the placement host and poll it to completion.
 
-        ``base_path`` names its ``.sh``, ``.out``, ``.pid`` and ``.status``
-        files. A leftover status file is an interrupted earlier run's, so it
-        is cleared with a warning and a fresh run starts. At ``timeout``
-        seconds the command is killed and the result is exit 1 with the
-        output so far. Every file is removed at the end. A host that does
-        not answer the launch, or never answers for the status, raises
-        :class:`LimaCommandFailed` saying so rather than reporting an exit
-        status nothing read; the files are then the caller's to remove
-        (:meth:`kill_detached`).
+        Its ``.sh``, ``.out``, ``.pid`` and ``.status`` files live in a
+        directory of their own, ``prefix`` and a random suffix, that
+        ``mktemp -d`` creates private to the host user, so no other account
+        can plant or read them and no earlier run's files are ever consumed.
+        At ``timeout`` seconds the command is killed and the result is exit 1
+        with the output so far. The directory is removed at the end. A host
+        that does not answer the launch, or never answers for the status,
+        raises :class:`LimaCommandFailed` saying so rather than reporting an
+        exit status nothing read; the directory is then the caller's to
+        remove (:meth:`kill_detached` with the same ``prefix``).
         """
-        files = _DetachedFiles(base_path)
-        if self._returncode(f"test -f {files.status}") == 0:
-            output.warn(f"clearing stale result files from a previous interrupted run ({base_path}.*)")
+        directory = self._private_directory(prefix)
+        files = _DetachedFiles(f"{directory}/run")
         self.upload(files.wrapper, _WRAPPER_TEMPLATE.format(command=command, **files.template_fields()))
-        self._returncode(f"rm -f {files.output} {files.pid} {files.status}")
         if self._returncode(_launch_wrapper(files)) == _SSH_CONNECTION_FAILED:
             raise LimaCommandFailed(f"the placement host '{self.host}' did not answer when starting: {command}")
         time.sleep(0.5)
@@ -152,26 +154,46 @@ class LimaHost:
         except ValueError:
             exit_code = 1
         with contextlib.suppress(LimaCommandFailed):
-            self._returncode(f"rm -f {files.wrapper} {files.pid} {files.status} {files.output}")
+            self._returncode(_remove_directory(directory))
         return DetachedResult(exit_code=exit_code, output=captured or "")
 
-    def kill_detached(self, base_path: str) -> None:
-        """Stop the command a :meth:`run_detached` with ``base_path`` started, then remove its files.
+    def kill_detached(self, prefix: str) -> None:
+        """Stop every command a :meth:`run_detached` with ``prefix`` started, then remove its directory.
 
-        A no-op when it never started or already finished. Best-effort, so a
+        Each run's directory is found by its name and kept only when it is a
+        directory the host user owns, which no other account can create in
+        a sticky ``/var/tmp``. A no-op when none is left. Best-effort, so a
         caller unwinding from an earlier failure keeps that failure:
         ``nohup`` exists precisely so the command survives this process, so
         an interrupted caller must stop it before undoing what it built.
         The PID file may be days old by the time a later delete calls this,
         so the PID is killed only while it is still that run's wrapper.
         """
-        files = _DetachedFiles(base_path)
-        try:
-            with contextlib.suppress(LimaCommandFailed):
-                self._returncode(_kill_wrapper(files))
-        finally:
-            with contextlib.suppress(Exception):
-                self._returncode(f"rm -f {files.output} {files.wrapper} {files.pid} {files.status}")
+        parent, name = prefix.rsplit("/", 1)
+        listing = self._ask(
+            f'find {shlex.quote(parent)} -maxdepth 1 -type d -name {shlex.quote(name + ".*")} -user "$(id -u)" -print'
+        )
+        if listing is None or listing.returncode != 0:
+            return
+        for directory in listing.stdout.splitlines():
+            if not _is_private_directory(directory, prefix):
+                continue
+            files = _DetachedFiles(f"{directory}/run")
+            try:
+                with contextlib.suppress(LimaCommandFailed):
+                    self._returncode(_kill_wrapper(files))
+            finally:
+                with contextlib.suppress(Exception):
+                    self._returncode(_remove_directory(directory))
+
+    def _private_directory(self, prefix: str) -> str:
+        """Create ``prefix`` plus a random suffix as a directory only the host user can enter."""
+        directory = self.run(
+            f"umask 077 && mktemp -d {shlex.quote(prefix + '.' + 'X' * _DETACHED_RANDOM_LENGTH)}"
+        ).strip()
+        if not _is_private_directory(directory, prefix):
+            raise LimaCommandFailed(f"the placement host '{self.host}' returned an invalid temporary directory")
+        return directory
 
     def _poll_until_done(self, files: _DetachedFiles, *, timeout: int) -> None:
         """Wait for the status file, warning on a long silence and killing the command at ``timeout``."""
@@ -276,6 +298,16 @@ class LimaHost:
             process.wait()
             raise
         return _Completed(process.returncode, decode_stream(stdout), decode_stream(stderr))
+
+
+def _is_private_directory(directory: str, prefix: str) -> bool:
+    """Whether ``directory`` has the name :meth:`LimaHost._private_directory` gives a run under ``prefix``."""
+    return re.fullmatch(rf"{re.escape(prefix)}\.[A-Za-z0-9]{{{_DETACHED_RANDOM_LENGTH}}}", directory) is not None
+
+
+def _remove_directory(directory: str) -> str:
+    """The command that removes a detached run's directory and everything in it."""
+    return f"rm -rf -- {shlex.quote(directory)}"
 
 
 def _wrapper_invocation(files: _DetachedFiles) -> str:
