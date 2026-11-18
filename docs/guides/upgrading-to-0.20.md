@@ -3,10 +3,11 @@
 Agentworks 0.20 adds stored runtime intent for VMs, sessions and named consoles. Existing sessions
 and consoles need explicit adoption before reconciliation can restore them. It also verifies every
 connection to a VM against a host-key store of its own instead of trusting whatever it sees first.
-Existing VMs need a one-time host-key import before most commands will connect to them. Third-party
-VM platform plugins must move to vm-platform contract version 2 (see
-[Third-party VM platforms](#third-party-vm-platforms)), and third-party harness integrations, Git
-credential providers and secret backends to new contract versions as well (see
+Existing VMs need a one-time host-key import before most commands, and your own `ssh` to their
+managed aliases, will connect to them. Third-party VM platform plugins must move to vm-platform
+contract version 2 (see [Third-party VM platforms](#third-party-vm-platforms)), and third-party
+harness integrations, Git credential providers and secret backends to new contract versions as well
+(see
 [their section](#third-party-harness-integrations-git-credential-providers-and-secret-backends)).
 Tmux clients aimed at an agent session's server now run as that agent. Once the host keys are
 imported, run `agw vm reinit` on each existing VM to retire grants nothing uses any more (see
@@ -268,9 +269,13 @@ along with the database. VMs created on 0.20 have keys only there, because nothi
 `~/.ssh/known_hosts` any more. For VMs that predate 0.20, the import (from `~/.ssh/known_hosts` or a
 verified `--known-hosts` file) still works as the fallback.
 
-Your own `ssh awvm--NAME` keeps working meanwhile: Agentworks adds the store options to a VM's
-managed SSH entry only once the VM has a record. After the import, those entries verify against the
-store as well, and your own `ssh` never writes to it.
+Your own `ssh` refuses those VMs too. Every managed SSH entry (`awvm--NAME`, `awagent--NAME`) now
+verifies the VM's key against the store, with `StrictHostKeyChecking yes`, so `ssh awvm--NAME`, and
+`scp`, VS Code Remote-SSH or anything else that goes through those aliases, fails with
+`Host key verification failed` for a VM with no record instead of trusting `~/.ssh/known_hosts` or
+accepting the key on first use. The VM's managed entries carry a comment naming the fix. Run the
+import (or `agw vm recover NAME`) and the same aliases work again, verifying against the store; your
+own `ssh` never writes to it. If you never import, those aliases stay refused.
 
 ## New VMs
 
@@ -358,7 +363,10 @@ refusing.
 - **Key paths ssh would misread are refused.** A configured private key whose path holds `%`, `$`,
   `"`, a backslash or a control character is refused by these commands, and is left out of the
   managed SSH config entries with a warning, so the operator's own `ssh` offers its default keys for
-  those hosts. Move the key to a plain path.
+  those hosts. Move the key to a plain path. On Windows, a key path with an apostrophe and no
+  whitespace is left out of the entries the same way, because the `ssh` shipped with Git for Windows
+  reads no form of it. A home directory named with an apostrophe is fine: the entries name the files
+  under it relative to `~`.
 - **Windows passes arguments through unexpanded.** `agw` no longer expands `*`, `?`, `~`, `%VAR%` or
   `$VAR` in its own arguments on Windows, which it did before forwarding them, even after `--`. A
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a

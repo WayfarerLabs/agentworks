@@ -150,10 +150,11 @@ def option_value(path_text: str) -> str:
     in double quotes to stay one literal value. Any other path stays bare:
     quoting it gains nothing, and the ssh shipped with Git for Windows rejects a
     quoted value without whitespace with ``invalid quotes``. A path with an
-    apostrophe and no whitespace has no form both accept, so that client still
-    refuses one; the execution core never runs that client. Every path written
-    into an option goes through here, for the ``-o`` arguments and the managed
-    SSH config entries alike. Callers pass :func:`literal_path` output, so
+    apostrophe and no whitespace has no form that client accepts; the execution
+    core never runs it, and the managed SSH config entries, which it may read,
+    refuse such a path on Windows (``ssh_config.py``). Every path written into
+    an option goes through here, for the ``-o`` arguments and the managed SSH
+    config entries alike. Callers pass :func:`literal_path` output, so
     ``path_text`` holds no double quote that could end the quoting early.
     """
     return f'"{path_text}"' if any(char in " \t'" for char in path_text) else path_text
@@ -315,10 +316,11 @@ def _store_value(path: Path) -> str:
     return option_value(literal_path(path, "host-key store path"))
 
 
-def _pinned_options() -> tuple[tuple[str, str], ...]:
+def pinned_options() -> tuple[tuple[str, str], ...]:
     """Settings every VM connection pins, whatever configuration says, as
     (name, value). Shared by the spawn-time ``-o`` arguments and the managed
-    SSH entries, so the operator's own ``ssh`` pins what Agentworks pins."""
+    SSH entries (``ssh_config.py``), so the operator's own ``ssh`` pins what
+    Agentworks pins."""
     return (
         ("GlobalKnownHostsFile", _NULL_DEVICE),
         ("UpdateHostKeys", "no"),
@@ -356,23 +358,5 @@ def ssh_options(trust: TrustBinding | HostTrust) -> tuple[str, ...]:
             f"HostKeyAlias={host_key_alias(trust.vm_name)}",
             f"StrictHostKeyChecking={checking}",
         ]
-    values += [f"{name}={value}" for name, value in _pinned_options()]
+    values += [f"{name}={value}" for name, value in pinned_options()]
     return tuple(arg for value in values for arg in ("-o", value))
-
-
-def entry_options(vm_name: str) -> tuple[str, ...]:
-    """``ssh_config`` option lines that make the operator's own ``ssh`` verify
-    against the store, or none while the VM has no record.
-
-    Until the VM has a record the operator's ``ssh`` keeps working against their
-    own ``known_hosts``. The pinned settings stop that ``ssh`` from reading a
-    global known-hosts file, writing to the store, or hashing it.
-    """
-    if not has_record(vm_name):
-        return ()
-    return (
-        f"HostKeyAlias {host_key_alias(vm_name)}",
-        f"UserKnownHostsFile {_store_value(store_file(vm_name))}",
-        "StrictHostKeyChecking yes",
-        *(f"{name} {value}" for name, value in _pinned_options()),
-    )

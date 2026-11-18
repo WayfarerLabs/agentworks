@@ -1157,11 +1157,19 @@ entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key
 or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
 `agw config sync-ssh-config` to force a rebuild.
 
-Entries for a VM that has a host-key record also carry `HostKeyAlias`, `UserKnownHostsFile` (the
-VM's store file) and `StrictHostKeyChecking yes`, plus `UpdateHostKeys no` and `HashKnownHosts no`
-so your own `ssh` neither writes to the store nor hashes it. Entries for a VM without a record are
-unchanged, so your own `ssh` keeps working until you run `agw vm import-host-keys`. See
-[Host keys](#host-keys).
+Every entry also carries `HostKeyAlias`, `UserKnownHostsFile` (the VM's store file) and
+`StrictHostKeyChecking yes`, plus `UpdateHostKeys no` and `HashKnownHosts no` so your own `ssh`
+neither writes to the store nor hashes it. Your own `ssh` therefore trusts exactly the keys
+Agentworks has recorded: it refuses a VM with no record (`Host key verification failed`) until
+`agw vm import-host-keys NAME` or `agw vm recover NAME` records one, and that VM's entries carry a
+comment saying so. See [Host keys](#host-keys).
+
+Paths in the entries are written relative to `~` when they are under your home directory. A VM whose
+store path cannot be written into an entry gets no entries, with a warning, rather than entries that
+would trust whatever answers; a key path that cannot be written is left out with a warning, so your
+own `ssh` offers its default keys. On Windows, where the `ssh` shipped with Git for Windows may read
+the entries and accepts no form of a path with an apostrophe and no whitespace, such a path is
+refused the same way.
 
 ### Sessions
 

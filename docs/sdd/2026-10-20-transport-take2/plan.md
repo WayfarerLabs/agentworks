@@ -663,14 +663,16 @@ module, and `remote_exec.py` is deleted.
 - [x] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
 - [x] Delete the independence guards that can no longer fail once the legacy modules are gone: the
       fresh-interpreter guard, the conftest blocker and the static legacy-import check.
-- [ ] Make the managed SSH entries' store options unconditional, with release notes for operators
+- [x] Make the managed SSH entries' store options unconditional, with release notes for operators
       who never imported.
-- [ ] Settle how a host path with an apostrophe and no whitespace reaches the ssh shipped with Git
+- [x] Settle how a host path with an apostrophe and no whitespace reaches the ssh shipped with Git
       for Windows, which rejects both the quoted and the bare form of such an option value
       (`execution/trust.py`, `option_value`): refuse that path before writing a managed SSH config
       entry, with a message naming the character, or record the gap in the Windows guidance. The
       execution core never runs that client, so only an operator's own `ssh` through the managed
-      entries meets it. Raised by #910's review; #898 closed without tracking it.
+      entries meets it. Raised by #910's review; #898 closed without tracking it. Settled by
+      refusing it on Windows, with the entries naming paths under the home directory relative to
+      `~`, so a profile named with an apostrophe is never refused (trust-lld, Managed SSH entries).
 - [x] Search for remaining users of the `AcceptEnv` fragment. If none remain, stop writing it and
       supersede ADR 0014; otherwise record what still needs it in that ADR.
 - [ ] Settle when `run_as_root`'s `deadline` starts. Proxmox counts it from the call, so its agent

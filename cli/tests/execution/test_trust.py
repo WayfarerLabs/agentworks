@@ -182,7 +182,6 @@ def test_only_a_path_ssh_would_split_or_unquote_is_quoted(
     with trust.provisioning_binding("web") as binding:
         assert binding.provisioning_file is not None
         assert f"UserKnownHostsFile={value(binding.provisioning_file)}" in trust.ssh_options(binding)
-    assert f"UserKnownHostsFile {value(trust.store_file('web'))}" in trust.entry_options("web")
 
 
 # -- Modes and the missing record --------------------------------------------------
@@ -377,25 +376,6 @@ def test_provisioning_file_is_removed_when_the_create_fails() -> None:
 def test_two_provisioning_files_for_one_name_do_not_collide() -> None:
     with trust.provisioning_binding("web") as first, trust.provisioning_binding("web") as second:
         assert first.provisioning_file != second.provisioning_file
-
-
-# -- Managed entries ---------------------------------------------------------------------
-
-
-def test_entry_options_exist_exactly_when_the_vm_has_a_record() -> None:
-    assert trust.entry_options("web") == ()
-
-    trust.write_records("web", [_KEY])
-    options = trust.entry_options("web")
-
-    assert "HostKeyAlias agentworks-vm-web" in options
-    assert f"UserKnownHostsFile {trust.store_file('web').as_posix()}" in options
-    assert "StrictHostKeyChecking yes" in options
-    assert "UpdateHostKeys no" in options
-    assert "HashKnownHosts no" in options
-
-    trust.remove("web")
-    assert trust.entry_options("web") == ()
 
 
 # -- Store failures are state errors --------------------------------------------------------

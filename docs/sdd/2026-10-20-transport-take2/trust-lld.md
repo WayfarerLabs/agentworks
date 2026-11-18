@@ -230,9 +230,8 @@ through the platform.
 
 ## Managed SSH entries
 
-`_format_entry` (`ssh_config.py:258`) takes an optional trust block. Its callers pass the VM name,
-so the admin and agent entries for a VM with a store record get these lines, indented like the
-existing ones:
+The admin and agent entries for a VM (`ssh_config._vm_entries`) carry these lines, indented like the
+existing ones (`ssh_config._verification_lines`):
 
 ```text
     HostKeyAlias agentworks-vm-<name>
@@ -244,18 +243,43 @@ existing ones:
     HashKnownHosts no
 ```
 
-The store path is written bare, and quoted only when it holds whitespace or an apostrophe
-(`trust.option_value`).
+(`NUL` replaces `/dev/null` on Windows.) The pins match `ssh_options` (`trust.pinned_options`): the
+operator's own `ssh` consults only the store for the alias, never writes to it, and never hashes it.
+Every change to a record is followed by `sync_ssh_config`: import, enrollment's existing post-create
+sync (`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase B fails),
+delete (`power.py:340`), and, in slice 4, recovery.
 
-(`NUL` replaces `/dev/null` on Windows.) An unreadable record for one VM warns and omits that VM's
-trust lines; an unsafe store directory does the same for every VM. Neither aborts the rebuild.
+Slices 1 to 7 wrote the block only for a VM with a record, so the operator's own `ssh` kept working
+against their `known_hosts` until they imported. Slice 8 makes it unconditional, as D9 decided, so
+R8's end state does not depend on every operator importing (`ssh_config._vm_entries`):
 
-The pins match `ssh_options`: the operator's own `ssh` consults only the store for the alias, never
-writes to it, and never hashes it. Entries for a VM without a record stay unchanged until slice 8
-makes the block unconditional, as D9 decided: the operator's own `ssh` keeps working until they
-import. Every change to a record is followed by `sync_ssh_config`: import, enrollment's existing
-post-create sync (`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase
-B fails), delete (`power.py:340`), and, in slice 4, recovery.
+- **No record.** The entries still carry the block, so the operator's own `ssh` refuses the VM
+  (`No ED25519 host key is known for agentworks-vm-<name> and you have requested strict checking`,
+  then `Host key verification failed`, with no prompt) rather than reading `known_hosts` or
+  accepting a key on first use. Each such entry carries one comment naming
+  `agw vm import-host-keys <vm>` and `agw vm recover <vm>`. A record that cannot be read gets no
+  comment, since `ssh` reports the read failure itself. The upgrade guide carries the
+  breaking-change note.
+- **No store read for the options.** The block no longer depends on the record, so an unreadable
+  record no longer drops it; only the comment reads the store.
+- **A store path that cannot be written** (`literal_path` refuses it, or the Windows apostrophe rule
+  below) leaves out every entry of that VM, with a warning, rather than writing entries that would
+  trust whatever answers. It never aborts the rebuild for the other VMs. A key path that cannot be
+  written still only drops `IdentityFile`, with a warning, since the operator's own `ssh` then
+  offers its default keys and trust is unaffected.
+- **Paths are written `~`-relative** under the home directory (`ssh_config._entry_value`, the rule
+  `IdentityFile` already followed), so the home directory's own name never reaches a value. The
+  store directory is always under the home directory (`CONFIG_DIR`), so a Windows profile named with
+  an apostrophe or a space (`C:/Users/O'Brien`) yields a bare `~/.config/agentworks/...` value every
+  client reads. OpenSSH expands `~` from the account's home directory, which is also where it reads
+  the `~/.ssh/config` that includes these entries.
+- **An apostrophe and no whitespace** is refused on Windows before it reaches an entry, with a
+  message naming the character and the path. The `ssh` shipped with Git for Windows may read the
+  entries there and rejects both the quoted and the bare form of such a value; the execution core
+  never runs that client, so `option_value` still double-quotes the value for the `-o` arguments. On
+  Linux and macOS every client reads the quoted form, so nothing is refused there. With the
+  `~`-relative rule, only a path the operator chose outside the home directory's own name, or one
+  that a symbolic link resolves out of it, can meet this refusal.
 
 ## Errors
 
@@ -304,8 +328,11 @@ Each test guards behavior, per the development principles and the no-prose-polic
 
 - **Lifecycle:** create begins enrollment after the row is realized; delete removes the record
   whenever it removes the row.
-- **Managed entries:** the trust block appears exactly when a record exists, the installed client
-  resolves it against the store, and one bad record never aborts the rebuild.
+- **Managed entries:** every entry carries the trust block, record or not, with the missing-record
+  comment exactly when the VM has no record; the installed client resolves it against the store for
+  both; an unreadable record keeps the block; an unwritable store path leaves that VM's entries out
+  without aborting the rebuild; on Windows an apostrophe path without whitespace is refused, and a
+  home directory named with an apostrophe still yields entries (`tests/test_ssh_config.py`).
 - **ENROLL only from create** holds by construction: `enrollment_access` is a distinct factory whose
   only caller is Phase A (`vms/initializer/phase_a.py`), reached only from create, and every other
   factory binds `VM`. The enrollment tests cover both; nothing pins the call graph.
