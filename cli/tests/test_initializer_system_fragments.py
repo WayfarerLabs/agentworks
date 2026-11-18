@@ -37,7 +37,6 @@ def guest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StepGuest:
         ("AGENTWORKS_ZPROFILE_PATH", "zsh/zprofile"),
         ("AGENTWORKS_SSHD_ACCEPT_ENV_PATH", "sshd_config.d/50-agentworks-accept-env.conf"),
         ("AGENTWORKS_SUDOERS_ENV_KEEP_PATH", "sudoers.d/50-agentworks-env-keep"),
-        ("AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH", "sudoers.d/51-agentworks-console-setenv"),
         ("SKEL_BASHRC_PATH", "skel/.bashrc"),
         ("SKEL_ZSHRC_PATH", "skel/.zshrc"),
     ):
@@ -441,24 +440,11 @@ def test_an_interrupt_held_after_a_write_that_did_not_land_warns_nothing(
 # -- sudoers fragments ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("write", "name"),
-    [
-        (lambda guest: shell_env._write_sudoers_env_keep(guest.files, guest.log), "AGENTWORKS_SUDOERS_ENV_KEEP_PATH"),
-        (
-            lambda guest: shell_env._write_sudoers_console_setenv(guest.files, guest.log, "agentworks"),
-            "AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH",
-        ),
-    ],
-    ids=["env_keep", "console_setenv"],
-)
-def test_a_sudoers_fragment_is_staged_validated_then_promoted_and_the_staging_removed(
-    guest: StepGuest, write: object, name: str
-) -> None:
-    real = str(_path(name))
+def test_the_env_keep_fragment_is_staged_validated_then_promoted_and_the_staging_removed(guest: StepGuest) -> None:
+    real = str(_path("AGENTWORKS_SUDOERS_ENV_KEEP_PATH"))
     staging = real + ".tmp"
 
-    write(guest)  # type: ignore[operator]
+    shell_env._write_sudoers_env_keep(guest.files, guest.log)
 
     assert stat.S_IMODE(Path(staging).stat().st_mode) == 0o440
     assert guest.writes() == [staging]
@@ -468,6 +454,28 @@ def test_a_sudoers_fragment_is_staged_validated_then_promoted_and_the_staging_re
         Command(("rm", "-f", "--", staging), elevated=True, deadline=60),
     ]
     assert guest.log.warned == []
+
+
+def test_the_retired_console_setenv_fragment_is_removed_by_one_elevated_rm() -> None:
+    guest = StepGuest(local_files=False)
+
+    shell_env._remove_sudoers_console_setenv(guest.files, guest.log)
+
+    [call] = guest.access.calls
+    assert call.request == Command(
+        ("rm", "-f", "--", "/etc/sudoers.d/51-agentworks-console-setenv"), elevated=True, deadline=60
+    )
+    assert call.options["check"]
+    assert guest.log.warned == []
+
+
+def test_a_failed_console_setenv_removal_warns_without_raising() -> None:
+    guest = StepGuest(local_files=False)
+    guest.access.default_outcome = _failed()
+
+    shell_env._remove_sudoers_console_setenv(guest.files, guest.log)
+
+    assert len(guest.log.warned) == 1
 
 
 def test_a_rejected_sudoers_fragment_never_reaches_its_real_path(guest: StepGuest) -> None:

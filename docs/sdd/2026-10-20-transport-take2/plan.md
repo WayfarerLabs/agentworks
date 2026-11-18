@@ -604,7 +604,7 @@ Definition of done: create and reinit run entirely on the new transport.
 - [ ] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and every
       `LineOrientedSecretUse.ENVIRONMENT` use, in `env/compose.py:73-81` and
       `secrets/orchestration.py:228-232`), now that no path sends environment by `SetEnv`.
-- [ ] Delete the console's env carry across sudo, which the handover replaces: the `--preserve-env`
+- [x] Delete the console's env carry across sudo, which the handover replaces: the `--preserve-env`
       path and its memo in `sessions/multi_console/`, and the `Defaults:<admin> setenv` sudoers
       grant (`_write_sudoers_console_setenv`), with reinit removing the installed fragment from
       existing VMs.
@@ -615,7 +615,7 @@ Definition of done: create and reinit run entirely on the new transport.
       batch B. Batch C, once `delete_workspace` has no legacy target left. Split the file by command
       while moving it: at about 2,440 lines it is well past the repository's 1,000-line ceiling.
 - [ ] Re-prove incident rows I6a and I8.
-- [ ] Supersede ADR 0017.
+- [x] Supersede ADR 0017.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything. The audit
       is in [`sessions-lld.md`](./sessions-lld.md); rows I80 to I89 landed in the HLA (`a456bb16a`)

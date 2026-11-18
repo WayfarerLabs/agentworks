@@ -484,7 +484,7 @@ agent's own connection parks it, the pane runs `sudo -n -u <agent>` with stage 0
 path, and stage 0, now the agent, fetches the request and execs the shell with it (HLA D8).
 `sudo -n -u` needs only the admin's existing `NOPASSWD: ALL`. The `--preserve-env` path, the probe,
 `PreserveEnvMemo` and its threading (`tmux_build.py:77`, `:549`, `crud.py:354`, `:671`,
-`restore.py:213`, `:405`) went in batch D2; the sudoers grant goes in D3 (below, "Deletions").
+`restore.py:213`, `:405`) went in batch D2, and the sudoers grant in D3 (below, "Deletions").
 
 ### Console pane secrets in the boundary
 
@@ -963,11 +963,11 @@ In the order they land, each with its tests:
      (`sessions/multi_console/secrets_env.py:42`), and every `preserve_memo` parameter. Tests:
      `cli/tests/test_consoles_shell_panes.py`, `cli/tests/_tmux_model.py` and
      `cli/tests/test_tmux_model.py` lose their preserve-env cases and model.
-   - (Batch D3.) `_write_sudoers_console_setenv` (`vms/initializer/shell_env.py:545-574`) and its
-     call (`driver.py:387-388`) become `_remove_sudoers_console_setenv(files, log)`: one elevated
-     `Command(("rm", "-f", "--", AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH))`. The installer owns that
-     path outright, so removing it whole is right on create (nothing there) and on reinit (any
-     release's fragment). A failure warns as a step does. Test: its writer test
+   - (Built in batch D3.) `_write_sudoers_console_setenv` (`vms/initializer/shell_env.py:545-574`)
+     and its call (`driver.py:387-388`) become `_remove_sudoers_console_setenv(files, log)`: one
+     elevated `Command(("rm", "-f", "--", AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH))`. The installer
+     owns that path outright, so removing it whole is right on create (nothing there) and on reinit
+     (any release's fragment). A failure warns as a step does. Test: its writer test
      (`cli/tests/test_initializer_system_fragments.py:449`) becomes a recording test of that one
      request.
    - (Batch D2: `cli/tests/sessions/test_console_pane_handover.py`.) A recording test of console
@@ -1241,9 +1241,12 @@ collateral it makes stale.
   the sudo T2 vectors (`T2-pane-through-sudo` and `T2-pane-through-sudo-empty-term`, lanes L and V).
   Built, except the `console start` row of the pane-secret table (open question 3).
 - **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
-  amended.
+  amended. Built.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
-  migration. Whether D3 and D4 share one reinit pass is decided when D3 starts.
+  migration.
+- **D3 and D4 share one reinit pass** (decision 9): each guest-state retirement is an idempotent
+  initialization step that runs on create and on reinit, so one `agw vm reinit` brings an existing
+  VM to the new state, and the upgrade guide says so once.
 - **D5**, the test bridges' removal, folds into D2: D2 removes the last legacy target, so the
   bridges that route accesses through one go with it. Built with D2: the doubles answer accesses
   (`route_vm_access_to_guest`, `_FakeTarget.answer`, `command_line`), and no module in
@@ -1285,6 +1288,10 @@ The lead accepted each on 2026-11-12, and the operator ruled on the pane secrets
    lock (complexity review). Passing backup's paths as arguments puts every option before `--` and
    the members after it, which also settles the review's argument-order finding, and leaves no
    truncated-stdin case and no stdin file on the guest to retain.
+9. **One reinit pass for batch D's guest state** (lead, 2026-11-18). The sudoers setenv grant's
+   removal (D3) and the retirement of the admin's group access to agent tmux servers (D4) are each
+   an idempotent initialization step, on create a no-op and on reinit a migration, so a single
+   `agw vm reinit` converges an existing VM.
 
 Not taken: streaming tar straight to the workstation instead of detaching it. R6, survival across a
 disconnect, is the operator's requirement.

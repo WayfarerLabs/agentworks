@@ -88,7 +88,7 @@ links as before. The same holds for agent reinit.
 | Tailscale DNS          | Startup-ordering drop-in rewritten, and systemd reloaded, only when content differs; a failed reload puts the prior drop-in back                                                                                                                 |
 | sshd AcceptEnv         | Drop-in rewritten, validated and sshd reloaded only when its content differs; any failure puts the prior drop-in back, so the next reinit retries                                                                                                |
 | sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion                                                                                                                                                                         |
-| sudoers console setenv | Same; scoped to the VM's admin user                                                                                                                                                                                                              |
+| sudoers console setenv | Removed: `rm -f` of the fragment earlier releases installed, a no-op when it is absent                                                                                                                                                           |
 
 ### Additive only
 

@@ -258,7 +258,7 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
 
 # -- VM-side identity / sshd / sudoers fragments -----------------------------
 #
-# Three on-VM files maintained by agentworks init:
+# The on-VM system files agentworks init maintains:
 #
 #   /etc/profile.d/agentworks-identity.sh
 #     System-wide login-shell fragment with the VM-stable identity vars
@@ -274,29 +274,19 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
 #     Validated with `sshd -t` before sshd is reloaded.
 #
 #   /etc/sudoers.d/50-agentworks-env-keep
-#     `Defaults env_keep += "AGENTWORKS_* AW_*"`. Lets agentworks-managed
-#     vars survive the sudo boundary in console add-shell agent panes
-#     (where the tmux server runs as admin and a pane sudo's to the agent).
-#     Validated with `visudo -cf` on a staging path before install.
+#     `Defaults env_keep += "AGENTWORKS_* AW_*"`. Keeps agentworks-managed
+#     vars across a sudo boundary. Validated with `visudo -cf` on a staging
+#     path before install.
 #
-#   /etc/sudoers.d/51-agentworks-console-setenv
-#     `Defaults:<admin> setenv`. Permits the admin user to use
-#     `sudo --preserve-env=<keys>` so arbitrarily-named operator env and
-#     secrets (not just AGENTWORKS_*/AW_*) survive the same sudo boundary
-#     in console add-shell agent panes. See
-#     docs/adrs/0017-console-pane-preserve-env.md. Validated with
-#     `visudo -cf` on a staging path before install.
+# Init also removes /etc/sudoers.d/51-agentworks-console-setenv, a grant
+# earlier releases installed and nothing uses now.
 
 AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
 AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"
 AGENTWORKS_SSHD_ACCEPT_ENV_PATH = "/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
 AGENTWORKS_SUDOERS_ENV_KEEP_PATH = "/etc/sudoers.d/50-agentworks-env-keep"
 
-# The env_keep allowlist, as sudoers glob patterns. Vars matching these cross a
-# sudo boundary without needing `--preserve-env`; everything else in a console
-# agent pane's composed env rides the setenv fragment instead (ADR 0017). The
-# console pane's capability probe picks a var no pattern here covers, so this
-# is the shared source of truth for both.
+# The env_keep allowlist, as sudoers glob patterns.
 AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS = ("AGENTWORKS_*", "AW_*")
 AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH = "/etc/sudoers.d/51-agentworks-console-setenv"
 
@@ -519,20 +509,17 @@ def _install_sudoers_fragment(files: Files, log: InitLog, *, path: str, body: st
 def _write_sudoers_env_keep(files: Files, log: InitLog) -> None:
     """Deploy ``env_keep += "AGENTWORKS_* AW_*"`` to sudoers.d/.
 
-    Preserves agentworks-managed vars (``AGENTWORKS_*`` / ``AW_*``) across
-    the user switch in console add-shell agent panes (the tmux server runs
-    as admin; the pane sudo's to the agent). Arbitrarily-named operator env
-    and secrets ride a separate mechanism (``--preserve-env`` + the console
-    setenv fragment); see ``_write_sudoers_console_setenv`` and
-    docs/adrs/0017-console-pane-preserve-env.md.
+    Keeps agentworks-managed vars (``AGENTWORKS_*`` / ``AW_*``) across a
+    sudo boundary, as ADR 0014 decided for the user switch into an agent's
+    shell. No Agentworks path relies on it to carry environment: a console's
+    agent pane takes its environment from its parked request.
     """
     log.step("sudoers env_keep")
     output.info(f"Writing {AGENTWORKS_SUDOERS_ENV_KEEP_PATH}...")
 
     body = (
         "# Managed by agentworks -- do not edit.\n"
-        "# Preserves agentworks-managed env vars across sudo for the\n"
-        "# console add-shell agent-pane path; see\n"
+        "# Preserves agentworks-managed env vars across sudo; see\n"
         "# docs/adrs/0014-sshd-accept-env-wildcard.md.\n"
         f'Defaults env_keep += "{" ".join(AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS)}"\n'
     )
@@ -542,36 +529,26 @@ def _write_sudoers_env_keep(files: Files, log: InitLog) -> None:
         warn_step(log, "sudoers env_keep install failed; re-run 'agw vm reinit' to retry", error)
 
 
-def _write_sudoers_console_setenv(files: Files, log: InitLog, admin_user: str) -> None:
-    """Deploy ``Defaults:<admin> setenv`` to sudoers.d/.
+def _remove_sudoers_console_setenv(files: Files, log: InitLog) -> None:
+    """Remove the retired ``Defaults:<admin> setenv`` fragment from sudoers.d/.
 
-    Lets the admin user carry arbitrarily-named operator env and secrets
-    across the sudo boundary in console add-shell agent panes via
-    ``sudo --preserve-env=<keys>`` (see ``_split_shell_pane``). Without
-    ``setenv``, sudo refuses ``--preserve-env`` for any var outside the
-    ``env_keep`` allowlist, so only ``AGENTWORKS_*`` / ``AW_*`` would
-    survive. Scoped to the admin user (``Defaults:<user>``), not global.
-
-    The admin already holds ``ALL=(ALL) NOPASSWD:ALL``, so granting it
-    ``setenv`` is no meaningful privilege change: it only permits
-    command-line env preservation, which a full-root user could already
-    achieve. See docs/adrs/0017-console-pane-preserve-env.md.
+    Earlier releases installed it so a console's agent pane could carry its
+    environment across ``sudo --preserve-env``. A pane now takes its
+    environment from its parked request (``agentworks.execution.attach``),
+    so nothing crosses sudo and the grant has no user. Agentworks owns the
+    path outright, so one ``rm -f`` is right on create (nothing there) and on
+    reinit (any release's fragment); sudo reads sudoers.d/ on every
+    invocation, so the removal takes effect at once.
     """
-    log.step("sudoers console setenv")
-    output.info(f"Writing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
-
-    body = (
-        "# Managed by agentworks -- do not edit.\n"
-        "# Permits `sudo --preserve-env=<keys>` for the admin user so\n"
-        "# composed operator env and secrets survive the sudo boundary in\n"
-        "# console add-shell agent panes; see\n"
-        "# docs/adrs/0017-console-pane-preserve-env.md.\n"
-        f"Defaults:{admin_user} setenv\n"
-    )
+    log.step("sudoers console setenv removal")
+    output.info(f"Removing {AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}...")
     try:
-        _install_sudoers_fragment(files, log, path=AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH, body=body)
+        files.access.run(
+            Command(("rm", "-f", "--", AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH), elevated=True, deadline=files.deadline),
+            check=True,
+        )
     except STEP_FAILURES as error:
-        warn_step(log, "sudoers console setenv install failed; re-run 'agw vm reinit' to retry", error)
+        warn_step(log, "removing the retired sudoers console setenv fragment failed; re-run 'agw vm reinit'", error)
 
 
 def _write_agentworks_rc(files: Files, shell_snippets: list[str], log: InitLog, *, home: str, shell: str) -> None:

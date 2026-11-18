@@ -4,9 +4,26 @@ Date: 2026-07-15
 
 ## Status
 
-Accepted. Refines the sudoers portion of ADR 0014 (which narrowed the `AcceptEnv *` wildcard down to
-`AGENTWORKS_* AW_*` at the sudo boundary). This ADR carves out the console add-shell agent-pane case
-so that arbitrarily-named operator env and secrets reach that specific pane.
+Superseded by the terminal handover
+([transport take 2, HLA D8](../sdd/2026-10-20-transport-take2/hla.md#d8-streaming-attach-forwarding-and-reachability-r2-r4);
+[`sessions-lld.md`](../sdd/2026-10-20-transport-take2/sessions-lld.md#console-panes-a-fresh-handover-for-every-pane)).
+The text below is the record of the decision as it was taken.
+
+It refined the sudoers portion of ADR 0014 (which narrowed the `AcceptEnv *` wildcard down to
+`AGENTWORKS_* AW_*` at the sudo boundary), carving out the console add-shell agent-pane case so that
+arbitrarily-named operator env and secrets reach that specific pane.
+
+### What replaced each decision
+
+- **Decision 1, `--preserve-env` on the pane's sudo.** A pane's environment travels in the request
+  the pane's account parks before the pane exists, and the pane's one-time command collects it, so
+  no environment crosses sudo. An agent's pane switches with a plain `sudo -n -u <agent>`.
+- **Decision 2, the `setenv` grant.** `vm create` and `vm reinit` remove
+  `/etc/sudoers.d/51-agentworks-console-setenv` instead of writing it.
+- **Decision 3, the capability probe and its memo.** Deleted, with the fallback they guarded: there
+  is no `--preserve-env` left to refuse.
+- **The first Negative, values on the `tmux -e` argv.** No longer applies: no `tmux` command line
+  carries an environment value.
 
 ## Context
 

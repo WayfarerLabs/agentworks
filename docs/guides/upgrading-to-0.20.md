@@ -140,6 +140,16 @@ then runs the client as the agent with `runuser`. Attach clients run on a termin
   `session attach` refuses it with a one-line reason, and a console window for such a session says
   so once and keeps waiting for it.
 
+## Reinit retires grants nothing uses
+
+Earlier releases left grants on each VM that this release no longer uses. `vm create` no longer adds
+them, and `vm reinit` removes them, so one `agw vm reinit` of each existing VM brings it to the new
+state. Until then they stay in place, unused:
+
+- **The console setenv sudoers grant**, `/etc/sudoers.d/51-agentworks-console-setenv`
+  (`Defaults:<admin> setenv`), which carried an agent console shell's environment across `sudo` (see
+  [Named consoles](#named-consoles)).
+
 ## Import existing host keys
 
 Agentworks used to accept a VM's host key on first use and write it to `~/.ssh/known_hosts`. It now
@@ -479,10 +489,11 @@ steps of runtime reconciliation, reach the VM through the new layer, so they nee
   its shell again: restore a shell pane with `agw console restore-session` and the admin shell
   window with `agw console restart`.
 - **An agent's console shell connects as the agent.** Its environment no longer crosses `sudo`, so
-  it no longer needs the `Defaults:<admin> setenv` grant of `51-agentworks-console-setenv`. It needs
-  the agent's own SSH access instead, as an agent session does: a console command that would open a
-  shell for an agent that predates the direct-SSH rollout refuses before it prompts for a pane
-  secret or changes the console's tmux or definition, with the `agw agent reinit` hint. It may
+  it no longer needs the `Defaults:<admin> setenv` grant of `51-agentworks-console-setenv`, which
+  reinit removes ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)). It
+  needs the agent's own SSH access instead, as an agent session does: a console command that would
+  open a shell for an agent that predates the direct-SSH rollout refuses before it prompts for a
+  pane secret or changes the console's tmux or definition, with the `agw agent reinit` hint. It may
   already have started a stopped VM, and `console start` records that the console should run, before
   that check. `restore-session` checks every agent of the session's shells, even when their panes
   are not missing. `console add-shell` and `add-sessions` check only when the console is running,
