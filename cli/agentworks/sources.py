@@ -25,7 +25,7 @@ import re
 import stat
 import tarfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks import output
@@ -392,8 +392,11 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
     Either way the ref, or the remote's ``HEAD`` without one, is fetched and
     checked out detached (:func:`_fetch_and_detach`), so a changed or dropped ref
     takes effect, a branch advances, and a tag or a full commit hash works
-    alike. Every git command must succeed: a failure is ``CommandFailed``, so
-    the caller can tell a sync that did not happen from one that did.
+    alike. A fresh clone is made beside ``dest`` and moved there only once its
+    ref is checked out (:func:`_clone_into_place`). Every git command must
+    succeed: a failure is ``CommandFailed``, so the caller can tell a sync
+    that did not happen from one that did. A directory that is not a clone,
+    or a link that does not lead to one, is refused.
 
     The existing clone's origin is its configured URL, read as written
     (``insteadOf`` rewrites apply to what git fetches, not to what the
@@ -417,14 +420,44 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
             raise SourceRefError(f"{dest} exists but is a clone of a different repository")
         if log:
             log.output(f"Updating {source.path} in {dest} (ref: {source.ref or 'default'})")
-    elif succeeds(("test", "-d", dest)):
+    elif succeeds(("test", "-d", dest)) or succeeds(("test", "-L", dest)):
         raise SourceRefError(f"{dest} exists but is not a git repo")
     else:
-        clone = ("git", "clone", "--no-checkout", "--", source.path, dest)
-        access.run(Command(clone, deadline=DOTFILES_DEADLINE), check=True)
+        _clone_into_place(source, files, dest)
         if log:
             log.output(f"Cloned {source.path} to {dest}")
+        return
     _fetch_and_detach(files, dest, source.ref, deadline=DOTFILES_DEADLINE)
+
+
+_CLONE_STAGING_NAME = ".agentworks-clone-"
+
+
+def _clone_into_place(source: SourceRef, files: Files, dest: str) -> None:
+    """Clone ``source`` and check out its ref beside ``dest``, then move the checkout to ``dest``.
+
+    ``dest`` only ever appears as a complete checkout, so a clone or a ref
+    that fails leaves nothing a later sync would take for a clone of that
+    origin. The checkout is made in a ``mktemp`` directory in ``dest``'s
+    parent, so the move is a rename; that directory is removed whatever
+    happened, and a removal that fails or does not complete only warns.
+    """
+    access = files.access
+    parent = str(PurePosixPath(guest_path(dest)).parent)
+    prefix = f"{parent.rstrip('/')}/{_CLONE_STAGING_NAME}"
+    access.run(Command(("mkdir", "-p", "--", parent), deadline=files.deadline), check=True)
+    created = access.run(Command(("mktemp", "-d", f"{prefix}XXXXXX"), deadline=files.deadline), check=True)
+    staging = created.stdout.decode("utf-8", "replace").strip()
+    if not staging.startswith(prefix) or "/" in staging.removeprefix(prefix):
+        raise SourceRefError(f"mktemp on VM '{access.vm_name}' did not name a staging directory")
+    checkout = f"{staging}/checkout"
+    try:
+        clone = ("git", "clone", "--no-checkout", "--", source.path, checkout)
+        access.run(Command(clone, deadline=DOTFILES_DEADLINE), check=True)
+        _fetch_and_detach(files, checkout, source.ref, deadline=DOTFILES_DEADLINE)
+        access.run(Command(("mv", "-T", "--", checkout, dest), deadline=files.deadline), check=True)
+    finally:
+        _remove_staging(files, staging)
 
 
 def _fetch_and_detach(files: Files, repo: str, ref: str, *, deadline: float, depth: int | None = None) -> None:

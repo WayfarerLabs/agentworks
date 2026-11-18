@@ -31,8 +31,14 @@ def test_a_failed_dotfiles_sync_skips_the_install_and_says_the_destination_is_un
     guest = StepGuest(local_files=False)
     guest.respond(Command(("test", "-d", f"{DOTFILES}/.git"), deadline=60), Result(Completed(1)))
     guest.respond(Command(("test", "-d", DOTFILES), deadline=60), Result(Completed(1)))
+    guest.respond(Command(("test", "-L", DOTFILES), deadline=60), Result(Completed(1)))
+    staging = f"{HOME}/.agentworks-clone-Ab12Cd"
     guest.respond(
-        Command(("git", "clone", "--no-checkout", "--", DOTFILES_URL, DOTFILES), deadline=120),
+        Command(("mktemp", "-d", f"{HOME}/.agentworks-clone-XXXXXX"), deadline=60),
+        Result(Completed(0), f"{staging}\n".encode()),
+    )
+    guest.respond(
+        Command(("git", "clone", "--no-checkout", "--", DOTFILES_URL, f"{staging}/checkout"), deadline=120),
         CommandFailed("box", 128, Result(Completed(128), stderr=b"fatal: repository not found\n"), streams_logged=True),
     )
 

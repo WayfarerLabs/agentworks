@@ -665,7 +665,9 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   must be the full hash. The admin used to pull whatever branch the clone was on, so a local branch
   in the checkout is no longer advanced; commit your dotfiles changes upstream. A failed sync now
   skips the dotfiles install for agents too, as it does for the admin, instead of running it over
-  the previous checkout.
+  the previous checkout. A first clone is made beside the destination and moved there only once its
+  `ref` is checked out, so a `ref` the remote does not serve leaves no destination behind and a
+  corrected `dotfiles_source` clones afresh.
 - **A dotfiles clone whose origin holds a credential is refused.** An existing checkout must be a
   clone of the `dotfiles_source` URL itself; one cloned from a URL with a user name or token in it
   is refused, without echoing either URL. Point it at the plain URL with
