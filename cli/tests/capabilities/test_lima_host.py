@@ -196,23 +196,50 @@ def test_a_detached_command_refuses_a_directory_the_host_did_not_make_private(
     assert commands == [_MKTEMP]
 
 
-def test_a_kill_reaches_only_directories_with_a_runs_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The listing is of directories this user owns; a name a run would not get is left alone."""
+def _run_here(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+    """Run a placement host command in this machine's shell instead."""
+    completed = subprocess.run(["/bin/bash", "-c", command], input=input, capture_output=True, text=True, check=False)
+    return _Completed(completed.returncode, completed.stdout, completed.stderr)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the listing in a POSIX shell")
+def test_a_kill_reaches_only_directories_with_a_runs_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The listing keeps directories this user owns with a run's name; nothing else beside them is touched."""
+    run = tmp_path / "agw-x.AbCdEf1234"
+    (run / "run.out").parent.mkdir()
+    (run / "run.out").write_text("")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (tmp_path / "agw-x.Link567890").symlink_to(elsewhere, target_is_directory=True)
+    (tmp_path / "agw-x.File123456").write_text("")
+    (tmp_path / "agw-y.AbCdEf1234").mkdir()
+    (tmp_path / "agw-x.short").mkdir()
+    bystanders = sorted(path.name for path in tmp_path.iterdir() if path != run)
+    monkeypatch.setattr(LimaHost, "_execute", _run_here)
+
+    LimaHost("me@gpu-box").kill_detached(str(tmp_path / "agw-x"))
+
+    assert not run.exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == bystanders
+    assert (tmp_path / "agw-x.Link567890").is_symlink() and elsewhere.is_dir()
+
+
+def test_a_kill_that_cannot_list_the_runs_warns_and_touches_nothing(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A run the listing missed keeps going alongside the caller's ``limactl delete``, so the operator hears of it."""
     commands: list[str] = []
 
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         commands.append(command)
-        if command.startswith("find "):
-            return _Completed(0, f"{_RUN_DIRECTORY}\n/var/tmp/agw-x.short\n/var/tmp/agw-x.AbCdEf1234/x\n", "")
-        return _Completed(0, "", "")
+        return _Completed(1, "", "find: '/var/tmp': Permission denied\n")
 
     monkeypatch.setattr(LimaHost, "_execute", execute)
 
     LimaHost("me@gpu-box").kill_detached("/var/tmp/agw-x")
 
-    assert commands[0] == ("find /var/tmp -maxdepth 1 -type d -name 'agw-x.*' -user \"$(id -u)\" -print")
-    assert [command for command in commands[1:] if command.startswith("rm ")] == [f"rm -rf -- {_RUN_DIRECTORY}"]
-    assert all("agw-x.short" not in command for command in commands[1:])
+    assert len(commands) == 1
+    assert len(captured_output.warnings) == 1
 
 
 def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_command(

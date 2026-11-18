@@ -162,8 +162,10 @@ class LimaHost:
 
         Each run's directory is found by its name and kept only when it is a
         directory the host user owns, which no other account can create in
-        a sticky ``/var/tmp``. A no-op when none is left. Best-effort, so a
-        caller unwinding from an earlier failure keeps that failure:
+        a sticky ``/var/tmp``. A no-op when none is left, and a warning when
+        the listing itself fails, since a run it could not find keeps going
+        alongside the caller's next step. Best-effort, so a caller unwinding
+        from an earlier failure keeps that failure:
         ``nohup`` exists precisely so the command survives this process, so
         an interrupted caller must stop it before undoing what it built.
         The PID file may be days old by the time a later delete calls this,
@@ -174,6 +176,10 @@ class LimaHost:
             f'find {shlex.quote(parent)} -maxdepth 1 -type d -name {shlex.quote(name + ".*")} -user "$(id -u)" -print'
         )
         if listing is None or listing.returncode != 0:
+            output.warn(
+                f"could not list the detached runs '{prefix}.*' on the placement host '{self.host}', "
+                "so any still running there were not stopped"
+            )
             return
         for directory in listing.stdout.splitlines():
             if not _is_private_directory(directory, prefix):
