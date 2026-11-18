@@ -517,7 +517,7 @@ class TestCloneThatLostItsVMID:
 
 
 class TestDeleteOp:
-    """The delete op deletes only our guest, and returns only once its VMID is gone (incident row I18)."""
+    """The delete op deletes only our guest, and returns only once its VMID is gone."""
 
     @staticmethod
     def _vm_row() -> VMRow:

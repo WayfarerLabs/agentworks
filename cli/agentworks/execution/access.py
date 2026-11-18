@@ -1,6 +1,6 @@
 """The identity-bound entry point to one VM.
 
-``vm_access`` copies names and paths and resolves nothing (R9): no key is read,
+``vm_access`` copies names and paths and resolves nothing: no key is read,
 no trust file is opened and nothing is spawned until an operation runs. Each
 operation then runs in one order, so everything before the spawn raises with
 nothing dispatched: refuse an agent's elevated request, resolve the client,
@@ -350,7 +350,8 @@ class VMAccess:
         A read error from a ``FromFile``'s file fails the request with that error instead of reporting the
         guest's outcome; the payload still sees its input end where the read stopped.
         """
-        # R3: only the admin elevates, whatever the guest's sudoers says.
+        # Only the admin elevates, whatever the guest's sudoers says, so an
+        # agent-bound access never yields administrative authority.
         if request.elevated and not isinstance(self.identity, Admin):
             raise PermissionDenied(self.vm_name, self._user)
         ssh = client.resolve_ssh()
@@ -424,7 +425,7 @@ def _input_file(stdin: NoInput | Bytes | FromFile) -> Iterator[BinaryIO | None]:
 
 
 class _OutputFiles:
-    """The files one ``run``'s ``ToFile`` sinks write: kept only when ``keep`` is set before the block ends (I20).
+    """The files one ``run``'s ``ToFile`` sinks write: kept only when ``keep`` is set before the block ends.
 
     Every way out of the block that does not set ``keep`` (another completion,
     a checked failure, an exception from the pump, a progress callback or
@@ -482,7 +483,7 @@ def stream_to_operator(access: VMAccess, request: RunRequest) -> int:
     Newline translation by the text layers (a Windows console's, and the
     bare-LF setting in ``cli/_entry.py``) must not touch a binary stream, so
     the callers get the binary buffers, with the text layers flushed first so
-    earlier output keeps its order (I2). Stdin is the raw stream: a daemon
+    earlier output keeps its order. Stdin is the raw stream: a daemon
     thread blocked in a buffered read aborts the interpreter at exit.
     """
     sys.stdout.flush()

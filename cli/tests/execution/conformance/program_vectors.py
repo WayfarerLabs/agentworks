@@ -1,4 +1,4 @@
-"""The vectors for the request vocabulary slice 5 adds, F1 to F5, F8 and F9 in the files LLD.
+"""The request vocabulary's vectors: F1 to F5, F8 and F9.
 
 They join :mod:`vectors`' list, so the same lanes run them: finite stdin and
 the operation log (F1, F2), core-owned Python programs and their startup (F3,

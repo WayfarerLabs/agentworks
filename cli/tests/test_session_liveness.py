@@ -354,7 +354,7 @@ def test_a_status_read_that_does_not_complete_raises_after_one_dispatch_and_the_
     db,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """I88: a VM that does not answer within the deadline costs one dispatch and reads as unknown."""
+    """A VM that does not answer within the deadline costs one dispatch and reads as unknown."""
     from tests.vm_access_support import install_access_recorder
 
     db.insert_vm("box", site="site", hostname="box")

@@ -217,8 +217,12 @@ class PipeSession:
     that stream and then closes its read end, so ssh's write after that one
     fails with ``EPIPE``, as it did when it held the operator's streams; the
     read end stays open until then because ssh drops the stderr, status
-    included, that follows a failed write to its stdout (``execution-lld.md``
-    has the mechanism and its one edge). ssh does not end the channel for a
+    included, that follows a failed write to its stdout, so a quiet payload's
+    trailer must not meet a closed read end. The one edge: a guest that writes
+    once more after its consumer left and then goes quiet meets the closed read
+    end, so its trailer survives only when it reaches ssh in the same read as
+    that last write, and otherwise the result is ``Unknown(CONSUMER_LEFT)``,
+    which ``stream`` reports as 141. ssh does not end the channel for a
     departed stderr, and the status travels on stderr, so :meth:`pump` returns
     :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing held for a
     slow consumer and the trailer has not already arrived (with it in hand,

@@ -9,10 +9,10 @@ running, delete the VMID. This module holds the sequence after that check
 ``ProxmoxPlatform.delete`` composes the same two pieces.
 
 :func:`remove_guest` returns only once the VMID is gone and raises
-otherwise: core drops a VM's row only when its delete returns (incident
-row I18), and Proxmox has no azure-style tag sweep to find an orphan
-later. A destroy task that completes shows the VMID gone; a failed delete
-counts as done only when ``/cluster/nextid`` says nothing holds the VMID.
+otherwise: core drops a VM's row only when its delete returns, and
+Proxmox has no azure-style tag sweep to find an orphan later. A destroy
+task that completes shows the VMID gone; a failed delete counts as done
+only when ``/cluster/nextid`` says nothing holds the VMID.
 ``ProxmoxAPI`` wraps every HTTP and transport failure as
 ``ProxmoxAPIError``, so an unreachable API is a failed delete like any
 other. The two rollback wrappers contain every non-interrupt failure of

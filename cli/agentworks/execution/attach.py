@@ -182,7 +182,7 @@ def attach(
         if clear_screen_on_exit:
             emit_clear()
         # After the guard: its exit pass leaves the alternate screen, which
-        # would wipe anything written before it closes (I6).
+        # would wipe anything written before it closes.
         if code == _SSH_STATUS_CONNECTION_ENDED:
             output.warn("connection ended or the command exited 255; terminal restored.")
             output.detail("Remote state is untouched. Re-run the same command to reattach.")

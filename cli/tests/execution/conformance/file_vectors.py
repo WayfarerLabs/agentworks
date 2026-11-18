@@ -1,4 +1,4 @@
-"""The vectors for file operations, F6 and F7 in the files LLD.
+"""The vectors for file operations, F6 and F7.
 
 They join :mod:`vectors`' list, so the same lanes run them: the VM-wide lock
 under the image's ``protected_regular`` (F6), and elevated file operations with

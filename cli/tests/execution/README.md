@@ -78,16 +78,16 @@ included; the root channel's W3 skips on a local lane without `/proc`.
   It creates and removes `/tmp/agw-conformance-*` and `/tmp/agw-handover-*` on the guest. The
   detached vectors also create `/var/lib/agentworks/detached`, and its parent if absent, and leave
   both; they discard each launch they make, and every launch removes the sibling launch directories
-  that are not running and are older than seven days. Run it from each workstation the evidence
-  matrix names; Windows is where binary stdin and early exit matter most. The lane is not part of
-  the default run.
+  that are not running and are older than seven days. Run it from each supported workstation (Linux,
+  macOS and Windows); Windows is where binary stdin and early exit matter most. The lane is not part
+  of the default run.
 
 The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner's passwordless
 `sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
 distribution's default sudoers on a fresh VM, is V only.
 
-`conformance/program_vectors.py` holds the vectors for the request vocabulary the files LLD adds,
-which join the list in `vectors.py`:
+`conformance/program_vectors.py` holds the vectors for the request vocabulary (programs, input,
+sinks), which join the list in `vectors.py`:
 
 - F1 (L, S and V): a request's `Bytes` input reaches no record of a real `OperationLogFile` and no
   error, and `log_streams=False` keeps its streams out of the record.
@@ -175,11 +175,10 @@ port: a port a plain listener holds is retried and then reported unavailable.
 cover what happens around the terminal half, a pane's handover (including one in a real tmux pane,
 skipped where none is installed) and a forward, on the same lanes.
 
-`conformance/root_vectors.py` holds the root channel's vectors (W1 to W9 in the platform LLD), on
-two lanes of their own. L runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and
-again under `sudo -n` where the runner grants it (`conformance/test_root_vectors.py`). V runs
-through the platform `run_as_root` of the VM named by `AGW_CONFORMANCE_VM`, inside the same gated
-boundary `vm shell --platform` opens:
+`conformance/root_vectors.py` holds the root channel's vectors, W1 to W9, on two lanes of their own.
+L runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and again under `sudo -n` where
+the runner grants it (`conformance/test_root_vectors.py`). V runs through the platform `run_as_root`
+of the VM named by `AGW_CONFORMANCE_VM`, inside the same gated boundary `vm shell --platform` opens:
 
 ```console
 AGW_CONFORMANCE_VM=my-vm uv run pytest tests/execution/conformance/test_root_live_vectors.py -m integration

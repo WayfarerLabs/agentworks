@@ -1,4 +1,4 @@
-"""I84 over the admin's access: a teardown kills once, repeats nothing uncertain, and an unknown removes nothing.
+"""Teardown over the admin's access: it kills once, repeats nothing uncertain, and an unknown removes nothing.
 
 The reachable case runs against a real tmux server (the ``native`` fixture),
 each request recorded on its way through the access.

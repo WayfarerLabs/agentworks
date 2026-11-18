@@ -76,7 +76,7 @@ def admin_access(vm: VMRow, config: Config, logger: OperationLog | None) -> VMAc
 def _value_free_clone_failure(
     error: CommandFailed | ExecutionIncomplete | RequestRefused, *, ws_name: str, vm_name: str
 ) -> None:
-    """Strip ``error`` of everything the guest returned, keeping its identity (I87).
+    """Strip ``error`` of everything the guest returned, keeping its identity.
 
     Git's stderr and the command line can hold credentials in the repository
     address, so the message, the hint and the result's streams are replaced

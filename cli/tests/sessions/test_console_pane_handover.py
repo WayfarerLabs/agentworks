@@ -3,7 +3,7 @@
 The pane's environment is in the request its identity's own access parks; the
 admin's tmux lines carry only the handover's token. This covers console build
 (start), add-shell and both restore paths, the window rebuild being the
-recovery after a killed attach pane (incident row I6a).
+recovery after a killed attach pane.
 """
 
 from __future__ import annotations

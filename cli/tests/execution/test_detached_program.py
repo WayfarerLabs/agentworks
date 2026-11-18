@@ -168,7 +168,7 @@ def wait_for(path: Path, seconds: float = 20) -> None:
         time.sleep(0.02)
 
 
-# -- Launch identity (I80, R6) -----------------------------------------------------------
+# -- Launch identity -----------------------------------------------------------------------
 
 
 def test_two_launches_of_one_command_each_report_only_their_own_status_and_output(guest: Guest) -> None:
@@ -199,7 +199,7 @@ def test_an_existing_id_is_refused_and_the_earlier_launch_is_unchanged(guest: Gu
     assert after == before
 
 
-# -- How a launch runs (I8) -------------------------------------------------------------
+# -- How a launch runs ------------------------------------------------------------------
 
 
 def test_the_payload_has_a_session_of_its_own_and_output_holds_both_streams_of_it_and_its_child(
@@ -466,7 +466,7 @@ def test_an_empty_status_reads_lost_and_never_breaks_a_later_launch(guest: Guest
     assert guest.observe(observed_id).state == detached_program.LOST
 
 
-# -- Interrupt and discard (I82) ---------------------------------------------------------
+# -- Interrupt and discard ---------------------------------------------------------------
 
 
 def test_interrupt_stops_the_whole_group_and_reads_exited_with_sigterms_status(guest: Guest) -> None:
@@ -520,7 +520,7 @@ def test_discard_refuses_a_running_launch_and_removes_an_ended_or_absent_one(gue
     assert guest.observe(ended).state == detached_program.ABSENT
 
 
-# -- The base (I83) ----------------------------------------------------------------------
+# -- The base ----------------------------------------------------------------------------
 
 
 def test_root_creates_the_base_private_under_a_readable_parent(guest: Guest) -> None:

@@ -1,4 +1,4 @@
-"""The ``ToFile`` sink: a new binary file, kept only for ``Completed(0)`` (I20).
+"""The ``ToFile`` sink: a new binary file, kept only for ``Completed(0)``.
 
 The pump is replaced by a fake ``_execute`` that hands the sinks fixed
 chunks, so this runs on every CI host, Windows included, where binary mode is

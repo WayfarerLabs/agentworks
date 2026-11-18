@@ -93,7 +93,7 @@ def _verified_session_access(
     admin: VMAccess,
     logger: OperationLog | None,
 ) -> VMAccess:
-    """The session owner's access, for destructive operations on a single session, after the I19 probe.
+    """The session owner's access, for destructive operations on a single session, after the direct-SSH probe.
 
     For an admin session that is ``admin`` itself. For an agent session it is
     the agent's access, logging to ``logger``, once a probe proves direct SSH

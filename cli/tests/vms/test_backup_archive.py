@@ -2,8 +2,8 @@
 
 A scripted guest answers each request: the path and zstd checks, ``du``, the
 detached program's operations and the download's ``cat``. Nothing here is
-host-sensitive, so these run in the Linux CI suite only; the live cells (a
-forced disconnect, an interrupt) are in the LLD's live evidence.
+host-sensitive, so these run in the Linux CI suite only. A forced disconnect
+and an interrupt against a real VM are live checks, outside this suite.
 """
 
 from __future__ import annotations

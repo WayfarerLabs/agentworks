@@ -149,7 +149,7 @@ def test_platform_shell_opens_the_native_shell_with_no_tailnet_address_and_no_en
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A VM with no tailnet address still gets its native shell, and no environment is composed (R7)."""
+    """A VM with no tailnet address still gets its native shell, and no environment is composed."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, tailscale_host=None)
@@ -228,7 +228,7 @@ def test_the_native_shell_runs_under_the_terminal_guard_and_255_is_noted_after_i
     monkeypatch: pytest.MonkeyPatch,
     status: int,
 ) -> None:
-    """The guard's exit pass leaves the alternate screen, so the 255 notice must come after it (I6)."""
+    """The guard's exit pass leaves the alternate screen, so the 255 notice must come after it."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)

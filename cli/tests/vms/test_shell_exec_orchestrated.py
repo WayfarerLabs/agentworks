@@ -647,7 +647,7 @@ def test_shell_platform_runs_the_native_shell_on_the_node_platform_with_the_site
     leave a platform whose channel needs a credential (a cloud's route)
     no delivery surface at all. The pin: the delivered context reads the
     site's declared secret, and only that one, since the native shell
-    composes no environment and so resolves no environment secret (R7).
+    composes no environment and so resolves no environment secret.
     """
     config = make_config()
     _seed_vm(db)

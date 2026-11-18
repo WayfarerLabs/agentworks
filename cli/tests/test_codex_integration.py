@@ -1444,7 +1444,7 @@ def _provision(home: Path) -> Path:
 
 
 def test_the_recorder_is_installed_by_one_write_as_the_session_user_before_the_command() -> None:
-    """I89: the install is one atomic file write, executable, before any launch command exists."""
+    """The recorder's install is one atomic file write, executable, before any launch command exists."""
     access = _target()
 
     _harness_integration(state={}).start(_op_ctx(access))
@@ -1472,7 +1472,7 @@ def test_the_recorder_is_installed_by_one_write_as_the_session_user_before_the_c
     ],
 )
 def test_a_failed_recorder_install_warns_and_the_launch_goes_on(warnings: list[str], failure: str) -> None:
-    """I89: the session falls back to discovery, and the launch command is built as without the failure."""
+    """The session falls back to discovery, and the launch command is built as without the failure."""
     access = _target()
 
     def answer(call: Call) -> Result | None:

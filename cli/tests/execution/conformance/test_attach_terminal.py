@@ -46,7 +46,7 @@ def test_a_dropped_connection_is_explained_after_the_guard_has_closed(
         assert local_lane.access.attach(LoginShell(cwd=local_lane.workdir)) == 255
 
     kinds = [kind for kind, _ in events]
-    assert kinds == ["enter", "exit", "warn", "detail"]  # I6: the guard's reset would wipe an earlier notice
+    assert kinds == ["enter", "exit", "warn", "detail"]  # the guard's reset would wipe an earlier notice
 
 
 def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
@@ -59,7 +59,7 @@ def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
     with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
         local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
-    assert events == [("enter", None), ("exit", None)]  # I21
+    assert events == [("enter", None), ("exit", None)]  # the terminal is restored on interrupt
     assert local_lane.wait_gone(f"/tmp/agw-handover-{token}")  # the launcher saw the client leave
 
 

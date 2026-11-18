@@ -72,7 +72,7 @@ def test_dead_workload_falls_back_after_unsuccessful_main_capture():
 @pytest.mark.parametrize("stage", ["main", "alternate", "cleanup"])
 @pytest.mark.parametrize("failure", ["unknown", "command-failed"])
 def test_dead_workload_over_an_access_keeps_status_when_a_request_does_not_complete_or_fails(stage, failure):
-    """I57 on the admin's access: a capture or kill that does not complete, or fails, is best effort."""
+    """A dead workload over the admin's access: a capture or kill that does not complete, or fails, is best effort."""
     output = uuid4().hex
     access = RecordingVMAccess([], Admin())
 
