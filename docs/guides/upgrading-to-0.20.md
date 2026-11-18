@@ -930,11 +930,12 @@ would change; the default accepts every hostname.
   only when the channel itself verifies the host key it is reading.
 - **The legacy transports are removed.** `agentworks.transports` and `agentworks.ssh` are gone, with
   `ExecTransport`, `LimaTransport`, `RemoteLimaTransport`, `WSL2Transport`, `SSHTransport`,
-  `native_transport`, `wait_for_reconnect`, `TailscaleWait`, `SSHTarget`, `SSHResult` and
-  `SSHError`, and so is `agentworks.plugins.proxmox.transport`. A platform reaches its VM through
-  its own `run_as_root` and core through `agentworks.execution`. The operation log is
-  `agentworks.execution.oplog.OperationLogFile`, and a platform writes to it only through
-  `request.progress`.
+  `native_transport`, `wait_for_reconnect`, `TailscaleWait`, `SSHTarget`, `SSHResult`, `SSHError`,
+  `SSHLogger`, `LOG_DIR` and `openssh_program`, and so is `agentworks.plugins.proxmox.transport`. A
+  platform reaches its VM through its own `run_as_root` and core through `agentworks.execution`;
+  `SSHError`'s base, `agentworks.errors.ConnectivityError`, is what the execution errors subclass.
+  The operation log is `agentworks.execution.oplog.OperationLogFile`, its directory
+  `agentworks.execution.oplog.LOG_DIR`, and a platform writes to it only through `request.progress`.
 
 ### Create returns an address
 
