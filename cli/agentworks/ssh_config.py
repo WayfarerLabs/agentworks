@@ -276,9 +276,9 @@ def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agen
     try:
         # Boundary: these are persisted values, and each becomes a token of a line ssh parses. The host and the
         # users follow the execution core's own rule for the same rows; an agent's name is also its alias.
-        ssh_process.Destination(vm.tailscale_host, vm.admin_username)
+        _require_destination(vm.tailscale_host, vm.admin_username, "the admin")
         for agent in agents:
-            ssh_process.Destination(vm.tailscale_host, agent.linux_user)
+            _require_destination(vm.tailscale_host, agent.linux_user, f"agent '{agent.name}'")
             _require_alias_token(agent.name)
         verification = _verification_lines(vm.name)
     except AgentworksError as e:
@@ -294,6 +294,14 @@ def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agen
             )
         )
     return entries
+
+
+def _require_destination(host: str, user: str, whose: str) -> None:
+    """Refuse a host or account ``ssh_process.Destination`` refuses, naming the values and ``whose`` account it is."""
+    try:
+        ssh_process.Destination(host, user)
+    except ValidationError as e:
+        raise ValidationError(f"{whose} (user {user!r} at {host!r}): {e}") from e
 
 
 # What an alias's name part may hold: nothing ssh would split, unquote, match as a pattern or end the line at.

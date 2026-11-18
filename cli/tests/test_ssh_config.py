@@ -780,7 +780,9 @@ def test_a_persisted_value_that_would_add_a_line_leaves_the_vms_entries_out(
     content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
     assert set(_managed_blocks(content)) == {"awvm--db"}
     assert "ProxyCommand" not in content
-    assert len(captured_output.warnings) == 1
+    (warning,) = captured_output.warnings
+    if field == "linux_user":
+        assert "claude" in warning
 
 
 @pytest.mark.parametrize(
@@ -821,8 +823,10 @@ def test_an_entry_is_written_exactly_when_the_execution_core_would_connect_there
     _rebuild_config_dir(config, db)
 
     assert (ssh_dir / "config.d" / _MANAGED_CONF).exists() is accepted
+    assert len(captured_output.warnings) == (0 if accepted else 1)
 
 
+@pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
 def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entries(tmp_path: Path) -> None:
     ssh_dir = tmp_path / "my ssh"
@@ -853,3 +857,17 @@ def test_an_unquoted_include_split_at_its_space_is_replaced_where_it_stands(tmp_
     content = ssh_config.read_text()
     assert unquoted not in content.splitlines()
     assert content == f"Host *\n    ServerAliveInterval 60\n\n{_include_directive(ssh_config)}\n"
+
+
+def test_an_operators_unrelated_include_is_left_alone(tmp_path: Path) -> None:
+    ssh_dir = tmp_path / "my ssh"
+    ssh_dir.mkdir()
+    ssh_config = ssh_dir / "config"
+    original = "Include ~/.ssh/work/*\n\nHost *\n    ServerAliveInterval 60\n"
+    ssh_config.write_text(original)
+
+    _ensure_include(ssh_config)
+
+    content = ssh_config.read_text()
+    assert content.endswith(original)
+    assert _include_directive(ssh_config) in content.splitlines()
