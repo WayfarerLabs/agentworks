@@ -895,8 +895,14 @@ raised), with `cli/tests/vms/test_applied_state_checkpoint.py` mapping a warning
 raise to failed; I59 by the same fake's request order; I60, I61 and I62 by the steps over
 `local_files`, with I61's "no reload" read from the recorded requests; I63 by recording tests in
 which `visudo` and `sshd -t` reject, asserting the real path never receives the fragment and the
-prior content is restored; I64 by `test_authorized_keys.py` moved (mode, owner, each `STEP_FAILURES`
-type on the admin's write giving the unproven outcome, the agent's failure raising); I65 and I66 by
+prior content is restored (superseded: D3 retired both fragments under ADR 0026, in `8791c24a0`,
+`1112f1fed` and `d984a608e`, so the validated install and its tests went with them; what remains is
+their removal, proved by `tests/test_initializer_system_fragments.py`'s
+`test_an_installed_accept_env_fragment_is_removed_and_sshd_reloaded`,
+`test_no_accept_env_fragment_leaves_sshd_alone` and
+`test_the_retired_sudoers_fragments_are_removed_by_one_elevated_rm`); I64 by
+`test_authorized_keys.py` moved (mode, owner, each `STEP_FAILURES` type on the admin's write giving
+the unproven outcome, the agent's failure raising); I65 and I66 by
 `cli/tests/agents/test_agent_home_permissions.py` and `test_create_reinit_orchestrated.py` moved;
 I67 by `test_initializer_workspaces_dir.py`'s order test; I68 by `tests/vms/test_dotfiles.py` and
 `test_agent_home_permissions.py::test_a_failed_git_dotfiles_sync_skips_the_agent_install`; I69 and

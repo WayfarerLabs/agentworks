@@ -750,7 +750,13 @@ open live-evidence box.
 | I25 | The hold enters `init_stack` just before Phase A, and the stack closes after Phase B (`vms/manager/lifecycle.py:364`, `:612`)                                                                                                           | `test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command` (the hold precedes Phase A); the span through Phase B is by construction, with no test of its own; the live half has no evidence                                     |
 | I26 | The release is the contract's first request, recorded from the guest's answer and enforced before `COMPLETE` (`vms/initializer/phase_a.py:107-111`)                                                                                     | `test_the_sequence_records_enrolls_checks_then_completes`, `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_release_mismatch` case), `test_a_failed_release_check_records_no_release`                            |
 | I27 | `reconcile_release` raises `StateError` on live drift, and `confirm_vm_release` is the explicit adoption (`vms/manager/release.py:23-42`)                                                                                               | `test_reconcile_release_refuses_recorded_live_drift`, the `test_confirm_release_*` tests in `tests/test_vm_release.py`                                                                                                                            |
-| I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns                               | `test_redactions_cannot_be_registered_after_writes`, `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`     |
+| I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns                               | `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`                                                          |
+
+I28's ordering half has no test of its own since `cb4024c55`, which retired
+`test_redactions_cannot_be_registered_after_writes` because it only asserted that no `add_redaction`
+method existed. The ordering is structural: `OperationLogFile` takes its redactions as a constructor
+parameter and registers them before it writes the header (`execution/oplog.py:75-94`), and nothing
+can add one later; the three tests the row names prove the redaction itself.
 
 ## Collateral
 

@@ -734,6 +734,15 @@ I47 by the native setup tests; I48 and I49 by the provider readiness and command
 startup file that exits 0 and a command that prints; I50 by F8; I51 by `request_environment`'s test;
 I52 by the prompt snapshot test. Each row also gets a live cell.
 
+Two of these no longer hold as written. I39's comparison is proved by
+`tests/artifacts/test_publication.py::test_owned_file_update_mode_and_idempotent_removal` (an
+unchanged file is not rewritten, a mode change is), and its no-copy-back half is structural:
+verification reads `Files.stat`, whose reply is the kind, mode and digest the file program computes
+on the guest (`execution/files.py:139-160`), never the content. I52 is retired: `ee30ac943` (native
+delivery's completion, 2026-11-08) replaced the session-prompt workaround with the skill carriers,
+so the workaround, its `--system-prompt-snapshot` argument and the snapshot test went, and a
+configuration that still names the workaround is a configuration error. Nothing is left to re-prove.
+
 `2841cb9fa` (python3 guaranteed for native helpers) needs no row: D10 makes python3 a provisioning
 requirement, and every request is `VMNotReady` without it.
 

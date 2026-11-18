@@ -842,7 +842,12 @@ the legacy path except the log.
 **Existing rows that rode on these modules.** Each was re-proved on the execution core in the slice
 its row names, and the legacy copy goes with the module: I1 (ADR 0020, #361), I2, I4 (#684), I5, I12
 (ADR 0015), I13, I14 (#736) and I21 (#889, #669) in slice 2; I15 (#251), I17 and I32 in slices 3
-and 4. I28 moves with the log and is re-proved by the log's own tests at its new home.
+and 4. I28 moves with the log and is re-proved by the log's own tests at its new home. I15's tests
+are `tests/execution/test_reachability.py`'s
+`test_an_answer_after_a_failure_is_confirmed_by_a_second_probe`,
+`test_a_failed_confirmation_keeps_polling` and
+`test_exhaustion_returns_false_after_every_attempt_and_no_trailing_pause`, the bound and the
+confirming probe; its wording is the command's, whose prose no test pins.
 
 **New rows, I90 to I93**, added to the HLA's inventory before anything is deleted:
 

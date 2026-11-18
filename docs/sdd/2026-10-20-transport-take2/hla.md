@@ -551,12 +551,13 @@ Host connections such as Remote Lima's keep their own configuration and are not 
     only the operator's confirmation.
   - **Limits.** Unverified mode is used for nothing else after provisioning. Every other
     `run_as_root` call is VM trust only.
-- **Managed SSH entries.** Once a VM has a store record, `ssh_config.py` adds `HostKeyAlias`,
-  `UserKnownHostsFile` (the store file) and `StrictHostKeyChecking yes` to its managed VM and agent
-  entries, so the operator's own `ssh` verifies against the store. Entries for a VM without a record
-  stay as they are today, so an operator's own `ssh` keeps working through the upgrade until they
-  import. Slice 8 makes the store options unconditional, so R8's end state does not depend on every
-  operator importing.
+- **Managed SSH entries.** `ssh_config.py` gives every managed VM and agent entry `HostKeyAlias`,
+  `StrictHostKeyChecking yes` and the pinned options, with `UserKnownHostsFile` naming the store
+  file once the VM has a record, so the operator's own `ssh` verifies against the store. A VM
+  without a record names the null device instead, so that `ssh` refuses it until the import or
+  recovery records a key, and a weaker setting read first can never write a first-use key into the
+  store. R8's end state therefore does not depend on every operator importing
+  ([trust-lld.md](./trust-lld.md), Managed SSH entries).
 - **Legacy paths during migration.** Slice 1 gives the legacy VM-target factories an explicit trust
   binding in VM or Enroll mode. These are `transport()`, `agent_transport()`,
   `transport_for_user()`, Phase A's builder, the backup scp, the workspace-copy ssh, the port
@@ -835,9 +836,11 @@ The slices:
 ### Incident inventory (R10)
 
 Each row is re-proved in the slice that moves the code carrying it, and the evidence is recorded in
-the plan. Rows I1 to I3 come from the transport-improv migration strategy, and the rest from
-scouting. The seed is not exhaustive, so each slice audits the entry points it moves (their ADRs,
-linked issues and fix history) and adds rows before anything is deleted.
+that slice's LLD (its incident sections, naming the tests, and its live-evidence cells), with the
+plan recording the live results slices 1 and 2 gathered. Rows I1 to I3 come from the
+transport-improv migration strategy, and the rest from scouting. The seed is not exhaustive, so each
+slice audits the entry points it moves (their ADRs, linked issues and fix history) and adds rows
+before anything is deleted.
 
 | Row | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Re-proved in |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |

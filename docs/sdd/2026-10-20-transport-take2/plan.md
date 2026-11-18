@@ -644,7 +644,13 @@ module, and `remote_exec.py` is deleted.
 
 - [x] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows for anything not yet recorded.
-- [ ] Confirm that every incident inventory row has recorded evidence.
+- [x] Confirm that every incident inventory row has recorded evidence. Every row names a test, a
+      live cell, or a recorded disposition: I15's and I39's tests are now named (execution-lld,
+      files-lld), I28's retired shape test and I52's retired workaround are recorded (contract-lld,
+      files-lld), and I63's fragment tests are superseded by their removal tests (init-lld). Many
+      slice 5 to 7 rows cite their tests by description rather than by name; those descriptions each
+      identify an existing test. Pending live halves (I6a, I8, I25 among them) belong to the
+      evidence matrix item below.
 - [x] Move `LOG_DIR` and the operation log's readers (`doctor_state.py`, `vms/manager/lifecycle.py`,
       `vms/manager/_helpers.py`, `vms/manager/power.py`, `vm logs`) and their test patch sites to
       `execution/oplog.py` as `SSHLogger` is deleted, matching log files by the exact
