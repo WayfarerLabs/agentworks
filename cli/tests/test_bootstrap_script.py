@@ -240,60 +240,115 @@ _SWAP_STUBS = {
     "mkswap": '[ ! -e "$STUBS/interrupt" ] || exit 130\necho swap-area >> "$1"\n',
     # swapon PATH; refuses a file that is not a swap area, and records an activation as /proc/swaps would
     "swapon": 'grep -q swap-area "$1" || exit 1\necho "$1 file 1048572 0 -2" >> "$ROOT/swaps"\n',
+    # blkid -p -s TYPE -o value PATH
+    "blkid": 'grep -q swap-area "$6" || exit 2\necho swap\n',
+    "sync": "",
 }
 
 
-def _run_swap_step(step: str, root: Path, stubs: Path) -> int:
-    env = {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}", "ROOT": str(root), "STUBS": str(stubs)}
-    return subprocess.run(["bash", "-c", f"set -euo pipefail\nSWAP_GB=1\n{step}"], env=env, check=False).returncode
+class _SwapStep:
+    """The bootstrap's swap step as generated, with its system paths moved under ``root`` and its tools stubbed."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        script = generate_bootstrap_script(
+            admin_username="testuser",
+            ssh_public_key="ssh-ed25519 AAAA testkey",
+            provisioning_packages=["curl"],
+            hostname="lima--myvm",
+            swap=1,
+        )
+        self.root, self.stubs = tmp_path / "root", tmp_path / "stubs"
+        self.root.mkdir()
+        self.stubs.mkdir()
+        for name, body in _SWAP_STUBS.items():
+            (self.stubs / name).write_text(f"#!/bin/sh\n{body}")
+            (self.stubs / name).chmod(0o755)
+        step = script[script.index("# -- Step 4: Swap file --") : script.index("# -- Step 5:")]
+        for path, moved in (("/swapfile", self.swapfile), ("/etc/fstab", self.fstab), ("/proc/swaps", self.swaps)):
+            step = step.replace(path, str(moved))
+        self.step = step
+        self.fstab.write_text("")
+        self.swaps.write_text("Filename Type Size Used Priority\n")
+        self.fstab_line = f"{self.swapfile} none swap sw 0 0"
+
+    @property
+    def swapfile(self) -> Path:
+        return self.root / "swapfile"
+
+    @property
+    def fstab(self) -> Path:
+        return self.root / "fstab"
+
+    @property
+    def swaps(self) -> Path:
+        return self.root / "swaps"
+
+    def run(self) -> subprocess.CompletedProcess[str]:
+        env = {
+            **os.environ,
+            "PATH": f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
+            "ROOT": str(self.root),
+            "STUBS": str(self.stubs),
+        }
+        return subprocess.run(
+            ["bash", "-c", f"set -euo pipefail\nSWAP_GB=1\n{self.step}"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 @requires_posix_shell
 def test_the_swap_step_finishes_on_the_next_run_after_an_interruption(tmp_path: Path) -> None:
-    """A run cut short between ``fallocate`` and the fstab line leaves nothing the next run skips, and repeats nothing.
+    """A run cut short between ``fallocate`` and the fstab line leaves nothing the next run skips or repeats."""
+    swap = _SwapStep(tmp_path)
 
-    The step runs as generated, with its three system paths moved under ``tmp_path`` and the swap tools stubbed.
-    """
-    script = generate_bootstrap_script(
-        admin_username="testuser",
-        ssh_public_key="ssh-ed25519 AAAA testkey",
-        provisioning_packages=["curl"],
-        hostname="lima--myvm",
-        swap=1,
-    )
-    step = script[script.index("# -- Step 4: Swap file --") : script.index("# -- Step 5:")]
-    root, stubs = tmp_path / "root", tmp_path / "stubs"
-    root.mkdir()
-    stubs.mkdir()
-    for name, body in _SWAP_STUBS.items():
-        (stubs / name).write_text(f"#!/bin/sh\n{body}")
-        (stubs / name).chmod(0o755)
-    for path, moved in (
-        ("/swapfile", root / "swapfile"),
-        ("/etc/fstab", root / "fstab"),
-        ("/proc/swaps", root / "swaps"),
-    ):
-        step = step.replace(path, str(moved))
-    (root / "fstab").write_text("")
-    (root / "swaps").write_text("Filename Type Size Used Priority\n")
-    fstab_line = f"{root / 'swapfile'} none swap sw 0 0"
+    (swap.stubs / "interrupt").write_text("")
+    assert swap.run().returncode != 0
+    assert not swap.swapfile.exists()
 
-    (stubs / "interrupt").write_text("")
-    assert _run_swap_step(step, root, stubs) != 0
-    assert not (root / "swapfile").exists()
-
-    (stubs / "interrupt").unlink()
-    assert _run_swap_step(step, root, stubs) == 0
-    assert "swap-area" in (root / "swapfile").read_text()
-    assert not (root / "swapfile.partial").exists()
-    assert (root / "fstab").read_text().splitlines() == [fstab_line]
-    assert len((root / "swaps").read_text().splitlines()) == 2
+    (swap.stubs / "interrupt").unlink()
+    assert swap.run().returncode == 0
+    assert "swap-area" in swap.swapfile.read_text()
+    assert not (swap.root / "swapfile.partial").exists()
+    assert swap.fstab.read_text().splitlines() == [swap.fstab_line]
+    assert len(swap.swaps.read_text().splitlines()) == 2
 
     # A run cut short after the activation, before the fstab line, adds only the line.
-    (root / "fstab").write_text("")
-    assert _run_swap_step(step, root, stubs) == 0
-    assert (root / "fstab").read_text().splitlines() == [fstab_line]
-    assert len((root / "swaps").read_text().splitlines()) == 2
+    swap.fstab.write_text("")
+    assert swap.run().returncode == 0
+    assert swap.fstab.read_text().splitlines() == [swap.fstab_line]
+    assert len(swap.swaps.read_text().splitlines()) == 2
+
+    # A run after a complete one changes nothing.
+    before = (swap.swapfile.read_text(), swap.fstab.read_text(), swap.swaps.read_text())
+    assert swap.run().returncode == 0
+    assert (swap.swapfile.read_text(), swap.fstab.read_text(), swap.swaps.read_text()) == before
+
+
+@requires_posix_shell
+def test_an_existing_swapfile_that_is_not_a_swap_area_stops_the_step_untouched(tmp_path: Path) -> None:
+    swap = _SwapStep(tmp_path)
+    swap.swapfile.write_text("someone else's data\n")
+
+    result = swap.run()
+
+    assert result.returncode != 0
+    assert any(line.startswith("##ERROR## ") for line in result.stdout.splitlines())
+    assert swap.swapfile.read_text() == "someone else's data\n"
+    assert swap.fstab.read_text() == ""
+    assert len(swap.swaps.read_text().splitlines()) == 1
+
+
+@requires_posix_shell
+def test_an_existing_fstab_line_for_the_swapfile_is_not_added_again(tmp_path: Path) -> None:
+    swap = _SwapStep(tmp_path)
+    swap.fstab.write_text(f"{swap.swapfile}\tnone\tswap\tdefaults\t0\t0\n")
+
+    assert swap.run().returncode == 0
+
+    assert len(swap.fstab.read_text().splitlines()) == 1
 
 
 @requires_posix_shell

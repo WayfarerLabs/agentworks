@@ -174,26 +174,34 @@ fi
 
 # -- Step 4: Swap file --
 # Each part resumes on its own, so a run cut short anywhere in this step
-# finishes it on the next run. /swapfile appears only once it is a complete
-# swap area: it is built under another name and renamed into place, and a
-# partial one from an earlier run is started again. Activation and the fstab
-# line are each checked before they are done, so neither repeats.
+# finishes it on the next run, and an existing /swapfile is never replaced.
+# /swapfile appears only once it is a complete swap area: it is built under
+# another name, flushed and renamed into place, and a partial one from an
+# earlier run is started again. An existing /swapfile that is not a swap
+# area stops the bootstrap rather than being overwritten. Activation and the
+# fstab line are each checked before they are done, so neither repeats.
 echo "##STEP## Swap file"
 if [ "$SWAP_GB" -gt 0 ]; then
-    if [ -f /swapfile ]; then
-        SWAP_STATE="already exists"
+    if [ -e /swapfile ]; then
+        if ! grep -q '^/swapfile ' /proc/swaps \
+            && [ "$(blkid -p -s TYPE -o value /swapfile 2>/dev/null || true)" != swap ]; then
+            echo "##ERROR## /swapfile exists but is not a swap area; move or delete it, then run the bootstrap again"
+            exit 1
+        fi
+        SWAP_DONE="swap file already exists"
     else
         SWAP_MB=$((SWAP_GB * 1024))
         rm -f /swapfile.partial
         fallocate -l "${{SWAP_MB}}M" /swapfile.partial
         chmod 600 /swapfile.partial
         mkswap /swapfile.partial
+        sync
         mv /swapfile.partial /swapfile
-        SWAP_STATE="created"
+        SWAP_DONE="${{SWAP_GB}} GiB swap file created"
     fi
     grep -q '^/swapfile ' /proc/swaps || swapon /swapfile
-    grep -qxF '/swapfile none swap sw 0 0' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-    echo "##SUCCESS## ${{SWAP_GB}} GiB swap file $SWAP_STATE"
+    grep -q '^/swapfile[[:space:]]' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo "##SUCCESS## $SWAP_DONE"
 else
     echo "##SUCCESS## swap disabled"
 fi
