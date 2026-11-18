@@ -209,7 +209,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     # The value travels in the admin's parked request, and the window runs only the handover's command.
     assert [(call.operation, call.request) for call in admin.calls] == [("park", LoginShell(env={"TOKEN": value}))]
     [(command, kwargs)] = created
-    assert shlex.split(command)[-1] == Handover(PARK_TOKEN).command()
+    assert shlex.split(command)[-1] == Handover(PARK_TOKEN, "agentworks").command()
     assert marker not in command
     assert not kwargs.get("env")
     logs = list(tmp_path.glob("**/*.log"))

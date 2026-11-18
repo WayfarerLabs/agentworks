@@ -177,7 +177,7 @@ class RecordingVMAccess(VMAccess):
     @contextlib.contextmanager
     def park(self, request: LoginShell) -> Iterator[Handover]:
         self.calls.append(Call(self.identity, "park", request))
-        handover = Handover(PARK_TOKEN)
+        handover = Handover(PARK_TOKEN, self._user)
         yield handover
         handover.collected = self.park_collected
 

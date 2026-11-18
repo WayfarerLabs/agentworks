@@ -266,7 +266,7 @@ class VMAccess:
                 parked = stack.enter_context(
                     attach_module.Parked(vm_name=self.vm_name, wire=wire, nonce=nonce, argv=argv, log=log)
                 )
-            handover = Handover(token)
+            handover = Handover(token, self._user)
             yield handover
             handover.collected = parked.collect()
 

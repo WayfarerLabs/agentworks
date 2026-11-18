@@ -513,7 +513,7 @@ TMUX_VARIABLES = {
 }
 
 
-def pane_handover(lane: Lane, *, term: str | None) -> bytes:
+def pane_handover(lane: Lane, *, term: str | None, switch_user: bool = False) -> bytes:
     """Park a login shell, run its handover command on a fresh terminal, check it, and return what it showed."""
     secret = "sekrit-pane-value-5e"
     lane.quiet_interactive_startup()
@@ -521,7 +521,7 @@ def pane_handover(lane: Lane, *, term: str | None) -> bytes:
     owner_env = TMUX_VARIABLES | ({} if term is None else {"TERM": term})
 
     with lane.access.park(LoginShell(cwd=lane.workdir, env={"TOKEN": secret})) as handover:
-        command = handover.command()
+        command = handover.command(switch_user=switch_user)
         shown = lane.pane(command, owner_env=owner_env, keys=PANE_KEYS)
 
     assert shown.completion == Completed(0), shown
@@ -544,6 +544,25 @@ def pane_takes_its_terminal_from_its_owner(lane: Lane) -> None:
 
 def pane_without_term_gets_the_default(lane: Lane) -> None:
     pane_handover(lane, term=None)
+
+
+# What a pane behind sudo shows of tmux's variables: sudo's env_reset passes TERM and drops the rest.
+NO_TMUX_VARIABLES = re.compile(rb"TX:\|\|\|\|\r?\n")
+
+
+def pane_through_sudo_takes_only_term(lane: Lane) -> None:
+    """An agent's pane in the admin's tmux server switches to the parking account with ``sudo -n -u``."""
+    needs_sudo(lane)
+    shown = pane_handover(lane, term=PANE_TERM, switch_user=True)
+
+    assert NO_TMUX_VARIABLES.search(shown), shown
+
+
+def pane_through_sudo_without_term_gets_the_default(lane: Lane) -> None:
+    needs_sudo(lane)
+    shown = pane_handover(lane, term=None, switch_user=True)
+
+    assert NO_TMUX_VARIABLES.search(shown), shown
 
 
 # What a startup file the attach's terminal half runs exports; none of it is the attach terminal's.
@@ -893,6 +912,8 @@ def build() -> list[Vector]:
         ),
         Vector("T2-pane-terminal-from-owner", "LSV", pane_takes_its_terminal_from_its_owner),
         Vector("T2-pane-default-term", "LSV", pane_without_term_gets_the_default),
+        Vector("T2-pane-through-sudo", "LV", pane_through_sudo_takes_only_term),
+        Vector("T2-pane-through-sudo-default-term", "LV", pane_through_sudo_without_term_gets_the_default),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
         Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),

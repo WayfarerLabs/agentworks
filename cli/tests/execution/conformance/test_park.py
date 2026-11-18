@@ -7,6 +7,8 @@ a real tmux pane.
 
 from __future__ import annotations
 
+import getpass
+import shlex
 import shutil
 import subprocess
 import sys
@@ -58,6 +60,19 @@ def test_a_directory_it_cannot_enter_is_refused_before_anything_is_parked(local_
 
     assert raised.value.code == "cwd"
     assert not local_lane.exists(f"/tmp/agw-handover-{token}")
+
+
+def test_a_pane_another_account_runs_switches_to_the_account_that_parked(local_lane: LocalLane) -> None:
+    local_lane.shorten_handover_wait(1)
+
+    with local_lane.access.park(LoginShell()) as handover:
+        pass
+
+    # The pane's own command, run by the account that parked, has no switch in front.
+    assert handover.account == getpass.getuser()
+    plain = shlex.split(handover.command())
+    switched = shlex.split(handover.command(switch_user=True))
+    assert switched == ["sudo", "-n", "-u", handover.account, "--", *plain]
 
 
 def test_only_a_login_shell_parks(local_lane: LocalLane, monkeypatch: pytest.MonkeyPatch) -> None:

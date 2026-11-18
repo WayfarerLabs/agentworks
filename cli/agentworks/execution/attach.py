@@ -17,6 +17,7 @@ does not hold (a tmux pane on the guest).
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -131,22 +132,29 @@ class Parked:
 class Handover:
     """A request parked for a terminal agw does not hold, such as a tmux pane on the guest.
 
-    ``collected`` is set when ``VMAccess.park``'s block exits normally:
-    whether the pane collected the request within
+    ``account`` is the Linux account that parked it, the only one that can
+    reach its socket. ``collected`` is set when ``VMAccess.park``'s block
+    exits normally: whether the pane collected the request within
     :data:`HANDOVER_COLLECT_SECONDS`.
     """
 
     token: str
+    account: str
     collected: bool = False
 
-    def command(self) -> str:
+    def command(self, *, switch_user: bool = False) -> str:
         """The pane's command line: the handover form of stage 0, which collects the request and runs it.
 
-        Its only value is the token; the environment is in the parked
-        request. The pane must run as the account that parked, the only one
-        that can reach the socket.
+        Its only values are the token and, with ``switch_user``, the account;
+        the environment is in the parked request. The pane must run as the
+        account that parked. ``switch_user`` is for a pane another account's
+        tmux server creates (an agent's pane in the admin's console): it puts
+        ``sudo -n -u <account>`` in front, which needs only the server
+        owner's passwordless sudo, and whose ``env_reset`` passes the
+        terminal's ``TERM`` and none of tmux's other variables.
         """
-        return ssh_process.stage0_command(socket_path(self.token))
+        command = ssh_process.stage0_command(socket_path(self.token))
+        return f"sudo -n -u {shlex.quote(self.account)} -- {command}" if switch_user else command
 
 
 def attach(

@@ -302,11 +302,15 @@ with access.park(LoginShell(env=pane_env)) as handover:
 ```
 
 `Handover.command()` is the pane's command line, the handover form of stage 0 with only the token in
-it; the pane runs it as the account that parked, the only one that can reach the socket. Leaving the
-block normally waits up to `HANDOVER_COLLECT_SECONDS` (the launcher's `HANDOVER_WAIT_SECONDS`, 30,
-and a margin) for the launcher's trailer and sets `handover.collected`; leaving it on an exception
-(the pane could not be created) closes the parking stdin at once, so the launcher cleans up. Either
-way the connection has ended afterwards.
+it; the pane runs it as the account that parked (`handover.account`), the only one that can reach
+the socket. A pane another account's tmux server creates, such as an agent's pane in the admin's
+console, takes `command(switch_user=True)`, which puts `sudo -n -u <account>` in front. sudo's
+`env_reset` passes `TERM` and none of tmux's other four variables, so such a shell has `TERM` alone
+of them (conformance vector `T2-pane-through-sudo`). Leaving the block normally waits up to
+`HANDOVER_COLLECT_SECONDS` (the launcher's `HANDOVER_WAIT_SECONDS`, 30, and a margin) for the
+launcher's trailer and sets `handover.collected`; leaving it on an exception (the pane could not be
+created) closes the parking stdin at once, so the launcher cleans up. Either way the connection has
+ended afterwards.
 
 The variables that describe the terminal come from whoever owns it, since they say what the shell
 runs on and are no one's environment. An attach's terminal is the operator's, reached over ssh: its
