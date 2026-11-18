@@ -624,7 +624,7 @@ Definition of done: create and reinit run entirely on the new transport.
       issues and fix history), and add incident inventory rows before deleting anything. The audit
       is in [`sessions-lld.md`](./sessions-lld.md); rows I80 to I89 landed in the HLA (`a456bb16a`)
       before batch A deleted `remote_exec.py`.
-- [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
+- [x] Collateral: guides for sessions, consoles and backup where behavior changes.
 - [x] Settle with the operator the commented post-bind resolve in
       `sessions/multi_console/restore.py` (it either runs or goes), and whether the workspace, agent
       and session refusals of a VM with no recorded SSH identity

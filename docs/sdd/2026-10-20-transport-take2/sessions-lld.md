@@ -1278,6 +1278,13 @@ Each item lands in the batch that makes it stale:
 | `cli/agentworks/sample-config.toml:193-195`                                                                                                                                                                                                                                                              | Env injection leaves the list of line-oriented consumers                                                                                            | E                         |
 | Docstrings: `sessions/tmux.py:66-70`, `:74-80`, `:651-675`; `sessions/multi_console/tmux_build.py:183-203`; `sessions/multi_console/secrets_env.py:152-160`; `multi_console/attach.py:362-366`; `vms/backup.py:268-285`; `plugins/codex/recorder.py:13-16`, `:50-55`; `harness_integration.py:1002-1009` | Describe the request, the handover and `detached` rather than `SetEnv`, `-e`, `--preserve-env` and `run_detached`                                   | the batch that moves each |
 
+As built (batch F1), an audit of `docs/guides/` against the slice found the upgrade guide, the
+session status and runnable status guides and the idempotency table current. Two stale facts outside
+the table were fixed: the command reference's tmux architecture (every session's server on a socket
+of its own, the admin's included, its environment from the launch request) and its list of
+line-oriented secret consumers, which no longer includes the environment. The upgrade guide's
+introduction gained the two follow-up steps its sections ask for.
+
 Completions: none change. **Contracts.** `ToFile`, `FromFile`, `TerminalCommand`, `park` and
 `detached()` are additive on `VMAccess`, which plugins reach through their run context; every kind
 was bumped once for this release already (`init-lld.md`, "Collateral"). No bump and no contract
