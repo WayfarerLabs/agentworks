@@ -16,9 +16,8 @@ from agentworks.capabilities.vm_platform import bootstrap_script, sudoers
 from agentworks.ssh import SSHError
 from agentworks.vms.initializer import shell_env
 from agentworks.vms.initializer.shell_env import _write_sudoers_admin
-from tests.conftest import requires_posix_shell
 
-pytestmark = requires_posix_shell
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Debian guest scripts require GNU coreutils")
 
 
 @pytest.fixture
