@@ -318,16 +318,15 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         StateError("plugin has no Trixie selector", hint="update the plugin"),
         AuthorizationError("provider denied create", hint="grant the required action"),
         TokenRejectedError("provider rejected the credential", hint="check the credential"),
-        ValidationError("the platform would rename this hostname", hint="pick another VM name"),
     ],
-    ids=("operator-map", "code-map", "authorization", "credential", "refused-request"),
+    ids=("operator-map", "code-map", "authorization", "credential"),
 )
 def test_create_vm_preserves_typed_platform_failure(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
-    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError | ValidationError,
+    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
@@ -381,8 +380,13 @@ def test_create_vm_refuses_a_platform_refused_hostname_before_anything_resolves(
 
 @pytest.mark.parametrize(
     "failure",
-    [ConnectivityError("node did not report its address", hint="log in again"), RuntimeError("no hint here")],
-    ids=("agentworks-error", "other"),
+    [
+        ConnectivityError("node did not report its address", hint="log in again"),
+        # A provider-reported address PublicSSH refuses, after the backend VM exists.
+        ValidationError("SSH host must be a literal DNS name or unbracketed IP address"),
+        RuntimeError("no hint here"),
+    ],
+    ids=("agentworks-error", "validation-error", "other"),
 )
 def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
     db: Database,
