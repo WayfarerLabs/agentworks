@@ -820,6 +820,65 @@ client on one workstation (else the operator's disposition). For each, the V vec
 - an attach from each workstation, killed mid-session, and a handover whose second connection fails;
 - a forward with a busy local port, and Ctrl-C on a live forward.
 
+## Slice 8: removal
+
+Slice 8 deletes the legacy stack this LLD's package replaced, `agentworks.transports` and
+`agentworks.ssh`, and moves the operation log out of `agentworks.ssh` into `execution/oplog.py` (HLA
+D13). Line references in this section are at `4b4818fb7`, the PR C head before slice 8, and paths
+are under `cli/agentworks/` unless they start with `cli/` or `docs/`.
+
+### Incident audit
+
+The audit read the fix history of both modules (`git log` on `transports/` and `ssh.py`, 78 and 109
+commits), the bodies of the incident-bearing commits it cites, the issues they link (#117, #199,
+#211, #251, #270, #330, #331, #360, #361, #669, #684, #736, #889, #893, and Win32-OpenSSH #1338),
+ADRs 0014, 0015, 0017 and 0020, whose decisions these modules carried (0003 and 0019 name the
+transports only in passing), and the transport-improv migration strategy's inventory. At `4b4818fb7`
+no production module imports `agentworks.transports`, and only the operation log and its readers
+import `agentworks.ssh`, so nothing the audit found still runs on the legacy path except the log.
+
+**Existing rows that rode on these modules.** Each was re-proved on the execution core in the slice
+its row names, and the legacy copy goes with the module: I1 (ADR 0020, #361), I2, I4 (#684), I5, I12
+(ADR 0015), I13, I14 (#736) and I21 (#889, #669) in slice 2; I15 (#251), I17 and I32 in slices 3
+and 4. I28 moves with the log and is re-proved by the log's own tests at its new home.
+
+**New rows, I90 to I93**, added to the HLA's inventory before anything is deleted:
+
+| Row | Behavior                                                                                                                                                                                                                                                                    |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I90 | On a Windows console an interactive `ssh -t` with a remote command is led by a NUL, so Win32-OpenSSH's first raw-mode write never moves the console and deletes the operator's lines (#893 round 1 F1, `601e81d87`; `transports/ssh.py:383`, `execution/ssh_process.py:92`) |
+| I91 | Threads of one command share one operation log: each write holds the log's lock and opens and closes its own handler, so every record lands once and no file is left open (`e34199c0d`, `279d4cdeb`; `ssh.py:153`, `:323`)                                                  |
+| I92 | An operation's own log holds the traceback of the exception that ended it, redacted like every other line, so the shared `error.log` is only the fallback for a failure before any log exists (`ec1ab0246`; `ssh.py:275-300`)                                               |
+| I93 | OpenSSH is started by an absolute path, never looked up in the working directory, and a missing client is a typed refusal with install guidance rather than a bare `FileNotFoundError` (`d05382778`, `43943f033`; `ssh.py:94-106`)                                          |
+
+**How each is re-proved, by test.** I90 by
+`test_an_interactive_remote_command_is_led_by_a_nul_only_on_a_windows_console` and
+`test_a_nul_led_command_writes_the_nul_first_and_keeps_its_exit_status`
+(`cli/tests/execution/test_ssh_process.py`), whose `ssh_process.nul_first_on_a_windows_console` is
+the one copy left once `transports/ssh.py` goes, and live by I21's Windows Terminal cells; I91 by
+the eight-thread test and I92 by the close tests, both moved with the log to
+`cli/tests/execution/test_operation_log_file.py`; I93 by `test_client_resolution.py`'s relative and
+current-directory elements, the Windows candidate order that never searches `PATH`, and the refusal
+when no client is found.
+
+**Not rows.**
+
+- Decoding a child's output as text mode did, and the Windows code page fixes (`ea4a3a9b1`,
+  `491786020`, `1209f2ed1`). The execution core never decodes: results are bytes, read from binary
+  pipes (I2), and each consumer decodes UTF-8 with replacement, so no locale encoding is involved.
+- Quoting a remote copy's paths and the `chmod` after it, and a staging file whose cleanup warns
+  (`656fe4470`, `8e095b17c`, `75b77e0ac`). The file program carries its paths as data in its
+  request, never in a shell line, and publishes from a sibling temporary file (I37).
+- Coalescing `SetEnv` pairs (`94f54f873`). Nothing sends environment by `SetEnv`; ADR 0014 is
+  superseded by ADR 0026.
+- Remote Lima's login shell for an interactive `PATH` and its isolated guest commands (`3e4b83ce2`,
+  `638fa0185`). Remote Lima's host channel is the platform's private `lima_host.py` (slice 4).
+- Logging each timed-out attempt, and the retry count (`fbc117a65`, `ccf6d7df8`). `VMAccess` makes
+  one attempt (HLA D5), and a request that ran out of time is recorded as `Unknown(DEADLINE)`.
+- The log's sink keeping the sanitized record and its file handler in one function for CodeQL's
+  clear-text storage query (`b59153d1f`, `8030b035b`). It is a scanner constraint, not behavior; the
+  function moves unchanged with its comment.
+
 ## Amendments
 
 The HLA and the plan carry the choices here that change them.

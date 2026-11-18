@@ -642,7 +642,7 @@ module, and `remote_exec.py` is deleted.
 
 ## Slice 8: Removal (PR C)
 
-- [ ] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
+- [x] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows for anything not yet recorded.
 - [ ] Confirm that every incident inventory row has recorded evidence.
 - [ ] Move `LOG_DIR` and the operation log's readers (`doctor_state.py`, `vms/manager/lifecycle.py`,
