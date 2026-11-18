@@ -88,7 +88,10 @@ def _text(value: str, what: str) -> bytes:
     try:
         return value.encode("utf-8", "surrogateescape")
     except UnicodeEncodeError:
-        raise ValidationError(f"{what} cannot be encoded as bytes") from None
+        pass
+    # Raised clear of the except block: ``from None`` would still leave the
+    # codec error, which holds the whole value, on ``__context__``.
+    raise ValidationError(f"{what} cannot be encoded as bytes")
 
 
 def encode(request: Request, *, nonce: str, term: str | None = None, handover: str | None = None) -> bytes:
