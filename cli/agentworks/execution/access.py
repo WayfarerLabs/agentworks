@@ -238,8 +238,11 @@ class VMAccess:
         (``attach.park``).
 
         The envelope carries no ``TERM``: the pane's terminal belongs to tmux,
-        which sets ``TERM`` in the pane's environment, and the launcher takes
-        it from there. Like ``attach`` it keeps no operation log.
+        which sets ``TERM``, ``TMUX``, ``TMUX_PANE``, ``TERM_PROGRAM`` and
+        ``TERM_PROGRAM_VERSION`` in the pane's environment, and the launcher
+        takes them from there, since they describe the terminal the shell runs
+        on rather than anyone's environment. Like ``attach`` it keeps no
+        operation log.
 
         Plugins hold an access, so a request that is not a ``LoginShell`` is
         a ``ValidationError`` before anything resolves: every pane runs a

@@ -494,19 +494,32 @@ def terminal_command_whose_directory_is_missing_is_refused_before_the_terminal(l
 # -- T2: a pane's handover ---------------------------------------------------------------
 
 # Typed into the pane's shell. Each probe prints a marker its own echoed line does not hold.
-PANE_KEYS = b"printf '%s2:%s:%s\\n' T \"$TERM\" \"$TOKEN\"\ncase $- in *i*) echo I''NTERACTIVE ;; esac\nexit 0\n"
+PANE_KEYS = (
+    b'printf \'%s2:%s:%s\\n\' T "$TERM" "$TOKEN"\n'
+    b'printf \'%sX:%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$TERM_PROGRAM_VERSION"\n'
+    b"case $- in *i*) echo I''NTERACTIVE ;; esac\n"
+    b"exit 0\n"
+)
 PANE_TERM = "screen-256color"
+# What tmux sets for a pane besides TERM, as a pane's owner would.
+TMUX_VARIABLES = {
+    "TMUX": "/tmp/tmux-1000/default,4242,0",
+    "TMUX_PANE": "%7",
+    "TERM_PROGRAM": "tmux",
+    "TERM_PROGRAM_VERSION": "3.5a",
+}
 
 
-def pane_handover(lane: Lane, *, term: str | None, run_as: str | None) -> None:
-    """Park a login shell, run its handover command on a fresh terminal, and check what the shell had."""
+def pane_handover(lane: Lane, *, term: str | None, run_as: str | None) -> bytes:
+    """Park a login shell, run its handover command on a fresh terminal, check it, and return what it showed."""
     secret = "sekrit-pane-value-5e"
     lane.quiet_interactive_startup()
     token = lane.handover_token()
+    owner_env = TMUX_VARIABLES | ({} if term is None else {"TERM": term})
 
     with lane.access.park(LoginShell(cwd=lane.workdir, env={"TOKEN": secret})) as handover:
         command = handover.command(run_as=run_as)
-        shown = lane.pane(command, term=term, keys=PANE_KEYS)
+        shown = lane.pane(command, owner_env=owner_env, keys=PANE_KEYS)
 
     assert shown.completion == Completed(0), shown
     assert handover.collected
@@ -514,10 +527,18 @@ def pane_handover(lane: Lane, *, term: str | None, run_as: str | None) -> None:
     assert f"T2:{term or DEFAULT_TERM}:{secret}".encode() in shown.stdout
     assert b"INTERACTIVE" in shown.stdout
     assert lane.wait_gone(f"/tmp/agw-handover-{token}")
+    return shown.stdout
 
 
-def pane_takes_term_from_its_owner(lane: Lane) -> None:
-    pane_handover(lane, term=PANE_TERM, run_as=None)
+def tmux_line(values: dict[str, str]) -> bytes:
+    keys = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
+    return ("TX:" + "|".join(values.get(key, "") for key in keys)).encode()
+
+
+def pane_takes_its_terminal_from_its_owner(lane: Lane) -> None:
+    shown = pane_handover(lane, term=PANE_TERM, run_as=None)
+
+    assert tmux_line(TMUX_VARIABLES) in shown
 
 
 def pane_without_term_gets_the_default(lane: Lane) -> None:
@@ -526,7 +547,10 @@ def pane_without_term_gets_the_default(lane: Lane) -> None:
 
 def pane_through_sudo_keeps_term_and_is_interactive(lane: Lane) -> None:
     needs_sudo(lane)
-    pane_handover(lane, term=PANE_TERM, run_as=lane.account)
+    shown = pane_handover(lane, term=PANE_TERM, run_as=lane.account)
+
+    # sudo's env_reset keeps TERM; no sudoers agentworks writes or Debian ships keeps the others.
+    assert tmux_line({}) in shown
 
 
 def pane_through_sudo_without_term_gets_the_default(lane: Lane) -> None:
@@ -845,7 +869,7 @@ def build() -> list[Vector]:
             "LSV",
             terminal_command_whose_directory_is_missing_is_refused_before_the_terminal,
         ),
-        Vector("T2-pane-term-from-owner", "LSV", pane_takes_term_from_its_owner),
+        Vector("T2-pane-terminal-from-owner", "LSV", pane_takes_its_terminal_from_its_owner),
         Vector("T2-pane-default-term", "LSV", pane_without_term_gets_the_default),
         Vector("T2-pane-through-sudo", "LV", pane_through_sudo_keeps_term_and_is_interactive),
         Vector("T2-pane-through-sudo-default-term", "LV", pane_through_sudo_without_term_gets_the_default),

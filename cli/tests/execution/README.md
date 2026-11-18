@@ -138,11 +138,13 @@ The terminal vectors join the same list:
   refused with the shell's status, the last before the terminal is touched.
 - T2 (L, S and V): a pane's handover. The lane parks a login shell, runs the handover's command on
   `script`'s pty (as tmux runs a pane's command through its default shell), and types into the
-  shell: it is interactive, has its environment, and takes `TERM` from the pane's environment, or
-  `DEFAULT_TERM` without one. The same through `sudo -n -u` runs on L and V and follows the
-  elevation vectors' rule. On local lanes the account's home is an empty one of the lane's
-  (`quiet_interactive_startup`), so an interactive shell reads no startup file of the runner's; on L
-  the account shell is the lane's own, so the four shells are each covered.
+  shell: it is interactive, has its environment, and takes `TERM`, `TMUX`, `TMUX_PANE`,
+  `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` from the pane's environment, with `DEFAULT_TERM` when
+  `TERM` is absent. The same through `sudo -n -u` runs on L and V and follows the elevation vectors'
+  rule; there the shell has `TERM` and none of the other four, which `env_reset` drops. On local
+  lanes the account's home is an empty one of the lane's (`quiet_interactive_startup`), so an
+  interactive shell reads no startup file of the runner's; on L the account shell is the lane's own,
+  so the four shells are each covered.
 
 `conformance/test_attach_terminal.py`, `conformance/test_park.py` and `conformance/test_forward.py`
 cover what happens around the terminal half, a pane's handover (including one in a real tmux pane,

@@ -61,6 +61,8 @@ def main(f: int, g: bytes) -> None:
     except ImportError:
         sys.exit(STDLIB_MISSING_STATUS)
 
+    # What tmux sets for a pane besides TERM: its server and pane, and what it is.
+    terminal_owner_variables = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
     fixed_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games"
     handover_wait_seconds = 30
     program_interpreter = "/usr/bin/python3"
@@ -129,11 +131,15 @@ def main(f: int, g: bytes) -> None:
             "SHLVL": "1",
         }
         if mode == "tty" and os.isatty(0):
-            # TERM describes the terminal, so it comes from the terminal's owner: the
-            # envelope's for an attach (the workstation's), and for a pane's handover,
-            # whose envelope carries none, the environment tmux started the pane with.
+            # These describe the terminal the shell runs on, not anyone's environment, so
+            # they come from the terminal's owner. TERM is the envelope's for an attach (the
+            # workstation's); a pane's handover carries none, and tmux set it and the rest
+            # in the environment it started the pane's command with.
             term = request["term"]
             env["TERM"] = term if term is not None else os.environ.get("TERM") or DEFAULT_TERM
+            for name in terminal_owner_variables:
+                if name in os.environ:
+                    env[name] = os.environ[name]
             with contextlib.suppress(OSError):
                 env["SSH_TTY"] = os.ttyname(0)
         runtime_dir = f"/run/user/{uid}"

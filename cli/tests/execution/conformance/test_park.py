@@ -79,7 +79,7 @@ def test_the_pane_runs_the_handover_stage_and_collects_as_the_account_that_parke
 
 
 @pytest.mark.skipif(sys.platform != "linux" or shutil.which("tmux") is None, reason="runs a real tmux server on Linux")
-def test_a_tmux_pane_collects_its_request_and_has_the_panes_term(local_lane: LocalLane, tmp_path: Path) -> None:
+def test_a_tmux_pane_collects_its_request_and_has_the_panes_terminal(local_lane: LocalLane, tmp_path: Path) -> None:
     secret = "sekrit-pane-value-5e"
     local_lane.quiet_interactive_startup()
     config = tmp_path / "tmux.conf"
@@ -94,11 +94,15 @@ def test_a_tmux_pane_collects_its_request_and_has_the_panes_term(local_lane: Loc
             subprocess.run([*tmux, "new-session", "-d", pane], check=True, env=environment)
 
         assert handover.collected
-        probe = f'printf "%s:%s:%s\\n" "$TERM" "$TOKEN" "$PWD" > {shown}'
+        probe = f'printf "%s:%s:%s:%s:%s:%s\\n" "$TERM" "$TOKEN" "$PWD" "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" > {shown}'
         subprocess.run([*tmux, "send-keys", probe, "Enter"], check=True, env=environment)
         deadline = time.monotonic() + 20
         while not (shown.exists() and shown.read_text().endswith("\n")) and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert shown.read_text() == f"screen-256color:{secret}:{local_lane.workdir}\n"
+        term, token, directory, server, pane_id, program = shown.read_text().rstrip("\n").split(":")
+        assert (term, token, directory, program) == ("screen-256color", secret, local_lane.workdir, "tmux")
+        # tmux's own description of the pane: its server's socket, then its pid and session; then the pane.
+        assert server.startswith(f"{tmp_path / 'tmux.sock'},")
+        assert pane_id.startswith("%")
     finally:
         subprocess.run([*tmux, "kill-server"], check=False, env=environment, capture_output=True)

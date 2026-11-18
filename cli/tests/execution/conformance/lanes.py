@@ -181,18 +181,18 @@ class Lane:
     def quiet_interactive_startup(self) -> None:
         """Keep an interactive shell on the lane from reading any startup file of a person's (a no-op on a VM)."""
 
-    def pane(self, command: str, *, term: str | None, keys: bytes) -> Result:
+    def pane(self, command: str, *, owner_env: Mapping[str, str], keys: bytes) -> Result:
         """Run ``command`` on a fresh terminal, as tmux runs a pane's command, typing ``keys`` into it.
 
-        The terminal is ``script``'s pty on the guest, and ``term``, when
-        given, is the ``TERM`` its owner sets in the command's environment,
-        as tmux sets ``default-terminal``. The result's stdout is what the
-        terminal showed, echo and prompts included.
+        The terminal is ``script``'s pty on the guest, and ``owner_env`` is
+        what its owner sets in the command's environment, as tmux sets
+        ``TERM`` from ``default-terminal`` and ``TMUX`` for its server. The
+        result's stdout is what the terminal showed, echo and prompts
+        included.
         """
-        env = {} if term is None else {"TERM": term}
         # script runs the command line through $SHELL -c, as tmux runs a pane's through its default shell.
         argv = ("script", "-q", "-e", "-c", self.pane_command(command), "/dev/null")
-        return self.access.run(Command(argv, env=env, stdin=Bytes(keys), deadline=60))
+        return self.access.run(Command(argv, env=dict(owner_env), stdin=Bytes(keys), deadline=60))
 
     def pane_command(self, command: str) -> str:
         """``command`` as the guest runs it: the L lane points stage 0 at its own interpreter."""

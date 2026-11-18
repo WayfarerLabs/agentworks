@@ -308,10 +308,14 @@ block normally waits up to 35 seconds (the launcher's 30 and a margin) for the l
 and sets `handover.collected`; leaving it on an exception (the pane could not be created) closes the
 parking stdin at once, so the launcher cleans up. Either way the connection has ended afterwards.
 
-`TERM` comes from whoever owns the terminal. An attach sends the operator's (`xterm-256color` when
+The variables that describe the terminal come from whoever owns it, since they say what the shell
+runs on and are no one's environment. An attach sends the operator's `TERM` (`xterm-256color` when
 the workstation has none). A park envelope carries none, because tmux owns a pane's terminal and
-sets `TERM` in the pane's environment, which sudo's `env_reset` keeps; the launcher takes it from
-there, or uses `xterm-256color` when there is none (conformance vector T2).
+sets `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` in the pane's
+environment; in `tty` mode the launcher takes those five from its inherited environment, with
+`xterm-256color` when `TERM` is absent, and nothing else (conformance vector T2). sudo's `env_reset`
+keeps `TERM`, and neither Debian's sudoers nor agentworks' `env_keep` fragment keeps the other four,
+so a pane behind `sudo -n -u` has only `TERM` of them.
 
 On a Windows console the terminal half's remote command is led by a NUL, which stops Win32-OpenSSH
 from deleting the operator's lines on its first write; `ssh_process.nul_first_on_a_windows_console`
