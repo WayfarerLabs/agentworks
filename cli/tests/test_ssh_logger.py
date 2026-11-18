@@ -291,29 +291,52 @@ def test_record_redacts_a_secret_shown_without_its_line_breaks(
     assert "tok-abc-123" not in logger.path.read_text()
 
 
+def _utf8_locale_available() -> bool:
+    import subprocess
+
+    try:
+        listed = subprocess.run(["locale", "-a"], capture_output=True, check=False).stdout
+    except OSError:
+        return False
+    return any(name.lower() in (b"c.utf8", b"c.utf-8") for name in listed.split())
+
+
+@pytest.mark.parametrize("locale", ["C", "C.UTF-8"])
 @pytest.mark.parametrize(
     "secret",
     [
-        pytest.param("line-one-7e\r\n\tline-two-7e 'q' \\ \x01\x1b\x7f", id="controls-quotes-backslash"),
-        pytest.param("line-one-7e caf\u00e9\nline-two-7e", id="non-ascii"),
+        pytest.param(
+            "line-one-7e\r\n\t\x07\x08\x0b\x0c line-two-7e 'q' \\ \x01\x1b\x7f\udcff",
+            id="controls-quotes-backslash-high-byte",
+        ),
+        pytest.param("line-one-7e caf\u00e9 na\u00efve 'q'\x01\nline-two-7e", id="letters"),
+        pytest.param("line-one-7e \u65e5\u672c\u8a9e 'q'\x01\nline-two-7e", id="cjk"),
+        pytest.param("line-one-7e \U0001f600 'q'\x01\nline-two-7e", id="emoji"),
+        pytest.param("line-one-7e a\u00a0b\u00ad 'q'\x01\nline-two-7e", id="space-and-format"),
     ],
 )
 def test_sanitize_redacts_bash_ansi_c_quoting_of_a_secret(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str, locale: str
 ) -> None:
-    """``printf %q`` and ``declare -p`` spell such a value ``$'...'``; the spelling is bash's, so bash is the oracle."""
+    """``printf %q`` and ``declare -p`` spell such a value ``$'...'``; the spelling is bash's, so bash is the oracle.
+
+    A guest payload runs under ``C.UTF-8``, where bash prints a printable
+    non-ASCII character raw; in ``C`` it spells every non-ASCII byte.
+    """
     import shutil
     import subprocess
 
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash is not installed")
+    if locale != "C" and not _utf8_locale_available():
+        pytest.skip(f"the {locale} locale is not installed")
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     logger = SSHLogger("vm1", "test-op", redactions=(secret,))
     script = 'printf "%q\\n" "$1"; declare -p X'
     shown = subprocess.run(
         [bash, "-c", script, "bash", secret],
-        env={"LC_ALL": "C", "X": secret},
+        env={"LC_ALL": locale, "X": secret},
         capture_output=True,
         check=True,
     ).stdout.decode("utf-8", "surrogateescape")

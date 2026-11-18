@@ -161,9 +161,12 @@ suitability for every sink.
 
 Operation logs and guest diagnostics redact each secret an operation registers with them as a whole:
 the raw value, its shell-quoted and Python `repr` spellings, the value without leading or trailing
-line breaks, and bash's `$'...'` spelling (`printf %q`, `declare -p`) in the C locale, which for
-non-ASCII text differs from the UTF-8 locale's. One line of a multi-line secret shown on its own is
-not redacted: matching each line would also redact common lines such as a PEM `-----END` line.
+line breaks, and bash's `$'...'` spelling (`printf %q`, `declare -p`) in the C locale and in the
+guest's `C.UTF-8`. In `C.UTF-8` bash prints a printable non-ASCII character raw, and printable is
+glibc's `iswprint`, which the redaction approximates as Python's `str.isprintable` plus space,
+format and private-use characters; a code point one side's Unicode tables assign and the other's do
+not can still be spelled differently. One line of a multi-line secret shown on its own is not
+redacted: matching each line would also redact common lines such as a PEM `-----END` line.
 
 Factory construction and context entry perform no provider or broker work. Cleanup always runs;
 cleanup failure emits fixed source-only warning text and never masks the primary result or
