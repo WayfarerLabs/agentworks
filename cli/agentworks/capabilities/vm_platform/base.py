@@ -387,7 +387,12 @@ class VMPlatform(Capability):
         The channel works without the VM's Tailscale state. Write ``script``,
         close stdin, and return everything the channel printed on each
         stream when it ends or ``deadline`` seconds pass; stop waiting at the
-        deadline and never claim the guest command stopped. A channel that
+        deadline and never claim the guest command stopped. The deadline
+        starts at dispatch and bounds the script alone: what the channel does
+        before it (opening a route, reading an address, confirming the guest,
+        waiting for the VM to answer) has bounds of its own, each provider
+        call its client's timeout and the wait for the VM about two minutes,
+        so a caller sizes ``deadline`` for its script. A channel that
         reaches the guest through an HTTP API bounds each socket wait by what
         remains, which is as far as a socket timeout reaches: a response that
         keeps arriving can carry one request past the deadline. Run it once:

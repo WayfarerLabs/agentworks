@@ -56,13 +56,16 @@ def _fake_vm(resource_id: str = _RESOURCE_ID) -> Any:
 
 
 class _Poller:
-    """A begin_* long-running-operation stub: ``.result()`` yields a value."""
+    """A begin_* long-running-operation stub: ``.result()`` yields a value, at once."""
 
     def __init__(self, value: object) -> None:
         self._value = value
 
-    def result(self) -> object:
+    def result(self, timeout: float | None = None) -> object:
         return self._value
+
+    def done(self) -> bool:
+        return True
 
 
 class _FakeVMs:

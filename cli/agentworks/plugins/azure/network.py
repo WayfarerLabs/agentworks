@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentworks import output
 
@@ -121,6 +121,12 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 # operations the same way.
 _RULE_REMOVAL_TIMEOUT_SECONDS = 300.0
 
+# How long each Azure operation that opens a root channel's route may take
+# (the public-IP heal, the NSG convergence, the poke). The route opens before
+# the script's deadline starts, so the run_as_root contract needs it bounded
+# by itself; GCP bounds its firewall insert the same way.
+_ROUTE_OPERATION_TIMEOUT_SECONDS = 300.0
+
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
@@ -173,6 +179,23 @@ def wrap_azure_error(exc: Exception) -> AzureError:
         return AzureError(summary, detail=str(exc))
 
     return AzureError(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
+
+
+class _RouteOperationTimeout(AzureError):
+    """An operation opening a route did not finish within ``_ROUTE_OPERATION_TIMEOUT_SECONDS``."""
+
+
+def _finish_route_operation(poller: Any, what: str) -> Any:
+    """``poller``'s result, waiting at most ``_ROUTE_OPERATION_TIMEOUT_SECONDS``, or :class:`_RouteOperationTimeout`.
+
+    The operation may still finish after the wait ends, so a caller that
+    created something removes it.
+    """
+    result = poller.result(timeout=_ROUTE_OPERATION_TIMEOUT_SECONDS)
+    if not poller.done():
+        summary = f"Azure did not finish {what} within {_ROUTE_OPERATION_TIMEOUT_SECONDS:.0f}s"
+        raise _RouteOperationTimeout(summary, detail=summary)
+    return result
 
 
 def _trim_message(message: str) -> str:
@@ -264,17 +287,23 @@ def converge_nsg(network: NetworkManagementClient, rg: str, name: str) -> None:
     from azure.core.exceptions import ResourceNotFoundError
 
     try:
-        network.security_rules.begin_create_or_update(
-            rg,
-            f"{name}-nsg",
-            DENY_ALL_INBOUND_RULE_NAME,
-            _deny_all_inbound_rule(),
-        ).result()
+        _finish_route_operation(
+            network.security_rules.begin_create_or_update(
+                rg,
+                f"{name}-nsg",
+                DENY_ALL_INBOUND_RULE_NAME,
+                _deny_all_inbound_rule(),
+            ),
+            f"ensuring the '{DENY_ALL_INBOUND_RULE_NAME}' rule on NSG '{name}-nsg'",
+        )
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 
     try:
-        network.security_rules.begin_delete(rg, f"{name}-nsg", LEGACY_SSH_RULE_NAME).result()
+        _finish_route_operation(
+            network.security_rules.begin_delete(rg, f"{name}-nsg", LEGACY_SSH_RULE_NAME),
+            f"deleting the legacy '{LEGACY_SSH_RULE_NAME}' rule on NSG '{name}-nsg'",
+        )
     except ResourceNotFoundError:
         pass
     except Exception as exc:
@@ -353,12 +382,19 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
         priority = _lowest_free_allow_priority(network, rg, name)
         rule_name = f"{TRANSIENT_ALLOW_RULE_PREFIX}{uuid4().hex[:8]}"
         try:
-            network.security_rules.begin_create_or_update(
-                rg,
-                f"{name}-nsg",
-                rule_name,
-                _allow_ssh_rule(rule_name, prefixes, priority),
-            ).result()
+            _finish_route_operation(
+                network.security_rules.begin_create_or_update(
+                    rg,
+                    f"{name}-nsg",
+                    rule_name,
+                    _allow_ssh_rule(rule_name, prefixes, priority),
+                ),
+                f"creating the '{rule_name}' rule on NSG '{name}-nsg'",
+            )
+        except _RouteOperationTimeout:
+            # Another attempt would wait as long again; the rule may still land, so it goes.
+            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            raise
         except Exception as exc:
             remove_ssh_allow(network, rg, name, rule_name, prefixes)
             last_exc = exc
@@ -476,15 +512,14 @@ def ensure_public_ip(
                 tags={"owner": "agentworks"},
             ),
         )
-        ip_result = ip_poller.result()
+        ip_result = _finish_route_operation(ip_poller, f"creating the public IP '{name}-ip'")
 
         if nic.ip_configurations:
             nic.ip_configurations[0].public_ip_address = PublicIPAddress(id=ip_result.id)
-        network.network_interfaces.begin_create_or_update(
-            rg,
-            f"{name}-nic",
-            nic,
-        ).result()
+        _finish_route_operation(
+            network.network_interfaces.begin_create_or_update(rg, f"{name}-nic", nic),
+            f"attaching the public IP to '{name}-nic'",
+        )
 
     except Exception as exc:
         raise wrap_azure_error(exc) from exc

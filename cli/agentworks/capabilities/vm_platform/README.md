@@ -203,10 +203,13 @@ and DB migration.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 - `run_as_root(vm, ctx, script, deadline) -> RawRun` **MUST** run `/bin/bash -s` as root through the
   platform's own channel, independent of the VM's Tailscale state, with `script` on its stdin and
-  nowhere else, **MUST** run it once, and **MUST** return both streams without a status. A channel
-  that waits for the VM to answer before it dispatches anything (the clouds' public SSH and
-  Proxmox's guest agent each wait about two minutes) **MUST** raise `root_script.ChannelUnreachable`
-  when that wait runs out, since nothing was dispatched: callers then stop instead of retrying, and
+  nowhere else, **MUST** run it once, and **MUST** return both streams without a status. The
+  `deadline` starts at dispatch and bounds the script alone, so callers size it for their script.
+  What a channel does before dispatch (opening a route, reading an address, confirming the guest,
+  waiting for the VM to answer) **MUST** have bounds of its own: each provider call its client's
+  timeout, and a wait for the VM about two minutes. A channel that waits for the VM to answer before
+  it dispatches anything (the clouds' public SSH and Proxmox's guest agent) **MUST** raise
+  `root_script.ChannelUnreachable` when that wait runs out, since nothing was dispatched: callers then stop instead of retrying, and
   do not try a logout they could not deliver. Any other channel failure raises `ConnectivityError`,
   whose outcome is unknown. Its docstring in `base.py` is the full contract. The clouds inherit
   theirs from `public_ssh.PublicAddressPlatform`, supplying how to read the live public address, the

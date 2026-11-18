@@ -804,3 +804,56 @@ class TestEnsureDenyRaises:
 
         with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
             pytest.fail("the body must not run when convergence fails")
+
+
+class TestRouteOperationsAreBounded:
+    """A route opens before the script's deadline starts, so each Azure operation it waits on has a bound."""
+
+    def test_a_poke_whose_create_does_not_finish_removes_its_rule_and_raises_without_retrying(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentworks.plugins.azure.network import AzureError
+
+        network = _install_fakes(monkeypatch).network
+        rules: _FakeSecurityRules = network.security_rules
+        real_create = rules.begin_create_or_update
+        waits: list[float | None] = []
+
+        class _HungPoller(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                waits.append(timeout)
+                return super().result(timeout)
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            poller = real_create(rg, nsg, rule_name, rule)
+            return _HungPoller(rule, finishes=False) if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) else poller
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the poke does not finish")
+
+        (attempted,) = rules.transient_names()
+        assert attempted in {d[2] for d in rules.deletes()}
+        assert all(wait is not None for wait in waits)
+
+    @pytest.mark.parametrize("hung", ["deny", "public-ip"])
+    def test_a_heal_or_convergence_that_does_not_finish_fails_the_route_before_any_poke(
+        self, monkeypatch: pytest.MonkeyPatch, hung: str
+    ) -> None:
+        from agentworks.plugins.azure.network import AzureError
+
+        network = _install_fakes(monkeypatch, public_ip_attached=hung != "public-ip").network
+        rules: _FakeSecurityRules = network.security_rules
+        hung_poller = _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"), finishes=False)
+        if hung == "deny":
+            monkeypatch.setattr(rules, "begin_create_or_update", lambda *_args: hung_poller)
+        else:
+            monkeypatch.setattr(network.public_ip_addresses, "begin_create_or_update", lambda *_args: hung_poller)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(AzureError), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the route cannot open")
+
+        assert not rules.transient_names()
