@@ -262,6 +262,28 @@ def test_a_pane_that_never_collects_its_request_is_a_failed_pane(
     assert len(captured_output.warnings) == 1
 
 
+@pytest.mark.parametrize("killed", [True, False])
+def test_an_uncollected_pane_says_whether_its_kill_completed(fake_guest: _ScriptedGuest, killed: bool) -> None:
+    from agentworks.sessions.multi_console.tmux_build import _PaneShellNotStarted, _split_parked
+
+    fake_guest.responses["split-window"] = _FakeResult(stdout="%7\n")
+    if not killed:
+        fake_guest.responses["kill-pane"] = _FakeResult(returncode=1, stderr="no server running")
+    fake_guest.admin().park_collected = False
+
+    with pytest.raises(_PaneShellNotStarted) as raised:
+        _split_parked(
+            fake_guest.run_command(),
+            fake_guest.admin(),
+            LoginShell(),
+            window="'=aw-console-con':a",
+            switch_user=False,
+            redactions=(),
+        )
+
+    assert raised.value.pane_may_remain is not killed
+
+
 def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, fake_guest: _ScriptedGuest) -> None:
     """The pane's composed environment, workspace identity only, is in its parked request and nowhere else.
 

@@ -465,10 +465,15 @@ admin's access and each checked agent's, from the members whose shells park as a
 operation calls it before it resolves a pane secret: in `prepare_console_reconcile` for a build (so
 `console start`, `restart` and reconciliation refuse while preparing), and in
 `_prepare_console_access` for `create_console` and `restore_session`, once the VM is active and
-before the boundary resolve, so a refused agent stops them before they can prompt. `add-shell` and
-`add-sessions` first probe the console's tmux, read-only; only a running console has a pane to park,
-so only then do they check the agents, before they resolve or record anything. A stopped console's
-edit, or one whose probe cannot tell, is recorded and its live sync stays best effort, as before D2.
+before the pane-secret resolve, so a refused agent stops them before they can prompt for a pane
+secret. The activation gate runs first, so a stopped VM may be started, and its gate secrets
+resolved, before the refusal; `console start` records its running intent before it prepares
+(`lifecycle.py:86`). `restore_session` checks the agents before it probes the console's tmux
+(`restore.py:136-149`), so on a console that is not running a stale agent gets the reinit hint
+rather than the not-running refusal. `add-shell` and `add-sessions` first probe the console's tmux,
+read-only; only a running console has a pane to park, so only then do they check the agents, before
+they resolve a pane secret or record anything. A stopped console's edit, or one whose probe cannot
+tell, is recorded and its live sync stays best effort, as before D2.
 
 **What replaces the sudo carry.** Today an agent pane runs
 `exec sudo --login --preserve-env=<keys> -u <agent> bash -c '<bootstrap>'`

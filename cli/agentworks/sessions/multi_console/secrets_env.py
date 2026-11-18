@@ -8,8 +8,7 @@ runs) and "what env does this pane actually get?" (``_resolve_pane_env``,
 called at split time once the values are in hand).
 
 Some of these names (``_pane_secret_target``, ``_admin_only_secret_target``,
-``_console_build_secret_targets``, ``_member_secret_targets``,
-``_resolve_pane_env``) are monkeypatched by tests directly on the
+``_console_build_secret_targets``, ``_resolve_pane_env``) are monkeypatched by tests directly on the
 ``agentworks.sessions.multi_console`` package object. Because a patch there
 only rebinds the *package's* attribute, not this module's own global, every
 call site anywhere in the package (including the ones below that call a
@@ -61,17 +60,17 @@ def _pane_secret_target(
     - Admin pane: vm + workspace + admin.
     - Agent pane: vm + workspace + agent.
 
-    Session-template env is NOT included -- those vars are for the session
+    Session-template env is NOT included: those vars are for the session
     itself, not for sidecar shells attached to its window. Returns
     ``None`` when the session row is missing fields the resolver would
     need.
 
     ``is_admin_pane`` is the PROMOTED value, not the operator-passed
     --admin flag: callers pass ``_pane_runs_as_admin``'s answer, the rule
-    the panes run by. Passing the raw flag for an admin-mode session (session_user ==
-    admin_user) would route through the ``agent_name is None`` branch
-    and silently return ``None``, breaking the eager-resolve guarantee
-    for that shape.
+    the panes run by. Passing the raw flag for an admin-mode session (one
+    whose owner is the VM's admin) would route through the ``agent_name is
+    None`` branch and silently return ``None``, breaking the eager-resolve
+    guarantee for that shape.
     """
     from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
     from agentworks.secrets import SecretTarget
@@ -140,7 +139,7 @@ def _admin_only_secret_target(
 ) -> SecretTarget:
     """SecretTarget for an admin-only console pane (no workspace context).
 
-    Used for ``console.admin_shell`` panes at build time -- a vanilla
+    Used for ``console.admin_shell`` panes at build time: a vanilla
     admin login shell with vm + admin scope. Workspace and session
     contexts don't apply (the admin shell isn't tied to either).
 
@@ -243,14 +242,14 @@ def _resolve_pane_env(
 ) -> dict[str, str]:
     """Compose env for a console add-shell pane attached to a session's window.
 
-    Console add-shell panes are sidecar shells -- they're organized under
+    Console add-shell panes are sidecar shells: they're organized under
     a session's window in the console UI, but they're not *in* the session
     (separate process tree, not part of the session's tmux). Under the
     env-and-secrets identity taxonomy they're "admin or agent shell rooted
     in a workspace": they see workspace dynamic identity but NOT session
     identity, and their operator env stops at workspace scope. The
     sessions themselves (the agent's actual tmux server / shells) keep
-    full session context -- they ARE the workload.
+    full session context; they ARE the workload.
 
     Admin pane: admin + vm + workspace operator env; workspace dynamic
     identity.

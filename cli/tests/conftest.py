@@ -1156,14 +1156,6 @@ def provisioning_trust_for_tests(vm_name: str) -> TrustBinding:
     return TrustBinding(TrustMode.UNVERIFIED, vm_name, Path(tempfile.gettempdir()) / f"provisioning-{vm_name}")
 
 
-def ssh_enrolls_on_first_use(trust_binding: object) -> None:
-    """What ssh does on a successful connection under ``accept-new`` to the VM's
-    store file: record the key. Call it from a fake transport's ``run`` with the
-    transport's ``trust``; it records only under ENROLL, as ssh would."""
-    if isinstance(trust_binding, TrustBinding) and trust_binding.mode is TrustMode.ENROLL:
-        seed_vm_trust(trust_binding.vm_name)
-
-
 @pytest.fixture
 def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
     """Route ``execution.vm_access`` and ``enrollment_access`` to a recording fake, and resolve ssh without a client."""

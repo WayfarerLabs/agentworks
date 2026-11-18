@@ -429,6 +429,7 @@ def _prepare_console_access(
     from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
+    from ._access import console_access
     from .lifecycle import preflight_console_vm
 
     vm = db.get_vm(vm_name)
@@ -460,7 +461,7 @@ def _prepare_console_access(
             )
             activate_vm_runtime(context)
             with context.node.hold_active():
-                access = _mc.console_access(db, config, vm, execution.vm_access(vm, config, Admin()), members)
+                access = console_access(db, config, vm, execution.vm_access(vm, config, Admin()), members)
                 resolver.resolve()
                 yield access
     finally:

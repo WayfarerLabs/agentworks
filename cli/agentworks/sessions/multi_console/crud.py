@@ -31,6 +31,7 @@ from agentworks.sessions.multi_console_layout import (
 )
 from agentworks.sessions.tmux import ProbeStatus, access_run_command, exact_tmux_target
 
+from ._access import console_access
 from ._helpers import (
     SessionSpec,
     _dedupe_specs,
@@ -41,7 +42,7 @@ from ._helpers import (
     parse_session_spec,
     tmux_session_name,
 )
-from .attach import _live_best_effort, _pane_runs_as_admin, _session_linux_user
+from .attach import _live_best_effort, _pane_runs_as_admin, _prepare_console_access, _session_linux_user
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
@@ -123,7 +124,7 @@ def _probe_live_sync(
         return _LiveSync(error)
     if presence is not ProbeStatus.PRESENT:
         return _LiveSync(presence)
-    return _LiveSync(presence, _mc.console_access(db, config, vm, admin, members))
+    return _LiveSync(presence, console_access(db, config, vm, admin, members))
 
 
 def create_console(
@@ -220,7 +221,7 @@ def create_console(
 
         with (
             closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _mc._prepare_console_access(
+            _prepare_console_access(
                 db,
                 config,
                 vm_name,
@@ -670,14 +671,17 @@ def add_shell(
         session_row = db.get_session(session_name)
         vm_row = db.get_vm(console.vm_name)
         secret_values: dict[str, str] = {}
+        # Who the pane runs as: the scope it resolves and the result it reports both follow it.
+        runs_as_admin = admin
         if session_row is not None and vm_row is not None:
             session_user = _session_linux_user(db, session_row, vm_row)
+            runs_as_admin = _pane_runs_as_admin(vm_row, session_user, admin_shell=admin)
             pane_target = _mc._pane_secret_target(
                 db,
                 registry,
                 vm=vm_row,
                 session=session_row,
-                is_admin_pane=_pane_runs_as_admin(vm_row, session_user, admin_shell=admin),
+                is_admin_pane=runs_as_admin,
             )
             if pane_target is not None:
                 from agentworks.secrets import resolve_for_command
@@ -691,7 +695,7 @@ def add_shell(
                 )
 
         db.update_console_shells(console_name, session_name, new_shells)
-        user_tag = "admin" if admin else "agent"
+        user_tag = "admin" if runs_as_admin else "agent"
         output.result(
             f"Added {user_tag} shell at {cwd or '<workspace>'} to '{session_name}' in console '{console_name}'."
         )

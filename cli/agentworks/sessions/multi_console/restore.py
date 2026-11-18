@@ -1,10 +1,9 @@
 """Reconcile a console session window's live tmux state against its
 configured shell list.
 
-``_console_tmux_presence``, ``_member_secret_targets``, and
-``_add_session_window`` are monkeypatched by tests directly on the
-``agentworks.sessions.multi_console`` package object. A patch on the package object only rebinds the
-package's own attribute, not the attribute of the module that actually
+``_console_tmux_presence`` and ``_add_session_window`` are monkeypatched by
+tests directly on the ``agentworks.sessions.multi_console`` package object. A
+patch on the package object only rebinds the package's own attribute, not the attribute of the module that actually
 defines the function, so every call site below goes through the package
 object at call time (``_mc.<name>(...)``) rather than a direct reference.
 """
@@ -31,7 +30,7 @@ from agentworks.sessions.multi_console_layout import (
 from agentworks.sessions.tmux import ProbeStatus, access_run_command, exact_tmux_target
 
 from ._helpers import _require_console, tmux_session_name
-from .attach import _session_linux_user
+from .attach import _prepare_console_access, _session_linux_user
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
@@ -118,7 +117,7 @@ def restore_session(
         configured_count = len(member.shells)
         with (
             closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _mc._prepare_console_access(
+            _prepare_console_access(
                 db,
                 config,
                 console.vm_name,

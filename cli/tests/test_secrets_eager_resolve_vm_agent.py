@@ -35,13 +35,12 @@ from tests.vm_access_support import AccessRecorder, install_access_recorder
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
 
+__all__ = ["_stub_build_registry"]
+
 
 def _guest_sessions(recorder: AccessRecorder) -> list[str]:
     """The operations that run the operator's command or shell on the guest, in order."""
     return [call.operation for call in recorder.calls if call.operation in {"attach", "stream"}]
-
-
-__all__ = ["_stub_build_registry"]
 
 
 @pytest.fixture(autouse=True)

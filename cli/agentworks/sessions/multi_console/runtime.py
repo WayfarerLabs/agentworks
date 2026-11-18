@@ -13,6 +13,7 @@ from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.tmux import ProbeStatus
 
+from ._access import console_access
 from ._helpers import _require_console, _verify_session_on_vm, guarded_console_selection
 from ._status import ConsoleStatus, classify_console_status
 
@@ -173,7 +174,7 @@ def prepare_console_reconcile(
             if builds
             else ()
         )
-        access = _mc.console_access(db, config, vm, admin, members if builds else ())
+        access = console_access(db, config, vm, admin, members if builds else ())
         return PreparedConsoleReconcile(
             db,
             registry,

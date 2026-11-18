@@ -481,11 +481,13 @@ steps of runtime reconciliation, reach the VM through the new layer, so they nee
 - **An agent's console shell connects as the agent.** Its environment no longer crosses `sudo`, so
   it no longer needs the `Defaults:<admin> setenv` grant of `51-agentworks-console-setenv`. It needs
   the agent's own SSH access instead, as an agent session does: a console command that would open a
-  shell for an agent that predates the direct-SSH rollout refuses before it prompts for a secret or
-  changes anything, with the `agw agent reinit` hint. `restore-session` checks every agent of the
-  session's shells, even when their panes are not missing. `console add-shell` and `add-sessions`
-  check only when the console is running, since only then do they open the new shells; on a stopped
-  console they record the new shell or member as before.
+  shell for an agent that predates the direct-SSH rollout refuses before it prompts for a pane
+  secret or changes the console's tmux or definition, with the `agw agent reinit` hint. It may
+  already have started a stopped VM, and `console start` records that the console should run, before
+  that check. `restore-session` checks every agent of the session's shells, even when their panes
+  are not missing. `console add-shell` and `add-sessions` check only when the console is running,
+  since only then do they open the new shells; on a stopped console they record the new shell or
+  member as before.
 - **A shell pane whose directory is gone opens in the home directory with a warning,** where the
   pane printed the message itself.
 - **Pane secrets resolve before the console changes.** `console create` and `restore-session`

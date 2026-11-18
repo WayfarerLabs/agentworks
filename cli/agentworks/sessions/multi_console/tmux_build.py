@@ -80,9 +80,14 @@ class SessionWindowBuild:
 class _PaneShellNotStarted(Exception):
     """A shell pane that did not start its shell: tmux refused the split, or the pane never collected its request.
 
-    A pane that never collected its request is killed before this is raised,
-    so neither case leaves a pane behind.
+    A pane that never collected its request is killed, best effort, before
+    this is raised; ``pane_may_remain`` says the kill did not complete, so the
+    pane may still be there.
     """
+
+    def __init__(self, message: str, *, pane_may_remain: bool = False) -> None:
+        super().__init__(message)
+        self.pane_may_remain = pane_may_remain
 
 
 def _split_parked(
@@ -99,7 +104,8 @@ def _split_parked(
     The split runs inside the parking block, so a split tmux refuses lets the
     parked request go at once. A pane that does not collect the request
     within the handover's wait started no shell; it is killed, best effort,
-    so it does not linger as an untagged pane.
+    so it does not linger as an untagged pane, and the failure says when the
+    kill did not complete.
     """
     from agentworks.execution.errors import ExecutionIncomplete, RequestRefused
     from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
@@ -111,10 +117,11 @@ def _split_parked(
             raise _PaneShellNotStarted(sanitize_setup_diagnostic(res.stderr.strip(), redactions=redactions))
     if not handover.collected:
         pane_id = res.stdout.strip()
+        killed = False
         if pane_id:
             with contextlib.suppress(ExecutionIncomplete, RequestRefused):
-                run(f"tmux kill-pane -t {shlex.quote(pane_id)}", check=False)
-        raise _PaneShellNotStarted("the pane did not collect its shell's request")
+                killed = run(f"tmux kill-pane -t {shlex.quote(pane_id)}", check=False).ok
+        raise _PaneShellNotStarted("the pane did not collect its shell's request", pane_may_remain=not killed)
     return res.stdout
 
 
@@ -201,7 +208,13 @@ def _split_shell_pane(
             output.warn(f"cannot enter {full_path} for a shell pane in '{window_name}'; it opens in the home directory")
             out = split(LoginShell(env=pane_env))
     except _PaneShellNotStarted as failure:
-        output.warn(f"failed to add shell pane in '{window_name}': {failure}")
+        remains = (
+            f"; a pane that never started its shell may remain, which `agw console restart "
+            f"{shlex.quote(console_name)}` clears"
+            if failure.pane_may_remain
+            else ""
+        )
+        output.warn(f"failed to add shell pane in '{window_name}': {failure}{remains}")
         return None
     except (ExecutionIncomplete, RequestRefused) as error:
         output.warn(f"failed to add shell pane in '{window_name}': {redact(str(error))}")
