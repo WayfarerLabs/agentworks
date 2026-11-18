@@ -14,13 +14,14 @@ import typer
 from agentworks.cli import _record_unhandled_error
 from agentworks.cli._errors import echo_hint
 from agentworks.errors import ExternalError, SecretUnavailableError, StateError
+from agentworks.execution.results import Result
 from agentworks.output import AgentworksError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh import SSHError
 
 from ._runtime_probes import framed_runtime_result
-from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
-from .vm_access_support import route_vm_access_to_target
+from .conftest import _FakeResult, stub_build_registry, stub_session_resolvers, stub_vm_gates
+from .vm_access_support import Call, command_line, is_command_check, route_vm_access_to_guest
 
 # Every access a command builds is the recording fake: these tests run no ssh.
 pytestmark = pytest.mark.usefixtures("vm_access_recorder")
@@ -430,17 +431,8 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
     # Skip the VM-running probe entirely.
     stub_vm_gates(monkeypatch)
 
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
-    route_vm_access_to_target(monkeypatch, _Target())
+    # Every request completes with status 0 and no output.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)
     # deploy_restricted_config does its own SSH writes -- skip them.
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
@@ -497,22 +489,8 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
 
     stub_vm_gates(monkeypatch)
 
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
-    route_vm_access_to_target(monkeypatch, _Target())
-    # agent_transport is constructed in session_manager.create_session for
-    # agent-mode sessions (FRD R1, direct target-user SSH). Stub it too so
-    # the SimpleNamespace config doesn't need an `operator` attribute.
-    agent_factory = lambda vm, config, agent, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
+    # Every request completes with status 0 and no output.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
 
@@ -572,17 +550,8 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
 
     stub_vm_gates(monkeypatch)
 
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
-    route_vm_access_to_target(monkeypatch, _Target())
+    # Every request completes with status 0 and no output.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
@@ -658,49 +627,45 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
 
     clap_error = "error: invalid value 'on-failure' for '--ask-for-approval <APPROVAL_POLICY>'"
 
-    class _Result:
-        def __init__(self, ok: bool = True, stdout: str = "") -> None:
-            self.ok = ok
-            self.returncode = 0 if ok else 1
-            self.stdout = stdout
-            self.stderr = ""
-
-    class _AdminTarget:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
     agent_commands: list[str] = []
 
-    class _DeadPaneAgentTarget:
-        """A held dead pane with stable identity until the server is killed."""
+    class _DeadPaneAgentGuest:
+        """The agent's guest: a held dead pane with stable identity until the server is killed."""
 
         def __init__(self) -> None:
             self.alive = True
 
-        def run(self, cmd: str, *args: object, **kwargs: object) -> _Result:
+        def answer(self, call: Call) -> Result | None:
+            cmd = command_line(call.request)
+            if cmd is None or is_command_check(call.request):
+                return None
+            return self.dispatch(cmd).result()
+
+        def dispatch(self, cmd: str) -> _FakeResult:
             agent_commands.append(cmd)
             if cmd.startswith("test -e "):
-                return _Result(ok=False)
+                return _FakeResult(returncode=1)
             if "#{pane_dead}" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="1 2\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="1 2\n"))
             if "#{pid}" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="4242\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="4242\n"))
             if "boot_id" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n"))
             if "test -d /proc/4242" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="present" if self.alive else "absent"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="present" if self.alive else "absent"))
             if "cat /proc/4242/stat" in cmd:
                 fields = ["S", *[str(value) for value in range(4, 23)]]
-                return framed_runtime_result(cmd, _Result(stdout=f"4242 (tmux: server) {' '.join(fields)}\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout=f"4242 (tmux: server) {' '.join(fields)}\n"))
             if "capture-pane" in cmd:
-                return _Result(stdout=f"{clap_error}\n\nFor more information, try '--help'.\n")
+                return _FakeResult(stdout=f"{clap_error}\n\nFor more information, try '--help'.\n")
             if "kill-server" in cmd:
                 self.alive = False
-            return _Result()
+            return _FakeResult()
 
-    agent_target = _DeadPaneAgentTarget()
+    agent_target = _DeadPaneAgentGuest()
 
-    route_vm_access_to_target(monkeypatch, _AdminTarget(), agent_target)
+    # The admin's requests complete with status 0 and no output; the agent's reach the dead pane's guest.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None, agent_target.answer)
     monkeypatch.setattr(agent_access, "_assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)

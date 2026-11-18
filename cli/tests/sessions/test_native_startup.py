@@ -17,6 +17,8 @@ import pytest
 
 from agentworks.db import SessionRow, SessionStatus
 from agentworks.errors import AgentworksError, ExternalError, StateError
+from agentworks.execution.requests import Bytes
+from agentworks.execution.results import Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import SessionTmuxServer
@@ -25,13 +27,13 @@ from agentworks.sessions.manager._status import batch_check_status, check_sessio
 from agentworks.ssh import SSHError, SSHResult
 from tests._runtime_probes import server_for
 from tests.conftest import current_user_name
-from tests.vm_access_support import Admin, RecordingVMAccess, access_over_target
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, command_line, guest_result
 
 from .test_create_start_restart_orchestrated import (
     _create_stubs,
-    _patch_transports,
     _requiring_template,
     _restart_fixture,
+    _route_guests,
 )
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from .test_startup_recovery import _fake_owner_realizers
@@ -73,11 +75,15 @@ class NativeTarget:
         }
 
     def run(self, command: str, *, check: bool = True, **kwargs: Any) -> SSHResult:
-        """Run ``command`` locally, with ``env`` exported beside the guest's own environment as a request's is."""
+        """Run ``command`` locally, with ``env`` exported beside the guest's own environment as a request's is.
+
+        The tmux primitives take it as their ``RunCommand``; :meth:`answer`
+        runs an access's requests through it, recording each request's
+        elevation and deadline as ``sudo`` and ``deadline`` and passing its
+        ``Bytes`` input as ``input_data``.
+        """
         self.calls.append((command, kwargs))
         input_data = kwargs.get("input_data")
-        if isinstance(input_data, bytes):
-            input_data = input_data.decode()
         result = subprocess.run(
             ["/bin/sh", "-c", command],
             capture_output=True,
@@ -90,9 +96,23 @@ class NativeTarget:
             raise ExternalError(result.stderr or result.stdout)
         return SSHResult(result.returncode, self.banner + result.stdout, self.stderr_banner + result.stderr)
 
+    def answer(self, call: Call) -> Result | None:
+        """Run a ``Command`` or ``Script`` here from its command line, with the request's environment and input."""
+        request = call.request
+        line = command_line(request)
+        if line is None:
+            return None
+        options: dict[str, Any] = {"sudo": request.elevated, "deadline": request.deadline}
+        if isinstance(request.stdin, Bytes):
+            options["input_data"] = request.stdin.data.decode()
+        result = self.run(line, check=False, env=dict(request.env), **options)
+        return guest_result(result.returncode, result.stdout, result.stderr)
+
     def access(self) -> RecordingVMAccess:
         """The admin's access, its requests run here."""
-        return access_over_target(self)
+        access = RecordingVMAccess([], Admin())
+        access.answer = self.answer
+        return access
 
     def batch_status(self, sessions: list[SessionRow]) -> dict[str, SessionStatus]:
         """``batch_check_status`` on :meth:`access`, each row with the server its socket path names."""
@@ -247,7 +267,7 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
     _in_agent_directory(native, "agt-a1")
     db._conn.execute("UPDATE sessions SET socket_path = ? WHERE name = 's1'", (native.socket,))
     db._conn.commit()
-    _patch_transports(monkeypatch, native, native)
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "check_session_status", check_session_status)
     gate = native.root / "exit"
@@ -316,7 +336,7 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
     _in_agent_directory(native, "agt-a1")
     db._conn.execute("UPDATE sessions SET socket_path = ? WHERE name = 's1'", (native.socket,))
     db._conn.commit()
-    _patch_transports(monkeypatch, native, native)
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     monkeypatch.setattr(
@@ -366,7 +386,7 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
     db = _create_stubs(tmp_path, monkeypatch, [])
     _in_agent_directory(native, "agt-s1")
     _fake_owner_realizers(monkeypatch)
-    _patch_transports(monkeypatch, native, native)
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     monkeypatch.setattr(
@@ -435,7 +455,7 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
         db._conn.execute("UPDATE sessions SET socket_path = ? WHERE name = 's1'", (native.socket,))
         db._conn.commit()
         options = {}
-    _patch_transports(monkeypatch, native, native)
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     monkeypatch.setattr(

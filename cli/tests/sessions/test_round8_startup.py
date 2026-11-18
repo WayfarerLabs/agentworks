@@ -21,7 +21,7 @@ from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 from tests._runtime_probes import server_for
 from tests.vm_access_support import Admin, RecordingVMAccess
 
-from .test_create_start_restart_orchestrated import BOOT_ID, _patch_transports, _requiring_template, _restart_fixture
+from .test_create_start_restart_orchestrated import BOOT_ID, _requiring_template, _restart_fixture, _route_guests
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from .test_native_startup import (
     _NATIVE_CAPTURE,
@@ -41,7 +41,7 @@ def bind_native_runtime(db, monkeypatch, native: NativeTarget) -> None:
     Path(native.socket).parent.mkdir()
     monkeypatch.setattr(tmux, "AGENT_SOCKET_ROOT", str(native.root))
     monkeypatch.setattr(manager, "_teardown_session", _lifecycle._teardown_session)
-    _patch_transports(monkeypatch, native, native)
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_ensure_pid", _pids._ensure_pid)
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
@@ -95,7 +95,7 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         assert native.batch_status([row]) == {"s1": SessionStatus.RUNNING}
         assert db.get_session("s1") == row
         proofs = [options for command, options in native.calls if "AGW_RUNTIME_LAUNCH=" in command]
-        assert proofs and all(options.get("timeout") == GUEST_OBSERVATION_TIMEOUT_SECONDS for options in proofs)
+        assert proofs and all(options.get("deadline") == GUEST_OBSERVATION_TIMEOUT_SECONDS for options in proofs)
         observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
         assert observed is not None
         original_pid = observed.pid

@@ -42,7 +42,7 @@ from agentworks.plugins.claude.conversation_probe import conversation_request
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
-from tests.vm_access_support import check_result, is_command_check, route_vm_access_to_target
+from tests.vm_access_support import check_result, is_command_check, route_vm_access_to_guest
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -61,32 +61,21 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_build_registry(monkeypatch)
 
 
-class _Result:
-    def __init__(self, ok: bool = True) -> None:
-        self.ok = ok
-        self.returncode = 0 if ok else 1
-        self.stdout = ""
-        self.stderr = ""
-
-
 # The id the op mints when the row holds none (``_common_stubs`` pins it), so a double can name its probe.
 _MINTED_SID = "6a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d"
 
 
-class _ClaudeTarget:
-    """Launch-target double for the claude-code op: its access answers the
+class _ClaudeGuest:
+    """Launch guest double for the claude-code op: its access answers the
     readiness ``command -v claude`` check and ``conversation_request(sid)``
     under any launch environment, recording each into a shared event log.
     ``transcript_present`` decides resume-vs-launch; ``sid`` is the id the op is expected to probe (``None``
-    when it should probe none). Its transport answers everything else."""
+    when it should probe none). Every other request completes with status 0."""
 
     def __init__(self, events: list[str], *, sid: str | None, transcript_present: bool) -> None:
         self._events = events
         self._sid = sid
         self._present = transcript_present
-
-    def run(self, cmd: str, **kwargs: object) -> _Result:
-        return _Result()
 
     def answer(self, call: Call) -> Result | None:
         if is_command_check(call.request):
@@ -136,8 +125,8 @@ def _harness_integration_template(
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
-def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _ClaudeTarget) -> None:
-    route_vm_access_to_target(monkeypatch, target)
+def _route_guest(monkeypatch: pytest.MonkeyPatch, target: _ClaudeGuest) -> None:
+    route_vm_access_to_guest(monkeypatch, target.answer)
 
 
 def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:
@@ -193,7 +182,7 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=None, transcript_present=False))
+    _route_guest(monkeypatch, _ClaudeGuest(events, sid=None, transcript_present=False))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -230,7 +219,7 @@ def test_create_forces_a_fresh_conversation_when_a_transcript_exists(
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=_MINTED_SID, transcript_present=True))
+    _route_guest(monkeypatch, _ClaudeGuest(events, sid=_MINTED_SID, transcript_present=True))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -277,7 +266,7 @@ def _restart_stubs(
 
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=sid, transcript_present=transcript_present))
+    _route_guest(monkeypatch, _ClaudeGuest(events, sid=sid, transcript_present=transcript_present))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch, harness_integration=harness_integration)
     _capture_pane_command(monkeypatch, events, captured)
@@ -476,7 +465,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _ClaudeTarget(events, sid=None, transcript_present=False))
+    _route_guest(monkeypatch, _ClaudeGuest(events, sid=None, transcript_present=False))
     _common_stubs(monkeypatch)
     _harness_integration_template(
         monkeypatch,

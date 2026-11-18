@@ -16,7 +16,6 @@ admin SSH transport are the fakes.
 from __future__ import annotations
 
 import contextlib
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -42,7 +41,14 @@ from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from tests._runtime_probes import owner_probe_line
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
-from tests.vm_access_support import install_access_recorder, route_vm_access_to_target
+from tests.vm_access_support import (
+    Call,
+    command_line,
+    guest_result,
+    install_access_recorder,
+    is_command_check,
+    route_vm_access_to_guest,
+)
 
 # Captured at import, before the autouse fixture stubs the SSH precondition.
 _REAL_SSH_BOUNDARY = require_vm_ssh_boundary
@@ -129,28 +135,29 @@ def _node_holding(db: Database, config: object, platform: object, *, vm_name: st
     return LiveVMNode(db, config, object(), row, site)  # type: ignore[arg-type]
 
 
-class _FakeAdminTarget:
-    """Admin transport double: every command is recorded and answers
-    ok, so tmux probes / kills, group ops, and the user delete all
-    proceed."""
+class _FakeAdminGuest:
+    """The guest behind the admin's access: every command line is recorded and
+    answers ok, so tmux probes / kills, group ops, and the user delete all
+    proceed; a stale-socket presence test finds nothing."""
 
     def __init__(self) -> None:
         self.commands: list[str] = []
 
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+    def answer(self, call: Call) -> Result | None:
+        cmd = command_line(call.request)
+        if cmd is None or is_command_check(call.request):
+            return None
         self.commands.append(cmd)
-        if owner_probe_line(cmd).startswith("test -e "):
-            return SimpleNamespace(ok=False, returncode=1, stdout="", stderr="")
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+        return guest_result(1 if owner_probe_line(cmd).startswith("test -e ") else 0)
 
 
 @pytest.fixture
-def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminTarget:
-    """One recording admin target behind the admin's access (its session
-    teardown, grants' group ops, initializer's user delete), whose commands
-    reach the double as their command lines."""
-    fake = _FakeAdminTarget()
-    route_vm_access_to_target(monkeypatch, fake)
+def target(monkeypatch: pytest.MonkeyPatch) -> _FakeAdminGuest:
+    """One recording guest behind the admin's access (its session teardown,
+    grants' group ops, initializer's user delete), answering each request
+    from its command line."""
+    fake = _FakeAdminGuest()
+    route_vm_access_to_guest(monkeypatch, fake.answer)
     return fake
 
 
@@ -208,7 +215,7 @@ def test_grant_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -234,7 +241,7 @@ def test_grant_stopped_vm_gate_burst_seeds_the_whole_union(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -259,7 +266,7 @@ def test_revoke_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -285,7 +292,7 @@ def test_revoke_stopped_vm_gate_burst_seeds_the_whole_union(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -309,7 +316,7 @@ def test_delete_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     synced: list[object],
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
@@ -328,7 +335,7 @@ def test_delete_on_a_vm_with_no_host_key_record_refuses_before_touching_the_row_
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     synced: list[object],
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
@@ -356,7 +363,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     synced: list[object],
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
@@ -380,7 +387,7 @@ def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -402,7 +409,7 @@ def test_delete_declined_confirm_aborts_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -423,7 +430,7 @@ def test_grant_empty_request_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config()
@@ -443,7 +450,7 @@ def test_revoke_unknown_agent_fails_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config()
@@ -465,7 +472,7 @@ def test_revoke_unknown_agent_fails_with_zero_resolves_and_zero_gate(
 def test_agent_scope_reaches_node_readiness(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -502,7 +509,7 @@ def test_agent_scope_reaches_node_readiness(
 def test_delete_choreography_end_to_end_standalone(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     synced: list[object],
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
@@ -614,7 +621,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     synced: list[object],
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
@@ -691,7 +698,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
 def test_grant_all_sets_flag_and_adds_every_vm_workspace(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -720,7 +727,7 @@ def test_grant_all_sets_flag_and_adds_every_vm_workspace(
 def test_grant_missing_workspace_warns_and_skips(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -742,7 +749,7 @@ def test_grant_missing_workspace_warns_and_skips(
 def test_revoke_named_workspace_with_implicit_access_keeps_membership(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -768,7 +775,7 @@ def test_revoke_named_workspace_with_implicit_access_keeps_membership(
 def test_revoke_all_warns_about_remaining_implicit_access(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeAdminTarget,
+    target: _FakeAdminGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:

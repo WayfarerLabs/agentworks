@@ -25,11 +25,14 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint, access_run_command
 from tests._runtime_probes import owner_probe_line
 from tests.vm_access_support import (
-    access_over_target,
+    Call,
+    RecordingVMAccess,
     check_result,
+    command_line,
+    guest_result,
     is_command_check,
     presence_check,
-    route_vm_access_to_target,
+    route_vm_access_to_guest,
 )
 
 from .conftest import (
@@ -51,30 +54,35 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 if TYPE_CHECKING:
     from agentworks.execution.results import Result
-    from tests.vm_access_support import AccessRecorder, Call
+    from tests.vm_access_support import AccessRecorder
 
 
 # Every access a command builds is the recording fake: these tests run no ssh.
 pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
-class _Result:
-    ok = True
-    returncode = 0
-    stdout = ""
-    stderr = ""
-
-
 class _Target:
-    """``Transport`` stub that records every ``run`` call against a shared log."""
+    """A guest that records every request's command line against a shared log and completes it with status 0."""
 
     def __init__(self, label: str, log: list[tuple[str, str]]) -> None:
         self.label = label
         self.log = log
 
-    def run(self, cmd: str, *_args: object, **_kwargs: object) -> _Result:
+    def answer(self, call: Call) -> Result | None:
+        cmd = command_line(call.request)
+        if cmd is None:
+            return None
         self.log.append((self.label, cmd))
-        return _Result()
+        return self.outcome(cmd)
+
+    def outcome(self, cmd: str) -> Result:
+        return guest_result()
+
+    def access(self) -> RecordingVMAccess:
+        """The admin's access, its requests answered here."""
+        access = RecordingVMAccess([], Admin())
+        access.answer = self.answer
+        return access
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -103,7 +111,7 @@ def _patch_common(
         "agent": _Target("agent", call_log),
     }
 
-    route_vm_access_to_target(monkeypatch, targets["admin"], targets["agent"])
+    route_vm_access_to_guest(monkeypatch, targets["admin"].answer, targets["agent"].answer)
     monkeypatch.setattr(
         "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
@@ -171,14 +179,8 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
     commands: list[tuple[str, str]] = []
 
     class _RemovalTarget(_Target):
-        def run(self, cmd: str, *_args: object, **_kwargs: object) -> _Result:
-            self.log.append((self.label, cmd))
-            if owner_probe_line(cmd).startswith("test -e "):
-                result = _Result()
-                result.ok = False
-                result.returncode = 1
-                return result
-            return _Result()
+        def outcome(self, cmd: str) -> Result:
+            return guest_result(1 if owner_probe_line(cmd).startswith("test -e ") else 0)
 
     target = _RemovalTarget("admin", commands)
     monkeypatch.setattr(
@@ -199,7 +201,7 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
 
     session_manager._teardown_session(
         session,  # type: ignore[arg-type]
-        access=access_over_target(target),
+        access=target.access(),
         target_owns_session=True,
         db=db,
         force=False,
@@ -237,7 +239,7 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
     with pytest.raises(BrokenStateError):
         session_manager._teardown_session(
             session,  # type: ignore[arg-type]
-            access=access_over_target(target),
+            access=target.access(),
             target_owns_session=True,
             db=db,
             force=False,
@@ -275,7 +277,7 @@ def test_admin_access_elevates_agent_runtime_absence_proof(
         with pytest.raises(BrokenStateError):
             session_manager._teardown_session(
                 session,  # type: ignore[arg-type]
-                access=access_over_target(target),
+                access=target.access(),
                 target_owns_session=False,
                 db=db,
                 force=False,
@@ -294,7 +296,7 @@ def test_admin_access_elevates_agent_runtime_absence_proof(
         with pytest.raises(ExternalError):
             session_manager._teardown_session(
                 session,  # type: ignore[arg-type]
-                access=access_over_target(target),
+                access=target.access(),
                 target_owns_session=False,
                 db=db,
                 force=False,
@@ -319,7 +321,7 @@ def test_runtime_absence_proof_rejects_a_malformed_stored_boot_identity(tmp_path
     with pytest.raises(StateError):
         session_manager._prove_stored_runtime_absent(
             session,  # type: ignore[arg-type]
-            run_command=access_run_command(access_over_target(_Target("admin", [])), deadline=None, elevated=False),
+            run_command=access_run_command(_Target("admin", []).access(), deadline=None, elevated=False),
         )
 
 
@@ -346,10 +348,12 @@ def test_legacy_teardown_reads_the_admins_own_server_without_elevating(
 
     calls: list[tuple[str, bool]] = []
 
-    class _RootAwareTarget:
-        def run(self, command: str, *, sudo: bool = False, **_kwargs: object) -> _Result:
-            calls.append((command, sudo))
-            return _Result()
+    def root_aware(call: Call) -> Result:
+        calls.append((str(command_line(call.request)), call.request.elevated))
+        return guest_result()
+
+    admin = RecordingVMAccess([], Admin())
+    admin.answer = root_aware
 
     presences = iter((ProbeStatus.PRESENT, ProbeStatus.ABSENT))
 
@@ -366,7 +370,7 @@ def test_legacy_teardown_reads_the_admins_own_server_without_elevating(
 
     session_manager._teardown_session(
         session,
-        access=access_over_target(_RootAwareTarget()),
+        access=admin,
         target_owns_session=False,
         db=db,
         force=False,
@@ -845,24 +849,18 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
 
     clap_error = "error: invalid value 'on-failure' for '--ask-for-approval <APPROVAL_POLICY>'"
 
-    class _ScriptedResult:
-        def __init__(self, ok: bool = True, stdout: str = "") -> None:
-            self.ok = ok
-            self.returncode = 0 if ok else 1
-            self.stdout = stdout
-            self.stderr = ""
-
-    class _DeadPaneTarget:
-        """Admin transport whose fresh tmux session holds a dead pane."""
-
-        def run(self, cmd: str, *_args: object, **_kwargs: object) -> _ScriptedResult:
-            if owner_probe_line(cmd).startswith("test -e "):
-                return _ScriptedResult(ok=False)
-            if "#{pane_dead}" in cmd:
-                return _ScriptedResult(ok=True, stdout="AGW_RUNTIME_PANE=1 2\n")
-            if "capture-pane" in cmd:
-                return _ScriptedResult(ok=True, stdout=f"{clap_error}\n")
-            return _ScriptedResult()
+    def dead_pane(call: Call) -> Result | None:
+        """The admin's guest, whose fresh tmux session holds a dead pane."""
+        cmd = command_line(call.request)
+        if cmd is None:
+            return None
+        if owner_probe_line(cmd).startswith("test -e "):
+            return guest_result(1)
+        if "#{pane_dead}" in cmd:
+            return guest_result(stdout="AGW_RUNTIME_PANE=1 2\n")
+        if "capture-pane" in cmd:
+            return guest_result(stdout=f"{clap_error}\n")
+        return guest_result()
 
     monkeypatch.setattr(
         tmux_mod,
@@ -871,8 +869,7 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
             ProbeStatus.PRESENT, TmuxServerFingerprint(pid=12345, boot_id=BOOT_ID, start_ticks=1)
         ),
     )
-    target = _DeadPaneTarget()
-    route_vm_access_to_target(monkeypatch, target)
+    route_vm_access_to_guest(monkeypatch, dead_pane)
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
 

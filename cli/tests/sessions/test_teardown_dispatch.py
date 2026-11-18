@@ -18,7 +18,7 @@ from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.sessions import tmux
 from agentworks.sessions.manager._teardown import DedicatedTeardownPlan, execute_dedicated_teardown
 from tests.conftest import current_user_name
-from tests.vm_access_support import Admin, RecordingVMAccess, access_over_target
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 from .test_native_startup import _NATIVE_CAPTURE, NativeTarget, launch
 from .test_native_startup import native as native
@@ -52,7 +52,7 @@ def _sources(access: RecordingVMAccess) -> list[str]:
 
 def test_a_teardown_kills_the_matching_server_once_and_repeats_only_its_absence_poll(native: NativeTarget) -> None:
     launch(native, "sleep 30")
-    access = access_over_target(native)
+    access = native.access()
 
     execute_dedicated_teardown(_plan(native, access))
 
@@ -78,7 +78,7 @@ def test_a_teardown_whose_probe_does_not_complete_removes_and_signals_nothing(
     native: NativeTarget, force: bool
 ) -> None:
     launch(native, "sleep 30")
-    probed = access_over_target(native)
+    probed = native.access()
     plan = _plan(native, probed, force=force)
     unknown = RecordingVMAccess([], Admin())
     unknown.default_outcome = Result(Unknown(UnknownReason.DEADLINE))

@@ -41,7 +41,7 @@ from agentworks import output
 from agentworks.db import Database, InitStatus
 
 from .conftest import stub_build_registry, stub_vm_gates
-from .vm_access_support import route_vm_access_to_target
+from .vm_access_support import route_vm_access_to_guest
 
 
 @pytest.fixture(autouse=True)
@@ -102,20 +102,8 @@ def _install_session_prep_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.conftest import stub_session_resolvers
 
     stub_vm_gates(monkeypatch)
-
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *a: object, **k: object) -> _Result:
-            return _Result()
-
-    factory = lambda *a, **k: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    route_vm_access_to_target(monkeypatch, _Target())
+    # Every request completes with status 0 and no output; every command check finds its command.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)
     stub_session_resolvers(monkeypatch)
 
 

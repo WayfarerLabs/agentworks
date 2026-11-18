@@ -34,17 +34,20 @@ from agentworks.sessions.tmux import (
     ADMIN_SOCKET_ROOT,
     AGENT_SOCKET_ROOT,
     ProbeStatus,
+    access_run_command,
     probe_tmux_server_pid,
     runtime_probe_command,
 )
 from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 from tests._runtime_probes import framed_runtime_result
 from tests.conftest import requires_posix_shell, requires_symlinks
-from tests.vm_access_support import Admin, Call, RecordingVMAccess, answer_from_target
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, command_line
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from agentworks.sessions.tmux import RunCommand
 
 
 ADMIN_SOCKETS = f"{ADMIN_SOCKET_ROOT}/agentworks"
@@ -71,28 +74,33 @@ class _FakeTarget:
         self.commands: list[str] = []
         self.call_options: list[tuple[bool, float | None]] = []
 
-    def run(
-        self,
-        command: str,
-        *,
-        check: bool = True,
-        sudo: bool = False,
-        timeout: float | None = None,
-        input_data: str | None = None,
-    ) -> _FakeResult:
+    def answer(self, call: Call) -> Result | None:
+        """Answer a ``Command`` or ``Script`` from its command line, noting whether it was root's and its deadline."""
+        line = command_line(call.request)
+        if line is None:
+            return None
+        self.call_options.append((call.request.elevated, call.request.deadline))
+        result = self.dispatch(line, elevated=call.request.elevated)
+        return Result(Completed(result.returncode), result.stdout.encode(), result.stderr.encode())
+
+    def dispatch(self, command: str, *, elevated: bool = False) -> _FakeResult:
         self.commands.append(command)
-        self.call_options.append((sudo, timeout))
         for pattern, result in self._responses.items():
             if pattern in command:
                 return framed_runtime_result(command, result)
         return framed_runtime_result(command, _FakeResult())
 
 
-def _admin(target: object) -> RecordingVMAccess:
-    """The admin's access, each request answered by ``target`` as its command line, ``sudo`` for root's."""
+def _admin(target: _FakeTarget) -> RecordingVMAccess:
+    """The admin's access, each request answered by ``target`` (:meth:`_FakeTarget.answer`)."""
     access = RecordingVMAccess([], Admin())
-    access.answer = answer_from_target(target)
+    access.answer = target.answer
     return access
+
+
+def _run(target: _FakeTarget) -> RunCommand:
+    """The admin's tmux ``RunCommand`` over :func:`_admin`, as a primitive's caller builds it."""
+    return access_run_command(_admin(target), deadline=None, elevated=False)
 
 
 def _session(
@@ -718,15 +726,14 @@ def test_agent_status_elevates_cross_user_pid_probe() -> None:
             )
             self.pid_sudo: list[bool] = []
 
-        def run(self, command: str, **kwargs: object) -> _FakeResult:
+        def dispatch(self, command: str, *, elevated: bool = False) -> _FakeResult:
             if "test -d /proc/42" in command:
-                elevated = kwargs.get("sudo") is True
                 self.pid_sudo.append(elevated)
                 return framed_runtime_result(
                     command,
                     _FakeResult(ok=elevated, returncode=0 if elevated else 2, stdout="present" if elevated else ""),
                 )
-            return super().run(command, **kwargs)
+            return super().dispatch(command, elevated=elevated)
 
     target = _ElevatedPidTarget()
     assert _check(session, admin=_admin(target)) == SessionStatus.BROKEN
@@ -918,17 +925,17 @@ def test_stopped_pid_sentinel() -> None:
 
 def test_probe_pid_success() -> None:
     target = _FakeTarget({"display-message": _FakeResult(ok=True, stdout="12345\n")})
-    assert probe_tmux_server_pid(run_command=target.run).value == 12345
+    assert probe_tmux_server_pid(run_command=_run(target)).value == 12345
 
 
 def test_probe_pid_not_running() -> None:
     target = _FakeTarget({"display-message": _FakeResult(ok=False, stderr="no server running on /tmp/tmux")})
-    assert probe_tmux_server_pid(run_command=target.run).status is ProbeStatus.ABSENT
+    assert probe_tmux_server_pid(run_command=_run(target)).status is ProbeStatus.ABSENT
 
 
 def test_probe_pid_with_socket() -> None:
     target = _FakeTarget({"display-message": _FakeResult(ok=True, stdout="99999\n")})
-    result = probe_tmux_server_pid(run_command=target.run, socket_path="/run/test.sock")
+    result = probe_tmux_server_pid(run_command=_run(target), socket_path="/run/test.sock")
     assert result.value == 99999
     assert "-S /run/test.sock" in target.commands[0]
 
@@ -1343,8 +1350,8 @@ def test_ensure_pid_raises_on_unresolvable() -> None:
 
     session = _owned(_session("s1", pid=None, socket_path="/sock", mode="agent"))
 
-    class _FailTarget:
-        def run(self, command, *, check=True, sudo=False, timeout=None):
+    class _FailTarget(_FakeTarget):
+        def dispatch(self, command: str, *, elevated: bool = False) -> _FakeResult:
             # has-session succeeds but display-message fails -> can't recover PID
             if "has-session" in command:
                 return _FakeResult(ok=True)

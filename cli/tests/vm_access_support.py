@@ -284,6 +284,36 @@ def command_line(request: object) -> str | None:
     return None
 
 
+def guest_result(returncode: int = 0, stdout: str = "", stderr: str = "") -> Result:
+    """What a guest command that exited ``returncode`` with these streams completes as."""
+    return Result(Completed(returncode), stdout.encode(), stderr.encode())
+
+
+def route_vm_access_to_guest(
+    monkeypatch: pytest.MonkeyPatch,
+    answer: Callable[[Call], Result | BaseException | None],
+    agent_answer: Callable[[Call], Result | BaseException | None] | None = None,
+) -> AccessRecorder:
+    """Route ``execution.vm_access`` to recording accesses whose requests ``answer`` models.
+
+    For a double that models the guest: an agent's requests go to
+    ``agent_answer`` when one is given. A required-command check the answer
+    leaves (``None``) finds its command; anything else it leaves gets the
+    access's other outcomes.
+    """
+    recorder = install_access_recorder(monkeypatch)
+
+    def routed(call: Call) -> Result | BaseException | None:
+        model = answer if agent_answer is None or isinstance(call.identity, Admin) else agent_answer
+        result = model(call)
+        if result is None and is_command_check(call.request):
+            return check_result(call.request, 0)
+        return result
+
+    recorder.answer = routed
+    return recorder
+
+
 def is_command_check(request: object) -> bool:
     """Whether ``request`` is a ``command_checks`` probe."""
     from agentworks.command_checks import STATUS_PREFIX
@@ -481,21 +511,20 @@ __all__ = [
     "Agent",
     "Call",
     "RecordingVMAccess",
-    "access_over_target",
     "account_shell",
     "answer_command_checks",
     "answer_destination_identity",
     "check_result",
     "command_check_access",
     "command_line",
-    "files_over_target",
+    "guest_result",
     "is_command_check",
     "presence_check",
     "local_files",
     "local_remote_argv",
     "local_vm_access",
     "rewrite_launcher",
-    "route_vm_access_to_target",
+    "route_vm_access_to_guest",
     "run_file_program_locally",
     "run_requests_locally",
 ]
@@ -552,73 +581,3 @@ def answer_destination_identity(call: Call) -> Result | None:
     if isinstance(request, Command) and request.argv[:2] in (("cat", "/etc/machine-id"), ("stat", "-Lc")):
         return Result(Completed(0), b"native-identity\n")
     return None
-
-
-def answer_from_target(target: Any) -> Callable[[Call], Result | None]:
-    """An ``answer`` that runs each ``Command`` and ``Script`` on a legacy transport double, as its command line.
-
-    For manager tests whose double models the guest as a legacy ``Transport``
-    while a step they drive has moved onto ``VMAccess``: the double sees the
-    same command it did, ``shlex.join`` of a command's argv or a script's
-    source, with ``sudo`` for an elevated request, ``timeout`` for its
-    deadline, ``input_data`` for its ``Bytes`` input and ``env`` for its
-    environment when it has one. Anything else is left to the access's other
-    outcomes.
-    """
-    from agentworks.execution.requests import Bytes, Command, Script
-
-    def answer(call: Call) -> Result | None:
-        request = call.request
-        if isinstance(request, Command):
-            line = shlex.join(request.argv)
-        elif isinstance(request, Script):
-            line = request.source
-        else:
-            return None
-        options: dict[str, Any] = {"sudo": request.elevated, "check": False, "timeout": request.deadline}
-        if isinstance(request.stdin, Bytes):
-            options["input_data"] = request.stdin.data.decode()
-        if request.env:
-            options["env"] = dict(request.env)
-        outcome = target.run(line, **options)
-        stdout, stderr = getattr(outcome, "stdout", "") or "", getattr(outcome, "stderr", "") or ""
-        return Result(
-            Completed(getattr(outcome, "returncode", 0 if getattr(outcome, "ok", True) else 1)),
-            stdout.encode() if isinstance(stdout, str) else stdout,
-            stderr.encode() if isinstance(stderr, str) else stderr,
-        )
-
-    return answer
-
-
-def route_vm_access_to_target(monkeypatch: pytest.MonkeyPatch, target: Any, agent: Any = None) -> AccessRecorder:
-    """Route ``execution.vm_access`` to a recording fake whose commands run on ``target`` (see answer_from_target).
-
-    An agent's requests run on ``agent`` when one is given. A double with
-    an ``answer(call)`` answers first; every required-command check
-    it leaves finds its command.
-    """
-    recorder = install_access_recorder(monkeypatch)
-
-    def answer(call: Call) -> Result | None:
-        double = target if agent is None or isinstance(call.identity, Admin) else agent
-        own = getattr(double, "answer", None)
-        result = own(call) if callable(own) else None
-        if result is None and is_command_check(call.request):
-            result = check_result(call.request, 0)
-        return result if result is not None else answer_from_target(double)(call)
-
-    recorder.answer = answer
-    return recorder
-
-
-def access_over_target(target: Any, identity: Identity | None = None) -> RecordingVMAccess:
-    """A recording access whose commands run on ``target`` (see answer_from_target), the admin's by default."""
-    access = RecordingVMAccess([], identity or Admin())
-    access.answer = answer_from_target(target)
-    return access
-
-
-def files_over_target(target: Any, *, deadline: float | None = None) -> Files:
-    """The admin's ``Files`` over a recording access whose commands run on ``target`` (see answer_from_target)."""
-    return access_over_target(target).files(deadline=deadline)

@@ -30,7 +30,7 @@ from agentworks.sessions import manager
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from tests.conftest import stub_build_registry
 from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.sessions.test_create_start_restart_orchestrated import _patch_transports, _restart_fixture
+from tests.sessions.test_create_start_restart_orchestrated import _restart_fixture, _route_guests
 
 # Every access a command builds is the recording fake: these tests run no ssh.
 pytestmark = [
@@ -63,7 +63,7 @@ def lifecycle(tmp_path, monkeypatch):
     stub_build_registry(monkeypatch)
     db, events = _restart_fixture(tmp_path, monkeypatch)
     target = LocalFixtureTransport(tmp_path / "native")
-    _patch_transports(monkeypatch, target, target)
+    _route_guests(monkeypatch, target, target)
     # The shared lifecycle fixture simulates a completed runtime without
     # creating tmux. Keep its startup observation on that same runtime seam.
     monkeypatch.setattr("agentworks.sessions.tmux.startup_protection_enabled", lambda *a, **k: False)

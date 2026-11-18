@@ -11,7 +11,7 @@ model: the parity carries the node layer could not prove on its own.
 - the SESSION operation scope reaches the held harness integration's readiness.
 
 Same fake surfaces as the imperative oracle tests: SimpleNamespace
-config, stubbed registry/gates/transports; the service-layer functions
+config, stubbed registry/gates, recording accesses; the service-layer functions
 are driven for real.
 """
 
@@ -48,10 +48,12 @@ from tests.conftest import seed_vm_trust
 from tests.vm_access_support import (
     AccessRecorder,
     check_result,
+    command_line,
+    guest_result,
     install_access_recorder,
     is_command_check,
     presence_check,
-    route_vm_access_to_target,
+    route_vm_access_to_guest,
 )
 
 from ..conftest import (
@@ -89,32 +91,18 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_ssh_identity(monkeypatch)
 
 
-class _Result:
-    def __init__(self, ok: bool = True) -> None:
-        self.ok = ok
-        self.returncode = 0 if ok else 20
-        self.stdout = ""
-        self.stderr = ""
-
-
 class _Target:
-    """Launch-target double: records probe events into a shared log.
+    """Launch guest double: records probe events into a shared log.
 
-    Its transport side answers ``run`` and ``write_file``; :meth:`answer`
-    answers its access's required-command checks, finding every command
-    except those in ``missing``.
+    :meth:`answer` answers its access's required-command checks, finding
+    every command except those in ``missing``, the tmuxinator file's write
+    and removal, and the startup-protection read (off); every other request
+    completes with status 0.
     """
 
     def __init__(self, events: list[str], *, missing: set[str] | None = None) -> None:
         self._events = events
         self._missing = missing or set()
-
-    def run(self, cmd: str, **kwargs: object) -> _Result:
-        if "AGW_RUNTIME_STARTUP=" in cmd:
-            result = _Result()
-            result.stdout = "\nAGW_RUNTIME_STARTUP=off\n"
-            return result
-        return _Result()
 
     def answer(self, call: Call) -> Result | None:
         request = call.request
@@ -125,7 +113,10 @@ class _Target:
             self._events.append(f"tmuxinator_write:{json.loads(request.args[1])['path']}")
             return Result(Completed(0))
         if not is_command_check(request):
-            return None
+            line = command_line(request)
+            return (
+                guest_result(stdout="\nAGW_RUNTIME_STARTUP=off\n") if line and "AGW_RUNTIME_STARTUP=" in line else None
+            )
         self._events.append("probe")
         return check_result(request, 20 if presence_check(request) in self._missing else 0)
 
@@ -164,9 +155,12 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
     )
 
 
-def _patch_transports(monkeypatch: pytest.MonkeyPatch, admin: _Target, agent: _Target) -> AccessRecorder:
-    """Route the admin's and the agent's accesses to ``admin`` and ``agent`` (``route_vm_access_to_target``)."""
-    return route_vm_access_to_target(monkeypatch, admin, agent)
+def _route_guests(monkeypatch: pytest.MonkeyPatch, admin: _Target, agent: _Target) -> AccessRecorder:
+    """Route the admin's and the agent's accesses to ``admin`` and ``agent`` (``route_vm_access_to_guest``).
+
+    Each answer is looked up per request, so a test may replace a double's ``answer`` afterwards.
+    """
+    return route_vm_access_to_guest(monkeypatch, lambda call: admin.answer(call), lambda call: agent.answer(call))
 
 
 def test_create_flag_validation_precedes_unrelated_unsupported_live_overlay(
@@ -227,7 +221,7 @@ def _restart_fixture(
 
     events: list[str] = []
     runtime_status = [status]
-    _patch_transports(monkeypatch, _Target(events), _Target(events, missing=missing))
+    _route_guests(monkeypatch, _Target(events), _Target(events, missing=missing))
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     _requiring_template(monkeypatch, "claude")
@@ -935,7 +929,7 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
     from agentworks.sessions import tmux as tmux_mod
 
     db = _seed_db(tmp_path)
-    _patch_transports(monkeypatch, _Target(events), _Target(events))
+    _route_guests(monkeypatch, _Target(events), _Target(events))
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     _requiring_template(monkeypatch, "claude")
@@ -1796,7 +1790,7 @@ def test_restart_pane_command_uses_resume_command_and_session_workspace(
 # resolution happens in the command's own recorded passes, all before
 # the walk-away point; nothing resolves after them. Real config,
 # registry, resolver, and backend loop (env-var backend); the platform
-# backend ops, the reachability probe, and the transports are the
+# backend ops, the reachability probe, and the accesses are the
 # fakes.
 
 SESSION_ENV_MANIFESTS = [
@@ -1875,7 +1869,7 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
-    _patch_transports(monkeypatch, _Target(events), _Target(events))
+    _route_guests(monkeypatch, _Target(events), _Target(events))
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
 
@@ -2004,7 +1998,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
     events: list[str] = []
     captured_env: dict[str, str] = {}
-    _patch_session_ops(monkeypatch, events, captured_env)  # transports must never be reached
+    _patch_session_ops(monkeypatch, events, captured_env)  # the accesses must never be reached
 
     with pytest.raises(StateError) as caught:
         create_session(

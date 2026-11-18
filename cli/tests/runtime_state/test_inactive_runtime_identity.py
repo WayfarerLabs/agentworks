@@ -13,6 +13,7 @@ import pytest
 from agentworks.db import PID_STOPPED, DesiredRuntimeState, SessionRuntimeSnapshot, SessionStatus, VMStatus
 from agentworks.errors import StateError
 from agentworks.execution.access import Admin
+from agentworks.execution.results import Completed, Result
 from agentworks.runtime_state import reconcile_session
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _status
@@ -20,7 +21,7 @@ from tests._runtime_probes import owner_probe_line, server_for
 from tests.runtime_state.test_composition import REFUSE, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 from tests.runtime_state.test_public_stop import _running
-from tests.vm_access_support import RecordingVMAccess, answer_from_target
+from tests.vm_access_support import Call, RecordingVMAccess, command_line
 
 if TYPE_CHECKING:
     from agentworks.db import SessionRow
@@ -43,7 +44,15 @@ class _Target:
         self.model = model
         self.vm = vm
 
-    def run(self, command: str, **kwargs: object) -> SimpleNamespace:
+    def answer(self, call: Call) -> Result | None:
+        """Answer a ``Command`` or ``Script`` as this VM's tmux servers would."""
+        line = command_line(call.request)
+        if line is None:
+            return None
+        guest = self.dispatch(line)
+        return Result(Completed(guest.returncode), guest.stdout.encode(), guest.stderr.encode())
+
+    def dispatch(self, command: str) -> SimpleNamespace:
         command = owner_probe_line(command)
         if "kill-server" in command:
             words = shlex.split(command)
@@ -69,9 +78,6 @@ class _Target:
             stdout="AGW_RUNTIME_STARTUP=off\n" if "AGW_RUNTIME_STARTUP=" in command else "",
             stderr="",
         )
-
-    def write_file(self, *args: object, **kwargs: object) -> None:
-        pass
 
 
 class _Memory:
@@ -134,9 +140,9 @@ class _Memory:
 
 
 def _access(model: _Memory, vm: str) -> RecordingVMAccess:
-    """The admin's access on ``vm``, its commands run on that VM's double."""
+    """The admin's access on ``vm``, its requests answered by that VM's double."""
     access = RecordingVMAccess([], Admin())
-    access.answer = answer_from_target(_Target(model, vm))
+    access.answer = _Target(model, vm).answer
     return access
 
 

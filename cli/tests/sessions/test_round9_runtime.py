@@ -15,7 +15,6 @@ from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from tests._runtime_probes import server_for
-from tests.vm_access_support import files_over_target
 
 from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
@@ -323,7 +322,7 @@ def test_maintenance_socket_guard_covers_the_entire_framed_probe(monkeypatch, na
         return result
 
     monkeypatch.setattr(native, "run", replace_after_enumeration)
-    assert tmux._cleanup_stale_sockets_under(files_over_target(native), str(scan), owner="agt-a") == 0
+    assert tmux._cleanup_stale_sockets_under(native.access().files(), str(scan), owner="agt-a") == 0
     assert stale.is_symlink()
     assert not observed.exists()
     assert native.native("list-sessions").ok

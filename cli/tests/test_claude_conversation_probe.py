@@ -8,14 +8,13 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
 from agentworks.errors import StateError
 from agentworks.execution.results import Completed, Result
 from agentworks.plugins.claude.conversation_probe import ConversationProbe, probe_conversation
-from tests.vm_access_support import Admin, RecordingVMAccess, access_over_target
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, command_line, guest_result
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="The launch target uses a POSIX login shell")
 
@@ -32,16 +31,27 @@ class _LocalTarget:
         self.commands: list[str] = []
         self.env = {**os.environ, "SHELL": "/bin/sh", "CLAUDE_CONFIG_DIR": str(root)}
 
-    def run(self, command: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def answer(self, call: Call) -> Result | None:
+        """Run a request's command line here, with the request's environment over the target's."""
+        command = command_line(call.request)
+        if command is None:
+            return None
         self.commands.append(command)
-        environment = {**self.env, **cast(dict[str, str], kwargs.get("env") or {})}
-        return subprocess.run(
+        environment = {**self.env, **call.request.env}
+        completed = subprocess.run(
             [environment["SHELL"], "-lic", command], env=environment, capture_output=True, text=True, timeout=20
         )
+        return guest_result(completed.returncode, completed.stdout, completed.stderr)
+
+    def access(self) -> RecordingVMAccess:
+        """The admin's access, its requests run here."""
+        access = RecordingVMAccess([], Admin())
+        access.answer = self.answer
+        return access
 
 
 def _probe(target: _LocalTarget, *, detect: bool = True, sid: str = _SID) -> ConversationProbe:
-    return probe_conversation(access_over_target(target), sid, detect=detect)
+    return probe_conversation(target.access(), sid, detect=detect)
 
 
 def _answering(status: int, stdout: str = "") -> RecordingVMAccess:
@@ -296,7 +306,7 @@ def test_existence_survives_detection_program_failure(target: _LocalTarget, tmp_
 def test_configured_launch_environment_selects_probe_root(target: _LocalTarget, tmp_path: Path) -> None:
     alternate = tmp_path / "configured-root"
     _transcript(alternate, [_link()])
-    observed = probe_conversation(access_over_target(target), _SID, environment={"CLAUDE_CONFIG_DIR": str(alternate)})
+    observed = probe_conversation(target.access(), _SID, environment={"CLAUDE_CONFIG_DIR": str(alternate)})
     assert observed == ConversationProbe(True, (_NEXT,))
 
 

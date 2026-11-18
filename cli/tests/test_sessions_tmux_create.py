@@ -35,7 +35,7 @@ from agentworks.sessions.tmux import (
     parse_process_start_ticks,
 )
 from tests._runtime_probes import framed_runtime_result, owner_switch
-from tests.vm_access_support import Admin, Call, RecordingVMAccess, files_over_target
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, command_line, guest_result
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -247,27 +247,34 @@ def test_tmux_presence_classifier_distinguishes_absence_from_permission_failure(
 def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None:
     from agentworks.sessions.tmux import _cleanup_stale_sockets_under
 
-    class _CleanupTarget:
+    class _CleanupGuest:
         def __init__(self, diagnostic: str) -> None:
             self.diagnostic = diagnostic
             self.commands: list[str] = []
 
-        def run(self, command: str, **kwargs: object) -> _SpyResult:
+        def answer(self, call: Call) -> Result | None:
+            command = command_line(call.request)
+            if command is None:
+                return None
             self.commands.append(command)
             if "find " in command:
-                return _SpyResult(stdout="\nAGW_STALE_SOCKETS_BEGIN\0/run/agentworks/s.sock\0AGW_STALE_SOCKETS_END\0")
+                return guest_result(stdout="\nAGW_STALE_SOCKETS_BEGIN\0/run/agentworks/s.sock\0AGW_STALE_SOCKETS_END\0")
             if "list-sessions" in command:
-                result = _SpyResult(returncode=1)
-                result.stderr = self.diagnostic
-                return framed_runtime_result(command, result)
-            return _SpyResult()
+                result = framed_runtime_result(command, _SpyResult(returncode=1))
+                return guest_result(1, result.stdout, result.stderr + self.diagnostic)
+            return guest_result()
 
-    unknown = _CleanupTarget("error connecting to /run/agentworks/s.sock (Permission denied)")
-    assert _cleanup_stale_sockets_under(files_over_target(unknown), "/run/agentworks", owner="agt-a") == 0
+        def files(self) -> Files:
+            access = RecordingVMAccess([], Admin())
+            access.answer = self.answer
+            return access.files()
+
+    unknown = _CleanupGuest("error connecting to /run/agentworks/s.sock (Permission denied)")
+    assert _cleanup_stale_sockets_under(unknown.files(), "/run/agentworks", owner="agt-a") == 0
     assert not any("rm -f -- " in command for command in unknown.commands)
 
-    absent = _CleanupTarget("no server running on /run/agentworks/s.sock")
-    assert _cleanup_stale_sockets_under(files_over_target(absent), "/run/agentworks", owner="agt-a") == 1
+    absent = _CleanupGuest("no server running on /run/agentworks/s.sock")
+    assert _cleanup_stale_sockets_under(absent.files(), "/run/agentworks", owner="agt-a") == 1
     assert sum("rm -f -- " in command for command in absent.commands) == 1
     # The server probe runs as the directory's owner; listing and removal do not.
     probes = [command for command in absent.commands if "list-sessions" in command]

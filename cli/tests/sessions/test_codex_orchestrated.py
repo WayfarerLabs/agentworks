@@ -41,7 +41,7 @@ from agentworks.plugins.codex.harness_integration import discovery_probe, record
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
-from tests.vm_access_support import check_result, is_command_check, route_vm_access_to_target
+from tests.vm_access_support import check_result, is_command_check, route_vm_access_to_guest
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
@@ -69,16 +69,8 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_build_registry(monkeypatch)
 
 
-class _Result:
-    def __init__(self, returncode: int = 0, stdout: str = "") -> None:
-        self.returncode = returncode
-        self.ok = returncode == 0
-        self.stdout = stdout
-        self.stderr = ""
-
-
-class _CodexTarget:
-    """Launch-target double for the codex op: its access answers the
+class _CodexGuest:
+    """Launch guest double for the codex op: its access answers the
     readiness ``command -v codex`` check and the three op-time probes (the
     recorder read, the ``*-<sid>.jsonl`` rollout presence probe, and the
     source-filtered discovery probe), recording each into a shared event
@@ -103,9 +95,6 @@ class _CodexTarget:
         self._present = rollout_present
         self._discovered = discovered
         self._bound = bound
-
-    def run(self, cmd: str, **kwargs: object) -> _Result:
-        return _Result()
 
     def answer(self, call: Call) -> Result | None:
         if is_command_check(call.request):
@@ -158,8 +147,8 @@ def _harness_integration_template(monkeypatch: pytest.MonkeyPatch, config: dict[
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
-def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _CodexTarget) -> None:
-    route_vm_access_to_target(monkeypatch, target)
+def _route_guest(monkeypatch: pytest.MonkeyPatch, target: _CodexGuest) -> None:
+    route_vm_access_to_guest(monkeypatch, target.answer)
 
 
 def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:
@@ -197,7 +186,7 @@ def _restart_stubs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    target: _CodexTarget,
+    target: _CodexGuest,
     events: list[str],
     stored_state: dict[str, object] | None,
 ) -> tuple[Database, dict[str, str]]:
@@ -214,7 +203,7 @@ def _restart_stubs(
     )
 
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, target)
+    _route_guest(monkeypatch, target)
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -263,7 +252,7 @@ def test_create_launches_fresh_without_probing_any_session_state(
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _CodexTarget(events, recorded=_SID, rollout_present=True, discovered=f"{_ROLLOUT}\n"))
+    _route_guest(monkeypatch, _CodexGuest(events, recorded=_SID, rollout_present=True, discovered=f"{_ROLLOUT}\n"))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -302,7 +291,7 @@ def test_restart_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, m
     the recorder during the last launch, so the next op reads it, resumes
     it, and the id lands on the row in the namespaced shape."""
     events: list[str] = []
-    target = _CodexTarget(events, recorded=_SID, rollout_present=True)
+    target = _CodexGuest(events, recorded=_SID, rollout_present=True)
     db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
     _restart(db)
@@ -324,7 +313,7 @@ def test_restart_resumes_the_stored_id_without_a_recording(tmp_path: Path, monke
     resumes it verbatim even though the recorder file is gone (the
     recording is a binding mechanism, not the system of record)."""
     events: list[str] = []
-    target = _CodexTarget(events, rollout_present=True)
+    target = _CodexGuest(events, rollout_present=True)
     db, captured = _restart_stubs(
         tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
@@ -348,7 +337,7 @@ def test_restart_adopts_a_discovered_rollout_when_nothing_is_recorded(
     id, one source-filtered rollout in the workspace, so the op adopts its
     uuid and persists it."""
     events: list[str] = []
-    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n", rollout_present=True)
+    target = _CodexGuest(events, discovered=f"{_ROLLOUT}\n", rollout_present=True)
     db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
     _restart(db)
@@ -369,7 +358,7 @@ def test_restart_with_several_candidates_opens_the_picker_and_binds_nothing(
     pane, not as a failed op: the row keeps no id, and the next completed
     turn binds whatever the human picked."""
     events: list[str] = []
-    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")
+    target = _CodexGuest(events, discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")
     db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
     _restart(db)
@@ -389,7 +378,7 @@ def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     gone (archived or deleted) drops the id, finds nothing to adopt, and
     launches fresh with the stale-specific decision line."""
     events: list[str] = []
-    target = _CodexTarget(events, rollout_present=False)
+    target = _CodexGuest(events, rollout_present=False)
     db, captured = _restart_stubs(
         tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
@@ -408,7 +397,7 @@ def test_restart_retires_a_marker_era_blob_key(tmp_path: Path, monkeypatch: pyte
     2026-08-04) still resumes: the retired ``discovery_marker`` key is
     dropped from the persisted blob and its file removed by the pane."""
     events: list[str] = []
-    target = _CodexTarget(events, rollout_present=True)
+    target = _CodexGuest(events, rollout_present=True)
     db, captured = _restart_stubs(
         tmp_path,
         monkeypatch,
@@ -437,7 +426,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
     ``codex`` namespace, and the claude id is neither read (no inherited
     ``session_id``) nor dropped on persist."""
     events: list[str] = []
-    target = _CodexTarget(events, recorded=_SID, rollout_present=True)
+    target = _CodexGuest(events, recorded=_SID, rollout_present=True)
     db, captured = _restart_stubs(
         tmp_path,
         monkeypatch,
@@ -476,7 +465,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _CodexTarget(events))
+    _route_guest(monkeypatch, _CodexGuest(events))
     _common_stubs(monkeypatch)
     _harness_integration_template(
         monkeypatch,
