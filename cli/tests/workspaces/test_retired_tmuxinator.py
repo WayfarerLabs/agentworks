@@ -243,12 +243,44 @@ def test_a_workspace_hidden_by_an_unsearchable_parent_is_warned(
 
 
 @requires_guest_shell
-def test_a_workspace_directory_that_is_gone_is_a_quiet_success(
+@skip_as_root
+def test_a_workspace_reached_through_a_link_into_an_unsearchable_directory_is_warned(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
 ) -> None:
     target, workspace, _entries = guest
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    shutil.rmtree(_workspace(db, tmp_path / "guest" / "workspaces", "gone"))
+    locked = tmp_path / "guest" / "locked"
+    (locked / "inner").mkdir(parents=True)
+    through = tmp_path / "guest" / "through"
+    through.symlink_to(locked / "inner")
+    hidden = _workspace(db, through, "ws")
+    locked.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        locked.chmod(0o755)
+
+    assert (hidden / ".tmuxinator.yml").exists()
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert len(captured_output.warnings) == 1
+    assert str(hidden) in captured_output.warnings[0]
+
+
+@requires_guest_shell
+@pytest.mark.parametrize("dangling", [False, True], ids=["deleted", "dangling-link"])
+def test_a_workspace_directory_that_is_gone_is_a_quiet_success(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    dangling: bool,
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    gone = _workspace(db, tmp_path / "guest" / "workspaces", "gone")
+    shutil.rmtree(gone)
+    if dangling:
+        gone.symlink_to(tmp_path / "guest" / "nowhere")
 
     _reinit(db, target)
 
@@ -294,12 +326,45 @@ def test_a_discovery_directory_hidden_by_an_unsearchable_ancestor_is_warned(
 
 
 @requires_guest_shell
+@skip_as_root
 @pytest.mark.parametrize("levels_up", [0, 1], ids=["discovery-directory", "config-directory"])
-def test_a_missing_discovery_directory_is_a_quiet_success(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, levels_up: int
+def test_a_discovery_directory_linked_into_an_unsearchable_directory_is_warned(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    levels_up: int,
 ) -> None:
     target, workspace, entries = guest
-    shutil.rmtree((entries, entries.parent)[levels_up])
+    (entries / "ws-proj-console.yml").symlink_to(workspace / ".tmuxinator.yml")
+    linked = (entries, entries.parent)[levels_up]
+    locked = tmp_path / "guest" / "locked"
+    locked.mkdir()
+    shutil.move(linked, locked / linked.name)
+    linked.symlink_to(locked / linked.name)
+    locked.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        locked.chmod(0o755)
+
+    assert (entries / "ws-proj-console.yml").is_symlink()
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
+@pytest.mark.parametrize("shape", ["missing", "config-missing", "dangling-link"])
+def test_a_missing_discovery_directory_is_a_quiet_success(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    shape: str,
+) -> None:
+    target, workspace, entries = guest
+    shutil.rmtree(entries.parent if shape == "config-missing" else entries)
+    if shape == "dangling-link":
+        entries.symlink_to(tmp_path / "guest" / "nowhere")
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
 
     _reinit(db, target)

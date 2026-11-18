@@ -182,8 +182,9 @@ it from the VM admin's `~/.config/tmuxinator/ws-<name>-console.yml`. `vm reinit`
 links, without following them, and each workspace's `.tmuxinator.yml` that is a regular file still
 starting with the generated header. Anything else is left alone. A link, project or workspace
 directory that cannot be read or searched also stays, as does whatever a directory the admin cannot
-search hides: the links behind an unsearchable `~/.config`, or a project inside an unsearchable
-directory above its workspace. Like a failed removal, each makes reinit warn without failing.
+search hides, directly or through a symbolic link: the links behind an unsearchable `~/.config`, or
+a project inside an unsearchable directory above its workspace. Like a failed removal, each makes
+reinit warn without failing.
 
 ## Workspace repair
 

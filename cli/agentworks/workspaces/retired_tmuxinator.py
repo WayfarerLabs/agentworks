@@ -43,6 +43,9 @@ _UNFINISHED_MARKER = "AGW_TMUXINATOR_UNFINISHED="
 # both scripts start with ``hidden``, the one rule for absent versus hidden: it walks
 # up from a path it cannot see to the nearest ancestor it can, and the path is hidden
 # when that ancestor is a directory it cannot search. Otherwise the path is absent.
+# Callers canonicalize first with ``realpath -m``, which resolves every link it can
+# reach and keeps the rest literal, so a link into an unsearchable directory walks
+# up from its target rather than stopping at the link.
 _HIDDEN_FUNCTION = """\
 hidden() {
   seen="$1"
@@ -58,7 +61,7 @@ _LINKS_SCRIPT = (
     + """\
 dir="$HOME/.config/tmuxinator"
 if [ ! -d "$dir" ]; then
-  hidden "$dir" && exit 1
+  hidden "$(realpath -m -- "$dir")" && exit 1
   exit 0
 fi
 [ -x "$dir" ] && [ -r "$dir" ] || exit 1
@@ -93,7 +96,7 @@ while IFS= read -r workspace; do
       1) ;;
       *) unfinished ;;
     esac
-  elif hidden "$project"; then
+  elif hidden "$(realpath -m -- "$workspace")/.tmuxinator.yml"; then
     unfinished
   fi
 done
