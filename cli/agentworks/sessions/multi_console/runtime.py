@@ -58,6 +58,11 @@ class PreparedConsoleReconcile:
     action: ConsoleAction
     pane_targets: tuple[SecretTarget, ...]
 
+    @property
+    def admin(self) -> VMAccess:
+        """The admin's access, on which every tmux request runs."""
+        return self.access.admin
+
 
 @dataclass(frozen=True)
 class PreparedConsoleStop:
@@ -245,7 +250,7 @@ def execute_console_reconcile(prepared: PreparedConsoleReconcile, *, values: Map
 
     with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
         _verify_prepared(prepared)
-        admin = prepared.access.admin
+        admin = prepared.admin
         canonical, staging = _presence(admin, prepared.console.name)
         if prepared.action is ConsoleAction.UNCHANGED:
             if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
@@ -268,7 +273,6 @@ def execute_console_reconcile(prepared: PreparedConsoleReconcile, *, values: Map
             prepared.db,
             prepared.registry,
             prepared.console,
-            prepared.vm,
             values=values,
             layout=prepared.layout,
             members=prepared.members,
@@ -291,8 +295,7 @@ def observe_prepared_console(prepared: PreparedConsoleReconcile | PreparedConsol
     """Observe the retained exact names without resolving sources or activating."""
     with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
         _verify_prepared(prepared)
-        admin = prepared.access.admin if isinstance(prepared, PreparedConsoleReconcile) else prepared.admin
-        canonical, staging = _presence(admin, prepared.console.name)
+        canonical, staging = _presence(prepared.admin, prepared.console.name)
         return classify_console_status(
             canonical_present=canonical is ProbeStatus.PRESENT,
             staging_present=staging is ProbeStatus.PRESENT,

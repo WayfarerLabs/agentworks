@@ -41,14 +41,18 @@ from ._helpers import (
     parse_session_spec,
     tmux_session_name,
 )
-from .attach import _live_best_effort, _session_linux_user
+from .attach import _live_best_effort, _pane_runs_as_admin, _session_linux_user
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.config import Config
     from agentworks.db import Database, ShellEntry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
+
+    from ._access import ConsoleAccess
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,67 @@ class ConsoleDefinition:
     vm_name: str
     admin_shell: bool
     members: tuple[ConsoleSessionRow, ...]
+
+
+@dataclass(frozen=True)
+class _LiveSync:
+    """A membership edit's view of the console's live tmux, taken before the edit is recorded.
+
+    ``presence`` is ``None`` when the VM has no live access, else the probe's
+    verdict or the error the probe raised. ``access`` is set only for a
+    running console, the one case whose live sync parks shell panes, and
+    holds the new panes' agents already checked (``_probe_live_sync``).
+    """
+
+    presence: ProbeStatus | Exception | None
+    access: ConsoleAccess | None = None
+
+    def running(self, console_name: str) -> ConsoleAccess | None:
+        """The accesses to sync the running console on, or ``None`` when there is none to sync.
+
+        Called inside ``_live_best_effort``, after the edit is recorded: a probe
+        that raised raises its error here, and one that could not tell raises
+        ``StateError``.
+        """
+        if isinstance(self.presence, Exception):
+            raise self.presence
+        if self.presence is ProbeStatus.UNKNOWN:
+            raise StateError(
+                f"could not determine console '{console_name}' tmux state",
+                entity_kind="console",
+                entity_name=console_name,
+            )
+        return self.access
+
+
+def _probe_live_sync(
+    db: Database,
+    config: Config,
+    console_name: str,
+    vm_name: str,
+    members: Sequence[ConsoleSessionRow],
+) -> _LiveSync:
+    """Probe the console's live tmux and, when it is running, check the agents of ``members``' shell panes.
+
+    The probe is read-only. Only a running console has panes to park, so only
+    then does ``console_access`` check each agent's direct SSH, here, before
+    the edit resolves or records anything; a refused agent stops it with its
+    reinit hint. Otherwise the edit is recorded and the live sync stays best
+    effort (``_LiveSync.running``).
+    """
+    live = _mc._live_access(db, config, vm_name)
+    if live is None:
+        return _LiveSync(None)
+    vm, admin = live
+    try:
+        presence = _mc._console_tmux_presence(admin, console_name)
+    except UserAbort:
+        raise
+    except Exception as error:
+        return _LiveSync(error)
+    if presence is not ProbeStatus.PRESENT:
+        return _LiveSync(presence)
+    return _LiveSync(presence, _mc.console_access(db, config, vm, admin, members))
 
 
 def create_console(
@@ -155,7 +220,7 @@ def create_console(
 
         with (
             closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _mc._prepare_vm_access(
+            _mc._prepare_console_access(
                 db,
                 config,
                 vm_name,
@@ -166,8 +231,10 @@ def create_console(
                 targets=lambda vm: _mc._console_build_secret_targets(
                     db, registry, console=definition, vm=vm, members=definition.members
                 ),
-            ) as (vm, admin),
+                members=definition.members,
+            ) as access,
         ):
+            vm, admin = access.vm, access.admin
             secret_values = resolver.values
             try:
                 _mc._validate_console_build_values(
@@ -178,7 +245,6 @@ def create_console(
                     members=definition.members,
                     values=secret_values,
                 )
-                access = _mc.console_access(db, config, vm, admin, definition.members)
                 _mc._teardown_console_tmux(admin, name)
                 with db.transaction():
                     db.insert_console(name, vm_name, admin_shell=add_admin_shell)
@@ -193,7 +259,6 @@ def create_console(
                         db,
                         registry,
                         console,
-                        vm,
                         values=secret_values,
                         layout=named_console_template(registry).tmux_layout,
                     )
@@ -276,72 +341,40 @@ def add_sessions(
                     entity_name=spec.name,
                 )
 
-        live = _mc._live_access(db, config, console.vm_name)
         registry = load_request_registry(config, live_database=db)
+        # The members to record; the transaction below settles their positions.
+        new_members = tuple(
+            ConsoleSessionRow(console_name, spec.name, position, default_shells(spec.shells))
+            for position, spec in enumerate(specs)
+        )
+        sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
 
-        # Eager-prompting orchestration: when
-        # any spec carries shells > 0 the live-attach path below will open
-        # new shells via _add_session_window. Resolve every referenced
-        # secret BEFORE the DB write so a failure leaves no partial state.
-        # No platform instance participates in this command (the live sync
-        # is pure Tailscale, no platform ops), so this is the operation's
-        # ONE prompt session by construction: nothing to fold into a
-        # bind boundary.
-        # default_shells produces {cwd: None, admin: False} entries, so the
-        # only admin-promotion path is session_user == admin_user (an
-        # admin-mode session). The resolve is skipped when no specs carry
-        # shells (the bare ``add-sessions s1 s2`` shape) -- the empty values
-        # dict below still feeds the live-attach path, whose windows then
-        # have no panes to compose env for.
+        # Eager-prompting orchestration: when any spec carries shells > 0 the
+        # live-attach path below will open new shells via _add_session_window.
+        # Resolve every referenced secret BEFORE the DB write so a failure
+        # leaves no partial state. No platform instance participates in this
+        # command (the live sync is pure Tailscale, no platform ops), so this
+        # is the operation's ONE prompt session by construction: nothing to
+        # fold into a bind boundary. The resolve is skipped when no specs
+        # carry shells (the bare ``add-sessions s1 s2`` shape); the empty
+        # values dict below still feeds the live-attach path, whose windows
+        # then have no panes to compose env for.
         secret_values: dict[str, str] = {}
-        if any(spec.shells > 0 for spec in specs):
+        vm_row = db.get_vm(console.vm_name)
+        new_shell_targets: list[SecretTarget] = []
+        if vm_row is not None:
+            for member in new_members:
+                new_shell_targets.extend(_mc._member_secret_targets(db, registry, vm=vm_row, member=member))
+        if new_shell_targets:
             from agentworks.secrets import resolve_for_command
 
-            vm_row = db.get_vm(console.vm_name)
-            new_shell_targets: list[SecretTarget] = []
-            if vm_row is not None:
-                for spec in specs:
-                    if spec.shells <= 0:
-                        continue
-                    session = db.get_session(spec.name)
-                    if session is None:
-                        continue
-                    try:
-                        session_user = _session_linux_user(db, session, vm_row)
-                    except NotFoundError:
-                        continue
-                    # All new shells are admin=False (default_shells), so
-                    # use_admin promotion only fires for admin-mode sessions.
-                    use_admin = session_user == vm_row.admin_username
-                    pane = _mc._pane_secret_target(
-                        db,
-                        registry,
-                        vm=vm_row,
-                        session=session,
-                        is_admin_pane=use_admin,
-                    )
-                    if pane is None:
-                        continue
-                    # Every new shell on this session has the same scope
-                    # chain, so one target covers them all (eager-resolve
-                    # unions per secret name).
-                    new_shell_targets.append(pane)
-            if new_shell_targets:
-                secret_values = resolve_for_command(
-                    new_shell_targets,
-                    config,
-                    registry,
-                    allow_transient_auto_declare=True,
-                    interaction=interaction,
-                )
-        # The new members' agent panes connect as their agents, so check them before anything changes.
-        access = None
-        if live is not None:
-            new_members = [
-                ConsoleSessionRow(console_name, spec.name, position, default_shells(spec.shells))
-                for position, spec in enumerate(specs)
-            ]
-            access = _mc.console_access(db, config, live[0], live[1], new_members)
+            secret_values = resolve_for_command(
+                new_shell_targets,
+                config,
+                registry,
+                allow_transient_auto_declare=True,
+                interaction=interaction,
+            )
 
         with db.transaction():
             current_order = [member.session_name for member in db.list_console_sessions(console_name)]
@@ -361,39 +394,29 @@ def add_sessions(
                     entity_kind="console",
                     entity_name=console_name,
                 )
-            for spec in specs:
-                db.add_console_session(console_name, spec.name, default_shells(spec.shells))
+            for member in new_members:
+                db.add_console_session(console_name, member.session_name, member.shells)
             if resolved_index != len(current_order):
-                added_names = [spec.name for spec in specs]
+                added_names = [member.session_name for member in new_members]
                 desired_order = current_order[:resolved_index] + added_names + current_order[resolved_index:]
                 db.reorder_console_sessions(console_name, desired_order)
 
         output.result(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
         with _live_best_effort(f"add-sessions to '{console_name}'", console_name=console_name):
+            access = sync.running(console_name)
             if access is None:
                 return
-            vm, admin = access.vm, access.admin
-            presence = _mc._console_tmux_presence(admin, console_name)
-            if presence is ProbeStatus.UNKNOWN:
-                raise StateError(
-                    f"could not determine console '{console_name}' tmux state",
-                    entity_kind="console",
-                    entity_name=console_name,
-                )
-            if presence is ProbeStatus.ABSENT:
-                return
-            for spec in specs:
-                member = db.get_console_session(console_name, spec.name)
-                assert member is not None
+            for new_member in new_members:
+                recorded = db.get_console_session(console_name, new_member.session_name)
+                assert recorded is not None
                 _mc._add_session_window(
                     access,
                     db,
                     registry,
                     values=secret_values,
                     console_name=console_name,
-                    member=member,
-                    vm=vm,
+                    member=recorded,
                     layout=named_console_template(registry).tmux_layout,
                     # Append each new member past the last window (not into a
                     # reclaimed low slot) so live order matches config even before
@@ -406,7 +429,7 @@ def add_sessions(
             # corrects any pre-existing drift left by an earlier op.
             ordered_windows = [m.session_name for m in db.list_console_sessions(console_name)]
             _reorder_session_windows(
-                access_run_command(admin, deadline=None, elevated=False),
+                access_run_command(access.admin, deadline=None, elevated=False),
                 console_name=console_name,
                 ordered_session_windows=ordered_windows,
             )
@@ -627,8 +650,10 @@ def add_shell(
                 entity_name=session_name,
             )
 
-        live = _mc._live_access(db, config, console.vm_name)
         registry = load_request_registry(config, live_database=db)
+        new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
+        new_shells = [*cs.shells, new_shell]
+        sync = _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
 
         # Eager-prompting orchestration: resolve any
         # secrets referenced by this pane's env chain BEFORE the DB write +
@@ -639,23 +664,20 @@ def add_shell(
         # SecretUnavailableError with no partial state to clean up. We
         # always resolve (even when the console isn't live), since the
         # operator typed add-shell expecting to use the new pane shortly.
-        # use_admin promotion matches _split_shell_pane: an admin-mode
-        # session has session_user == admin_user, so a pane on that session
-        # always runs as admin even when --admin wasn't passed. Compute the
-        # same promoted value here so the eager-resolve scope matches what
-        # _resolve_pane_env will produce at pane-split time.
+        # The pane's scope follows _pane_runs_as_admin, the rule the pane
+        # runs by, so the eager resolve matches what _resolve_pane_env will
+        # produce at pane-split time.
         session_row = db.get_session(session_name)
         vm_row = db.get_vm(console.vm_name)
         secret_values: dict[str, str] = {}
         if session_row is not None and vm_row is not None:
             session_user = _session_linux_user(db, session_row, vm_row)
-            use_admin = admin or session_user == vm_row.admin_username
             pane_target = _mc._pane_secret_target(
                 db,
                 registry,
                 vm=vm_row,
                 session=session_row,
-                is_admin_pane=use_admin,
+                is_admin_pane=_pane_runs_as_admin(vm_row, session_user, admin_shell=admin),
             )
             if pane_target is not None:
                 from agentworks.secrets import resolve_for_command
@@ -668,12 +690,6 @@ def add_shell(
                     interaction=interaction,
                 )
 
-        new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
-        new_shells = [*cs.shells, new_shell]
-        # An agent's pane connects as the agent, so check it before anything changes.
-        access = None
-        if live is not None:
-            access = _mc.console_access(db, config, live[0], live[1], [replace(cs, shells=[new_shell])])
         db.update_console_shells(console_name, session_name, new_shells)
         user_tag = "admin" if admin else "agent"
         output.result(
@@ -681,17 +697,8 @@ def add_shell(
         )
 
         with _live_best_effort(f"add-shell to '{console_name}:{session_name}'", console_name=console_name):
+            access = sync.running(console_name)
             if access is None:
-                return
-            vm, admin_access = access.vm, access.admin
-            presence = _mc._console_tmux_presence(admin_access, console_name)
-            if presence is ProbeStatus.UNKNOWN:
-                raise StateError(
-                    f"could not determine console '{console_name}' tmux state",
-                    entity_kind="console",
-                    entity_name=console_name,
-                )
-            if presence is ProbeStatus.ABSENT:
                 return
             session = db.get_session(session_name)
             if session is None:
@@ -699,7 +706,7 @@ def add_shell(
             workspace_path = _resolve_workspace_path(db, session)
             if workspace_path is None:
                 return
-            session_user = _session_linux_user(db, session, vm)
+            session_user = _session_linux_user(db, session, access.vm)
             _split_shell_pane(
                 access,
                 db,
@@ -710,9 +717,7 @@ def add_shell(
                 workspace_path=workspace_path,
                 shell=new_shell,
                 session=session,
-                vm=vm,
                 session_user=session_user,
-                admin_user=vm.admin_username,
                 # new_shell is appended to cs.shells, so its index in the updated
                 # configured list is the previous list's length.
                 config_index=len(cs.shells),
@@ -725,7 +730,7 @@ def add_shell(
             # config order (`[0]`, `[1]`, ...), the same ordering invariant the
             # build/restore paths uphold. len(new_shells) is the full shell count
             # after this append.
-            run = access_run_command(admin_access, deadline=None, elevated=False)
+            run = access_run_command(access.admin, deadline=None, elevated=False)
             _reorder_shell_panes(run, q_con, q_win, len(new_shells))
             # Re-apply the layout to redistribute geometry after the split and
             # swaps (mirrors the restore_session sequence). No _focus_session_pane

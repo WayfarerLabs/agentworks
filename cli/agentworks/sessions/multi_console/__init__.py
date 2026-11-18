@@ -33,7 +33,7 @@ package object rather than a direct cross-submodule import).
 
 from __future__ import annotations
 
-from ._access import ConsoleAccess, console_access, pane_agent
+from ._access import ConsoleAccess, console_access
 from ._helpers import (
     ADMIN_SHELL_WINDOW,
     TMUX_PREFIX,
@@ -54,7 +54,8 @@ from .attach import (
     _console_tmux_presence,
     _live_access,
     _live_best_effort,
-    _prepare_vm_access,
+    _pane_runs_as_admin,
+    _prepare_console_access,
     _session_linux_user,
     _teardown_console_tmux,
     _tmux_session_presence,
@@ -86,10 +87,10 @@ from .restore import restore_session
 from .secrets_env import (
     _admin_only_secret_target,
     _console_build_secret_targets,
+    _member_secret_targets,
     _pane_secret_target,
     _resolve_admin_env,
     _resolve_pane_env,
-    _restore_session_secret_targets,
     _validate_console_build_values,
 )
 from .tmux_build import (
@@ -119,10 +120,11 @@ __all__ = [
     "_live_access",
     "_live_best_effort",
     "_pane_secret_target",
-    "_prepare_vm_access",
+    "_pane_runs_as_admin",
+    "_prepare_console_access",
     "_resolve_pane_env",
     "_resolve_workspace_path",
-    "_restore_session_secret_targets",
+    "_member_secret_targets",
     "_session_linux_user",
     "_split_shell_pane",
     "_validate_cwd",
@@ -142,7 +144,6 @@ __all__ = [
     "list_consoles",
     "offer_delete_if_empty_consoles",
     "observe_console_statuses",
-    "pane_agent",
     "parse_session_spec",
     "remove_sessions",
     "reorder_sessions",

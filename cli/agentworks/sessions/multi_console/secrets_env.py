@@ -8,7 +8,7 @@ runs) and "what env does this pane actually get?" (``_resolve_pane_env``,
 called at split time once the values are in hand).
 
 Some of these names (``_pane_secret_target``, ``_admin_only_secret_target``,
-``_console_build_secret_targets``, ``_restore_session_secret_targets``,
+``_console_build_secret_targets``, ``_member_secret_targets``,
 ``_resolve_pane_env``) are monkeypatched by tests directly on the
 ``agentworks.sessions.multi_console`` package object. Because a patch there
 only rebinds the *package's* attribute, not this module's own global, every
@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Protocol
 import agentworks.sessions.multi_console as _mc
 from agentworks.errors import NotFoundError
 
-from .attach import _session_linux_user
+from .attach import _pane_runs_as_admin, _session_linux_user
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -67,9 +67,8 @@ def _pane_secret_target(
     need.
 
     ``is_admin_pane`` is the PROMOTED value, not the operator-passed
-    --admin flag. Callers must apply the same promotion ``_split_shell_pane``
-    uses: ``use_admin = shell_admin_flag or session_user == admin_user``.
-    Passing the raw flag for an admin-mode session (session_user ==
+    --admin flag: callers pass ``_pane_runs_as_admin``'s answer, the rule
+    the panes run by. Passing the raw flag for an admin-mode session (session_user ==
     admin_user) would route through the ``agent_name is None`` branch
     and silently return ``None``, breaking the eager-resolve guarantee
     for that shape.
@@ -177,17 +176,9 @@ def _console_build_secret_targets(
 
     - The admin shell window (when ``console.admin_shell`` is set):
       vm + admin scope.
-    - For each session window: every configured shell pane (a session-
-      attach pane joins the session's existing tmux server and consumes
-      no new secrets, so it is skipped here).
-
-    Same ``use_admin`` promotion as ``_split_shell_pane`` (shell admin
-    flag OR session_user == admin_user) so the eager-resolve scope
-    matches what the build path will actually consume.
-
-    Sessions whose agent / workspace rows are missing get their shell
-    panes skipped (matches ``_pane_secret_target``'s defensive
-    fallthrough). The operator surfaces these via ``agw doctor``.
+    - For each session window: every configured shell pane
+      (``_member_secret_targets``; a session-attach pane joins the session's
+      existing tmux server and consumes no new secrets, so it is skipped).
     """
     targets: list[SecretTarget] = []
     if console.admin_shell:
@@ -200,40 +191,24 @@ def _console_build_secret_targets(
             ),
         )
     for member in members if members is not None else db.list_console_sessions(console.name):
-        session = db.get_session(member.session_name)
-        if session is None:
-            continue
-        try:
-            session_user = _session_linux_user(db, session, vm)
-        except NotFoundError:
-            continue
-        for shell in member.shells:
-            use_admin = shell["admin"] or session_user == vm.admin_username
-            pane = _mc._pane_secret_target(
-                db,
-                registry,
-                vm=vm,
-                session=session,
-                is_admin_pane=use_admin,
-            )
-            if pane is not None:
-                targets.append(pane)
+        targets.extend(_mc._member_secret_targets(db, registry, vm=vm, member=member))
     return targets
 
 
-def _restore_session_secret_targets(
+def _member_secret_targets(
     db: Database,
     registry: Registry,
     *,
     vm: VMRow,
     member: ConsoleSessionRow,
-    indices: list[int],
 ) -> list[SecretTarget]:
-    """SecretTargets for the shell panes at ``indices`` of ``member``'s configured shells.
+    """A SecretTarget for each of ``member``'s configured shell panes.
 
-    ``restore_session`` passes every configured index to its boundary
-    resolve, before it knows which panes are missing, so the values for any
-    pane it opens are in hand before its first tmux request.
+    Each pane's scope follows ``_pane_runs_as_admin``, the rule the panes
+    themselves run by, so the eager resolve covers what opening them will
+    consume. A session whose row or agent is gone has no panes to open, so
+    it gets none (matching ``_pane_secret_target``'s defensive fallthrough);
+    the operator surfaces these via ``agw doctor``.
     """
     targets: list[SecretTarget] = []
     session = db.get_session(member.session_name)
@@ -243,15 +218,13 @@ def _restore_session_secret_targets(
         session_user = _session_linux_user(db, session, vm)
     except NotFoundError:
         return targets
-    for idx in indices:
-        shell = member.shells[idx]
-        use_admin = shell["admin"] or session_user == vm.admin_username
+    for shell in member.shells:
         pane = _mc._pane_secret_target(
             db,
             registry,
             vm=vm,
             session=session,
-            is_admin_pane=use_admin,
+            is_admin_pane=_pane_runs_as_admin(vm, session_user, admin_shell=shell["admin"]),
         )
         if pane is not None:
             targets.append(pane)
@@ -328,9 +301,8 @@ def _resolve_pane_env(
         )
 
     if session.agent_name is None:
-        # In theory unreachable given the caller's ``use_admin`` logic in
-        # ``_split_shell_pane`` (an admin-mode session has session_user ==
-        # admin_user, which forces is_admin_pane=True up there). Guarded
+        # In theory unreachable given ``_pane_runs_as_admin`` (an admin-mode
+        # session's owner is the admin, which forces is_admin_pane=True). Guarded
         # here against future invariant drift so a non-admin pane on a
         # session with no agent silently skips env rather than crashing.
         return {}
@@ -398,7 +370,7 @@ def _validate_console_build_values(
             )
         session_user = _mc._session_linux_user(db, session, vm)
         for shell in member.shells:
-            use_admin = shell["admin"] or session_user == vm.admin_username
+            use_admin = _pane_runs_as_admin(vm, session_user, admin_shell=shell["admin"])
             _mc._resolve_pane_env(
                 db,
                 registry,

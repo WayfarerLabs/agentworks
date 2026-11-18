@@ -1,16 +1,10 @@
-"""The accesses one console operation uses on its VM.
-
-``console_access`` is monkeypatched by tests directly on the
-``agentworks.sessions.multi_console`` package object, so its callers reach it
-through the package object (``_mc.console_access(...)``).
-"""
+"""The accesses one console operation uses on its VM."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-import agentworks.sessions.multi_console as _mc
 from agentworks.errors import NotFoundError
 
 if TYPE_CHECKING:
@@ -57,17 +51,17 @@ class ConsoleAccess:
         return replace(self, admin=execution.vm_access(self.vm, self.config, Admin(), log=log.record))
 
 
-def pane_agent(db: Database, vm: VMRow, session_name: str, *, admin_shell: bool) -> AgentRow | None:
+def _pane_agent(db: Database, vm: VMRow, session_name: str, *, admin_shell: bool) -> AgentRow | None:
     """The agent a shell pane on ``session_name``'s window runs as, or ``None`` for an admin pane.
 
-    A shell marked ``admin`` and any shell on an admin-mode session run as the
-    admin. Raises ``NotFoundError`` for a session that is gone or whose agent
-    is gone.
+    Raises ``NotFoundError`` for a session that is gone or whose agent is gone.
     """
+    from .attach import _pane_runs_as_admin, _session_linux_user
+
     session = db.get_session(session_name)
     if session is None:
         raise NotFoundError(f"session '{session_name}' not found", entity_kind="session", entity_name=session_name)
-    if admin_shell or _mc._session_linux_user(db, session, vm) == vm.admin_username:
+    if _pane_runs_as_admin(vm, _session_linux_user(db, session, vm), admin_shell=admin_shell):
         return None
     assert session.agent_name is not None  # _session_linux_user found the agent
     agent = db.get_agent(session.agent_name)
@@ -98,7 +92,7 @@ def console_access(
     for member in members:
         for shell in member.shells:
             try:
-                agent = pane_agent(db, vm, member.session_name, admin_shell=shell["admin"])
+                agent = _pane_agent(db, vm, member.session_name, admin_shell=shell["admin"])
             except NotFoundError:
                 break
             if agent is None or agent.linux_user in agents:

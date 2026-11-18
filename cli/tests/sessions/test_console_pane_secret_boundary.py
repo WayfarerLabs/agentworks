@@ -3,9 +3,10 @@
 ``console create`` and ``restore-session`` register every pane's targets on the
 boundary resolver before the activation gate and resolve once the VM is active,
 before their first tmux request or database write; ``restore-session`` takes
-every configured shell, whatever turns out to be missing (operator ruling of
-2026-11-12). ``console start`` and ``restart`` resolve their build's targets on
-the same resolver before any tmux change. None calls ``resolve_for_command``.
+a target for every configured shell, whatever turns out to be missing (operator
+ruling of 2026-11-12). ``console start`` and ``restart`` resolve their build's
+targets on the same resolver before any tmux change. Each resolves once, and
+none calls ``resolve_for_command``.
 """
 
 from __future__ import annotations
@@ -73,6 +74,10 @@ def _registered(boundary: _Boundary) -> list[object]:
     return [targets for kind, targets in boundary.before_resolve() if kind == "register"]
 
 
+def _resolves(boundary: _Boundary) -> int:
+    return [kind for kind, _ in boundary.events].count("resolve")
+
+
 def test_create_resolves_its_panes_before_any_tmux_request_or_database_write(
     db: Database, console_target_factory: Callable[..., _FakeTarget], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -88,6 +93,7 @@ def test_create_resolves_its_panes_before_any_tmux_request_or_database_write(
     )
 
     assert _registered(boundary) == [(PANE,)]
+    assert _resolves(boundary) == 1
     assert not [event for event in boundary.before_resolve() if event[0] == "tmux"]
     assert boundary.changes_at_resolve == before
     assert db.get_console("con") is not None
@@ -108,18 +114,17 @@ def test_restore_resolves_every_configured_shell_before_any_tmux_request(
     if not window_missing:
         model.seed_window(CON, "b", pane_tags=(None, 0, 2))
     target = console_target_factory(model)
-    asked: list[list[int]] = []
-    monkeypatch.setattr(
-        mc, "_restore_session_secret_targets", lambda *a, **k: asked.append(list(k["indices"])) or [PANE]
-    )
+    shells = [SecretTarget(vm={}, label=f"console-pane:{index}") for index in range(3)]
+    unasked = iter(shells)
+    monkeypatch.setattr(mc, "_pane_secret_target", lambda *a, **k: next(unasked))
     before = db._conn.total_changes
     boundary = _Boundary(db, target, monkeypatch)
 
     mc.restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
 
-    # Every configured shell, though only index 1 (or the whole window) was missing.
-    assert asked == [[0, 1, 2]]
-    assert _registered(boundary) == [(PANE,)]
+    # A target for every configured shell, though only index 1 (or the whole window) was missing.
+    assert _registered(boundary) == [tuple(shells)]
+    assert _resolves(boundary) == 1
     assert not [event for event in boundary.before_resolve() if event[0] == "tmux"]
     assert boundary.changes_at_resolve == before
     assert [tag for _pid, _pidx, tag in model.pane_rows(CON, "b") or []] == [None, 0, 1, 2]
@@ -146,6 +151,7 @@ def test_start_and_restart_resolve_their_build_before_changing_tmux(
     run(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
 
     assert _registered(boundary) == [(PANE,)]
+    assert _resolves(boundary) == 1
     # Only the read-only presence probes that choose the action come first.
     early = [command for kind, command in boundary.before_resolve() if kind == "tmux"]
     assert early
@@ -164,11 +170,12 @@ def test_a_vm_without_an_address_resolves_nothing_and_dispatches_nothing(
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **k: pytest.fail("built pane targets"))
     boundary = _Boundary(db, None, monkeypatch)
 
-    with pytest.raises(StateError, match="no Tailscale address"):
+    with pytest.raises(StateError) as raised:
         mc.create_console(
             db, _StubConfig(), name="con", vm_name="vm1", session_specs=["a+1"], interaction=TtyInteractionPolicy.REFUSE
         )
 
+    assert (raised.value.entity_kind, raised.value.entity_name) == ("vm", "vm1")
     assert boundary.events == []
     assert recorder.calls == []
     assert db.get_console("con") is None

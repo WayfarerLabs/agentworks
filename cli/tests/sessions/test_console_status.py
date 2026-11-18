@@ -11,7 +11,7 @@ from agentworks.db import ConsoleRow
 from agentworks.errors import ConnectivityError, NotFoundError
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.requests import Script, Shell
-from agentworks.execution.results import Completed, Result
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.sessions.multi_console._status import (
     ConsoleStatus,
     _enumerate_tmux_sessions,
@@ -111,6 +111,37 @@ def test_console_observer_isolates_unreachable_vm_and_uses_exact_names(
         "beta": ConsoleStatus.UNKNOWN,
     }
     assert recorder.operations == [("admin", "run")]
+
+
+def test_console_observer_leaves_only_an_unreachable_vms_consoles_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A VM that passes the SSH boundary but does not answer costs only its own consoles their status.
+
+    Building an access is passive, so the failure arrives with the VM's one
+    request, inside its own observation.
+    """
+    consoles = [ConsoleRow("alpha", "vm-a", False, "", ""), ConsoleRow("beta", "vm-b", False, "", "")]
+    vms = {name: _vm(name) for name in ("vm-a", "vm-b")}
+
+    class _DB:
+        def get_vm(self, name: str) -> object:
+            return vms[name]
+
+    answers = {
+        "vm-a": Result(Completed(0), b"aw-console-alpha\n"),
+        "vm-b": Result(Unknown(UnknownReason.CONNECTION)),
+    }
+
+    def access(vm: SimpleNamespace, _config: object, identity: Admin, **_kwargs: object) -> RecordingVMAccess:
+        built = RecordingVMAccess([], identity, vm_name=vm.name)
+        built.default_outcome = answers[vm.name]
+        return built
+
+    monkeypatch.setattr("agentworks.execution.vm_access", access)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args: None)
+
+    result = observe_console_statuses(_DB(), object(), consoles)  # type: ignore[arg-type]
+
+    assert result == {"alpha": ConsoleStatus.RUNNING, "beta": ConsoleStatus.UNKNOWN}
 
 
 def test_console_observer_reports_a_vm_without_a_host_key_record_and_observes_the_others(

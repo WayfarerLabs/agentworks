@@ -1,10 +1,9 @@
 """Live-tmux probing and high-level lifecycle/list/describe entrypoints.
 
-``kill_session_windows``, ``_console_tmux_presence``, ``_prepare_vm_access``,
-and ``_live_access`` are monkeypatched by tests directly on the
-``agentworks.sessions.multi_console`` package object (they intercept, e.g., the
-live-sync path of ``crud.remove_sessions`` or ``restore.restore_session``
-without a live VM). A patch on the package object only rebinds the package's
+``kill_session_windows``, ``_console_tmux_presence``, and ``_live_access`` are
+monkeypatched by tests directly on the ``agentworks.sessions.multi_console``
+package object (they intercept, e.g., the live-sync path of
+``crud.remove_sessions`` without a live VM). A patch on the package object only rebinds the package's
 own attribute, not this module's global, so even the calls below from one
 function in this file to another function in this same file go through the
 package object at call time (``_mc.<name>(...)``) rather than a bare
@@ -43,7 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow, ShellEntry, VMRow
+    from agentworks.db import ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
     from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.machine_output import JsonObject
@@ -52,6 +51,8 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.manager import SessionTmuxServer
+
+    from ._access import ConsoleAccess
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
 # (validated at cap 64) and display-only, so this is a deliberately tighter,
@@ -154,6 +155,16 @@ def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
             )
         return agent.linux_user
     return vm.admin_username
+
+
+def _pane_runs_as_admin(vm: VMRow, session_user: str, *, admin_shell: bool) -> bool:
+    """Whether a console shell pane runs as the VM's admin rather than as its session's agent.
+
+    ``session_user`` is the session's owner (``_session_linux_user``). A
+    shell marked ``admin`` runs as the admin, and so does every shell on an
+    admin-mode session, whose owner is the admin.
+    """
+    return admin_shell or session_user == vm.admin_username
 
 
 def _attach_loop_wrapper(session_name: str, server: SessionTmuxServer | None) -> str:
@@ -389,7 +400,7 @@ def kill_session_windows(
 
 
 @contextlib.contextmanager
-def _prepare_vm_access(
+def _prepare_console_access(
     db: Database,
     config: Config,
     vm_name: str,
@@ -398,16 +409,19 @@ def _prepare_vm_access(
     interaction: TtyInteractionPolicy,
     held_native_guard: NativeMutationGuard,
     resolver: Resolver,
-    targets: Callable[[VMRow], Sequence[SecretTarget]] | None = None,
-) -> Iterator[tuple[VMRow, VMAccess]]:
-    """Activate the VM, run the operation's one boundary resolve, and yield the row and the admin's access.
+    targets: Callable[[VMRow], Sequence[SecretTarget]],
+    members: Sequence[ConsoleSessionRow],
+) -> Iterator[ConsoleAccess]:
+    """Activate the VM, check the panes' agents, run the operation's one boundary resolve, and yield its accesses.
 
     The missing-VM and missing-address refusals come first, with nothing
     resolved. ``targets`` gives the operation's pane secret targets from the
-    VM's row; they register on ``resolver`` before the activation gate opens,
-    and the one resolve runs once the VM is active and before the caller's
-    first request, so every pane value is in ``resolver.values`` before
-    anything changes.
+    VM's row; they register on ``resolver`` before the activation gate opens.
+    Once the VM is active, :func:`console_access` checks the direct SSH of
+    every agent whose shell panes ``members`` configure, so a refused agent
+    stops the operation before the resolve can prompt; then the one resolve
+    runs, before the caller's first request, so every pane value is in
+    ``resolver.values`` before anything changes.
     """
     import agentworks.execution as execution
     from agentworks.execution.access import Admin
@@ -434,8 +448,7 @@ def _prepare_vm_access(
                 held_native_guard=guard,
                 interaction=interaction,
             )
-            if targets is not None:
-                resolver.register_targets(targets(vm), allow_transient_auto_declare=True)
+            resolver.register_targets(targets(vm), allow_transient_auto_declare=True)
             context = prepare_vm_runtime(
                 db,
                 config,
@@ -447,8 +460,9 @@ def _prepare_vm_access(
             )
             activate_vm_runtime(context)
             with context.node.hold_active():
+                access = _mc.console_access(db, config, vm, execution.vm_access(vm, config, Admin()), members)
                 resolver.resolve()
-                yield vm, execution.vm_access(vm, config, Admin())
+                yield access
     finally:
         if context is not None:
             context.clear_values()

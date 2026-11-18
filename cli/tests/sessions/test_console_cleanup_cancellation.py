@@ -82,7 +82,6 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
             db,
             registry,
             db.get_console("con"),
-            vm,
             values={},
             layout="tiled",
         )
@@ -132,7 +131,6 @@ def test_log_close_preserves_failure_priority(
             db,
             registry,
             db.get_console("con"),
-            vm,
             values={},
             layout="tiled",
         )

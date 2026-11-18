@@ -235,9 +235,7 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
     admin = target.admin()
     admin.park_collected = failure != "handover"
     with pytest.raises(ExternalError):
-        mc._build_console_tmux(
-            target.console_access(_vm(db)), db, registry, _console(db), _vm(db), values={}, layout="tiled"
-        )
+        mc._build_console_tmux(target.console_access(_vm(db)), db, registry, _console(db), values={}, layout="tiled")
 
     assert [call.operation for call in admin.calls if call.operation != "run"] == ["park"]
     assert not model.has_session("aw-console-con")
@@ -275,7 +273,6 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
             db,
             registry,
             _console(db),
-            _vm(db),
             values={},
             layout="tiled",
         )

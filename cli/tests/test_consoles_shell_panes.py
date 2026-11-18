@@ -146,20 +146,60 @@ def test_an_admin_pane_parks_as_the_admin_with_no_switch(db: Database, fake_targ
 
 
 def test_an_agent_pane_checks_the_agents_access_before_anything_changes(db: Database, fake_target: _FakeTarget) -> None:
-    """An agent that predates the direct-SSH rollout is refused with the reinit hint before the shell is recorded."""
+    """On a running console, an agent that predates the direct-SSH rollout is refused before the shell is recorded."""
     _seed_agent_session_console(db)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     assert fake_target.recorder is not None
     agent = fake_target.recorder.access(BOT)
     agent.answer = lambda _call: Result(Unknown(UnknownReason.AUTH_FAILED))  # ssh as the agent is refused
 
-    with pytest.raises(StateError, match="direct SSH") as raised:
+    with pytest.raises(StateError) as raised:
         add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert "agw agent reinit bot" in (raised.value.hint or "")
+    assert (raised.value.entity_kind, raised.value.entity_name) == ("agent", "bot")
+    assert raised.value.hint
     member = db.get_console_session("con", "s")
     assert member is not None and member.shells == []
     assert fake_target.parks() == []
     assert agent.requests() == [Command(("true",), deadline=30)]
+
+
+def test_a_stopped_console_records_an_agent_pane_without_checking_the_agent(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """With no live tmux there is no pane to park, so the shell is recorded and the agent is not asked."""
+    _seed_agent_session_console(db)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(
+        returncode=1, stderr="can't find session: aw-console-con"
+    )
+    assert fake_target.recorder is not None
+    agent = fake_target.recorder.access(BOT)
+
+    add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
+
+    member = db.get_console_session("con", "s")
+    assert member is not None and len(member.shells) == 1
+    assert agent.requests() == []
+    assert fake_target.parks() == []
+
+
+def test_a_console_whose_tmux_cannot_be_read_records_the_shell_then_fails(
+    db: Database, fake_target: _FakeTarget
+) -> None:
+    """A probe that cannot tell checks no agent: the shell is recorded, then the live sync refuses to guess."""
+    _seed_agent_session_console(db)
+    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=1, stderr="lost server")
+    assert fake_target.recorder is not None
+    agent = fake_target.recorder.access(BOT)
+
+    with pytest.raises(StateError) as raised:
+        add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert (raised.value.entity_kind, raised.value.entity_name) == ("console", "con")
+    member = db.get_console_session("con", "s")
+    assert member is not None and len(member.shells) == 1
+    assert agent.requests() == []
+    assert fake_target.parks() == []
 
 
 def test_a_pane_whose_directory_is_gone_opens_in_the_home_directory(
@@ -197,7 +237,9 @@ def test_a_refused_split_lets_the_parked_request_go(
     [park] = fake_target.parks()
     assert "raised" in park.options
     assert not [c for c in fake_target.commands if "set-option -p" in c]
-    assert any("failed to add shell pane in 'a': no space" in warning for warning in captured_output.warnings)
+    # The one warning carries tmux's own reason.
+    [warning] = captured_output.warnings
+    assert "no space" in warning
 
 
 def test_a_pane_that_never_collects_its_request_is_a_failed_pane(
@@ -212,8 +254,10 @@ def test_a_pane_that_never_collects_its_request_is_a_failed_pane(
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
+    # The pane started no shell, so it is killed rather than left untagged, and the failure is warned.
     assert not [c for c in fake_target.commands if "set-option -p" in c]
-    assert any("failed to add shell pane in 'a'" in warning for warning in captured_output.warnings)
+    assert [c for c in fake_target.commands if "kill-pane" in c] == ["tmux kill-pane -t %7"]
+    assert len(captured_output.warnings) == 1
 
 
 def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, fake_target: _FakeTarget) -> None:
@@ -348,9 +392,16 @@ def test_add_shell_reorders_shell_panes_into_config_order(
     assert [(pidx, tag) for _pid, pidx, tag in rows] == [(0, None), (1, 0), (2, 1), (3, 2)]
 
 
-def test_split_shell_pane_warns_when_set_option_fails(db: Database, fake_target: _FakeTarget) -> None:
+@pytest.mark.parametrize("failure", ["refused", "incomplete"])
+def test_split_shell_pane_warns_when_set_option_fails(
+    db: Database,
+    fake_target: _FakeTarget,
+    captured_output: CapturedOutput,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
     """If tmux split-window succeeded and emitted a pane id but the subsequent
-    set-option fails (tmux version/flags mismatch, target gone, etc.), the
+    set-option fails (tmux refuses it, or the request does not complete), the
     pane is live but untagged. _split_shell_pane must surface this so the
     operator gets a loud signal instead of restore-session breaking later."""
     _seed_vm(db, with_tailscale=True)
@@ -360,7 +411,21 @@ def test_split_shell_pane_warns_when_set_option_fails(db: Database, fake_target:
     fake_target.commands.clear()
     fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     fake_target.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
-    # set-option fails non-zero.
-    fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="bad target")
+    if failure == "refused":
+        fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="bad target")
+    else:
+        answer = fake_target.answer
+
+        def lost(call: Call) -> Result | None:
+            line = command_line(call.request)
+            return Result(Unknown(UnknownReason.CONNECTION)) if line and "set-option -p" in line else answer(call)
+
+        monkeypatch.setattr(fake_target, "answer", lost)
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
+
+    [warning] = captured_output.warnings
+    if failure == "refused":
+        assert "bad target" in warning  # tmux's own reason reaches the operator
+    member = db.get_console_session("con", "a")
+    assert member is not None and len(member.shells) == 1

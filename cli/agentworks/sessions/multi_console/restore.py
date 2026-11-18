@@ -1,11 +1,9 @@
 """Reconcile a console session window's live tmux state against its
 configured shell list.
 
-``_prepare_vm_access``, ``_console_tmux_presence``,
-``_restore_session_secret_targets``, and ``_add_session_window`` are
-monkeypatched by tests directly on the ``agentworks.sessions.multi_console``
-package object (so a test can drive ``restore_session`` against a recording
-access without a live VM). A patch on the package object only rebinds the
+``_console_tmux_presence``, ``_member_secret_targets``, and
+``_add_session_window`` are monkeypatched by tests directly on the
+``agentworks.sessions.multi_console`` package object. A patch on the package object only rebinds the
 package's own attribute, not the attribute of the module that actually
 defines the function, so every call site below goes through the package
 object at call time (``_mc.<name>(...)``) rather than a direct reference.
@@ -90,9 +88,10 @@ def restore_session(
       every live shell pane in it with it (plus, for a single-member console,
       the console's last window, and with it the whole tmux session).
 
-    Every configured shell's secrets resolve in the operation's one boundary
-    pass, before the first tmux request, whether or not its pane turns out to
-    be missing; each pane it opens parks a fresh handover.
+    Every configured shell's agent is checked and its secrets resolve in the
+    operation's one boundary pass, before the first tmux request, whether or
+    not its pane turns out to be missing; each pane it opens parks a fresh
+    handover.
     """
     from ._helpers import guarded_console_selection
 
@@ -119,7 +118,7 @@ def restore_session(
         configured_count = len(member.shells)
         with (
             closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _mc._prepare_vm_access(
+            _mc._prepare_console_access(
                 db,
                 config,
                 console.vm_name,
@@ -127,11 +126,11 @@ def restore_session(
                 interaction=interaction,
                 resolver=resolver,
                 held_native_guard=held_native_guard,
-                targets=lambda vm: _mc._restore_session_secret_targets(
-                    db, registry, vm=vm, member=member, indices=list(range(configured_count))
-                ),
-            ) as (vm, admin),
+                targets=lambda vm: _mc._member_secret_targets(db, registry, vm=vm, member=member),
+                members=[member],
+            ) as access,
         ):
+            vm, admin = access.vm, access.admin
             secret_values = resolver.values
             run = access_run_command(admin, deadline=None, elevated=False)
             presence = _mc._console_tmux_presence(admin, console_name)
@@ -192,13 +191,12 @@ def restore_session(
 
                 output.info(f"window '{session_name}' is missing; rebuilding from config...")
                 result = _mc._add_session_window(
-                    _mc.console_access(db, config, vm, admin, [member]),
+                    access,
                     db,
                     registry,
                     values=secret_values,
                     console_name=console_name,
                     member=member,
-                    vm=vm,
                     layout=layout,
                 )
                 if not result.built:
@@ -357,7 +355,6 @@ def restore_session(
                     entity_name=session_name,
                 )
             session_user = _session_linux_user(db, session, vm)
-            access = _mc.console_access(db, config, vm, admin, [member])
 
             output.info(f"Restoring {len(missing)} shell pane(s) in '{session_name}': config indices {missing}.")
             # Collect each split's outcome so a partial failure becomes a loud error
@@ -374,9 +371,7 @@ def restore_session(
                     workspace_path=workspace_path,
                     shell=member.shells[cidx],
                     session=session,
-                    vm=vm,
                     session_user=session_user,
-                    admin_user=vm.admin_username,
                     config_index=cidx,
                 )
                 if pane_id is None:

@@ -21,6 +21,7 @@ pattern used across the rest of the package for patched names.
 
 from __future__ import annotations
 
+import contextlib
 import posixpath
 import shlex
 from dataclasses import dataclass, field
@@ -36,7 +37,7 @@ from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name, tmux_staging_name
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
+    from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, SessionRow, ShellEntry
     from agentworks.execution.access import VMAccess
     from agentworks.execution.requests import LoginShell
     from agentworks.resources.registry import Registry
@@ -76,8 +77,12 @@ class SessionWindowBuild:
     failed_shells: list[int] = field(default_factory=list)
 
 
-class _PaneNotCreated(Exception):
-    """A split tmux refused, or whose pane never collected its request: the pane has no shell."""
+class _PaneShellNotStarted(Exception):
+    """A shell pane that did not start its shell: tmux refused the split, or the pane never collected its request.
+
+    A pane that never collected its request is killed before this is raised,
+    so neither case leaves a pane behind.
+    """
 
 
 def _split_parked(
@@ -92,18 +97,24 @@ def _split_parked(
     """Park ``request`` on ``parking``, split ``window`` with a pane that collects it, and return tmux's output.
 
     The split runs inside the parking block, so a split tmux refuses lets the
-    parked request go at once; one whose pane does not collect the request
-    within the handover's wait started no shell.
+    parked request go at once. A pane that does not collect the request
+    within the handover's wait started no shell; it is killed, best effort,
+    so it does not linger as an untagged pane.
     """
+    from agentworks.execution.errors import ExecutionIncomplete, RequestRefused
     from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
     with parking.park(request) as handover:
         command = handover.command(switch_user=switch_user)
         res = run(f"tmux split-window -t {window} -P -F '#{{pane_id}}' {shlex.quote(command)}", check=False)
         if not res.ok:
-            raise _PaneNotCreated(sanitize_setup_diagnostic(res.stderr.strip(), redactions=redactions))
+            raise _PaneShellNotStarted(sanitize_setup_diagnostic(res.stderr.strip(), redactions=redactions))
     if not handover.collected:
-        raise _PaneNotCreated("the pane did not collect its shell's request")
+        pane_id = res.stdout.strip()
+        if pane_id:
+            with contextlib.suppress(ExecutionIncomplete, RequestRefused):
+                run(f"tmux kill-pane -t {shlex.quote(pane_id)}", check=False)
+        raise _PaneShellNotStarted("the pane did not collect its shell's request")
     return res.stdout
 
 
@@ -118,9 +129,7 @@ def _split_shell_pane(
     workspace_path: str,
     shell: ShellEntry,
     session: SessionRow,
-    vm: VMRow,
     session_user: str,
-    admin_user: str,
     config_index: int,
     tmux_name: str | None = None,
 ) -> str | None:
@@ -148,18 +157,20 @@ def _split_shell_pane(
     `_add_session_window` records which config indices came back None in its
     `SessionWindowBuild.failed_shells`, and `restore_session` checks each
     return so a partial restore is loud rather than a silent exit-0."""
-    from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
+    from agentworks.execution.errors import ExecutionIncomplete, RequestRefused
     from agentworks.execution.requests import LoginShell
-    from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
+    from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
     from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
     from agentworks.sessions.tmux import access_run_command
-    from agentworks.vms.initializer.steps import describe_failure
 
+    from .attach import _pane_runs_as_admin
+
+    vm = access.vm
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
     q_con = exact_tmux_target(tmux_name or tmux_session_name(console_name))
     window = f"{q_con}:{shlex.quote(window_name)}"
-    use_admin = shell["admin"] or session_user == admin_user
+    use_admin = _pane_runs_as_admin(vm, session_user, admin_shell=shell["admin"])
 
     pane_env = _mc._resolve_pane_env(
         db,
@@ -167,7 +178,7 @@ def _split_shell_pane(
         values=values,
         vm=vm,
         session=session,
-        pane_user=admin_user if use_admin else session_user,
+        pane_user=vm.admin_username if use_admin else session_user,
         is_admin_pane=use_admin,
     )
     run = access_run_command(access.admin, deadline=None, elevated=False)
@@ -189,12 +200,11 @@ def _split_shell_pane(
                 raise
             output.warn(f"cannot enter {full_path} for a shell pane in '{window_name}'; it opens in the home directory")
             out = split(LoginShell(env=pane_env))
-    except _PaneNotCreated as failure:
+    except _PaneShellNotStarted as failure:
         output.warn(f"failed to add shell pane in '{window_name}': {failure}")
         return None
-    except (ExecutionIncomplete, CommandFailed, RequestRefused) as error:
-        sanitize_setup_error(error, redactions=values.values())
-        output.warn(f"failed to add shell pane in '{window_name}': {describe_failure(error, redact)}")
+    except (ExecutionIncomplete, RequestRefused) as error:
+        output.warn(f"failed to add shell pane in '{window_name}': {redact(str(error))}")
         return None
 
     q_console = shlex.quote(console_name)
@@ -216,7 +226,7 @@ def _split_shell_pane(
         tag_res = run(f"tmux set-option -p -t {q_pane} {SHELL_INDEX_OPTION} {config_index}", check=False)
         tag_failure = None if tag_res.ok else redact(tag_res.stderr.strip()) or "tmux refused set-option"
     except ExecutionIncomplete as error:
-        tag_failure = describe_failure(error, redact)
+        tag_failure = redact(str(error))
     if tag_failure is not None:
         # The split happened (the pane is live) but tagging failed. Treat this
         # as a failure: callers like restore_session must know the pane is
@@ -265,7 +275,6 @@ def _add_session_window(
     values: Mapping[str, str],
     console_name: str,
     member: ConsoleSessionRow,
-    vm: VMRow,
     layout: str,
     place_last: bool = False,
     tmux_name: str | None = None,
@@ -371,7 +380,7 @@ def _add_session_window(
         from agentworks.errors import NotFoundError
 
         try:
-            session_user = _session_linux_user(db, session, vm)
+            session_user = _session_linux_user(db, session, access.vm)
         except NotFoundError as exc:
             output.warn(f"agent for session '{session.name}' is missing ({exc}); skipping shell panes for this window")
             return SessionWindowBuild(built=False)
@@ -386,9 +395,7 @@ def _add_session_window(
                 workspace_path=workspace_path,
                 shell=shell,
                 session=session,
-                vm=vm,
                 session_user=session_user,
-                admin_user=vm.admin_username,
                 config_index=config_index,
                 tmux_name=runtime_name,
             )
@@ -409,7 +416,6 @@ def _build_console_tmux_unlogged(
     db: Database,
     registry: Registry,
     console: ConsoleRow,
-    vm: VMRow,
     *,
     values: Mapping[str, str],
     layout: str,
@@ -473,7 +479,7 @@ def _build_console_tmux_unlogged(
             # environment is parked on the admin's own connection and the
             # pane's command collects it (the terminal handover), so no value
             # reaches a tmux argument or the SSH command line.
-            pane_env = _mc._resolve_admin_env(db, registry, values=values, vm=vm)
+            pane_env = _mc._resolve_admin_env(db, registry, values=values, vm=access.vm)
             with admin.park(LoginShell(env=pane_env)) as handover:
                 created = run(
                     f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
@@ -513,7 +519,6 @@ def _build_console_tmux_unlogged(
                 values=values,
                 console_name=console.name,
                 member=member,
-                vm=vm,
                 layout=layout,
                 tmux_name=staging_name,
             )
@@ -567,7 +572,6 @@ def _build_console_tmux(
     db: Database,
     registry: Registry,
     console: ConsoleRow,
-    vm: VMRow,
     *,
     values: Mapping[str, str],
     layout: str,
@@ -584,14 +588,13 @@ def _build_console_tmux(
 
     primary: BaseException | None = None
     try:
-        with operation_log(vm.name, "console-build", redactions=tuple(values.values())) as log:
+        with operation_log(access.vm.name, "console-build", redactions=tuple(values.values())) as log:
             try:
                 _build_console_tmux_unlogged(
                     access.logged(log),
                     db,
                     registry,
                     console,
-                    vm,
                     values=values,
                     layout=layout,
                     members=members,

@@ -6,7 +6,7 @@ Split out of the original ``test_secrets_eager_resolve.py`` (see
 operator-facing guarantee). This file covers the console slice:
 ``add_shell``, ``start_console``, attach to an existing runtime, and
 ``add_sessions`` must eager-resolve secrets BEFORE any pane-opening
-mutation (tmux build, DB write) -- but only on the branches that actually
+mutation (tmux build, DB write), but only on the branches that actually
 open new shells. Branches that merely join or wrap existing tmux state
 must NOT eager-resolve, per FRD R4/R5. The pane secrets that resolve in a
 console command's one boundary pass are pinned in
@@ -93,10 +93,9 @@ def test_console_add_shell_promotes_admin_for_admin_mode_session(
 ) -> None:
     """add_shell against an admin-mode session must promote the pane's
     is_admin_pane to True even when the operator passed ``admin=False``,
-    matching ``_split_shell_pane``'s ``use_admin = shell.admin or
-    session_user == admin_user`` logic. Without the promotion, the
-    helper's ``agent_name is None`` branch would silently skip eager-
-    resolve while ``_resolve_pane_env`` at split time prompts for
+    as ``_pane_runs_as_admin``, the rule the pane runs by, does. Without the
+    promotion, the helper's ``agent_name is None`` branch would silently skip
+    eager-resolve while ``_resolve_pane_env`` at split time prompts for
     admin-scope secrets late."""
     from agentworks.sessions import multi_console
 
