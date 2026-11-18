@@ -703,11 +703,11 @@ does not know its identity or bound. The five that take a `Transport` directly
 (`probe_tmux_server_pid`, `probe_process_start_ticks`, `read_boot_id`,
 `capture_tmux_server_fingerprint` and `_matches_launch_attempt`, `:1185-1318`) take a `RunCommand`;
 the four with a `sudo` parameter lose it, which the caller binds as `elevated` (`read_boot_id` never
-elevates). `tmux_cmd`'s `sudo` (`:555`), which nothing passes, goes. `RunCommand` returns a
-`CommandResult` protocol (`stdout`, `stderr`, `returncode`, `ok`), the shape of both
-`access_run_command`'s `CommandOutcome` and the legacy `SSHResult`, so the primitives read a
-result's fields as attributes. Batch D2 put the last callers, the consoles, on `access_run_command`
-and removed its docstring's `Transport.run` half.
+elevates). `tmux_cmd`'s `sudo` (`:555`), which nothing passes, goes. `RunCommand` returns
+`access_run_command`'s `CommandOutcome` (`stdout`, `stderr`, `returncode`, `ok`), so the primitives
+read a result's fields as attributes; the `CommandResult` protocol that also admitted the legacy
+`SSHResult` went with it. Batch D2 put the last callers, the consoles, on `access_run_command` and
+removed its docstring's `Transport.run` half.
 
 | Primitive                                                                                    | Today                                        | Read-only | Notes                                                                                                                    |
 | -------------------------------------------------------------------------------------------- | -------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |

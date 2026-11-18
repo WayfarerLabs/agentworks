@@ -91,22 +91,6 @@ ADMIN_SOCKET_ROOT = "/run/agentworks/admin-tmux-sockets"
 TMUX_BINARY = "/usr/bin/tmux"
 
 
-class CommandResult(Protocol):
-    """What a ``RunCommand`` returns: the decoded streams and the exit status (``CommandOutcome``)."""
-
-    @property
-    def stdout(self) -> str: ...
-
-    @property
-    def stderr(self) -> str: ...
-
-    @property
-    def returncode(self) -> int: ...
-
-    @property
-    def ok(self) -> bool: ...
-
-
 class RunCommand(Protocol):
     """Callable that runs a shell command line on the VM: ``access_run_command`` over a ``VMAccess``.
 
@@ -119,7 +103,7 @@ class RunCommand(Protocol):
         *,
         check: bool = True,
         env: dict[str, str] | None = None,
-    ) -> CommandResult: ...
+    ) -> CommandOutcome: ...
 
 
 @dataclass(frozen=True)
@@ -296,7 +280,7 @@ def socket_owner_run_command(
     """
     run = access_run_command(access, deadline=deadline, elevated=switch_user)
 
-    def as_owner(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> CommandResult:
+    def as_owner(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> CommandOutcome:
         line = as_socket_owner_line(command, socket_path=socket_path, owner=owner, switch_user=switch_user)
         return run(line, check=check, env=env)
 
@@ -336,7 +320,7 @@ class FingerprintProbe:
     fingerprint: TmuxServerFingerprint | None = None
 
 
-def _test_presence_from_result(result: CommandResult) -> ProbeStatus:
+def _test_presence_from_result(result: CommandOutcome) -> ProbeStatus:
     """Classify a shell ``test`` result, whose 0/1 contract is unambiguous."""
     returncode = result.returncode
     if returncode == 0:
@@ -353,7 +337,7 @@ _TMUX_SERVER_ABSENCE_DIAGNOSTICS = (
 _TMUX_TARGET_ABSENCE_DIAGNOSTIC = re.compile(r"can't find session: .+", re.ASCII)
 
 
-def _normalized_probe_streams(result: CommandResult) -> tuple[str, str]:
+def _normalized_probe_streams(result: CommandOutcome) -> tuple[str, str]:
     """Return probe stdout and stderr with surrounding whitespace removed."""
     return result.stdout.strip(), result.stderr.strip()
 
@@ -382,7 +366,7 @@ def runtime_probe_stderr(stderr: str) -> str | None:
 
 
 def _tmux_presence_from_result(
-    result: CommandResult, *, missing_target_is_absent: bool, stdout: str | None = None
+    result: CommandOutcome, *, missing_target_is_absent: bool, stdout: str | None = None
 ) -> ProbeStatus:
     """Classify one tmux presence probe from its exit and canonical diagnostic."""
     returncode = result.returncode
