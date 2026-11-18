@@ -182,8 +182,8 @@ def test_refusals_never_quote_what_they_refused() -> None:
         assert secret not in str(raised.value)
         assert secret not in repr(raised.value)
         assert raised.value.__cause__ is None
-        # The codec error holds the whole value, so it must not ride along as the context either.
-        assert not isinstance(raised.value.__context__, UnicodeError)
+        # A codec error holds the whole value, so nothing may ride along as the context either.
+        assert raised.value.__context__ is None
 
 
 def test_requests_do_not_repr_their_payload() -> None:
