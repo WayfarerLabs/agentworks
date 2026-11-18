@@ -1,6 +1,6 @@
 # 13. CLI-side Secret Injection for VM Shells
 
-Date: 2026-06-06 (amended 2026-08-09)
+Date: 2026-06-06 (amended 2026-08-09 and 2026-11-18)
 
 ## Status
 

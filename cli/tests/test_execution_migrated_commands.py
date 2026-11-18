@@ -76,7 +76,7 @@ def test_vm_shell_platform_runs_no_client_check_up_front(monkeypatch: pytest.Mon
         vm_manager.shell_vm(UntouchableDatabase(), SimpleNamespace(), "box", native_shell=True, interaction=REFUSE)  # type: ignore[arg-type]
 
 
-# -- The agent probe: an unreachable VM versus an agent that predates the rollout -----------
+# -- The agent probe: an unreachable VM versus an agent with no SSH access of its own -------
 
 
 AGENT = Agent("a1", "agt-a1")

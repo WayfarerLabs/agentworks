@@ -66,9 +66,9 @@ live diagnostic access may report busy briefly while another operation holds the
 
 ## Host keys
 
-Agentworks verifies each VM's SSH host key against a per-VM store. Only the first connection of
-`vm create` may record a key; an existing VM with no record never falls back to first use. Commands
-that need guest SSH or VM activation refuse one with no record, while describe and listing commands
+Agentworks verifies each VM's SSH host key against a per-VM store and may accept a key on first use
+only during `vm create`; an existing VM with no record never falls back to first use. Commands that
+need guest SSH or VM activation refuse one with no record, while describe and listing commands
 report the missing record per VM and carry on. Provider-only stops and pure desired-state selection
 do not require a record. `agw vm import-host-keys --help` explains how to fill the store for a VM
 with no record.

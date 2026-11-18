@@ -11,9 +11,11 @@ problem from the status-probe side.
 
 Amended: every Agentworks connection to a VM now sends its request on the OpenSSH client's stdin, a
 pipe that `agw` writes and closes once the request and the caller's input are sent
-([`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)). No request
-connection inherits the operator's console, so none takes `-n`; a port forward, which sends no
-request, still does. A non-interactive request runs under `-T` and an interactive one under `-t`,
+([`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)). The exceptions
+are a terminal attach's two connections: the parking connection's stdin stays open until the
+terminal half collects the request, and the terminal half's stdin is the operator's terminal. No
+request connection inherits the operator's console, so none takes `-n`; a port forward, which sends
+no request, still does. A non-interactive request runs under `-T` and an interactive one under `-t`,
 and `-F none` keeps an operator's `RequestTTY` or `ControlMaster` setting from applying. The
 decision (no forced pty, and no stdin left open to the console) stands; `SSHTarget`, `run()` and the
 `input_text` and `input_data` payloads named below are gone, and issue #745's concern no longer

@@ -54,8 +54,10 @@ access and may honor the operator's configuration.
 **Trust bound to the VM.** Host keys live in an Agentworks store, one record per VM keyed by VM
 name, verified strictly on every connection, by Agentworks and by the operator's own `ssh` through
 the managed aliases. Only a VM Agentworks is creating has its key accepted on first use, at core's
-first connection after provisioning. An existing VM's key enters the store only by an explicit
-import or by `vm recover` reading it through the platform under the operator's confirmation.
+first connection after provisioning. A cloud's provisioning connection and `vm recover`'s host-key
+read also accept a key on first use, under a binding scoped to that one run and never persisted. An
+existing VM's key enters the store only by an explicit import or by `vm recover` reading it through
+the platform under the operator's confirmation.
 
 **Platforms keep only a root channel.** A platform provisions with whatever native access it needs,
 performs the VM's first Tailscale join, and returns the VM's tailnet address. After that it supplies
@@ -75,7 +77,7 @@ fixed in provisioning or initialization, not carried as a branch in core.
 - **No lowest common denominator.** No size limit, quoting rule or staging scheme exists to serve a
   native channel.
 - **Request content stays private.** It appears in no process list on either machine and never
-  touches disk, and environment values arrive byte-exact without VM-side configuration.
+  touches disk.
 - **Trust survives address changes** and never widens silently.
 - **Recovery has a defined path.** When Tailscale or SSH breaks, `vm recover` repairs it through the
   platform's root channel instead of every operation carrying a fallback.
@@ -92,6 +94,9 @@ fixed in provisioning or initialization, not carried as a branch in core.
 - **A broken sshd can be out of reach.** Where a platform's root channel itself goes through the
   guest's sshd (the clouds' public SSH, Lima), a broken sshd needs provider-native recovery or
   recreation.
+- **Four account shells.** sshd runs the constant first stage under the account's login shell, which
+  is verified only for `sh`, `dash`, `bash` and `zsh`, so an admin or agent login shell outside
+  those is a configuration error.
 - **A terminal attach costs two connections.**
 
 ## Alternatives considered
@@ -120,5 +125,6 @@ fixed in provisioning or initialization, not carried as a branch in core.
 - [`cli/agentworks/capabilities/vm_platform/README.md`](../../cli/agentworks/capabilities/vm_platform/README.md)
   states what a platform must deliver and implement under vm-platform contract version 2.
 - [ADR 0026](0026-environment-travels-inside-the-request.md) records how the environment travels,
-  superseding ADRs 0014 and 0017. ADRs 0003, 0011, 0013, 0019, 0020 and 0025 carry amendments for
-  the mechanisms this decision replaced.
+  superseding ADRs 0014 and 0017. ADRs 0003, 0011, 0013, 0019,
+  [0020](0020-close-ssh-stdin-instead-of-forcing-a-tty.md) and 0025 carry amendments for the
+  mechanisms this decision replaced, and ADRs 0015 and 0016 note where `SetEnv` was replaced.

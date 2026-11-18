@@ -59,7 +59,7 @@ def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
     with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
         local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
-    assert events == [("enter", None), ("exit", None)]  # the terminal is restored on interrupt
+    assert events == [("enter", None), ("exit", None)]
     assert local_lane.wait_gone(f"/tmp/agw-handover-{token}")  # the launcher saw the client leave
 
 

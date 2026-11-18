@@ -13,79 +13,73 @@ contract versions as well.
 Work through these in order; the sections after this list give the detail.
 
 1. **Keep a database backup.** The first command that opens the state database offers a
-   pre-migration snapshot; retain it ([Rollback](#rollback)).
-2. **Check the OpenSSH client.** Every command that reaches a VM needs OpenSSH 8.5 or newer, and on
-   Windows the Win32-OpenSSH build; `agw doctor` shows the client Agentworks resolved
-   ([What these commands need](#what-these-commands-need)).
+   pre-migration snapshot; retain it, together with a full backup (`agw database --help`), for
+   [Rollback](#rollback).
+2. **Run `agw doctor` and fix what it reports.** It shows the OpenSSH client Agentworks resolved:
+   every command that reaches a VM needs OpenSSH 8.5 or newer, on Windows the Win32-OpenSSH build
+   ([What these commands need](#what-these-commands-need)). No ssh configuration applies to a VM
+   connection, so the agent named by `SSH_AUTH_SOCK` serves the configured key, and an encrypted key
+   must already be loaded there. It also reports configuration this release refuses outright, such
+   as a relative, `/` or `..` `paths.vm_workspaces`, which stops every command
+   ([Workspaces](#workspaces)), and stored agent or admin specs that need replacing before
+   `vm reinit` or `agent reinit` will run ([Initialization steps](#initialization-steps)).
 3. **Import host keys.** Run `agw vm import-host-keys --all` until it reports a record for every VM.
-   Until a VM has one, every command that reaches it refuses it, and so does your own `ssh` through
-   its managed aliases ([Import existing host keys](#import-existing-host-keys)). A VM with nothing
-   to import, or one that cannot rejoin Tailscale, gets its record from `agw vm recover NAME`.
-4. **Reinit each existing VM once.** `agw vm reinit NAME` removes the sshd and sudoers grants this
-   release no longer uses, which changes what your own `ssh` and `sudo` pass on
+   Until a VM has one, every command that reaches it refuses it. Each run also rewrites the managed
+   SSH entries, so your own `ssh` through them verifies against the store from then on
+   ([Import existing host keys](#import-existing-host-keys)). A VM with nothing to import, or one
+   that cannot rejoin Tailscale, gets its record from `agw vm recover NAME`.
+4. **Reinit each existing VM once.** `agw vm reinit NAME` removes the sshd and sudoers grants and
+   the admin's group access to agent tmux servers that this release no longer uses, which changes
+   what your own `ssh` and `sudo` pass on
    ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)). Read its warnings:
    it reports settings in `/etc/environment` and other `pam_env` files that commands no longer
    apply, and login shells Agentworks does not support
    ([What behaves differently](#what-behaves-differently)). A VM that reinit reports as unable to
    run Agentworks requests lacks `python3`; `agw vm recover NAME` installs it, then reinit again.
 5. **Restart each running named console** with `agw console restart NAME`, once its VM has been
-   reinitialized. A console's windows and shells change only when it is rebuilt, and an old window
-   showing an agent session cannot reconnect to it once the VM is reinitialized
-   ([Named consoles](#named-consoles)).
-6. **Adopt desired runtime state.** Give existing sessions and named consoles their intended
-   targets, preview, and reconcile ([Adopt desired runtime state](#adopt-desired-runtime-state)).
+   reinitialized ([Named consoles](#named-consoles)). Restarting records that the console should
+   run.
+6. **Adopt desired runtime state** for existing sessions and named consoles, preview, and reconcile
+   ([Adopt desired runtime state](#adopt-desired-runtime-state)).
 7. **Refresh shell completions** with `agw completion install`.
-8. **Check platform follow-ups.** A Lima VM created before 0.20 reruns its create-time bootstrap at
-   every start, and a WSL2 VM created before 0.20 takes the Windows computer's name at every start,
-   until you recreate it or, for WSL2, set its hostname yourself
-   ([Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
+8. **Check the changes that apply without an error.** These need action if they affect you:
+   - a git dotfiles checkout now follows the template's `ref`, and a local branch in it no longer
+     advances; dotfiles that ship a mise config now win over `mise_packages`; and an install
+     command's directory now takes precedence over a mise shim of the same name
+     ([Initialization steps](#initialization-steps));
+   - `vm exec` no longer applies `PATH` additions made in profile files, and on Windows `agw` no
+     longer expands `*`, `?`, `~` or variables in its arguments
+     ([What behaves differently](#what-behaves-differently));
+   - a workspace tmuxinator config an earlier release generated must not be started on a VM with
+     agent sessions until Agentworks rewrites it
+     ([Agent session tmux clients run as the agent](#agent-session-tmux-clients-run-as-the-agent));
+   - files an earlier release's interrupted backup or Remote Lima create left under `/var/tmp` are
+     no longer cleaned up ([Backups](#backups),
+     [Start, recover, rekey and delete](#start-recover-rekey-and-delete));
+   - a Lima VM created before 0.20 reruns its create-time bootstrap at every start, and a WSL2 VM
+     created before 0.20 takes the Windows computer's name at every start, until you recreate it or,
+     for WSL2, set its hostname yourself
+     ([Start, recover, rekey and delete](#start-recover-rekey-and-delete)).
 9. **Update third-party plugins** to their new contract versions
    ([harness integrations, Git credential providers and secret backends](#third-party-harness-integrations-git-credential-providers-and-secret-backends),
    [VM platforms](#third-party-vm-platforms)).
 
-What changes for you, in short:
-
-- **Host keys are checked strictly,** by Agentworks and by your own `ssh` through the managed
-  aliases, against the store only, with no first-use acceptance for an existing VM.
-- **Environment never travels through sshd or sudo.** After reinit, your own `ssh -o SetEnv` or
-  `SendEnv` reaches the VM only for the names sshd's stock configuration accepts, and your own
-  `sudo` no longer keeps `AGENTWORKS_*` or `AW_*`.
-- **No ssh configuration applies** to a VM connection: the agent named by `SSH_AUTH_SOCK` serves the
-  configured key, and an encrypted key must already be loaded there.
-- **Environment values may hold line breaks,** which earlier releases warned about or refused
-  ([What behaves differently](#what-behaves-differently)).
-
 ## Import existing host keys
 
-Agentworks used to accept a VM's host key on first use and write it to `~/.ssh/known_hosts`. It now
-keeps one record per VM under `~/.config/agentworks/known_hosts/`, keyed by VM name, and refuses to
-connect to a VM that has no record. A missing record never falls back to first use.
-
-Run the import once, from the workstation where you already connected to your VMs:
+Agentworks keeps one host-key record per VM under `~/.config/agentworks/known_hosts/`, keyed by VM
+name, and refuses to connect to an existing VM that has no record; it no longer reads or writes
+`~/.ssh/known_hosts` for VMs. Run the import from the workstation where you already connected to
+your VMs:
 
 ```console
 agw vm import-host-keys --all
 ```
 
-For each VM, the command asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` holds
-for the VM's tailnet address, and copies them into that VM's record. Your `known_hosts` is only
-read. It runs the `ssh-keygen` installed beside the OpenSSH client Agentworks connects with, so it
-needs the same supported client (OpenSSH 8.5 or newer) that connecting does. Pass
-`--known-hosts PATH` to read a different file, for example one copied from another workstation.
-
-Each VM gets one line in the report:
-
-- `imported (N keys)`: the VM now has a record.
-- `already current`: the VM already had a record that covers the matching keys. Nothing changed.
-- `conflicts with the stored key`: the VM has a record and `known_hosts` disagrees. Nothing changed.
-  A different key is worth understanding before you trust it.
-- `no matching entry`: `known_hosts` has nothing for the VM's address.
-- `trust marker present`: a matching `@cert-authority` or `@revoked` line exists. Nothing is
-  imported for that VM.
-- `no tailnet address`: the VM has no recorded Tailscale address yet.
-
-The command exits non-zero while any selected VM ends without a record. Run
-`agw vm import-host-keys --all` again at any time as a checklist of the VMs still missing one.
+It copies the keys `~/.ssh/known_hosts` holds for each VM's tailnet address into that VM's record,
+reading the file only; `--known-hosts PATH` reads another one, such as a copy from another
+workstation. It prints one line per VM and exits non-zero while any selected VM ends without a
+record, so run it again as a checklist. The [command reference](../../cli/command-reference.md)
+describes the matching and each report line.
 
 ## A VM with no matching entry
 
@@ -112,19 +106,16 @@ node.
 
 ## What fails until the import runs
 
-Commands that act on a VM refuse it; commands that only describe or list VMs report the missing
-record for that VM and carry on. Every command that reaches a VM over SSH refuses a VM with no
-record, before it starts the VM, resolves a secret or changes anything, and prints a hint that names
-the import. That covers `vm start`, `vm shell`, `vm exec`, `vm reinit`, `vm backup`,
-`vm port-forward`, `vm rekey`, and the workspace, agent, session and console commands, including the
-start of a stopped VM that any of them would trigger; `vm rekey` checks first so it never spends a
-Tailscale auth key. One command differs: `vm shell --platform` on a cloud VM (AWS, Azure, GCP)
-resolves the site's credentials first and then refuses, before it opens any network rule.
-`agw vm recover NAME` is the one command that repairs a VM without a record, starting it first if it
-is stopped: it reads the keys through the platform and records them once you confirm their
-fingerprints, without a file to import. `vm describe`, `session describe` and the status listings
-that span several VMs warn that the VM has no record, leave out what they would have read over SSH,
-and carry on.
+Every command that reaches a VM over SSH refuses a VM with no record, before it starts the VM,
+resolves a secret or changes anything, and prints a hint that names the import. That covers
+`vm start`, `vm shell`, `vm exec`, `vm reinit`, `vm backup`, `vm port-forward`, `vm rekey`, and the
+workspace, agent, session and console commands, including the start of a stopped VM that any of them
+would trigger; `vm rekey` checks first so it never spends a Tailscale auth key. One command differs:
+`vm shell --platform` on a cloud VM (AWS, Azure, GCP) resolves the site's credentials first and then
+refuses, before it opens any network rule. `agw vm recover NAME` is the one command that repairs a
+VM without a record, starting it first if it is stopped. `vm describe`, `session describe` and the
+status listings that span several VMs warn that the VM has no record, leave out what they would have
+read over SSH, and carry on.
 
 `vm delete` still works without a record, because deleting is what you do with a broken VM. It
 cannot reach a cloud VM (AWS, Azure, GCP) to log its node out of Tailscale, though, so that step is
@@ -133,25 +124,17 @@ console afterwards.
 
 `agw database restore` onto another workstation carries no host-key records, because the store lives
 beside the database, not in it. Copy `~/.config/agentworks/known_hosts/` from the old workstation
-along with the database. VMs created on 0.20 have keys only there, because nothing writes
-`~/.ssh/known_hosts` any more. For VMs that predate 0.20, the import (from `~/.ssh/known_hosts` or a
-verified `--known-hosts` file) still works as the fallback.
+along with the database. VMs created on 0.20 have keys only there. For older VMs, the import still
+works as the fallback.
 
-Your own `ssh` refuses those VMs too. Every managed SSH entry (`awvm--NAME`, `awagent--NAME`) now
-verifies the VM's key with `StrictHostKeyChecking yes` against the store, which it names as the
-global known-hosts file, so `ssh awvm--NAME`, and `scp`, VS Code Remote-SSH or anything else that
-goes through those aliases, fails with `Host key verification failed` for a VM with no record
-instead of trusting `~/.ssh/known_hosts` or accepting the key on first use. The VM's managed entries
-carry a comment naming the fix. Run the import (or `agw vm recover NAME`) and the same aliases work
-again, verifying against the store. Your own `ssh` never writes to the store, because the entries
-name it as the global known-hosts file, which `ssh` only reads. A host-key checking setting of your
-own (`StrictHostKeyChecking accept-new` or `no`, in an earlier `Host *` block or on the command
-line, as some tools pass it) can let `ssh` connect to a VM with no record without verifying it.
-Neither that nor an update setting (`UpdateHostKeys`) ever records a key in the store. A known-hosts
-file setting of your own (`UserKnownHostsFile` or `GlobalKnownHostsFile`) read before the entry
-takes precedence over it: keys then go into your file rather than the store, and later connections
-trust them, or the store is skipped and the VM fails closed. If you never import, those aliases stay
-refused.
+Your own `ssh` changes when the managed SSH entries (`awvm--NAME`, `awagent--NAME`) are next
+rewritten, by the import, `vm reinit`, `vm recover`, `vm start`, `agent create` or
+`agw config sync-ssh-config`; until then the earlier entries remain. The rewritten entries verify
+the VM's key strictly against the store, so `ssh awvm--NAME`, and `scp`, VS Code Remote-SSH or
+anything else that goes through those aliases, fails with `Host key verification failed` for a VM
+with no record, and works again once the import or `agw vm recover NAME` records one. The
+[command reference](../../cli/command-reference.md#direct-ssh-aliases) describes the entries and how
+settings of your own interact with them.
 
 ## New VMs
 
@@ -160,9 +143,8 @@ store only. Your `~/.ssh/known_hosts` is no longer touched. `vm delete` removes 
 
 ## Reinit retires grants nothing uses
 
-Earlier releases left grants on each VM that this release no longer uses. `vm create` no longer adds
-them, and `vm reinit` removes them, so one `agw vm reinit` of each existing VM brings it to the new
-state. Until then they stay in place, unused:
+`vm create` no longer adds the grants below, and `vm reinit` removes them, so one `agw vm reinit` of
+each existing VM brings it to the new state. Until then they stay in place, unused:
 
 - **The console setenv sudoers grant**, `/etc/sudoers.d/51-agentworks-console-setenv`
   (`Defaults:<admin> setenv`), which carried an agent console shell's environment across `sudo` (see
@@ -192,13 +174,10 @@ state. Until then they stay in place, unused:
   membership. If any directory could not be reset, reinit warns and keeps the group for the next
   reinit. `agent create` and `session create` also reset the directories they use, without a
   warning. An agent session started before the reset keeps running, but from the moment an agent's
-  directory is reset, any account but the agent and root is refused a new connection to its servers.
-  That includes a console window not yet rebuilt and a tmuxinator config an earlier release
-  generated, which connect as the admin: rebuild the console and do not start the old config, as the
-  bullets on
-  [existing console windows and tmuxinator configs](#agent-session-tmux-clients-run-as-the-agent)
-  say. A tool of your own that connects to an agent's tmux server as the admin must switch to the
-  agent first, as Agentworks does.
+  directory is reset, any account but the agent and root is refused a new connection to its servers,
+  a console window not yet rebuilt and an old tmuxinator config included. A tool of your own that
+  connects to an agent's tmux server as the admin must switch to the agent first, as Agentworks
+  does.
 
 ## Agent session tmux clients run as the agent
 
@@ -218,8 +197,6 @@ then runs the client as the agent with `runuser`. Attach clients run on a termin
   environment, so variables tmux would otherwise copy into the session on attach, such as
   `SSH_AUTH_SOCK`, no longer reach it. Under `sudo`'s default policy `TERM` and the locale variables
   still do.
-- **Existing console windows keep their old attach loop until rebuilt.** Run
-  `agw console restart NAME` for each running named console that shows an agent session.
 - **Workspace tmuxinator configs from earlier releases are not covered until rewritten.** A
   workspace's `.tmuxinator.yml` that an earlier release generated starts plain tmux clients as the
   VM admin, including against agent sessions' servers. Agentworks rewrites it, with the switch, when
@@ -237,9 +214,6 @@ then runs the client as the agent with `runuser`. Attach clients run on a termin
 
 ## Adopt desired runtime state
 
-Keep a full database backup from before the upgrade. The normal database-open path offers a
-pre-migration snapshot; retain it. See `agw database --help` for backup and restore operations.
-
 Schema migration 39 replaces the old VM `operator_stopped` flag with a desired runtime state:
 
 | Existing VM policy                         | Migrated target |
@@ -247,88 +221,35 @@ Schema migration 39 replaces the old VM `operator_stopped` flag with a desired r
 | Manually stopped (`operator_stopped=true`) | `stopped`       |
 | Automatic activation permitted (`false`)   | `on-demand`     |
 
-`on-demand` permits activation when another operation needs the VM, without requesting that it stay
-running. Migration does not infer `running` intent from the VM's observed power state. Existing
-sessions and named consoles have unset targets, preserving their definitions, console membership and
-runtime evidence. They need operator-selected `running` or `stopped` targets; reconciliation reports
-missing intent rather than guessing from old PIDs or timestamps. Newly created VMs, sessions and
-named consoles record `running` intent.
+Migration does not infer `running` intent from a VM's observed power state. Existing sessions and
+named consoles have unset targets, and reconciliation reports them as blocked rather than guessing
+from old PIDs or timestamps. Newly created VMs, sessions and named consoles record `running` intent,
+and so do explicit `vm start`, `vm recover` when it starts a stopped VM, and session and console
+start commands; nothing clears intent when a runtime exits on its own.
 
-### Inspect, adopt and preview
+In order:
 
-Plain lists read local inventory and show stored intent without connecting to VMs:
+1. Inspect stored intent with `agw vm list`, `agw session list` and `agw console list`, which read
+   local inventory without connecting to VMs.
+2. Record each known target with `agw vm set-desired-state`, `agw session set-desired-state` or
+   `agw console set-desired-state`, which start and stop nothing. Leave unknown targets unset. A
+   console's target does not set its member sessions' targets.
+3. Preview with `agw vm reconcile NAME --dry-run`, which observes without changing anything or
+   booting a stopped VM.
+4. Apply with `agw vm reconcile NAME`, which may start or stop the VM and its children according to
+   their targets, or `session reconcile` or `console reconcile` for one resource.
 
-```console
-agw vm list
-agw session list
-agw console list
-```
-
-For each resource whose intended state is known, use its `set-desired-state` command. These commands
-change stored intent without starting or stopping anything. For example, substitute existing names
-and select only targets the operator intends:
-
-```console
-agw vm set-desired-state workstation on-demand
-agw session set-desired-state development running
-agw session set-desired-state retired-work stopped
-agw console set-desired-state daily running
-```
-
-Leave unknown targets unset until the operator decides. A named console's target controls its view;
-it does not set its member sessions' targets, so adopt those sessions separately.
-
-Complete the [host-key import](#import-existing-host-keys) before reconciling. Preview one VM and
-its stored sessions and named consoles first:
-
-```console
-agw vm reconcile workstation --dry-run
-```
-
-The preview observes reachable runtimes without changing them or booting a stopped VM. Selected
-sessions and named consoles with unset targets are reported as blocked. Both preview and apply exit
-nonzero while any remain. Apply may still recover other eligible resources, so a nonzero exit does
-not mean nothing changed.
-
-When the reported scope and targets match the intended recovery, apply them:
-
-```console
-agw vm reconcile workstation
-```
-
-Applying may start or stop the selected VM and its children according to their targets. A stopped VM
-target blocks children that request running; it does not discard their intent. If that VM should run
-again, explicitly start it with `agw vm start workstation`, then reconcile it to restore its
-children. VM start alone does not restore sessions or consoles. A focused `session reconcile NAME`
-or `console reconcile NAME` is available when only that resource should be restored.
-
-### Lifecycle changes to account for
-
-- Explicit `vm start` now records `running` intent even when the VM is already running, and
-  `vm recover` records it when it starts a stopped VM. Use `agw vm set-desired-state NAME on-demand`
-  to return to activation only when needed. Explicit session start/stop commands also record intent,
-  including accepted batch no-ops. Named-console start/stop commands record intent for the console
-  view.
-- A VM shutting down or suspending itself, a session exiting, or a console disappearing does not
-  clear intent. Restoring intended state requires an explicit reconcile command; there is no
-  background controller.
-- On WSL2, a live VM with `stopped` intent receives no idle-shutdown protection during access or
-  management commands and may stop mid-command. Select `on-demand` or `running` only when normal
-  holds and future activation are both intended.
-- Batch session start/restart and reconciliation collect all eligible workload secrets before
-  changing selected workload runtimes. One missing required workload secret blocks the entire
-  deferred batch. Required VM activation or repair may already have happened and is not rolled back.
-  Accepted intent survives a later failure or cancellation, so retry reconciliation after resolving
-  the failure.
+[Desired runtime state](desired-runtime-state.md) covers targets, WSL2 holds, batch secret
+resolution, failure handling and JSON output.
 
 ### Rollback
 
 An older binary refuses the newer schema. Rollback requires a full pre-migration database backup and
 a compatible Agentworks release; do not reconstruct the retired flag or downgrade the schema by
-hand. Restoring the database does not undo provider or guest changes made since the backup.
-
-See [Desired runtime state](desired-runtime-state.md) for scope, failure handling and JSON output
-compatibility. Refresh shell completions after upgrading with `agw completion install`.
+hand. Restoring the database does not undo provider or guest changes made since the backup: a VM
+reinitialized by 0.20 no longer has the `AcceptEnv` wildcard, the `env_keep` fragment or the
+`tmux-agent-access` group that a 0.19 binary relies on until that binary's own `vm reinit` puts them
+back.
 
 ## Connecting through the new layer
 
@@ -348,11 +269,12 @@ use the platform's own channel instead (see
 
 ### What these commands need
 
-Each such command checks the client first, so an unsupported one is refused before `vm create`
-builds a VM, `vm start` starts one, or `vm rekey` and `vm recover` spend a Tailscale auth key. The
-automatic start, which other commands trigger, is one exception: it checks the client at its wait,
-once the VM has started. `vm describe` is the other: it warns and leaves the live resources out
-instead of refusing.
+The `vm` commands and `agent shell` and `agent exec` check the client first, so an unsupported one
+is refused before `vm create` builds a VM, `vm start` starts one, or `vm rekey` and `vm recover`
+spend a Tailscale auth key. `vm describe` warns and leaves the live resources out instead of
+refusing. The other commands that reach a VM (workspace, session and console commands, and
+`agent create`, `agent reinit` and `agent delete`) and the automatic start fail at their first
+request to the VM instead, which comes after any VM start and secret prompt.
 
 - **OpenSSH 8.5 or newer on the workstation.** Agentworks uses the first `ssh` on your `PATH`
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or
@@ -552,6 +474,9 @@ the VM once no backup is running.
 
 ### Named consoles
 
+- **Restart each running console after its VM's reinit.** A running console keeps its windows, their
+  attach loops and its shells until `agw console restart NAME` rebuilds it, and once its VM is
+  reinitialized an old window cannot reconnect to an agent session.
 - **A console shell's environment is off the command line.** Each shell pane, and the admin shell
   window `console create --add-admin-shell` adds, takes its resolved values from a request on its
   own account's connection, which the pane's one-time command collects, instead of
@@ -563,16 +488,15 @@ the VM once no backup is running.
   `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` tmux sets for its pane. An agent's shell pane switches
   to the agent with `sudo -n -u` before it collects its request, and sudo passes on only `TERM` of
   those five, so an agent's console shell has `TERM` and no `TMUX`, as under the `sudo --login` of
-  earlier releases. A running console's shells change when the console is rebuilt
-  (`agw console restart`). Because each pane's command runs once, `tmux respawn-pane` cannot start
-  its shell again: restore a shell pane with `agw console restore-session` and the admin shell
-  window with `agw console restart`.
+  earlier releases. Because each pane's command runs once, `tmux respawn-pane` cannot start its
+  shell again: restore a shell pane with `agw console restore-session` and the admin shell window
+  with `agw console restart`.
 - **An agent's console shell connects as the agent.** Its environment no longer crosses `sudo`, so
   it no longer needs the `Defaults:<admin> setenv` grant of `51-agentworks-console-setenv`, which
   reinit removes ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)). It
   needs the agent's own SSH access instead, as an agent session does: a console command that would
-  open a shell for an agent that predates the direct-SSH rollout refuses before it prompts for a
-  pane secret or changes the console's tmux or definition, with the `agw agent reinit` hint. It may
+  open a shell for an agent that has no SSH access of its own refuses before it prompts for a pane
+  secret or changes the console's tmux or definition, with the `agw agent reinit` hint. It may
   already have started a stopped VM, and `console start` records that the console should run, before
   that check. `restore-session` checks every agent of the session's shells, even when their panes
   are not missing. `console add-shell` and `add-sessions` check only when the console is running,
@@ -651,8 +575,8 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
 - **Step warnings show what failed.** A failed step's warning ends with the last three lines of the
   command's error output, with secrets removed.
 - **The DNS check warns when it cannot run.** A DNS probe that fails to run or times out warns and
-  initialization goes on. The issue #117 latch still stops it. A mise lockfile step that cannot
-  create its directory warns too.
+  initialization goes on. DNS that tailscaled left latched in direct mode still stops it, with the
+  manual fix as its hint. A mise lockfile step that cannot create its directory warns too.
 - **Some failures stop initialization instead of warning.** A host key that does not match the VM's
   record, a VM with no record, and a VM that cannot run Agentworks requests fail initialization at
   the first request, with that error, instead of turning every later step into a warning. A failed
@@ -664,8 +588,7 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   warns, naming the line to add, and stays partial: until that line is in your dotfiles, that
   account's login shells lack `AGENTWORKS_AGENT` and the `PATH` entries of its install commands and
   mise. Add the line from the warning, such as `. /home/agentworks/.agentworks-profile.sh`, to the
-  file the link points to, then reinit. The old behavior edited the checkout through the link, which
-  then blocked its next `git pull`.
+  file the link points to, then reinit.
 - **Other links in a home are refused too.** The profile and rc fragments, the mise config and
   lockfile, `authorized_keys` and the agent's `.ssh` are written by the file program, which refuses
   a link at the file or any parent. A mise config that is a link (or sits in a linked directory) is
