@@ -206,6 +206,24 @@ def test_one_agent_s_failed_socket_directory_keeps_the_group_and_the_others_are_
     assert len(guest.log.warned) == 2
 
 
+def test_a_failed_socket_root_keeps_the_group_and_every_agent_s_directory_is_still_repaired(
+    db: Database, run_section: Callable[..., None]
+) -> None:
+    for name in ("a1", "a2"):
+        db.insert_agent(name, "box", f"agt-{name}")
+    guest = Guest()
+    root_chmod = Command(("chmod", "00711", "--", AGENT_SOCKET_ROOT), elevated=True, deadline=60)
+    guest.fail(_is(root_chmod), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    run_section(guest)
+
+    assert _socket_dir_chmod("agt-a1") in guest.commands()
+    assert _socket_dir_chmod("agt-a2") in guest.commands()
+    assert _retirements(guest) == []
+    # The root's own warning, then the kept group's.
+    assert len(guest.log.warned) == 2
+
+
 def test_the_group_is_retired_once_every_socket_directory_is_repaired(
     db: Database, run_section: Callable[..., None]
 ) -> None:

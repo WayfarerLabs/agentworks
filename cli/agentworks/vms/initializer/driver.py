@@ -294,14 +294,15 @@ def run_initialization(
 
 
 def _converge_agent_sockets(files: Files, linux_users: list[str], log: InitLog, *, warn_if_missing: bool) -> None:
-    """Repair the agent socket root and every agent's directory, then retire the shared group if all were repaired.
+    """Repair the agent socket root and each of ``linux_users``' directories, then retire the shared group if all were.
 
     Each directory is tried even when an earlier one fails, each failure
-    warning on its own. The group goes only once nothing can still carry
-    it: a directory left in the earlier layout keeps the group's ID and its
-    group bits, and a later ``useradd -U`` could give that ID to a new
-    agent's private group. So a failed repair keeps the group, with a
-    warning, for the next reinit to retire.
+    warning on its own. The group goes only once none of these can still
+    carry it: a directory left in the earlier layout keeps the group's ID
+    and its group bits, and a later ``useradd -U`` could give that ID to a
+    new agent's private group. So a failed repair keeps the group, with a
+    warning, for a later reinit to retire. Only the listed agents'
+    directories are checked: one a failed agent delete left behind is not.
     """
     from agentworks.sessions.tmux import (
         RETIRED_AGENT_SOCKET_GROUP,
@@ -339,7 +340,7 @@ def _converge_agent_sockets(files: Files, linux_users: list[str], log: InitLog, 
         warn(
             log,
             f"kept the retired {RETIRED_AGENT_SOCKET_GROUP} group, since a socket directory above was not "
-            "repaired; the next 'agw vm reinit' retires it",
+            "repaired; the next 'agw vm reinit' retires it once that directory is repaired",
         )
         return
     try:
