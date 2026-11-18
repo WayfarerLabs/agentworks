@@ -19,8 +19,9 @@ from unittest import mock
 
 import pytest
 
-from agentworks import ssh
+from agentworks.execution import oplog
 from agentworks.execution.errors import CommandFailed
+from agentworks.execution.oplog import OperationLogFile
 from agentworks.execution.requests import (
     Bytes,
     CaptureOutput,
@@ -32,7 +33,6 @@ from agentworks.execution.requests import (
     Shell,
 )
 from agentworks.execution.results import Completed, Unknown, UnknownReason
-from agentworks.ssh import SSHLogger
 from tests.execution.conformance.lanes import LocalLane, needs_sudo
 
 if TYPE_CHECKING:
@@ -59,9 +59,9 @@ def python(source: str, *, stdin: bytes | None = None, log_streams: bool = True)
 
 def stdin_reaches_no_record_and_no_error(lane: Lane) -> None:
     secret = f"agw-f1-{uuid.uuid4().hex}"
-    with tempfile.TemporaryDirectory() as logs, mock.patch.object(ssh, "LOG_DIR", Path(logs)):
+    with tempfile.TemporaryDirectory() as logs, mock.patch.object(oplog, "LOG_DIR", Path(logs)):
         # The operation log a command really keeps, in a directory of its own.
-        logger = SSHLogger("conformance", "F1")
+        logger = OperationLogFile("conformance", "F1")
         records: list[None] = []
 
         def log(request: RunRequest, result: Result) -> None:

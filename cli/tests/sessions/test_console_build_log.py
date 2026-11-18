@@ -36,7 +36,7 @@ def test_the_build_logs_each_admin_request_with_its_values_redacted(
     _seed_sessions(db, ["a"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["a+1"])
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     model = TmuxModel()
     # A guest that prints a value back: the layout step's output is the one place it can reach the log.
     guest = console_guest_factory(model, responses={"select-layout": _FakeResult(stdout=f"{VALUE}\n")})

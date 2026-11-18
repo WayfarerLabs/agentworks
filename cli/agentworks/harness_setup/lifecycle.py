@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 
 class SetupLog(Protocol):
-    """What native setup reads of the owning operation's log (``SSHLogger`` satisfies it)."""
+    """What native setup reads of the owning operation's log (``OperationLogFile`` satisfies it)."""
 
     @property
     def redactions(self) -> tuple[str, ...]: ...

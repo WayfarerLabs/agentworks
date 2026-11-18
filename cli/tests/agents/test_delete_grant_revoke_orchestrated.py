@@ -567,7 +567,7 @@ def _delete_on_recorder(
     outcome: Result | BaseException,
 ) -> list[Any]:
     from agentworks.agents import initializer as agent_initializer
-    from agentworks.ssh import SSHLogger
+    from agentworks.execution.oplog import OperationLogFile
 
     config = make_config()
     _seed(db)
@@ -576,7 +576,7 @@ def _delete_on_recorder(
     recorder = install_access_recorder(monkeypatch)
     recorder.access().respond(failing, outcome)
 
-    agent_initializer.delete_agent_on_vm(vm, config, "agt-a1", logger=SSHLogger("box", "test-delete-socket-dir"))
+    agent_initializer.delete_agent_on_vm(vm, config, "agt-a1", logger=OperationLogFile("box", "test-delete-socket-dir"))
 
     requests = recorder.requests("run")
     assert all(request.elevated for request in requests)

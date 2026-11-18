@@ -102,12 +102,10 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
     record) is not chained on a VM that never completed: recover refuses that
     VM, so the delete guidance is the only hint.
     """
-    from agentworks.ssh import LOG_DIR
+    from agentworks.execution import oplog
 
-    log_hint = ""
-    logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
-    if logs:
-        log_hint = f"\nDetails: {logs[0]}"
+    logs = sorted(oplog.LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
+    log_hint = f"\nDetails: {logs[0]}" if logs else ""
 
     vm = db.get_vm(vm_name)
     if vm is not None and vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
@@ -458,7 +456,7 @@ def create_vm(
             # resolved) at the composition root above; dispatch is just ops now.
             platform_obj = site_node.platform
             from agentworks.capabilities.vm_platform import ProvisionRequest
-            from agentworks.ssh import SSHLogger
+            from agentworks.execution.oplog import OperationLogFile
 
             # One manager-owned log spans platform bootstrap, Phase A, and
             # initialization. Construct it before dispatch so WSL2 can report
@@ -467,7 +465,7 @@ def create_vm(
             # success, failure, and interrupt after construction exits it. A
             # close error warns but cannot replace the primary operation result.
             try:
-                logger = SSHLogger(
+                logger = OperationLogFile(
                     vm_name,
                     "vm-create",
                     redactions=tuple(

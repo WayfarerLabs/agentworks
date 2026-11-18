@@ -34,7 +34,7 @@ def _observe_home(lifecycle: Lifecycle, monkeypatch: pytest.MonkeyPatch, *, stdo
 def test_invalid_home_observation_preserves_existing_session_artifacts(
     lifecycle: Lifecycle, monkeypatch: pytest.MonkeyPatch, operation: str, response: str
 ) -> None:
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", lifecycle.target.home / "logs")
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", lifecycle.target.home / "logs")
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     assert previous is not None

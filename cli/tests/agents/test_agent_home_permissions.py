@@ -81,7 +81,7 @@ def _run_create_on_vm(
     """
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import build_registry
-    from agentworks.ssh import SSHLogger
+    from agentworks.execution.oplog import OperationLogFile
 
     if db.get_vm("box") is None:
         db.insert_vm("box", site="proxmox", hostname="box")
@@ -124,7 +124,7 @@ def _run_create_on_vm(
         LINUX_USER,
         agent_name="dev",
         credential_requests=(),
-        logger=SSHLogger("box", "test-home-perms"),
+        logger=OperationLogFile("box", "test-home-perms"),
         admin_git_force_safe_directory=True,
     )
     return recorder

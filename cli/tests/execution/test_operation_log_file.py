@@ -1,10 +1,9 @@
-"""Tests for ``SSHLogger`` close-time exception capture.
+"""The operation log file: its one redacting sink, its close and its sharing, and how a VM's logs are found.
 
 When ``close()`` is called from inside an ``except`` block (the pattern
-used by every operation-level handler in ``agentworks.vms.initializer`` and
-elsewhere), the in-flight exception's traceback should be appended to
-the per-op log. That keeps operation-level errors out of the shared
-``error.log`` at the top of the config dir.
+every operation-level handler uses), the in-flight exception's traceback is
+appended to the per-operation log, which keeps operation-level errors out of
+the shared ``error.log`` at the top of the config dir.
 """
 
 from __future__ import annotations
@@ -15,7 +14,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform import BootstrapProgress
-from agentworks.ssh import SSHLogger, SSHResult
+from agentworks.execution import oplog
+from agentworks.execution.oplog import OperationLogFile
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -23,14 +23,13 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def logger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SSHLogger]:
-    """Build a fresh ``SSHLogger`` rooted in ``tmp_path`` (not the user's
-    real config dir) so the test doesn't pollute on-disk state."""
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    yield SSHLogger("vm1", "test-op")
+def logger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[OperationLogFile]:
+    """A fresh log rooted in ``tmp_path``, not the user's real config dir."""
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    yield OperationLogFile("vm1", "test-op")
 
 
-def test_close_appends_traceback_when_called_inside_except(logger: SSHLogger) -> None:
+def test_close_appends_traceback_when_called_inside_except(logger: OperationLogFile) -> None:
     """``close()`` introspects ``sys.exc_info()``. An exception in flight
     at close time gets its traceback appended to the log file before the
     footer. This is what routes operation-level errors away from the
@@ -47,7 +46,7 @@ def test_close_appends_traceback_when_called_inside_except(logger: SSHLogger) ->
     assert "# Finished:" in text
 
 
-def test_close_without_exception_omits_traceback_block(logger: SSHLogger) -> None:
+def test_close_without_exception_omits_traceback_block(logger: OperationLogFile) -> None:
     """A bare ``close()`` (no exception in flight) writes the footer
     only -- the traceback block is gated on ``sys.exc_info()``."""
     logger.close()
@@ -57,7 +56,7 @@ def test_close_without_exception_omits_traceback_block(logger: SSHLogger) -> Non
     assert "# Finished:" in text
 
 
-def test_ssh_logger_structurally_satisfies_bootstrap_progress(logger: SSHLogger) -> None:
+def test_the_log_structurally_satisfies_bootstrap_progress(logger: OperationLogFile) -> None:
     progress: BootstrapProgress = logger
 
     progress.step("bootstrap step")
@@ -74,33 +73,12 @@ def test_ssh_logger_structurally_satisfies_bootstrap_progress(logger: SSHLogger)
 
 
 @pytest.mark.windows
-def test_path_retargeting_moves_subsequent_records(
-    logger: SSHLogger,
-    tmp_path: Path,
-) -> None:
-    """Backup logging changes the public path after construction; the active
-    handler must follow it without copying prior records."""
-    original_path = logger.path
-    retargeted = tmp_path / "backup" / "backup.log"
-    logger.path = retargeted
-
-    logger.output("backup payload")
-    logger.close()
-
-    assert "backup payload" not in original_path.read_text()
-    assert "backup payload" in retargeted.read_text()
-    assert "# Finished:" in retargeted.read_text()
-
-
-@pytest.mark.windows
 def test_write_error_propagates_and_closes_handler(
-    logger: SSHLogger,
+    logger: OperationLogFile,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The logging adapter must not swallow filesystem failures, and its
     transient descriptor must close on the exceptional path."""
-    from agentworks import ssh
-
     captured: list[tuple[Any, Any]] = []
 
     def failing_emit(handler: object, record: object) -> None:
@@ -110,7 +88,7 @@ def test_write_error_propagates_and_closes_handler(
         except OSError:
             handler.handleError(record)  # type: ignore[attr-defined]
 
-    monkeypatch.setattr(ssh._PropagatingFileHandler, "emit", failing_emit)
+    monkeypatch.setattr(oplog._PropagatingFileHandler, "emit", failing_emit)
 
     with pytest.raises(OSError, match="disk full"):
         logger.output("payload")
@@ -130,17 +108,19 @@ def test_write_sink_sanitizes_every_persistent_surface(
     itself (no public method pre-sanitizes; correctness must not
     depend on caller discipline)."""
     secret = "tskey-auth-supersecret-12345"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
+
+    from agentworks.execution.requests import Command
+    from agentworks.execution.results import Completed, Result
 
     logger.step(f"joining with {secret}")
     logger.output(f"raw output {secret}")
     logger.warning(f"warn {secret}")
     logger.log_error(f"error {secret}")
-    logger.log_timeout(f"tailscale up --auth-key {secret}", 1, 2)
-    logger.log_command(
-        f"tailscale up --auth-key {secret}",
-        SSHResult(returncode=1, stdout=f"out {secret}", stderr=f"err {secret}"),
+    logger.record(
+        Command(("tailscale", "up", f"--auth-key={secret}")),
+        Result(Completed(1), f"out {secret}".encode(), f"err {secret}".encode()),
     )
     logger._write(f"caller bypassed every public surface: {secret}\n")
     logger.close()
@@ -157,8 +137,8 @@ def test_warning_text_is_sanitized_before_durable_logging(
     """Durable warnings retain their diagnosis without leaking known secrets."""
     secret = "ghp-supersecret-token"
     warning = f"credential rejected: {secret}"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
     logger.warning(warning)
 
     initial_text = logger.path.read_text()
@@ -177,25 +157,22 @@ def test_warning_text_is_sanitized_before_durable_logging(
     assert logger.warnings == [warning]
 
 
-def test_redactions_cannot_be_registered_after_writes(logger: SSHLogger) -> None:
+def test_redactions_cannot_be_registered_after_writes(logger: OperationLogFile) -> None:
     """Incremental logs persist their header during construction, so accepting
     later redactions would make the no-cleartext guarantee timing-dependent."""
     assert not hasattr(logger, "add_redaction")
 
 
-def test_shell_quoted_secret_is_redacted_from_command(logger: SSHLogger) -> None:
+def test_shell_quoted_secret_is_redacted_from_command(logger: OperationLogFile) -> None:
     """Shell quoting rewrites embedded single quotes, so the transformed
     representation must be registered alongside the raw secret."""
     import shlex
 
     secret = "password-with-'quote"
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
     quoted = shlex.quote(secret)
 
-    logger.log_command(
-        f"example --password {quoted}",
-        SSHResult(returncode=1, stdout="", stderr=""),
-    )
+    logger.output(f"example --password {quoted}")
     logger.close()
 
     text = logger.path.read_text()
@@ -213,8 +190,8 @@ def test_close_redacts_secrets_from_traceback(
     might appear in a ``str(exc)`` payload, which would otherwise hit
     the per-op log as plaintext)."""
     secret = "tskey-auth-supersecret-12345"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
     try:
         raise RuntimeError(f"tailscale up failed with key={secret}")
     except RuntimeError:
@@ -237,8 +214,8 @@ def test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diag
     from agentworks.execution.results import Completed, Result
 
     secret = "tskey-auth with space"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
 
     logger.record(
         Command(("tailscale", "up", f"--auth-key={secret}")),
@@ -258,8 +235,8 @@ def test_record_redacts_a_secret_ending_in_line_breaks_at_the_end_of_a_stream(
     from agentworks.execution.results import Completed, Result
 
     secret = "first-line-4c\nsecond-line-4c\n\n"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
 
     # The secret is the last of stdout, as `printf %s "$TOKEN"` leaves it, and stderr follows it in the record.
     logger.record(Command(("printenv", "TOKEN")), Result(Completed(1), f"TOKEN={secret}".encode(), b"warning\n"))
@@ -283,8 +260,8 @@ def test_record_redacts_a_secret_shown_without_its_line_breaks(
     from agentworks.execution.requests import Command
     from agentworks.execution.results import Completed, Result
 
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
 
     logger.record(Command(("tool",)), Result(Completed(1), b"", shown.encode()))
 
@@ -331,8 +308,8 @@ def test_sanitize_redacts_bash_ansi_c_quoting_of_a_secret(
         pytest.skip("bash is not installed")
     if locale != "C" and not _utf8_locale_available():
         pytest.skip(f"the {locale} locale is not installed")
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op", redactions=(secret,))
     script = 'printf "%q\\n" "$1"; declare -p X'
     shown = subprocess.run(
         [bash, "-c", script, "bash", secret],
@@ -351,8 +328,8 @@ def test_record_labels_a_request_with_the_latest_step(tmp_path: Path, monkeypatc
     from agentworks.execution.requests import Command
     from agentworks.execution.results import Completed, Result
 
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op")
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op")
 
     logger.step("first-step")
     logger.step("second-step")
@@ -371,8 +348,8 @@ def test_a_failed_request_is_recorded_before_its_error_is_raised(
     from agentworks.execution.requests import Command
     from agentworks.execution.results import Result, Unknown, UnknownReason
 
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("vm1", "test-op")
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("vm1", "test-op")
     access = VMAccess(
         vm_name="vm1",
         host="100.64.0.9",
@@ -395,7 +372,7 @@ def test_an_operation_log_given_a_path_writes_all_of_it_there(tmp_path: Path, mo
     from agentworks.vms.manager import operation_log
 
     log_dir, destination = tmp_path / "logs", tmp_path / "backup" / "backup.log"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", log_dir)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", log_dir)
 
     with operation_log("vm1", "vm-backup", path=destination) as log:
         log.step("Archive")
@@ -417,7 +394,7 @@ def test_an_operation_log_shared_by_concurrent_threads_keeps_every_record_and_cl
     from agentworks.execution.results import Completed, Result
     from agentworks.vms.manager import operation_log
 
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     threads, writes = 8, 200
     start = threading.Barrier(threads)
     previous = sys.getswitchinterval()

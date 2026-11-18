@@ -606,16 +606,16 @@ def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setu
 def test_a_failed_integration_reaches_the_operation_log_through_a_lifecycle_entry_point(
     setup_case, monkeypatch, tmp_path
 ):
+    from agentworks.execution.oplog import OperationLogFile
     from agentworks.harness_setup.lifecycle import apply_agent_setup
-    from agentworks.ssh import SSHLogger
     from tests.vm_access_support import install_access_recorder
 
     db, inputs, _, _, failures = setup_case
     failures.add("first")
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     install_access_recorder(monkeypatch)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
-    logger = SSHLogger("agent", "agent-reinit")
+    logger = OperationLogFile("agent", "agent-reinit")
     observed: list[SetupFailure] = []
     apply_agent_setup(
         db,

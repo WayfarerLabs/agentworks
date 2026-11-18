@@ -41,7 +41,7 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(
     stub_build_registry(monkeypatch)
     stub_vm_ssh_identity(monkeypatch)
     log_root = tmp_path / "logs"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", log_root)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", log_root)
     secret = uuid4().hex
     original_resolve = _create._preflight_and_resolve
 

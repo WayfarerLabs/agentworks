@@ -71,7 +71,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """
     import agentworks.config
     import agentworks.config.validation
-    import agentworks.ssh
+    import agentworks.execution.oplog
 
     root = tmp_path / "home"
     config_dir = root / ".config" / "agentworks"
@@ -101,7 +101,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(agentworks.config, "CONFIG_PATH", config_dir / "config.toml")
     monkeypatch.setattr(agentworks.config.validation, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(agentworks.config.validation, "CONFIG_PATH", config_dir / "config.toml")
-    monkeypatch.setattr(agentworks.ssh, "LOG_DIR", config_dir / "logs")
+    monkeypatch.setattr(agentworks.execution.oplog, "LOG_DIR", config_dir / "logs")
     yield root
 
 

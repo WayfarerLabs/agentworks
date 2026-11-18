@@ -509,8 +509,8 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
     captured_output: object,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution.oplog import OperationLogFile
     from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
-    from agentworks.ssh import SSHLogger
 
     config = make_config()
     outcomes: list[OverlayOutcome] = []
@@ -529,7 +529,7 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
         lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
-    monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
+    monkeypatch.setattr(OperationLogFile, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
 
     with pytest.raises(RuntimeError, match="close failed"):
         vm_manager.create_vm(

@@ -213,7 +213,7 @@ def _report_contents(
 ) -> None:
     """Report stored counts and flag VMs in non-complete states."""
     from agentworks.db import InitStatus
-    from agentworks.ssh import LOG_DIR
+    from agentworks.execution import oplog
 
     group.ok(
         "Contents",
@@ -222,9 +222,9 @@ def _report_contents(
     )
 
     def log_hint(vm_name: str) -> str:
-        if not LOG_DIR.exists():
+        if not oplog.LOG_DIR.exists():
             return ""
-        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+        logs = sorted(oplog.LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
         return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:

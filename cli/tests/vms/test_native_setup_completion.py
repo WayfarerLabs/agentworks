@@ -80,7 +80,7 @@ def test_vm_reports_native_failures_only_after_command_completion(
         def close(self) -> None:
             events.append("close")
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", Logger)
 
     def bootstrap(*args: object, **kwargs: object) -> tuple[MagicMock, str, DebianRelease]:
         db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)

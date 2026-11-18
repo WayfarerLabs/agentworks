@@ -1,24 +1,200 @@
-"""The operation log's record of one request.
+"""The operation log: one file per operation on a VM, and the record of each request in it.
 
-:func:`format_record` turns a request and its result into the block an
-operation log writes. It reads no environment value, script or program source
-or input, so no code path can write them: a record shows a request's shape,
-never its secrets. A request with ``log_streams=False`` has neither of its
-streams written either. Writing the block, and redacting the secrets an
-operation registered, is the log's own job, at its one sink.
+:class:`OperationLogFile` is the log a command writes, under :data:`LOG_DIR`
+as ``<vm>-<timestamp>-<stem>.log`` unless the caller names its path. Every
+byte the file receives passes through one sink that removes the secrets registered when
+the log was built, raw, shell-quoted and normalized.
+
+:func:`format_record` turns a request and its result into the block the log
+writes. It reads no environment value, script or program source or input,
+so no code path can write them: a record shows a request's shape, never its
+secrets. A request with ``log_streams=False`` has neither of its streams
+written either.
 """
 
 from __future__ import annotations
 
+import logging
 import shlex
+import sys
+import threading
+import traceback
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Completed, NotDelivered
+from agentworks.path_rendering import format_host_path
+from agentworks.secrets.redaction import secret_redaction_forms
 
 if TYPE_CHECKING:
     from agentworks.execution.requests import RunRequest
     from agentworks.execution.results import Completion, Result
+
+LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
+"""Where an operation log is written unless its caller names a path."""
+
+_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+
+
+class _PropagatingFileHandler(logging.FileHandler):
+    """File handler that preserves the log's write-failure contract: a failed write raises."""
+
+    def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802, ARG002
+        raise
+
+
+class OperationLogFile:
+    """One operation's log, written to disk on every call so a partial log survives a crash.
+
+    The secrets passed as ``redactions`` are registered before the header is
+    written and cannot be added later, so no write can precede them. Writers
+    in this process that share one log, such as stop-all's concurrent
+    teardowns, take turns.
+    """
+
+    def __init__(
+        self,
+        vm_name: str,
+        command_stem: str,
+        *,
+        redactions: tuple[str, ...] = (),
+        path: Path | None = None,
+    ) -> None:
+        started = datetime.now(tz=UTC)
+        self.vm_name = vm_name
+        self._path = path or LOG_DIR / f"{vm_name}-{started.strftime(_TIMESTAMP_FORMAT)}-{command_stem}.log"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # Each write opens, writes and closes its own handler under the lock.
+        # It orders nothing across processes.
+        self._write_lock = threading.Lock()
+        self._secrets = tuple(dict.fromkeys(secret for secret in redactions if secret))
+        forms = dict.fromkeys(form for secret in self._secrets for form in secret_redaction_forms(secret))
+        # Prefer the longest representation so an overlapping shorter token
+        # cannot rewrite part of it before the complete value is matched.
+        self._redact = tuple(sorted(forms, key=len, reverse=True))
+        self._warnings: list[str] = []
+        self._label = command_stem
+
+        self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {started.strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
+
+    @property
+    def path(self) -> Path:
+        """The file this log writes."""
+        return self._path
+
+    @property
+    def display_path(self) -> str:
+        """:attr:`path` spelled the way an operator reads it (``~/...``), for a message that names the log.
+
+        The log's body stays a verbatim transcript; only the name is rendered.
+        """
+        return format_host_path(self._path)
+
+    @property
+    def redactions(self) -> tuple[str, ...]:
+        """The secrets registered at construction, for text this operation reports outside its log.
+
+        A guest diagnostic quoted in an error never passes through the log's
+        sink, so code that builds one sanitizes it with these.
+        """
+        return self._secrets
+
+    def sanitize(self, text: str) -> str:
+        """``text`` with every form of every registered secret replaced by ``[REDACTED]``."""
+        for secret in self._redact:
+            text = text.replace(secret, "[REDACTED]")
+        return text
+
+    def step(self, name: str) -> None:
+        """Log the start of a named step, which labels the requests :meth:`record` writes after it."""
+        self._label = name
+        self._write(f"--- [{_clock()}] {name} ---\n")
+
+    def record(self, request: RunRequest, result: Result) -> None:
+        """Log one ``agentworks.execution`` request and its result, labeled with the latest step.
+
+        The callable a command hands ``VMAccess`` as its ``log``. The record
+        holds no environment value, script source or stdin, and goes through
+        the same redaction as every other line.
+        """
+        self._write(f"[{_clock()}] " + format_record(request, result, label=self._label))
+
+    def output(self, text: str) -> None:
+        """Log general output."""
+        if text:
+            self._write(text if text.endswith("\n") else text + "\n")
+
+    def warning(self, msg: str) -> None:
+        """Keep ``msg`` for :attr:`warnings` and log its sanitized form."""
+        self._warnings.append(msg)
+        self._write(f"[{_clock()}] WARNING: {msg}\n")
+
+    def log_error(self, msg: str) -> None:
+        """Log an error message."""
+        self._write(f"[{_clock()}] ERROR: {msg}\n")
+
+    @property
+    def warnings(self) -> list[str]:
+        return list(self._warnings)
+
+    @property
+    def has_warnings(self) -> bool:
+        return bool(self._warnings)
+
+    def close(self) -> None:
+        """Write the footer, after the traceback of the exception in flight, if any.
+
+        Operations close their log from inside their ``except`` blocks, so the
+        error that ended an operation lands in its own log rather than only in
+        the shared ``error.log``, which is the fallback for failures before
+        any operation log exists.
+        """
+        exc_type, exc, exc_tb = sys.exc_info()
+        if exc is not None:
+            tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
+            self._write(f"[{_clock()}] EXCEPTION:\n{tb_text}\n")
+
+        lines = [f"\n# Finished: {datetime.now(tz=UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}"]
+        if self._warnings:
+            lines.append(f"# Warnings: {len(self._warnings)}")
+        self._write("\n".join(lines) + "\n")
+
+    def _write(self, text: str) -> None:
+        # Every byte that reaches the file handler passes through this choke
+        # point. The guarantee covers the complete redaction set supplied at
+        # construction, even when a caller passes those values in raw text.
+        # It cannot cover a secret the caller failed to register before the
+        # first incremental write. Raw and shell-quoted forms are registered
+        # together, and late registration is intentionally unsupported.
+        #
+        # Keep the sanitized LogRecord and transient FileHandler together in
+        # this function. CodeQL's clear-text-storage query recognizes this
+        # local data flow; moving either side behind a helper reopens the alert
+        # even though the runtime behavior would be equivalent.
+        record = logging.LogRecord(
+            name="agentworks.execution.oplog",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=self.sanitize(text),
+            args=(),
+            exc_info=None,
+        )
+        with self._write_lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            handler = _PropagatingFileHandler(self._path, mode="a", encoding="utf-8", errors="replace")
+            try:
+                handler.setFormatter(logging.Formatter("%(message)s"))
+                handler.terminator = ""
+                handler.handle(record)
+            finally:
+                handler.close()
+
+
+def _clock() -> str:
+    return datetime.now(tz=UTC).strftime("%H:%M:%S")
 
 
 def format_record(request: RunRequest, result: Result, *, label: str) -> str:

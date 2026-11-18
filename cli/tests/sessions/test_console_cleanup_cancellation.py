@@ -66,7 +66,7 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     primary = primary_type("build failed")
     cleanup = cleanup_type("cleanup interrupted")
     model = TmuxModel()
@@ -109,7 +109,7 @@ def test_log_close_preserves_failure_priority(
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     primary = primary_type("build failed")
     closing = close_type("log close interrupted")
     model = TmuxModel()
@@ -119,7 +119,7 @@ def test_log_close_preserves_failure_priority(
         closes.append(True)
         raise closing
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger.close", close)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile.close", close)
     guest = _guest(console_guest_factory, model, primary=primary, cleanup=None)
     vm = db.get_vm("vm1")
     assert vm is not None

@@ -16,6 +16,7 @@ from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ExternalError, StateError
 from agentworks.execution.errors import CommandFailed
+from agentworks.execution.oplog import OperationLogFile as _RealOperationLogFile
 from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.inputs import SetupInputs
@@ -28,7 +29,6 @@ from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
-from agentworks.ssh import SSHLogger as _RealSSHLogger
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import resolve_from_dict as resolve_vm
 from agentworks.workspaces.realize import realize_workspace
@@ -172,7 +172,7 @@ def native(monkeypatch, tmp_path, vm_access_recorder):
         def record(self, request, result):
             pass
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", Logger)
     return SimpleNamespace(loggers=loggers, removed_agent=removed_agent, removed_project=removed_project)
 
 
@@ -493,8 +493,8 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
     monkeypatch.setattr("agentworks.vms.initializer.driver._reconcile_authorized_keys", final_keys)
     monkeypatch.setattr(ShellIntegration, "vm_init", vm_setup)
     monkeypatch.setattr(ShellIntegration, "user_init", user_setup)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", db.path.parent / "logs")
-    logger = _RealSSHLogger(vm.name, "setup-fixture", redactions=("vm-private",))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", db.path.parent / "logs")
+    logger = _RealOperationLogFile(vm.name, "setup-fixture", redactions=("vm-private",))
 
     failures: list[SetupFailure] = []
 

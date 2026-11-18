@@ -106,18 +106,18 @@ def pretend_windows_console(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
-    """Keep default SSH logs in this worker's temporary directory."""
-    import agentworks.ssh as ssh
+def _isolate_operation_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
+    """Keep default operation logs in this worker's temporary directory."""
+    from agentworks.execution import oplog
 
-    prior = ssh.LOG_DIR
-    log_dir = tmp_path_factory.getbasetemp() / "ssh-logs"
+    prior = oplog.LOG_DIR
+    log_dir = tmp_path_factory.getbasetemp() / "operation-logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    ssh.LOG_DIR = log_dir
+    oplog.LOG_DIR = log_dir
     try:
         yield
     finally:
-        ssh.LOG_DIR = prior
+        oplog.LOG_DIR = prior
 
 
 @pytest.fixture(scope="session")

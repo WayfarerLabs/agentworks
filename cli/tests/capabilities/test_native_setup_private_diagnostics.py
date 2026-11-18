@@ -9,10 +9,10 @@ import pytest
 
 from agentworks.capabilities.harness_integration import harness_integration_for
 from agentworks.errors import ExternalError
+from agentworks.execution.oplog import OperationLogFile
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.outcomes import SetupFailure, describe_setup_failures
 from agentworks.harness_setup.state import read_native_setup
-from agentworks.ssh import SSHLogger
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
 
 
@@ -46,8 +46,8 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
     log_token, log_rendered, log_canonical = _secret("logger", representation)
     logger = None
     if with_logger:
-        monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-        logger = SSHLogger("private-diagnostics", "setup", redactions=(log_token,))
+        monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
+        logger = OperationLogFile("private-diagnostics", "setup", redactions=(log_token,))
     # Core hands the invocation every secret the operation log registered.
     invocation = replace(invocation, secrets={"credential": token}, redactions=logger.redactions if logger else ())
     # The logger-only value precedes a long invocation value crossing the storage

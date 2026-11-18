@@ -218,11 +218,11 @@ def _resolve_system_slug(db: Database) -> str | None:
 
 def _init_log_hint(vm_name: str) -> str:
     """Return a log hint suffix like ' See log: <path>' or empty string."""
-    from agentworks.ssh import LOG_DIR
+    from agentworks.execution import oplog
 
-    if not LOG_DIR.exists():
+    if not oplog.LOG_DIR.exists():
         return ""
-    logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+    logs = sorted(oplog.LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
     return f" See log: {format_host_path(logs[0])}" if logs else ""
 
 
@@ -235,12 +235,11 @@ def operation_log(
     The log is written under the log directory, or to ``path`` when given
     (backup keeps its log beside the archive). Each write holds the log's
     lock, so threads of one command may share one log. Typed by the ``InitLog``
-    protocol, never as ``SSHLogger``, so a manager module that imports
-    nothing legacy can use it.
+    protocol, which test doubles implement too.
     """
-    from agentworks.ssh import SSHLogger
+    from agentworks.execution.oplog import OperationLogFile
 
-    log = SSHLogger(vm_name, command_stem, redactions=redactions, path=path)
+    log = OperationLogFile(vm_name, command_stem, redactions=redactions, path=path)
     try:
         yield log
     finally:

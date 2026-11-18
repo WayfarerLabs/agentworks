@@ -276,7 +276,7 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
         def close(self) -> None:
             events.append("close")
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         events.append("create")
@@ -336,7 +336,7 @@ def test_logger_construction_failure_never_dispatches_and_unwinds_row(
         raise failure
 
     create = MagicMock()
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _logger_failure)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _logger_failure)
     monkeypatch.setattr(LimaPlatform, "create", create)
 
     if isinstance(failure, KeyboardInterrupt):
@@ -382,7 +382,7 @@ def test_create_failure_closes_logger_once_without_replacing_primary(
             closes.append("close")
             raise close_interrupt
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _fail(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         raise failure
@@ -433,7 +433,7 @@ def test_successful_create_propagates_fresh_logger_close_interrupt(
             closes.append("close")
             raise close_interrupt
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
     monkeypatch.setattr(
         LimaPlatform,
         "create",
@@ -483,7 +483,7 @@ def test_logger_close_warning_failure_does_not_replace_primary(
             closes.append("close")
             raise close_interrupt
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _fail_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         raise primary
@@ -621,7 +621,7 @@ def test_create_init_failure_keeps_the_row(
         def close(self) -> None:
             closes.append("close")
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
@@ -1108,7 +1108,7 @@ def test_reinit_runs_initialization_through_the_gate(
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
     _contract_passes.access(vm_name="rvm").run_outcomes = _contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
 
     steps: list[str] = []

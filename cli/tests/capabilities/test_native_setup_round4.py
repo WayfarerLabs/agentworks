@@ -16,12 +16,12 @@ from agentworks.capabilities.harness_integration import HarnessIntegration, Shel
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
 from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
+from agentworks.execution.oplog import OperationLogFile
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure, describe_setup_failures, sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.origin import Origin
-from agentworks.ssh import SSHLogger
 from tests.artifacts.test_routing import graph
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
 from tests.native_setup_fixtures import LocalFixtureTransport
@@ -213,8 +213,8 @@ def test_untrusted_large_failure_is_bounded_terminal_safe_and_redacted_before_tr
     osc = uuid4().hex
     logger = None
     if with_logger:
-        monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-        logger = SSHLogger("round4", "setup", redactions=(token,))
+        monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
+        logger = OperationLogFile("round4", "setup", redactions=(token,))
     invocation = replace(invocation, secrets={"credential": token})
     # A secret crossing the storage limit must be redacted before slicing.
     payload = (

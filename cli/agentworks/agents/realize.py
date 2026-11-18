@@ -93,7 +93,7 @@ def realize_agent(
     # update tests/agents/test_recipe_gate_drift.py's enumerated caller set.
     from agentworks.agents.initializer import create_agent_on_vm, create_new_agent_user, delete_agent_on_vm
     from agentworks.agents.manager import derive_linux_user
-    from agentworks.ssh import SSHLogger
+    from agentworks.execution.oplog import OperationLogFile
 
     linux_user = derive_linux_user(name)
     # Supply every declared secret input when the logger is constructed. A logger's
@@ -118,7 +118,7 @@ def realize_agent(
 
     with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
         require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
-        ssh_logger = SSHLogger(
+        ssh_logger = OperationLogFile(
             vm.name,
             "agent-create",
             redactions=tuple(

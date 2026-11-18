@@ -92,7 +92,7 @@ def deletion(db, tmp_path, monkeypatch):
         def sanitize(self, text):
             return text
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", Logger)
     config = SimpleNamespace(paths=SimpleNamespace(vscode_workspaces=tmp_path))
     return SimpleNamespace(
         vm=vm,

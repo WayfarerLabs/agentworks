@@ -296,20 +296,20 @@ def test_copy_closes_the_operation_logs_exactly_once_on_cancellation(
     the footer and exception section in the per-VM log, exactly once:
     ``close()`` is not idempotent, each call appends a footer. The source
     read's own log closed before."""
-    from agentworks.ssh import SSHLogger
+    from agentworks.execution.oplog import OperationLogFile
 
     config = make_config()
     seed(db)
     reachable(monkeypatch, True)
     _wire_copy(monkeypatch, [])
     closes: list[str] = []
-    real_close = SSHLogger.close
+    real_close = OperationLogFile.close
 
-    def _spying_close(self: SSHLogger) -> None:
+    def _spying_close(self: OperationLogFile) -> None:
         closes.append(str(self.path))
         real_close(self)
 
-    monkeypatch.setattr(SSHLogger, "close", _spying_close)
+    monkeypatch.setattr(OperationLogFile, "close", _spying_close)
 
     def _cancelled(*args: object, **kwargs: object) -> None:
         raise KeyboardInterrupt

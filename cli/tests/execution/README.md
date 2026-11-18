@@ -43,6 +43,8 @@ returns canned outcomes without ssh.
 - `test_reachability.py`: what `reachability.wait` polls, what it raises on the first attempt, and
   the confirming probe, over the recording fake.
 - `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
+- `test_operation_log_file.py`: the operation log file's one redacting sink, its close and its
+  sharing between threads.
 - `test_root_script.py`: the root-script wrapper over fabricated channel output (the status rule,
   the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.
 - `test_run_process.py`: `run_process` over Python children (the deadline, the output limit, a
@@ -92,8 +94,8 @@ distribution's default sudoers on a fresh VM, is V only.
 `conformance/program_vectors.py` holds the vectors for the request vocabulary the files LLD adds,
 which join the list in `vectors.py`:
 
-- F1 (L, S and V): a request's `Bytes` input reaches no record of a real `SSHLogger` and no error,
-  and `log_streams=False` keeps its streams out of the record.
+- F1 (L, S and V): a request's `Bytes` input reaches no record of a real `OperationLogFile` and no
+  error, and `log_streams=False` keeps its streams out of the record.
 - F2 and F3 (L, S and V): every input byte reaches a `PythonProgram` from its first byte, its
   arguments arrive exactly, and its source is in no argument.
 - F4 (L and V): a `PythonProgram` with `login`, `interactive` and both, under startup files that

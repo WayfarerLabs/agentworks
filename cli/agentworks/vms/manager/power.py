@@ -291,9 +291,9 @@ def delete_vm(
             _warn_not_logged_out(vm, not_logged_out)
 
         # Clean up logs
-        from agentworks.ssh import LOG_DIR
+        from agentworks.execution import oplog
 
-        vm_logs = list(LOG_DIR.glob(f"{name}-*.log")) if LOG_DIR.exists() else []
+        vm_logs = list(oplog.LOG_DIR.glob(f"{name}-*.log")) if oplog.LOG_DIR.exists() else []
         for log in vm_logs:
             log.unlink(missing_ok=True)
         if vm_logs:

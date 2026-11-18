@@ -21,7 +21,7 @@ ends, the platform then closes the VM's provisioning access
 (``close_provisioning_access``) exactly once. After a span that passed comes
 a wait for the VM to answer again.
 
-The log is typed as the small protocol below, which ``SSHLogger`` satisfies.
+The log is typed as the small protocol below, which ``oplog.OperationLogFile`` satisfies.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 
 class OperationLog(Protocol):
-    """What Phase A writes to the create's operation log (``SSHLogger`` satisfies it)."""
+    """What Phase A writes to the create's operation log (``OperationLogFile`` satisfies it)."""
 
     @property
     def display_path(self) -> str: ...

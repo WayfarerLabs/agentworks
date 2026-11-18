@@ -224,7 +224,7 @@ def test_create_and_reinit_loggers_receive_all_git_credential_inputs(
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
     agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
@@ -493,15 +493,15 @@ def test_create_logger_close_failure_retains_owner_and_reports_once(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
+    from agentworks.execution.oplog import OperationLogFile
     from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
-    from agentworks.ssh import SSHLogger
 
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
     outcomes: list[OverlayOutcome] = []
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
-    monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
+    monkeypatch.setattr(OperationLogFile, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
 
     with pytest.raises(RuntimeError, match="close failed"):
         agent_manager.create_agent(

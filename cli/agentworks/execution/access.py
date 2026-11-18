@@ -66,7 +66,7 @@ class VMAccess:
     so a directly constructed access chooses; ``run`` and ``stream`` refuse an
     elevated request on an agent-bound one. ``trust_mode`` is ``VM`` except for
     the access :func:`enrollment_access` builds. ``log`` is an operation log's
-    record callable (``SSHLogger.record``), which ``run`` calls once per
+    record callable (``OperationLogFile.record``), which ``run`` calls once per
     request. ``stream``, ``attach``, ``park`` and ``forward`` keep no log.
     """
 

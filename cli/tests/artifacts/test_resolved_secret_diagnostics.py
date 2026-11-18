@@ -12,8 +12,8 @@ import pytest
 
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
+from agentworks.execution.oplog import OperationLogFile
 from agentworks.execution.results import Completed, Result
-from agentworks.ssh import SSHLogger
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 
@@ -122,7 +122,7 @@ def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
     marker = uuid4().hex.upper()
     secret = "x" + marker + "\nsecond-part"
     path = "/home/worker/.claude/skills/review/SKILL.md"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     install_access_recorder(monkeypatch)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
     invocations = []
@@ -140,7 +140,7 @@ def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
         vm=db.insert_vm("vm", "site", "host"),
         username="worker",
         values={"TOKEN": "resolved-value"},
-        logger=SSHLogger("resolved-values", "probe", redactions=(secret,)),
+        logger=OperationLogFile("resolved-values", "probe", redactions=(secret,)),
         held=Mock(),
         operation="agent-init",
         failures=[],

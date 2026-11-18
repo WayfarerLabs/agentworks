@@ -345,11 +345,11 @@ def reinit_vm(
                 git_redactions = credential_redactions(cred_nodes, resolver.values)
 
                 # The operation log every request of this reinit records into.
-                from agentworks.ssh import SSHLogger
+                from agentworks.execution.oplog import OperationLogFile
 
                 # This operation log's redaction set includes credentials and every
                 # resolved setup input before any incremental initialization log write.
-                logger = SSHLogger(
+                logger = OperationLogFile(
                     name,
                     "vm-reinit",
                     redactions=tuple(

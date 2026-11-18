@@ -55,7 +55,7 @@ WARNING_TAIL_LINES = 3
 
 
 class InitLog(OperationLog, Protocol):
-    """The operation log initialization writes, Phase B's and an agent's (``SSHLogger`` satisfies it).
+    """The operation log initialization writes, Phase B's and an agent's (``OperationLogFile`` satisfies it).
 
     Steps write it; native setup reads its redactions
     (``harness_setup.lifecycle.SetupLog``), and the outcome counts its

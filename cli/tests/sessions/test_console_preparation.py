@@ -177,7 +177,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     marker = uuid4().hex
     value = f"prefix'{marker}' $(touch ignored) suffix"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
     guest = install_scripted_guest(monkeypatch, _ScriptedGuest(model=TmuxModel()))
     admin = guest.admin()
@@ -213,7 +213,7 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {})
     model = TmuxModel()
 
@@ -250,8 +250,10 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    monkeypatch.setattr("agentworks.ssh.SSHLogger.close", lambda *a: (_ for _ in ()).throw(StateError("log failed")))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    monkeypatch.setattr(
+        "agentworks.execution.oplog.OperationLogFile.close", lambda *a: (_ for _ in ()).throw(StateError("log failed"))
+    )
     monkeypatch.setattr(attach, "_tmux_session_presence", lambda *a: ProbeStatus.ABSENT)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {})
     cleanup = []

@@ -97,14 +97,20 @@ nor repeated against the VM's sshd. The caller decides what an exhausted wait me
 record a new host key. Create's first contact is its only caller; every other access verifies
 against the store.
 
-`vm_access(..., log=)` takes an operation log's record callable, `SSHLogger.record` today, which
-`run` calls once per request before raising for its outcome, so failures are logged. The block is
-`oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
+`vm_access(..., log=)` takes an operation log's record callable, `oplog.OperationLogFile.record`,
+which `run` calls once per request before raising for its outcome, so failures are logged. The block
+is `oplog.format_record`'s: the step label, the request's shape (the argv, or a script's shell and
 login flag, with the working directory, the environment's names and the deadline), the completion,
 both streams and ssh's diagnostics. A request with `log_streams=False` has neither stream in its
 record, for a payload whose output is file content or a command line that must not be retained. No
-environment value, script source or input reaches the formatter; the logger redacts the secrets
+environment value, script source or input reaches the formatter; the log redacts the secrets
 registered when it was constructed, at its one sink.
+
+`OperationLogFile(vm_name, stem, redactions=(), path=None)` is that log: a file under
+`oplog.LOG_DIR` named `<vm>-<timestamp>-<stem>.log` unless the caller names a path, written on every
+call so a partial log survives a crash, and shared safely by threads of one command. Its `close()`
+writes the traceback of the exception in flight, so an operation's own log holds the error that
+ended it.
 
 ## What a request becomes
 

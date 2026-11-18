@@ -329,9 +329,9 @@ def delete_agent(
     from agentworks.harness_setup.locking import native_mutation_guard
 
     with native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard) as guard:
-        from agentworks.ssh import SSHLogger
+        from agentworks.execution.oplog import OperationLogFile
 
-        ssh_logger = SSHLogger(vm.name, "agent-delete")
+        ssh_logger = OperationLogFile(vm.name, "agent-delete")
         try:
             output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
             # Refuse a session row the owner rule rejects before any VM work.
@@ -694,9 +694,9 @@ def reinit_agent(
             native_setup = None
             with output.section("Agent Initialization"):
                 from agentworks.agents.initializer import create_agent_on_vm
-                from agentworks.ssh import SSHLogger
+                from agentworks.execution.oplog import OperationLogFile
 
-                ssh_logger = SSHLogger(
+                ssh_logger = OperationLogFile(
                     vm.name,
                     "agent-reinit",
                     redactions=tuple(
