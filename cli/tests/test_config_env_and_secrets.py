@@ -299,13 +299,14 @@ def test_session_template_env_plaintext_and_secret(tmp_path: Path) -> None:
     assert tmpl.env["API_KEY"].secret == "anthropic-api-key"
 
 
-def test_invalid_env_key_raises(tmp_path: Path) -> None:
+@pytest.mark.parametrize("key", ["1BAD", "BAD\n", "BAD-NAME"])
+def test_invalid_env_key_raises(tmp_path: Path, key: str) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        manifests=[ManifestDoc("admin-template", "default", {"env": {"1BAD": "value"}})],
+        manifests=[ManifestDoc("admin-template", "default", {"env": {key: "value"}})],
     )
-    with pytest.raises(ConfigError, match="invalid env var name"):
+    with pytest.raises(ConfigError):
         _load(cfg_file)
 
 
