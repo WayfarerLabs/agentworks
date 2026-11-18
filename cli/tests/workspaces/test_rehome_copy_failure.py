@@ -136,6 +136,40 @@ def test_copy_failure_preserves_source_row_partial_target_and_error(
     assert target.copy_calls == 1
 
 
+def test_interrupted_copy_preserves_source_row_partial_target_and_error(
+    db: Database, rehome_case: RehomeCase, captured_output: CapturedOutput, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = rehome_case.target
+    target.environment["COPY_FAIL"] = "1"
+    original = KeyboardInterrupt("copy fixture interrupted")
+    run = target.run
+
+    def interrupt(command: str, **kwargs: object) -> SSHResult:
+        try:
+            return run(command, **kwargs)
+        except SSHError as error:
+            if error is target.copy_error:
+                raise original
+            raise
+
+    monkeypatch.setattr(target, "run", interrupt)
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        rehome(db, rehome_case)
+
+    assert caught.value is original
+    assert len(captured_output.warnings) == 1
+    assert str(target.source) in captured_output.warnings[0]
+    assert str(target.destination) in captured_output.warnings[0]
+    row = db.get_workspace("project")
+    assert row is not None and row.workspace_path == str(target.source)
+    assert (target.source / "kept.txt").read_bytes() == b"source contents\n"
+    assert (target.source / "later.txt").read_bytes() == b"not copied on failure\n"
+    assert (target.destination / "kept.txt").read_bytes() == b"source contents\n"
+    assert not (target.destination / "later.txt").exists()
+    assert target.copy_calls == 1
+
+
 @pytest.mark.parametrize("reservation", ["present", "raced", "unconfirmed"])
 def test_unowned_or_unconfirmed_target_is_preserved_without_copy_hint(
     db: Database, rehome_case: RehomeCase, captured_output: CapturedOutput, reservation: str

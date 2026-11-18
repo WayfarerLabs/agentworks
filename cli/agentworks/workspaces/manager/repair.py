@@ -435,6 +435,8 @@ def _repair_git_identity(
 def _rehome_partial_state_hint(db: Database, ws_name: str, old_path: str, new_path: str) -> str:
     """Describe the actual DB state after a rehome failure / cancellation.
 
+    Call only after the target reservation is confirmed.
+
     The rehome flow copies files to the new path, then updates the DB. KI or
     an exception can land before OR after the DB update, so we read the row
     back to give the user an accurate picture rather than asserting one way.
