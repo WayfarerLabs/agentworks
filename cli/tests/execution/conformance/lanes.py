@@ -389,18 +389,24 @@ def free_port() -> int:
 
 
 @contextlib.contextmanager
-def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
-    """A loopback sshd run by the current user, with a temporary host key and authorized key."""
+def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServer]:
+    """A loopback sshd run by the current user, with a temporary host key and authorized key.
+
+    Started again on the same ``directory`` and ``port``, it keeps the keys it
+    made there, so a client that trusted the first server reaches the second
+    as the same VM.
+    """
     sshd = find_sshd()
     if sshd is None:
         unavailable("S lane needs an sshd binary")
     directory.mkdir(parents=True, exist_ok=True)
     host_key, client_key = directory / "host_key", directory / "client_key"
     for key in (host_key, client_key):
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+        if not key.exists():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
     authorized = directory / "authorized_keys"
     authorized.write_text(Path(f"{client_key}.pub").read_text())
-    port = free_port()
+    port = port or free_port()
     config = directory / "sshd_config"
     config.write_text(
         "\n".join(

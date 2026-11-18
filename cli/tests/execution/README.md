@@ -78,9 +78,10 @@ included; the root channel's W3 skips on a local lane without `/proc`.
   starts dropping unauthenticated connections at random past 10, so parallel vectors would fail
   unpredictably.
 
-  It creates and removes only `/tmp/agw-conformance-*` and `/tmp/agw-handover-*` on the guest. Run
-  it from each workstation the evidence matrix names; Windows is where binary stdin and early exit
-  matter most. The lane is not part of the default run.
+  It creates and removes only `/tmp/agw-conformance-*`, `/tmp/agw-handover-*` and its own detached
+  launches under `/var/lib/agentworks/detached` on the guest. Run it from each workstation the
+  evidence matrix names; Windows is where binary stdin and early exit matter most. The lane is not
+  part of the default run.
 
 The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner's passwordless
 `sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
@@ -146,6 +147,26 @@ The terminal vectors join the same list:
   typed key; on L the account shell is the lane's own, so the four shells are each covered. On L, an
   attach on `script`'s pty whose stage 0 shell exports `TMUX`, `TMUX_PANE` and `TERM_PROGRAM` shows
   its shell none of them, and `SSH_TTY`.
+
+`conformance/detached_vectors.py` holds detached work's vectors (DT1 to DT4), which join the same
+list and run on L, S and V, elevated, so on L and S they need the runner's passwordless `sudo -n`
+and follow the elevation vectors' rule. The real `Detached` client sends the real guest program, so
+each launch outlives the request that started it:
+
+- DT1: two launches of one command each report only their own status and output, and a launch under
+  an existing id is refused with the earlier one unchanged.
+- DT2: a payload still running after its launch's connection closed is observed, completed and
+  downloaded through `ToFile` by later requests, every byte unchanged.
+- DT3: `interrupt` leaves no process in the payload's group and reads `EXITED` with `SIGTERM`'s
+  status.
+- DT4: root owns the base, its parent, a launch's directory and its `work/`, and none is writable by
+  anyone else.
+
+On L and S the program's base is under the worker's temporary directory (the conformance
+`conftest.py`'s `detached_base`, removed with `sudo -n` afterwards), so no test writes the runner's
+own `/var/lib`. `conformance/test_detached_resume.py` stops the S lane's own sshd while a launch
+runs and starts it again: while it is down an observation is an outcome backup's loop waits out, and
+once it is back the next one reads what the payload did meanwhile.
 
 `conformance/test_attach_terminal.py`, `conformance/test_park.py` and `conformance/test_forward.py`
 cover what happens around the terminal half, a pane's handover (including one in a real tmux pane,

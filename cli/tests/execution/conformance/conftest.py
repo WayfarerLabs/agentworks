@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.execution import detached, detached_program
 from tests.execution.conformance.lanes import (
     SHELLS,
     LocalLane,
@@ -14,6 +17,7 @@ from tests.execution.conformance.lanes import (
     python_interpreters,
     require_linux_guest,
     rootless_sshd,
+    sudo_granted,
 )
 
 if TYPE_CHECKING:
@@ -39,3 +43,36 @@ def local_lane(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, 
 @pytest.fixture
 def sshd_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sshd_server: SSHDServer) -> SSHDLane:
     return SSHDLane(monkeypatch, tmp_path, sshd_server)
+
+
+@pytest.fixture(scope="session")
+def detached_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """The detached program's base for launches the L and S lanes make on this machine, removed afterwards.
+
+    The program creates the base and its parent as root, so removing them
+    needs the same passwordless sudo the vectors that made them needed.
+    """
+    guest = tmp_path_factory.mktemp("detached-guest")
+    yield guest / "agentworks" / "detached"
+    shutil.rmtree(guest, ignore_errors=True)
+    if guest.exists() and sudo_granted():
+        subprocess.run(["sudo", "-n", "rm", "-rf", "--", str(guest)], check=False)
+
+
+@pytest.fixture(autouse=True)
+def _private_detached_base(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Send the detached program with its base at :func:`detached_base` in every non-integration test.
+
+    The L and S lanes run the program on this machine as root, where the VM's
+    base would be the runner's own ``/var/lib``. Integration tests reach a VM
+    and keep its real base.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return
+    base = str(request.getfixturevalue("detached_base"))
+    source = detached.program_source()
+    declaration = f'BASE = "{detached_program.BASE}"'
+    if source.count(declaration) != 1:
+        raise RuntimeError(f"the detached program no longer declares {declaration}; update this fixture")
+    monkeypatch.setattr(detached, "program_source", lambda: source.replace(declaration, f'BASE = "{base}"'))
+    monkeypatch.setattr(detached_program, "BASE", base)
