@@ -1,13 +1,12 @@
 """The V lane of the root channel's vectors: a live VM's platform ``run_as_root``, run by the integration tester.
 
 Set ``AGW_CONFORMANCE_VM`` to the name of a VM in the operator's own state and
-run ``uv run pytest tests/test_root_channel_live_vectors.py -m integration``
+run ``uv run pytest tests/execution/conformance/test_root_live_vectors.py -m integration``
 from each workstation. The lane opens the same gated platform boundary
 ``vm shell --platform`` does (it starts a stopped VM and resolves the site's
 secrets, prompting if it must), then hands each vector
 ``platform.run_as_root`` bound to the VM. It creates and removes only
-``/tmp/agw-conformance-*`` on the guest. It lives outside
-``tests/execution/`` because the platform boundary imports legacy modules.
+``/tmp/agw-conformance-*`` on the guest.
 """
 
 from __future__ import annotations

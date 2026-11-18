@@ -182,10 +182,8 @@ through the platform `run_as_root` of the VM named by `AGW_CONFORMANCE_VM`, insi
 boundary `vm shell --platform` opens:
 
 ```console
-AGW_CONFORMANCE_VM=my-vm uv run pytest tests/test_root_channel_live_vectors.py -m integration
+AGW_CONFORMANCE_VM=my-vm uv run pytest tests/execution/conformance/test_root_live_vectors.py -m integration
 ```
-
-That runner sits outside this directory because the platform boundary imports legacy modules.
 
 ## Writing a vector
 

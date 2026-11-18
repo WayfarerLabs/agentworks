@@ -1,6 +1,6 @@
 """Run the root channel's vectors on the local lane: ``/bin/bash -s``, and under ``sudo -n`` where granted.
 
-The V lane is ``tests/test_root_channel_live_vectors.py``.
+The V lane is ``test_root_live_vectors.py``.
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 - **L** runs ``root_script.run_process(["/bin/bash", "-s"], ...)`` locally, and
   again under ``sudo -n`` where the runner grants it.
 - **V** runs through a live VM's platform ``run_as_root``, from
-  ``tests/test_root_channel_live_vectors.py``.
+  ``test_root_live_vectors.py``.
 
 A vector takes the lane and uses only ``lane.run``, so its body is the same
 on both. Each asserts observable behavior: a status, bytes, an effect on the
