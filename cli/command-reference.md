@@ -1157,12 +1157,14 @@ entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key
 or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
 `agw config sync-ssh-config` to force a rebuild.
 
-Every entry also carries `HostKeyAlias`, `UserKnownHostsFile` (the VM's store file) and
-`StrictHostKeyChecking yes`, plus `UpdateHostKeys no` and `HashKnownHosts no` so your own `ssh`
-neither writes to the store nor hashes it. Your own `ssh` therefore trusts exactly the keys
-Agentworks has recorded: it refuses a VM with no record (`Host key verification failed`) until
-`agw vm import-host-keys NAME` or `agw vm recover NAME` records one, and that VM's entries carry a
-comment saying so. See [Host keys](#host-keys).
+Every entry also carries `HostKeyAlias`, `UserKnownHostsFile` and `StrictHostKeyChecking yes`, plus
+`UpdateHostKeys no` and `HashKnownHosts no` so your own `ssh` neither updates nor hashes the file it
+reads. For a VM with a host-key record, `UserKnownHostsFile` is the VM's store file. For a VM with
+none it is the null device, and the entries carry a comment naming `agw vm import-host-keys NAME`
+and `agw vm recover NAME`. Your own `ssh` therefore trusts exactly the keys Agentworks has recorded:
+it refuses a VM with no record (`Host key verification failed`) until one is recorded, and even a
+setting of yours that relaxes host-key checking for these hosts cannot write a key into the store.
+See [Host keys](#host-keys).
 
 Paths in the entries are written relative to `~` when they are under your home directory. A VM whose
 store path cannot be written into an entry gets no entries, with a warning, rather than entries that

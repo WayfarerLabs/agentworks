@@ -253,15 +253,22 @@ Slices 1 to 7 wrote the block only for a VM with a record, so the operator's own
 against their `known_hosts` until they imported. Slice 8 makes it unconditional, as D9 decided, so
 R8's end state does not depend on every operator importing (`ssh_config._vm_entries`):
 
-- **No record.** The entries still carry the block, so the operator's own `ssh` refuses the VM
+- **No record.** The entries still carry the block, with `UserKnownHostsFile` set to the null device
+  instead of the store file, so the operator's own `ssh` refuses the VM
   (`No ED25519 host key is known for agentworks-vm-<name> and you have requested strict checking`,
   then `Host key verification failed`, with no prompt) rather than reading `known_hosts` or
-  accepting a key on first use. Each such entry carries one comment naming
-  `agw vm import-host-keys <vm>` and `agw vm recover <vm>`. A record that cannot be read gets no
-  comment, since `ssh` reports the read failure itself. The upgrade guide carries the
-  breaking-change note.
-- **No store read for the options.** The block no longer depends on the record, so an unreadable
-  record no longer drops it; only the comment reads the store.
+  accepting a key on first use. Naming the null device rather than the store closes a first-use
+  write into the store: ssh takes each option's first value, so a weaker setting read first (an
+  earlier `Host *` with `StrictHostKeyChecking accept-new`, which the legacy layout's trailing
+  managed section always follows, or `-o StrictHostKeyChecking=no` from a tool) would otherwise
+  write the key it accepted into the store file, where `trust.stored_keys` reads it as a record that
+  import can never replace. Each such entry carries one comment naming
+  `agw vm import-host-keys <vm>` and `agw vm recover <vm>`. A record that cannot be read is treated
+  as one, so its entries name the store and `ssh` reports the read failure itself. The upgrade guide
+  carries the breaking-change note.
+- **Persisted values are checked.** The tailnet address, the admin and agent account names and the
+  agent names each become a token of a line ssh parses, so a value that is not a plain host name,
+  address or account name leaves that VM's entries out with a warning.
 - **A store path that cannot be written** (`literal_path` refuses it, or the Windows apostrophe rule
   below) leaves out every entry of that VM, with a warning, rather than writing entries that would
   trust whatever answers. It never aborts the rebuild for the other VMs. A key path that cannot be
@@ -328,11 +335,13 @@ Each test guards behavior, per the development principles and the no-prose-polic
 
 - **Lifecycle:** create begins enrollment after the row is realized; delete removes the record
   whenever it removes the row.
-- **Managed entries:** every entry carries the trust block, record or not, with the missing-record
-  comment exactly when the VM has no record; the installed client resolves it against the store for
-  both; an unreadable record keeps the block; an unwritable store path leaves that VM's entries out
-  without aborting the rebuild; on Windows an apostrophe path without whitespace is refused, and a
-  home directory named with an apostrophe still yields entries (`tests/test_ssh_config.py`).
+- **Managed entries:** every entry carries the trust block, record or not, naming the store exactly
+  when the VM has a record and the null device with the missing-record comment otherwise; the
+  installed client resolves both, and a preceding `Host *` with `accept-new` still leaves the
+  record-less entry's known-hosts file the null device; an unreadable record keeps the block; an
+  unwritable store path leaves that VM's entries out without aborting the rebuild; on Windows an
+  apostrophe path without whitespace is refused, and a home directory named with an apostrophe still
+  yields entries (`tests/test_ssh_config.py`).
 - **ENROLL only from create** holds by construction: `enrollment_access` is a distinct factory whose
   only caller is Phase A (`vms/initializer/phase_a.py`), reached only from create, and every other
   factory binds `VM`. The enrollment tests cover both; nothing pins the call graph.

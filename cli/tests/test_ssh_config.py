@@ -222,16 +222,17 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     assert directive in content
 
 
+# On Windows an apostrophe with no whitespace is refused instead (tested below).
+_KEY_DIRS = [("keys", False), ("my keys", True)] + ([] if sys.platform == "win32" else [("o'brien", True)])
+
+
 @pytest.mark.windows
-@pytest.mark.parametrize(("key_dir", "quoted"), [("keys", False), ("my keys", True), ("o'brien", True)])
+@pytest.mark.parametrize(("key_dir", "quoted"), _KEY_DIRS)
 def test_the_identity_file_is_quoted_only_when_ssh_would_split_or_unquote_it(
-    key_dir: str, quoted: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    key_dir: str, quoted: bool, tmp_path: Path
 ) -> None:
-    from agentworks import ssh_config as ssh_config_module
     from agentworks.ssh_config import _identity_value
 
-    # Where Git for Windows may read the entries, an apostrophe with no whitespace is refused (tested below).
-    monkeypatch.setattr(ssh_config_module, "_GIT_FOR_WINDOWS_MAY_READ", False)
     key = tmp_path / key_dir / "id_ed25519"
     key.parent.mkdir()
     key.write_text("")
@@ -470,17 +471,20 @@ def _managed_blocks(content: str) -> dict[str, str]:
     return blocks
 
 
-_STORE_OPTIONS = ("HostKeyAlias", "UserKnownHostsFile", "StrictHostKeyChecking", "UpdateHostKeys")
-
-
 def _comment_lines(block: str) -> list[str]:
     return [line for line in block.splitlines() if line.lstrip().startswith("#")]
 
 
+def _entry_path(path: Path) -> str:
+    """How an entry names ``path``: relative to ``~`` when it is under the home directory, wherever tmp lives."""
+    from agentworks import ssh_config as ssh_config_module
+    from agentworks.execution import trust
+
+    return trust.option_value(ssh_config_module._to_ssh_path(path))
+
+
 @pytest.mark.parametrize("rebuild", ["config_dir", "legacy"])
-def test_every_entry_verifies_against_the_store_whether_or_not_the_vm_has_a_record(
-    tmp_path: Path, rebuild: str
-) -> None:
+def test_every_entry_verifies_strictly_and_only_a_recorded_vms_names_its_store(tmp_path: Path, rebuild: str) -> None:
     from agentworks import ssh_config as ssh_config_module
     from agentworks.execution import trust
 
@@ -501,14 +505,19 @@ def test_every_entry_verifies_against_the_store_whether_or_not_the_vm_has_a_reco
     blocks = _managed_blocks(content)
     assert set(blocks) == {"awvm--known", "awagent--agent-known", "awvm--fresh", "awagent--agent-fresh"}
     for vm_name in ("known", "fresh"):
+        # No record: a weaker setting that takes effect first could otherwise write a first-use key into the store.
+        known_hosts = _entry_path(trust.store_file(vm_name)) if vm_name == "known" else trust.NULL_DEVICE
         for alias in (f"awvm--{vm_name}", f"awagent--agent-{vm_name}"):
             assert f"    HostKeyAlias agentworks-vm-{vm_name}\n" in blocks[alias]
-            assert f"    UserKnownHostsFile {trust.store_file(vm_name).as_posix()}\n" in blocks[alias]
+            assert f"    UserKnownHostsFile {known_hosts}\n" in blocks[alias]
             assert "    StrictHostKeyChecking yes\n" in blocks[alias]
             assert "    UpdateHostKeys no\n" in blocks[alias]
             assert "    HashKnownHosts no\n" in blocks[alias]
             assert "    CheckHostIP no\n" in blocks[alias]
-            assert f"    GlobalKnownHostsFile {trust._NULL_DEVICE}\n" in blocks[alias]
+            assert f"    GlobalKnownHostsFile {trust.NULL_DEVICE}\n" in blocks[alias]
+    fresh = blocks["awvm--fresh"] + blocks["awagent--agent-fresh"]
+    assert _entry_path(trust.store_file("fresh")) not in fresh
+    assert trust.store_file("fresh").as_posix() not in fresh
     # Only the entries of the VM with no record point the operator at the commands that record one.
     assert not _comment_lines(blocks["awvm--known"])
     assert not _comment_lines(blocks["awagent--agent-known"])
@@ -516,7 +525,7 @@ def test_every_entry_verifies_against_the_store_whether_or_not_the_vm_has_a_reco
     assert len(_comment_lines(blocks["awagent--agent-fresh"])) == 1
 
 
-def test_recording_or_removing_a_key_changes_only_the_missing_record_comment(tmp_path: Path) -> None:
+def test_recording_or_removing_a_key_switches_the_entry_between_the_store_and_nothing(tmp_path: Path) -> None:
     from agentworks.execution import trust
 
     config, ssh_dir = _mock_config(tmp_path)
@@ -529,22 +538,21 @@ def test_recording_or_removing_a_key_changes_only_the_missing_record_comment(tmp
     def entry() -> str:
         return _managed_blocks(conf.read_text())["awvm--web"]
 
-    def options() -> list[str]:
-        return [line for line in entry().splitlines() if not line.lstrip().startswith("#")]
+    def without_record() -> None:
+        assert f"    UserKnownHostsFile {trust.NULL_DEVICE}\n" in entry()
+        assert _comment_lines(entry())
 
     _rebuild_config_dir(config, db)
-    without_record = options()
-    assert _comment_lines(entry())
+    without_record()
 
     trust.write_records("web", [fake_host_key()])
     _rebuild_config_dir(config, db)
-    assert options() == without_record
+    assert f"    UserKnownHostsFile {_entry_path(trust.store_file('web'))}\n" in entry()
     assert not _comment_lines(entry())
 
     trust.remove("web")
     _rebuild_config_dir(config, db)
-    assert options() == without_record
-    assert _comment_lines(entry())
+    without_record()
 
 
 # Git for Windows' ssh cannot read an apostrophe path with no whitespace, so the Windows run skips that store.
@@ -583,15 +591,44 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
         ).stdout
         settings = dict(line.split(" ", 1) for line in out.splitlines())
 
-        # A VM with no record resolves the same way: strict checking against a store with no key refuses it.
+        known_hosts = trust.store_file(vm_name).as_posix() if vm_name == "known" else trust.NULL_DEVICE
         assert settings["hostkeyalias"] == f"agentworks-vm-{vm_name}"
-        assert settings["userknownhostsfile"] == trust.store_file(vm_name).as_posix()
+        assert settings["userknownhostsfile"] == known_hosts
         assert settings["stricthostkeychecking"] == "true"
         assert settings["updatehostkeys"] == "false"
         assert settings["hashknownhosts"] == "no"
         assert settings["checkhostip"] == "no"
-        assert settings["globalknownhostsfile"] == trust._NULL_DEVICE
+        assert settings["globalknownhostsfile"] == trust.NULL_DEVICE
     assert settings["hostname"] == "100.64.0.2"
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+def test_a_weaker_setting_read_first_never_makes_the_store_a_first_use_writers_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ssh takes each option's first value, so an earlier ``Host *`` wins; it must not get the store to write into."""
+    from agentworks.execution import trust
+    from tests.conftest import isolate_home
+
+    isolate_home(monkeypatch, tmp_path / "home")
+    config, ssh_dir = _mock_config(tmp_path)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("fresh", "100.64.0.2")]
+    db.list_agents.return_value = []
+    _rebuild_config_dir(config, db)
+    combined = ssh_dir / "combined"
+    managed = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    combined.write_text(f"Host *\n    StrictHostKeyChecking accept-new\n\n{managed}")
+
+    out = subprocess.run(
+        ["ssh", "-G", "-F", str(combined), "awvm--fresh"], capture_output=True, text=True, timeout=10, check=True
+    ).stdout
+    settings = dict(line.split(" ", 1) for line in out.splitlines())
+
+    assert settings["stricthostkeychecking"] == "accept-new"
+    assert settings["userknownhostsfile"] == trust.NULL_DEVICE
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
@@ -662,6 +699,7 @@ def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_r
     config.operator.ssh_private_key = key
     store = tmp_path / "o'brien-store"
     monkeypatch.setattr(trust, "STORE_DIR", store)
+    trust.write_records("web", [fake_host_key()])  # only a recorded VM's entries name its store
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
@@ -671,18 +709,17 @@ def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_r
 
     assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
     identity_warning, store_warning = captured_output.warnings
-    assert "(')" in identity_warning
     assert format_host_path(key.resolve()) in identity_warning
-    assert "(')" in store_warning
     assert format_host_path(trust.store_file("web").resolve()) in store_warning
 
     # With whitespace the quoted form is one that client reads, so the path is written.
     spaced = tmp_path / "o'brien x" / "id_ed25519"
     spaced.parent.mkdir()
     spaced.write_text("")
-    assert ssh_config_module._identity_value(spaced) == f'"{spaced.resolve().as_posix()}"'
+    assert ssh_config_module._identity_value(spaced) == _entry_path(spaced)
 
 
+@pytest.mark.windows
 def test_a_home_directory_named_with_an_apostrophe_never_reaches_an_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -701,6 +738,7 @@ def test_a_home_directory_named_with_an_apostrophe_never_reaches_an_entry(
     key.parent.mkdir()
     key.write_text("")
     config.operator.ssh_private_key = key
+    trust.write_records("web", [fake_host_key()])
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
@@ -712,3 +750,28 @@ def test_a_home_directory_named_with_an_apostrophe_never_reaches_an_entry(
     assert "    IdentityFile ~/.ssh/id_ed25519\n" in block
     assert "    UserKnownHostsFile ~/.config/agentworks/known_hosts/vm-web\n" in block
     assert captured_output.warnings == []
+
+
+@pytest.mark.parametrize("field", ["tailscale_host", "admin_username", "linux_user"])
+def test_a_persisted_value_that_would_add_a_line_leaves_the_vms_entries_out(
+    tmp_path: Path,
+    field: str,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Boundary: a row written by another version or by hand cannot add an option to an entry."""
+    config, ssh_dir = _mock_config(tmp_path)
+    vm, other = _mock_vm("web", "100.64.0.1"), _mock_vm("db", "100.64.0.2")
+    agent = _mock_agent("claude", "agt-claude", "web")
+    target = agent if field == "linux_user" else vm
+    setattr(target, field, f"{getattr(target, field)}\n    ProxyCommand sh -c 'evil'")
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [vm, other]
+    db.list_agents.side_effect = lambda vm_name: [agent] if vm_name == "web" else []
+
+    _rebuild_config_dir(config, db)
+
+    content = (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert set(_managed_blocks(content)) == {"awvm--db"}
+    assert "ProxyCommand" not in content
+    assert len(captured_output.warnings) == 1

@@ -15,13 +15,15 @@ what Agentworks' connections trust and refuses a VM with no recorded key.
 
 from __future__ import annotations
 
+import operator
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.atomic_write import atomic_write_text
-from agentworks.errors import AgentworksError, ConfigError
+from agentworks.errors import AgentworksError, ConfigError, ValidationError
 from agentworks.execution import trust
 from agentworks.path_rendering import format_host_path
 
@@ -65,7 +67,7 @@ def _to_ssh_path(path: Path) -> str:
 def _include_directive(ssh_config: Path) -> str:
     """Build the Include directive for config.d."""
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
-    return f"Include {_to_ssh_path(config_d)}/*"
+    return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -125,15 +127,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     """
     ssh_config = config.operator.ssh_config
     user_section, _old_entries = _read_managed(ssh_config)
-    prefix = config.operator.ssh_host_prefix
-    agent_prefix = config.operator.ssh_agent_host_prefix
-
-    identity = _identity_value(config.operator.ssh_private_key)
-    host_blocks: list[str] = []
-    for vm in db.list_vms():
-        host_blocks.extend(_vm_entries(db, vm, identity, prefix, agent_prefix))
-
-    _write_legacy(ssh_config, user_section, host_blocks)
+    _write_legacy(ssh_config, user_section, _host_entries(config, db))
 
 
 # -- config.d approach -----------------------------------------------------
@@ -160,8 +154,6 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     ssh_config = config.operator.ssh_config
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
     config_d.mkdir(parents=True, exist_ok=True)
-    prefix = config.operator.ssh_host_prefix
-    agent_prefix = config.operator.ssh_agent_host_prefix
 
     # Ensure Include directive at top of ssh_config
     _ensure_include(ssh_config)
@@ -171,10 +163,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
-    identity = _identity_value(config.operator.ssh_private_key)
-    host_entries: list[str] = []
-    for vm in db.list_vms():
-        host_entries.extend(_vm_entries(db, vm, identity, prefix, agent_prefix))
+    host_entries = _host_entries(config, db)
 
     conf_name = _managed_conf_name(db)
     conf_path = config_d / conf_name
@@ -240,33 +229,49 @@ def _remove_legacy_section(ssh_config: Path) -> None:
 # -- Shared helpers --------------------------------------------------------
 
 
-def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agent_prefix: str) -> list[str]:
-    """The VM's admin entry and one entry per agent on it, verifying against its host-key store.
+def _host_entries(config: Config, db: Database) -> list[str]:
+    """Every managed Host block, in database order, for both layouts."""
+    identity = _identity_value(config.operator.ssh_private_key)
+    prefix = config.operator.ssh_host_prefix
+    agent_prefix = config.operator.ssh_agent_host_prefix
+    entries: list[str] = []
+    for vm in db.list_vms():
+        entries.extend(_vm_entries(db, vm, identity, prefix, agent_prefix))
+    return entries
 
-    Every entry carries the store options, record or not, so the operator's
-    own ``ssh`` verifies the VM's key against the store and never accepts one
-    on first use. A VM whose store options cannot be written gets no entries,
-    with a warning, rather than entries that would trust whatever answers; it
-    never aborts the rebuild for every other VM. A VM with no tailnet address
-    has nothing to connect to and gets none either.
+
+def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agent_prefix: str) -> list[str]:
+    """The VM's admin entry and one entry per agent on it, verifying its host key against the store.
+
+    Every entry carries the verification options, record or not, so the
+    operator's own ``ssh`` never accepts the VM's key on first use (see
+    :func:`_verification_lines`). A VM whose entries cannot be written safely
+    gets none, with a warning, rather than entries that would trust whatever
+    answers or a line that says something else; it never aborts the rebuild
+    for every other VM. A VM with no tailnet address has nothing to connect to
+    and gets none either.
 
     Agent entries share the VM entry's ``HostName``, ``IdentityFile`` and
-    store options; only ``User`` and the alias differ. The agent alias is a
-    top-level ``<agent_prefix><agent.name>``, not nested under the VM alias,
-    because an agent belongs to exactly one VM and the operator-facing handle
-    is the agent name, not the Linux user.
+    verification options; only ``User`` and the alias differ. The agent alias
+    is a top-level ``<agent_prefix><agent.name>``, not nested under the VM
+    alias, because an agent belongs to exactly one VM and the operator-facing
+    handle is the agent name, not the Linux user.
     """
     if not vm.tailscale_host:
         return []
+    agents = db.list_agents(vm_name=vm.name)
     try:
+        # Boundary: these are persisted values, and each becomes a token of a line ssh parses.
+        for value in (vm.tailscale_host, vm.admin_username, *(f(agent) for agent in agents for f in _AGENT_TOKENS)):
+            _require_token(value)
         verification = _verification_lines(vm.name)
     except AgentworksError as e:
-        output.warn(f"SSH config entries for VM '{vm.name}' left out: {e}")
+        output.warn(f"SSH config entries for VM '{vm.name}' left out: {_with_hint(e)}")
         return []
     entries = [
         _format_entry(ssh_host_alias(vm.name, prefix), vm.tailscale_host, vm.admin_username, identity, verification)
     ]
-    for agent in db.list_agents(vm_name=vm.name):
+    for agent in agents:
         entries.append(
             _format_entry(
                 ssh_agent_alias(agent.name, agent_prefix), vm.tailscale_host, agent.linux_user, identity, verification
@@ -275,28 +280,50 @@ def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agen
     return entries
 
 
+_AGENT_TOKENS = (operator.attrgetter("name"), operator.attrgetter("linux_user"))
+# A host name, an address or an account name: nothing ssh would split, unquote or end the line at.
+_TOKEN = re.compile(r"[A-Za-z0-9._:-]+")
+
+
+def _require_token(value: str) -> None:
+    if not _TOKEN.fullmatch(value):
+        raise ValidationError(f"{value!r} is not a host name, an address or an account name ssh can be given")
+
+
+def _with_hint(error: AgentworksError) -> str:
+    return f"{error} {error.hint}" if error.hint else str(error)
+
+
 def _verification_lines(vm_name: str) -> str:
-    """The option lines that make the operator's own ``ssh`` verify the VM against its store, as entry text.
+    """The option lines that make the operator's own ``ssh`` verify the VM's host key, as entry text.
+
+    A VM with a record verifies against its store file. A VM with none
+    verifies against the null device instead, so its ``ssh`` refuses the VM,
+    and a weaker setting that takes effect first (an earlier ``Host *`` with
+    ``StrictHostKeyChecking accept-new``, or ``-o StrictHostKeyChecking=no``
+    on the command line) can at most accept a key into nothing: it never
+    writes a first-use key into the store, where it would count as a record.
+    Such an entry also carries a comment naming the commands that record one.
+    A record that cannot be read is treated as one: its ssh reports the read
+    failure itself.
 
     The pins match the execution core's (:func:`trust.pinned_options`): that
-    ``ssh`` reads no global known-hosts file and never writes to the store or
-    hashes it. A VM with no record yet also gets a comment naming the commands
-    that record one, since until then its ``ssh`` refuses the VM's key. A
-    record that cannot be read gets no comment: ``ssh`` reports that itself.
-    Raises :class:`~agentworks.errors.AgentworksError` when the store path
-    cannot be written into an entry.
+    ``ssh`` reads no global known-hosts file and never updates or hashes the
+    file it reads. Raises :class:`~agentworks.errors.AgentworksError` when
+    the store path cannot be written into an entry.
     """
+    try:
+        recorded = trust.has_record(vm_name)
+    except AgentworksError:
+        recorded = True
+    known_hosts = _entry_value(trust.store_file(vm_name), "host-key store path") if recorded else trust.NULL_DEVICE
     options = (
         f"HostKeyAlias {trust.host_key_alias(vm_name)}",
-        f"UserKnownHostsFile {_entry_value(trust.store_file(vm_name), 'host-key store path')}",
+        f"UserKnownHostsFile {known_hosts}",
         "StrictHostKeyChecking yes",
         *(f"{name} {value}" for name, value in trust.pinned_options()),
     )
-    try:
-        missing = not trust.has_record(vm_name)
-    except AgentworksError:
-        missing = False
-    if missing:
+    if not recorded:
         options += (
             f"# No host key is recorded for VM '{vm_name}' yet, so ssh refuses it. Record one with "
             f"'agw vm import-host-keys {vm_name}' or 'agw vm recover {vm_name}'.",
@@ -322,7 +349,7 @@ def _entry_value(path: Path, what: str) -> str:
     value = _to_ssh_path(resolved)
     if _GIT_FOR_WINDOWS_MAY_READ and "'" in value and not any(char in value for char in " \t"):
         raise ConfigError(
-            f"{what} '{format_host_path(resolved)}' cannot be written into an SSH config entry: the ssh shipped "
+            f"{what} {format_host_path(resolved)} cannot be written into an SSH config entry: the ssh shipped "
             "with Git for Windows reads no form of a path with an apostrophe (') and no whitespace",
             hint="Rename the directory or file so its path has no apostrophe.",
         )
@@ -339,7 +366,7 @@ def _identity_value(identity_file: Path) -> str | None:
     try:
         return _entry_value(identity_file, "SSH identity file")
     except ConfigError as e:
-        output.warn(f"IdentityFile left out of the SSH config entries: {e}")
+        output.warn(f"IdentityFile left out of the SSH config entries: {_with_hint(e)}")
         return None
 
 

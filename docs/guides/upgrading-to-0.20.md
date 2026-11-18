@@ -270,12 +270,13 @@ along with the database. VMs created on 0.20 have keys only there, because nothi
 verified `--known-hosts` file) still works as the fallback.
 
 Your own `ssh` refuses those VMs too. Every managed SSH entry (`awvm--NAME`, `awagent--NAME`) now
-verifies the VM's key against the store, with `StrictHostKeyChecking yes`, so `ssh awvm--NAME`, and
-`scp`, VS Code Remote-SSH or anything else that goes through those aliases, fails with
-`Host key verification failed` for a VM with no record instead of trusting `~/.ssh/known_hosts` or
-accepting the key on first use. The VM's managed entries carry a comment naming the fix. Run the
-import (or `agw vm recover NAME`) and the same aliases work again, verifying against the store; your
-own `ssh` never writes to it. If you never import, those aliases stay refused.
+verifies the VM's key with `StrictHostKeyChecking yes`, against the store once the VM has a record
+and against nothing until then, so `ssh awvm--NAME`, and `scp`, VS Code Remote-SSH or anything else
+that goes through those aliases, fails with `Host key verification failed` for a VM with no record
+instead of trusting `~/.ssh/known_hosts` or accepting the key on first use. The VM's managed entries
+carry a comment naming the fix. Run the import (or `agw vm recover NAME`) and the same aliases work
+again, verifying against the store; your own `ssh` never writes to it. If you never import, those
+aliases stay refused.
 
 ## New VMs
 

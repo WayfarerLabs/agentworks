@@ -47,7 +47,7 @@ STORE_DIR = CONFIG_DIR / "known_hosts"
 # a ``none`` value as a file name relative to the working directory, so a file
 # planted there could add a trusted key; the null device is accepted by every
 # version.
-_NULL_DEVICE = "NUL" if sys.platform == "win32" else "/dev/null"
+NULL_DEVICE = "NUL" if sys.platform == "win32" else "/dev/null"
 
 # What a VM name must satisfy to be a file name and a host-key alias. Persisted
 # names are not re-validated against the creation grammar, so this checks only
@@ -322,7 +322,7 @@ def pinned_options() -> tuple[tuple[str, str], ...]:
     SSH entries (``ssh_config.py``), so the operator's own ``ssh`` pins what
     Agentworks pins."""
     return (
-        ("GlobalKnownHostsFile", _NULL_DEVICE),
+        ("GlobalKnownHostsFile", NULL_DEVICE),
         ("UpdateHostKeys", "no"),
         ("HashKnownHosts", "no"),
         ("CheckHostIP", "no"),
