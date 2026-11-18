@@ -103,10 +103,8 @@ useful work in progress.
 
 Session and console observers reach the VM directly, with no VM activation or provider credential
 work. Sessions send one compound probe per selected VM on its admin's access, as root, once, with a
-10-second deadline. Consoles create the canonical SSH transport and use one exact tmux session-name
-enumeration per selected VM, with `tty=False`, one attempt, and a 10-second timeout; their probes
-that do not send fact data explicitly close stdin so non-interactive Windows SSH clients do not
-retain the operator's console handle. Independent VMs run with finite concurrency.
+10-second deadline. Consoles send one exact tmux session-name enumeration per selected VM on its
+admin's access, one request with a 10-second deadline. Independent VMs run with finite concurrency.
 
 VM observation uses the existing version-2 platform status operation. It may run that operation's
 provider preflight and resolve its declared credentials, but it does not run authenticated runup

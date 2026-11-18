@@ -115,15 +115,12 @@ without connecting to the VM. `--vm`, `--workspace`, and `--agent` select other 
 remain redacted unless `--resolve` is explicit. This is a managed-config preview, not an observation
 of a process's live environment or user shell startup effects.
 
-Env delivery depends on the consumer. VM/agent shell and exec use the
-[execution channel](../../cli/agentworks/execution/README.md), which sends environment values in its
-stdin request envelope. Legacy SSH transport consumers use the client's `SetEnv` option. Clients
-that expand SetEnv values can reinterpret literal `${...}` text using the controller's environment,
-or refuse it when that variable is absent. Ordinary `${agw:user_name}` references render before
-transport; intentionally escaped plaintext and opaque secret contents can still contain literal
-namespace text. Preview and setup rendering do not perform SSH client expansion. The legacy
-transport behavior is tracked in
-[issue #873](https://github.com/WayfarerLabs/agentworks/issues/873).
+Every consumer that reaches the VM over SSH (VM and agent shell and exec, sessions, and console
+shells) uses the [execution channel](../../cli/agentworks/execution/README.md), which sends
+environment values in its stdin request envelope; a console shell's travel in the request its
+terminal handover parks. No value is on a command line or in the client's `SetEnv` option, so the
+SSH client never expands one, and literal `${...}` text in an escaped plaintext or a secret reaches
+the workload as written.
 
 ## Secrets
 

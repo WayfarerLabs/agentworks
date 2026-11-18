@@ -3,11 +3,10 @@
 Combines AGENTWORKS_* identity vars (per-context subset only; VM-stable and
 per-user subsets live in VM-side profile fragments) with the user-defined
 env merged across the precedence ladder, secret references filled from the
-command's pre-resolved values. The resulting flat ``dict[str, str]`` is
-handed to the transport layer (``Transport.run(env=...)``), which coalesces
-every pair into one ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
-``_set_env_args`` in ``agentworks/transports/ssh.py``); the remote sshd
-accepts these under the ``AcceptEnv *`` directive deployed by VM init.
+command's pre-resolved values. The resulting flat ``dict[str, str]`` becomes
+a request's ``env`` (``agentworks.execution``), which travels in the request
+envelope on the connection's standard input, never on a command line; a
+console pane's is in the request its terminal handover parks.
 
 ``values`` is the dict returned by the command's single
 ``resolve_for_command`` call. A secret referenced here but absent from it

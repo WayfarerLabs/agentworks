@@ -245,15 +245,17 @@ initialization, as the admin and then as the agent, through it (see
 through it. `workspace create`, `workspace repair`, `workspace rehome` and `workspace copy` run all
 their work on the VM through it (see [Workspaces](#workspaces)), and so does `workspace delete`.
 Every session command runs all its work on the VM through it, and so does the session teardown of
-`agent delete` and `workspace delete` (see [Sessions](#sessions)). `vm backup` runs its checks, its
-workspace archive and the archive's download through it (see [Backups](#backups)). `vm describe`
-reads the VM's live resources through it, as one request bounded at 30 seconds where it made up to
-three attempts before. `vm start`, and the automatic start of a VM that stopped on its own, use it
-to wait for the VM to answer; `vm rekey` and `vm recover` use it for the same wait after their
-scripts, which run through the platform's own channel (see
+`agent delete` and `workspace delete` (see [Sessions](#sessions)). Every named console command runs
+all its work on the VM through it, and so do the console steps of runtime reconciliation (see
+[Named consoles](#named-consoles)). `vm backup` runs its checks, its workspace archive and the
+archive's download through it (see [Backups](#backups)). `vm describe` reads the VM's live resources
+through it, as one request bounded at 30 seconds where it made up to three attempts before.
+`vm start`, and the automatic start of a VM that stopped on its own, use it to wait for the VM to
+answer; `vm rekey` and `vm recover` use it for the same wait after their scripts, which run through
+the platform's own channel (see
 [Start, recover, rekey and delete](#start-recover-rekey-and-delete)). `vm shell --platform` uses the
 platform's own channel instead and needs no `python3`; on a cloud VM that channel is SSH to its
-public address under the same rules. Everything else keeps its current path for now.
+public address under the same rules.
 
 ### What these commands need
 
@@ -276,12 +278,12 @@ refusing.
   directory before `PATH`, and on POSIX an empty or relative `PATH` entry means the current
   directory. Agentworks now starts every workstation program by its path in an absolute `PATH`
   directory: `tailscale`, PowerShell, the 1Password CLI `op`, `git`, `taskkill`, local Lima's
-  `limactl`, VS Code's `code`, your `EDITOR`, and the `ssh` of the requests that still use the older
-  SSH path (named consoles). A program found only in the current directory counts as not installed,
-  so `agw doctor` and the 1Password backend's readiness no longer vouch for one. An `EDITOR` given
-  as a path is run as given. On Windows, `workspace create --open-vscode` does not start VS Code:
-  its `code` command is a batch file, which only `cmd.exe` can run, and `cmd.exe` parses the
-  workspace path by its own rules. The warning names the workspace file to open in VS Code yourself.
+  `limactl`, VS Code's `code` and your `EDITOR`. A program found only in the current directory
+  counts as not installed, so `agw doctor` and the 1Password backend's readiness no longer vouch for
+  one. An `EDITOR` given as a path is run as given. On Windows, `workspace create --open-vscode`
+  does not start VS Code: its `code` command is a batch file, which only `cmd.exe` can run, and
+  `cmd.exe` parses the workspace path by its own rules. The warning names the workspace file to open
+  in VS Code yourself.
 - **`python3` on the VM.** Every request starts a small Python program on the VM. A VM without
   `python3`, or with one that lacks its standard library, is reported as unable to run Agentworks
   requests. New VMs get it at provisioning. `vm reinit` and `vm confirm-release` now connect the
@@ -424,7 +426,6 @@ the VM once no backup is running.
 `describe` and `list --status`, the batch starts and session reconciliation, and the session
 teardown of `agent delete` and `workspace delete` reach the VM through the new layer, so they need
 what [What these commands need](#what-these-commands-need) lists and read no ssh configuration.
-Named consoles keep the older path for now, apart from the admin shell window below.
 
 - **The session's environment is off the command line.** Its values, secrets included, travel in the
   launch request's environment, which the session's own tmux server takes as its global environment
@@ -454,16 +455,49 @@ Named consoles keep the older path for now, apart from the admin shell window be
   starts, instead of by its launch command. The write refuses a symbolic link at the file or a
   parent (a linked `~/.agentworks`, say), which the launch command followed. A refused or failed
   write warns and the session starts anyway, finding its conversation by discovery instead.
-- **A console's admin shell window starts with the launcher's environment.** The window
-  `console create --add-admin-shell` adds takes its resolved values from a request on the admin's
-  own connection instead of `tmux new-session -e` arguments, so they no longer appear on a guest
-  command line. Like the other shells agentworks starts, its shell begins with the environment
+
+### Named consoles
+
+`console create`, `start`, `restart`, `stop`, `attach`, `delete`, `add-sessions`, `remove-sessions`,
+`reorder-sessions`, `add-shell`, `restore-session`, `describe` and `list --status`, and the console
+steps of runtime reconciliation, reach the VM through the new layer, so they need what
+[What these commands need](#what-these-commands-need) lists and read no ssh configuration.
+
+- **A console shell's environment is off the command line.** Each shell pane, and the admin shell
+  window `console create --add-admin-shell` adds, takes its resolved values from a request on its
+  own account's connection, which the pane's one-time command collects, instead of
+  `tmux split-window -e` or `new-session -e` arguments, so no value appears on a guest command line.
+  Like the other shells agentworks starts, its shell begins with the environment
   [What behaves differently](#what-behaves-differently) describes (the fixed `PATH`, no
-  `SSH_CLIENT`, `SSH_CONNECTION`, `SSH_TTY` or `pam_env` variables) plus those values, keeps the
-  `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` tmux sets for the pane, and
-  still runs its login startup files. A running console's window changes when the console is rebuilt
-  (`agw console restart`). The window's pane runs a one-time command that collects that request, so
-  `tmux respawn-pane` cannot start its shell again: restore the window with `agw console restart`.
+  `SSH_CLIENT`, `SSH_CONNECTION`, `SSH_TTY` or `pam_env` variables) plus those values, and still
+  runs its login startup files. An admin's shell keeps the `TERM`, `TMUX`, `TMUX_PANE`,
+  `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` tmux sets for its pane. An agent's shell pane switches
+  to the agent with `sudo -n -u` before it collects its request, and sudo passes on only `TERM` of
+  those five, so an agent's console shell has `TERM` and no `TMUX`, as under the `sudo --login` of
+  earlier releases. A running console's shells change when the console is rebuilt
+  (`agw console restart`). Because each pane's command runs once, `tmux respawn-pane` cannot start
+  its shell again: restore a shell pane with `agw console restore-session` and the admin shell
+  window with `agw console restart`.
+- **An agent's console shell connects as the agent.** Its environment no longer crosses `sudo`, so
+  it no longer needs the `Defaults:<admin> setenv` grant of `51-agentworks-console-setenv`. It needs
+  the agent's own SSH access instead, as an agent session does: a console command that would open a
+  shell for an agent that predates the direct-SSH rollout refuses before it changes the console's
+  tmux state, with the `agw agent reinit` hint. `console add-shell` and `add-sessions` check it
+  before they record the new shell or member, on a VM with a Tailscale address.
+- **A shell pane whose directory is gone opens in the home directory with a warning,** where the
+  pane printed the message itself.
+- **Pane secrets resolve before the console changes.** `console create` and `restore-session`
+  resolve the secrets of every shell they could open in one pass, once the VM is active and before
+  any tmux request. `restore-session` resolves every configured shell's secrets even when few or no
+  panes are missing, so a non-interactive restore fails on a secret it would not have used, and it
+  resolves them before it checks the window's pane tags, so you may be prompted before a corrupt
+  window is refused.
+- **`console attach` runs `tmux attach` itself,** with its arguments, rather than through the
+  admin's shell. `[terminal] clear_on_detach` applies as before.
+- **A console build is logged by shape.** `console create`, `start` and `restart` write the admin's
+  requests of a build to the `console-build` operation log as the other commands do: arguments, or a
+  script's shell, with the names of its environment variables and its deadline. Parking a shell's
+  request keeps no log.
 
 ## Create, reinit and the VM contract
 
@@ -494,8 +528,7 @@ Named consoles keep the older path for now, apart from the admin shell window be
   names recreation. The pam_env settings and an unsupported login shell only warn.
 - **The operation log** records each of these requests by its shape: the command's arguments, or a
   script's shell, with the working directory, the names of its environment variables and its
-  deadline. A script's text and an environment variable's value are not written. Requests still on
-  the older SSH path (named consoles) log as before.
+  deadline. A script's text and an environment variable's value are not written.
 
 ### Initialization steps
 

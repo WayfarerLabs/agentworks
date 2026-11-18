@@ -1,12 +1,9 @@
 """Env model: EnvEntry, scope merge, AGENTWORKS_* identity vars, env composition.
 
 Pure data with no Typer dependency. Consumers (sessions, consoles, vms,
-agents) assemble effective env via ``compose_env`` and hand the resulting
-``dict[str, str]`` to the transport layer (``Transport.run(env=...)`` /
-``Transport.interactive(command, env=...)``), which materializes one
-``-o SetEnv=KEY=VALUE`` argument per entry. The remote sshd accepts these
-under the ``AcceptEnv *`` directive deployed by VM init (see
-``docs/adrs/0014-sshd-accept-env-wildcard.md``).
+agents) assemble effective env via ``compose_env`` and put the resulting
+``dict[str, str]`` in a request's ``env`` (``agentworks.execution``), which
+travels in the request envelope on the connection's standard input.
 """
 
 from agentworks.env.compose import compose_env

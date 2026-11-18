@@ -70,29 +70,29 @@ operation log's move to `execution/oplog.py` (slice 8), and the other legacy mod
 
 ## Module layout
 
-| Module                                                                                                                   | Change                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `execution/requests.py`                                                                                                  | `FromFile`; `ToFile`; `TerminalCommand`                                                                                                                                    |
-| `execution/access.py`                                                                                                    | `run` accepts `FromFile` and `ToFile`; `attach` takes `LoginShell \| TerminalCommand` and `clear_screen_on_exit` (`terminal.clear_screen_on_detach`); `park`; `detached()` |
-| `execution/attach.py`                                                                                                    | The parking half becomes `Parked`, which `attach` and `park` share                                                                                                         |
-| `execution/envelope.py`, `execution/agw_launch.py`                                                                       | `TerminalCommand` in `tty` mode; a `park` envelope carries no `TERM`, and `tty` mode takes the terminal's variables from its environment                                   |
-| `execution/pump.py`                                                                                                      | A file sink with a progress callback; nothing else (`FromFile` feeds the existing input thread)                                                                            |
-| `execution/detached.py` (new)                                                                                            | `Launch`, `Detached`: `new_launch`, `launch`, `observe`, `interrupt`, `download`, `discard`                                                                                |
-| `execution/detached_program.py` (new)                                                                                    | The guest program `launch`, `observe`, `interrupt` and `discard` run, a `PythonProgram`, as `file_program.py` is                                                           |
-| `vms/manager/_helpers.py`                                                                                                | `_operation_log` becomes public `operation_log(..., path=None)`, re-exported by `vms.manager`; `_query_live_resources` on `VMAccess`                                       |
-| `vms/backup.py`                                                                                                          | On `VMAccess`, `detached` and `ToFile`; no thread, staging, `chown` or `scp`                                                                                               |
-| `remote_exec.py`, `cli/tests/test_remote_exec.py`                                                                        | Deleted (decision 2)                                                                                                                                                       |
-| `workspaces/backends/vm.py`, `workspaces/manager/*.py`, `workspaces/realize.py`, `workspaces/tmuxinator.py`              | On `VMAccess`; copy is two `run`s over a tar stream                                                                                                                        |
-| `sessions/tmux.py`                                                                                                       | Every primitive takes a `RunCommand` built by `access_run_command`; `_tmux_env_flags` goes; `deploy_restricted_config` takes `Files`; the launch line runs `/usr/bin/tmux` |
-| `sessions/manager/*.py`                                                                                                  | On the owner's, the admin's or the elevated admin's access; `_BoundedStatusTarget` goes                                                                                    |
-| `sessions/multi_console/*.py`, `sessions/multi_console_layout.py`                                                        | On the admin's access; pane secrets in the boundary; `_split_shell_pane` parks a handover per pane; the `--preserve-env` probe, `PreserveEnvMemo` and its threading go     |
-| `runtime_state/_session_stop.py`                                                                                         | Session stop's teardown targets (`:84`, `:223`, from #885) on the owner's or the elevated admin's access, with `DEDICATED_TEARDOWN_ATTEMPTS` gone (batch C)                |
-| `runtime_state/_prepare.py`, `runtime_state/_preview.py`                                                                 | The console presence probes (`_prepare.py:280`, `:352`, `_preview.py:263`, `:275`, from #885) on the admin's access (batch D)                                              |
-| `agents/manager/lifecycle.py`, `agents/manager/__init__.py`, `agents/manager/_common.py`, `sessions/manager/__init__.py` | Agent delete's teardown and window cleanup on the admin's access; both `transport` re-exports and `_assert_agent_ssh_works` go                                             |
-| `plugins/codex/recorder.py`, `plugins/codex/harness_integration.py`                                                      | The recorder is published with `Files.write` in `start`; `provision_fragment` goes                                                                                         |
-| `vms/initializer/shell_env.py`, `driver.py`                                                                              | `_write_sudoers_console_setenv` becomes `_remove_sudoers_console_setenv`                                                                                                   |
-| `manifests/decode.py`, `env/compose.py`, `env/show.py`, `secrets/orchestration.py`, `resolver.py`, `line_safety.py`      | The environment newline refusals go (below, "Deletions")                                                                                                                   |
-| `status_observation.py`                                                                                                  | `GUEST_OBSERVATION_ATTEMPTS` goes                                                                                                                                          |
+| Module                                                                                                                   | Change                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `execution/requests.py`                                                                                                  | `FromFile`; `ToFile`; `TerminalCommand`                                                                                                                                                                             |
+| `execution/access.py`                                                                                                    | `run` accepts `FromFile` and `ToFile`; `attach` takes `LoginShell \| TerminalCommand` and `clear_screen_on_exit` (`terminal.clear_screen_on_detach`); `park`; `detached()`                                          |
+| `execution/attach.py`                                                                                                    | The parking half becomes `Parked`, which `attach` and `park` share                                                                                                                                                  |
+| `execution/envelope.py`, `execution/agw_launch.py`                                                                       | `TerminalCommand` in `tty` mode; a `park` envelope carries no `TERM`, and `tty` mode takes the terminal's variables from its environment                                                                            |
+| `execution/pump.py`                                                                                                      | A file sink with a progress callback; nothing else (`FromFile` feeds the existing input thread)                                                                                                                     |
+| `execution/detached.py` (new)                                                                                            | `Launch`, `Detached`: `new_launch`, `launch`, `observe`, `interrupt`, `download`, `discard`                                                                                                                         |
+| `execution/detached_program.py` (new)                                                                                    | The guest program `launch`, `observe`, `interrupt` and `discard` run, a `PythonProgram`, as `file_program.py` is                                                                                                    |
+| `vms/manager/_helpers.py`                                                                                                | `_operation_log` becomes public `operation_log(..., path=None)`, re-exported by `vms.manager`; `_query_live_resources` on `VMAccess`                                                                                |
+| `vms/backup.py`                                                                                                          | On `VMAccess`, `detached` and `ToFile`; no thread, staging, `chown` or `scp`                                                                                                                                        |
+| `remote_exec.py`, `cli/tests/test_remote_exec.py`                                                                        | Deleted (decision 2)                                                                                                                                                                                                |
+| `workspaces/backends/vm.py`, `workspaces/manager/*.py`, `workspaces/realize.py`, `workspaces/tmuxinator.py`              | On `VMAccess`; copy is two `run`s over a tar stream                                                                                                                                                                 |
+| `sessions/tmux.py`                                                                                                       | Every primitive takes a `RunCommand` built by `access_run_command`; `_tmux_env_flags` goes; `deploy_restricted_config` takes `Files`; the launch line runs `/usr/bin/tmux`                                          |
+| `sessions/manager/*.py`                                                                                                  | On the owner's, the admin's or the elevated admin's access; `_BoundedStatusTarget` goes                                                                                                                             |
+| `sessions/multi_console/*.py`, `sessions/multi_console_layout.py`                                                        | On the admin's access; pane secrets in the boundary; `_split_shell_pane` parks a handover per pane, on `ConsoleAccess` (`_access.py`, batch D2); the `--preserve-env` probe, `PreserveEnvMemo` and its threading go |
+| `runtime_state/_session_stop.py`                                                                                         | Session stop's teardown targets (`:84`, `:223`, from #885) on the owner's or the elevated admin's access, with `DEDICATED_TEARDOWN_ATTEMPTS` gone (batch C)                                                         |
+| `runtime_state/_prepare.py`, `runtime_state/_preview.py`                                                                 | The console presence probes (`_prepare.py:280`, `:352`, `_preview.py:263`, `:275`, from #885) on the admin's access (batch D)                                                                                       |
+| `agents/manager/lifecycle.py`, `agents/manager/__init__.py`, `agents/manager/_common.py`, `sessions/manager/__init__.py` | Agent delete's teardown and window cleanup on the admin's access; both `transport` re-exports and `_assert_agent_ssh_works` go                                                                                      |
+| `plugins/codex/recorder.py`, `plugins/codex/harness_integration.py`                                                      | The recorder is published with `Files.write` in `start`; `provision_fragment` goes                                                                                                                                  |
+| `vms/initializer/shell_env.py`, `driver.py`                                                                              | `_write_sudoers_console_setenv` becomes `_remove_sudoers_console_setenv`                                                                                                                                            |
+| `manifests/decode.py`, `env/compose.py`, `env/show.py`, `secrets/orchestration.py`, `resolver.py`, `line_safety.py`      | The environment newline refusals go (below, "Deletions")                                                                                                                                                            |
+| `status_observation.py`                                                                                                  | `GUEST_OBSERVATION_ATTEMPTS` goes                                                                                                                                                                                   |
 
 ## Requests this slice adds
 
@@ -183,9 +183,9 @@ with access.park(LoginShell(cwd=full_path, env=pane_env)) as handover:
 - **`Handover.command() -> str`** is the pane's command line: the handover form of stage 0,
   `stage0_command(socket_path(token))` (`ssh_process.py:73-86`). Its only value is the token; the
   environment is in the parked request. The pane runs it as the account that parked, the only one
-  that can reach the socket. D2 adds `Handover.command(*, switch_user: bool = False)` with its first
-  caller, the agent panes: the handover then records the account that parked, and `switch_user` puts
-  `sudo -n -u <that account>` in front for a pane in the admin's tmux server.
+  that can reach the socket. `Handover.command(*, switch_user: bool = False)` (batch D2, with its
+  caller, the agent panes): the handover records the account that parked (`Handover.account`), and
+  `switch_user` puts `sudo -n -u <that account> --` in front for a pane in the admin's tmux server.
 - **Leaving the block.** On a normal exit the client keeps pumping the parking connection until its
   trailer, for at most `HANDOVER_COLLECT_SECONDS`, the launcher's `HANDOVER_WAIT_SECONDS` (30,
   shared from `agw_launch.py`) and a margin of 5, and sets `handover.collected` from it: `exit 0` is
@@ -424,11 +424,11 @@ handover for each pane it creates:
   `_add_session_window`, `:456`), `console add-sessions` (`crud.py:358`), `console add-shell`
   (`crud.py:654`), and `console restore-session` for missing panes (`restore.py:407`) and for a
   missing window (`restore.py:204` through `_add_session_window`). The last is the recovery after a
-  killed attach pane (`977d32c7c`). It composes `pane_env` as today (`_resolve_pane_env`,
+  killed attach pane (`977d32c7c`). It composes `pane_env` as before (`_resolve_pane_env`,
   `sessions/multi_console/secrets_env.py:279-366`), parks `LoginShell(cwd=full_path, env=pane_env)`
-  on the pane identity's access (the admin's, or the agent's for an agent pane), runs
-  `tmux split-window ... <handover.command(switch_user=<an agent pane>)>` on the admin's access
-  inside the block, and tags the pane.
+  on the pane identity's access (`ConsoleAccess.pane`: the admin's, or the agent's for an agent
+  pane), runs `tmux split-window ... <handover.command(switch_user=<an agent pane>)>` on the admin's
+  access inside the block, and tags the pane once it collected its request (batch D2).
 - **The admin-shell window** (`tmux_build.py:556-589` at D1, batch D1) parks the admin pane's
   environment (`_resolve_admin_env`) on the admin's access and runs
   `new-session -d ... <handover.command()>`. A failed `new-session` raises inside the block, so the
@@ -441,11 +441,12 @@ handover for each pane it creates:
 Windows that run the attach loop (`multi_console/attach.py:155-235`) carry no environment and keep
 their command. No pane path passes `-e`, and none passes `env=` to the admin's `run`.
 
-**A missing workspace directory** keeps today's behavior. Today the pane runs
-`cd <path> || echo <diagnostic>; exec "$SHELL" -l` (`tmux_build.py:242`, `:248`), so it opens in the
-home with a message. Now `park` with `cwd=full_path` is refused with `RequestRefused(cwd)` before
-any pane exists (agw-launch enters the directory before parking, `agw_launch.py:255-258`);
-`_split_shell_pane` then warns naming the path and parks again with no `cwd`, the home.
+**A missing workspace directory** opens the shell in the home, as the pane's
+`cd <path> || echo <diagnostic>; exec "$SHELL" -l` did before (`tmux_build.py:242`, `:248`), with
+the message as a warning (batch D2): `park` with `cwd=full_path` is refused with
+`RequestRefused(cwd)` before any pane exists (agw-launch enters the directory before parking,
+`agw_launch.py:255-258`); `_split_shell_pane` then warns naming the path and parks again with no
+`cwd`, the home.
 
 **When `park` raises.** Today a failed split warns and returns `None`, and callers decide whether
 that is fatal (`restore.py:215-238`, `:404-424`; `crud.py:654-680`). An `ExecutionIncomplete`,
@@ -457,8 +458,14 @@ tag is treated the same way, and so is an uncollected handover. `TrustMissing`, 
 `authorized_keys`, as an agent session already does. So each console operation calls
 `_assert_agent_access_works(access, admin, agent)` (`agents/manager/access.py:44-89`) once for every
 agent it will park for, before the operation's first mutation, and an agent that predates the
-direct-SSH rollout gets that function's reinit hint instead of a failed pane. Today's `sudo --login`
-panes did not need it; the upgrade guide says so.
+direct-SSH rollout gets that function's reinit hint instead of a failed pane. The earlier
+`sudo --login` panes did not need it; the upgrade guide says so. As built (batch D2),
+`console_access` (`sessions/multi_console/_access.py`) builds the operation's `ConsoleAccess`, the
+admin's access and each checked agent's, from the members whose shells park as an agent: in
+`prepare_console_reconcile` for a build (so `console start`, `restart` and reconciliation refuse
+while preparing), in `create_console` before its first tmux request, in `restore_session` before the
+window or pane it opens, and in `add-shell` and `add-sessions` before their database write when the
+VM has a Tailscale address.
 
 **What replaces the sudo carry.** Today an agent pane runs
 `exec sudo --login --preserve-env=<keys> -u <agent> bash -c '<bootstrap>'`
@@ -469,7 +476,7 @@ agent's own connection parks it, the pane runs `sudo -n -u <agent>` with stage 0
 path, and stage 0, now the agent, fetches the request and execs the shell with it (HLA D8).
 `sudo -n -u` needs only the admin's existing `NOPASSWD: ALL`. The `--preserve-env` path, the probe,
 `PreserveEnvMemo` and its threading (`tmux_build.py:77`, `:549`, `crud.py:354`, `:671`,
-`restore.py:213`, `:405`), and the sudoers grant all go (below, "Deletions").
+`restore.py:213`, `:405`) went in batch D2; the sudoers grant goes in D3 (below, "Deletions").
 
 ### Console pane secrets in the boundary
 
@@ -490,14 +497,26 @@ live code, each justified by a comment as a conditional-need exception. Per comm
 | `console restore-session`, panes missing  | only the missing indices' secrets, after the validation guards (`restore.py:385-399`) | the same targets as above, every configured shell; the late resolve goes                                                                        |
 | `console add-sessions`, `add-shell`       | resolve once, with no gate (`crud.py:306`, `:620`)                                    | unchanged                                                                                                                                       |
 
-`_prepare_vm_target` (`multi_console/attach.py:345-389`) takes `targets` as a function of the
-`VMRow`, since both builders need the row (`sessions/multi_console/secrets_env.py:178`, `:237`) and
-`_prepare_vm_target` is where it is fetched (`attach.py:378`). So the not-found and
-Tailscale-address refusals stay in one place before the gate, with nothing resolved, and it calls
-the function and passes the result to `gated_vm_boundary`, whose `targets` parameter already exists
-(`vms/manager/boundary.py:196`), then yields `resolver.values` beside the access. Its docstring's
-"documented conditional-need path" (`:362-366`) goes. Every console resolve is then the one boundary
-pass, before the first mutation, as ADR 0019 promises.
+`_prepare_vm_access` (`multi_console/attach.py`, renamed from `_prepare_vm_target` in batch D2)
+takes `targets` as a function of the `VMRow`, since both builders need the row
+(`sessions/multi_console/secrets_env.py:178`, `:237`) and `_prepare_vm_access` is where it is
+fetched. So the not-found and Tailscale-address refusals stay in one place before the gate, with
+nothing resolved. #885 replaced the `gated_vm_boundary` composition this paragraph first named with
+its prepared runtime (`prepare_vm_runtime`, whose gate secrets resolve through
+`resolver.resolve_gate`) before D2, so as built `_prepare_vm_access` registers the targets on the
+operation's resolver before the gate, runs its one `resolver.resolve()` once the VM is active, and
+yields the row and the admin's access; callers read `resolver.values`. Its docstring's "documented
+conditional-need path" is gone. `console create` and `restore-session` resolve in that one boundary
+pass, before their first tmux request or database write, as ADR 0019 promises.
+
+**`console start` and `restart` as built.** #885 (desired runtime state) reshaped them after this
+table was written: `realize_console` and reconciliation accept the running intent, prepare the
+console under its family guard (`prepare_console_reconcile`, which probes presence to choose the
+action), register the build's targets on the one resolver, and resolve once before any tmux change.
+So they resolve in one pass before their first tmux mutation, but a start of a running console
+resolves nothing, which that effort's FRD R7 requires ("already-satisfied targets ... must not
+request runtime-only secrets"). Batch D2 left that as #885 built it, so the `console start` row
+above is not built: open question 3.
 
 **The cost, stated plainly.** `console start` of a running console, which today asks for nothing,
 resolves every pane secret and may prompt for each; a non-interactive `console start` of a running
@@ -676,8 +695,8 @@ the four with a `sudo` parameter lose it, which the caller binds as `elevated` (
 elevates). `tmux_cmd`'s `sudo` (`:555`), which nothing passes, goes. `RunCommand` returns a
 `CommandResult` protocol (`stdout`, `stderr`, `returncode`, `ok`), the shape of both
 `access_run_command`'s `CommandOutcome` and the legacy `SSHResult`, so the primitives read a
-result's fields as attributes; once every caller is on `access_run_command` (batch D), its
-docstring's `Transport.run` half goes.
+result's fields as attributes. Batch D2 put the last callers, the consoles, on `access_run_command`
+and removed its docstring's `Transport.run` half.
 
 | Primitive                                                                                    | Today                                        | Read-only | Notes                                                                                                                    |
 | -------------------------------------------------------------------------------------------- | -------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -811,9 +830,11 @@ request that runs tmux is the builder's line; reverting any one call site to a r
 
 Every console request runs on the admin's access (the console's tmux server is the admin's), except
 an agent pane's parking connection and its access check, which run on the agent's.
-`_prepare_vm_target` and `_live_target` (`multi_console/attach.py:345-408`) yield the admin's
-access; the gate and the SSH boundary are as today, with the pane secrets as the boundary's targets
-(above).
+`_prepare_vm_access` and `_live_access` (`multi_console/attach.py`, batch D2) yield the admin's
+access; the gate and the SSH boundary are as before, with the pane secrets as the boundary's targets
+(above). A shell pane parks on its identity's access from the operation's `ConsoleAccess`
+(`sessions/multi_console/_access.py`), and a console build's admin access logs to `console-build`
+(`ConsoleAccess.logged`), where a log that fails to close never masks the build's own failure.
 
 | Operation                                 | Today                                                                                                                     | Request                                                                                      | Deadline                                                                                                               |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -909,32 +930,35 @@ In the order they land, each with its tests:
    (`cli/tests/test_session_liveness.py:29`, `:226`), and the retry assertions in
    `cli/tests/sessions/test_round8_startup.py:21`, `:97` and
    `cli/tests/sessions/test_session_batch_stop_parallelism.py:22`, `:461-462`, which assert the
-   deadline and one dispatch instead. The constant itself stays until console status stops using it
-   (`sessions/multi_console/_status.py:12-13`, `:59`), in deletion 6.
+   deadline and one dispatch instead. The constant itself stayed until console status stopped using
+   it (`sessions/multi_console/_status.py:12-13`, `:59`), in deletion 6.
 5. **Session creation's `-e` flags** (batch C): `create_session` stops calling `_tmux_env_flags`
    (`sessions/tmux.py:918`, `:975`). Its tests in `cli/tests/test_sessions_tmux_create.py`,
    `secrets/test_quoted_logging.py` and `sessions/test_startup_recovery.py` assert instead that no
    launch request's argv or script holds an environment value. The function stays for the console
    panes until deletion 6.
 6. **The console's environment carry and its sudoers grant** (batch D):
-   - `_tmux_env_flags` (`sessions/tmux.py:630-648`), whose last callers are `_split_shell_pane`'s
+   - `_tmux_env_flags` (`sessions/tmux.py:630-648`), whose last callers were `_split_shell_pane`'s
      (`sessions/multi_console/tmux_build.py:213`, `:231`), and `GUEST_OBSERVATION_ATTEMPTS`
-     (`status_observation.py:14`), whose last user is console status.
-   - `_sudo_can_preserve_env`, `PreserveEnvMemo` and the `--preserve-env` branch
-     (`sessions/multi_console/tmux_build.py:77-155`, `:268-280`), `_SUDO_PRESERVE_PROBE_VAR`
+     (`status_observation.py:14`), whose last user was console status (deleted in batch D2; the two
+     log-redaction tests that built a command with `_tmux_env_flags` spell the `-e` argument
+     themselves).
+   - (Deleted in batch D2.) `_sudo_can_preserve_env`, `PreserveEnvMemo` and the `--preserve-env`
+     branch (`sessions/multi_console/tmux_build.py:77-155`, `:268-280`), `_SUDO_PRESERVE_PROBE_VAR`
      (`sessions/multi_console/secrets_env.py:42`), and every `preserve_memo` parameter. Tests:
      `cli/tests/test_consoles_shell_panes.py`, `cli/tests/_tmux_model.py` and
      `cli/tests/test_tmux_model.py` lose their preserve-env cases and model.
-   - `_write_sudoers_console_setenv` (`vms/initializer/shell_env.py:545-574`) and its call
-     (`driver.py:387-388`) become `_remove_sudoers_console_setenv(files, log)`: one elevated
+   - (Batch D3.) `_write_sudoers_console_setenv` (`vms/initializer/shell_env.py:545-574`) and its
+     call (`driver.py:387-388`) become `_remove_sudoers_console_setenv(files, log)`: one elevated
      `Command(("rm", "-f", "--", AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH))`. The installer owns that
      path outright, so removing it whole is right on create (nothing there) and on reinit (any
      release's fragment). A failure warns as a step does. Test: its writer test
      (`cli/tests/test_initializer_system_fragments.py:449`) becomes a recording test of that one
      request.
-   - A recording test of console build, add-shell and both restore paths asserts that no `tmux` argv
-     or script line holds any `pane_env` value, that no admin `run` carries `env`, and that each
-     shell pane parked one handover on its identity's access.
+   - (Batch D2: `cli/tests/sessions/test_console_pane_handover.py`.) A recording test of console
+     build, add-shell and both restore paths asserts that no `tmux` argv or script line holds any
+     `pane_env` value, that no admin `run` carries `env`, and that each shell pane parked one
+     handover on its identity's access.
 7. **The environment newline refusals** (batch E, once no request sends environment by `SetEnv`,
    which holds once batch D lands, the console panes being the last):
    - the newline branch of `_env_entry_issues` (`manifests/decode.py:254-261`);
@@ -1027,7 +1051,11 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 (`test_restart_resolves_inputs_before_destroying_running_runtime`), whose invariant is re-pinned
 through the boundary, not dropped; `test_secrets_eager_resolve_console.py:149`, `:277` and `:519`,
 which patch the late resolve; and `test_consoles_orchestration.py:89`, a start on a running console,
-which now resolves every pane secret, the accepted cost.
+which now resolves every pane secret, the accepted cost. As built (batch D2), #885 had already moved
+the first two onto its prepared barrier; the late restore resolve's test moved to the boundary pins
+(`cli/tests/sessions/test_console_pane_secret_boundary.py`, which also holds the two refusal pins);
+and the third is unchanged, since a start of a running console still resolves nothing (open question
+3).
 
 **The guest programs.** `test_detached_program.py` beside `test_file_program.py`, on Linux CI, both
 interpreters. agw-launch's `TerminalCommand` and the inherited terminal variables join the
@@ -1191,25 +1219,28 @@ collateral it makes stale.
   admin-window handover.
 - **D2**: the consoles onto the access, with a handover per pane and pane secrets in the boundary,
   deleting the env carry across sudo; `Handover.command(switch_user=)` arrives with its caller and
-  the sudo T2 vectors.
+  the sudo T2 vectors (`T2-pane-through-sudo` and `T2-pane-through-sudo-default-term`, lanes L and
+  V). Built, except the `console start` row of the pane-secret table (open question 3).
 - **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
   amended.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
   migration. Whether D3 and D4 share one reinit pass is decided when D3 starts.
 - **D5**, the test bridges' removal, folds into D2: D2 removes the last legacy target, so the
-  bridges that route accesses through one go with it.
+  bridges that route accesses through one go with it. Built with D2: the doubles answer accesses
+  (`route_vm_access_to_guest`, `_FakeTarget.answer`, `command_line`), and no module in
+  `cli/agentworks` but the legacy stack itself imports `agentworks.transports`.
 
 **Bridges.**
 
-| Bridge                                                                                                                                                                                                                                                                  | Left by | Removed in                                     |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------------------------------------------- |
-| `_scope._regenerate_tmuxinator` builds an admin access beside its legacy target for the tmuxinator write and `remove_config`                                                                                                                                            | B       | C                                              |
-| `delete_workspace` keeps a legacy target for session teardown and `kill_session_windows`                                                                                                                                                                                | B       | C                                              |
-| The console modules pass their legacy `target.run` as a `RunCommand`, and `crud.remove_sessions` builds an admin access beside its target for `kill_session_windows`                                                                                                    | C       | D                                              |
-| The console build carries the admin's access beside its legacy target (`PreparedConsoleReconcile.admin`, `_build_console_tmux(admin=)`, built in `crud.create_console`, `lifecycle.realize_console` and `runtime_state/_prepare.py`) for the admin window's handover    | D1      | D2, where the target goes                      |
-| Slice 6's test bridges `route_vm_access_to_target` and `files_over_target` (`cli/tests/vm_access_support.py`), which run a moved step's requests on a legacy transport double                                                                                           | slice 6 | D, with the last legacy target                 |
-| `access_over_target` (`cli/tests/vm_access_support.py:570`) and `install_fake_target` (`cli/tests/conftest.py:674`, behind the `fake_target` and `console_target_factory` fixtures), which route every `VMAccess` of about 20 test files through a legacy target double | C       | D, rewriting those doubles as access answers   |
-| `kill_session_windows`'s console presence probe (`multi_console/attach.py:335-350`), a copy of `_tmux_session_presence` (`:205`) over the admin's access while the console modules keep their legacy target                                                             | C       | D, where the console probe moves to the access |
+| Bridge                                                                                                                                                                                                                                                                  | Left by | Removed in                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----------------------------------------------- |
+| `_scope._regenerate_tmuxinator` builds an admin access beside its legacy target for the tmuxinator write and `remove_config`                                                                                                                                            | B       | C                                               |
+| `delete_workspace` keeps a legacy target for session teardown and `kill_session_windows`                                                                                                                                                                                | B       | C                                               |
+| The console modules pass their legacy `target.run` as a `RunCommand`, and `crud.remove_sessions` builds an admin access beside its target for `kill_session_windows`                                                                                                    | C       | D2                                              |
+| The console build carries the admin's access beside its legacy target (`PreparedConsoleReconcile.admin`, `_build_console_tmux(admin=)`, built in `crud.create_console`, `lifecycle.realize_console` and `runtime_state/_prepare.py`) for the admin window's handover    | D1      | D2, where the target goes                       |
+| Slice 6's test bridges `route_vm_access_to_target` and `files_over_target` (`cli/tests/vm_access_support.py`), which run a moved step's requests on a legacy transport double                                                                                           | slice 6 | D2, with the last legacy target                 |
+| `access_over_target` (`cli/tests/vm_access_support.py:570`) and `install_fake_target` (`cli/tests/conftest.py:674`, behind the `fake_target` and `console_target_factory` fixtures), which route every `VMAccess` of about 20 test files through a legacy target double | C       | D2, rewriting those doubles as access answers   |
+| `kill_session_windows`'s console presence probe (`multi_console/attach.py:335-350`), a copy of `_tmux_session_presence` (`:205`) over the admin's access while the console modules keep their legacy target                                                             | C       | D2, where the console probe moves to the access |
 
 ## Decisions
 
@@ -1283,3 +1314,9 @@ Edits this LLD needs in the HLA and the plan, for the lead to make:
    here, since no caller needs one.
 2. The seven-day prune is this LLD's choice. A shorter bound frees disk sooner; a longer one keeps a
    finished launch observable longer, which nothing uses.
+3. Whether `console start` of a running console, and reconciliation of one, resolves every pane
+   secret, as the pane-secret table says following the operator's 2026-11-12 ruling, or nothing, as
+   the desired-runtime FRD's R7 requires and #885 built (raised by batch D2). The ruling's question
+   was the late resolves that ran after live tmux showed which panes were missing; #885's start
+   decides its action from read-only presence probes and resolves once before any tmux change. Batch
+   D2 kept #885's behavior.
