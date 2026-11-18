@@ -9,7 +9,6 @@ below belong to ``a``.
 from __future__ import annotations
 
 import base64
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -56,22 +55,16 @@ def _seed(db: Database, mode: SessionMode, agent: str | None, socket_path: str) 
 
 
 class _Recorder:
-    """Records every request, and its input, any transport or VM access is asked to run."""
+    """Records every request, and its input, a VM access is asked to run."""
 
     def __init__(self) -> None:
-        self.commands: list[str] = []
         self.vm_events: list[tuple[str, str]] = []
         self.accesses: AccessRecorder | None = None
-
-    def run(self, command: str, **kwargs: Any) -> SimpleNamespace:
-        self.commands.append(command)
-        self.commands.append(str(kwargs.get("input_data") or ""))
-        return SimpleNamespace(returncode=0, ok=True, stdout="", stderr="")
 
     def naming(self, socket_path: str) -> list[str]:
         """The requests that name ``socket_path``, plainly or in batch status's encoding."""
         encoded = base64.b64encode(socket_path.encode()).decode()
-        sent = list(self.commands)
+        sent: list[str] = []
         for call in self.accesses.calls if self.accesses is not None else []:
             request = call.request
             sent.append(repr(request))
@@ -79,13 +72,6 @@ class _Recorder:
             if isinstance(stdin, Bytes):
                 sent.append(stdin.data.decode("utf-8", "replace"))
         return [command for command in sent if socket_path in command or encoded in command]
-
-    def interactive(self, command: str, **kwargs: Any) -> int:
-        self.commands.append(command)
-        return 0
-
-    def write_file(self, path: str, content: str, **kwargs: Any) -> None:
-        self.commands.append(content)
 
 
 def _describe(db: Database, config: object) -> object:
@@ -121,13 +107,10 @@ OBSERVERS: dict[str, Callable[[Database, Any], object]] = {
 
 @pytest.fixture
 def recorder(runtime: tuple[object, object, list[tuple[str, str]]], monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """The composition runtime, with the real status checks and every transport and VM access recorded."""
+    """The composition runtime, with the real status checks and every VM access recorded."""
     target = _Recorder()
     target.vm_events = runtime[2]
     target.accesses = install_access_recorder(monkeypatch)
-    factory = lambda *a, **k: target  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.transports.agent_transport", factory)
     monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(manager, "check_session_status", _status.check_session_status)
     monkeypatch.setattr(manager, "observe_session_statuses", _status.observe_session_statuses)

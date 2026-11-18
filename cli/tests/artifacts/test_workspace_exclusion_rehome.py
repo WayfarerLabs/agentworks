@@ -75,7 +75,6 @@ def move_case(db, deletion, tmp_path, monkeypatch):
     group = grp.getgrgid(os.getgid()).gr_name
     db._conn.execute("UPDATE workspaces SET linux_group = ? WHERE name = 'project'", (group,))
     db._conn.commit()
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
     monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", lambda *a, **k: nullcontext())
     monkeypatch.setattr("agentworks.workspaces.templates.resolve_live_tmuxinator", lambda *a, **k: False)

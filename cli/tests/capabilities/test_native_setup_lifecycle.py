@@ -29,7 +29,6 @@ from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from agentworks.ssh import SSHLogger as _RealSSHLogger
-from agentworks.transports import Transport
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import resolve_from_dict as resolve_vm
 from agentworks.workspaces.realize import realize_workspace
@@ -135,9 +134,6 @@ def test_component_inputs_keep_only_ancestors_and_retirement(db, registry, vm, m
 @pytest.fixture
 def native(monkeypatch, tmp_path, vm_access_recorder):
     vm_access_recorder.answer = answer_destination_identity
-    target = Mock(spec=Transport)
-    target.logger = None
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
     monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.initializer.create_agent_on_vm", lambda *a, **k: None)
@@ -177,7 +173,7 @@ def native(monkeypatch, tmp_path, vm_access_recorder):
             pass
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
-    return SimpleNamespace(target=target, loggers=loggers, removed_agent=removed_agent, removed_project=removed_project)
+    return SimpleNamespace(loggers=loggers, removed_agent=removed_agent, removed_project=removed_project)
 
 
 @pytest.mark.windows

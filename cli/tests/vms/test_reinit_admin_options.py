@@ -7,7 +7,6 @@ transports are fakes, as in ``test_create_reinit_orchestrated``.
 from __future__ import annotations
 
 import contextlib
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -96,7 +95,6 @@ def initialized(db: Database, monkeypatch: pytest.MonkeyPatch, vm_access_recorde
         admins.append(args[4])
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: SimpleNamespace())
     return admins
 
 

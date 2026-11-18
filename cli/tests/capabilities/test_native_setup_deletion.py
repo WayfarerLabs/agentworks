@@ -18,8 +18,7 @@ from agentworks.harness_setup.state import write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHError, SSHResult
-from agentworks.transports import Transport
+from agentworks.ssh import SSHError
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
 from tests.vm_access_support import install_access_recorder
@@ -51,10 +50,6 @@ def deletion(db, tmp_path, monkeypatch):
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *a, **k: registry)
     monkeypatch.setattr("agentworks.agents.manager.lifecycle.gated_vm_boundary", lambda *a, **k: nullcontext())
     monkeypatch.setattr("agentworks.workspaces.manager.delete.gated_vm_boundary", lambda *a, **k: nullcontext())
-    target = Mock(spec=Transport)
-    target.run.return_value = SSHResult(0, "native", "")
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
     # Session teardown and console cleanup run on the admin's access.
     install_access_recorder(monkeypatch)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
@@ -102,7 +97,6 @@ def deletion(db, tmp_path, monkeypatch):
     return SimpleNamespace(
         vm=vm,
         registry=registry,
-        target=target,
         config=config,
         removed=removed,
         logs=logs,
@@ -201,7 +195,6 @@ def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
 def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, deletion, monkeypatch, kind, name):
     _store_applied_state(db, kind, name, "claims")
-    deletion.target.run.side_effect = SSHError("unreachable")
     # The user delete and the workspace's own removal run on the admin's access.
     install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
     if kind == "agent":

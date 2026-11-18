@@ -433,7 +433,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
 
     # Every request completes with status 0 and no output.
     route_vm_access_to_guest(monkeypatch, lambda _call: None)
-    # deploy_restricted_config does its own SSH writes -- skip them.
+    # deploy_restricted_config does its own SSH writes; skip them.
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
     # The inner SSH operation raises KI mid-way through.

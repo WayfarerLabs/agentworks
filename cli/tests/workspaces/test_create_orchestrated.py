@@ -386,20 +386,14 @@ def test_workspace_scope_reaches_node_readiness(
 def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
     db, make_config, mutation, monkeypatch, resolve_counter, vm_access_recorder
 ):
-    from unittest.mock import Mock
-
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.state import read_native_setup
-    from agentworks.transports import Transport
 
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
     monkeypatch.setenv("AW_SECRET_PROJECT_TOKEN", "project-private")
-    target = Mock(spec=Transport)
-    target.logger = None
     vm_access_recorder.answer = answer_destination_identity
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     calls = []
 
     def setup(self, invocation):
@@ -430,22 +424,17 @@ def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(
     db, make_config, mutation, monkeypatch, vm_access_recorder
 ):
     from dataclasses import replace
-    from unittest.mock import Mock
 
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.state import read_native_setup
     from agentworks.plugins.codex.harness_integration import CodexIntegration
-    from agentworks.transports import Transport
 
     config = make_config()
     config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "codex"))
     _seed_vm(db)
     _reachable(monkeypatch, True)
     db.insert_agent("dev", "box", "agt-dev", template="default", grant_all=True)
-    target = Mock(spec=Transport)
-    target.logger = None
     vm_access_recorder.answer = answer_destination_identity
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     events = []
 
     def fail_setup(self, invocation):

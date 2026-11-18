@@ -30,9 +30,16 @@ import pytest
 from agentworks.errors import SecretUnavailableError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import fake_installed_programs
+from tests.vm_access_support import AccessRecorder, install_access_recorder
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
+
+
+def _guest_sessions(recorder: AccessRecorder) -> list[str]:
+    """The operations that run the operator's command or shell on the guest, in order."""
+    return [call.operation for call in recorder.calls if call.operation in {"attach", "stream"}]
+
 
 __all__ = ["_stub_build_registry"]
 
@@ -215,17 +222,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(Resolver, "resolve", _explode)
 
-    ssh_called: list[bool] = []
-
-    class _Target:
-        def interactive(self, *args: object, **kwargs: object) -> int:
-            ssh_called.append(True)
-            return 0
-
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *a, **k: _Target(),
-    )
+    recorder = install_access_recorder(monkeypatch)
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -235,7 +232,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
     with pytest.raises(SecretUnavailableError, match="api-key"):
         vm_manager.shell_vm(db, config, "vm1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    assert ssh_called == [], "eager-resolve must precede the SSH session"
+    assert _guest_sessions(recorder) == [], "eager-resolve must precede the SSH session"
     db.close()
 
 
@@ -272,14 +269,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(Resolver, "resolve", _explode)
 
-    streaming_calls: list[str] = []
-
-    class _Target:
-        def call_streaming(self, cmd: str, *, env: object = None) -> int:
-            streaming_calls.append(cmd)
-            return 0
-
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _Target())
+    recorder = install_access_recorder(monkeypatch)
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -289,7 +279,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     with pytest.raises(SecretUnavailableError, match="api-key"):
         vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    assert streaming_calls == [], "eager-resolve must precede call_streaming"
+    assert _guest_sessions(recorder) == [], "eager-resolve must precede the remote command"
     db.close()
 
 
@@ -327,14 +317,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(Resolver, "resolve", _explode)
 
-    streaming_calls: list[str] = []
-
-    class _Target:
-        def call_streaming(self, cmd: str, *, env: object = None) -> int:
-            streaming_calls.append(cmd)
-            return 0
-
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _Target())
+    recorder = install_access_recorder(monkeypatch)
 
     config = SimpleNamespace()
 
@@ -347,7 +330,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert streaming_calls == [], "eager-resolve must precede call_streaming"
+    assert _guest_sessions(recorder) == [], "eager-resolve must precede the remote command"
     db.close()
 
 

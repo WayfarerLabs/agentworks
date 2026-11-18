@@ -269,7 +269,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # observe_session_statuses emits one compound shell command per VM. We
     # reply with status lines for alpha (alive) + beta (alive); gamma's line
     # claims the session is gone.
-    def batch_status(call: Call) -> Result:
+    def batch_status(call: Call) -> Result | None:
         command, input_data = _batch_request(call)
         fake_target.commands.append(command)
         if all(_encoded_probe_field(name) in input_data for name in ("alpha", "beta", "gamma")):
@@ -290,7 +290,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
                     ),
                 ),
             ).result()
-        return _FakeResult().result()
+        return None  # a command check finds its command; anything else completes
 
     fake_target.answer = batch_status  # type: ignore[method-assign]
 

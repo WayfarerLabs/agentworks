@@ -19,7 +19,7 @@ from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _lifecycle, _pids
 from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 from tests._runtime_probes import server_for
-from tests.vm_access_support import Admin, RecordingVMAccess
+from tests.vm_access_support import Admin, RecordingVMAccess, command_line
 
 from .test_create_start_restart_orchestrated import BOOT_ID, _requiring_template, _restart_fixture, _route_guests
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
@@ -94,8 +94,10 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         )
         assert native.batch_status([row]) == {"s1": SessionStatus.RUNNING}
         assert db.get_session("s1") == row
-        proofs = [options for command, options in native.calls if "AGW_RUNTIME_LAUNCH=" in command]
-        assert proofs and all(options.get("deadline") == GUEST_OBSERVATION_TIMEOUT_SECONDS for options in proofs)
+        proofs = [
+            call.request for call in native.access_calls if "AGW_RUNTIME_LAUNCH=" in (command_line(call.request) or "")
+        ]
+        assert proofs and all(request.deadline == GUEST_OBSERVATION_TIMEOUT_SECONDS for request in proofs)
         observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
         assert observed is not None
         original_pid = observed.pid

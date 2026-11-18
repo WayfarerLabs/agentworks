@@ -57,6 +57,8 @@ class NativeTarget:
         # AGENT_SOCKET_ROOT); admin-mode launches share the same address.
         self.socket = str(root / "agt-owned" / "s.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        # Every request the accesses from :meth:`access` were asked, in order.
+        self.access_calls: list[Call] = []
         self.banner = ""
         self.stderr_banner = ""
         # Every switch to a server's owner goes through runuser; this account
@@ -78,9 +80,8 @@ class NativeTarget:
         """Run ``command`` locally, with ``env`` exported beside the guest's own environment as a request's is.
 
         The tmux primitives take it as their ``RunCommand``; :meth:`answer`
-        runs an access's requests through it, recording each request's
-        elevation and deadline as ``sudo`` and ``deadline`` and passing its
-        ``Bytes`` input as ``input_data``.
+        runs an access's requests through it, passing a request's ``Bytes``
+        input as ``input_data``.
         """
         self.calls.append((command, kwargs))
         input_data = kwargs.get("input_data")
@@ -102,15 +103,13 @@ class NativeTarget:
         line = command_line(request)
         if line is None:
             return None
-        options: dict[str, Any] = {"sudo": request.elevated, "deadline": request.deadline}
-        if isinstance(request.stdin, Bytes):
-            options["input_data"] = request.stdin.data.decode()
-        result = self.run(line, check=False, env=dict(request.env), **options)
+        input_data = request.stdin.data.decode() if isinstance(request.stdin, Bytes) else None
+        result = self.run(line, check=False, env=dict(request.env), input_data=input_data)
         return guest_result(result.returncode, result.stdout, result.stderr)
 
     def access(self) -> RecordingVMAccess:
         """The admin's access, its requests run here."""
-        access = RecordingVMAccess([], Admin())
+        access = RecordingVMAccess(self.access_calls, Admin())
         access.answer = self.answer
         return access
 
@@ -357,7 +356,8 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
         assert row is not None and row.pid is None
         assert Path(native.socket).stat().st_mode & 0o077 == 0
         assert check_session_status(row, admin=native.access(), server=server_for(row)) is SessionStatus.UNKNOWN
-        assert any(options.get("sudo") is True for command, options in native.calls if "has-session" in command)
+        probes = [call.request for call in native.access_calls if "has-session" in (command_line(call.request) or "")]
+        assert any(request.elevated for request in probes)
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
         assert _repair_session_pid(row, admin=native.access(), db=db)
         recovered = db.get_session("s1")

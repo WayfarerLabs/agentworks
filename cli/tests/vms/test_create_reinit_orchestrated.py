@@ -42,7 +42,7 @@ from tests.conftest import (
 )
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
-from tests.vm_access_support import AccessRecorder, Admin
+from tests.vm_access_support import AccessRecorder, Admin, install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1035,11 +1035,6 @@ def _seed_provisioned_vm(db: Database) -> None:
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
 
 
-def _reinit_transport() -> SimpleNamespace:
-    """Phase B's legacy target, which these tests' faked initializer never uses."""
-    return SimpleNamespace()
-
-
 TRIXIE_OS_RELEASE = b'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'
 BOOKWORM_OS_RELEASE = b'ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n'
 CLEAN_SCRIPT = b"AGW-CHECK-END\n"
@@ -1126,9 +1121,6 @@ def test_reinit_runs_initialization_through_the_gate(
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: steps.append("sync"))
-    import agentworks.transports as transports
-
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1159,13 +1151,12 @@ def test_reinit_refuses_invalid_configured_identity_before_activation_or_transpo
     failure = ConfigError("invalid test identity")
     prepare = MagicMock(side_effect=failure)
     activate = MagicMock()
-    make_transport = MagicMock()
+    recorder = install_access_recorder(monkeypatch)
     monkeypatch.setattr(
         "agentworks.vms.applied_state.prepare_configured_ssh_identity",
         prepare,
     )
     monkeypatch.setattr("agentworks.orchestration.activation.activation_gate", activate)
-    monkeypatch.setattr("agentworks.transports.transport", make_transport)
 
     with pytest.raises(ConfigError) as caught:
         vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
@@ -1176,7 +1167,7 @@ def test_reinit_refuses_invalid_configured_identity_before_activation_or_transpo
         config.operator.ssh_private_key,
     )
     activate.assert_not_called()
-    make_transport.assert_not_called()
+    assert recorder.built == []
 
 
 def test_reinit_resolves_the_stored_admin_template(
@@ -1228,9 +1219,6 @@ def test_reinit_resolves_the_stored_admin_template(
         captured["admin"] = args[4]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
-    import agentworks.transports as transports
-
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1264,7 +1252,6 @@ def test_reinit_applies_a_legacy_flat_vm_payload(
         captured["vm_template"] = args[3]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1295,7 +1282,6 @@ def _reinit_with_faked_initializer(
     monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
     ran = [] if initialized is None else initialized
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: ran.append(True))
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: _reinit_transport())
     recorder.access(vm_name="rvm").run_outcomes = outcomes
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
     return ran

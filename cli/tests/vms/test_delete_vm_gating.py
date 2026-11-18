@@ -175,7 +175,7 @@ def test_whole_vm_delete_logs_out_then_deletes_without_tearing_down_sessions(
     monkeypatch.setattr(ProxmoxPlatform, "delete", delete)
     monkeypatch.setattr(session_manager, "ensure_pids_batch", unexpected)
     monkeypatch.setattr(session_manager, "_teardown_session", unexpected)
-    monkeypatch.setattr("agentworks.transports.transport", unexpected)
+    monkeypatch.setattr("agentworks.execution.vm_access", unexpected)
 
     vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 

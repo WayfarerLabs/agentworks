@@ -268,8 +268,8 @@ def test_vm_observer_precomputes_database_context_before_worker_threads(
         lambda *_args, **_kwargs: pytest.fail("status observation activated a VM"),
     )
     monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *_args, **_kwargs: pytest.fail("VM status observation opened a guest transport"),
+        "agentworks.execution.vm_access",
+        lambda *_args, **_kwargs: pytest.fail("VM status observation built a guest access"),
     )
     changes_before = db._conn.total_changes  # noqa: SLF001
 

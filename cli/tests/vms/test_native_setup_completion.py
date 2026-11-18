@@ -52,8 +52,6 @@ def test_vm_reports_native_failures_only_after_command_completion(
     monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     monkeypatch.setattr(LimaPlatform, "status", lambda *a, **k: VMStatus.RUNNING)
-    target = MagicMock()
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     # Reinit's base checks: the release, the check script, then the elevated sudo check.
     vm_access_recorder.access(vm_name="box").run_outcomes = [
         Result(Completed(0), b'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'),

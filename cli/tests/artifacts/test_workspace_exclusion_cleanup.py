@@ -70,7 +70,6 @@ def shared_workspace(db, deletion, tmp_path, monkeypatch):
     foreign = NativeClaim(role="unrelated", identifier="keep", destination="native")
     store(db, "project", (*first_claims, foreign))
     store(db, "survivor", second_claims)
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
     removed = []
 

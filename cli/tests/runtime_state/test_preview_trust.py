@@ -36,7 +36,7 @@ def _forbid_preview_mutations(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for target in (
         "agentworks.harness_setup.locking.native_mutation_guard",
-        "agentworks.transports.transport",
+        "agentworks.execution.vm_access",
         "agentworks.secrets.resolver.Resolver.resolve",
     ):
         monkeypatch.setattr(target, forbidden)

@@ -1284,7 +1284,6 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
     from agentworks.harness_setup.state import read_native_setup
-    from agentworks.transports import Transport
 
     config = make_config()
     _seed_vm(db)
@@ -1292,8 +1291,6 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     monkeypatch.setenv("AW_SECRET_SETUP_TOKEN", "setup-private")
     if operation == "reinit":
         db.insert_agent("dev", "box", "agt-dev", template="default")
-    target = MagicMock(spec=Transport)
-    target.logger = None
     install_access_recorder(monkeypatch).answer = answer_destination_identity
     calls = []
 
@@ -1328,7 +1325,6 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
     from dataclasses import replace
 
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
-    from agentworks.transports import Transport
 
     manifests = [
         *AGENT_MANIFESTS[:2],
@@ -1349,8 +1345,6 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
     db.instance_state.put_desired_overlay("agent", "dev", payload)
     original = db.instance_state.get_desired_overlay("agent", "dev")
     _reachable(monkeypatch, True)
-    target = MagicMock(spec=Transport)
-    target.logger = None
     install_access_recorder(monkeypatch).answer = answer_destination_identity
 
     def setup(self, invocation):
@@ -1402,7 +1396,6 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.state import read_native_setup
     from agentworks.plugins.codex.harness_integration import CodexIntegration
-    from agentworks.transports import Transport
 
     config = make_config()
     config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "codex"))
@@ -1412,8 +1405,6 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
     if operation == "reinit":
         db.insert_agent("dev", "box", "agt-dev", template="default")
         db.insert_agent_grant("dev", "project", "explicit")
-    target = MagicMock(spec=Transport)
-    target.logger = None
     install_access_recorder(monkeypatch).answer = answer_destination_identity
     events = []
 

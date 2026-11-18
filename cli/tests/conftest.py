@@ -570,11 +570,11 @@ class _FakeTarget:
         return framed_runtime_result(command, _FakeResult())
 
     def answer(self, call: Call) -> Result | None:
-        """Answer a ``Command`` or ``Script`` from its command line; ``None`` for anything else."""
-        from tests.vm_access_support import command_line
+        """Answer a ``Command`` or ``Script`` from its command line; ``None`` for a command check and anything else."""
+        from tests.vm_access_support import command_line, is_command_check
 
         line = command_line(call.request)
-        return None if line is None else self.dispatch(line).result()
+        return None if line is None or is_command_check(call.request) else self.dispatch(line).result()
 
     def admin(self) -> RecordingVMAccess:
         """The admin's recording access, whose requests this guest answers."""
@@ -760,13 +760,10 @@ def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) ->
     check finds its command. Returns ``target`` for the caller to keep a
     reference.
     """
-    from tests.vm_access_support import check_result, install_access_recorder, is_command_check
+    from tests.vm_access_support import route_vm_access_to_guest
 
-    recorder = install_access_recorder(monkeypatch)
-    recorder.answer = lambda call: (
-        check_result(call.request, 0) if is_command_check(call.request) else target.answer(call)
-    )
-    target.recorder = recorder
+    # Late-bound, so a test that replaces ``target.answer`` is answered by its replacement.
+    target.recorder = route_vm_access_to_guest(monkeypatch, lambda call: target.answer(call))
     stub_vm_gates(monkeypatch)
     return target
 
