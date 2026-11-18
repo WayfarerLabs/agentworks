@@ -37,7 +37,7 @@ def test_a_port_another_process_holds_is_retried_and_then_reported_unavailable(
 
     monkeypatch.setattr(lanes, "unavailable", unavailable)
     monkeypatch.setattr(lanes, "RESTART_ATTEMPTS", 2)
-    monkeypatch.setattr(lanes.subprocess, "Popen", counting_popen)
+    monkeypatch.setattr(subprocess, "Popen", counting_popen)
     with socket.socket() as holder:
         holder.bind(("127.0.0.1", 0))
         holder.listen()
