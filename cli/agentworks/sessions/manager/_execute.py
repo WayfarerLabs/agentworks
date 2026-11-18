@@ -15,7 +15,7 @@ from agentworks.sessions.manager._lifecycle import (
     _mark_runtime_unknown,
     _redacted_launch_errors,
 )
-from agentworks.sessions.manager._tmux_server import require_session_tmux_server, resolve_session_tmux_server
+from agentworks.sessions.manager._tmux_server import resolve_session_tmux_server
 from agentworks.sessions.tmux import access_run_command
 from agentworks.vms.manager import operation_log
 
@@ -141,7 +141,13 @@ def _execute_session_start(
             require_socket_path,
         )
 
-        socket_path = require_session_tmux_server(db, session).socket_path
+        if server is None:
+            raise StateError(
+                f"session '{name}' has no dedicated tmux socket for startup recovery",
+                entity_kind="session",
+                entity_name=name,
+            )
+        socket_path = server.socket_path
         require_socket_path(socket_path, run_command=session_run_command)
         probe = capture_tmux_server_fingerprint(run_command=session_run_command, socket_path=socket_path)
         observed = probe.fingerprint
