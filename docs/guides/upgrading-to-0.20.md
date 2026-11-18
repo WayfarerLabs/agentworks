@@ -21,11 +21,12 @@ Work through these in order; the sections after this list give the detail.
    every command that reaches a VM needs OpenSSH 8.5 or newer, on Windows the Win32-OpenSSH build
    ([What these commands need](#what-these-commands-need)). No ssh configuration applies to a VM
    connection, so the agent named by `SSH_AUTH_SOCK` serves the configured key, and an encrypted key
-   must already be loaded there. Doctor does not check the key, so load an encrypted one now with
-   `ssh-add`. Doctor also reports configuration this release refuses outright, such as a relative,
-   `/` or `..` `paths.vm_workspaces`, which stops every command that loads the configuration
-   ([Workspaces](#workspaces)), and stored agent or admin specs that need replacing before
-   `vm reinit` or `agent reinit` will run ([Initialization steps](#initialization-steps)).
+   must already be loaded there. Doctor does not check that the agent holds the key, so load an
+   encrypted one now with `ssh-add`. Doctor also reports configuration this release refuses
+   outright, such as a relative, `/` or `..` `paths.vm_workspaces`, which stops every command that
+   loads the configuration ([Workspaces](#workspaces)), and stored agent or admin specs that need
+   replacing before `vm reinit` or `agent reinit` will run
+   ([Initialization steps](#initialization-steps)).
 3. **Import host keys.** Run `agw vm import-host-keys --all` until it reports a record for every VM.
    Until a VM has one, every command that reaches it refuses it. Each run also rewrites the managed
    SSH entries, so your own `ssh` through them verifies against the store from then on
@@ -139,11 +140,12 @@ works as the fallback.
 
 Your own `ssh` changes when the managed SSH entries (`awvm--NAME`, `awagent--NAME`) are next
 rewritten, by the import, `vm create`, `vm reinit`, `vm recover`, `vm rekey`, `vm delete`,
-`agent create`, `agent reinit`, `agent delete` or `agw config sync-ssh-config`; until then the
-earlier entries remain. The rewritten entries verify the VM's key strictly against the store, so
-`ssh awvm--NAME`, and `scp`, VS Code Remote-SSH or anything else that goes through those aliases,
-fails with `Host key verification failed` for a VM with no record, and works again once the import
-or `agw vm recover NAME` records one. The
+`agent create`, `agent reinit`, `agent delete`, `session create` or `session delete` when it creates
+or deletes an agent, or `agw config sync-ssh-config`; until then the earlier entries remain. The
+rewritten entries verify the VM's key strictly against the store, so `ssh awvm--NAME`, and `scp`, VS
+Code Remote-SSH or anything else that goes through those aliases, fails with
+`Host key verification failed` for a VM with no record, and works again once the import or
+`agw vm recover NAME` records one. The
 [command reference](../../cli/command-reference.md#direct-ssh-aliases) describes the entries and how
 settings of your own interact with them.
 
@@ -259,8 +261,9 @@ An older binary refuses the newer schema. Rollback requires a full pre-migration
 a compatible Agentworks release; do not reconstruct the retired flag or downgrade the schema by
 hand. Restoring the database does not undo provider or guest changes made since the backup: a VM
 reinitialized by 0.20 no longer has the `AcceptEnv` wildcard, the `env_keep` fragment, the
-`51-agentworks-console-setenv` grant its console build needs or the `tmux-agent-access` group that a
-0.19 binary relies on until that binary's own `vm reinit` puts them back.
+`51-agentworks-console-setenv` grant or the `tmux-agent-access` group that a 0.19 binary relies on
+(without the grant its agent console panes degrade) until that binary's own `vm reinit` puts them
+back.
 
 ## Connecting through the new layer
 
@@ -284,9 +287,10 @@ use the platform's own channel instead (see
 `vm verify-connection`, `vm backup`, `vm exec`, `vm shell` (but not `vm shell --platform`) and
 `vm port-forward`, and `agent shell` and `agent exec`, check the client first, so an unsupported one
 is refused before `vm create` builds a VM, `vm start` starts one, or `vm rekey` and `vm recover`
-spend a Tailscale auth key. `vm describe` warns and leaves the live resources out instead. Every
-other command that reaches a VM, and the automatic start, fails at its first request to the VM,
-which comes after any VM start and secret prompt.
+spend a Tailscale auth key. `vm describe` warns and leaves the live resources out instead, and
+session status reads (`session list --status`, `session describe`) warn and report that VM's
+sessions as unknown. Every other command that reaches a VM, and the automatic start, fails at its
+first request to the VM, which comes after any VM start and secret prompt.
 
 - **OpenSSH 8.5 or newer on the workstation.** Agentworks uses the first `ssh` on your `PATH`
   (ignoring empty and relative `PATH` entries) and checks its version once per run. A missing or

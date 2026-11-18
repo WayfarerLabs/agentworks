@@ -55,7 +55,7 @@ access and may honor the operator's configuration.
 name, verified strictly on every connection, by Agentworks and by the operator's own `ssh` through
 the managed aliases. Only a VM Agentworks is creating has its key accepted on first use, at core's
 first connection after provisioning. Two connections also run unverified, a cloud's provisioning
-connection and `vm recover`'s host-key read, under a binding scoped to that one run and never
+connection and its `vm recover` host-key read, under a binding scoped to that one run and never
 persisted. An existing VM's key enters the store only by an explicit import or by `vm recover`
 reading it through the platform under the operator's confirmation.
 
