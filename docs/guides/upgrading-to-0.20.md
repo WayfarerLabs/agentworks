@@ -459,10 +459,11 @@ Named consoles keep the older path for now, apart from the admin shell window be
   own connection instead of `tmux new-session -e` arguments, so they no longer appear on a guest
   command line. Like the other shells agentworks starts, its shell begins with the environment
   [What behaves differently](#what-behaves-differently) describes (the fixed `PATH`, no
-  `SSH_CLIENT`, `SSH_CONNECTION` or `pam_env` variables) plus those values, keeps the `TERM`,
-  `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` tmux sets for the pane, and still
-  runs its login startup files. A running console's window changes when the console is rebuilt
-  (`agw console restart`).
+  `SSH_CLIENT`, `SSH_CONNECTION`, `SSH_TTY` or `pam_env` variables) plus those values, keeps the
+  `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` tmux sets for the pane, and
+  still runs its login startup files. A running console's window changes when the console is rebuilt
+  (`agw console restart`). The window's pane runs a one-time command that collects that request, so
+  `tmux respawn-pane` cannot start its shell again: restore the window with `agw console restart`.
 
 ## Create, reinit and the VM contract
 
