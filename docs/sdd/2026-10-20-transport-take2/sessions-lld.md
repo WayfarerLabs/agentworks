@@ -691,9 +691,9 @@ docstring's `Transport.run` half goes.
 | Create: config, launch, fingerprint, finalize | `_create_roll.py:398-471`                                                                                               | admin for the config; owner for the rest                                                                                                                                                                                                                                                         | none, as today                                                                             | `deploy_restricted_config(run_command)`, `session_run_command`, `fingerprint_target`                            |
 | Create: rollback absence proof                | `_create_roll.py:486-487`                                                                                               | owner                                                                                                                                                                                                                                                                                            | none                                                                                       | the same with `target=`                                                                                         |
 | Start, restart                                | `_lifecycle.py:502-942`                                                                                                 | admin (logged from the start of the execution, where today the first requests are not logged, `:502-503`; the preflight reads that prepare it write no log by design, since a log takes its redactions before its first write and the secrets resolve after the preflight), owner for the launch | none, except the status reads                                                              | the log-free `transport(vm, config)` and `_build_session_target`                                                |
-| Status of one session                         | `check_session_status`, `_status.py:89-112`, and `_check_dedicated_session`, `:139-170`, unbounded                      | every read as the server's owner (`owner_run_command`) after `_validated_socket`: the agent through `runuser` for an agent session, the admin for an admin session                                                                                                                               | 10                                                                                         | `partial(target.run, sudo=agent)`                                                                               |
+| Status of one session                         | `check_session_status`, `_status.py:89-112`, and `_check_dedicated_session`, `:139-170`, unbounded                      | every read as the server's owner (`owner_run_command`) on the server its caller resolved (`resolve_session_tmux_server`): the agent through `runuser` for an agent session, the admin for an admin session                                                                                       | 10                                                                                         | `partial(target.run, sudo=agent)`                                                                               |
 | Status, bounded                               | `_BoundedStatusTarget`, `_status.py:50-56`, `:196-216`, `_queries.py:478-481`                                           | as above                                                                                                                                                                                                                                                                                         | 10                                                                                         | `_BoundedStatusTarget`, which goes                                                                              |
-| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one elevated `Script(Shell.SH)` per VM, each row's tmux reads as its socket owner (decision 5)                                                                                                                                                                                                   | 10                                                                                         | the script's own `sudo -n tmux` and `sudo -n sh -c`, and each row's mode field, which the owner's name replaces |
+| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one elevated `Script(Shell.SH)` per VM, its rows probed concurrently, each row's tmux reads as its socket owner, every client under `timeout -k 1 2` (decision 5)                                                                                                                                | `GUEST_OBSERVATION_TIMEOUT_SECONDS` plus one row's bound (16)                              | the script's own `sudo -n tmux` and `sudo -n sh -c`, and each row's mode field, which the owner's name replaces |
 | Legacy rows in a status fan-out               | `_status.py:476`, `:498-500`, an unbounded probe on the main thread                                                     | admin: the schema requires an agent session's socket (`CHECK`, `db/migrations.py:163`), so every legacy row is an admin's                                                                                                                                                                        | 10                                                                                         | `_build_session_target`'s `true`                                                                                |
 | Pid repair                                    | `_repair_session_pid`, `_pids.py:122-422`, unbounded                                                                    | admin; a dedicated server's reads as its owner (`owner_run_command`), through `runuser` for an agent session                                                                                                                                                                                     | 10 for every read                                                                          | `target.run`, `partial(target.run, sudo=agent)`                                                                 |
 | The agent probe in `_build_session_target`    | `_pids.py:86-87`                                                                                                        | `_assert_agent_access_works`                                                                                                                                                                                                                                                                     | its own                                                                                    | `_assert_agent_ssh_works`                                                                                       |
@@ -723,50 +723,63 @@ unknown there too.
 
 **The batch status script reads each row as its owner** (decision 5). It loses its inner `sudo -n`
 and runs elevated as one request (HLA D4: elevation is the whole operation), but only to read the
-boot id and drop privilege: each row's tmux reads run as that row's socket owner through
-`runuser -u <owner> --` (util-linux, essential on Debian, as the stale-socket probe already uses).
-Root must never be a tmux client of a server another account controls: a tmux client acts on what
-its server sends it with the client's own rights, so no check of the socket's path, type or owner
-makes a root client safe; only running as the owner does. The checks still keep each read on the
-server the row names. The controller (`observe_session_statuses`) validates each row's socket path
-against its owner's directory with `_validated_socket` (`_teardown.py`) before building the request,
-sends the owner from the database on stdin beside the name, socket and pid, and leaves a row that
-fails unknown with a warning. The script refuses a row whose socket is a link, exists but is not a
-socket, or is owned by another account than that owner, reporting status 126 for both reads, which
-reads as unknown. `runuser` opens a PAM session per read, which `pam_unix` logs on the guest; the
-elevated request itself is already logged by `sudo`. The real-tmux test
-(`tests/sessions/test_native_batch_status.py`, the sudo lane) runs the script as root against a
-server its user owns, and the shell-level test in `test_session_liveness.py` covers the refusals and
-the `runuser` argv without root.
+boot id and drop privilege: each row's tmux reads run as that row's socket owner, root running
+`runuser -u <owner> --` itself (`tmux.owner_client_command`; util-linux, essential on Debian, as the
+stale-socket probe already uses). Root must never be a tmux client of a server another account
+controls: a tmux client acts on what its server sends it with the client's own rights, so no check
+of the socket's path, type or owner makes a root client safe; only running as the owner does. The
+checks still keep each read on the server the row names. The controller (`observe_session_statuses`)
+resolves each row's server with `resolve_session_tmux_server` (`sessions/manager/_tmux_server.py`,
+the owner rule in `tmux.socket_owner`) before any VM work, passes it to `batch_check_status`, sends
+each row's account on stdin beside the name, socket and pid, and leaves a row that fails unknown
+with a warning. The script refuses a row whose socket is a link, exists but is not a socket, or is
+owned by another account than that owner, reporting status 126 for both reads, which reads as
+unknown.
+
+The rows are probed concurrently, each in a background job the script waits for, and every tmux
+client runs under `timeout -k 1 2`; a row whose `has-session` times out skips `list-sessions`, so a
+row costs at most 6 seconds whatever its server does and a stuck server delays no other row. The
+request's deadline is `GUEST_OBSERVATION_TIMEOUT_SECONDS` plus one row's bound, 16 seconds. Each row
+prints one line keyed by its position in the request, so lines may arrive in any order; a row
+without a line reads unknown for that row only. `runuser` opens a PAM session per read, which
+`pam_unix` logs on the guest; the elevated request itself is already logged by `sudo`. The real-tmux
+test (`tests/sessions/test_native_batch_status.py`, the sudo lane) runs the script as root against a
+server its user owns; `test_batch_status_bounds.py` holds servers stuck and checks that only their
+rows read unknown; `test_owner_client_switch.py` runs each switched client in a shell and checks
+that root runs `runuser` itself, from `/`; and the shell-level test in `test_session_liveness.py`
+covers the refusals and the `runuser` argv without root.
 
 **Every other read and teardown of a dedicated server runs as its owner too** (lead, 2026-11-14), on
 one builder, `tmux.socket_owner_run_command`, which puts root's socket guard before each line and,
-when the caller's access is not the owner's, `runuser` to the owner (`as_socket_owner_line`):
+when the caller's access is not the owner's, root's switch to the owner, `runuser` spelled once in
+`tmux.owner_client_command` (`as_socket_owner_line`). Each caller resolves the session's server with
+`resolve_session_tmux_server` before any VM work and passes it as `server=`; the admin's own shells
+reach root's guard and switch through `sudo -n /bin/sh -c` (`as_socket_owner_from_admin`):
 
-- `check_session_status` validates the socket with `_validated_socket`, which raises before any read
-  for a path outside the owner's directory, and runs every read, `_pending_launch_is_owned`'s
-  included, through `owner_run_command`. The boot id and `/proc/<pid>` reads are readable as the
-  agent, so they take the same path rather than a root one.
+- `check_session_status` reads the server its caller resolved with `resolve_session_tmux_server`,
+  which raises before any read for a path outside the owner's directory, and runs every read,
+  `_pending_launch_is_owned`'s included, through `owner_run_command`. The boot id and `/proc/<pid>`
+  reads are readable as the agent, so they take the same path rather than a root one.
 - Pid repair, the runtime observation's fallback, the checkpoint proof and startup protection
-  validate the socket the same way and read through `owner_run_command`; `observation_run_command`,
+  resolve the server the same way and read through `owner_run_command`; `observation_run_command`,
   which ran them as root for an agent session, is gone.
 - Teardown by a caller that does not own the session (stop-all, agent delete, workspace delete): the
-  plan carries the owner from `_validated_socket`, and its `run_command`, `kill-server`, its probes
-  and the stale socket's removal included, elevates only to switch to that owner.
+  plan carries the owner from `require_session_tmux_server`, and its `run_command`, `kill-server`,
+  its probes and the stale socket's removal included, elevates only to switch to that owner.
 - The stale-socket cleanup's probe uses the same builder, so its guard now checks the owner as well.
 - The admin is no client of an agent's server either: it has passwordless sudo, so it is the same
   class. `session attach` runs its terminal half as `sudo -n /bin/sh -c <line>`, the line being the
   builder's switch to the agent around `tmux -S <socket> attach`, with `clear_screen_on_exit` and
   the NUL lead as before; `session logs` captures through the builder; and the tmuxinator config
   gives an agent session's window the same switched `has-session` and `attach` (`agent_owners`, from
-  `_validated_socket`), each pane a YAML double-quoted scalar. A named console's window for an agent
-  session runs its attach loop (`multi_console/attach.py:155-235`) with every `has-session` and
-  `attach` switched the same way (`tmux.as_socket_owner_from_admin`), the owner from
-  `_validated_socket`; a row that fails it gets no window, with a warning. The guard's refusal exits
-  `SOCKET_GUARD_REFUSED` (126), neither tmux's 0 nor 1, so an unframed probe and the stale socket's
-  removal check read it as unknown rather than as an absent server; `session attach` prints a
-  one-line reason with it, and a console window says why once per refused stretch, then keeps
-  waiting.
+  `resolve_session_tmux_server`), each pane a YAML double-quoted scalar. A named console's window
+  for an agent session runs its attach loop (`multi_console/attach.py:155-235`) with every
+  `has-session` and `attach` switched the same way (`tmux.as_socket_owner_from_admin`), the owner
+  from `resolve_session_tmux_server`; a row that fails it gets no window, with a warning. The
+  guard's refusal exits `SOCKET_GUARD_REFUSED` (126), neither tmux's 0 nor 1, so an unframed probe
+  and the stale socket's removal check read it as unknown rather than as an absent server;
+  `session attach` prints a one-line reason with it, and a console window says why once per refused
+  stretch, then keeps waiting.
 - Every interactive client, the `tmux attach` of `session attach`, of the console window loop and of
   the tmuxinator window, runs on `runuser`'s own relay terminal (`cd / && runuser --pty -u <agent>`,
   after the guard; `as_socket_owner_line(terminal=True)`), so the agent's processes cannot reach the
@@ -777,9 +790,9 @@ when the caller's access is not the owner's, `runuser` to the owner (`as_socket_
 
 **The admin's standing access to agent tmux servers retires in batch D.** Once every admin path
 switches to the agent, nothing uses the group access that made the admin able to connect to an
-agent's server directly: the admin's membership of `tmux-agent-access` (`tmux.py:381`, `:408`), the
-socket root's `2771` and each agent directory's `2770` with that group (`:410-411`, `:449-450`), the
-socket's `chmod g+rwx` (`:1100`) and `_grant_server_access` (`:690-715`, called at `:1110`). Left in
+agent's server directly: the admin's membership of `tmux-agent-access` (`tmux.py:472`, `:499`), the
+socket root's `2771` and each agent directory's `2770` with that group (`:501-502`, `:540-541`), the
+socket's `chmod g+rwx` (`:1191`) and `_grant_server_access` (`:781-806`, called at `:1201`). Left in
 place, it keeps a second, unguarded way for the admin to be a client of a server the agent controls.
 Removing it changes the guest's groups and modes, so it rides batch D with a reinit migration that
 takes the admin out of the group and resets the modes on existing VMs.

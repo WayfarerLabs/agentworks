@@ -647,18 +647,21 @@ unbounded, as today.
 `cleanup_stale_sockets` keeps its framed inventory and its per-socket guard
 (`sessions/tmux.py:367-413`, `4a64820d9`): the inventory is an elevated `Script(Shell.SH)` and each
 removal an elevated `Script` with the socket guard. The server probe runs as the socket's owner:
-`_cleanup_stale_sockets_under` takes that owner, the agent's Linux user, and its per-socket `run`
-wraps the probe's line as `runuser -u <owner> -- sh -c '<line>'` inside the guard, so `tmux` runs as
-the agent, and root runs only the guard and the guarded `rm -f` (`sessions/tmux.py:400-410`, where
-today the probe runs elevated). In this slice's code that probe is the only `tmux` client that runs
-against an agent's socket as another account; session commands run as the session's owner, and the
-session paths are slice 7's. Its docstring (`:338-345`) loses the reference to the deleted admin
-twin and the double-dash aside. `probe_tmux_server` takes a `RunCommand` (`sessions/tmux.py:71-90`,
-`:1060-1068`), so `access_run_command(access, *, deadline, elevated)` adapts one: it runs the line
-as a `Script(Shell.SH)` with the given `env` and returns the decoded `stdout`, `stderr`,
-`returncode` and `ok` the probe reads, raising the typed error for a completion that is not
-`Completed`, as `SSHError` was raised. It is the tmux probes' one adapter: slice 7 moves every other
-`RunCommand` user onto it. It lives in `sessions/tmux.py` beside the protocol.
+`_cleanup_stale_sockets_under` takes that owner, the agent's Linux user, and probes each socket
+through `socket_owner_run_command`: root's guard refuses a link, a path that is not a socket and a
+socket another account owns, then root runs the probe's line as
+`(cd / && /usr/sbin/runuser -u <owner> -- /bin/sh -c '<line>')` (`tmux.owner_client_command`), so
+`tmux` runs as the agent, and root runs only the guard and the guarded `rm -f`
+(`sessions/tmux.py:400-410`, where today the probe runs elevated). In this slice's code that probe
+is the only `tmux` client that runs against an agent's socket as another account; session commands
+run as the session's owner, and the session paths are slice 7's. Its docstring (`:338-345`) loses
+the reference to the deleted admin twin and the double-dash aside. `probe_tmux_server` takes a
+`RunCommand` (`sessions/tmux.py:71-90`, `:1060-1068`), so
+`access_run_command(access, *, deadline, elevated)` adapts one: it runs the line as a
+`Script(Shell.SH)` with the given `env` and returns the decoded `stdout`, `stderr`, `returncode` and
+`ok` the probe reads, raising the typed error for a completion that is not `Completed`, as
+`SSHError` was raised. It is the tmux probes' one adapter: slice 7 moves every other `RunCommand`
+user onto it. It lives in `sessions/tmux.py` beside the protocol.
 
 `cleanup_stale_admin_sockets` (`sessions/tmux.py:353-365`) has had no caller since it was added in
 `ddf9973b9`, though its docstring says reinit calls it; it is deleted rather than ported (decision
@@ -681,17 +684,17 @@ legacy steps still raise.
 
 How each elevated request in this slice that touches a path an unelevated account owns is placed.
 
-| Operation                                                                                          | Path                                                                                                                                          | Design                                                                                                        |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| The agent's `.ssh` (`ssh_keys.py:117-120`)                                                         | inside the agent's home                                                                                                                       | `ensure_directory` with `owner`: a no-follow walk, then `fchown` and `fchmod` on a no-follow descriptor (I79) |
-| The agent's `authorized_keys` (`ssh_keys.py:121-135`)                                              | inside the agent's `.ssh`                                                                                                                     | `write`: a no-follow walk, then a rename of a file already given its owner and mode (I79)                     |
-| `chmod 0750` and `id -gn` on the agent's home (`agents/initializer.py:178`, `:188`)                | the home's entry is in root-owned `/home`                                                                                                     | a `Command` on that entry                                                                                     |
-| Fresh-user `test -e` and `test -L` (`agents/initializer.py:56-60`)                                 | `/home`, root-owned                                                                                                                           | read-only; the result only refuses                                                                            |
-| Agent socket directory `mkdir`, `chown`, `chmod` (`sessions/tmux.py:332-334`)                      | its entry is in `/run/agentworks/agent-tmux-sockets`, `root:tmux-agent-access` 2771, whose group holds only the admin (`tmux.py:266`, `:289`) | `Command`s on that entry                                                                                      |
-| Stale-socket probe and removal (`sessions/tmux.py:374-410`)                                        | inside the agent-owned socket directory                                                                                                       | the probe runs as the socket's owner through `runuser`; root runs the link-refusing guard and `rm -f` (above) |
-| Agent delete's `rm -rf` of the socket directory and `userdel -r` (`agents/initializer.py:413-425`) | the directory's entry is root-and-admin owned                                                                                                 | `rm -rf` and `userdel`, as today                                                                              |
-| Workspace ACLs (`workspaces/acls.py:36-51`)                                                        | workspace trees                                                                                                                               | today's mechanism, below                                                                                      |
-| Every `/etc`, `/run`, `/proc` and workspaces-parent operation                                      | root-owned paths, which only root and the admin (who holds sudo) can change                                                                   | as each table above says                                                                                      |
+| Operation                                                                                          | Path                                                                                                                                          | Design                                                                                                                   |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| The agent's `.ssh` (`ssh_keys.py:117-120`)                                                         | inside the agent's home                                                                                                                       | `ensure_directory` with `owner`: a no-follow walk, then `fchown` and `fchmod` on a no-follow descriptor (I79)            |
+| The agent's `authorized_keys` (`ssh_keys.py:121-135`)                                              | inside the agent's `.ssh`                                                                                                                     | `write`: a no-follow walk, then a rename of a file already given its owner and mode (I79)                                |
+| `chmod 0750` and `id -gn` on the agent's home (`agents/initializer.py:178`, `:188`)                | the home's entry is in root-owned `/home`                                                                                                     | a `Command` on that entry                                                                                                |
+| Fresh-user `test -e` and `test -L` (`agents/initializer.py:56-60`)                                 | `/home`, root-owned                                                                                                                           | read-only; the result only refuses                                                                                       |
+| Agent socket directory `mkdir`, `chown`, `chmod` (`sessions/tmux.py:332-334`)                      | its entry is in `/run/agentworks/agent-tmux-sockets`, `root:tmux-agent-access` 2771, whose group holds only the admin (`tmux.py:266`, `:289`) | `Command`s on that entry                                                                                                 |
+| Stale-socket probe and removal (`sessions/tmux.py:374-410`)                                        | inside the agent-owned socket directory                                                                                                       | the probe runs as the socket's owner through `runuser`; root runs the socket guard and the link-refusing `rm -f` (above) |
+| Agent delete's `rm -rf` of the socket directory and `userdel -r` (`agents/initializer.py:413-425`) | the directory's entry is root-and-admin owned                                                                                                 | `rm -rf` and `userdel`, as today                                                                                         |
+| Workspace ACLs (`workspaces/acls.py:36-51`)                                                        | workspace trees                                                                                                                               | today's mechanism, below                                                                                                 |
+| Every `/etc`, `/run`, `/proc` and workspaces-parent operation                                      | root-owned paths, which only root and the admin (who holds sudo) can change                                                                   | as each table above says                                                                                                 |
 
 Workspace ACL application keeps today's mechanism in this slice; its hardening is left to the
 permissions effort.
