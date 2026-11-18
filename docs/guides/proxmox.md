@@ -234,11 +234,12 @@ bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during
 root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
 agent to answer, since a VM that has just started has none running yet; a VM whose agent never
 answers fails with nothing dispatched. That wait comes before the script's own time limit, so a VM
-that is still starting never shortens it. Create's wait for cloud-init gives cloud-init five minutes
-and asks again within them, since cloud-init can restart the agent, so a create from a template
-without the agent fails after about six minutes. A started VM that does not answer over Tailscale
-SSH fails `vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server
-here, since the guest agent does not depend on it.
+that is still starting never shortens it. Create's wait for cloud-init gives cloud-init seven
+minutes and asks again within them, since cloud-init can restart the agent; a create from a template
+without the agent spends them on the agent's two-minute waits and fails after about six minutes. A
+started VM that does not answer over Tailscale SSH fails `vm start` with a hint to run
+`agw vm recover`, which can also restart a broken SSH server here, since the guest agent does not
+depend on it.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work

@@ -8,7 +8,12 @@ import pytest
 
 from agentworks.capabilities.vm_platform.tailscale_join import DEFAULT_READINESS_COMMAND
 from agentworks.errors import ConnectivityError, ProvisioningError
-from agentworks.plugins.proxmox.platform import CLOUD_INIT_DEADLINE_SECONDS, _wait_for_cloud_init
+from agentworks.plugins.proxmox import guest_agent
+from agentworks.plugins.proxmox.platform import (
+    CLOUD_INIT_DEADLINE_SECONDS,
+    CLOUD_INIT_RETRY_MIN_SECONDS,
+    _wait_for_cloud_init,
+)
 from tests._root_channel_fakes import Answer, FakeGuest
 
 if TYPE_CHECKING:
@@ -81,4 +86,7 @@ def test_a_channel_that_keeps_failing_raises_at_the_deadline(monkeypatch: pytest
     with pytest.raises(ConnectivityError):
         _wait_for_cloud_init(guest.run_as_root, 101, log=None)
 
-    assert now[0] >= CLOUD_INIT_DEADLINE_SECONDS
+    assert now[0] >= CLOUD_INIT_DEADLINE_SECONDS - CLOUD_INIT_RETRY_MIN_SECONDS
+    assert guest.deadlines[0] == CLOUD_INIT_DEADLINE_SECONDS
+    # No attempt is dispatched with too little of the budget to finish.
+    assert min(guest.deadlines) >= CLOUD_INIT_RETRY_MIN_SECONDS - guest_agent.POLL_INTERVAL_SECONDS

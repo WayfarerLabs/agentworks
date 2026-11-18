@@ -105,6 +105,18 @@ def test_no_request_outlasts_its_bound_or_the_request_timeout(deadline: float, t
     assert api.timeouts == [REQUEST_TIMEOUT_SECONDS, timeout, timeout]
 
 
+@pytest.mark.parametrize("deadline", [0, -1.0])
+def test_a_deadline_with_no_time_in_it_is_refused_before_anything_is_asked(deadline: float) -> None:
+    """Otherwise the dispatch would fail at once and report that the script may have started."""
+    api = FakeAPI([])
+
+    with pytest.raises(ValueError):
+        run(api, deadline=deadline)
+
+    assert api.ping_count == 0
+    assert api.execs == []
+
+
 def test_the_deadline_starts_once_the_agent_answers() -> None:
     """A VM that has just started spends its agent wait, not the script's deadline."""
     not_yet = ProxmoxAPIError("QEMU guest agent is not running")

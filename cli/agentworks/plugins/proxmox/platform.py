@@ -49,9 +49,10 @@ if TYPE_CHECKING:
     from agentworks.execution.root_script import RawRun
 
 BOOTSTRAP_DEADLINE_SECONDS = 600
-CLOUD_INIT_DEADLINE_SECONDS = 300
-"""cloud-init's budget, across the attempts a channel failure starts. Each attempt's guest-agent wait comes
-before its deadline, with its own bound (``guest_agent.AGENT_WAIT_SECONDS``)."""
+CLOUD_INIT_DEADLINE_SECONDS = 420
+"""cloud-init's budget, counted from the first attempt across the ones a channel failure starts."""
+CLOUD_INIT_RETRY_MIN_SECONDS = 60
+"""The least an attempt after a channel failure dispatches with; none starts once less of the budget remains."""
 STATUS_DEADLINE_SECONDS = 10.0
 """How long ``status`` may spend confirming the guest and reading its state before it reads as unknown."""
 
@@ -573,25 +574,27 @@ def _wait_for_cloud_init(
 
     The wait is the cloud bootstrap's own command, so a failure quotes
     cloud-init's status and detail the same way (``readiness_failure``). A
-    channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
-    runs out, each attempt's deadline being what remains of it: cloud-init can
+    channel failure is asked again while at least
+    :data:`CLOUD_INIT_RETRY_MIN_SECONDS` of :data:`CLOUD_INIT_DEADLINE_SECONDS`
+    remains, each attempt's deadline being what remains: cloud-init can
     restart the guest agent mid-run (Proxmox's ``ciupgrade``), and
     ``cloud-init status --wait`` changes nothing, so running it again is safe.
-    The guest agent's wait before each attempt has its own bound, outside the
-    budget. ``log`` records each wait that ran to an outcome.
+    The guest agent's wait before each dispatch has its own bound and comes
+    before that attempt's deadline, so the whole wait can end up to
+    ``guest_agent.AGENT_WAIT_SECONDS`` after the budget. ``log`` records each
+    wait that ran to an outcome.
     """
     expires = time.monotonic() + CLOUD_INIT_DEADLINE_SECONDS
+    deadline: float = CLOUD_INIT_DEADLINE_SECONDS
     while True:
         try:
-            result = root_script.run(
-                run_as_root, DEFAULT_READINESS_COMMAND, deadline=max(expires - time.monotonic(), 0.1), log=log
-            )
+            result = root_script.run(run_as_root, DEFAULT_READINESS_COMMAND, deadline=deadline, log=log)
             break
         except ConnectivityError:
-            remaining = expires - time.monotonic()
-            if remaining <= 0:
+            if expires - time.monotonic() < CLOUD_INIT_RETRY_MIN_SECONDS:
                 raise
-            time.sleep(min(guest_agent.POLL_INTERVAL_SECONDS, remaining))
+            time.sleep(guest_agent.POLL_INTERVAL_SECONDS)
+            deadline = expires - time.monotonic()
     if result.status == CLOUD_INIT_RECOVERABLE_STATUS:
         output.warn(f"cloud-init completed with recoverable errors on Proxmox VMID {vmid}; continuing")
     elif result.status != 0:

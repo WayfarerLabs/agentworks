@@ -146,11 +146,14 @@ def test_an_api_failure_reads_as_unknown_status_but_refuses_a_start_or_a_root_sc
 
 def test_the_identity_check_comes_before_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     """A slow check leaves the script its whole deadline: the deadline starts at dispatch."""
+    now = [1000.0]
     passed: list[float] = []
 
     def slow_check(self: ProxmoxPlatform, vm: VMRow, ctx: RunContext) -> dict[str, object]:
+        now[0] += 25  # most of the deadline, had it started with the call
         return {}
 
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
     monkeypatch.setattr(ProxmoxPlatform, "_guest", slow_check)
     monkeypatch.setattr(ProxmoxPlatform, "_api", lambda self, ctx: None)
     monkeypatch.setattr(

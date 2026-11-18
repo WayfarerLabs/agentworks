@@ -498,9 +498,8 @@ controlling pseudo-terminal (`tests/capabilities/test_wsl2_root_channel.py`).
 
 ### Proxmox
 
-`guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun`, a duration wrapper over
-`run_as_root_until(..., expires)`, which the platform calls with its own expiry, is written fresh
-from the dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest
+`guest_agent.run_as_root(api, node, vmid, script, deadline) -> RawRun`, which the platform calls
+once its identity check passes, is written fresh from the dispatch-and-poll half of `plugins/proxmox/transport.py:51-137`. First it pings the guest
 agent (`guest_agent_ping`, `POST .../agent/ping`) every two seconds until it answers, since a VM
 that has just started (recover starts a stopped one with no wait) has no agent running yet. A ping
 carries no script, so asking again is safe; a token rejection raises `TokenRejectedError` at once,
@@ -527,8 +526,9 @@ answers `Agent error: PID <pid> does not exist`), since that request carries onl
 dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput` report
 raises `ConnectivityError` saying the script exited with its output cut short. No failure chains the
 API error, whose request quotes the script. `create` waits for cloud-init through it
-(`cloud-init status --wait --long`, the cloud bootstrap's readiness command, a 300 s budget for
-cloud-init, each attempt's agent wait before its deadline, status 2 a warning, and any other failure
+(`cloud-init status --wait --long`, the cloud bootstrap's readiness command, a 420 s budget for
+cloud-init counted from the first attempt, each attempt's agent wait before its deadline and no
+retry with less than 60 s of the budget left, status 2 a warning, and any other failure
 quoting cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within
 that budget, since cloud-init can restart the guest agent and the command changes nothing), with no
 separate wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's
@@ -1075,14 +1075,17 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   firewall rule, an address read and a boot, and would still not bound the provider calls.
 - **The bounds before dispatch.** The clouds: `PublicSSH.wait_until_answering` (120 s); each
   provider call its client's timeout; Azure's long-running operations on the route (the public-IP
-  heal, the deny re-pin, the legacy-rule delete and the poke) wait at most
-  `_ROUTE_OPERATION_TIMEOUT_SECONDS` (300 s), where they had no bound, and a poke that does not
-  finish removes its rule and raises without another attempt; GCP's firewall insert already had one.
+  heal, the deny re-pin, the legacy-rule delete and the poke) each wait at most
+  `_OPERATION_TIMEOUT_SECONDS` (300 s, the removal's bound too), where they had no bound. A poke
+  whose create does not finish in time raises without another attempt, after giving the create up
+  to `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more and then removing the rule, since a delete
+  racing the create can fail or find nothing and let the rule land after it; if the create still
+  has not finished, a warning names the rule for removal by hand. GCP's firewall insert already had
+  a bound.
   Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the agent wait's
   `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
-  the deadline starts. `guest_agent.run_as_root_until` goes, and Proxmox's cloud-init wait keeps a
-  300-second budget for cloud-init itself.
+  the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its 420-second budget, now counted with the agent waits outside each attempt's deadline, and retries only while 60 seconds of it remain, so no attempt is dispatched with almost no time; `guest_agent.run_as_root` refuses a deadline that is not positive before it asks anything.
 
 ## Live evidence
 
