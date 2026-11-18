@@ -108,14 +108,17 @@ compatibility. Refresh shell completions after upgrading with `agw completion in
 ## Agent session tmux clients run as the agent
 
 Agentworks no longer runs a tmux client as root or as the VM admin against an agent session's tmux
-server. Every such client started from the admin connection, from status checks and `session stop`
-to `session attach`, `session logs` and named console windows, now switches to the agent account
-with `sudo` and `runuser` first. Attach clients run on a terminal of their own (`runuser --pty`).
-What to expect:
+server. Every such client started from the admin connection, from status checks and
+`session stop --all` to `session attach`, `session logs` and named console windows, now switches to
+the agent account first: the admin's connection elevates with `sudo`, and root checks the socket and
+then runs the client as the agent with `runuser`. Attach clients run on a terminal of their own
+(`runuser --pty`). What to expect:
 
-- **Guest authentication logs gain entries.** Each switch is a `sudo` invocation plus a `runuser`
-  session for the agent account, so `/var/log/auth.log` or the journal records both for every probe,
-  including every poll while a console window waits for a stopped agent session.
+- **Guest authentication logs gain entries.** Each switch is one `sudo` invocation plus one
+  `runuser` session for the agent account, so `/var/log/auth.log` or the journal records both for
+  every probe, including every poll while a console window waits for a stopped agent session. The
+  batched status read of `session list --status` is one `sudo` invocation for the whole VM, with a
+  `runuser` session for each tmux read it makes.
 - **Attach no longer carries your SSH environment into the agent's server.** `sudo` resets the
   environment, so variables tmux would otherwise copy into the session on attach, such as
   `SSH_AUTH_SOCK`, no longer reach it. Under `sudo`'s default policy `TERM` and the locale variables
@@ -442,9 +445,10 @@ Named consoles keep the older path for now, apart from the admin shell window be
   operation log by shape. `session stop` writes one `session-stop` log per VM and
   `session stop --all` one `session-stop-all` log per VM. The listings, `session describe` and the
   reads that prepare a start or restart write none.
-- **`session attach` runs `tmux attach` itself.** The connection starts `tmux` directly with its
-  arguments rather than through the admin's shell, and `[terminal] clear_on_detach` applies as
-  before.
+- **`session attach` runs `tmux attach` itself.** For an admin session the connection starts `tmux`
+  directly with its arguments rather than through the admin's shell. For an agent session it starts
+  the switch to the agent around the same `tmux attach` (above: `sudo`, the socket check, then
+  `runuser --pty`). `[terminal] clear_on_detach` applies as before.
 - **The Codex recorder is written before the launch.** A `codex` session's conversation recorder,
   `~/.agentworks/codex/record-thread-v1.sh`, is written by one atomic file write before the session
   starts, instead of by its launch command. The write refuses a symbolic link at the file or a
@@ -721,7 +725,11 @@ before they resolve the auth key.
   which only the host user can enter and which is removed when the create ends, instead of at
   `/var/tmp/agentworks-lima-<instance>.*` beside other accounts' files. A rolled-back create and a
   later `vm delete` find that directory by its prefix and owner. Files an earlier release's
-  interrupted create left at the old names are no longer looked for; remove them on the host.
+  interrupted create left at the old names are no longer looked for; remove them on the host. For
+  the same reason `vm delete` does not stop a create an earlier release started that is still
+  running on the host, so its `limactl` would run alongside the delete: before deleting such a VM,
+  let that create finish, or on the host stop the `/bin/bash /var/tmp/agentworks-lima-<instance>.sh`
+  process whose PID is in the `.pid` file beside it, and the `limactl` it started.
 - **A WSL2 VM keeps its own hostname.** WSL names a distro after the Windows computer at every start
   unless `/etc/wsl.conf` names it, and a later Tailscale join takes that name too. A WSL2 VM created
   by 0.20 has `hostname` set under `[network]` there; one created before does not. Add it yourself
