@@ -65,13 +65,14 @@ exit "$rc"
 # FIFO, a directory or a link away from ``cmp``, which exits 1 on a difference and 2
 # when it cannot read. A workspace directory that exists but cannot be searched
 # hides its project, so it counts as a failure too. Each workspace the script could
-# not finish is reported on its own marker line.
+# not finish is reported on its own marker line. The loop variable is not ``path``,
+# which zsh ties to ``$PATH``.
 _PROJECTS_SCRIPT = f"""\
 header={shlex.quote(_GENERATED_HEADER.decode())}
 rc=0
-unfinished() {{ rc=1; printf '\\n{_UNFINISHED_MARKER}%s\\n' "$path"; }}
-while IFS= read -r path; do
-  project="$path/.tmuxinator.yml"
+unfinished() {{ rc=1; printf '\\n{_UNFINISHED_MARKER}%s\\n' "$workspace"; }}
+while IFS= read -r workspace; do
+  project="$workspace/.tmuxinator.yml"
   if [ -f "$project" ] && [ ! -L "$project" ]; then
     printf %s "$header" | cmp -s -n {len(_GENERATED_HEADER)} -- "$project" -
     case $? in
@@ -79,7 +80,7 @@ while IFS= read -r path; do
       1) ;;
       *) unfinished ;;
     esac
-  elif [ -d "$path" ] && [ ! -x "$path" ]; then
+  elif [ -d "$workspace" ] && [ ! -x "$workspace" ]; then
     unfinished
   fi
 done
