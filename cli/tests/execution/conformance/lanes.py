@@ -200,12 +200,15 @@ class LocalFilesystem(Lane):
     scratch: Path
 
     def quiet_interactive_startup(self) -> None:
-        """Send a launcher whose passwd entry has an empty home of the lane's, not the runner's own.
+        """Send a launcher whose passwd entry has a home of the lane's, not the runner's own.
 
-        An empty ``.zshrc`` there keeps zsh from starting its new-user setup,
-        which would read the keys a vector types.
+        Its zsh startup keeps an interactive zsh from reading the keys a
+        vector types: ``.zshenv`` sets ``skip_global_compinit``, so Ubuntu's
+        ``/etc/zsh/zshrc`` runs no ``compinit``, whose insecure-directories
+        prompt takes the first key on a CI runner; an empty ``.zshrc`` keeps
+        zsh from starting its new-user setup.
         """
-        home = self.make_dir({".zshrc": ""})
+        home = self.make_dir({".zshenv": "skip_global_compinit=1\n", ".zshrc": ""})
         self.rewrite_launcher(b"home = entry.pw_dir", b"home = " + repr(home).encode())
 
     def make_dir(self, files: Mapping[str, str] | None = None) -> str:

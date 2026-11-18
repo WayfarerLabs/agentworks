@@ -140,11 +140,12 @@ The terminal vectors join the same list:
   `script`'s pty (as tmux runs a pane's command through its default shell), and types into the
   shell: it is interactive, has its environment, takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM`
   and `TERM_PROGRAM_VERSION` from the pane's environment, with `DEFAULT_TERM` when `TERM` is absent,
-  and has no `SSH_TTY`. On local lanes the account's home is an empty one of the lane's
-  (`quiet_interactive_startup`), so an interactive shell reads no startup file of the runner's; on L
-  the account shell is the lane's own, so the four shells are each covered. On L, an attach on
-  `script`'s pty whose stage 0 shell exports `TMUX`, `TMUX_PANE` and `TERM_PROGRAM` shows its shell
-  none of them, and `SSH_TTY`.
+  and has no `SSH_TTY`. On local lanes the account's home is one of the lane's
+  (`quiet_interactive_startup`), so an interactive shell reads no startup file of the runner's, and
+  its `.zshenv` sets `skip_global_compinit`, so Ubuntu's global `compinit` cannot prompt and take a
+  typed key; on L the account shell is the lane's own, so the four shells are each covered. On L, an
+  attach on `script`'s pty whose stage 0 shell exports `TMUX`, `TMUX_PANE` and `TERM_PROGRAM` shows
+  its shell none of them, and `SSH_TTY`.
 
 `conformance/test_attach_terminal.py`, `conformance/test_park.py` and `conformance/test_forward.py`
 cover what happens around the terminal half, a pane's handover (including one in a real tmux pane,
