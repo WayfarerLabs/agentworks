@@ -514,7 +514,7 @@ def _write_sudoers_admin(
 
     logger.step("Admin sudo grant")
     try:
-        target.run(admin_sudoers_script(admin_user), sudo=True)
+        target.run(admin_sudoers_script(admin_user, preserve_existing=True), sudo=True)
     except SSHError as e:
         msg = f"admin sudo grant install failed: {e}. Re-run `agw vm reinit` to retry."
         logger.warning(msg)

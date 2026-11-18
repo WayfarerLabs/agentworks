@@ -105,7 +105,8 @@ def test_reinit_executes_the_grant_writer_and_warns_on_rejection(
     monkeypatch: pytest.MonkeyPatch, grant_directory: Path, validator: Path, reject: bool
 ) -> None:
     grant = grant_directory / "test-admin"
-    grant.write_text("previous grant\n")
+    prior = "test-admin ALL=(root) /usr/bin/true\n"
+    grant.write_text(prior)
     grant.chmod(0o644)
     if reject:
         monkeypatch.setenv("VALIDATION_STATUS", "1")
@@ -121,16 +122,18 @@ def test_reinit_executes_the_grant_writer_and_warns_on_rejection(
     _write_sudoers_admin(target, logger, "test-admin")
 
     assert json.loads(validator.read_text())["mode"] == 0o440
+    assert grant.read_text() == prior
     assert grant.stat().st_mode & 0o777 == (0o644 if reject else 0o440)
     assert logger.warning.call_count == int(reject)
     assert list(grant_directory.iterdir()) == [grant]
 
 
-def test_bootstrap_uses_the_admin_grant_writer(monkeypatch: pytest.MonkeyPatch) -> None:
-    writer = MagicMock(return_value=":\n")
+def test_bootstrap_projects_the_admin_grant_writer(monkeypatch: pytest.MonkeyPatch) -> None:
+    fragment = "printf '%s\\n' 'arbitrary writer result'\n"
+    writer = MagicMock(return_value=fragment)
     monkeypatch.setattr(bootstrap_script, "admin_sudoers_script", writer)
 
-    bootstrap_script.generate_bootstrap_script(
+    script = bootstrap_script.generate_bootstrap_script(
         admin_username="test-admin",
         ssh_public_key="",
         provisioning_packages=[],
@@ -139,6 +142,22 @@ def test_bootstrap_uses_the_admin_grant_writer(monkeypatch: pytest.MonkeyPatch) 
     )
 
     writer.assert_called_once_with("test-admin")
+    assert fragment in script
+
+
+def test_reinit_does_not_create_a_missing_grant(grant_directory: Path, validator: Path) -> None:
+    def run(command: str, *, sudo: bool) -> None:
+        assert sudo
+        result = subprocess.run(["bash", "-c", command], check=False)
+        if result.returncode:
+            raise SSHError("fragment unavailable")
+
+    logger = MagicMock()
+    _write_sudoers_admin(MagicMock(run=run), logger, "test-admin")
+
+    logger.warning.assert_called_once()
+    assert not validator.exists()
+    assert not list(grant_directory.iterdir())
 
 
 def test_grant_passes_real_visudo(monkeypatch: pytest.MonkeyPatch, grant_directory: Path) -> None:
@@ -151,4 +170,12 @@ def test_grant_passes_real_visudo(monkeypatch: pytest.MonkeyPatch, grant_directo
 
     grant = grant_directory / "test-admin"
     subprocess.run([executable, "-cf", str(grant)], check=True)
+    assert grant.stat().st_mode & 0o777 == 0o440
+
+    prior = "test-admin ALL=(root) /usr/bin/true\n"
+    grant.chmod(0o644)
+    grant.write_text(prior)
+    subprocess.run(["bash", "-c", sudoers.admin_sudoers_script("test-admin", preserve_existing=True)], check=True)
+    subprocess.run([executable, "-cf", str(grant)], check=True)
+    assert grant.read_text() == prior
     assert grant.stat().st_mode & 0o777 == 0o440
