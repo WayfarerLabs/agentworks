@@ -160,6 +160,22 @@ def test_a_fifo_or_directory_at_the_project_path_is_left_alone(
 
 
 @requires_guest_shell
+def test_an_unsearchable_directory_at_the_project_path_is_left_alone(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    project = workspace / ".tmuxinator.yml"
+    project.mkdir(mode=0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        project.chmod(0o755)
+
+    assert project.is_dir()
+    assert captured_output.warnings == []
+
+
+@requires_guest_shell
 @skip_as_root
 def test_a_failed_removal_warns_once_and_the_rest_are_still_removed(
     db: Database,

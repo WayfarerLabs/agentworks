@@ -41,18 +41,19 @@ _UNFINISHED_MARKER = "AGW_TMUXINATOR_UNFINISHED="
 #
 # A test on a path is also false when an unsearchable ancestor hides the path, so
 # both scripts start with ``hidden``, the one rule for absent versus hidden: it walks
-# up from a path it cannot see to the nearest ancestor it can, and the path is hidden
-# when that ancestor is a directory it cannot search. Otherwise the path is absent.
+# up from the path's parent to the nearest ancestor it can see, and the path is hidden
+# when that ancestor is a directory it cannot search. Otherwise the path is absent or
+# visible, so a visible path is never examined itself.
 # Callers canonicalize first with ``realpath -m``, which resolves every link it can
 # reach and keeps the rest literal, so a link into an unsearchable directory walks
 # up from its target rather than stopping at the link.
 _HIDDEN_FUNCTION = """\
 hidden() {
-  seen="$1"
-  while [ ! -e "$seen" ] && [ ! -L "$seen" ]; do
-    case $seen in */*) seen="${seen%/*}" ;; *) return 1 ;; esac
+  up="${1%/*}"
+  until [ -e "$up" ]; do
+    case $up in */*) up="${up%/*}" ;; *) return 1 ;; esac
   done
-  [ "$seen" != "$1" ] && [ -d "$seen" ] && [ ! -x "$seen" ]
+  [ -d "$up" ] && [ ! -x "$up" ]
 }
 """
 
