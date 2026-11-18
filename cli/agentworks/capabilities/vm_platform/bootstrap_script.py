@@ -173,19 +173,27 @@ else
 fi
 
 # -- Step 4: Swap file --
+# Each part resumes on its own, so a run cut short anywhere in this step
+# finishes it on the next run. /swapfile appears only once it is a complete
+# swap area: it is built under another name and renamed into place, and a
+# partial one from an earlier run is started again. Activation and the fstab
+# line are each checked before they are done, so neither repeats.
 echo "##STEP## Swap file"
 if [ "$SWAP_GB" -gt 0 ]; then
     if [ -f /swapfile ]; then
-        echo "##SUCCESS## swap file already exists"
+        SWAP_STATE="already exists"
     else
         SWAP_MB=$((SWAP_GB * 1024))
-        fallocate -l "${{SWAP_MB}}M" /swapfile
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo '/swapfile none swap sw 0 0' >> /etc/fstab
-        echo "##SUCCESS## ${{SWAP_GB}} GiB swap file created"
+        rm -f /swapfile.partial
+        fallocate -l "${{SWAP_MB}}M" /swapfile.partial
+        chmod 600 /swapfile.partial
+        mkswap /swapfile.partial
+        mv /swapfile.partial /swapfile
+        SWAP_STATE="created"
     fi
+    grep -q '^/swapfile ' /proc/swaps || swapon /swapfile
+    grep -qxF '/swapfile none swap sw 0 0' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo "##SUCCESS## ${{SWAP_GB}} GiB swap file $SWAP_STATE"
 else
     echo "##SUCCESS## swap disabled"
 fi

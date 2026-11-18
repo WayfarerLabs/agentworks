@@ -233,27 +233,67 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
     assert "ssh-ed25519 AAAA testkey" in with_key
 
 
-def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
-    """The fstab swap entry must not duplicate when the bootstrap re-runs.
+_SWAP_STUBS = {
+    # fallocate -l SIZE PATH
+    "fallocate": 'echo "$1 $2" > "$3"\n',
+    # mkswap PATH; fails while $STUBS/interrupt exists, as a run cut short after fallocate would stop
+    "mkswap": '[ ! -e "$STUBS/interrupt" ] || exit 130\necho swap-area >> "$1"\n',
+    # swapon PATH; refuses a file that is not a swap area, and records an activation as /proc/swaps would
+    "swapon": 'grep -q swap-area "$1" || exit 1\necho "$1 file 1048572 0 -2" >> "$ROOT/swaps"\n',
+}
 
-    ``/swapfile`` is a persistent on-disk file, so the surrounding
-    ``if [ -f /swapfile ]`` guard sends every re-run down the "already exists"
-    branch, skipping both swap creation and the fstab append. Assert that the
-    single ``>> /etc/fstab`` append lives under that guard rather than at the
-    top level of the step.
+
+def _run_swap_step(step: str, root: Path, stubs: Path) -> int:
+    env = {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}", "ROOT": str(root), "STUBS": str(stubs)}
+    return subprocess.run(["bash", "-c", f"set -euo pipefail\nSWAP_GB=1\n{step}"], env=env, check=False).returncode
+
+
+@requires_posix_shell
+def test_the_swap_step_finishes_on_the_next_run_after_an_interruption(tmp_path: Path) -> None:
+    """A run cut short between ``fallocate`` and the fstab line leaves nothing the next run skips, and repeats nothing.
+
+    The step runs as generated, with its three system paths moved under ``tmp_path`` and the swap tools stubbed.
     """
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
         provisioning_packages=["curl"],
         hostname="lima--myvm",
-        swap=4,
+        swap=1,
     )
+    step = script[script.index("# -- Step 4: Swap file --") : script.index("# -- Step 5:")]
+    root, stubs = tmp_path / "root", tmp_path / "stubs"
+    root.mkdir()
+    stubs.mkdir()
+    for name, body in _SWAP_STUBS.items():
+        (stubs / name).write_text(f"#!/bin/sh\n{body}")
+        (stubs / name).chmod(0o755)
+    for path, moved in (
+        ("/swapfile", root / "swapfile"),
+        ("/etc/fstab", root / "fstab"),
+        ("/proc/swaps", root / "swaps"),
+    ):
+        step = step.replace(path, str(moved))
+    (root / "fstab").write_text("")
+    (root / "swaps").write_text("Filename Type Size Used Priority\n")
+    fstab_line = f"{root / 'swapfile'} none swap sw 0 0"
 
-    assert "if [ -f /swapfile ]; then" in script
-    # Exactly one fstab append, and it is the swap line under the guard.
-    assert script.count(">> /etc/fstab") == 1
-    assert "echo '/swapfile none swap sw 0 0' >> /etc/fstab" in script
+    (stubs / "interrupt").write_text("")
+    assert _run_swap_step(step, root, stubs) != 0
+    assert not (root / "swapfile").exists()
+
+    (stubs / "interrupt").unlink()
+    assert _run_swap_step(step, root, stubs) == 0
+    assert "swap-area" in (root / "swapfile").read_text()
+    assert not (root / "swapfile.partial").exists()
+    assert (root / "fstab").read_text().splitlines() == [fstab_line]
+    assert len((root / "swaps").read_text().splitlines()) == 2
+
+    # A run cut short after the activation, before the fstab line, adds only the line.
+    (root / "fstab").write_text("")
+    assert _run_swap_step(step, root, stubs) == 0
+    assert (root / "fstab").read_text().splitlines() == [fstab_line]
+    assert len((root / "swaps").read_text().splitlines()) == 2
 
 
 @requires_posix_shell
