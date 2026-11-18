@@ -169,7 +169,7 @@ of an attach without the terminal half.
 
 ```text
 with access.park(LoginShell(cwd=full_path, env=pane_env)) as handover:
-    admin.run(Command(("tmux", "split-window", ..., handover.command(run_as="agent-x"))))
+    admin.run(Command(("tmux", "split-window", ..., handover.command(switch_user=True))))
 # leaving the block waits for the pane to collect its request
 ```
 
@@ -180,27 +180,30 @@ with access.park(LoginShell(cwd=full_path, env=pane_env)) as handover:
   manager over the `PipeSession` that waits for `parked` within `PARKING_WAIT_SECONDS` and raises
   the typed error, before anything else happens, when it does not come. `attach` is `Parked` plus
   the terminal half; `park` is `Parked` plus a `Handover`.
-- **`Handover.command(run_as: str | None = None) -> str`** is the pane's command line: the handover
-  form of stage 0, `stage0_command(socket_path(token))` (`ssh_process.py:73-86`), with
-  `sudo -n -u <run_as>` in front when the pane's server belongs to another account. `run_as` must be
-  the account that parked (`Handover.account`), the only one that can reach the socket; any other is
-  a `ValueError`. Its only values are the token and an account name; the environment is in the
-  parked request.
+- **`Handover.command() -> str`** is the pane's command line: the handover form of stage 0,
+  `stage0_command(socket_path(token))` (`ssh_process.py:73-86`). Its only value is the token; the
+  environment is in the parked request. The pane runs it as the account that parked, the only one
+  that can reach the socket. D2 adds `Handover.command(*, switch_user: bool = False)` with its first
+  caller, the agent panes: the handover then records the account that parked, and `switch_user` puts
+  `sudo -n -u <that account>` in front for a pane in the admin's tmux server.
 - **Leaving the block.** On a normal exit the client keeps pumping the parking connection until its
-  trailer, for at most `HANDOVER_COLLECT_SECONDS = 35` (the launcher's 30-second wait,
-  `agw_launch.py:60`, and a margin), and sets `handover.collected` from it: `exit 0` is collected,
-  `refused handover` is not. On an exception (the split failed) it closes the parking stdin at once,
-  which the launcher treats as the client leaving and cleans up (`agw_launch.py:290-299`). Either
-  way the socket directory is gone afterwards.
-- **The terminal's variables.** An attach sends the operator's `TERM`, because the workstation owns
-  that terminal. A pane's terminal belongs to tmux, which sets `TERM` (from its `default-terminal`),
-  `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` in the pane's environment. These
-  describe the terminal the shell runs on, not anyone's environment. So a `park` envelope carries no
-  `TERM`, and `tty` mode takes those five names from its inherited environment, with `DEFAULT_TERM`
-  (shared from `agw_launch.py`) when `TERM` is absent, and nothing else from it. `park` has no
-  `term` parameter: the rule belongs to the operation, not the caller. sudo's `env_reset` keeps
-  `TERM`, and neither Debian's sudoers nor agentworks' `env_keep` fragment keeps the other four, so
-  an agent pane behind `sudo -n -u` has `TERM` alone of them (amendment A1).
+  trailer, for at most `HANDOVER_COLLECT_SECONDS`, the launcher's `HANDOVER_WAIT_SECONDS` (30,
+  shared from `agw_launch.py`) and a margin of 5, and sets `handover.collected` from it: `exit 0` is
+  collected, `refused handover` is not. On an exception (the split failed) it closes the parking
+  stdin at once, which the launcher treats as the client leaving and cleans up
+  (`agw_launch.py:290-299`). Either way the socket directory is gone afterwards.
+- **The terminal's variables.** These describe the terminal the shell runs on, not anyone's
+  environment, so they come from the terminal's owner. An attach's terminal is the workstation's,
+  reached over ssh: its envelope carries the operator's `TERM`, and its shell gets `SSH_TTY` for the
+  pty sshd made; it takes nothing else from its inherited environment. A pane's terminal belongs to
+  tmux, which sets `TERM` (from its `default-terminal`), `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and
+  `TERM_PROGRAM_VERSION` in the pane's environment. So a `park` envelope carries no `TERM`, and for
+  such an envelope only, `tty` mode takes those five names from its inherited environment, with
+  `DEFAULT_TERM` (shared from `agw_launch.py`) when `TERM` is absent, and sets no `SSH_TTY`, since a
+  tmux pty is not an SSH terminal. `park` has no `term` parameter: the rule belongs to the
+  operation, not the caller. sudo's `env_reset` keeps `TERM`, and neither Debian's sudoers nor
+  agentworks' `env_keep` fragment keeps the other four, so an agent pane behind `sudo -n -u` has
+  `TERM` alone of them (amendment A1).
 - **sudo's pty.** sudo 1.9.14 and later, Debian 13's, defaults to `use_pty`, so an agent pane's
   shell runs on sudo's relayed pty, as today's `sudo --login` pane does; vector T2 runs on Debian 13
   to show the shell is interactive there.
@@ -424,12 +427,16 @@ handover for each pane it creates:
   killed attach pane (`977d32c7c`). It composes `pane_env` as today (`_resolve_pane_env`,
   `sessions/multi_console/secrets_env.py:279-366`), parks `LoginShell(cwd=full_path, env=pane_env)`
   on the pane identity's access (the admin's, or the agent's for an agent pane), runs
-  `tmux split-window ... <handover.command(run_as=agent or None)>` on the admin's access inside the
-  block, and tags the pane.
-- **The admin-shell window** (`tmux_build.py:529`, batch D1) parks the admin pane's environment
-  (`_resolve_admin_env`) on the admin's access and runs `new-session -d ... <handover.command()>`. A
-  failed `new-session` raises inside the block, so the parked request goes at once, and a handover
-  the pane does not collect fails the staged build like any incomplete window.
+  `tmux split-window ... <handover.command(switch_user=<an agent pane>)>` on the admin's access
+  inside the block, and tags the pane.
+- **The admin-shell window** (`tmux_build.py:563-594` at D1, batch D1) parks the admin pane's
+  environment (`_resolve_admin_env`) on the admin's access and runs
+  `new-session -d ... <handover.command()>`. A failed `new-session` raises inside the block, so the
+  parked request goes at once. A handover the pane does not collect, or a pane that is gone or dead
+  in the one `tmux list-panes -F '#{pane_dead}'` read after collection (a launcher refusing on the
+  terminal, or a shell that ends at once), fails the staged build like any incomplete window. The
+  pane's command is one-shot, so the window is restored by `agw console restart`, not by
+  `respawn-pane`.
 
 Windows that run the attach loop (`multi_console/attach.py:155-235`) carry no environment and keep
 their command. No pane path passes `-e`, and none passes `env=` to the admin's `run`.
@@ -808,18 +815,18 @@ an agent pane's parking connection and its access check, which run on the agent'
 access; the gate and the SSH boundary are as today, with the pane secrets as the boundary's targets
 (above).
 
-| Operation                                 | Today                                                                                                               | Request                                                                                      | Deadline                                                                                                               |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Presence, the post-teardown probe         | `has-session`, `multi_console/attach.py:207`, `:251`, `:287`                                                        | `Script(Shell.SH)`                                                                           | presence 10, one dispatch, as `kill_session_windows`'s copy already is (`attach.py:335`); the post-teardown probe none |
-| Teardown, staging teardown, kill a window | `kill-session`, `kill-window`, `:244`, `:279`, `:332`                                                               | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
-| Attach                                    | `target.interactive("tmux attach -t '=aw-console-<c>'")`, `:830-833`                                                | `attach(TerminalCommand(("tmux", "attach", "-t", "=aw-console-" + name)))`                   | none                                                                                                                   |
-| Build                                     | `new-session` for the admin-shell window, the placeholder, `kill-window`, `rename-session`, `tmux_build.py:529-579` | the admin-shell window through `park` (above); the rest `Script(Shell.SH)`, `check=True`     | none                                                                                                                   |
-| Session window                            | `new-window ... '<attach loop>'`, `tmux_build.py:426`                                                               | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
-| Agent access check                        | none                                                                                                                | `_assert_agent_access_works`, once per agent, before the first mutation                      | its own                                                                                                                |
-| Shell pane                                | `split-window -e K=V ...` with `env=pane_env`, `:282`; tag, `:302`                                                  | `park` on the pane identity's access, then `split-window ... <handover command>` and the tag | parking: 60 to `parked`, 35 to collect                                                                                 |
-| The `--preserve-env` probe                | `tmux_build.py:134`                                                                                                 | none: deleted                                                                                |                                                                                                                        |
-| Layout, focus, panes, reorder             | `multi_console_layout.py:76-444`, `tmux_build.py:334`, `restore.py:140`                                             | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
-| Status                                    | `list-sessions`, `multi_console/_status.py:54`                                                                      | `Script(Shell.SH)`                                                                           | 10                                                                                                                     |
+| Operation                                 | Today                                                                                                                     | Request                                                                                      | Deadline                                                                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Presence, the post-teardown probe         | `has-session`, `multi_console/attach.py:207`, `:251`, `:287`                                                              | `Script(Shell.SH)`                                                                           | presence 10, one dispatch, as `kill_session_windows`'s copy already is (`attach.py:335`); the post-teardown probe none |
+| Teardown, staging teardown, kill a window | `kill-session`, `kill-window`, `:244`, `:279`, `:332`                                                                     | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
+| Attach                                    | `target.interactive("tmux attach -t '=aw-console-<c>'")`, `:830-833`                                                      | `attach(TerminalCommand(("tmux", "attach", "-t", "=aw-console-" + name)))`                   | none                                                                                                                   |
+| Build                                     | `new-session` for the admin-shell window, the placeholder, `kill-window`, `rename-session`, `tmux_build.py:563-636` at D1 | the admin-shell window through `park` (above); the rest `Script(Shell.SH)`, `check=True`     | none                                                                                                                   |
+| Session window                            | `new-window ... '<attach loop>'`, `tmux_build.py:426`                                                                     | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
+| Agent access check                        | none                                                                                                                      | `_assert_agent_access_works`, once per agent, before the first mutation                      | its own                                                                                                                |
+| Shell pane                                | `split-window -e K=V ...` with `env=pane_env`, `:282`; tag, `:302`                                                        | `park` on the pane identity's access, then `split-window ... <handover command>` and the tag | parking: 60 to `parked`, 35 to collect                                                                                 |
+| The `--preserve-env` probe                | `tmux_build.py:134`                                                                                                       | none: deleted                                                                                |                                                                                                                        |
+| Layout, focus, panes, reorder             | `multi_console_layout.py:76-444`, `tmux_build.py:334`, `restore.py:140`                                                   | `Script(Shell.SH)`                                                                           | none                                                                                                                   |
+| Status                                    | `list-sessions`, `multi_console/_status.py:54`                                                                            | `Script(Shell.SH)`                                                                           | 10                                                                                                                     |
 
 ### Backup
 
@@ -1004,7 +1011,7 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
   `EXITED`, never `LOST`.
 - `interrupt` of a payload that ignores `SIGTERM` returns `EXITED` with 137 after the kill wait.
 - `park`: a split that raises closes the parking stdin at once; an uncollected handover reports
-  `collected=False`; `Handover.command` puts `sudo -n -u` in front only for another account; a `cwd`
+  `collected=False`; `Handover.command(switch_user=True)` (D2) puts `sudo -n -u` in front; a `cwd`
   refusal parks again in the home and warns.
 - Backup's outcomes: `LOST` and a non-zero `EXITED` raise `BackupError`; the `finally` discards the
   launch's id even when `launch` raised.
@@ -1187,8 +1194,9 @@ collateral it makes stale.
 - **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
   amended.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
-  migration.
-- **D5**: the test bridges removed; it may fold into D2.
+  migration. Whether D3 and D4 share one reinit pass is decided when D3 starts.
+- **D5**, the test bridges' removal, folds into D2: D2 removes the last legacy target, so the
+  bridges that route accesses through one go with it.
 
 **Bridges.**
 
@@ -1213,9 +1221,10 @@ The lead accepted each on 2026-11-12, and the operator ruled on the pane secrets
 3. **`ENVIRONMENT_REVEAL` retires** with the environment refusal, and `env show` escapes every
    value, `\` as `\\` included, since plaintext values with newlines can now reach its table.
 4. **A pane's terminal variables come from the terminal's owner**: only a `park` envelope carries no
-   `TERM`, and `tty` mode takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and
-   `TERM_PROGRAM_VERSION` from the inherited environment, with `DEFAULT_TERM` when `TERM` is absent
-   (lead, 2026-11-18, widening the `TERM`-only rule).
+   `TERM`, and for that envelope only `tty` mode takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM`
+   and `TERM_PROGRAM_VERSION` from the inherited environment, with `DEFAULT_TERM` when `TERM` is
+   absent, and sets no `SSH_TTY`; an attach takes none of them from its environment (lead,
+   2026-11-18, widening the `TERM`-only rule).
 5. **Two tighter bounds**: the session status and pid-repair reads at 10 seconds, and the batch
    status script elevated as a whole, reading each row as its socket owner after validating its
    socket path (lead, 2026-11-14, replacing root reads against every row's server).
@@ -1233,10 +1242,11 @@ disconnect, is the operator's requirement.
 
 Edits this LLD needs in the HLA and the plan, for the lead to make:
 
-- **A1, HLA D4** (agw-launch step 4): `TERM` comes from the envelope, except for a `park` envelope,
-  which carries none; `tty` mode then takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and
-  `TERM_PROGRAM_VERSION` from the inherited environment, set by the terminal's owner (tmux), with
-  `DEFAULT_TERM` when `TERM` is absent.
+- **A1, HLA D4** (agw-launch step 4): `TERM` comes from the envelope and `SSH_TTY` from the
+  terminal's name, except for a `park` envelope, which carries no `TERM`; for that envelope only,
+  `tty` mode takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` from the
+  inherited environment, set by the terminal's owner (tmux), with `DEFAULT_TERM` when `TERM` is
+  absent, and sets no `SSH_TTY`. The HLA text carries this.
 - **A2, HLA D5**: the "Retries" bullet's `observation=True` option, "an option that arrives with its
   first caller, `detached.observe` in slice 7", goes: `VMAccess` never dispatches a request twice,
   reads are single dispatches with their deadlines, and repetition is the caller's loop

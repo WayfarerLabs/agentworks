@@ -365,19 +365,19 @@ import os,sys,socket as S;a=sys.argv[1:];s=a and S.socket(1);a and s.connect(a[0
 **Envelope.** One JSON object, `json.dumps(obj, ensure_ascii=True, separators=(",", ":"))`, so the
 wire is pure ASCII whatever the workstation's locale. No version field (HLA D3).
 
-| Field      | Type                         | Meaning                                                                             |
-| ---------- | ---------------------------- | ----------------------------------------------------------------------------------- |
-| `nonce`    | 32 lowercase hex             | `secrets.token_hex(16)` per request, never in the payload's argv or environment     |
-| `mode`     | `run`, `tty` or `park`       | Pipe mode with markers; terminal exec; park for a handover                          |
-| `kind`     | `argv`, `script` or `shell`  | `Command`, `Script`, `LoginShell`                                                   |
-| `argv`     | list of str                  | `argv` kind, non-empty                                                              |
-| `shell`    | `sh`, `bash`, `user_default` | `script` kind                                                                       |
-| `source`   | str                          | `script` kind                                                                       |
-| `login`    | bool                         | `script` kind                                                                       |
-| `cwd`      | str or null                  | Absolute; null means the home directory                                             |
-| `env`      | object of str to str         | The request's environment                                                           |
-| `term`     | str or null                  | `tty` and `park` modes: the operator's `TERM`, `xterm-256color` when unset or empty |
-| `handover` | 16 lowercase hex             | `park` mode: the client's `secrets.token_hex(8)`, naming the socket directory       |
+| Field      | Type                         | Meaning                                                                                                                                                                                                        |
+| ---------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nonce`    | 32 lowercase hex             | `secrets.token_hex(16)` per request, never in the payload's argv or environment                                                                                                                                |
+| `mode`     | `run`, `tty` or `park`       | Pipe mode with markers; terminal exec; park for a handover                                                                                                                                                     |
+| `kind`     | `argv`, `script` or `shell`  | `Command`, `Script`, `LoginShell`                                                                                                                                                                              |
+| `argv`     | list of str                  | `argv` kind, non-empty                                                                                                                                                                                         |
+| `shell`    | `sh`, `bash`, `user_default` | `script` kind                                                                                                                                                                                                  |
+| `source`   | str                          | `script` kind                                                                                                                                                                                                  |
+| `login`    | bool                         | `script` kind                                                                                                                                                                                                  |
+| `cwd`      | str or null                  | Absolute; null means the home directory                                                                                                                                                                        |
+| `env`      | object of str to str         | The request's environment                                                                                                                                                                                      |
+| `term`     | str or null                  | `tty` and `park` modes: an attach's operator `TERM` (`xterm-256color` when unset or empty); null for a pane's handover (`VMAccess.park`), whose `tty` mode takes the terminal's variables from its environment |
+| `handover` | 16 lowercase hex             | `park` mode: the client's `secrets.token_hex(8)`, naming the socket directory                                                                                                                                  |
 
 The client validates; agw-launch does not re-validate the schema. A malformed envelope is an
 uncaught exception before the start marker, and one build ships both halves.

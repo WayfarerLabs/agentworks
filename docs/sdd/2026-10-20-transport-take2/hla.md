@@ -245,13 +245,15 @@ if one proves necessary, is the same installed program (`2026-08-04-next-steps/t
      the session variables today's shells and session workloads use, each taken from a source
      startup files cannot touch: `TERM` from the envelope (the operator's terminal type, with a
      default the LLD sets for a Windows workstation that has none), `SSH_TTY` from the terminal's
-     name in TTY mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory exists and
-     belongs to the identity; then the request's environment. The one exception is a console pane's
-     handover (D8), whose envelope carries no `TERM`: there `TERM` comes from the inherited
-     environment that the terminal's owner, tmux, set, or the same default. tmux runs the pane
-     command through the admin's `default-shell -c`, whose startup file could change it, which is
-     acceptable because `TERM` is the terminal owner's description of the terminal, not a trust
-     property. Nothing else is copied from the inherited environment, so `SSH_CLIENT` and
+     name in an attach's TTY mode, and `XDG_RUNTIME_DIR` as `/run/user/<uid>` when that directory
+     exists and belongs to the identity; then the request's environment. The one exception is a
+     console pane's handover (D8), whose envelope carries no `TERM`: there `TERM`, `TMUX`,
+     `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` come from the inherited environment that
+     the terminal's owner, tmux, set, with the same default for `TERM`, and there is no `SSH_TTY`,
+     since a tmux pty is not an SSH terminal. tmux runs the pane command through the admin's
+     `default-shell -c`, whose startup file could change them, which is acceptable because they are
+     the terminal owner's description of the terminal, not a trust property. Nothing else is copied
+     from the inherited environment, and an attach copies none of those five, so `SSH_CLIENT` and
      `SSH_CONNECTION` are no longer passed, and release notes say so;
    - the working directory (the home directory by default) and a fixed umask;
    - signal dispositions back to their defaults, the signal mask cleared, and no inherited
