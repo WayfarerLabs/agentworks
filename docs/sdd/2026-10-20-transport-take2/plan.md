@@ -576,10 +576,10 @@ Definition of done: create and reinit run entirely on the new transport.
   - the env-newline refusals, the console's env carry across sudo and the legacy probe it deletes;
   - the incident audit of the entry points this slice moves.
 - [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
-- [ ] Bound the session and console status reads and pid repair at 10 seconds and `vm describe`'s
+- [x] Bound the session and console status reads and pid repair at 10 seconds and `vm describe`'s
       live resources at 30, each one dispatch, and retire `GUEST_OBSERVATION_ATTEMPTS` and
       `DEDICATED_TEARDOWN_ATTEMPTS` (HLA D5).
-- [ ] Migrate:
+- [x] Migrate:
   - workspace backends, rehome and repair;
   - workspace copy, using `run` over an opaque tar stream;
   - `sessions/`, including tmux, consoles, status probes and pid repair, with session environment in
