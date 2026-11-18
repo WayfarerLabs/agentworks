@@ -463,15 +463,16 @@ def test_declined_slug_keeps_default_file_name(tmp_path: Path) -> None:
 # -- Host-key store options ---------------------------------------------------
 
 
-def _resolved(config: Path, alias: str) -> dict[str, str]:
+def _resolved(config: Path, alias: str, *, context: str = "") -> dict[str, str]:
     """``ssh -G -F config alias``'s settings; it resolves the configuration and exits, never connecting.
 
-    A failure reports ssh's own stderr, which names a refused file or a bad line.
+    A failure reports ssh's own stderr, which names a refused file or a bad line, and ``context``, such as the
+    ACL of a file ssh checks.
     """
     result = subprocess.run(
         ["ssh", "-G", "-F", str(config), alias], capture_output=True, text=True, timeout=10, check=False
     )
-    assert result.returncode == 0, f"ssh -G exited {result.returncode}: {result.stderr.strip()}"
+    assert result.returncode == 0, f"ssh -G exited {result.returncode}: {result.stderr.strip()}\n{context}"
     return dict(line.split(" ", 1) for line in result.stdout.splitlines())
 
 
@@ -827,26 +828,29 @@ def test_an_entry_is_written_exactly_when_the_execution_core_would_connect_there
 
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+def _icacls(*args: str) -> str:
+    """Run ``icacls`` (Windows), failing with its own output; returns what it printed."""
+    result = subprocess.run(["icacls", *args], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, f"icacls {' '.join(args)} exited {result.returncode}: {result.stdout}{result.stderr}"
+    return result.stdout
+
+
 def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The product's own writers make the ``Include`` and the managed file, and ssh resolves the entry through both.
 
-    ssh checks an included file's permissions, though not the ``-F`` file's. On Windows the directory first gets
-    an owner-only ACL, inherited by what is created in it, as a profile's ``.ssh`` has: the runner's temporary
-    directory carries an ``OWNER RIGHTS`` entry that Win32-OpenSSH refuses, which no profile has.
+    ssh checks an included file's permissions, though not the ``-F`` file's. pytest makes its temporary
+    directories with ``mode=0o700``, which Python 3.13 and later turn on Windows into a protected DACL granting
+    ``OWNER RIGHTS`` with inheritance (``posixmodule.c``, ``os_mkdir_impl``), an entry no profile's ``.ssh``
+    carries and Win32-OpenSSH refuses. So on Windows the managed file gets the ACL a profile would give it, the
+    user's full control alone, before ssh reads it.
     """
     from tests.conftest import isolate_home
 
     home = isolate_home(monkeypatch, tmp_path / "home")
     ssh_dir = home / "my ssh"
     ssh_dir.mkdir()
-    if sys.platform == "win32":
-        subprocess.run(
-            ["icacls", str(ssh_dir), "/inheritance:r", "/grant:r", f"{os.environ['USERNAME']}:(OI)(CI)F"],
-            capture_output=True,
-            check=True,
-        )
     config, _ = _mock_config(tmp_path)
     config.operator.ssh_config = ssh_dir / "config"
     db = MagicMock()
@@ -856,7 +860,13 @@ def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entr
 
     _rebuild_config_dir(config, db)
 
-    assert _resolved(ssh_dir / "config", "awvm--web")["hostname"] == "100.64.0.9"
+    managed = ssh_dir / "config.d" / _MANAGED_CONF
+    acl = ""
+    if sys.platform == "win32":
+        _icacls(str(managed), "/inheritance:r", "/grant:r", f"{os.environ['USERNAME']}:F", "/remove:g", "*S-1-3-4")
+        acl = _icacls(str(managed))
+        assert "S-1-3-4" not in acl and "OWNER RIGHTS" not in acl, acl
+    assert _resolved(ssh_dir / "config", "awvm--web", context=acl)["hostname"] == "100.64.0.9"
 
 
 def test_an_unquoted_include_split_at_its_space_is_replaced_where_it_stands(tmp_path: Path) -> None:
