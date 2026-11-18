@@ -461,19 +461,24 @@ def replace_vm_admin_overlay(db: Database, instance_name: str, admin: AdminConfi
 
     This is ``vm reinit --admin-spec``; the caller's outer transaction holds
     it with any admin-template re-point. What the stored layers may hold is
-    :func:`vm_layer_kept_by_admin_spec`'s rule. The outcome names admin
-    fields only.
+    :func:`vm_layer_kept_by_admin_spec`'s rule. A clear leaves a payload-v2
+    record in its cleared form, so it also repairs one missing its admin
+    component. The outcome names admin fields only.
     """
     prior = db.instance_state.get_desired_overlay("vm", instance_name)
     vm_overlay = None if prior is None else vm_layer_kept_by_admin_spec(prior, clearing=admin is None)
     prior_admin_fields = () if prior is None else _stored_admin_field_names(prior)
     if admin is None:
+        # A payload-v2 record is rewritten whenever it is not already its cleared form, which also
+        # repairs one missing its admin component; payload v1 has no admin layer to clear.
+        if prior is not None and prior.payload.payload_version == _VM_RECORD_PAYLOAD_VERSION:
+            cleared = None if vm_overlay is None else _vm_instance_overlays(vm_overlay, None).payload
+            if cleared is None:
+                db.instance_state.clear_desired_overlay("vm", instance_name)
+            elif cleared != prior.payload:
+                db.instance_state.put_desired_overlay("vm", instance_name, cleared)
         if not prior_admin_fields:
             return OverlayOutcome(OverlayDisposition.EXPLICITLY_ABSENT)
-        if vm_overlay is None:
-            db.instance_state.clear_desired_overlay("vm", instance_name)
-        else:
-            db.instance_state.put_desired_overlay("vm", instance_name, _vm_instance_overlays(vm_overlay, None).payload)
         return OverlayOutcome(OverlayDisposition.CLEARED, prior_admin_fields)
     overlays = _vm_instance_overlays(vm_overlay, admin)
     db.instance_state.put_desired_overlay("vm", instance_name, overlays.payload)

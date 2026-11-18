@@ -376,6 +376,22 @@ def test_admin_spec_refuses_an_admin_layer_agent_reinit_would_refuse(
     assert "do-not-print-this-value" not in f"{refused.value} {captured_output.lines}"
 
 
+@pytest.mark.parametrize("vm", [STORED_VM, {}], ids=["vm-layer", "empty-vm-layer"])
+def test_admin_spec_clear_repairs_a_record_missing_its_admin_component(
+    db: Database, config: object, initialized: list[AdminConfig], vm: JsonObject
+) -> None:
+    db.instance_state.put_desired_overlay("vm", "rvm", VersionedPayload(2, {"vm": vm}))
+    with pytest.raises(StateError):
+        get_vm_instance_overlays(db, "rvm")
+
+    _reinit(db, config, admin_spec="{}")
+
+    assert _stored_payload(db) == (VersionedPayload(2, {"vm": vm, "admin": {}}) if vm else None)
+    overlays = get_vm_instance_overlays(db, "rvm")
+    assert (overlays.vm.payload.value if overlays and overlays.vm else {}) == vm
+    assert len(initialized) == 1
+
+
 def test_admin_spec_clears_an_admin_layer_written_by_a_newer_release(
     db: Database, config: object, initialized: list[AdminConfig]
 ) -> None:
