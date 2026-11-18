@@ -517,7 +517,7 @@ class _FakeResult:
 
 
 class _SupportsDispatch(Protocol):
-    """The one method ``_FakeTarget`` needs from a stateful tmux model.
+    """The one method ``_FakeGuest`` needs from a stateful tmux model.
 
     Typed as a Protocol (rather than importing ``tests._tmux_model.TmuxModel``)
     because that module imports ``_FakeResult`` from here; a concrete import
@@ -527,10 +527,10 @@ class _SupportsDispatch(Protocol):
     def dispatch(self, command: str) -> _FakeResult: ...
 
 
-class _FakeTarget:
+class _FakeGuest:
     """The guest a test's recording accesses reach: it answers each request from its command line.
 
-    ``answer`` is a ``RecordingVMAccess`` answer (``install_fake_target``
+    ``answer`` is a ``RecordingVMAccess`` answer (``install_fake_guest``
     installs it for every access): a ``Command``'s line is ``shlex.join`` of
     its argv and a ``Script``'s is its source. ``commands`` records every
     line in order, and ``recorder`` is the access recorder, whose calls hold
@@ -749,52 +749,52 @@ def stub_vm_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args, **kwargs: None)
 
 
-def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) -> _FakeTarget:
-    """Answer every ``VMAccess`` request from ``target`` and stub the VM gates.
+def install_fake_guest(monkeypatch: pytest.MonkeyPatch, guest: _FakeGuest) -> _FakeGuest:
+    """Answer every ``VMAccess`` request from ``guest`` and stub the VM gates.
 
-    Shared by the ``fake_target`` fixture (stateless) and the
-    ``console_target_factory`` fixture (stateful, model-backed), so both
+    Shared by the ``fake_guest`` fixture (stateless) and the
+    ``console_guest_factory`` fixture (stateful, model-backed), so both
     install the same seams and gate stubs. ``execution.vm_access`` builds
-    recording accesses (``vm_access_support.install_access_recorder``) whose
-    requests ``target`` answers, every identity's alike; a required-command
-    check finds its command. Returns ``target`` for the caller to keep a
+    recording accesses (``vm_access_support.route_vm_access_to_guest``) whose
+    requests ``guest`` answers, every identity's alike; a required-command
+    check finds its command. Returns ``guest`` for the caller to keep a
     reference.
     """
     from tests.vm_access_support import route_vm_access_to_guest
 
-    # Late-bound, so a test that replaces ``target.answer`` is answered by its replacement.
-    target.recorder = route_vm_access_to_guest(monkeypatch, lambda call: target.answer(call))
+    # Late-bound, so a test that replaces ``guest.answer`` is answered by its replacement.
+    guest.recorder = route_vm_access_to_guest(monkeypatch, lambda call: guest.answer(call))
     stub_vm_gates(monkeypatch)
-    return target
+    return guest
 
 
 @pytest.fixture
-def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    """Install a FakeTarget for the transport layer and stub the VM gates."""
-    return install_fake_target(monkeypatch, _FakeTarget())
+def fake_guest(monkeypatch: pytest.MonkeyPatch) -> _FakeGuest:
+    """Install a stateless ``_FakeGuest`` that answers every ``VMAccess`` request, and stub the VM gates."""
+    return install_fake_guest(monkeypatch, _FakeGuest())
 
 
 @pytest.fixture
-def console_target_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - returns a local factory
-    """Return a factory that installs a stateful, model-backed fake target.
+def console_guest_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - returns a local factory
+    """Return a factory that installs a stateful, model-backed ``_FakeGuest``.
 
     Usage::
 
-        def test_x(db, console_target_factory):
+        def test_x(db, console_guest_factory):
             model = TmuxModel()
             model.seed_session("aw-console-con", "a", pane_tags=(None, 0))
-            target = console_target_factory(model)
+            guest = console_guest_factory(model)
             restore_session(db, _StubConfig(), console_name="con", session_name="a")
             assert model.has_session("aw-console-con")
 
-    The installed target routes through the same transport seams / gate
-    stubs as ``fake_target``; ``responses`` still layers per-test overrides
+    The installed guest answers through the same access seam and gate stubs
+    as ``fake_guest``; ``responses`` still layers per-test overrides
     on top of the model (override map wins), so a test can force one command
     to fail while the rest stay stateful.
     """
 
-    def _make(model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None) -> _FakeTarget:
-        return install_fake_target(monkeypatch, _FakeTarget(responses=responses, model=model))
+    def _make(model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None) -> _FakeGuest:
+        return install_fake_guest(monkeypatch, _FakeGuest(responses=responses, model=model))
 
     return _make
 

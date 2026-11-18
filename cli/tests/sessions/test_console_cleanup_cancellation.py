@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db import Database
-    from tests.conftest import _FakeResult, _FakeTarget
+    from tests.conftest import _FakeGuest, _FakeResult
 
 
 _FAILURE_CASES = [
@@ -31,8 +31,8 @@ _FAILURE_CASES = [
 
 
 def _guest(
-    factory: Callable[..., _FakeTarget], model: TmuxModel, *, primary: BaseException, cleanup: BaseException | None
-) -> _FakeTarget:
+    factory: Callable[..., _FakeGuest], model: TmuxModel, *, primary: BaseException, cleanup: BaseException | None
+) -> _FakeGuest:
     """A modeled guest whose ``new-session`` raises ``primary`` and, after it, every request raises ``cleanup``."""
     guest = factory(model)
     modeled = guest.dispatch
@@ -58,7 +58,7 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     db: Database,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
-    console_target_factory: Callable[..., _FakeTarget],
+    console_guest_factory: Callable[..., _FakeGuest],
     logged: bool,
     primary_type: type[BaseException],
     cleanup_type: type[BaseException],
@@ -70,7 +70,7 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     primary = primary_type("build failed")
     cleanup = cleanup_type("cleanup interrupted")
     model = TmuxModel()
-    guest = _guest(console_target_factory, model, primary=primary, cleanup=cleanup)
+    guest = _guest(console_guest_factory, model, primary=primary, cleanup=cleanup)
     vm = db.get_vm("vm1")
     assert vm is not None
 
@@ -102,7 +102,7 @@ def test_log_close_preserves_failure_priority(
     db: Database,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
-    console_target_factory: Callable[..., _FakeTarget],
+    console_guest_factory: Callable[..., _FakeGuest],
     primary_type: type[BaseException],
     close_type: type[BaseException],
 ) -> None:
@@ -120,7 +120,7 @@ def test_log_close_preserves_failure_priority(
         raise closing
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger.close", close)
-    guest = _guest(console_target_factory, model, primary=primary, cleanup=None)
+    guest = _guest(console_guest_factory, model, primary=primary, cleanup=None)
     vm = db.get_vm("vm1")
     assert vm is not None
 

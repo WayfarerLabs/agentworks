@@ -169,7 +169,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     from agentworks.execution.attach import Handover
     from agentworks.execution.requests import LoginShell
     from tests._tmux_model import TmuxModel
-    from tests.conftest import _FakeTarget, install_fake_target
+    from tests.conftest import _FakeGuest, install_fake_guest
     from tests.vm_access_support import PARK_TOKEN
 
     _seed_vm(db)
@@ -179,7 +179,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     value = f"prefix'{marker}' $(touch ignored) suffix"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
-    target = install_fake_target(monkeypatch, _FakeTarget(model=TmuxModel()))
+    target = install_fake_guest(monkeypatch, _FakeGuest(model=TmuxModel()))
     admin = target.admin()
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
@@ -208,7 +208,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
 def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Database, tmp_path, monkeypatch, failure):
     from agentworks.errors import ExternalError
     from tests._tmux_model import TmuxModel
-    from tests.conftest import _FakeResult, _FakeTarget, install_fake_target
+    from tests.conftest import _FakeGuest, _FakeResult, install_fake_guest
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
@@ -217,7 +217,7 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {})
     model = TmuxModel()
 
-    class Guest(_FakeTarget):
+    class Guest(_FakeGuest):
         def dispatch(self, command: str) -> _FakeResult:
             if failure == "window" and command.startswith("tmux new-session"):
                 self.commands.append(command)
@@ -231,7 +231,7 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
                     return _FakeResult(stdout="1\n")
             return super().dispatch(command)
 
-    target = install_fake_target(monkeypatch, Guest(model=model))
+    target = install_fake_guest(monkeypatch, Guest(model=model))
     admin = target.admin()
     admin.park_collected = failure != "handover"
     with pytest.raises(ExternalError):
@@ -245,7 +245,7 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
 
 def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, monkeypatch):
     import agentworks.sessions.multi_console.attach as attach
-    from tests.conftest import _FakeResult, _FakeTarget, install_fake_target
+    from tests.conftest import _FakeGuest, _FakeResult, install_fake_guest
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
@@ -261,11 +261,11 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
         if len(cleanup) > 1:
             raise StateError("cleanup failed")
 
-    class Guest(_FakeTarget):
+    class Guest(_FakeGuest):
         def dispatch(self, command: str) -> _FakeResult:
             raise UserAbort("cancelled")
 
-    target = install_fake_target(monkeypatch, Guest())
+    target = install_fake_guest(monkeypatch, Guest())
     monkeypatch.setattr(attach, "_teardown_console_tmux", teardown)
     with pytest.raises(UserAbort):
         mc._build_console_tmux(
@@ -302,7 +302,7 @@ def test_stop_off_parent_accepts_without_transport_activation_or_hold(db: Databa
 
 
 @pytest.mark.parametrize("error_type", [UserAbort, StateError])
-def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_target, monkeypatch, error_type):
+def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_guest, monkeypatch, error_type):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -321,7 +321,7 @@ def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_tar
     assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
 
 
-def test_start_below_stopped_parent_records_child_running_without_activation(db: Database, fake_target, monkeypatch):
+def test_start_below_stopped_parent_records_child_running_without_activation(db: Database, fake_guest, monkeypatch):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -340,7 +340,7 @@ def test_start_below_stopped_parent_records_child_running_without_activation(db:
     assert _vm(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
-def test_known_preflight_refusal_preserves_console_target(db: Database, fake_target, monkeypatch):
+def test_known_preflight_refusal_preserves_console_target(db: Database, fake_guest, monkeypatch):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -410,7 +410,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
 
 
 def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
-    db: Database, console_target_factory, monkeypatch
+    db: Database, console_guest_factory, monkeypatch
 ):
     from copy import deepcopy
 
@@ -428,7 +428,7 @@ def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
     mc.set_console_desired_runtime_state(db, name="con", state="stopped")
     model = TmuxModel()
     model.seed_session("aw-console-con", "alpha")
-    console_target_factory(model)
+    console_guest_factory(model)
     before = deepcopy(model._sessions)
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: pytest.fail("collected pane secrets"))
     mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)

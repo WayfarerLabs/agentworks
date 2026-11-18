@@ -20,7 +20,7 @@ from tests.console_helpers import create_console_record as create_console
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.conftest import _FakeTarget
+    from tests.conftest import _FakeGuest
 
 CON = "aw-console-con"
 
@@ -154,7 +154,7 @@ def test_manager_rejects_invalid_start_index(db: Database, start_index: int) -> 
 
 def test_live_sync_respects_requested_index(
     db: Database,
-    console_target_factory: Callable[..., _FakeTarget],
+    console_guest_factory: Callable[..., _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b", "c", "d"])
@@ -165,7 +165,7 @@ def test_live_sync_respects_requested_index(
     model.new_window(CON, "b")
     model.new_window(CON, "c")
     model.new_window(CON, "d")
-    console_target_factory(model)
+    console_guest_factory(model)
 
     reorder_sessions(
         db,

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database
     from agentworks.execution.results import Result
-    from tests.conftest import _FakeTarget
+    from tests.conftest import _FakeGuest
     from tests.vm_access_support import Call
 
 VALUE = "s3cret-pane-value"
@@ -30,7 +30,7 @@ def test_the_build_logs_each_admin_request_with_its_values_redacted(
     db: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    console_target_factory: Callable[..., _FakeTarget],
+    console_guest_factory: Callable[..., _FakeGuest],
 ) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
@@ -39,7 +39,7 @@ def test_the_build_logs_each_admin_request_with_its_values_redacted(
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     model = TmuxModel()
     # A guest that prints a value back: the layout step's output is the one place it can reach the log.
-    guest = console_target_factory(model, responses={"select-layout": _FakeResult(stdout=f"{VALUE}\n")})
+    guest = console_guest_factory(model, responses={"select-layout": _FakeResult(stdout=f"{VALUE}\n")})
     assert guest.recorder is not None
     recorder = guest.recorder
     answer = guest.answer

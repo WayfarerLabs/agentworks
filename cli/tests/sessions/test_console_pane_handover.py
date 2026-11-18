@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database
     from agentworks.execution.access import Identity
-    from tests.conftest import _FakeTarget
+    from tests.conftest import _FakeGuest
 
 CON = "aw-console-con"
 MARKER = "sekrit-pane-6f2b"
@@ -59,22 +59,22 @@ def _seed(db: Database, specs: list[str], *, admin_shell: bool = False) -> None:
     create_console_record(db, name="con", vm_name="vm1", session_specs=specs, add_admin_shell=admin_shell)
 
 
-def _parks(target: _FakeTarget) -> list[tuple[Identity, str]]:
+def _parks(target: _FakeGuest) -> list[tuple[Identity, str]]:
     return [(call.identity, call.request.env["TOKEN"]) for call in target.parks()]
 
 
-def _assert_no_value_left_the_parked_requests(target: _FakeTarget) -> None:
+def _assert_no_value_left_the_parked_requests(target: _FakeGuest) -> None:
     assert target.recorder is not None
     assert not [line for line in target.commands if MARKER in line or "quoted" in line]
     assert not [call for call in target.recorder.calls if call.operation == "run" and call.request.env]
 
 
 def test_a_console_build_parks_every_shell_on_its_own_identity(
-    db: Database, console_target_factory: Callable[..., _FakeTarget]
+    db: Database, console_guest_factory: Callable[..., _FakeGuest]
 ) -> None:
     _seed(db, ["a+1", "s+1"], admin_shell=True)
     db.update_console_shells("con", "s", [{"cwd": None, "admin": False}, {"cwd": None, "admin": True}])
-    target = console_target_factory(TmuxModel())
+    target = console_guest_factory(TmuxModel())
 
     mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -88,12 +88,12 @@ def test_a_console_build_parks_every_shell_on_its_own_identity(
 
 
 def test_add_shell_parks_the_new_shell_on_its_own_identity(
-    db: Database, console_target_factory: Callable[..., _FakeTarget]
+    db: Database, console_guest_factory: Callable[..., _FakeGuest]
 ) -> None:
     _seed(db, ["s"])
     model = TmuxModel()
     model.seed_session(CON, "s")
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
 
     mc.add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -102,14 +102,14 @@ def test_add_shell_parks_the_new_shell_on_its_own_identity(
 
 
 def test_restoring_a_missing_window_parks_every_configured_shell(
-    db: Database, console_target_factory: Callable[..., _FakeTarget]
+    db: Database, console_guest_factory: Callable[..., _FakeGuest]
 ) -> None:
     """A killed attach pane takes its window with it when it was the last pane; restore rebuilds it whole."""
     _seed(db, ["a", "s+2"])
     db.update_console_shells("con", "s", [{"cwd": None, "admin": False}, {"cwd": None, "admin": True}])
     model = TmuxModel()
     model.seed_session(CON, "a")
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
 
     mc.restore_session(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -119,13 +119,13 @@ def test_restoring_a_missing_window_parks_every_configured_shell(
 
 
 def test_restoring_missing_panes_parks_only_the_missing_shells(
-    db: Database, console_target_factory: Callable[..., _FakeTarget]
+    db: Database, console_guest_factory: Callable[..., _FakeGuest]
 ) -> None:
     _seed(db, ["s+2"])
     db.update_console_shells("con", "s", [{"cwd": None, "admin": True}, {"cwd": None, "admin": False}])
     model = TmuxModel()
     model.seed_session(CON, "s", pane_tags=(None, 0))
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
 
     mc.restore_session(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 

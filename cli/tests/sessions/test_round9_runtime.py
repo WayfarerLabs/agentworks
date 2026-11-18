@@ -29,10 +29,10 @@ CONFIG = SimpleNamespace(session=SimpleNamespace(history_limit=1))
 if TYPE_CHECKING:
     from agentworks.db import Database
 
-    from .test_native_startup import NativeTarget
+    from .test_native_startup import NativeGuest
 
 
-def stopped_row(db: Database, native: NativeTarget) -> None:
+def stopped_row(db: Database, native: NativeGuest) -> None:
     db.update_session_runtime(
         "s1", socket_path=native.socket, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
     )

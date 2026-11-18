@@ -341,13 +341,13 @@ def test_console_add_sessions_does_not_eager_resolve_live_branch(
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
     # Live branch: simulate a live tmux session so _add_session_window runs.
     fake_vm = SimpleNamespace(name="vm1", admin_username="admin", tailscale_host="x")
-    fake_target = SimpleNamespace(
+    fake_guest = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
     )
     monkeypatch.setattr(
         multi_console,
         "_live_access",
-        lambda *a, **k: (fake_vm, fake_target),
+        lambda *a, **k: (fake_vm, fake_guest),
     )
     monkeypatch.setattr(
         multi_console,

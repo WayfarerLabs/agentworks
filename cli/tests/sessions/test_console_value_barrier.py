@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 @pytest.mark.parametrize("admin_shell", [True, False])
 def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
     db: Database,
-    console_target_factory,
+    console_guest_factory,
     monkeypatch: pytest.MonkeyPatch,
     admin_shell: bool,
 ):
@@ -50,7 +50,7 @@ def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
     model = TmuxModel()
     model.seed_session("aw-console-con", "old")
     model.seed_session("aw-console-build+con", "partial")
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
     before = deepcopy(model._sessions)
     values = {"pane-key": "literal${agw:session_name}-secret"}
     secret_target = SecretTarget(vm={"TOKEN": EnvEntry.model_validate({"secret": "pane-key"})})
@@ -74,7 +74,7 @@ def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
 @pytest.mark.parametrize("staging", [False, True])
 def test_healthy_or_cleanup_only_validation_skips_unused_environments(
     db: Database,
-    console_target_factory,
+    console_guest_factory,
     monkeypatch: pytest.MonkeyPatch,
     staging: bool,
 ):
@@ -84,7 +84,7 @@ def test_healthy_or_cleanup_only_validation_skips_unused_environments(
     model.seed_session("aw-console-con", "old")
     if staging:
         model.seed_session("aw-console-build+con", "partial")
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
@@ -104,7 +104,7 @@ def test_healthy_or_cleanup_only_validation_skips_unused_environments(
 
 
 def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
-    db: Database, console_target_factory, monkeypatch
+    db: Database, console_guest_factory, monkeypatch
 ):
     _seed_vm(db)
     _seed_sessions(db, ["admin-session", "attach-only"])
@@ -126,7 +126,7 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
     )
     db.update_console_shells("con", "agent-session", [{"cwd": None, "admin": False}, {"cwd": None, "admin": True}])
     model = TmuxModel()
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     calls = []
     with mc.guarded_console_selection(db, "con") as (console, guard):

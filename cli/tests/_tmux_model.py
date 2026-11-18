@@ -1,6 +1,6 @@
 """An opt-in stateful tmux model for the named-console test fakes.
 
-The stateless ``_FakeTarget`` in ``tests/conftest.py`` is a substring
+The stateless ``_FakeGuest`` in ``tests/conftest.py`` is a substring
 map: a ``kill-window`` has no effect on a later ``list-windows`` /
 ``list-panes`` / ``has-session``, because ``run()`` just replays a
 seeded response. That is exactly the blind spot a real console-destroying
@@ -57,7 +57,7 @@ within, rather than bugs):
   a shell) that position is the tail, so the model matches within that
   envelope but does not reproduce tmux's general spatial insertion.
 
-Opt-in: a ``_FakeTarget`` built without a ``model`` behaves exactly as
+Opt-in: a ``_FakeGuest`` built without a ``model`` behaves exactly as
 before, so every existing stateless test is untouched.
 """
 

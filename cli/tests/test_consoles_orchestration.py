@@ -47,7 +47,7 @@ from agentworks.sessions.multi_console import (
 from agentworks.sessions.multi_console._status import ConsoleStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._runtime_probes import framed_runtime_result
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.conftest import _FakeGuest, _FakeResult
 from tests.console_helpers import create_console_record as create_console
 from tests.vm_access_support import Call, command_line
 
@@ -106,14 +106,14 @@ def test_create_console_explicit_specs(db: Database, captured_output: CapturedOu
 
 def test_console_start_records_publication_without_refreshing_running_noop(
     db: Database,
-    console_target_factory,  # noqa: ANN001
+    console_guest_factory,  # noqa: ANN001
 ) -> None:
     from tests._tmux_model import TmuxModel
 
     _seed_vm(db, with_tailscale=True)
     db.insert_console("work", "vm1", admin_shell=True)
     model = TmuxModel()
-    console_target_factory(model)
+    console_guest_factory(model)
 
     start_console(db, _StubConfig(), name="work", interaction=TtyInteractionPolicy.REFUSE)
     started = db.get_console("work")
@@ -133,7 +133,7 @@ def test_console_start_records_publication_without_refreshing_running_noop(
 
 def test_console_start_interrupt_after_publication_tears_down_runtime(
     db: Database,
-    console_target_factory,  # noqa: ANN001
+    console_guest_factory,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tests._tmux_model import TmuxModel
@@ -141,7 +141,7 @@ def test_console_start_interrupt_after_publication_tears_down_runtime(
     _seed_vm(db, with_tailscale=True)
     db.insert_console("work", "vm1", admin_shell=True)
     model = TmuxModel()
-    console_target_factory(model)
+    console_guest_factory(model)
 
     def _interrupt(_name: str) -> None:
         raise KeyboardInterrupt
@@ -154,7 +154,7 @@ def test_console_start_interrupt_after_publication_tears_down_runtime(
     assert not model.has_session("aw-console-work")
 
 
-def test_running_session_names_raises_on_unreachable(db: Database, fake_target: _FakeTarget) -> None:
+def test_running_session_names_raises_on_unreachable(db: Database, fake_guest: _FakeGuest) -> None:
     """If sessions exist with valid pid+boot_id but the probe returns nothing,
     treat that as a transport failure and raise instead of silently reporting
     'no running sessions'."""
@@ -165,7 +165,7 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
     db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (BOOT_ID,))
     db._conn.commit()
     # Probe returns empty stdout (simulates transport failure caught by check=False).
-    fake_target.dispatch = lambda command: _FakeResult(returncode=255, stdout="")  # type: ignore[method-assign]
+    fake_guest.dispatch = lambda command: _FakeResult(returncode=255, stdout="")  # type: ignore[method-assign]
 
     with pytest.raises(ConnectivityError):
         running_session_names(db, _StubConfig(), "vm1")
@@ -174,7 +174,7 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
 @pytest.mark.parametrize("pid", [None, 100])
 def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
     db: Database,
-    fake_target: _FakeTarget,
+    fake_guest: _FakeGuest,
     pid: int | None,
 ) -> None:
     from agentworks.sessions.multi_console import running_session_names
@@ -193,12 +193,12 @@ def test_running_session_names_rejects_legacy_row_before_connectivity_probe(
     assert caught.value.entity_kind == "session"
     assert caught.value.entity_name == "legacy"
     assert caught.value.hint is not None
-    assert fake_target.commands == []
+    assert fake_guest.commands == []
 
 
 def test_running_session_names_refuses_unproved_live_identity_without_repair(
     db: Database,
-    fake_target: _FakeTarget,
+    fake_guest: _FakeGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions import manager
@@ -217,11 +217,11 @@ def test_running_session_names_refuses_unproved_live_identity_without_repair(
 
     def batch_status(call: Call) -> Result:
         command, rows = _batch_request(call)
-        fake_target.commands.append(command)
+        fake_guest.commands.append(command)
         key = _batch_key(rows, "alpha")
         return framed_runtime_result(command, _FakeResult(returncode=0, stdout=f"S:{key}:0::0::1::1:\n")).result()
 
-    fake_target.answer = batch_status  # type: ignore[method-assign]
+    fake_guest.answer = batch_status  # type: ignore[method-assign]
 
     with pytest.raises(ConnectivityError):
         running_session_names(db, _StubConfig(), "vm1")
@@ -230,19 +230,19 @@ def test_running_session_names_refuses_unproved_live_identity_without_repair(
     assert (unchanged.pid, unchanged.boot_id, unchanged.tmux_server_start_ticks) == (None, None, None)
     assert unchanged == before
     assert db._conn.total_changes == changes_before
-    assert len(fake_target.commands) == 1
+    assert len(fake_guest.commands) == 1
 
 
 def test_running_session_names_refuses_unresolved_incomplete_identity(
     db: Database,
-    fake_target: _FakeTarget,
+    fake_guest: _FakeGuest,
 ) -> None:
     from agentworks.sessions.multi_console import running_session_names
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
-    fake_target.dispatch = lambda command: (  # type: ignore[method-assign]
-        fake_target.commands.append(command) or _FakeResult(returncode=255)
+    fake_guest.dispatch = lambda command: (  # type: ignore[method-assign]
+        fake_guest.commands.append(command) or _FakeResult(returncode=255)
     )
 
     with pytest.raises(ConnectivityError):
@@ -250,10 +250,10 @@ def test_running_session_names_refuses_unresolved_incomplete_identity(
 
     unresolved = db.get_session("alpha")
     assert unresolved is not None and unresolved.pid is None
-    assert len(fake_target.commands) == 1
+    assert len(fake_guest.commands) == 1
 
 
-def test_running_session_names_uses_live_status_check(db: Database, fake_target: _FakeTarget) -> None:
+def test_running_session_names_uses_live_status_check(db: Database, fake_guest: _FakeGuest) -> None:
     """running_session_names SSH-probes via observe_session_statuses and
     returns only sessions whose live tmux state is running."""
     from agentworks.sessions.multi_console import running_session_names
@@ -271,7 +271,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # claims the session is gone.
     def batch_status(call: Call) -> Result | None:
         command, input_data = _batch_request(call)
-        fake_target.commands.append(command)
+        fake_guest.commands.append(command)
         if all(_encoded_probe_field(name) in input_data for name in ("alpha", "beta", "gamma")):
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
@@ -292,7 +292,7 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
             ).result()
         return None  # a command check finds its command; anything else completes
 
-    fake_target.answer = batch_status  # type: ignore[method-assign]
+    fake_guest.answer = batch_status  # type: ignore[method-assign]
 
     names = running_session_names(db, _StubConfig(), "vm1")
     assert names == ["alpha", "beta"]

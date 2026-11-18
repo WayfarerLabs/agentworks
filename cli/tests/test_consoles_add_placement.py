@@ -21,7 +21,7 @@ from tests.console_helpers import create_console_record as create_console
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.conftest import _FakeTarget
+    from tests.conftest import _FakeGuest
 
 CON = "aw-console-con"
 
@@ -92,14 +92,14 @@ def test_manager_places_new_block_at_requested_index(
 @pytest.mark.parametrize("start_index", [-1, 4])
 def test_manager_rejects_invalid_index_without_mutation(
     db: Database,
-    fake_target: _FakeTarget,
+    fake_guest: _FakeGuest,
     monkeypatch: pytest.MonkeyPatch,
     start_index: int,
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b", "c", "d"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
-    fake_target.commands.clear()
+    fake_guest.commands.clear()
     monkeypatch.setattr(
         "agentworks.secrets.resolve_for_command",
         lambda *args, **kwargs: pytest.fail("invalid placement must not resolve secrets"),
@@ -118,7 +118,7 @@ def test_manager_rejects_invalid_index_without_mutation(
     assert exc_info.value.entity_kind == "console"
     assert exc_info.value.entity_name == "con"
     assert [member.session_name for member in db.list_console_sessions("con")] == ["a", "b", "c"]
-    assert fake_target.commands == []
+    assert fake_guest.commands == []
 
 
 def test_manager_rolls_back_additions_when_reorder_fails(
@@ -209,7 +209,7 @@ def test_manager_reports_typed_conflict_when_requested_membership_changes(
 
 def test_live_sync_matches_indexed_database_order(
     db: Database,
-    console_target_factory: Callable[..., _FakeTarget],
+    console_guest_factory: Callable[..., _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b", "c", "d"])
@@ -218,7 +218,7 @@ def test_live_sync_matches_indexed_database_order(
     model = TmuxModel()
     model.new_session(CON, "a")
     model.new_window(CON, "b")
-    console_target_factory(model)
+    console_guest_factory(model)
 
     add_sessions(
         db,

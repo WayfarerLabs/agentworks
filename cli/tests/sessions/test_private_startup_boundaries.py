@@ -19,12 +19,12 @@ from agentworks.sessions.manager._lifecycle import _redacted_launch_errors
 from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
-from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_FINALIZE, NativeTarget, launch
+from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_FINALIZE, NativeGuest, launch
 from .test_native_startup import native as native
 from .test_round8_startup import bind_native_runtime
 
 
-def record_native_runtime(db: Database, native: NativeTarget) -> tmux.TmuxServerFingerprint:
+def record_native_runtime(db: Database, native: NativeGuest) -> tmux.TmuxServerFingerprint:
     socket, _ = launch(native, "sleep 30", is_admin=False)
     fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=socket).fingerprint
     assert fingerprint is not None

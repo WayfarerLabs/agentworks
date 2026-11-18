@@ -26,7 +26,7 @@ from .test_create_start_restart_orchestrated import _stub_build_registry as _stu
 from .test_native_startup import (
     _NATIVE_CAPTURE,
     _NATIVE_FINALIZE,
-    NativeTarget,
+    NativeGuest,
     launch,
 )
 from .test_native_startup import (
@@ -36,7 +36,7 @@ from .test_native_startup import (
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="uses Linux guest runtime commands")
 
 
-def bind_native_runtime(db, monkeypatch, native: NativeTarget) -> None:
+def bind_native_runtime(db, monkeypatch, native: NativeGuest) -> None:
     native.socket = str(native.root / "agt-a1" / "s1.sock")
     Path(native.socket).parent.mkdir()
     monkeypatch.setattr(tmux, "AGENT_SOCKET_ROOT", str(native.root))

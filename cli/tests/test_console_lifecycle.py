@@ -25,7 +25,7 @@ from tests.console_helpers import create_console_record
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.conftest import _FakeTarget
+    from tests.conftest import _FakeGuest
 
 
 def _refuse() -> TtyInteractionPolicy:
@@ -34,12 +34,12 @@ def _refuse() -> TtyInteractionPolicy:
 
 def test_create_persists_and_publishes_only_canonical_runtime(
     db: Database,
-    console_target_factory: Callable[[TmuxModel], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     model = TmuxModel()
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
 
     create_console(
         db,
@@ -58,12 +58,12 @@ def test_create_persists_and_publishes_only_canonical_runtime(
 
 def test_create_failure_retains_stopped_definition_and_cleans_staging(
     db: Database,
-    console_target_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     model = TmuxModel()
-    console_target_factory(
+    console_guest_factory(
         model,
         {"new-window -t '=aw-console-build+con'": _FakeResult(returncode=1, stderr="boom")},
     )
@@ -85,7 +85,7 @@ def test_create_failure_retains_stopped_definition_and_cleans_staging(
 
 def test_create_failure_retains_definition_when_runtime_absence_is_indeterminate(
     db: Database,
-    console_target_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeGuest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import agentworks.sessions.multi_console as multi_console
@@ -93,7 +93,7 @@ def test_create_failure_retains_definition_when_runtime_absence_is_indeterminate
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     model = TmuxModel()
-    console_target_factory(
+    console_guest_factory(
         model,
         {"new-window -t '=aw-console-build+con'": _FakeResult(returncode=1, stderr="boom")},
     )
@@ -121,7 +121,7 @@ def test_create_failure_retains_definition_when_runtime_absence_is_indeterminate
 
 def test_start_is_idempotent_and_stop_removes_both_managed_names(
     db: Database,
-    console_target_factory: Callable[[TmuxModel], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
@@ -129,7 +129,7 @@ def test_start_is_idempotent_and_stop_removes_both_managed_names(
     model = TmuxModel()
     model.seed_session("aw-console-con", "alpha")
     model.seed_session("aw-console-build+con", "partial")
-    console_target_factory(model)
+    console_guest_factory(model)
 
     start_console(db, _StubConfig(), name="con", interaction=_refuse())
     assert model.has_session("aw-console-con")
@@ -143,13 +143,13 @@ def test_start_is_idempotent_and_stop_removes_both_managed_names(
 
 def test_attach_never_realizes_an_absent_runtime(
     db: Database,
-    console_target_factory: Callable[[TmuxModel], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
     model = TmuxModel()
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
 
     with pytest.raises(StateError):
         attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=_refuse())
@@ -160,7 +160,7 @@ def test_attach_never_realizes_an_absent_runtime(
 
 def test_restart_resolves_inputs_before_destroying_running_runtime(
     db: Database,
-    console_target_factory: Callable[[TmuxModel], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_vm(db, with_tailscale=True)
@@ -168,7 +168,7 @@ def test_restart_resolves_inputs_before_destroying_running_runtime(
     create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
     model = TmuxModel()
     model.seed_session("aw-console-con", "alpha")
-    console_target_factory(model)
+    console_guest_factory(model)
 
     def _unavailable(*args: object, **kwargs: object) -> dict[str, str]:
         raise SecretUnavailableError("missing")
@@ -181,14 +181,14 @@ def test_restart_resolves_inputs_before_destroying_running_runtime(
 
 def test_exact_targets_do_not_touch_a_prefix_neighbor(
     db: Database,
-    console_target_factory: Callable[[TmuxModel], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel], _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
     model = TmuxModel()
     model.seed_session("aw-console-conlong", "operator")
-    console_target_factory(model)
+    console_guest_factory(model)
 
     start_console(db, _StubConfig(), name="con", interaction=_refuse())
 
@@ -198,12 +198,12 @@ def test_exact_targets_do_not_touch_a_prefix_neighbor(
 
 def test_console_transport_failure_never_triggers_teardown_or_build(
     db: Database,
-    console_target_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeTarget],
+    console_guest_factory: Callable[[TmuxModel, dict[str, _FakeResult]], _FakeGuest],
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     model = TmuxModel()
-    target = console_target_factory(
+    target = console_guest_factory(
         model,
         {"has-session -t '=aw-console-con'": _FakeResult(returncode=255)},
     )

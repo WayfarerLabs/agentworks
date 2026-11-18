@@ -437,14 +437,14 @@ def test_session_describe_does_not_eager_resolve(
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
-    fake_target = SimpleNamespace(
+    fake_guest = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
     )
     stub_vm_gates(monkeypatch)
 
     @contextlib.contextmanager
     def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
-        yield (ws_row, vm_row, fake_target.run, None, fake_target)
+        yield (ws_row, vm_row, fake_guest.run, None, fake_guest)
 
     monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(

@@ -20,13 +20,13 @@ from agentworks.sessions.manager._teardown import DedicatedTeardownPlan, execute
 from tests.conftest import current_user_name
 from tests.vm_access_support import Admin, RecordingVMAccess
 
-from .test_native_startup import _NATIVE_CAPTURE, NativeTarget, launch
+from .test_native_startup import _NATIVE_CAPTURE, NativeGuest, launch
 from .test_native_startup import native as native
 
 SESSION_UUID = "11111111-1111-4111-8111-111111111111"
 
 
-def _plan(native: NativeTarget, access: RecordingVMAccess, *, force: bool = False) -> DedicatedTeardownPlan:
+def _plan(native: NativeGuest, access: RecordingVMAccess, *, force: bool = False) -> DedicatedTeardownPlan:
     fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
     assert fingerprint is not None
     return DedicatedTeardownPlan(
@@ -50,7 +50,7 @@ def _sources(access: RecordingVMAccess) -> list[str]:
     return [request.source for request in access.requests() if isinstance(request, Script)]
 
 
-def test_a_teardown_kills_the_matching_server_once_and_repeats_only_its_absence_poll(native: NativeTarget) -> None:
+def test_a_teardown_kills_the_matching_server_once_and_repeats_only_its_absence_poll(native: NativeGuest) -> None:
     launch(native, "sleep 30")
     access = native.access()
 
@@ -74,9 +74,7 @@ def test_a_teardown_kills_the_matching_server_once_and_repeats_only_its_absence_
 
 
 @pytest.mark.parametrize("force", [False, True])
-def test_a_teardown_whose_probe_does_not_complete_removes_and_signals_nothing(
-    native: NativeTarget, force: bool
-) -> None:
+def test_a_teardown_whose_probe_does_not_complete_removes_and_signals_nothing(native: NativeGuest, force: bool) -> None:
     launch(native, "sleep 30")
     probed = native.access()
     plan = _plan(native, probed, force=force)

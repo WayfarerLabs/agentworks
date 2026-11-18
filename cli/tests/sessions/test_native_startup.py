@@ -48,7 +48,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-class NativeTarget:
+class NativeGuest:
     logger = None
 
     def __init__(self, root: Path) -> None:
@@ -137,7 +137,7 @@ def native(monkeypatch):
     # pytest's nested tmp_path is longer than sun_path on some hosts.
     with tempfile.TemporaryDirectory(prefix="agw-r9-runtime-native-", dir="/tmp") as directory:
         root = Path(directory)
-        target = NativeTarget(root)
+        target = NativeGuest(root)
         Path(target.socket).parent.mkdir()
         monkeypatch.setattr(tmux, "AGENT_SOCKET_ROOT", str(root))
         monkeypatch.setattr(tmux, "RUNUSER_PATH", str(target.runuser))
@@ -163,13 +163,13 @@ def native(monkeypatch):
     assert not root.exists()
 
 
-def _in_agent_directory(native: NativeTarget, linux_user: str) -> None:
+def _in_agent_directory(native: NativeGuest, linux_user: str) -> None:
     """Move the fixture socket into the directory of the agent the row names."""
     native.socket = str(native.root / linux_user / "s.sock")
     Path(native.socket).parent.mkdir(exist_ok=True)
 
 
-def launch(native: NativeTarget, command: str, *, is_admin: bool = True, launch_options=None):
+def launch(native: NativeGuest, command: str, *, is_admin: bool = True, launch_options=None):
     options = launch_options or {}
     return _NATIVE_CREATE(
         "s1",
@@ -467,7 +467,7 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
 
     def reject_release(command, *, check=True, **kwargs):
         if "remain-on-exit off" in command:
-            # Make the actual native command fail. NativeTarget.run enforces
+            # Make the actual native command fail. NativeGuest.run enforces
             # check=True exactly as the production Transport does.
             command = command.replace("remain-on-exit", "agentworks-invalid-release-option")
         return real_run(command, check=check, **kwargs)

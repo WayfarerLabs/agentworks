@@ -17,7 +17,7 @@ from agentworks.sessions import manager, tmux
 
 from .test_create_start_restart_orchestrated import _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
-from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_FINALIZE, NativeTarget, launch
+from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_FINALIZE, NativeGuest, launch
 from .test_native_startup import native as native
 from .test_round8_startup import bind_native_runtime
 
@@ -37,7 +37,7 @@ def access_user():
 
 
 def bind_access_group(
-    monkeypatch, native: NativeTarget, members: str, *, lookup_exit: int = 0, shell: str | None = None
+    monkeypatch, native: NativeGuest, members: str, *, lookup_exit: int = 0, shell: str | None = None
 ):
     """Control NSS enumeration without creating users or changing real groups."""
     native_run = native.run

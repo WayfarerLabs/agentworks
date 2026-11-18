@@ -24,11 +24,11 @@ from .test_round9_runtime import invoke
 if TYPE_CHECKING:
     from agentworks.db import Database
 
-    from .test_native_startup import NativeTarget
+    from .test_native_startup import NativeGuest
 
 
 def partial_runtime(
-    tmp_path, monkeypatch, native: NativeTarget, markers: str
+    tmp_path, monkeypatch, native: NativeGuest, markers: str
 ) -> tuple[Database, tmux.TmuxServerFingerprint]:
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     bind_native_runtime(db, monkeypatch, native)
@@ -76,7 +76,7 @@ def partial_runtime(
     return db, observed
 
 
-def act(db: Database, native: NativeTarget, operation: str) -> None:
+def act(db: Database, native: NativeGuest, operation: str) -> None:
     row = db.get_session("s1")
     assert row is not None
     if operation == "repair":

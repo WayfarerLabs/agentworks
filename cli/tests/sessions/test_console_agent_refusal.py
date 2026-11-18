@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db import Database
-    from tests.conftest import _FakeTarget
+    from tests.conftest import _FakeGuest
 
 CON = "aw-console-con"
 BOT = Agent("bot", "bot-user")
@@ -107,7 +107,7 @@ def _add_shell(db: Database, model: TmuxModel) -> Callable[[], None]:
 )
 def test_a_refused_agent_stops_the_operation_before_it_resolves_or_changes_anything(
     db: Database,
-    console_target_factory: Callable[..., _FakeTarget],
+    console_guest_factory: Callable[..., _FakeGuest],
     monkeypatch: pytest.MonkeyPatch,
     operation: Callable[[Database, TmuxModel], Callable[[], None]],
 ) -> None:
@@ -119,7 +119,7 @@ def test_a_refused_agent_stops_the_operation_before_it_resolves_or_changes_anyth
         db.set_console_desired_runtime_state("con", DesiredRuntimeState.RUNNING)
     model = TmuxModel()
     run = operation(db, model)
-    target = console_target_factory(model)
+    target = console_guest_factory(model)
     assert target.recorder is not None
     agent = target.recorder.access(BOT)
     agent.answer = lambda _call: Result(Unknown(UnknownReason.AUTH_FAILED))

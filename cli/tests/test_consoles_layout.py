@@ -21,7 +21,7 @@ from tests._consoles_support import (  # noqa: F401
     _StubConfig,
     _StubVerticalLayoutConfig,
 )
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.conftest import _FakeGuest, _FakeResult
 from tests.console_helpers import create_console_record as create_console
 
 if TYPE_CHECKING:
@@ -29,19 +29,19 @@ if TYPE_CHECKING:
 
 
 def test_apply_layout_preset_emits_simple_select_layout(
-    fake_target: _FakeTarget,
+    fake_guest: _FakeGuest,
 ) -> None:
     """Tmux preset layout names go straight to `select-layout`."""
     from agentworks.sessions.multi_console_layout import _apply_layout
 
-    _apply_layout(fake_target.run_command(), "'=aw-console-con'", "alpha", "tiled")
-    assert fake_target.commands == [
+    _apply_layout(fake_guest.run_command(), "'=aw-console-con'", "alpha", "tiled")
+    assert fake_guest.commands == [
         "tmux select-layout -t '=aw-console-con':alpha tiled",
     ]
 
 
 def test_apply_layout_aw_session_vertical_queries_then_applies_string(
-    fake_target: _FakeTarget,
+    fake_guest: _FakeGuest,
 ) -> None:
     """`aw-session-vertical` queries window geometry + pane IDs, builds a
     custom tmux layout string Python-side, and applies it via
@@ -50,20 +50,20 @@ def test_apply_layout_aw_session_vertical_queries_then_applies_string(
 
     # First call returns geometry + pane ids; the helper builds a layout
     # string from this and applies it via the second call.
-    fake_target.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
+    fake_guest.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
         returncode=0, stdout="80x36\n0 %31\n1 %32\n2 %33\n"
     )
 
     _apply_layout(
-        fake_target.run_command(),
+        fake_guest.run_command(),
         "'=aw-console-con'",
         "alpha",
         "aw-session-vertical",
     )
 
     # Expect two commands: the geometry/pane query and the select-layout apply.
-    assert len(fake_target.commands) == 2
-    query_cmd, apply_cmd = fake_target.commands
+    assert len(fake_guest.commands) == 2
+    query_cmd, apply_cmd = fake_guest.commands
     assert "display-message -t '=aw-console-con':alpha" in query_cmd
     assert "list-panes -t '=aw-console-con':alpha" in query_cmd
     # The apply command holds the computed string with a tmux checksum prefix.
@@ -165,7 +165,7 @@ def test_build_aw_session_vertical_layout_string_under_pane_base_index_one() -> 
 
 
 def test_apply_layout_aw_session_vertical_silent_on_single_pane(
-    fake_target: _FakeTarget, captured_output: CapturedOutput
+    fake_guest: _FakeGuest, captured_output: CapturedOutput
 ) -> None:
     """A session window with zero configured shells has just the session
     pane; nothing to lay out. The apply helper must NOT warn -- this is
@@ -174,19 +174,19 @@ def test_apply_layout_aw_session_vertical_silent_on_single_pane(
         _apply_aw_session_vertical_layout,
     )
 
-    fake_target.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
+    fake_guest.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
         returncode=0, stdout="80x36\n0 %1\n"
     )
 
-    _apply_aw_session_vertical_layout(fake_target.run_command(), "'=aw-console-con'", "alpha")
+    _apply_aw_session_vertical_layout(fake_guest.run_command(), "'=aw-console-con'", "alpha")
 
     # The query happens, but no select-layout call and no warning.
-    assert not any("select-layout" in c for c in fake_target.commands)
+    assert not any("select-layout" in c for c in fake_guest.commands)
     assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
 
 
 def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
-    fake_target: _FakeTarget, captured_output: CapturedOutput
+    fake_guest: _FakeGuest, captured_output: CapturedOutput
 ) -> None:
     """Too-small geometry (or anything else the builder refuses) should
     still produce a warning so an operator sees a breadcrumb."""
@@ -194,17 +194,17 @@ def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
         _apply_aw_session_vertical_layout,
     )
 
-    fake_target.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
+    fake_guest.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
         returncode=0, stdout="80x4\n0 %1\n1 %2\n2 %3\n3 %4\n"
     )
 
-    _apply_aw_session_vertical_layout(fake_target.run_command(), "'=aw-console-con'", "alpha")
+    _apply_aw_session_vertical_layout(fake_guest.run_command(), "'=aw-console-con'", "alpha")
 
     assert any("could not build aw-session-vertical" in w for w in captured_output.warnings)
 
 
 def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
-    fake_target: _FakeTarget, captured_output: CapturedOutput
+    fake_guest: _FakeGuest, captured_output: CapturedOutput
 ) -> None:
     """Under `pane-base-index 1` the pane list comes back indexed 1..N. The
     default layout must still apply (a real select-layout call) with no
@@ -213,68 +213,68 @@ def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
         _apply_aw_session_vertical_layout,
     )
 
-    fake_target.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
+    fake_guest.responses["display-message -t '=aw-console-con':alpha"] = _FakeResult(
         returncode=0, stdout="80x36\n1 %1\n2 %2\n"
     )
 
-    _apply_aw_session_vertical_layout(fake_target.run_command(), "'=aw-console-con'", "alpha")
+    _apply_aw_session_vertical_layout(fake_guest.run_command(), "'=aw-console-con'", "alpha")
 
-    assert any("select-layout -t '=aw-console-con':alpha" in c for c in fake_target.commands)
+    assert any("select-layout -t '=aw-console-con':alpha" in c for c in fake_guest.commands)
     assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
 
 
-def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:
+def test_focus_session_pane_emits_select_pane(fake_guest: _FakeGuest) -> None:
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
-    _focus_session_pane(fake_target.run_command(), "'=aw-console-con'", "alpha", 0)
-    assert fake_target.commands == [
+    _focus_session_pane(fake_guest.run_command(), "'=aw-console-con'", "alpha", 0)
+    assert fake_guest.commands == [
         "tmux select-pane -t '=aw-console-con':alpha.0",
     ]
 
 
-def test_focus_session_pane_targets_base_index(fake_target: _FakeTarget) -> None:
+def test_focus_session_pane_targets_base_index(fake_guest: _FakeGuest) -> None:
     """Under `pane-base-index 1` the session pane reports index 1 and no pane
     ever reports index 0, so focus must target the given base index, not a
     literal 0 (which tmux rejects with `can't find pane: 0`)."""
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
-    _focus_session_pane(fake_target.run_command(), "'=aw-console-con'", "alpha", 1)
-    assert fake_target.commands == [
+    _focus_session_pane(fake_guest.run_command(), "'=aw-console-con'", "alpha", 1)
+    assert fake_guest.commands == [
         "tmux select-pane -t '=aw-console-con':alpha.1",
     ]
 
 
-def test_restore_session_focuses_session_pane(db: Database, fake_target: _FakeTarget) -> None:
+def test_restore_session_focuses_session_pane(db: Database, fake_guest: _FakeGuest) -> None:
     """restore-session repair ends with the session pane focused."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a+2"])
 
-    fake_target.commands.clear()
-    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
-    fake_target.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
-    fake_target.responses["list-windows -t '=aw-console-con'"] = _FakeResult(returncode=0, stdout="a\n")
+    fake_guest.commands.clear()
+    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_guest.responses["-F '#{window_index}|#{window_name}'"] = _FakeResult(stdout="0|a\n")
+    fake_guest.responses["list-windows -t '=aw-console-con'"] = _FakeResult(returncode=0, stdout="a\n")
     # One shell pane present (config_index=0), the second is missing.
-    fake_target.responses["list-panes -t '=aw-console-con':a"] = _FakeResult(returncode=0, stdout="%5|0|\n%6|1|0\n")
+    fake_guest.responses["list-panes -t '=aw-console-con':a"] = _FakeResult(returncode=0, stdout="%5|0|\n%6|1|0\n")
     # split-window must return a fresh pane id so the tag step succeeds.
-    fake_target.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%9\n")
+    fake_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%9\n")
 
     restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert "tmux select-pane -t '=aw-console-con':a.0" in fake_target.commands
+    assert "tmux select-pane -t '=aw-console-con':a.0" in fake_guest.commands
 
 
-def test_add_shell_does_not_focus_session_pane(db: Database, fake_target: _FakeTarget) -> None:
+def test_add_shell_does_not_focus_session_pane(db: Database, fake_guest: _FakeGuest) -> None:
     """add-shell is invoked mid-attach; pulling focus away from the
     operator's current pane would be jarring. Layout still re-applies."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    fake_target.commands.clear()
-    fake_target.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    fake_guest.commands.clear()
+    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert not any("select-pane" in c for c in fake_target.commands)
+    assert not any("select-pane" in c for c in fake_guest.commands)
     # But the layout still re-applies for the new pane count.
-    assert any("select-layout -t '=aw-console-con':a tiled" in c for c in fake_target.commands)
+    assert any("select-layout -t '=aw-console-con':a tiled" in c for c in fake_guest.commands)
