@@ -847,7 +847,12 @@ are `tests/execution/test_reachability.py`'s
 `test_an_answer_after_a_failure_is_confirmed_by_a_second_probe`,
 `test_a_failed_confirmation_keeps_polling` and
 `test_exhaustion_returns_false_after_every_attempt_and_no_trailing_pause`, the bound and the
-confirming probe; its wording is the command's, whose prose no test pins.
+confirming probe. Its closed wording is a choice of `reachability.Wording`, which
+`tests/vms/test_await_tailnet.py::test_the_wait_verifies_a_running_vm_and_waits_out_a_start` and
+`tests/vms/test_recover.py`'s
+`test_a_healthy_node_is_repaired_read_and_verified_with_the_key_resolved_once` and
+`test_a_join_selects_the_settle_and_the_reconnect_wording` prove is selected; the sentences
+themselves are prose no test pins.
 
 **New rows, I90 to I93**, added to the HLA's inventory before anything is deleted:
 
