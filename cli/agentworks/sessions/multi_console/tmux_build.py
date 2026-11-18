@@ -576,8 +576,8 @@ def _build_console_tmux_unlogged(
                     raise staging_failed()  # inside the block, so the parked request goes at once
             # A pane that never collected its request never started its shell. One that did can
             # still lose it at once (the launcher refusing on the terminal, or a shell that ends
-            # immediately); the listing after collection follows a new connection's round trip,
-            # so it sees that. A shell that ends later is not the build's to see.
+            # immediately); the listing after collection follows another round trip, so it
+            # usually sees that. A shell that ends later is not the build's to see.
             if not handover.collected or not admin_shell_alive():
                 raise ExternalError(
                     f"the admin shell window of console '{console.name}' did not start its shell",

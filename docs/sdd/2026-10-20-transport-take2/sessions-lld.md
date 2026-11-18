@@ -429,7 +429,7 @@ handover for each pane it creates:
   on the pane identity's access (the admin's, or the agent's for an agent pane), runs
   `tmux split-window ... <handover.command(switch_user=<an agent pane>)>` on the admin's access
   inside the block, and tags the pane.
-- **The admin-shell window** (`tmux_build.py:563-594` at D1, batch D1) parks the admin pane's
+- **The admin-shell window** (`tmux_build.py:556-589` at D1, batch D1) parks the admin pane's
   environment (`_resolve_admin_env`) on the admin's access and runs
   `new-session -d ... <handover.command()>`. A failed `new-session` raises inside the block, so the
   parked request goes at once. A handover the pane does not collect, or a pane that is gone or dead
@@ -1033,8 +1033,8 @@ which now resolves every pane secret, the accepted cost.
 interpreters. agw-launch's `TerminalCommand` and the inherited terminal variables join the
 conformance suite as vectors T1 (an argv on the terminal, with its refusals) and T2 (a pane
 handover, with `TERM` and tmux's variables from the environment and `DEFAULT_TERM` without `TERM`,
-directly and through `sudo -n -u` under the sudo lane, where only `TERM` survives), T2 also on a
-Debian 13 VM.
+and `T2-attach-takes-no-pane-variables`, which keeps them out of an attach), T2 also on a Debian 13
+VM. D2 adds the T2 vectors through `sudo -n -u` under the sudo lane, where only `TERM` survives.
 
 **tmux.** Tests against a real tmux (skipped where none is installed), the first of batch C: the
 batch status script runs as root and reads a server as the account that owns it, refusing a link or
@@ -1190,7 +1190,8 @@ collateral it makes stale.
 - **D1**: `park`, `Parked` and `Handover`, vectors T1 (moved into the list) and T2, and the
   admin-window handover.
 - **D2**: the consoles onto the access, with a handover per pane and pane secrets in the boundary,
-  deleting the env carry across sudo.
+  deleting the env carry across sudo; `Handover.command(switch_user=)` arrives with its caller and
+  the sudo T2 vectors.
 - **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
   amended.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit

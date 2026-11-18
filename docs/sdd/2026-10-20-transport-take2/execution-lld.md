@@ -425,13 +425,16 @@ defined once. Steps, mapped to HLA D4:
    entry of `os.getuid()` (looked up in step 1, before the marker: a missing entry is an exception,
    since sshd cannot authenticate a uid without one; an empty shell is `/bin/sh`), then
    `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games`,
-   `LANG=C.UTF-8`, `SHLVL=1`, `TERM` and `SSH_TTY` (the terminal name) in `tty` mode when stdin is a
-   terminal, `XDG_RUNTIME_DIR=/run/user/<uid>` when that directory exists and the uid owns it, and
-   last the request's `env`, which may override anything. Nothing is copied from the inherited
-   environment. The working directory is set with `os.chdir` in agw-launch itself, to `cwd` or home
-   (`refused cwd` on failure, which `Popen` could not tell from a missing `argv[0]`), the umask is
-   `022`, every signal an earlier process ignored goes back to its default, the signal mask is
-   cleared, and the payload gets no descriptor above 2 other than a script's.
+   `LANG=C.UTF-8`, `SHLVL=1`, in `tty` mode when stdin is a terminal `TERM` and, for an attach,
+   `SSH_TTY` (the terminal name), `XDG_RUNTIME_DIR=/run/user/<uid>` when that directory exists and
+   the uid owns it, and last the request's `env`, which may override anything. Nothing else is
+   copied from the inherited environment, except that a pane's handover (a `park` envelope, whose
+   `term` is null) takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` from
+   it, `DEFAULT_TERM` standing in for an absent `TERM`, and gets no `SSH_TTY` (HLA D4). The working
+   directory is set with `os.chdir` in agw-launch itself, to `cwd` or home (`refused cwd` on
+   failure, which `Popen` could not tell from a missing `argv[0]`), the umask is `022`, every signal
+   an earlier process ignored goes back to its default, the signal mask is cleared, and the payload
+   gets no descriptor above 2 other than a script's.
    - **Choices the HLA leaves open.** `PATH` is one fixed value for every identity, a superset of
      Debian's login paths so `ip` resolves for an admin and later for root. The locale is
      `LANG=C.UTF-8` and no `LC_*`: sessions used to inherit the workstation's `LANG` through
