@@ -830,14 +830,14 @@ are under `cli/agentworks/` unless they start with `cli/` or `docs/`.
 
 ### Incident audit
 
-The audit read the fix history of both modules (`git log` on `transports/` and `ssh.py`, 78 and 109
-commits), the bodies of the incident-bearing commits it cites, the issues they link (this
-repository's issues 117, 199, 211, 251, 270, 330, 331, 360, 361, 669, 684, 736, 889 and 893, and
-Win32-OpenSSH's 1338), ADRs 0014, 0015, 0017 and 0020, whose decisions these modules carried (0003
-and 0019 name the transports only in passing), and the transport-improv migration strategy's
-inventory. At `4b4818fb7` no production module imports `agentworks.transports`, and only the
-operation log and its readers import `agentworks.ssh`, so nothing the audit found still runs on the
-legacy path except the log.
+The audit read the fix history of both modules (`git log` at `4b4818fb7` on `transports/` and
+`ssh.py`, 78 and 115 commits), the bodies of the incident-bearing commits it cites, the issues they
+link (this repository's issues 117, 199, 211, 251, 270, 330, 331, 360, 361, 669, 684, 736, 889 and
+893, and Win32-OpenSSH's 1338), ADRs 0014, 0015, 0017 and 0020, whose decisions these modules
+carried (0003 and 0019 name the transports only in passing), and the transport-improv migration
+strategy's inventory. At `4b4818fb7` no production module imports `agentworks.transports`, and only
+the operation log and its readers import `agentworks.ssh`, so nothing the audit found still runs on
+the legacy path except the log.
 
 **Existing rows that rode on these modules.** Each was re-proved on the execution core in the slice
 its row names, and the legacy copy goes with the module: I1 (ADR 0020, #361), I2, I4 (#684), I5, I12
@@ -860,8 +860,9 @@ and 4. I28 moves with the log and is re-proved by the log's own tests at its new
 the one copy left once `transports/ssh.py` goes, and live by I21's Windows Terminal cells; I91 by
 the eight-thread test and I92 by the close tests, both moved with the log to
 `cli/tests/execution/test_operation_log_file.py`; I93 by `test_client_resolution.py`'s relative and
-current-directory elements, the Windows candidate order that never searches `PATH`, and the refusal
-when no client is found.
+current-directory elements and `test_pump.py`'s
+`test_a_client_that_cannot_start_is_a_typed_refusal`, the Windows candidate order that never
+searches `PATH`, and the refusal when no client is found.
 
 **Not rows.**
 
@@ -903,6 +904,14 @@ cleanup (`vms/manager/power.py:294`) and `vm logs` (`cli/commands/vm.py:531`). T
 `agentworks.execution.oplog.LOG_DIR`, and a test that replaces the class patches
 `agentworks.execution.oplog.OperationLogFile`, since every constructor imports it at call time.
 
+`vm_logs` counts only a file or a link, which `vm delete` can unlink, so a directory named like a
+log cannot abort a delete after its backend and database cleanup. `vm logs` reads a log as the UTF-8
+it is written in, whatever the workstation's locale. The top-level `error.log` sits in the same
+directory through `oplog.LOG_DIR`, rather than a second spelling of it under `CONFIG_DIR`. Every
+operator-facing mention, `vm logs`'s help, the hints that name a log and the troubleshooting guide,
+says "operation log", since the log records `wsl.exe`, `limactl` and guest-agent steps as well as
+SSH requests.
+
 ### The join's log
 
 Create's `ProvisionRequest.progress` is already its operation log (`vms/manager/lifecycle.py:522`),
@@ -935,8 +944,9 @@ bootstrap's record (`test_run_bootstrap.py`).
 - **The modules.** `agentworks.transports` (`__init__.py`, `base.py`, `ssh.py`) and
   `agentworks.ssh`, with their tests: `cli/tests/transports/`, `cli/tests/test_ssh_input.py` and
   `cli/tests/test_ssh_missing_client.py`, whose live counterparts are the execution core's own (I1,
-  I2, I4, I5, I14, I93). `subprocess_io.py` stays: Lima's host channel (`lima_host.py:296`) still
-  writes stdin through it.
+  I2, I4, I5, I14, I93). `subprocess_io.py`'s two helpers had one caller left, Lima's host channel
+  (`lima_host.py:296`), so they move into `lima_host.py` as private functions, tested through
+  `LimaHost` in local mode.
 - **The suite's doubles.** `tests/native_setup_fixtures.LocalFixtureTransport` subclassed the legacy
   `Transport` only for methods no test still called. It is `LocalFixtureAccount`, an account on this
   machine that answers an access's requests, with `shell()` for the few tests that set the fixture
@@ -953,7 +963,12 @@ bootstrap's record (`test_run_bootstrap.py`).
   that comment's example. The comment names `ExecutionIncomplete` instead; the rendering is
   unchanged.
 - **Doctor.** `_check_required_tools` keeps `tailscale`'s `PATH` row and the resolver's verdict; the
-  `ssh` and `scp` presence rows go, since nothing starts either from `PATH` any more.
+  `ssh` and `scp` presence rows go, since nothing starts either from `PATH` any more. Remote Lima's
+  readiness had the same flaw, asking for an `ssh` on `PATH` while its host channel runs the
+  resolved client; it asks the resolver and reads `ClientUnsupported` as not ready.
+- **The live root vectors.** `cli/tests/test_root_channel_live_vectors.py` sat outside
+  `tests/execution/` only because the blocker refused the platform boundary's legacy imports; it is
+  `cli/tests/execution/conformance/test_root_live_vectors.py`.
 - **The independence guards.** The fresh-interpreter guard
   (`cli/tests/execution/test_independence.py`), the conftest blocker
   (`cli/tests/execution/conftest.py`), the static check
@@ -967,12 +982,11 @@ R10's end state, no core code building its own `ssh` or `scp` command line outsi
 core and the platforms' private access, was confirmed at the end of this slice by:
 
 - `git grep -nE "[\"'](ssh|scp|ssh\.exe|scp\.exe)[\"']|\bscp\b|resolve_program\([\"']s|find_program\([\"']s|client\.path"`
-  over `cli/agentworks` outside `execution/`: the hits are a `mode: "ssh"` placement value and
-  Remote Lima's `is_installed("ssh")` readiness check (`capabilities/vm_platform/lima.py`), doctor's
-  resolver row printing the client's path, prose (`errors.py`, `sources.py`'s scp-style git remotes,
-  `shell_env.py`, an `agents/initializer.py` comment), the `systemctl reload ssh` argv run on the
-  guest, and `vm verify-connection`'s `transport="ssh"` label. None builds a workstation command
-  line.
+  over `cli/agentworks` outside `execution/`: the hits are Remote Lima's `mode: "ssh"` placement
+  value (`capabilities/vm_platform/lima.py`), doctor's resolver row printing the client's path,
+  prose (`sources.py`'s scp-style git remotes, `shell_env.py`, an `agents/initializer.py` comment),
+  the `systemctl reload ssh` argv run on the guest, and `vm verify-connection`'s `transport="ssh"`
+  label. None builds a workstation command line.
 - every `subprocess.run`, `Popen` and `call` outside `execution/` (18 call sites): git, `wsl.exe`,
   PowerShell, the operator's editor, `taskkill`, 1Password's `op`, `tailscale`, `ssh-keygen` and VS
   Code. None starts `ssh` or `scp`.
