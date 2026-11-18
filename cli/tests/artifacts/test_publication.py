@@ -13,14 +13,14 @@ from agentworks.artifacts.model import ArtifactContent, ArtifactInput, ArtifactO
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.errors import StateError
 from tests.artifacts._fixtures import received
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
 
 @pytest.fixture
 def target(tmp_path):
-    return LocalFixtureTransport(tmp_path / "target")
+    return LocalFixtureAccount(tmp_path / "target")
 
 
 def artifact(path: Path, data: bytes = b"content", *, executable: bool = False) -> ArtifactFile:
@@ -365,7 +365,7 @@ def test_recorded_package_root_never_prunes_same_named_ancestor_components(tmp_p
     from agentworks.plugins.claude.artifacts import outer_artifacts
     from tests.artifacts.test_native_delivery import artifact as native_artifact
 
-    target = LocalFixtureTransport(tmp_path / "skills/review")
+    target = LocalFixtureAccount(tmp_path / "skills/review")
     native_home = target.home / ".claude"
     package = native_home / "skills/review"
     plan = outer_artifacts(received(native_artifact(ArtifactType.SKILL)), str(native_home))

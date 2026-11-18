@@ -16,7 +16,7 @@ from uuid import uuid4
 import pytest
 
 from agentworks.db import SessionRow, SessionStatus
-from agentworks.errors import AgentworksError, ExternalError, StateError
+from agentworks.errors import AgentworksError, ConnectivityError, ExternalError, StateError
 from agentworks.execution.requests import Bytes
 from agentworks.execution.results import Result
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -24,7 +24,7 @@ from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import SessionTmuxServer
 from agentworks.sessions.manager._pids import _repair_session_pid
 from agentworks.sessions.manager._status import batch_check_status, check_session_status
-from agentworks.ssh import SSHError, SSHResult
+from agentworks.sessions.tmux import CommandOutcome
 from tests._runtime_probes import server_for
 from tests.conftest import current_user_name
 from tests.vm_access_support import Admin, Call, RecordingVMAccess, command_line, guest_result
@@ -76,7 +76,7 @@ class NativeGuest:
             "TMUX_TMPDIR": str(root),
         }
 
-    def run(self, command: str, *, check: bool = True, **kwargs: Any) -> SSHResult:
+    def run(self, command: str, *, check: bool = True, **kwargs: Any) -> CommandOutcome:
         """Run ``command`` locally, with ``env`` exported beside the guest's own environment as a request's is.
 
         The tmux primitives take it as their ``RunCommand``; :meth:`answer`
@@ -95,7 +95,9 @@ class NativeGuest:
         )
         if check and result.returncode:
             raise ExternalError(result.stderr or result.stdout)
-        return SSHResult(result.returncode, self.banner + result.stdout, self.stderr_banner + result.stderr)
+        return CommandOutcome(
+            stdout=self.banner + result.stdout, stderr=self.stderr_banner + result.stderr, returncode=result.returncode
+        )
 
     def answer(self, call: Call) -> Result | None:
         """Run a ``Command`` or ``Script`` here from its command line, with the request's environment and input."""
@@ -117,7 +119,7 @@ class NativeGuest:
         """``batch_check_status`` on :meth:`access`, each row with the server its socket path names."""
         return batch_check_status([(session, server_for(session)) for session in sessions], admin=self.access())
 
-    def native(self, command: str) -> SSHResult:
+    def native(self, command: str) -> CommandOutcome:
         return self.run(tmux.tmux_cmd(command, self.socket), check=False)
 
     def wait_dead(self) -> None:
@@ -395,7 +397,7 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
     monkeypatch.setattr(
         tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
     )
-    failure = KeyboardInterrupt() if fault == "interrupt" else SSHError("controlled liveness failure")
+    failure = KeyboardInterrupt() if fault == "interrupt" else ConnectivityError("controlled liveness failure")
 
     def observe_liveness(*args, **kwargs):
         raise failure
@@ -471,7 +473,7 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
     def reject_release(command, *, check=True, **kwargs):
         if "remain-on-exit off" in command:
             # Make the actual native command fail. NativeGuest.run enforces
-            # check=True exactly as the production Transport does.
+            # check=True exactly as the production access does.
             command = command.replace("remain-on-exit", "agentworks-invalid-release-option")
         return real_run(command, check=check, **kwargs)
 

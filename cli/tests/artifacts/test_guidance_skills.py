@@ -264,9 +264,9 @@ def test_generated_guidance_supporting_file_is_updated_and_retired_with_its_entr
     from pathlib import Path
 
     from agentworks.artifacts.publication import publish_artifacts
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
 
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     item = artifact(ArtifactType.RULE)
     initial = guidance_skills(str(target.home / "skills"), received(item))
     owned = publish_artifacts(target.files(), initial, (), lambda files: None, roots=(str(target.home),)).files

@@ -32,7 +32,7 @@ from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.artifacts._fixtures import received
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 
@@ -100,7 +100,7 @@ def test_shared_document_needs_no_whole_file_or_input_origin():
 def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
     db, tmp_path, monkeypatch, captured_output, tracked
 ):
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     workspace = target.home / "project"
 
     def git(*args: object, check: bool = True) -> subprocess.CompletedProcess[str]:

@@ -1,7 +1,7 @@
 """Stale-socket maintenance never treats shell output as a removal authority.
 
 The cleanup runs over the fixture's recording access, whose requests run on
-this machine (``LocalFixtureTransport.answer``), elevation ignored. A
+this machine (``LocalFixtureAccount.answer``), elevation ignored. A
 ``runuser`` shim in place of ``tmux.RUNUSER_PATH`` records the account each server
 probe asks for and runs the probe as the test's own user.
 """
@@ -30,7 +30,7 @@ from agentworks.sessions.manager._teardown import (
 )
 from agentworks.sessions.tmux import _cleanup_stale_sockets_under, access_run_command
 from tests.conftest import current_user_name
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 if TYPE_CHECKING:
     pass
@@ -41,9 +41,9 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux 
 
 
 @pytest.fixture
-def target(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalFixtureTransport]:
+def target(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalFixtureAccount]:
     with tempfile.TemporaryDirectory(prefix="agw-r8-sessions-sockets-") as location:
-        fixture = LocalFixtureTransport(Path(location))
+        fixture = LocalFixtureAccount(Path(location))
         shim = fixture.root / "bin" / "runuser"
         shim.parent.mkdir()
         shim.write_text(
@@ -55,11 +55,11 @@ def target(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalFixtureTransport]:
         yield fixture
 
 
-def cleanup(target: LocalFixtureTransport, directory: str) -> int:
+def cleanup(target: LocalFixtureAccount, directory: str) -> int:
     return _cleanup_stale_sockets_under(target.files(), directory, owner=current_user_name())
 
 
-def probed_as(target: LocalFixtureTransport) -> list[str]:
+def probed_as(target: LocalFixtureAccount) -> list[str]:
     log = target.root / "runuser.log"
     return log.read_text().split() if log.exists() else []
 
@@ -72,7 +72,7 @@ def stale(path: Path) -> None:
 @pytest.mark.parametrize("symlink", [False, True])
 @pytest.mark.parametrize("phase", ["worker-entry", "socket-removal"])
 def test_dedicated_worker_preserves_non_socket_paths(
-    target: LocalFixtureTransport,
+    target: LocalFixtureAccount,
     symlink: bool,
     phase: str,
 ) -> None:
@@ -131,7 +131,7 @@ def source_of(request: object) -> str:
 
 
 def intercept(
-    target: LocalFixtureTransport,
+    target: LocalFixtureAccount,
     monkeypatch: pytest.MonkeyPatch,
     replace: Callable[[str, Callable[[], Result]], Result],
 ) -> None:
@@ -144,9 +144,7 @@ def intercept(
     monkeypatch.setattr(target, "_spawn", spawn)
 
 
-def observe(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, stdout: str, *, returncode: int = 0
-) -> None:
+def observe(target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, stdout: str, *, returncode: int = 0) -> None:
     def replace(source: str, run: Callable[[], Result]) -> Result:
         if "find " in source:
             return Result(Completed(returncode), stdout.encode())
@@ -158,7 +156,7 @@ def observe(
 @pytest.mark.parametrize("banner", ["Welcome\n", "Welcome"])
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_socket(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, banner: str, stream: str
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, banner: str, stream: str
 ) -> None:
     binary = shutil.which("tmux")
     assert binary is not None, "tmux must be installed for native runtime safety coverage"
@@ -220,7 +218,7 @@ def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_so
     ],
 )
 def test_untrusted_inventory_cannot_authorize_any_removal(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, case: str
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
@@ -251,7 +249,7 @@ def test_untrusted_inventory_cannot_authorize_any_removal(
 
 @pytest.mark.parametrize("symlink", [False, True])
 def test_native_type_is_checked_before_tmux_and_before_unlink(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, symlink: bool
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, symlink: bool
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
@@ -274,7 +272,7 @@ def test_native_type_is_checked_before_tmux_and_before_unlink(
 
 @pytest.mark.parametrize("symlink", [False, True])
 def test_native_type_is_rechecked_after_the_tmux_probe(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, symlink: bool
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, symlink: bool
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
@@ -304,7 +302,7 @@ def test_native_type_is_rechecked_after_the_tmux_probe(
 
 @pytest.mark.parametrize("failure", ["unknown-tmux", "unlink-failed"])
 def test_unknown_native_presence_or_failed_unlink_does_not_claim_removal(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, failure: str
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
@@ -324,7 +322,7 @@ def test_unknown_native_presence_or_failed_unlink_does_not_claim_removal(
 
 
 @pytest.mark.parametrize("directory", ["relative", "/", "/run/../tmp", "/run//sockets", "/run/./sockets"])
-def test_invalid_expected_directory_is_rejected_before_dispatch(target: LocalFixtureTransport, directory: str) -> None:
+def test_invalid_expected_directory_is_rejected_before_dispatch(target: LocalFixtureAccount, directory: str) -> None:
     files = target.files()
     with pytest.raises(StateError):
         _cleanup_stale_sockets_under(files, directory, owner=current_user_name())

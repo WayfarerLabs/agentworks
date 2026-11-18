@@ -173,9 +173,9 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     from agentworks.artifacts.model import ArtifactMember
     from agentworks.artifacts.publication import validate_application
     from agentworks.plugins.codex.artifacts import outer_artifacts
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
 
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     workspace = target.home / "project"
     workspace.mkdir()
     owner = ArtifactOrigin("workspace", "workspace", "ws", entry="review")

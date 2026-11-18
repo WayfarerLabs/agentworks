@@ -13,8 +13,7 @@ import pytest
 from agentworks.errors import ExternalError
 from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.sessions.tmux import capture_output
-from agentworks.ssh import SSHResult
+from agentworks.sessions.tmux import CommandOutcome, capture_output
 from tests.conftest import stub_build_registry, stub_vm_ssh_identity
 from tests.sessions._workload_secrets import register_workload_secret
 from tests.sessions.test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
@@ -118,7 +117,7 @@ def test_real_tmux_capture_targets_the_exact_session_pane():
             completed = subprocess.run(
                 ["/bin/sh", "-c", command], capture_output=True, text=True, timeout=10, env=environment
             )
-            return SSHResult(completed.returncode, completed.stdout, completed.stderr)
+            return CommandOutcome(stdout=completed.stdout, stderr=completed.stderr, returncode=completed.returncode)
 
         try:
             subprocess.run(

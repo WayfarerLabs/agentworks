@@ -482,7 +482,7 @@ class VMPlatform(Capability):
         yet not observed-stopped either (``ensure_active`` skips
         ``auto_start`` when a status probe reports RUNNING while
         tailscaled is mid-reattach) proceeds into the hold and the op and
-        surfaces a plain SSHError, uniformly, rather than a WSL2-only
+        surfaces the request's own ``ExecutionIncomplete``, uniformly, rather than a WSL2-only
         reachability retry. Default no-op for platforms without
         an idle-shutdown mechanism (lima, azure, proxmox); wsl2 overrides
         to anchor the distro against ``vmIdleTimeout``. ``config`` is

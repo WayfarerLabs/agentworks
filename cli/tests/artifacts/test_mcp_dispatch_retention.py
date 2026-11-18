@@ -31,7 +31,7 @@ from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.artifacts._fixtures import group, received
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest native files")
@@ -49,7 +49,7 @@ def item(component: ArtifactComponent, name: str, command: str = "fixture") -> A
 def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_definitions(
     db, tmp_path, monkeypatch, unavailable
 ):
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     vm = db.insert_vm("vm", site="fixture", hostname="vm")
     path = target.home / ".codex/config.toml"
     ancestor, removed, current = item("vm", "ancestor"), item("agent", "removed"), item("agent", "current")
@@ -140,7 +140,7 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
 def test_shared_name_keeps_ancestor_source_across_dispatch_retries_local_changes_and_withdrawal(
     db, tmp_path, monkeypatch, tool, unavailable
 ):
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     vm = db.insert_vm("vm", site="fixture", hostname="vm")
     path = target.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"

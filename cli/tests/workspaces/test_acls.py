@@ -14,7 +14,7 @@ import pytest
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.workspaces.acls import apply_workspace_acls
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux" or shutil.which("setfacl") is None or shutil.which("getfacl") is None,
@@ -31,7 +31,7 @@ def snapshot(path: Path) -> str:
 
 
 def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_path):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     parent = target.home / "workspaces"
     parent.mkdir()
     parent.chmod(0o2770)
@@ -55,9 +55,9 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
         f"git -C {shlex.quote(str(source))} "
         "-c user.name=Fixture -c user.email=fixture@example.invalid commit -qm fixture",
     ):
-        assert target.run(command).ok
+        assert target.shell(command).returncode == 0
     workspace = parent / "project"
-    assert target.run(f"git clone -- {shlex.quote(str(source))} {shlex.quote(str(workspace))}").ok
+    assert target.shell(f"git clone -- {shlex.quote(str(source))} {shlex.quote(str(workspace))}").returncode == 0
     for directory in (workspace, *(entry for entry in workspace.rglob("*") if entry.is_dir())):
         directory.chmod(directory.stat().st_mode | 0o2000)
     apply_workspace_acls(target.files(), str(workspace))
@@ -82,7 +82,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
         assert observed.st_mode & 0o777 == (0o770 if item.executable else 0o660)
         assert os.access(item.path, os.R_OK | os.W_OK)
         assert os.access(item.path, os.X_OK) == item.executable
-    assert target.run(shlex.quote(str(workspace / ".codex/skills/review/run.sh"))).ok
+    assert target.shell(shlex.quote(str(workspace / ".codex/skills/review/run.sh"))).returncode == 0
     new_file = workspace / ".codex/rules/new.md"
     updated = publish_artifacts(
         target.files(),
@@ -106,7 +106,7 @@ def test_cloned_artifacts_adopt_and_first_repair_keeps_published_file_acls(tmp_p
 
 @pytest.mark.parametrize("original_mode", [0o644, 0o755, 0o650])
 def test_access_mask_preserves_effective_executable_intent_and_is_idempotent(tmp_path, original_mode):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     workspace = target.home / "workspace"
     workspace.mkdir()
     workspace.chmod(0o2770)
@@ -125,7 +125,7 @@ def test_access_mask_preserves_effective_executable_intent_and_is_idempotent(tmp
 
 @pytest.mark.parametrize("executable", [False, True])
 def test_differing_executable_intent_is_retained_after_workspace_acl_application(tmp_path, executable):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     path = target.home / "rule.md"
     path.write_bytes(b"fixture")
     path.chmod(0o644 if executable else 0o755)
@@ -146,7 +146,7 @@ def test_differing_executable_intent_is_retained_after_workspace_acl_application
 
 
 def test_workspace_acl_does_not_follow_a_link_outside_the_tree(tmp_path):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     workspace = target.home / "workspace"
     workspace.mkdir()
     outside = target.home / "outside"
@@ -158,7 +158,7 @@ def test_workspace_acl_does_not_follow_a_link_outside_the_tree(tmp_path):
 
 
 def test_parent_acl_repair_prunes_private_clone_attempt_trees(tmp_path):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     parent = target.home / "workspaces"
     parent.mkdir()
     apply_workspace_acls(target.files(), str(parent))

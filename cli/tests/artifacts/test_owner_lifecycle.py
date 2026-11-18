@@ -32,7 +32,7 @@ from agentworks.vms.templates import ResolvedVMTemplate
 from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 from tests.conftest import _StubRegistry
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.vm_access_support import RecordingVMAccess
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -50,7 +50,7 @@ def owner(db, tmp_path):
     config = SimpleNamespace(artifact_bundles={"team": bundle}, agent_templates={})
     registry = cast(Registry, _StubRegistry(config))
     vm = db.insert_vm("vm", "lima", "vm")
-    target = LocalFixtureTransport(tmp_path / "native")
+    target = LocalFixtureAccount(tmp_path / "native")
     return SimpleNamespace(
         db=db,
         vm=vm,
@@ -375,7 +375,7 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
         "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="test")
     )
     fixture.registry.finalize(probe_host_readiness=False)
-    target = LocalFixtureTransport(tmp_path / "native")
+    target = LocalFixtureAccount(tmp_path / "native")
     invocation = UserSetupInvocation(
         vm=fixture.vm,
         access=(recorded := target.access()),

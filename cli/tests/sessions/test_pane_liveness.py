@@ -12,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.sessions.tmux import _probe_pane_liveness
-from agentworks.ssh import SSHResult
+from agentworks.sessions.tmux import CommandOutcome, _probe_pane_liveness
 
 
 @pytest.mark.parametrize(
@@ -25,7 +24,7 @@ def test_explicit_native_pane_observation_is_accepted(observation, expected):
 
     def run(command, **kwargs):
         calls.append(command)
-        return SSHResult(0, "AGW_RUNTIME_PANE=" + observation, "")
+        return CommandOutcome(stdout="AGW_RUNTIME_PANE=" + observation, stderr="", returncode=0)
 
     assert _probe_pane_liveness("probe", run_command=run, socket_path="/tmp/unused.sock") == expected
     assert len(calls) == 1
@@ -37,7 +36,7 @@ def test_successful_blank_or_malformed_response_retries_without_asserting_alive(
 
     def run(command, **kwargs):
         calls.append(command)
-        return SSHResult(0, "AGW_RUNTIME_PANE=" + observation, "")
+        return CommandOutcome(stdout="AGW_RUNTIME_PANE=" + observation, stderr="", returncode=0)
 
     assert _probe_pane_liveness("probe", run_command=run, socket_path="/tmp/unused.sock") == ("unverified", "")
     assert len(calls) == 2
@@ -45,7 +44,12 @@ def test_successful_blank_or_malformed_response_retries_without_asserting_alive(
 
 @pytest.mark.parametrize("observation", ["0 \n", "1 23\n"])
 def test_valid_retry_can_resolve_a_successful_blank_first_response(observation):
-    answers = iter([SSHResult(0, "", ""), SSHResult(0, "AGW_RUNTIME_PANE=" + observation, "")])
+    answers = iter(
+        [
+            CommandOutcome(stdout="", stderr="", returncode=0),
+            CommandOutcome(stdout="AGW_RUNTIME_PANE=" + observation, stderr="", returncode=0),
+        ]
+    )
 
     def run(command, **kwargs):
         return next(answers)
@@ -60,7 +64,7 @@ def test_nonzero_probe_stays_unverified_without_capture_or_cleanup():
 
     def run(command, **kwargs):
         calls.append(command)
-        return SSHResult(1, "1 23\n", "")
+        return CommandOutcome(stdout="1 23\n", stderr="", returncode=1)
 
     assert _probe_pane_liveness("probe", run_command=run, socket_path="/tmp/unused.sock") == ("unverified", "")
     assert len(calls) == 2
@@ -110,7 +114,7 @@ def test_real_remain_on_exit_pane_is_observed_alive_then_dead():
             result = subprocess.run(
                 ["/bin/sh", "-c", command], capture_output=True, text=True, timeout=10, env=environment
             )
-            return SSHResult(result.returncode, result.stdout, result.stderr)
+            return CommandOutcome(stdout=result.stdout, stderr=result.stderr, returncode=result.returncode)
 
         try:
             script = (

@@ -22,14 +22,14 @@ from agentworks.plugins.codex import artifacts as codex
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_mcp_session_delivery import mcp
 from tests.artifacts.test_native_delivery import artifact, context
-from tests.native_setup_fixtures import LocalFixtureTransport, forbid_files, native_cli_double, setup_fixture_user
+from tests.native_setup_fixtures import LocalFixtureAccount, forbid_files, native_cli_double, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
 
 
 @pytest.fixture
 def target(tmp_path):
-    return LocalFixtureTransport(tmp_path / "guest")
+    return LocalFixtureAccount(tmp_path / "guest")
 
 
 @pytest.mark.parametrize("override", [None, ".claude", "custom-native"])

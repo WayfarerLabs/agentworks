@@ -123,20 +123,6 @@ def _vscode(monkeypatch: pytest.MonkeyPatch) -> None:
     _open_in_vscode(Path("workspace.code-workspace"))
 
 
-def _legacy_ssh() -> None:
-    from agentworks.execution.trust import HOST_TRUST
-    from agentworks.transports import SSHTransport
-
-    SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks").run("true", check=False)
-
-
-def _legacy_scp() -> None:
-    from agentworks.execution.trust import HOST_TRUST
-    from agentworks.transports import SSHTransport
-
-    SSHTransport(trust=HOST_TRUST, host="vm1", user="agentworks").copy_to(__file__, "/tmp/copy")
-
-
 def _local_limactl() -> None:
     from agentworks.capabilities.vm_platform.lima_host import LimaHost
 
@@ -153,8 +139,6 @@ SITES: list[tuple[tuple[str, ...], Callable[..., None]]] = [
     (("git",), _git_capture),
     (("taskkill",), _taskkill),
     (("code",), _vscode),
-    (("ssh",), _legacy_ssh),
-    (("scp",), _legacy_scp),
     (("limactl",), _local_limactl),
 ]
 SITE_IDS = [
@@ -167,8 +151,6 @@ SITE_IDS = [
     "git",
     "taskkill",
     "vscode",
-    "legacy-ssh",
-    "legacy-scp",
     "local-limactl",
 ]
 

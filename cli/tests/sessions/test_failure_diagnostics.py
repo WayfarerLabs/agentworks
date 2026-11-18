@@ -12,8 +12,7 @@ import pytest
 from agentworks.errors import ConnectivityError, ExternalError, StateError
 from agentworks.execution.errors import CommandFailed
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
-from agentworks.sessions.tmux import _raise_workload_died, access_run_command, capture_output
-from agentworks.ssh import SSHResult
+from agentworks.sessions.tmux import CommandOutcome, _raise_workload_died, access_run_command, capture_output
 from tests.vm_access_support import Admin, Call, RecordingVMAccess
 
 
@@ -31,7 +30,9 @@ def test_dead_workload_keeps_status_and_attempts_cleanup_after_external_failure(
         operation = "cleanup" if "kill-server" in tokens else "alternate" if "-a" in tokens else "main"
         if operation == stage:
             raise failure
-        return SSHResult(0, output if operation == "alternate" or stage == "cleanup" else "", "")
+        return CommandOutcome(
+            stdout=output if operation == "alternate" or stage == "cleanup" else "", stderr="", returncode=0
+        )
 
     with pytest.raises(StateError) as caught:
         _raise_workload_died("probe", run_command=run, socket_path="/tmp/unused.sock", exit_status="23")
@@ -53,8 +54,12 @@ def test_dead_workload_falls_back_after_unsuccessful_main_capture():
         tokens = shlex.split(command)
         calls.append(tokens)
         if "capture-pane" in tokens:
-            return SSHResult(0, marker, "") if "-a" in tokens else SSHResult(1, "", "")
-        return SSHResult(0, "", "")
+            return (
+                CommandOutcome(stdout=marker, stderr="", returncode=0)
+                if "-a" in tokens
+                else CommandOutcome(stdout="", stderr="", returncode=1)
+            )
+        return CommandOutcome(stdout="", stderr="", returncode=0)
 
     with pytest.raises(StateError) as caught:
         _raise_workload_died("probe", run_command=run, socket_path="/tmp/unused.sock", exit_status="23")
@@ -101,7 +106,7 @@ def test_dead_workload_does_not_suppress_cancellation_or_internal_failure(stage,
         operation = "cleanup" if "kill-server" in tokens else "alternate" if "-a" in tokens else "main"
         if operation == stage:
             raise failure
-        return SSHResult(0, "", "")
+        return CommandOutcome(stdout="", stderr="", returncode=0)
 
     with pytest.raises(failure_type) as caught:
         _raise_workload_died("probe", run_command=run, socket_path="/tmp/unused.sock", exit_status="23")
@@ -114,7 +119,7 @@ def test_ordinary_log_capture_remains_strict():
 
     def run(command, **kwargs):
         calls.append(command)
-        return SSHResult(1, "", "")
+        return CommandOutcome(stdout="", stderr="", returncode=1)
 
     with pytest.raises(ExternalError):
         capture_output("probe", run_command=run, socket_path="/tmp/unused.sock")

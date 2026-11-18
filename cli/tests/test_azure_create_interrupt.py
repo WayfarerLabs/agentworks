@@ -14,9 +14,9 @@ two Exception arms (#347): a mid-creation failure runs the name-based
 cleanup and raises the wrapped error (the pre-#338 arm, unchanged),
 and a failure escaping the post-creation span (transport construction
 plus the inline wait, e.g. a raw OSError from a missing local ssh
-binary) tears the full set down VM-first. Readiness ``SSHError`` now
-becomes a typed failure in the shared bootstrap helper and takes the
-same rollback path before the key is delivered.
+binary) tears the full set down VM-first. A readiness failure becomes a
+typed failure in the shared bootstrap helper and takes the same
+rollback path before the key is delivered.
 
 Fakes come from ``tests._azure_platform_support`` (shared with
 test_azure_nsg_exposure.py); egress detection is stubbed, no test hits
@@ -254,17 +254,17 @@ class TestInterruptDuringResourceCreation:
 
 class TestFailureDuringInlineWait:
     """#347: the failure arm spans the transport construction and the
-    inline bootstrap wait, so a non-SSHError escaping the wait rolls the
+    inline bootstrap wait, so an untyped error escaping the wait rolls the
     full resource set back (closing the bootstrap ingress with it)
-    instead of leaking a running VM. Readiness SSHError paths now raise
-    typed too, keeping them in the same rollback window."""
+    instead of leaking a running VM. Readiness failures raise typed too,
+    keeping them in the same rollback window."""
 
-    def test_non_ssh_error_escaping_the_wait_rolls_back_vm_first_and_wraps(
+    def test_an_untyped_error_escaping_the_wait_rolls_back_vm_first_and_wraps(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         """The issue's scenario: no local ssh binary, so the wait's first
-        probe raises a raw FileNotFoundError that SSHTransport.run does
-        not wrap as SSHError. Every resource exists at that point, so the
+        probe raises a raw FileNotFoundError that the channel does not
+        wrap. Every resource exists at that point, so the
         rollback deletes the VM first (it holds the NIC and disk) and
         then the name-based set, and the error re-raises wrapped, the
         Exception arms' convention."""

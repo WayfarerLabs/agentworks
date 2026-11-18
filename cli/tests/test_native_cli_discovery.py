@@ -18,7 +18,7 @@ from agentworks.harness_setup.model import NativeClaim
 from agentworks.plugins._harness_native.native_cli import NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
 from tests.native_setup_fixtures import (
-    LocalFixtureTransport,
+    LocalFixtureAccount,
     fixture_access,
     invocation,
     market_fixture,
@@ -31,8 +31,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local execution
 
 
 @pytest.fixture
-def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalFixtureTransport]:
-    target = LocalFixtureTransport(tmp_path / "native-login")
+def target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalFixtureAccount]:
+    target = LocalFixtureAccount(tmp_path / "native-login")
     monkeypatch.setattr(tempfile, "tempdir", str(target.root / "tmp"))
     yield target
     shutil.rmtree(target.root)
@@ -45,13 +45,13 @@ def logged() -> list[str]:
 
 
 @pytest.fixture
-def access(monkeypatch: pytest.MonkeyPatch, target: LocalFixtureTransport, logged: list[str]):
+def access(monkeypatch: pytest.MonkeyPatch, target: LocalFixtureAccount, logged: list[str]):
     return fixture_access(
         monkeypatch, target, log=lambda request, result: logged.append(format_record(request, result, label="native"))
     )
 
 
-def scratch_environment(target: LocalFixtureTransport) -> dict[str, str]:
+def scratch_environment(target: LocalFixtureAccount) -> dict[str, str]:
     """Setup environment that puts the native CLI's scratch directory in the fixture's own temporary directory."""
     return {"TMPDIR": str(target.root / "tmp")}
 
@@ -66,7 +66,7 @@ def executable(path: Path, label: str) -> None:
 
 
 def test_login_path_discovery_is_once_and_preserves_prepared_environment(
-    target: LocalFixtureTransport, access, logged: list[str]
+    target: LocalFixtureAccount, access, logged: list[str]
 ) -> None:
     executable(target.home / ".local/bin/codex", "login")
     (target.home / ".profile").write_text(
@@ -91,7 +91,7 @@ def test_login_path_discovery_is_once_and_preserves_prepared_environment(
     assert "startup noise" not in "".join(logged)
 
 
-def test_explicit_prepared_path_wins_over_login_path(target: LocalFixtureTransport, access) -> None:
+def test_explicit_prepared_path_wins_over_login_path(target: LocalFixtureAccount, access) -> None:
     executable(target.home / ".local/bin/codex", "login")
     executable(target.home / "explicit/codex", "explicit")
     explicit_path = str(target.home / "explicit") + ":/usr/bin:/bin"
@@ -103,7 +103,7 @@ def test_explicit_prepared_path_wins_over_login_path(target: LocalFixtureTranspo
 
 
 def test_resolution_reaches_past_a_login_startup_that_reads_stdin(
-    target: LocalFixtureTransport, access, logged: list[str]
+    target: LocalFixtureAccount, access, logged: list[str]
 ) -> None:
     executable(target.home / "explicit/codex", "explicit")
     (target.home / ".profile").write_text('cat > /dev/null\nexport PATH="/usr/bin:/bin"\n')
@@ -117,7 +117,7 @@ def test_resolution_reaches_past_a_login_startup_that_reads_stdin(
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
 def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
-    target: LocalFixtureTransport, tool: NativeTool, access
+    target: LocalFixtureAccount, tool: NativeTool, access
 ) -> None:
     market = market_fixture(target, tool)
     installed = (target.root / "bin" / tool).resolve()
@@ -159,7 +159,7 @@ def test_real_marketplace_discovery_reuses_user_login_tool_under_isolated_home(
     assert not list((target.root / "tmp").iterdir())
 
 
-def test_home_dependent_launcher_does_not_escape_discovery_isolation(target: LocalFixtureTransport, access) -> None:
+def test_home_dependent_launcher_does_not_escape_discovery_isolation(target: LocalFixtureAccount, access) -> None:
     launcher = target.home / ".local/bin/codex"
     launcher.parent.mkdir(parents=True)
     launcher.write_text(
@@ -177,7 +177,7 @@ def test_home_dependent_launcher_does_not_escape_discovery_isolation(target: Loc
 
 
 @pytest.mark.parametrize("resolved", [False, True])
-def test_a_transport_error_during_a_native_command_propagates_as_it_is(target: LocalFixtureTransport, resolved):
+def test_a_transport_error_during_a_native_command_propagates_as_it_is(target: LocalFixtureAccount, resolved):
     executable(target.home / ".local/bin/codex", "login")
     access = target.access()
     answer = access.answer

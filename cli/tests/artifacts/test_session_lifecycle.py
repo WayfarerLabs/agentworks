@@ -29,7 +29,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from tests.conftest import stub_build_registry
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.sessions.test_create_start_restart_orchestrated import _restart_fixture, _route_guests
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -44,7 +44,7 @@ class Lifecycle:
     db: Database
     config: Any
     template: ResolvedSessionTemplate
-    target: LocalFixtureTransport
+    target: LocalFixtureAccount
     events: list[str]
 
     def restart(self) -> None:
@@ -62,7 +62,7 @@ class Lifecycle:
 def lifecycle(tmp_path, monkeypatch):
     stub_build_registry(monkeypatch)
     db, events = _restart_fixture(tmp_path, monkeypatch)
-    target = LocalFixtureTransport(tmp_path / "native")
+    target = LocalFixtureAccount(tmp_path / "native")
     _route_guests(monkeypatch, target, target)
     # The shared lifecycle fixture simulates a completed runtime without
     # creating tmux. Keep its startup observation on that same runtime seam.

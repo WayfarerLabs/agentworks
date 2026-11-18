@@ -31,7 +31,7 @@ from agentworks.origin import Origin
 from agentworks.schema import CapabilityConfig
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.artifacts.test_routing import graph
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux user filesystem execution")
 
@@ -43,7 +43,7 @@ def fallback_placements(db, tmp_path, monkeypatch):
         "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="private-routing")
     )
     fixture.registry.finalize(probe_host_readiness=False)
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     user = UserSetupInvocation(
         vm=fixture.vm,
         access=(recorded := target.access()),

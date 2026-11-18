@@ -25,14 +25,14 @@ from agentworks.execution.files import Files
 from agentworks.harness_setup.model import NativeClaim
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_mcp import read, server, table, write
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, record
+from tests.native_setup_fixtures import LocalFixtureAccount, invocation, record
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest file helpers")
 
 
 @pytest.fixture
-def transport(tmp_path: Path) -> LocalFixtureTransport:
-    return LocalFixtureTransport(tmp_path)
+def account(tmp_path: Path) -> LocalFixtureAccount:
+    return LocalFixtureAccount(tmp_path)
 
 
 def legacy_name(item: ArtifactInput) -> str:
@@ -51,9 +51,9 @@ def claim_for(item: ArtifactInput, name: str, path: Path, tool="codex") -> Nativ
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
-def test_literal_native_entry_is_adopted_without_publication_and_retry_is_unchanged(transport, monkeypatch, tool):
+def test_literal_native_entry_is_adopted_without_publication_and_retry_is_unchanged(account, monkeypatch, tool):
     item = server("inventory-" + "a" * 54)
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     write(path, {key: {item.content.name: render_mcp(item, tool)}, "foreign": True}, tool)
     before = path.read_bytes()
@@ -67,7 +67,7 @@ def test_literal_native_entry_is_adopted_without_publication_and_retry_is_unchan
         events.append("checkpoint")
 
     monkeypatch.setattr("agentworks.artifacts.native.mcp.output.info", lambda message: events.append("notice"))
-    call = replace(invocation(transport, checkpoints), artifacts=received(item), checkpoint=checkpoint)
+    call = replace(invocation(account, checkpoints), artifacts=received(item), checkpoint=checkpoint)
     assert not apply_mcp(tool, call, destination=str(path)).deferred
     assert checkpoints == [(claim_for(item, item.content.name, path, tool),)]
     assert events == ["checkpoint", "notice"]
@@ -80,16 +80,16 @@ def test_literal_native_entry_is_adopted_without_publication_and_retry_is_unchan
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
-def test_adoption_notice_requires_a_successful_checkpoint_and_an_existing_unowned_entry(transport, monkeypatch, tool):
+def test_adoption_notice_requires_a_successful_checkpoint_and_an_existing_unowned_entry(account, monkeypatch, tool):
     item = server()
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     write(path, {key: {item.content.name: render_mcp(item, tool)}}, tool)
     before = path.read_bytes()
     notice = Mock()
     monkeypatch.setattr("agentworks.artifacts.native.mcp.output.info", notice)
     failed = replace(
-        invocation(transport, []),
+        invocation(account, []),
         artifacts=received(item),
         checkpoint=Mock(side_effect=ExternalError("fixture checkpoint failure")),
     )
@@ -120,11 +120,11 @@ def test_adoption_notice_requires_a_successful_checkpoint_and_an_existing_unowne
 @pytest.mark.parametrize("old_state", ["unchanged", "modified", "unclaimed"])
 @pytest.mark.parametrize("plain_exists", [False, True])
 def test_recorded_legacy_name_migrates_atomically_without_prefix_authority(
-    transport, monkeypatch, tool, old_state, plain_exists
+    account, monkeypatch, tool, old_state, plain_exists
 ):
     item = server()
     old_name = legacy_name(item)
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     original = render_mcp(item, tool)
     old_entry = {**original, "command": "operator"} if old_state == "modified" else original
@@ -136,7 +136,7 @@ def test_recorded_legacy_name_migrates_atomically_without_prefix_authority(
     checkpoints: list[tuple[NativeClaim, ...]] = []
     reports: list[str] = []
     call = replace(
-        invocation(transport, checkpoints, prior=record(previous, "codex")),
+        invocation(account, checkpoints, prior=record(previous, "codex")),
         artifacts=received(item),
         report_incomplete=reports.append,
     )
@@ -163,13 +163,13 @@ def test_recorded_legacy_name_migrates_atomically_without_prefix_authority(
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
-def test_equal_inputs_share_one_claim_and_withdrawing_one_keeps_the_entry(transport, monkeypatch, tool):
+def test_equal_inputs_share_one_claim_and_withdrawing_one_keeps_the_entry(account, monkeypatch, tool):
     first, second = server(), server(component="workspace")
     second = replace(second, content=replace(second.content, description="Different original metadata"))
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     checkpoints: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, checkpoints), artifacts=received(first, second))
+    call = replace(invocation(account, checkpoints), artifacts=received(first, second))
     assert mcp_input_conflicts(call.artifacts, tool) == {}
     assert not apply_mcp(tool, call, destination=str(path)).deferred
     assert len(checkpoints[-1]) == 1
@@ -186,13 +186,13 @@ def test_equal_inputs_share_one_claim_and_withdrawing_one_keeps_the_entry(transp
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
-def test_unresolved_equal_representative_survives_local_withdrawal_and_recovery(transport, tool):
+def test_unresolved_equal_representative_survives_local_withdrawal_and_recovery(account, tool):
     ancestor, local = server(component="vm"), server()
     independent = server("independent")
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     checkpoints: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, checkpoints), artifacts=received(ancestor, local))
+    call = replace(invocation(account, checkpoints), artifacts=received(ancestor, local))
     assert not apply_mcp(tool, call, destination=str(path)).deferred
     protected = checkpoints[-1][0]
     assert protected.source == ancestor.origin_identity
@@ -228,18 +228,18 @@ def test_unresolved_equal_representative_survives_local_withdrawal_and_recovery(
     assert not apply_mcp(tool, replace(recovered, artifacts=received(independent)), destination=str(path)).deferred
     assert checkpoints[-1] == (claim_for(independent, independent.content.name, path, tool),)
     assert set(table(read(path, tool), key)) == {independent.content.name}
-    assert not list((transport.root / "tmp").iterdir())
+    assert not list((account.root / "tmp").iterdir())
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
 @pytest.mark.parametrize("missing", [False, True])
-def test_unresolved_representative_defers_local_replacement_until_routing_recovers(transport, tool, missing):
+def test_unresolved_representative_defers_local_replacement_until_routing_recovers(account, tool, missing):
     ancestor, local = server(component="vm"), server()
     changed, independent = server(command="changed"), server("independent")
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     checkpoints: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, checkpoints), artifacts=received(ancestor, local))
+    call = replace(invocation(account, checkpoints), artifacts=received(ancestor, local))
     assert not apply_mcp(tool, call, destination=str(path)).deferred
     protected = checkpoints[-1][0]
     assert protected.source == ancestor.origin_identity
@@ -276,23 +276,23 @@ def test_unresolved_representative_defers_local_replacement_until_routing_recove
     checkpoints.clear()
     assert not apply_mcp(tool, recovered, destination=str(path)).deferred
     assert not checkpoints
-    assert not list((transport.root / "tmp").iterdir())
+    assert not list((account.root / "tmp").iterdir())
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
-def test_conflicting_literal_alias_preserves_claim_from_a_different_former_owner_and_key(transport, tool):
+def test_conflicting_literal_alias_preserves_claim_from_a_different_former_owner_and_key(account, tool):
     former = server("former-key", component="vm")
     name = legacy_name(former)
     first, second = server(name), server(name, command="different", component="workspace")
     independent = server("independent")
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     previous = (claim_for(former, name, path, tool),)
     assert previous[0].source not in {first.origin_identity, second.origin_identity, independent.origin_identity}
     write(path, {key: {name: render_mcp(former, tool)}}, tool)
     checkpoints: list[tuple[NativeClaim, ...]] = []
     call = replace(
-        invocation(transport, checkpoints, prior=record(previous, "codex")),
+        invocation(account, checkpoints, prior=record(previous, "codex")),
         artifacts=received(first, second, independent),
     )
     result = apply_mcp(tool, call, destination=str(path))
@@ -311,20 +311,18 @@ def test_conflicting_literal_alias_preserves_claim_from_a_different_former_owner
 
 
 @pytest.mark.parametrize("previous_name", ["plain", "legacy"])
-def test_conflicting_inputs_all_defer_and_preserve_prior_claims_while_independent_name_applies(
-    transport, previous_name
-):
+def test_conflicting_inputs_all_defer_and_preserve_prior_claims_while_independent_name_applies(account, previous_name):
     first = server()
     equal = server(component="workspace")
     differing = server(command="different", component="vm")
     independent = server("independent", component="session")
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     name = first.content.name if previous_name == "plain" else legacy_name(first)
     previous = (claim_for(first, name, path),)
     write(path, {"mcp_servers": {name: render_mcp(first, "codex")}})
     checkpoints: list[tuple[NativeClaim, ...]] = []
     call = replace(
-        invocation(transport, checkpoints, prior=record(previous, "codex")),
+        invocation(account, checkpoints, prior=record(previous, "codex")),
         artifacts=received(first, equal, differing, independent),
     )
     conflicts = mcp_input_conflicts(call.artifacts, "codex")
@@ -338,21 +336,21 @@ def test_conflicting_inputs_all_defer_and_preserve_prior_claims_while_independen
     }
 
 
-def test_conflicting_inputs_without_native_state_do_not_create_a_destination(transport):
+def test_conflicting_inputs_without_native_state_do_not_create_a_destination(account):
     first, second = server(), server(command="different", component="workspace")
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     checkpoints: list[tuple[NativeClaim, ...]] = []
     result = apply_mcp(
-        "codex", replace(invocation(transport, checkpoints), artifacts=received(first, second)), destination=str(path)
+        "codex", replace(invocation(account, checkpoints), artifacts=received(first, second)), destination=str(path)
     )
     assert {entry.input_id for entry in result.deferred} == {first.identity, second.identity}
     assert not path.exists() and not checkpoints
 
 
 @pytest.mark.parametrize("failure", ["foreign", "mapping", "read", "publish", "malformed", "location"])
-def test_equal_input_deferrals_keep_every_original_identity(transport, monkeypatch, failure):
+def test_equal_input_deferrals_keep_every_original_identity(account, monkeypatch, failure):
     first, second = server(), server(component="workspace")
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     previous: tuple[NativeClaim, ...] = ()
     mapping = None
     if failure in ("foreign", "mapping"):
@@ -369,12 +367,12 @@ def test_equal_input_deferrals_keep_every_original_identity(transport, monkeypat
         path.parent.mkdir()
         path.write_text("malformed = [\n")
     else:
-        previous = (claim_for(second, legacy_name(second), transport.home / "other/config.toml"),)
+        previous = (claim_for(second, legacy_name(second), account.home / "other/config.toml"),)
     checkpoints: list[tuple[NativeClaim, ...]] = []
     result = apply_mcp(
         "codex",
         replace(
-            invocation(transport, checkpoints, prior=record(previous, "codex")),
+            invocation(account, checkpoints, prior=record(previous, "codex")),
             artifacts=received(first, second),
             report_incomplete=Mock(),
         ),
@@ -387,18 +385,18 @@ def test_equal_input_deferrals_keep_every_original_identity(transport, monkeypat
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex"])
-def test_session_native_table_checks_use_the_declared_key_for_every_input(transport, tool):
+def test_session_native_table_checks_use_the_declared_key_for_every_input(account, tool):
     first, second = server(), server(component="workspace")
-    workspace = transport.root / "project"
+    workspace = account.root / "project"
     workspace.mkdir()
     path = workspace / (".mcp.json" if tool == "claude" else ".codex/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     write(path, {key: {first.content.name: {"command": "operator"}}}, tool)
     conflicts = session_mcp_conflicts(
         tool,
-        transport.access(),
+        account.access(),
         received(first, second),
-        home=str(transport.home),
+        home=str(account.home),
         environment={},
         workspace=str(workspace),
     )
@@ -406,9 +404,9 @@ def test_session_native_table_checks_use_the_declared_key_for_every_input(transp
 
 
 @pytest.mark.parametrize("old_state", ["unchanged", "modified", "unclaimed"])
-def test_foreign_literal_entry_does_not_authorize_retaining_an_obsolete_unchanged_alias(transport, old_state):
+def test_foreign_literal_entry_does_not_authorize_retaining_an_obsolete_unchanged_alias(account, old_state):
     item = server()
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     old_name = legacy_name(item)
     original = render_mcp(item, "codex")
     alias = {**original, "command": "operator-alias"} if old_state == "modified" else original
@@ -420,7 +418,7 @@ def test_foreign_literal_entry_does_not_authorize_retaining_an_obsolete_unchange
     result = apply_mcp(
         "codex",
         replace(
-            invocation(transport, checkpoints, prior=record(previous, "codex")),
+            invocation(account, checkpoints, prior=record(previous, "codex")),
             artifacts=received(item),
             report_incomplete=reports.append,
         ),

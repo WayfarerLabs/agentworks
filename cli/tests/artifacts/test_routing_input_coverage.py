@@ -19,7 +19,7 @@ from agentworks.harness_setup.state import write_native_setup
 from agentworks.origin import Origin
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.artifacts.test_routing import graph
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 
 @pytest.mark.parametrize("receiver", ["admin", "agent", "workspace"])
@@ -114,7 +114,7 @@ def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
         ),
     )
     monkeypatch.setattr(ShellIntegration, "user_init", lambda self, call: ArtifactApplication())
-    runner = LocalFixtureTransport(tmp_path / "guest")
+    runner = LocalFixtureAccount(tmp_path / "guest")
     invocation = UserSetupInvocation(
         vm=fixture.vm,
         access=(recorded := runner.access()),

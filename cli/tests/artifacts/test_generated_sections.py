@@ -13,14 +13,14 @@ from agentworks.artifacts.application import ArtifactFile, ArtifactPublication, 
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.artifacts.sections import BEGIN, END
 from agentworks.errors import StateError
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
 
 @pytest.fixture
 def target(tmp_path):
-    return LocalFixtureTransport(tmp_path / "target")
+    return LocalFixtureAccount(tmp_path / "target")
 
 
 def section(path: Path, body: bytes = b"managed instructions") -> ArtifactFile:
@@ -28,7 +28,7 @@ def section(path: Path, body: bytes = b"managed instructions") -> ArtifactFile:
 
 
 def apply(
-    target: LocalFixtureTransport,
+    target: LocalFixtureAccount,
     desired: tuple[ArtifactFile, ...],
     previous: tuple[OwnedArtifactFile, ...] = (),
 ) -> ArtifactPublication:

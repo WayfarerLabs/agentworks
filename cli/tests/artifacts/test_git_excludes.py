@@ -18,7 +18,7 @@ from agentworks.execution.requests import PythonProgram
 from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import NativeClaim
 from tests.artifacts.test_native_delivery import owned
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.vm_access_support import Call, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem")
@@ -28,7 +28,7 @@ def git(*args: object) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *map(str, args)], check=True, capture_output=True, text=True)
 
 
-class Guest(LocalFixtureTransport):
+class Guest(LocalFixtureAccount):
     """The fixture account behind one recording access, so a test sees every request made of it.
 
     With ``metadata`` set, the Git metadata program is answered with it in

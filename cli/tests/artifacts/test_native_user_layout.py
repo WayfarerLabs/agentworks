@@ -22,21 +22,21 @@ from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePl
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, owned
 from tests.artifacts.test_native_mcp import server
-from tests.native_setup_fixtures import LocalFixtureTransport, forbid_files, invocation, native_cli_double, record
+from tests.native_setup_fixtures import LocalFixtureAccount, forbid_files, invocation, native_cli_double, record
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux guest login and file helpers")
 TOOLS = [("claude", "ClaudeCodeIntegration"), ("codex", "CodexIntegration"), ("grok", "GrokBuildIntegration")]
 
 
 @pytest.fixture
-def target(tmp_path: Path) -> Iterator[LocalFixtureTransport]:
+def target(tmp_path: Path) -> Iterator[LocalFixtureAccount]:
     root = tmp_path / "layout-guest"
-    value = LocalFixtureTransport(root)
+    value = LocalFixtureAccount(root)
     yield value
     shutil.rmtree(root)
 
 
-def profile(target: LocalFixtureTransport, tool: str, root: Path) -> None:
+def profile(target: LocalFixtureAccount, tool: str, root: Path) -> None:
     variable, _ = NATIVE_USER_DIRECTORIES[tool]
     with (target.home / ".profile").open("a") as file:
         file.write(f"export {variable}={json.dumps(str(root))}\n")

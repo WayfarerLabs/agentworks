@@ -34,7 +34,7 @@ from agentworks.plugins._harness_native.native import setup_workspace
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from tests.artifacts._fixtures import received
-from tests.native_setup_fixtures import LocalFixtureTransport, invocation, native_cli_double, record, setup_fixture_user
+from tests.native_setup_fixtures import LocalFixtureAccount, invocation, native_cli_double, record, setup_fixture_user
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest file helpers")
 
@@ -55,8 +55,8 @@ def server(
 
 
 @pytest.fixture
-def transport(tmp_path: Path) -> LocalFixtureTransport:
-    return LocalFixtureTransport(tmp_path)
+def account(tmp_path: Path) -> LocalFixtureAccount:
+    return LocalFixtureAccount(tmp_path)
 
 
 def read(path: Path, tool: MCPTool = "codex") -> SettingsObject:
@@ -113,13 +113,13 @@ def test_static_render_preserves_reference_semantics(tool, monkeypatch):
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
-def test_create_adopt_update_and_entry_conflict_are_independent(transport, tool):
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+def test_create_adopt_update_and_entry_conflict_are_independent(account, tool):
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
     first, second = server(), server("other")
     write(path, {"foreign": {"private": "fixture-secret-value"}}, tool)
     claims: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, claims), artifacts=received(first, second))
+    call = replace(invocation(account, claims), artifacts=received(first, second))
     result = apply_mcp(tool, call, destination=str(path))
     assert not result.files and not result.shared_paths and not result.deferred
     assert {c.source for c in claims[-1]} == {first.origin_identity, second.origin_identity}
@@ -142,11 +142,11 @@ def test_create_adopt_update_and_entry_conflict_are_independent(transport, tool)
     assert table(table(read(path, tool), key), first.content.name)["command"] == "operator-changed"
     assert table(table(read(path, tool), key), second.content.name)["command"] == "new"
     assert read(path, tool)["foreign"] == {"private": "fixture-secret-value"}
-    assert "fixture-secret-value" not in "".join(transport.logged_output)
+    assert "fixture-secret-value" not in "".join(account.logged_output)
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
-def test_bundle_to_direct_keeps_native_mcp_claim_and_entry(transport, tool):
+def test_bundle_to_direct_keeps_native_mcp_claim_and_entry(account, tool):
     definitions = ArtifactDefinitions.model_validate(
         {"mcp_servers": {"inventory": {"definition": {"type": "stdio", "command": "fixture-server"}}}}
     )
@@ -155,9 +155,9 @@ def test_bundle_to_direct_keeps_native_mcp_claim_and_entry(transport, tool):
     bundled = capture_artifacts([("team", bundle)], origin)
     direct = capture_artifacts([], origin, declare=definitions)
     assert bundled.mcp_servers["inventory"].identity == direct.mcp_servers["inventory"].identity
-    path = transport.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
+    path = account.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     claims: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, claims), artifacts=received(*bundled.items()))
+    call = replace(invocation(account, claims), artifacts=received(*bundled.items()))
     apply_mcp(tool, call, destination=str(path))
     previous = claims[-1]
     baseline = path.read_bytes()
@@ -168,12 +168,12 @@ def test_bundle_to_direct_keeps_native_mcp_claim_and_entry(transport, tool):
 
 
 @pytest.mark.parametrize("modified,unavailable", [(False, False), (True, False), (False, True)])
-def test_retirement_retains_modified_and_unavailable_ancestor_entries(transport, modified, unavailable):
-    path = transport.home / ".grok/config.toml"
+def test_retirement_retains_modified_and_unavailable_ancestor_entries(account, modified, unavailable):
+    path = account.home / ".grok/config.toml"
     item = server()
     claims: list[tuple[NativeClaim, ...]] = []
     reasons: list[str] = []
-    call = replace(invocation(transport, claims), artifacts=received(item), report_incomplete=reasons.append)
+    call = replace(invocation(account, claims), artifacts=received(item), report_incomplete=reasons.append)
     apply_mcp("grok", call, destination=str(path))
     prior = record(claims[-1], "codex")
     if modified:
@@ -194,12 +194,12 @@ def test_retirement_retains_modified_and_unavailable_ancestor_entries(transport,
 
 
 @pytest.mark.parametrize("case", ["new-user", "existing", "new-workspace"])
-def test_mcp_publication_modes_follow_the_owner(transport, case):
+def test_mcp_publication_modes_follow_the_owner(account, case):
     """A new file is private to a user or shared with a workspace group; an existing file keeps its mode."""
     import grp
 
     group = grp.getgrgid(os.getgid()).gr_name
-    root = transport.home if case != "new-workspace" else transport.root / "project"
+    root = account.home if case != "new-workspace" else account.root / "project"
     path = root / ".codex/config.toml"
     if case == "existing":
         write(path, {"foreign": True})
@@ -209,7 +209,7 @@ def test_mcp_publication_modes_follow_the_owner(transport, case):
         root.mkdir()
         call = WorkspaceSetupInvocation(
             vm=object(),
-            access=(access := transport.access()),
+            access=(access := account.access()),
             files=access.files(),
             prior=None,
             checkpoint=Mock(),
@@ -219,7 +219,7 @@ def test_mcp_publication_modes_follow_the_owner(transport, case):
             artifacts=received(item),
         )
     else:
-        call = replace(invocation(transport, []), artifacts=received(item))
+        call = replace(invocation(account, []), artifacts=received(item))
     apply_mcp("codex", call, destination=str(path))
     assert item.content.name in table(read(path), "mcp_servers")
     file_mode, parent_mode = stat.S_IMODE(path.stat().st_mode), stat.S_IMODE(path.parent.stat().st_mode)
@@ -232,14 +232,14 @@ def test_mcp_publication_modes_follow_the_owner(transport, case):
         assert path.stat().st_gid == path.parent.stat().st_gid == grp.getgrnam(group).gr_gid
 
 
-def test_workspace_shared_paths_include_retained_claims_without_file_ownership(transport):
+def test_workspace_shared_paths_include_retained_claims_without_file_ownership(account):
     item = server(component="workspace")
-    root = transport.root / "project"
+    root = account.root / "project"
     root.mkdir()
     claims: list[tuple[NativeClaim, ...]] = []
     call = WorkspaceSetupInvocation(
         vm=object(),
-        access=(access := transport.access()),
+        access=(access := account.access()),
         files=access.files(),
         prior=None,
         checkpoint=claims.append,
@@ -261,11 +261,11 @@ def test_workspace_shared_paths_include_retained_claims_without_file_ownership(t
     assert retained.shared_paths == (str(path),)
 
 
-def test_checkpoint_failure_and_expected_hash_conflict_escape(transport, monkeypatch):
+def test_checkpoint_failure_and_expected_hash_conflict_escape(account, monkeypatch):
     item = server()
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     call = replace(
-        invocation(transport, []),
+        invocation(account, []),
         artifacts=received(item),
         checkpoint=Mock(side_effect=ExternalError("fixture persistence failure")),
     )
@@ -289,16 +289,16 @@ def test_checkpoint_failure_and_expected_hash_conflict_escape(transport, monkeyp
 
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 @pytest.mark.parametrize("missing", [False, True])
-def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(transport, strategy, missing):
+def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(account, strategy, missing):
     item = server()
     name = item.content.name
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     claims: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, claims), artifacts=received(item))
+    call = replace(invocation(account, claims), artifacts=received(item))
     setup_fixture_user("codex", NativeUserConfig(), call)
     if missing:
         path.unlink()
-    source = transport.root / "mapping.toml"
+    source = account.root / "mapping.toml"
     write(source, {"mcp_servers": {name: {"command": "source-owned", "args": []}}})
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy=strategy))
     result = setup_fixture_user("codex", config, replace(call, artifacts=received(), prior=record(claims[-1], "codex")))
@@ -312,16 +312,16 @@ def test_joint_codex_mapping_unmasks_withdrawn_native_key_in_one_pass(transport,
 
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 @pytest.mark.parametrize("existing", [False, True])
-def test_joint_codex_mapping_desired_key_obeys_actual_policy(transport, strategy, existing):
+def test_joint_codex_mapping_desired_key_obeys_actual_policy(account, strategy, existing):
     item = server()
     name = item.content.name
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     claims: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, claims), artifacts=received(item))
+    call = replace(invocation(account, claims), artifacts=received(item))
     if existing:
         setup_fixture_user("codex", NativeUserConfig(), call)
         call = replace(call, prior=record(claims[-1], "codex"))
-    source = transport.root / "mapping.toml"
+    source = account.root / "mapping.toml"
     write(source, {"mcp_servers": {name: {"command": "source-owned", "args": []}}})
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy=strategy))
     result = setup_fixture_user("codex", config, call)
@@ -330,24 +330,24 @@ def test_joint_codex_mapping_desired_key_obeys_actual_policy(transport, strategy
     assert table(table(read(path), "mcp_servers"), name)["command"] == ("source-owned" if mapping_wins else "server")
 
 
-def test_claude_user_role_and_config_override_are_independent_of_settings(transport):
+def test_claude_user_role_and_config_override_are_independent_of_settings(account):
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
-    custom = transport.home / "custom-claude"
-    call = replace(invocation(transport, claims, env={"CLAUDE_CONFIG_DIR": str(custom)}), artifacts=received(item))
+    custom = account.home / "custom-claude"
+    call = replace(invocation(account, claims, env={"CLAUDE_CONFIG_DIR": str(custom)}), artifacts=received(item))
     setup_fixture_user("claude", NativeUserConfig(), call)
     assert (custom / ".claude.json").exists()
     assert not (custom / "settings.json").exists()
     assert claims[-1][0].destination == str(custom / ".claude.json")
 
 
-def test_mapping_only_skip_existing_preserves_bytes_and_replace_repairs_invalid_toml(transport):
-    path = transport.home / ".codex/config.toml"
+def test_mapping_only_skip_existing_preserves_bytes_and_replace_repairs_invalid_toml(account):
+    path = account.home / ".codex/config.toml"
     path.parent.mkdir()
     path.write_text("# preserve this comment\nmodel = 'existing'\n")
-    source = transport.root / "mapping.toml"
+    source = account.root / "mapping.toml"
     source.write_text('model = "mapped"\n')
-    call = invocation(transport, [])
+    call = invocation(account, [])
     baseline = path.read_bytes()
     setup_fixture_user(
         "codex", NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="skip-existing")), call
@@ -360,8 +360,8 @@ def test_mapping_only_skip_existing_preserves_bytes_and_replace_repairs_invalid_
     assert read(path) == {"model": "mapped"}
 
 
-def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(transport, monkeypatch):
-    path = transport.home / ".codex/config.toml"
+def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(account, monkeypatch):
+    path = account.home / ".codex/config.toml"
     write(path, {"foreign": True})
     market = NativeMarket("fixture", identity({"source_type": "local", "source": "/fixture-market"}))
     installed: list[NativePlugin] = []
@@ -383,7 +383,7 @@ def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(transport, monkeyp
     setup_fixture_user(
         "codex",
         NativeUserConfig(plugins=["one@fixture"]),
-        replace(invocation(transport, claims), artifacts=received(item)),
+        replace(invocation(account, claims), artifacts=received(item)),
     )
     assert [c.role for c in claims[0]] == ["plugin"]
     assert {c.role for c in claims[-1]} == {"plugin", MCP_CLAIM_ROLE}
@@ -393,8 +393,8 @@ def test_plugin_progress_is_preserved_in_later_mcp_checkpoint(transport, monkeyp
 
 
 @pytest.mark.parametrize("fault", ["malformed", "read", "publish"])
-def test_native_configuration_failures_defer_without_claiming_or_disclosing(transport, monkeypatch, fault):
-    path = transport.home / ".codex/config.toml"
+def test_native_configuration_failures_defer_without_claiming_or_disclosing(account, monkeypatch, fault):
+    path = account.home / ".codex/config.toml"
     write(path, {"foreign": "private-fixture-only"})
     if fault == "malformed":
         path.write_text("private-fixture-only = [\n")
@@ -405,21 +405,21 @@ def test_native_configuration_failures_defer_without_claiming_or_disclosing(tran
     baseline = path.read_bytes()
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
-    result = apply_mcp("codex", replace(invocation(transport, claims), artifacts=received(item)), destination=str(path))
+    result = apply_mcp("codex", replace(invocation(account, claims), artifacts=received(item)), destination=str(path))
     assert [d.input_id for d in result.deferred] == [item.identity]
     assert "private-fixture-only" not in result.deferred[0].reason
     assert claims == [] and path.read_bytes() == baseline
 
 
-def test_skip_existing_still_installs_and_retires_mcp_entries(transport):
-    path = transport.home / ".codex/config.toml"
+def test_skip_existing_still_installs_and_retires_mcp_entries(account):
+    path = account.home / ".codex/config.toml"
     write(path, {"foreign": True})
-    source = transport.root / "mapping.toml"
+    source = account.root / "mapping.toml"
     source.write_text('source = "ignored"\n')
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="skip-existing"))
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
-    call = replace(invocation(transport, claims), artifacts=received(item))
+    call = replace(invocation(account, claims), artifacts=received(item))
     setup_fixture_user("codex", config, call)
     assert read(path)["foreign"] is True and "source" not in read(path)
     assert item.content.name in table(read(path), "mcp_servers")
@@ -428,9 +428,9 @@ def test_skip_existing_still_installs_and_retires_mcp_entries(transport):
     assert read(path) == {"foreign": True, "mcp_servers": {}}
 
 
-def test_shared_document_is_observed_and_published_once(transport, monkeypatch):
-    path = transport.home / ".codex/config.toml"
-    source = transport.root / "mapping.toml"
+def test_shared_document_is_observed_and_published_once(account, monkeypatch):
+    path = account.home / ".codex/config.toml"
+    source = account.root / "mapping.toml"
     source.write_text("foreign = true\n")
     observed: list[str] = []
     published: list[str] = []
@@ -449,22 +449,22 @@ def test_shared_document_is_observed_and_published_once(transport, monkeypatch):
     monkeypatch.setattr(Files, "read", reading)
     monkeypatch.setattr(Files, "update", publishing)
     config = NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="merge-overwrite"))
-    setup_fixture_user("codex", config, replace(invocation(transport, []), artifacts=received(server())))
+    setup_fixture_user("codex", config, replace(invocation(account, []), artifacts=received(server())))
     assert observed == published == [str(path)]
 
 
-def test_explicit_replacement_can_repair_malformed_config_with_mcp_inputs(transport):
-    path = transport.home / ".codex/config.toml"
+def test_explicit_replacement_can_repair_malformed_config_with_mcp_inputs(account):
+    path = account.home / ".codex/config.toml"
     path.parent.mkdir()
     path.write_text("malformed = [\n")
-    source = transport.root / "mapping.toml"
+    source = account.root / "mapping.toml"
     source.write_text('model = "mapped"\n')
     claims: list[tuple[NativeClaim, ...]] = []
     item = server()
     result = setup_fixture_user(
         "codex",
         NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
-        replace(invocation(transport, claims), artifacts=received(item)),
+        replace(invocation(account, claims), artifacts=received(item)),
     )
     assert result.deferred == ()
     assert read(path)["model"] == "mapped"
@@ -475,12 +475,12 @@ def test_explicit_replacement_can_repair_malformed_config_with_mcp_inputs(transp
 @pytest.mark.parametrize("value", [date(2026, 11, 11), time(12, 34, 56), datetime(2026, 11, 11, 12, 34, 56)])
 @pytest.mark.parametrize("missing_hash", [False, True])
 @pytest.mark.parametrize("operation", ["update", "withdraw"])
-def test_native_toml_typed_edits_never_match_prior_string_fingerprints(transport, value, missing_hash, operation):
-    path = transport.home / ".codex/config.toml"
+def test_native_toml_typed_edits_never_match_prior_string_fingerprints(account, value, missing_hash, operation):
+    path = account.home / ".codex/config.toml"
     item = server(command=str(value))
     name = item.content.name
     claims: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, claims), artifacts=received(item))
+    call = replace(invocation(account, claims), artifacts=received(item))
     apply_mcp("codex", call, destination=str(path))
     previous = tuple(claim.model_copy(update={"sha256": None}) if missing_hash else claim for claim in claims[-1])
     document = read(path)
@@ -511,19 +511,19 @@ def test_native_toml_typed_edits_never_match_prior_string_fingerprints(transport
 @pytest.mark.parametrize("strategy", ["replace", "merge-overwrite", "merge-preserve", "skip-existing"])
 @pytest.mark.parametrize("source_requests_key", [False, True])
 def test_explicit_mapping_takeover_releases_modified_obsolete_claim_in_one_pass(
-    transport, monkeypatch, strategy, source_requests_key
+    account, monkeypatch, strategy, source_requests_key
 ):
-    path = transport.home / ".codex/config.toml"
+    path = account.home / ".codex/config.toml"
     item = server()
     name = item.content.name
     claims: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, claims), artifacts=received(item))
+    call = replace(invocation(account, claims), artifacts=received(item))
     setup_fixture_user("codex", NativeUserConfig(), call)
     previous = record(claims[-1], "codex")
     document = read(path)
     table(table(document, "mcp_servers"), name)["command"] = "operator-modified"
     write(path, document)
-    source = transport.root / "mapping.toml"
+    source = account.root / "mapping.toml"
     write(
         source,
         {"mcp_servers": {name: {"command": "source-owned", "args": []}}}
@@ -570,10 +570,10 @@ def test_explicit_mapping_takeover_releases_modified_obsolete_claim_in_one_pass(
         KeyboardInterrupt(),
     ],
 )
-def test_optional_mcp_catches_only_typed_guarded_path_refusals(transport, monkeypatch, operation, error):
-    path = transport.home / ".codex/config.toml"
+def test_optional_mcp_catches_only_typed_guarded_path_refusals(account, monkeypatch, operation, error):
+    path = account.home / ".codex/config.toml"
     checkpoints: list[tuple[NativeClaim, ...]] = []
-    call = replace(invocation(transport, checkpoints), artifacts=received(server()))
+    call = replace(invocation(account, checkpoints), artifacts=received(server()))
     apply_mcp("codex", call, destination=str(path))
     previous = record(checkpoints[-1], "codex")
     before = path.read_bytes()
@@ -592,14 +592,14 @@ def test_optional_mcp_catches_only_typed_guarded_path_refusals(transport, monkey
     assert not checkpoints and path.read_bytes() == before
 
 
-def test_required_mapping_without_mcp_still_propagates_guarded_path_refusals(transport):
-    path = transport.home / ".codex/config.toml"
+def test_required_mapping_without_mcp_still_propagates_guarded_path_refusals(account):
+    path = account.home / ".codex/config.toml"
     path.mkdir(parents=True)
-    source = transport.root / "mapping.toml"
+    source = account.root / "mapping.toml"
     source.write_text('theme = "mapped"\n')
     with pytest.raises(PathRefused):
         setup_fixture_user(
             "codex",
             NativeUserConfig(settings=SettingsMapping(source=str(source), strategy="replace")),
-            invocation(transport, []),
+            invocation(account, []),
         )

@@ -19,14 +19,14 @@ from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
-from tests.native_setup_fixtures import LocalFixtureTransport, fixture_access
+from tests.native_setup_fixtures import LocalFixtureAccount, fixture_access
 
 pytestmark = requires_posix_shell
 
 
 @pytest.fixture
 def large_skill_setup(tmp_path, db, monkeypatch):
-    target = LocalFixtureTransport(tmp_path)
+    target = LocalFixtureAccount(tmp_path)
     probe(tmp_path, tool="claude", identities=())
     monkeypatch.setattr(
         "agentworks.plugins.claude.harness_integration.setup_user", lambda *args, **kwargs: ArtifactApplication()

@@ -409,9 +409,9 @@ def test_codex_inventory_bounds_combined_toml_bytes(tmp_path):
 def test_removed_skill_support_directories_do_not_block_remaining_native_skill(tmp_path):
     import hashlib
 
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
 
-    transport = LocalFixtureTransport(tmp_path)
+    transport = LocalFixtureAccount(tmp_path)
     root = tmp_path / "home/.claude/skills"
     removed = root / "removed"
     removed.mkdir(parents=True)
@@ -478,9 +478,9 @@ def test_large_skill_retirement_does_not_leave_an_inventory_lockout(tmp_path):
 
     from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
     from agentworks.artifacts.publication import publish_artifacts
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
 
-    target = LocalFixtureTransport(tmp_path)
+    target = LocalFixtureAccount(tmp_path)
     removed = target.home / ".claude/skills/removed"
     keep = target.home / ".claude/skills/review/SKILL.md"
     contents = {removed / "SKILL.md": b"---\nname: removed\n---\nbody\n"}
@@ -672,9 +672,9 @@ def test_user_setup_preflight_allows_retry_after_interrupted_skill_retirement(
     from agentworks.harness_setup.model import SetupRecord
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
     from tests.artifacts._fixtures import received
-    from tests.native_setup_fixtures import LocalFixtureTransport, fixture_access
+    from tests.native_setup_fixtures import LocalFixtureAccount, fixture_access
 
-    target = LocalFixtureTransport(tmp_path)
+    target = LocalFixtureAccount(tmp_path)
     probe(tmp_path, tool="claude", identities=())  # Provision the offline native executable.
     monkeypatch.setattr(
         "agentworks.plugins.claude.harness_integration.setup_user", lambda *args, **kwargs: ArtifactApplication()
@@ -882,10 +882,10 @@ def test_production_probe_streams_large_valid_package_through_login_shell(tmp_pa
     from agentworks.artifacts.application import ArtifactFile
     from agentworks.artifacts.native.probe import probe_native
     from agentworks.execution.requests import Bytes, PythonProgram
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
     from tests.vm_access_support import account_shell, local_vm_access
 
-    target = LocalFixtureTransport(tmp_path)
+    target = LocalFixtureAccount(tmp_path)
     probe(tmp_path, identities=())  # Provision only the offline native executable.
     requests = []
     access = local_vm_access(

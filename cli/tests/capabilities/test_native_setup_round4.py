@@ -24,7 +24,7 @@ from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.origin import Origin
 from tests.artifacts.test_routing import graph
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 
 @pytest.mark.parametrize("failure_type", [ConfigError, StateError, ExternalError, ConnectivityError])
@@ -99,8 +99,8 @@ def routed_setup(db, tmp_path, monkeypatch):
     origin = Origin.built_in(source="round4-dispatch")
     fixture.registry.add("harness-integration", "shell", HarnessIntegrationEntry(name="shell"), origin)
     fixture.registry.finalize(probe_host_readiness=False)
-    admin = LocalFixtureTransport(tmp_path / "admin")
-    agent = LocalFixtureTransport(tmp_path / "agent")
+    admin = LocalFixtureAccount(tmp_path / "admin")
+    agent = LocalFixtureAccount(tmp_path / "agent")
     vm_call = VMSetupInvocation(
         vm=fixture.vm,
         access=(recorded := admin.access()),

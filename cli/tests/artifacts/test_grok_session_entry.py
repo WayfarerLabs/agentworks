@@ -23,7 +23,7 @@ from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, owned
 from tests.artifacts.test_session_lifecycle import lifecycle as lifecycle
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.vm_access_support import RecordingVMAccess
 
 
@@ -104,8 +104,8 @@ def test_changed_private_artifacts_reuse_exactly_one_owned_entry_through_restart
 
 
 @pytest.fixture
-def login_target(tmp_path: Path) -> LocalFixtureTransport:
-    target = LocalFixtureTransport(tmp_path / "guest")
+def login_target(tmp_path: Path) -> LocalFixtureAccount:
+    target = LocalFixtureAccount(tmp_path / "guest")
     (target.root / "login-shell").write_text(
         '#!/bin/bash\ncase "$1" in -lc|-lic) ;; *) exit 9 ;; esac\n'
         '. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
@@ -118,7 +118,7 @@ def login_target(tmp_path: Path) -> LocalFixtureTransport:
 
 
 def start(
-    target: LocalFixtureTransport,
+    target: LocalFixtureAccount,
     current: SessionArtifactContext,
     monkeypatch: pytest.MonkeyPatch,
     workarounds: list[str],

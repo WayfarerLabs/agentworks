@@ -11,12 +11,11 @@ import pytest
 from agentworks.artifacts.application import ArtifactPublication, OwnedArtifactFile
 from agentworks.capabilities.harness_integration import harness_integration_for
 from agentworks.db import AppliedStateKey, VersionedPayload
-from agentworks.errors import ExternalError, StateError, UserAbort
+from agentworks.errors import ConnectivityError, ExternalError, StateError, UserAbort
 from agentworks.execution.oplog import OperationLogFile
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup, write_native_setup
-from agentworks.ssh import SSHError
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
 
 
@@ -47,7 +46,7 @@ def test_publication_failure_keeps_checkpointed_files_and_claims(setup_case, mon
         calls += 1
         if calls == 1:
             checkpoint((owned,))
-            raise SSHError("fixture publication failed")
+            raise ConnectivityError("fixture publication failed")
         return ArtifactPublication()
 
     monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", publish)

@@ -26,8 +26,6 @@ from agentworks.harness_setup.model import NativeClaim, SetupRecord
 from agentworks.plugins._harness_native.native import setup_user
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from agentworks.ssh import SSHResult
-from agentworks.transports import Transport
 from tests.vm_access_support import (
     Admin,
     Call,
@@ -45,8 +43,8 @@ if TYPE_CHECKING:
     from agentworks.execution.requests import RunRequest
 
 
-class LocalFixtureTransport(Transport):
-    """Execute only fixture commands under a newly constructed child environment."""
+class LocalFixtureAccount:
+    """An account on this machine that answers an access's requests, each run under a newly constructed environment."""
 
     def __init__(self, root: Path):
         self.root = root
@@ -86,42 +84,20 @@ class LocalFixtureTransport(Transport):
             "GIT_CEILING_DIRECTORIES": str(root.resolve()),
             "GIT_TERMINAL_PROMPT": "0",
         }
-        self.logger = None
-        self.default_timeout = 30
         self.commands: list[str] = []
         self.logged_output: list[str] = []
 
-    def describe(self) -> str:
-        return "isolated local native fixture"
-
-    def run(self, command: str, **kwargs) -> SSHResult:
-        self.commands.append(command)
-        result = subprocess.run(
+    def shell(self, command: str) -> subprocess.CompletedProcess[str]:
+        """Run ``command`` with Bash in the fixture's home and environment, to set the fixture up."""
+        return subprocess.run(
             ["bash", "-c", command],
             cwd=self.home,
             env=self.environment,
-            input=kwargs.get("input_text", kwargs.get("input_data", "")),
             text=True,
             capture_output=True,
-            timeout=kwargs.get("timeout") or 30,
+            timeout=30,
+            check=False,
         )
-        hidden = kwargs.get("input_text") is not None or kwargs.get("discard_output")
-        stdout = "" if hidden else result.stdout
-        stderr = "" if hidden else result.stderr
-        self.logged_output.extend([stdout, stderr])
-        return SSHResult(returncode=result.returncode, stdout=stdout, stderr=stderr)
-
-    def copy_to(self, local_path, remote_path, **kwargs) -> None:
-        shutil.copyfile(local_path, remote_path)
-
-    def copy_from(self, remote_path, local_path, **kwargs) -> None:
-        shutil.copyfile(remote_path, local_path)
-
-    def _interactive(self, command: str, **kwargs) -> int:
-        raise AssertionError("interactive operations are outside fixture scope")
-
-    def call_streaming(self, command: str, **kwargs) -> int:
-        raise AssertionError("streaming operations are outside fixture scope")
 
     def answer(self, call: Call) -> Result | None:
         """Answer an access's request as this fixture's account would, or ``None`` for the default outcome.
@@ -186,7 +162,7 @@ class LocalFixtureTransport(Transport):
 
 def fixture_access(
     monkeypatch: pytest.MonkeyPatch,
-    transport: LocalFixtureTransport,
+    transport: LocalFixtureAccount,
     *,
     log: Callable[[RunRequest, Result], None] | None = None,
 ) -> VMAccess:
@@ -195,7 +171,7 @@ def fixture_access(
 
 
 def invocation(
-    transport: LocalFixtureTransport,
+    transport: LocalFixtureAccount,
     claims: list[tuple[NativeClaim, ...]],
     *,
     prior=None,
@@ -233,7 +209,7 @@ def native_cli_double() -> MagicMock:
 
 
 def native_cli(
-    transport: LocalFixtureTransport, tool: NativeTool, config_root: Path | str, *, env=None, access=None
+    transport: LocalFixtureAccount, tool: NativeTool, config_root: Path | str, *, env=None, access=None
 ) -> NativeCLI:
     """A native CLI for the fixture's account, to use as a context manager."""
     return NativeCLI(tool, invocation(transport, [], env=env, access=access), config_root=str(config_root))
@@ -268,7 +244,7 @@ def record(claims: tuple[NativeClaim, ...], tool: NativeTool) -> SetupRecord:
     )
 
 
-def market_fixture(transport: LocalFixtureTransport, tool: NativeTool) -> Path:
+def market_fixture(transport: LocalFixtureAccount, tool: NativeTool) -> Path:
     binary = shutil.which(tool)
     if binary is None:
         pytest.skip(f"{tool} CLI is not installed")

@@ -12,7 +12,7 @@ import pytest
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.artifacts.sections import BEGIN, END
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest fil
 def test_unresolved_routes_hold_previous_files_and_sections_without_inspecting_them(
     tmp_path, monkeypatch, generated_section, plan
 ):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     path = target.home / "AGENTS.md"
     if generated_section:
         path.write_bytes(b"operator prefix\n")
@@ -51,7 +51,7 @@ def test_unresolved_routes_hold_previous_files_and_sections_without_inspecting_t
 
 @pytest.mark.parametrize("legacy_package", [False, True])
 def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_independent_files(tmp_path, legacy_package):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     package = target.home / "skills/review"
     entrypoint = ArtifactFile(
         str(package / "SKILL.md"),
@@ -99,7 +99,7 @@ def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_indepe
 
 
 def test_retained_aggregate_section_does_not_drop_unresolved_members_when_new_inputs_publish(tmp_path):
-    target = LocalFixtureTransport(tmp_path / "target")
+    target = LocalFixtureAccount(tmp_path / "target")
     path = target.home / "AGENTS.md"
     path.write_bytes(b"prefix\n")
     item = ArtifactFile(str(path), b"old rule and inherited hint", ("a" * 64, "b" * 64), generated_section=True)

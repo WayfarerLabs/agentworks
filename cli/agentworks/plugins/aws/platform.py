@@ -500,8 +500,8 @@ class EC2Platform(PublicAddressPlatform):
                 ) from cleanup_error
 
         # The WHOLE fallible region is guarded by both arms of the create
-        # rollback contract: a failure (including a non-SSHError from transport
-        # construction or the inline bootstrap wait) AND an operator interrupt
+        # rollback contract: a failure (including an untyped error from the
+        # channel's construction or the inline bootstrap wait) AND an operator interrupt
         # each sweep the partial backend state before propagating. The caller's
         # unwind deletes only the DB row, so anything left here would be orphaned.
         try:

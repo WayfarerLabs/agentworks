@@ -377,8 +377,8 @@ class TestCreateRollback:
         assert "terminate_instances" in methods
         assert "delete_security_group" in methods
 
-    def test_non_ssherror_after_launch_rolls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A non-SSHError escaping the post-launch region (here a raw OSError
+    def test_an_untyped_error_after_launch_rolls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An untyped error escaping the post-launch region (here a raw OSError
         from the inline bootstrap wait, e.g. a missing ssh binary) is inside the
         guarded region now, so it sweeps the partial instance + SG instead of
         leaking them past both rollback arms."""

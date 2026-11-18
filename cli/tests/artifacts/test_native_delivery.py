@@ -917,9 +917,9 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     from agentworks.artifacts.native.probe import NativeArtifactConflictError
     from agentworks.artifacts.publication import publish_artifacts
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
 
-    target = LocalFixtureTransport(tmp_path)
+    target = LocalFixtureAccount(tmp_path)
     bad, good = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
     inputs = received(bad, good)
     plan = claude.outer_artifacts(inputs, str(target.home / ".claude"))

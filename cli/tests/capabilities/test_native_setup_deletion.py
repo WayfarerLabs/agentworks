@@ -10,7 +10,7 @@ from agentworks.agents.manager import delete_agent
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.db import AppliedStateKey, VersionedPayload
-from agentworks.errors import StateError
+from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
@@ -18,7 +18,6 @@ from agentworks.harness_setup.state import write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHError
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
 from tests.vm_access_support import install_access_recorder
@@ -153,7 +152,7 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
         with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
             pass
         if outcome == "delete-failed":
-            raise SSHError("platform refused")
+            raise ConnectivityError("platform refused")
         removed.append(vm.name)
 
     def boundary(*args, **kwargs):

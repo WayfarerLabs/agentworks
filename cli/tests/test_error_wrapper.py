@@ -15,9 +15,7 @@ from agentworks.cli import _record_unhandled_error
 from agentworks.cli._errors import echo_hint
 from agentworks.errors import ExternalError, SecretUnavailableError, StateError
 from agentworks.execution.results import Result
-from agentworks.output import AgentworksError
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHError
 
 from ._runtime_probes import framed_runtime_result
 from .conftest import _FakeResult, stub_build_registry, stub_session_resolvers, stub_vm_gates
@@ -32,13 +30,6 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """SimpleNamespace configs don't carry publish_to; Phase 2a's
     manager-entry hoist is no-op'd via the shared helper."""
     stub_build_registry(monkeypatch)
-
-
-def test_ssh_error_is_agentworks_error() -> None:
-    """SSHError must be an AgentworksError subclass so main()'s wrapper catches
-    it (otherwise SSH timeouts leak as tracebacks)."""
-    assert issubclass(SSHError, AgentworksError)
-    assert isinstance(SSHError("boom"), AgentworksError)
 
 
 def test_record_unhandled_error_writes_traceback_with_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
