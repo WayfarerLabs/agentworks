@@ -527,8 +527,8 @@ def pane_handover(lane: Lane, *, term: str | None, switch_user: bool = False) ->
     assert shown.completion == Completed(0), shown
     assert handover.collected
     assert secret not in command  # the environment is in the parked request, not on the pane's command line
-    assert f"T2:{term or DEFAULT_TERM}:{secret}".encode() in shown.stdout
-    assert b"INTERACTIVE" in shown.stdout
+    assert f"T2:{term or DEFAULT_TERM}:{secret}".encode() in shown.stdout, shown.stdout
+    assert b"INTERACTIVE" in shown.stdout, shown.stdout
     assert lane.wait_gone(f"/tmp/agw-handover-{token}")
     return shown.stdout
 
@@ -558,9 +558,16 @@ def pane_through_sudo_takes_only_term(lane: Lane) -> None:
     assert NO_TMUX_VARIABLES.search(shown), shown
 
 
-def pane_through_sudo_without_term_gets_the_default(lane: Lane) -> None:
+def pane_through_sudo_with_an_empty_term_gets_the_default(lane: Lane) -> None:
+    """A pane through sudo whose ``TERM`` is empty gets ``DEFAULT_TERM``.
+
+    tmux gives every pane a ``TERM``, its ``default-terminal``, so a pane
+    without one is not a case sudo meets; sudo's ``env_reset`` would set
+    ``TERM=unknown`` for it. An empty ``default-terminal`` is: sudo keeps the
+    empty ``TERM``, and the launcher stands ``DEFAULT_TERM`` in for it.
+    """
     needs_sudo(lane)
-    shown = pane_handover(lane, term=None, switch_user=True)
+    shown = pane_handover(lane, term="", switch_user=True)
 
     assert NO_TMUX_VARIABLES.search(shown), shown
 
@@ -913,7 +920,7 @@ def build() -> list[Vector]:
         Vector("T2-pane-terminal-from-owner", "LSV", pane_takes_its_terminal_from_its_owner),
         Vector("T2-pane-default-term", "LSV", pane_without_term_gets_the_default),
         Vector("T2-pane-through-sudo", "LV", pane_through_sudo_takes_only_term),
-        Vector("T2-pane-through-sudo-default-term", "LV", pane_through_sudo_without_term_gets_the_default),
+        Vector("T2-pane-through-sudo-empty-term", "LV", pane_through_sudo_with_an_empty_term_gets_the_default),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
         Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),

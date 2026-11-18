@@ -1078,6 +1078,10 @@ conformance suite as vectors T1 (an argv on the terminal, with its refusals) and
 handover, with `TERM` and tmux's variables from the environment and `DEFAULT_TERM` without `TERM`,
 and `T2-attach-takes-no-pane-variables`, which keeps them out of an attach), T2 also on a Debian 13
 VM. D2 adds the T2 vectors through `sudo -n -u` under the sudo lane, where only `TERM` survives.
+tmux gives every pane a `TERM`, its `default-terminal` (tmux `environ_for_session`), so the sudo
+default vector hands over an empty `TERM`, which sudo's `env_reset` keeps and the launcher replaces
+with `DEFAULT_TERM`; a caller with no `TERM` at all, which no pane is, gets sudo's own
+`TERM=unknown`.
 
 **tmux.** Tests against a real tmux (skipped where none is installed), the first of batch C: the
 batch status script runs as root and reads a server as the account that owns it, refusing a link or
@@ -1234,8 +1238,8 @@ collateral it makes stale.
   admin-window handover.
 - **D2**: the consoles onto the access, with a handover per pane and pane secrets in the boundary,
   deleting the env carry across sudo; `Handover.command(switch_user=)` arrives with its caller and
-  the sudo T2 vectors (`T2-pane-through-sudo` and `T2-pane-through-sudo-default-term`, lanes L and
-  V). Built, except the `console start` row of the pane-secret table (open question 3).
+  the sudo T2 vectors (`T2-pane-through-sudo` and `T2-pane-through-sudo-empty-term`, lanes L and V).
+  Built, except the `console start` row of the pane-secret table (open question 3).
 - **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
   amended.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
