@@ -209,11 +209,11 @@ and DB migration.
   waiting for the VM to answer) **MUST** have bounds of its own: each provider call its client's
   timeout, and a wait for the VM about two minutes. A channel that waits for the VM to answer before
   it dispatches anything (the clouds' public SSH and Proxmox's guest agent) **MUST** raise
-  `root_script.ChannelUnreachable` when that wait runs out, since nothing was dispatched: callers then stop instead of retrying, and
-  do not try a logout they could not deliver. Any other channel failure raises `ConnectivityError`,
-  whose outcome is unknown. Its docstring in `base.py` is the full contract. The clouds inherit
-  theirs from `public_ssh.PublicAddressPlatform`, supplying how to read the live public address, the
-  console hint for a VM without one, and their route (below).
+  `root_script.ChannelUnreachable` when that wait runs out, since nothing was dispatched: callers
+  then stop instead of retrying, and do not try a logout they could not deliver. Any other channel
+  failure raises `ConnectivityError`, whose outcome is unknown. Its docstring in `base.py` is the
+  full contract. The clouds inherit theirs from `public_ssh.PublicAddressPlatform`, supplying how to
+  read the live public address, the console hint for a VM without one, and their route (below).
 - `read_host_keys(vm, ctx)` has a default over `run_as_root`; the clouds' base reads under an
   Unverified provisioning file and refuses a VM that already has a record.
 - `native_shell(vm, ctx) -> int` is optional: the default offers no shell, and a platform offers one

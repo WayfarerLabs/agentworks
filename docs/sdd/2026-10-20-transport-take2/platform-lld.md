@@ -511,31 +511,31 @@ the repair's 600. The deadline starts once the agent answers: one `guest_agent_e
 `["/bin/bash", "-s"]` with `input-data`, then `guest_agent_exec_status` every two seconds until it
 reports exit or the deadline passes. Each request's wait is bounded by what remains of the deadline
 (the ping's by what remains of its own bound), at most the API's 30-second
-`REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds the TCP connect and each wait for data,
-not name resolution or a whole response, so an API that keeps a response arriving can carry one
-request past the deadline; the `run_as_root` contract states the same limit for any channel over an
-HTTP API. The operator's [2026-11-11 ruling](./frd.md#2026-11-11) keeps that limit documented rather
-than enforced: the API is the site's own server, and a whole-response bound would mean replacing
-`urllib` and the proxy support that comes with it, reaching into private socket attributes, or
-abandoning a worker thread at the deadline. A poll carries only the PID, so a failed one is asked
-again at the next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up,
-as they do for an agent that restarted and lost the PID. Dispatch and status failures raise
-`ConnectivityError` with no stdin in the message (`guest_agent.py:80-118`), except an HTTP 401 or
-403, which raises `TokenRejectedError` at once; a status failure of either kind says the script may
-still be running, and a status failure from the API adds the API's own error text (an agent that
-restarted mid-script answers `Agent error: PID <pid> does not exist`), since that request carries
-only the PID. A dispatch failure adds none, since its request carries the script. A
-`_TruncatedQGAOutput` report raises `ConnectivityError` saying the script exited with its output cut
-short. No failure chains the API error, whose request quotes the script. `create` waits for
-cloud-init through it (`cloud-init status --wait --long`, the cloud bootstrap's readiness command,
-a 300 s budget for cloud-init, each attempt's agent wait before its deadline, status 2 a warning,
-and any other failure quoting cloud-init's last lines as the cloud bootstrap does; a channel
-failure is asked again within that budget, since cloud-init can restart the guest agent and the
-command changes nothing), with no separate wait for a guest IP, then runs the bootstrap through it with
-`run_bootstrap` and today's 600-second deadline (`platform.py:600`), then joins and settles;
-`guest_agent_exec_wait` and `guest_agent_network` leave the API client. `out-data` and `err-data`
-are encoded with `errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request`
-types `http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
+`REQUEST_TIMEOUT_SECONDS`. A socket timeout bounds the TCP connect and each wait for data, not name
+resolution or a whole response, so an API that keeps a response arriving can carry one request past
+the deadline; the `run_as_root` contract states the same limit for any channel over an HTTP API. The
+operator's [2026-11-11 ruling](./frd.md#2026-11-11) keeps that limit documented rather than
+enforced: the API is the site's own server, and a whole-response bound would mean replacing `urllib`
+and the proxy support that comes with it, reaching into private socket attributes, or abandoning a
+worker thread at the deadline. A poll carries only the PID, so a failed one is asked again at the
+next interval; only polls that keep failing for `STATUS_RETRY_SECONDS` (30 s) give up, as they do
+for an agent that restarted and lost the PID. Dispatch and status failures raise `ConnectivityError`
+with no stdin in the message (`guest_agent.py:80-118`), except an HTTP 401 or 403, which raises
+`TokenRejectedError` at once; a status failure of either kind says the script may still be running,
+and a status failure from the API adds the API's own error text (an agent that restarted mid-script
+answers `Agent error: PID <pid> does not exist`), since that request carries only the PID. A
+dispatch failure adds none, since its request carries the script. A `_TruncatedQGAOutput` report
+raises `ConnectivityError` saying the script exited with its output cut short. No failure chains the
+API error, whose request quotes the script. `create` waits for cloud-init through it
+(`cloud-init status --wait --long`, the cloud bootstrap's readiness command, a 300 s budget for
+cloud-init, each attempt's agent wait before its deadline, status 2 a warning, and any other failure
+quoting cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within
+that budget, since cloud-init can restart the guest agent and the command changes nothing), with no
+separate wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's
+600-second deadline (`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and
+`guest_agent_network` leave the API client. `out-data` and `err-data` are encoded with
+`errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request` types
+`http.client.HTTPException` as `ProxmoxAPIError` like any transport failure.
 `_run_bootstrap_via_agent` (`platform.py:566-636`), `native_transport` (`:488-502`) and
 `transport.py` go. No `native_shell` override. `recovery_needs_guest_sshd = False`.
 
@@ -1077,9 +1077,9 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   provider call its client's timeout; Azure's long-running operations on the route (the public-IP
   heal, the deny re-pin, the legacy-rule delete and the poke) wait at most
   `_ROUTE_OPERATION_TIMEOUT_SECONDS` (300 s), where they had no bound, and a poke that does not
-  finish removes its rule and raises without another attempt; GCP's firewall insert already had
-  one. Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the agent
-  wait's `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at spawn.
+  finish removes its rule and raises without another attempt; GCP's firewall insert already had one.
+  Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the agent wait's
+  `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes, and Proxmox's cloud-init wait keeps a
   300-second budget for cloud-init itself.

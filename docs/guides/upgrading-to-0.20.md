@@ -924,7 +924,10 @@ would change; the default accepts every hostname.
   runs `/bin/bash -s` as root through the platform's own channel, without the VM's Tailscale, with
   `script` on its stdin and nowhere else; it runs the script once and returns both streams with no
   exit status. The platform's own create-time join runs through it, and so do `vm recover`,
-  `vm rekey` and the logout at `vm delete`.
+  `vm rekey` and the logout at `vm delete`. Its `deadline` starts at dispatch and bounds the script
+  alone. Anything the channel does first (opening a route, confirming the guest, waiting for the VM
+  to answer) needs a bound of its own, and a wait for the VM that runs out raises
+  `root_script.ChannelUnreachable`.
 - **Declare `recovery_needs_guest_sshd`.** It is `True` when that channel goes through the guest's
   sshd. It has no default, and registration refuses a platform that leaves it out.
 - **`native_transport()` is gone,** along with `transient_route()` and `probe_failure_hint`. A cloud
