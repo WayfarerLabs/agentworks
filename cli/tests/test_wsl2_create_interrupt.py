@@ -38,7 +38,7 @@ from urllib.parse import urlparse
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError, wsl2
+from agentworks.capabilities.vm_platform import ProvisionRequest, RetainedProvisioningError, sudoers, wsl2
 from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
@@ -159,6 +159,46 @@ def test_the_distro_keeps_its_vms_hostname_in_wsl_conf(monkeypatch: pytest.Monke
     assert conf["network"]["hostname"] == request.hostname
     assert conf["user"]["default"] == request.admin_username
     assert conf["boot"]["systemd"] == "true"
+
+
+@requires_posix_shell
+def test_wsl_create_installs_a_validated_admin_grant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Run the actual root-side writer selected by native WSL creation."""
+    import os
+    import shutil
+
+    executable = shutil.which("visudo", path=os.defpath + os.pathsep + "/usr/sbin")
+    if executable is None:
+        pytest.skip("visudo is not installed")
+    monkeypatch.setenv("PATH", str(Path(executable).parent) + os.pathsep + os.environ["PATH"])
+    directory = tmp_path / "sudoers with spaces"
+    directory.mkdir()
+    monkeypatch.setattr(sudoers, "_SUDOERS_DIRECTORY", str(directory))
+    _wire(monkeypatch)
+    original = wsl2._run_wsl
+    scripts: list[str] = []
+
+    def writer(user: str) -> str:
+        script = sudoers.admin_sudoers_script(user)
+        scripts.append(script)
+        return script
+
+    def run(args: list[str], *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
+        if scripts and args[-1] == scripts[-1]:
+            return subprocess.run(["bash", "-c", args[-1]], check=False, text=True, capture_output=True)
+        return original(args, timeout=timeout)
+
+    monkeypatch.setattr(wsl2, "admin_sudoers_script", writer)
+    monkeypatch.setattr(wsl2, "_run_wsl", run)
+    request = _request()
+
+    WSL2Platform("wsl2", {}).create(request, RunContext())
+
+    assert len(scripts) == 1
+    grant = directory / request.admin_username
+    assert grant.stat().st_mode & 0o777 == 0o440
+    subprocess.run([executable, "-cf", str(grant)], check=True)
+    assert list(directory.iterdir()) == [grant]
 
 
 @pytest.mark.parametrize("hostname", ["vm_1", "team--vm1"])

@@ -504,6 +504,23 @@ def _install_sudoers_fragment(
         target.run(f"sudo rm -f {q_staging}", check=False)
 
 
+def _write_sudoers_admin(
+    target: Transport,
+    logger: SSHLogger,
+    admin_user: str,
+) -> None:
+    """Reconcile the managed admin grant, including its mode, on VM reinit."""
+    from agentworks.capabilities.vm_platform.sudoers import admin_sudoers_script
+
+    logger.step("Admin sudo grant")
+    try:
+        target.run(admin_sudoers_script(admin_user), sudo=True)
+    except SSHError as e:
+        msg = f"admin sudo grant install failed: {e}. Re-run `agw vm reinit` to retry."
+        logger.warning(msg)
+        output.warn(msg)
+
+
 def _write_sudoers_env_keep(
     target: Transport,
     logger: SSHLogger,

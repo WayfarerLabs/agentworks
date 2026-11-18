@@ -25,6 +25,7 @@ from agentworks.capabilities.vm_platform.base import (
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import run_bootstrap
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
+from agentworks.capabilities.vm_platform.sudoers import admin_sudoers_script
 from agentworks.capabilities.vm_platform.tailscale_join import (
     CREATE_RERUN_HINT,
     join_tailscale,
@@ -918,8 +919,7 @@ class WSL2Platform(VMPlatform):
                         "--",
                         "bash",
                         "-c",
-                        f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
-                        f" > /etc/sudoers.d/{shlex.quote(admin_username)}",
+                        admin_sudoers_script(admin_username),
                     ]
                 )
 
