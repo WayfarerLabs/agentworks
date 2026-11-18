@@ -236,38 +236,23 @@ def test_an_unsearchable_workspace_directory_is_warned(
 
 @requires_guest_shell
 @skip_as_root
-def test_a_workspace_hidden_by_an_unsearchable_parent_is_warned(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
-) -> None:
-    target, workspace, _entries = guest
-    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    parent = tmp_path / "guest" / "locked"
-    parent.mkdir()
-    hidden = _workspace(db, parent, "hidden")
-    parent.chmod(0o600)
-    try:
-        _reinit(db, target)
-    finally:
-        parent.chmod(0o755)
-
-    assert (hidden / ".tmuxinator.yml").exists()
-    assert not (workspace / ".tmuxinator.yml").exists()
-    assert len(captured_output.warnings) == 1
-    assert str(hidden) in captured_output.warnings[0]
-
-
-@requires_guest_shell
-@skip_as_root
-def test_a_workspace_reached_through_a_link_into_an_unsearchable_directory_is_warned(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+@pytest.mark.parametrize("through_link", [False, True], ids=["inside", "through-a-link"])
+def test_a_workspace_hidden_by_an_unsearchable_directory_is_warned(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    through_link: bool,
 ) -> None:
     target, workspace, _entries = guest
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
     locked = tmp_path / "guest" / "locked"
-    (locked / "inner").mkdir(parents=True)
-    through = tmp_path / "guest" / "through"
-    through.symlink_to(locked / "inner")
-    hidden = _workspace(db, through, "ws")
+    parent = locked / "inner"
+    parent.mkdir(parents=True)
+    if through_link:
+        (tmp_path / "guest" / "through").symlink_to(parent)
+        parent = tmp_path / "guest" / "through"
+    hidden = _workspace(db, parent, "hidden")
     locked.chmod(0o600)
     try:
         _reinit(db, target)
@@ -323,46 +308,31 @@ def test_a_discovery_directory_that_cannot_be_fully_handled_is_warned(
 
 @requires_guest_shell
 @skip_as_root
-def test_a_discovery_directory_hidden_by_an_unsearchable_ancestor_is_warned(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
-) -> None:
-    target, workspace, entries = guest
-    link = entries / "ws-proj-console.yml"
-    link.symlink_to(workspace / ".tmuxinator.yml")
-    entries.parent.chmod(0o600)
-    try:
-        _reinit(db, target)
-    finally:
-        entries.parent.chmod(0o755)
-
-    assert link.is_symlink()
-    assert len(captured_output.warnings) == 1
-
-
-@requires_guest_shell
-@skip_as_root
-@pytest.mark.parametrize("levels_up", [0, 1], ids=["discovery-directory", "config-directory"])
-def test_a_discovery_directory_linked_into_an_unsearchable_directory_is_warned(
+@pytest.mark.parametrize("shape", ["config-unsearchable", "discovery-linked", "config-linked"])
+def test_a_discovery_directory_hidden_by_an_unsearchable_directory_is_warned(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
     tmp_path: Path,
     captured_output: CapturedOutput,
-    levels_up: int,
+    shape: str,
 ) -> None:
     target, workspace, entries = guest
-    (entries / "ws-proj-console.yml").symlink_to(workspace / ".tmuxinator.yml")
-    linked = (entries, entries.parent)[levels_up]
-    locked = tmp_path / "guest" / "locked"
-    locked.mkdir()
-    shutil.move(linked, locked / linked.name)
-    linked.symlink_to(locked / linked.name)
+    link = entries / "ws-proj-console.yml"
+    link.symlink_to(workspace / ".tmuxinator.yml")
+    locked = entries.parent
+    if shape != "config-unsearchable":
+        linked = entries if shape == "discovery-linked" else entries.parent
+        locked = tmp_path / "guest" / "locked"
+        locked.mkdir()
+        shutil.move(linked, locked / linked.name)
+        linked.symlink_to(locked / linked.name)
     locked.chmod(0o600)
     try:
         _reinit(db, target)
     finally:
         locked.chmod(0o755)
 
-    assert (entries / "ws-proj-console.yml").is_symlink()
+    assert link.is_symlink()
     assert len(captured_output.warnings) == 1
 
 
@@ -415,20 +385,30 @@ def _project_and_link(workspace: Path, entries: Path) -> tuple[Path, Path]:
 
 
 @requires_guest_shell
-@pytest.mark.parametrize("failing", [1, 2], ids=["links-command", "projects-command"])
+@pytest.mark.parametrize(
+    ("failing", "link_kept", "project_kept"),
+    [(1, True, False), (2, False, True)],
+    ids=["links-command", "projects-command"],
+)
 def test_a_transport_error_on_one_command_still_runs_the_other(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, failing: int
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    captured_output: CapturedOutput,
+    failing: int,
+    link_kept: bool,
+    project_kept: bool,
 ) -> None:
     target, workspace, entries = guest
     project, link = _project_and_link(workspace, entries)
-    calls = _replace_call(target, failing, SSHError("connection dropped running sh -c 'script'"))
+    error_detail = "transport-error-detail-3c9e1f"
+    calls = _replace_call(target, failing, SSHError(error_detail))
 
     _reinit(db, target)
 
     assert len(calls) == 2
-    assert (link.is_symlink(), project.exists()) == (failing == 1, failing == 2)
+    assert link.is_symlink() is link_kept and project.exists() is project_kept
     assert len(captured_output.warnings) == 1
-    assert "sh -c" not in captured_output.warnings[0], "the warning must not carry the script"
+    assert error_detail not in captured_output.warnings[0], "the warning must not carry the transport's error"
 
 
 @requires_guest_shell
