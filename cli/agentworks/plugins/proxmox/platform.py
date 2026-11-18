@@ -574,13 +574,14 @@ def _wait_for_cloud_init(
 
     The wait is the cloud bootstrap's own command, so a failure quotes
     cloud-init's status and detail the same way (``readiness_failure``). A
-    channel failure is asked again while at least
+    channel failure after a dispatch is asked again while at least
     :data:`CLOUD_INIT_RETRY_MIN_SECONDS` of :data:`CLOUD_INIT_DEADLINE_SECONDS`
     remains, each attempt's deadline being what remains: cloud-init can
     restart the guest agent mid-run (Proxmox's ``ciupgrade``), and
     ``cloud-init status --wait`` changes nothing, so running it again is safe.
-    The guest agent's wait before each dispatch has its own bound and comes
-    before that attempt's deadline, so the whole wait can end up to
+    ``ChannelUnreachable`` is not asked again: the guest agent's own bounded
+    wait already found no agent, so it propagates at once. That wait comes
+    before each attempt's deadline, so the whole wait can end up to
     ``guest_agent.AGENT_WAIT_SECONDS`` after the budget. ``log`` records each
     wait that ran to an outcome.
     """
@@ -590,6 +591,8 @@ def _wait_for_cloud_init(
         try:
             result = root_script.run(run_as_root, DEFAULT_READINESS_COMMAND, deadline=deadline, log=log)
             break
+        except root_script.ChannelUnreachable:
+            raise
         except ConnectivityError:
             if expires - time.monotonic() < CLOUD_INIT_RETRY_MIN_SECONDS:
                 raise

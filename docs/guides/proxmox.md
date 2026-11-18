@@ -268,8 +268,9 @@ After provisioning, normal operations use Tailscale SSH, as they do on every pla
 
 A root script fails with
 `the QEMU guest agent of Proxmox VM <vmid>@<node> did not answer, so no script was dispatched` when
-the agent does not answer within about two minutes; create's wait for cloud-init asks again until
-about six minutes have passed. Check:
+the agent does not answer within about two minutes. Create's wait for cloud-init stops there too: it
+asks again only when the agent answered and then lost the script, as when cloud-init restarts it.
+Check:
 
 - The guest agent is installed in the template (the setup script handles this via `virt-customize`)
 - The guest agent is enabled in the VM config (`qm set <vmid> --agent enabled=1`)

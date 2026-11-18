@@ -8,6 +8,7 @@ import pytest
 
 from agentworks.capabilities.vm_platform.tailscale_join import DEFAULT_READINESS_COMMAND
 from agentworks.errors import ConnectivityError, ProvisioningError
+from agentworks.execution.root_script import ChannelUnreachable
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.platform import (
     CLOUD_INIT_DEADLINE_SECONDS,
@@ -90,3 +91,14 @@ def test_a_channel_that_keeps_failing_raises_at_the_deadline(monkeypatch: pytest
     assert guest.deadlines[0] == CLOUD_INIT_DEADLINE_SECONDS
     # No attempt is dispatched with too little of the budget to finish.
     assert min(guest.deadlines) >= CLOUD_INIT_RETRY_MIN_SECONDS - guest_agent.POLL_INTERVAL_SECONDS
+
+
+def test_an_unreachable_channel_is_not_asked_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guest agent's own bounded wait found no agent, so another attempt would only wait again."""
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.time.sleep", lambda seconds: pytest.fail("retried"))
+    guest = _guest(Answer(raises=ChannelUnreachable("the guest agent never answered")))
+
+    with pytest.raises(ChannelUnreachable):
+        _wait_for_cloud_init(guest.run_as_root, 101, log=None)
+
+    assert len(guest.deadlines) == 1
