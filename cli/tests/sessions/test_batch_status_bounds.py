@@ -1,7 +1,7 @@
 """Stuck tmux servers leave only their own rows unknown in batch status.
 
 The real batch program runs in a local shell under the request deadline that
-``batch_check_status`` asks for, with fake ``tmux`` and ``sudo`` on its PATH
+``batch_check_status`` asks for, with a fake ``tmux`` on its PATH
 and a fake ``runuser`` in place of ``tmux.RUNUSER_PATH``. The timeouts are
 shortened so the test stays quick.
 """
@@ -81,9 +81,6 @@ def _local_guest(shell: list[str], env: dict[str, str]) -> RecordingVMAccess:
 
 def _switch_stand_ins(bin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Root's switch to each row's account, reduced to running the client as the caller."""
-    sudo = bin_dir / "sudo"
-    sudo.write_text('#!/bin/sh\n[ "$1" = -n ] || exit 97\nshift\nexec "$@"\n')
-    sudo.chmod(0o755)
     runuser = bin_dir / "runuser"
     runuser.write_text('#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 97\nshift 3\nexec "$@"\n')
     runuser.chmod(0o755)

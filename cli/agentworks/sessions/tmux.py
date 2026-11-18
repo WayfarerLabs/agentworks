@@ -195,11 +195,14 @@ def socket_owner(socket_path: str, *, admin_username: str) -> str | None:
 def owner_client_command(command: str, *, owner_word: str, pty: bool = False) -> str:
     """Return ``command`` run as a tmux server's owner, from ``/``.
 
-    The one spelling of the switch to a server's owner. The VM admin's shell
-    or root runs the result: ``sudo`` lets it switch and ``runuser`` drops to
-    the owner, who runs ``command`` with ``/`` as its working directory.
-    ``owner_word`` is one shell word that expands to the account: a quoted
-    name (``as_socket_owner_line``), or a quoted variable in a guest program.
+    The one spelling of the switch to a server's owner. Only root runs it,
+    after its socket guard: every caller on the admin's access elevates the
+    whole line (``socket_owner_run_command``, ``as_socket_owner_from_admin``,
+    ``session attach``, the batch status script), so ``runuser`` drops
+    straight to the owner, who runs ``command`` with ``/`` as its working
+    directory. ``owner_word`` is one shell word that expands to the account:
+    a quoted name (``as_socket_owner_line``), or a quoted variable in a guest
+    program.
     ``pty`` gives an interactive client a terminal of its own (``runuser
     --pty``, which relays window-size changes): an owner-uid client left on
     the admin's terminal would be reachable by the owner's other processes,
@@ -209,7 +212,7 @@ def owner_client_command(command: str, *, owner_word: str, pty: bool = False) ->
     ``$( (cd / ...))``: written ``$((`` it parses as arithmetic.
     """
     switch = f"{RUNUSER_PATH} --pty" if pty else RUNUSER_PATH
-    return f"(cd / && sudo -n {switch} -u {owner_word} -- {command})"
+    return f"(cd / && {switch} -u {owner_word} -- {command})"
 
 
 SOCKET_GUARD_REFUSED = 126

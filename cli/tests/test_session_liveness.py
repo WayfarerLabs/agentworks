@@ -448,11 +448,8 @@ def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_
     )
     tmux.chmod(0o755)
 
-    # Root switches to each row's owner (tmux.owner_client_command); these stand-ins note the
-    # account and run the rest as the caller.
-    sudo = bin_dir / "sudo"
-    sudo.write_text('#!/bin/sh\n[ "$1" = -n ] || exit 97\nshift\nexec "$@"\n')
-    sudo.chmod(0o755)
+    # Root switches to each row's owner (tmux.owner_client_command); this stand-in notes the
+    # account and runs the rest as the caller.
     runuser = tmp_path / "runuser"
     runuser.write_text(
         '#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\nAGW_AS=$2\nexport AGW_AS\nshift 3\nexec "$@"\n'
@@ -1401,12 +1398,10 @@ def test_single_session_tmux_reads_run_as_the_owner_behind_the_socket_guard(
             '#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\n'
             f'printf "runuser %s\\n" "$2" >> {audit}\nshift 3\nexec "$@"\n'
         )
-        # Root's switch goes through sudo, which this stand-in reduces to running the rest.
-        (bin_dir / "sudo").write_text('#!/bin/sh\n[ "$1" = -n ] || exit 64\nshift\nexec "$@"\n')
         (bin_dir / "tmux").write_text(
             f'#!/bin/sh\nprintf "tmux %s\\n" "$*" >> {audit}\nprintf "no server running on %s\\n" "$2" >&2\nexit 1\n'
         )
-        for shim in ("runuser", "sudo", "tmux"):
+        for shim in ("runuser", "tmux"):
             (bin_dir / shim).chmod(0o755)
         monkeypatch.setattr(tmux, "RUNUSER_PATH", str(bin_dir / "runuser"))
         # The guard checks for the account whose directory holds the socket.

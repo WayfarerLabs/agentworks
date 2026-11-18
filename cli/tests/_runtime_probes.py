@@ -32,7 +32,7 @@ def socket_guard(command: str) -> tuple[str, str] | None:
 # ``tmux.owner_client_command`` around ``/bin/sh -c``, as ``as_socket_owner_line`` switches to the
 # owner: plain, or onto a relay terminal of its own.
 _OWNER_SWITCH = re.compile(
-    r"\(cd / && sudo -n \S*runuser(?P<relay> --pty)? -u (?P<owner>\S+) -- /bin/sh -c (?P<line>.*)\)",
+    r"\(cd / && \S*runuser(?P<relay> --pty)? -u (?P<owner>\S+) -- /bin/sh -c (?P<line>.*)\)",
     re.DOTALL,
 )
 

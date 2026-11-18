@@ -2,8 +2,7 @@
 
 The cleanup runs over the fixture's recording access, whose requests run on
 this machine (``LocalFixtureTransport.answer``), elevation ignored. A
-``runuser`` shim in place of ``tmux.RUNUSER_PATH``, reached through a
-``sudo`` shim on the fixture's ``PATH``, records the account each server
+``runuser`` shim in place of ``tmux.RUNUSER_PATH`` records the account each server
 probe asks for and runs the probe as the test's own user.
 """
 
@@ -53,10 +52,6 @@ def target(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalFixtureTransport]:
         )
         shim.chmod(0o755)
         monkeypatch.setattr("agentworks.sessions.tmux.RUNUSER_PATH", str(shim))
-        # Elevation without privilege: this user stands in for root.
-        sudo = fixture.root / "bin" / "sudo"
-        sudo.write_text('#!/bin/sh\n[ "$1" = -n ] || exit 64\nshift\nexec "$@"\n')
-        sudo.chmod(0o755)
         yield fixture
 
 

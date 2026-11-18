@@ -57,12 +57,10 @@ class NativeTarget:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.banner = ""
         self.stderr_banner = ""
-        # Every switch to a server's owner goes through sudo and runuser; this
-        # account owns every native server here, so both stand-ins run the rest as it.
+        # Every switch to a server's owner goes through runuser; this account
+        # owns every native server here, so the stand-in runs the rest as it.
         bin_dir = root / "bin"
         bin_dir.mkdir()
-        (bin_dir / "sudo").write_text('#!/bin/sh\n[ "$1" = -n ] || exit 64\nshift\nexec "$@"\n')
-        (bin_dir / "sudo").chmod(0o700)
         self.runuser = root / "runuser"
         self.runuser.write_text('#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\nshift 3\nexec "$@"\n')
         self.runuser.chmod(0o700)
