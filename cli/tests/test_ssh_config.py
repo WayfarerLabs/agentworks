@@ -462,6 +462,18 @@ def test_declined_slug_keeps_default_file_name(tmp_path: Path) -> None:
 # -- Host-key store options ---------------------------------------------------
 
 
+def _resolved(config: Path, alias: str) -> dict[str, str]:
+    """``ssh -G -F config alias``'s settings; it resolves the configuration and exits, never connecting.
+
+    A failure reports ssh's own stderr, which names a refused file or a bad line.
+    """
+    result = subprocess.run(
+        ["ssh", "-G", "-F", str(config), alias], capture_output=True, text=True, timeout=10, check=False
+    )
+    assert result.returncode == 0, f"ssh -G exited {result.returncode}: {result.stderr.strip()}"
+    return dict(line.split(" ", 1) for line in result.stdout.splitlines())
+
+
 def _managed_blocks(content: str) -> dict[str, str]:
     """The managed file's Host blocks, keyed by alias."""
     blocks: dict[str, str] = {}
@@ -579,14 +591,7 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
 
     for vm_name in ("known", "fresh"):
         # -G resolves the configuration and exits; it never connects.
-        out = subprocess.run(
-            ["ssh", "-G", "-F", str(ssh_dir / "config.d" / _MANAGED_CONF), f"awvm--{vm_name}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        ).stdout
-        settings = dict(line.split(" ", 1) for line in out.splitlines())
+        settings = _resolved(ssh_dir / "config.d" / _MANAGED_CONF, f"awvm--{vm_name}")
 
         assert settings["hostkeyalias"] == f"agentworks-vm-{vm_name}"
         assert settings["globalknownhostsfile"] == trust.store_file(vm_name).as_posix()
@@ -623,14 +628,7 @@ def test_a_weaker_setting_read_first_still_finds_the_store_only_as_the_file_ssh_
     combined.write_text(f"Host *\n    StrictHostKeyChecking accept-new\n    UpdateHostKeys yes\n\n{managed}")
 
     for vm_name in ("known", "fresh"):
-        out = subprocess.run(
-            ["ssh", "-G", "-F", str(combined), f"awvm--{vm_name}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        ).stdout
-        settings = dict(line.split(" ", 1) for line in out.splitlines())
+        settings = _resolved(combined, f"awvm--{vm_name}")
 
         assert (settings["stricthostkeychecking"], settings["updatehostkeys"]) == ("accept-new", "true")
         assert settings["userknownhostsfile"] == trust.NULL_DEVICE
@@ -837,10 +835,7 @@ def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entr
 
     _ensure_include(ssh_config)
 
-    out = subprocess.run(
-        ["ssh", "-G", "-F", str(ssh_config), "awvm--web"], capture_output=True, text=True, timeout=10, check=True
-    ).stdout
-    assert "hostname 100.64.0.9" in out.splitlines()
+    assert _resolved(ssh_config, "awvm--web")["hostname"] == "100.64.0.9"
 
 
 def test_an_unquoted_include_split_at_its_space_is_replaced_where_it_stands(tmp_path: Path) -> None:
