@@ -577,7 +577,9 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)).
 - **sshd is reloaded only when its fragment goes.** Initialization no longer writes an sshd fragment
   ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)); it reloads sshd only
-  when it removes the old one, where every initialization used to reload sshd.
+  when it removes the old one, where every initialization used to reload sshd. Until that reload
+  succeeds the fragment is kept as `/etc/ssh/agentworks-accept-env.reload-pending`, which sshd does
+  not read, so when the reload fails or a reinit is cut short before it, the next reinit reloads sshd.
 - **A file whose reload fails is put back.** When loading the sysctl baseline (now `sysctl -p` of
   that file alone, not `sysctl --system`), or `systemctl daemon-reload` after the tailscaled drop-in
   fails, times out or is interrupted, the file gets its previous content back (or is removed if it

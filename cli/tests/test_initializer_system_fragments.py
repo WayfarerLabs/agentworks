@@ -34,6 +34,7 @@ def guest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StepGuest:
         ("AGENTWORKS_IDENTITY_PROFILE_PATH", "profile.d/agentworks-identity.sh"),
         ("AGENTWORKS_ZPROFILE_PATH", "zsh/zprofile"),
         ("RETIRED_SSHD_ACCEPT_ENV_PATH", "sshd_config.d/50-agentworks-accept-env.conf"),
+        ("RETIRED_SSHD_ACCEPT_ENV_RELOAD_PENDING_PATH", "agentworks-accept-env.reload-pending"),
         ("SKEL_BASHRC_PATH", "skel/.bashrc"),
         ("SKEL_ZSHRC_PATH", "skel/.zshrc"),
     ):
@@ -161,38 +162,48 @@ def test_a_linked_zprofile_is_refused_with_a_warning_and_its_target_left_alone(
 SSHD_RELOAD = Command(("systemctl", "reload", "ssh"), elevated=True, deadline=60)
 
 
+def _retire(fragment: Path, pending: Path) -> Command:
+    return Command(("mv", "-f", "-T", "--", str(fragment), str(pending)), elevated=True, deadline=60)
+
+
 def _rm(path: Path) -> Command:
     return Command(("rm", "-f", "--", str(path)), elevated=True, deadline=60)
 
 
-def _installed_accept_env(guest: StepGuest) -> Path:
-    """An installed fragment, which the guest's ``rm`` removes; file operations run locally."""
-    fragment = _path("RETIRED_SSHD_ACCEPT_ENV_PATH")
+def _accept_env_guest(guest: StepGuest, *, installed: bool = True) -> tuple[Path, Path]:
+    """The fragment, installed or not, and its reload-pending name; ``mv``, ``rm`` and file operations act here."""
+    fragment, pending = _path("RETIRED_SSHD_ACCEPT_ENV_PATH"), _path("RETIRED_SSHD_ACCEPT_ENV_RELOAD_PENDING_PATH")
     fragment.parent.mkdir()
-    fragment.write_bytes(b"AcceptEnv *\n")
+    if installed:
+        fragment.write_bytes(b"AcceptEnv *\n")
 
     def answer(call: Call) -> Result | BaseException | None:
-        if call.request == _rm(fragment):
-            fragment.unlink(missing_ok=True)
+        if call.request == _retire(fragment, pending):
+            fragment.replace(pending)
+            return Result(Completed(0))
+        if call.request == _rm(pending):
+            pending.unlink(missing_ok=True)
             return Result(Completed(0))
         return run_file_program_locally(call)
 
     guest.access.answer = answer
-    return fragment
+    return fragment, pending
 
 
 def test_an_installed_accept_env_fragment_is_removed_and_sshd_reloaded(guest: StepGuest) -> None:
-    fragment = _installed_accept_env(guest)
+    fragment, pending = _accept_env_guest(guest)
 
     shell_env._remove_sshd_accept_env(guest.files, guest.log)
 
-    assert not fragment.exists()
-    assert guest.commands() == [_rm(fragment), SSHD_RELOAD]
-    assert all(call.options["check"] for call in guest.access.calls if call.request in (_rm(fragment), SSHD_RELOAD))
+    assert not fragment.exists() and not pending.exists()
+    assert guest.commands() == [_retire(fragment, pending), SSHD_RELOAD, _rm(pending)]
+    assert all(call.options["check"] for call in guest.access.calls if isinstance(call.request, Command))
     assert guest.log.warned == []
 
 
 def test_no_accept_env_fragment_leaves_sshd_alone(guest: StepGuest) -> None:
+    _accept_env_guest(guest, installed=False)
+
     shell_env._remove_sshd_accept_env(guest.files, guest.log)
 
     assert guest.commands() == []
@@ -201,27 +212,40 @@ def test_no_accept_env_fragment_leaves_sshd_alone(guest: StepGuest) -> None:
 
 
 def test_a_failed_removal_warns_and_never_reloads(guest: StepGuest) -> None:
-    fragment = _path("RETIRED_SSHD_ACCEPT_ENV_PATH")
+    fragment, pending = _path("RETIRED_SSHD_ACCEPT_ENV_PATH"), _path("RETIRED_SSHD_ACCEPT_ENV_RELOAD_PENDING_PATH")
     fragment.parent.mkdir()
     fragment.write_bytes(b"AcceptEnv *\n")
-    guest.respond(_rm(fragment), _failed(b"rm: cannot remove\n"))
+    guest.respond(_retire(fragment, pending), _failed(b"mv: cannot move\n"))
 
     shell_env._remove_sshd_accept_env(guest.files, guest.log)
 
-    assert guest.commands() == [_rm(fragment)]
+    assert guest.commands() == [_retire(fragment, pending)]
     assert len(guest.log.warned) == 1
 
 
-def test_a_failed_reload_after_the_removal_warns_once(guest: StepGuest) -> None:
-    fragment = _installed_accept_env(guest)
-    guest.respond(SSHD_RELOAD, _failed(b"Failed to reload ssh.service\n"))
+@pytest.mark.parametrize(
+    "outcome",
+    [_failed(b"Failed to reload ssh.service\n"), ExecutionIncomplete("box", Result(Unknown(UnknownReason.DEADLINE)))],
+    ids=["failed", "unknown"],
+)
+def test_a_reload_that_does_not_happen_after_the_removal_is_retried_by_the_next_run(
+    guest: StepGuest, outcome: BaseException
+) -> None:
+    fragment, pending = _accept_env_guest(guest)
+    guest.respond(SSHD_RELOAD, outcome)
 
     shell_env._remove_sshd_accept_env(guest.files, guest.log)
 
-    assert not fragment.exists()
-    assert guest.commands() == [_rm(fragment), SSHD_RELOAD]
+    assert not fragment.exists() and pending.exists()
     [warning] = guest.log.warned
     assert str(fragment) in warning
+
+    guest.access.responses.clear()
+    guest.access.calls.clear()
+    shell_env._remove_sshd_accept_env(guest.files, guest.log)
+
+    assert guest.commands() == [SSHD_RELOAD, _rm(pending)]
+    assert not pending.exists()
 
 
 # -- The retired sudoers fragments --------------------------------------------------------

@@ -278,6 +278,8 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
 AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
 AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"
 RETIRED_SSHD_ACCEPT_ENV_PATH = "/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf"
+RETIRED_SSHD_ACCEPT_ENV_RELOAD_PENDING_PATH = "/etc/ssh/agentworks-accept-env.reload-pending"
+"""Where the retired fragment is moved until sshd has reloaded without it, outside sshd's ``Include`` directory."""
 RETIRED_SUDOERS_FRAGMENTS = (
     "/etc/sudoers.d/50-agentworks-env-keep",
     "/etc/sudoers.d/51-agentworks-console-setenv",
@@ -434,30 +436,41 @@ def _remove_sshd_accept_env(files: Files, log: InitLog) -> None:
     Agentworks owns the path outright: on create there is nothing to remove,
     and on reinit the fragment goes and sshd reloads (``systemctl reload``
     validates the merged config first), so the running sshd stops accepting
-    client environment. A steady-state reinit leaves sshd alone. A reload
-    that fails after the removal is warned about with what to run: the next
-    reinit finds nothing to remove, and sshd keeps the old setting until it
-    next reloads or restarts.
+    client environment. A steady-state reinit leaves sshd alone.
+    The fragment is moved to ``RETIRED_SSHD_ACCEPT_ENV_RELOAD_PENDING_PATH``,
+    which sshd does not read, and that file goes only once sshd has
+    reloaded, so a reload that fails or never runs is retried by the next
+    initialization; a failed one is warned about with what to run.
     """
     log.step("sshd AcceptEnv removal")
-    path = RETIRED_SSHD_ACCEPT_ENV_PATH
+    path, pending = RETIRED_SSHD_ACCEPT_ENV_PATH, RETIRED_SSHD_ACCEPT_ENV_RELOAD_PENDING_PATH
+
+    def run(argv: tuple[str, ...]) -> None:
+        files.access.run(Command(argv, elevated=True, deadline=files.deadline), check=True)
+
     try:
-        if isinstance(files.stat(path, elevated=True), Absent):
+        if not isinstance(files.stat(path, elevated=True), Absent):
+            output.info(f"Removing {path}...")
+            run(("mv", "-f", "-T", "--", path, pending))
+        elif isinstance(files.stat(pending, elevated=True), Absent):
             return
-        output.info(f"Removing {path}...")
-        files.access.run(Command(("rm", "-f", "--", path), elevated=True, deadline=files.deadline), check=True)
     except STEP_FAILURES as error:
         warn_step(log, "removing the retired sshd AcceptEnv fragment failed; re-run 'agw vm reinit'", error)
         return
     try:
-        files.access.run(Command(("systemctl", "reload", "ssh"), elevated=True, deadline=files.deadline), check=True)
+        run(("systemctl", "reload", "ssh"))
     except STEP_FAILURES as error:
         warn_step(
             log,
-            f"removed {path}, but reloading sshd failed, so it keeps the old setting until it next reloads; "
-            "run 'sudo systemctl reload ssh' on the VM",
+            f"removed {path}, but reloading sshd failed, so it keeps the old setting until it reloads; "
+            "the next 'agw vm reinit' retries, or run 'sudo systemctl reload ssh' on the VM",
             error,
         )
+        return
+    try:
+        run(("rm", "-f", "--", pending))
+    except STEP_FAILURES as error:
+        warn_step(log, f"sshd reloaded, but removing {pending} failed, so the next reinit reloads sshd again", error)
 
 
 def _remove_retired_sudoers_fragments(files: Files, log: InitLog) -> None:
