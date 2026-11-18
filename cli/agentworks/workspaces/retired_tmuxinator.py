@@ -14,10 +14,9 @@ configuration does not belong in workspace content, so the feature is removed an
 
 Both commands run under ``sh -c`` as the admin, so the admin's login shell never
 parses them, and both always run. A discovery directory that cannot be read or
-searched or that an unsearchable ancestor hides, a project file that cannot be read
-and a workspace directory that cannot be searched stay in place and count as
-failures, as does a failed removal; the caller warns, naming the workspaces it could
-not finish.
+searched, a project file that cannot be read and anything an unsearchable directory
+hides stay in place and count as failures, as does a failed removal; the caller
+warns, naming the workspaces it could not finish.
 """
 
 from __future__ import annotations
@@ -40,15 +39,26 @@ _UNFINISHED_MARKER = "AGW_TMUXINATOR_UNFINISHED="
 # another's failure or stop the rest. A test that is merely false never sets it;
 # being unable to search or read something does.
 #
-# ``[ -d ]`` is also false when an unsearchable ancestor hides the discovery
-# directory, so the links script walks up to the nearest ancestor it can see: the
-# directory is absent only when that ancestor is searchable or not a directory.
-_LINKS_SCRIPT = """\
+# A test on a path is also false when an unsearchable ancestor hides the path, so
+# both scripts start with ``hidden``, the one rule for absent versus hidden: it walks
+# up from a path it cannot see to the nearest ancestor it can, and the path is hidden
+# when that ancestor is a directory it cannot search. Otherwise the path is absent.
+_HIDDEN_FUNCTION = """\
+hidden() {
+  seen="$1"
+  while [ ! -e "$seen" ] && [ ! -L "$seen" ]; do
+    case $seen in */*) seen="${seen%/*}" ;; *) return 1 ;; esac
+  done
+  [ "$seen" != "$1" ] && [ -d "$seen" ] && [ ! -x "$seen" ]
+}
+"""
+
+_LINKS_SCRIPT = (
+    _HIDDEN_FUNCTION
+    + """\
 dir="$HOME/.config/tmuxinator"
 if [ ! -d "$dir" ]; then
-  seen="$dir"
-  while [ -n "$seen" ] && [ ! -e "$seen" ] && [ ! -L "$seen" ]; do seen="${seen%/*}"; done
-  [ -d "$seen" ] && [ ! -x "$seen" ] && exit 1
+  hidden "$dir" && exit 1
   exit 0
 fi
 [ -x "$dir" ] && [ -r "$dir" ] || exit 1
@@ -60,14 +70,17 @@ for link in "$dir"/ws-*-console.yml; do
 done
 exit "$rc"
 """
+)
 
 # Workspace paths arrive one per line on stdin. ``[ -f ]`` and ``[ ! -L ]`` keep a
 # FIFO, a directory or a link away from ``cmp``, which exits 1 on a difference and 2
-# when it cannot read. A workspace directory that exists but cannot be searched
-# hides its project, so it counts as a failure too. Each workspace the script could
-# not finish is reported on its own marker line. The loop variable is not ``path``,
+# when it cannot read. A project hidden by an unsearchable directory, whether its
+# workspace or one above it, counts as a failure too. Each workspace the script
+# could not finish is reported on its own marker line. The loop variable is not ``path``,
 # which zsh ties to ``$PATH``.
-_PROJECTS_SCRIPT = f"""\
+_PROJECTS_SCRIPT = (
+    _HIDDEN_FUNCTION
+    + f"""\
 header={shlex.quote(_GENERATED_HEADER.decode())}
 rc=0
 unfinished() {{ rc=1; printf '\\n{_UNFINISHED_MARKER}%s\\n' "$workspace"; }}
@@ -80,12 +93,13 @@ while IFS= read -r workspace; do
       1) ;;
       *) unfinished ;;
     esac
-  elif [ -d "$workspace" ] && [ ! -x "$workspace" ]; then
+  elif hidden "$project"; then
     unfinished
   fi
 done
 exit "$rc"
 """
+)
 
 
 def _run(target: Transport, script: str, paths: str | None = None) -> tuple[bool, str]:

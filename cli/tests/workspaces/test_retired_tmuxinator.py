@@ -222,6 +222,42 @@ def test_an_unsearchable_workspace_directory_is_warned(
 
 @requires_guest_shell
 @skip_as_root
+def test_a_workspace_hidden_by_an_unsearchable_parent_is_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    parent = tmp_path / "guest" / "locked"
+    parent.mkdir()
+    hidden = _workspace(db, parent, "hidden")
+    parent.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        parent.chmod(0o755)
+
+    assert (hidden / ".tmuxinator.yml").exists()
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert len(captured_output.warnings) == 1
+    assert str(hidden) in captured_output.warnings[0]
+
+
+@requires_guest_shell
+def test_a_workspace_directory_that_is_gone_is_a_quiet_success(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    shutil.rmtree(_workspace(db, tmp_path / "guest" / "workspaces", "gone"))
+
+    _reinit(db, target)
+
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert captured_output.warnings == []
+
+
+@requires_guest_shell
+@skip_as_root
 @pytest.mark.parametrize("mode", [0o600, 0o300, 0o500], ids=["unsearchable", "unreadable", "read-only"])
 def test_a_discovery_directory_that_cannot_be_fully_handled_is_warned(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, mode: int
