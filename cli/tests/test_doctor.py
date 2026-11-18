@@ -327,7 +327,7 @@ class TestCompletionChecks:
 
 
 class TestRequiredToolsOpenSSHResolver:
-    """The resolver's verdict sits beside the PATH presence rows, which stay for the legacy paths."""
+    """The resolver's verdict follows tailscale's PATH presence row; ssh and scp have no row of their own."""
 
     def test_a_supported_client_is_reported_with_its_path_and_version(self, monkeypatch) -> None:
         from agentworks import doctor
@@ -338,7 +338,7 @@ class TestRequiredToolsOpenSSHResolver:
 
         group = doctor._check_required_tools()
 
-        assert [c.name for c in group.checks] == ["ssh", "scp", "tailscale", "OpenSSH client"]
+        assert [c.name for c in group.checks] == ["tailscale", "OpenSSH client"]
         verdict = group.checks[-1]
         assert verdict.status is Status.OK
         assert "/opt/ssh/bin/ssh" in (verdict.message or "")
@@ -359,10 +359,10 @@ class TestRequiredToolsOpenSSHResolver:
         verdict = group.checks[-1]
         assert verdict.status is Status.FAIL
         assert "/usr/bin/ssh" in (verdict.hint or "")
-        # The presence rows are independent of the verdict.
-        assert [c.status for c in group.checks[:3]] == [Status.OK] * 3
+        # The presence row is independent of the verdict.
+        assert group.checks[0].status is Status.OK
 
-    def test_a_missing_binary_still_fails_its_presence_row(self, monkeypatch) -> None:
+    def test_a_missing_tailscale_still_fails_its_presence_row(self, monkeypatch) -> None:
         from agentworks import doctor
         from agentworks.execution.errors import ClientUnsupported
 
@@ -377,7 +377,7 @@ class TestRequiredToolsOpenSSHResolver:
 
         group = doctor._check_required_tools()
 
-        assert [c.status for c in group.checks] == [Status.FAIL] * 4
+        assert [c.status for c in group.checks] == [Status.FAIL] * 2
 
 
 # These probes share the operator config and database, so one worker owns them.
