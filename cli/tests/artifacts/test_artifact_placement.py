@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex import artifacts as codex
 from agentworks.plugins.codex.harness_integration import CodexIntegration
@@ -34,7 +35,7 @@ def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, 
             environment={},
             request_environment=lambda local=None: {},
             secrets={},
-            redactions=(),
+            redactor=Redactor(),
         )
     )
     applied = {origin for file in result.files for origin in file.origins}

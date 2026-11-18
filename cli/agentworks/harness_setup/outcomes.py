@@ -76,6 +76,38 @@ def sanitize_setup_error(error: AgentworksError, *, redactions: Iterable[str] = 
         current = cause
 
 
+class Redactor:
+    """Sanitizes guest text against a fixed set of secret values that are not part of its interface.
+
+    Core builds one from every secret an operation resolved or its log
+    registered and gives it to integrations, which sanitize the guest text
+    an error or warning quotes without receiving those values themselves.
+    Integrations are trusted Python, so this scopes what core delivers; it
+    is not an isolation boundary. Immutable: :meth:`including` returns a new
+    one.
+    """
+
+    __slots__ = ("_values",)
+
+    def __init__(self, values: Iterable[str] = ()) -> None:
+        self._values = tuple(dict.fromkeys(value for value in values if value))
+
+    def __repr__(self) -> str:
+        return "Redactor(...)"
+
+    def including(self, values: Iterable[str]) -> Redactor:
+        """A redactor that also redacts ``values``."""
+        return Redactor((*self._values, *values))
+
+    def sanitize(self, text: str) -> str:
+        """``text`` bounded as :func:`sanitize_setup_diagnostic` bounds it, with these values redacted."""
+        return sanitize_setup_diagnostic(text, redactions=self._values)
+
+    def sanitize_error(self, error: AgentworksError) -> None:
+        """Sanitize ``error`` and its domain causes in place, as :func:`sanitize_setup_error` does."""
+        sanitize_setup_error(error, redactions=self._values)
+
+
 @dataclass(frozen=True)
 class SetupFailure:
     """One failed integration attempt, with sanitized runtime diagnostics."""

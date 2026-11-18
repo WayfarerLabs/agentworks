@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
 from agentworks.artifacts.model import ArtifactInputs
+from agentworks.harness_setup.outcomes import Redactor
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -31,10 +32,11 @@ class SetupInvocation:
     entry that cannot converge without failing unrelated setup entries; core
     retains incomplete evidence and reports the owning repair operation.
 
-    ``secrets`` holds only this integration's own config secrets. ``redactions``
-    is every secret the operation resolved or its log registered, and always
-    includes ``secrets``: sanitize any guest text an error or warning quotes
-    with it (``probe_native`` takes it).
+    ``secrets`` holds only this integration's own config secrets.
+    ``redactor`` redacts every secret the operation resolved or its log
+    registered, ``secrets`` always among them, without exposing the values:
+    sanitize any guest text an error or warning quotes with it
+    (``probe_native`` takes it).
     """
 
     vm: VMRow
@@ -46,13 +48,13 @@ class SetupInvocation:
     artifacts: ArtifactInputs = field(default_factory=ArtifactInputs)
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
     secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
-    redactions: tuple[str, ...] = field(default=(), repr=False)
+    redactor: Redactor = field(default_factory=Redactor, repr=False)
     # Unavailable ancestor routing must not retire its previously applied effects.
     retain_artifact_origins: frozenset[str] = field(default_factory=frozenset, repr=False)
 
     def __post_init__(self) -> None:
         # Narrowing ``secrets`` for an integration never narrows what is redacted.
-        object.__setattr__(self, "redactions", tuple(dict.fromkeys((*self.redactions, *self.secrets.values()))))
+        object.__setattr__(self, "redactor", self.redactor.including(self.secrets.values()))
 
     def request_environment(self, local: Mapping[str, str] | None = None) -> dict[str, str]:
         """The ``env`` for a request: this setup's ``environment``, with ``local`` added over it.

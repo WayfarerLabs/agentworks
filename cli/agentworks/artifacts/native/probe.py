@@ -15,12 +15,12 @@ from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.execution.requests import Bytes, CaptureOutput, PythonProgram
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.execution.access import VMAccess
@@ -403,7 +403,7 @@ def probe_native(
     *,
     tool: str,
     environment: Mapping[str, str],
-    redactions: Iterable[str] = (),
+    redactor: Redactor = Redactor(),
     home: str | None = None,
     native_root: str | None = None,
     workspace: str = "",
@@ -423,7 +423,6 @@ def probe_native(
     native workload gets. The request travels on its stdin, so a large
     package needs no argument.
     """
-    secret_values = tuple(redactions)
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
     identities = tuple(entries.values())
@@ -461,18 +460,14 @@ def probe_native(
         )
         status = result.require_completed(access.vm_name)
     except AgentworksError as error:
-        sanitize_setup_error(error, redactions=secret_values)
+        redactor.sanitize_error(error)
         raise
     stdout = result.stdout.decode("utf-8", "replace")
     stderr = result.stderr.decode("utf-8", "replace")
     # Login startup scripts can echo the supplied runtime environment on failure.
     # Redact known values and their shell-quoted forms before publishing diagnostics.
     if status:
-        raise ExternalError(
-            sanitize_setup_diagnostic(
-                f"{tool} artifact discovery probe failed (exit {status}): {stderr}", redactions=secret_values
-            )
-        )
+        raise ExternalError(redactor.sanitize(f"{tool} artifact discovery probe failed (exit {status}): {stderr}"))
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")
@@ -498,7 +493,7 @@ def probe_native(
     except (ValueError, KeyError, IndexError, TypeError):
         raise ExternalError(
             f"{tool} artifact discovery probe returned an invalid response",
-            hint=sanitize_setup_diagnostic(stderr, redactions=secret_values) or None,
+            hint=redactor.sanitize(stderr) or None,
         ) from None
     inventory_problems = _inventory_problems(
         observed.get("inventory"), identities, entries, recognized_entries=recognized_entries
@@ -520,13 +515,12 @@ def probe_native(
         message = f"{tool} artifact delivery: " + "; ".join(
             [*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]
         )
-        message = sanitize_setup_diagnostic(message, redactions=secret_values)
+        message = redactor.sanitize(message)
         paths = [*problem_paths, *(problem.path for problem in inventory_problems if problem.path)]
-        hint = sanitize_setup_diagnostic(
+        hint = redactor.sanitize(
             "Inspect native paths: " + ", ".join(repr(path) for path in dict.fromkeys(paths))
             if paths
-            else f"Native configuration directory: {root!r}",
-            redactions=secret_values,
+            else f"Native configuration directory: {root!r}"
         )
         if all(problem in ("native-artifact-collision", "native-artifact-identity-mismatch") for problem in problems):
             raise NativeArtifactConflictError(

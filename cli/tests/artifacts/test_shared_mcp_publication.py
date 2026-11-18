@@ -27,7 +27,7 @@ from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.harness_setup.outcomes import SetupFailure
+from agentworks.harness_setup.outcomes import Redactor, SetupFailure
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
@@ -197,7 +197,7 @@ def test_exclusion_metadata_cannot_escape_owning_workspace():
             Mock(),
             group="",
             report_incomplete=Mock(),
-            redactions=(),
+            redactor=Redactor(),
             shared_paths=("/workspace-neighbor/.mcp.json",),
         )
     assert target.method_calls == []

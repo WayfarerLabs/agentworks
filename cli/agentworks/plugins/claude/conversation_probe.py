@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import AgentworksError, StateError
 from agentworks.execution.requests import Script, Shell
-from agentworks.harness_setup.outcomes import sanitize_setup_error
+from agentworks.harness_setup.outcomes import Redactor
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.execution.access import VMAccess
 
@@ -179,7 +179,7 @@ def probe_conversation(
     *,
     detect: bool = True,
     environment: Mapping[str, str] | None = None,
-    redactions: Iterable[str] = (),
+    redactor: Redactor = Redactor(),
 ) -> ConversationProbe:
     """Probe exact stored UUID addressing in one login-shell round trip.
 
@@ -201,7 +201,7 @@ def probe_conversation(
         result = access.run(conversation_request(sid, detect=detect, environment=environment))
         status = result.require_completed(access.vm_name)
     except AgentworksError as error:
-        sanitize_setup_error(error, redactions=redactions)
+        redactor.sanitize_error(error)
         raise
     if status not in (0, 1):
         raise StateError(

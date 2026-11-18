@@ -52,6 +52,7 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
@@ -236,7 +237,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     invocation.access,
                     tool="claude",
                     environment=invocation.request_environment(),
-                    redactions=invocation.redactions,
+                    redactor=invocation.redactor,
                     files=files,
                     vm_only=True,
                 ),
@@ -293,7 +294,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 invocation.access,
                 tool="claude",
                 environment=invocation.request_environment(),
-                redactions=invocation.redactions,
+                redactor=invocation.redactor,
                 home=invocation.home,
                 native_root=root,
                 check_policy=False,
@@ -316,7 +317,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     invocation.access,
                     tool="claude",
                     environment=invocation.request_environment(),
-                    redactions=invocation.redactions,
+                    redactor=invocation.redactor,
                     home=invocation.home,
                     native_root=root,
                     files=files,
@@ -348,7 +349,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     invocation.access,
                     tool="claude",
                     environment=invocation.request_environment(),
-                    redactions=invocation.redactions,
+                    redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
                     workspace_only=True,
@@ -489,7 +490,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     sid,
                     detect=forced is None,
                     environment=context.environment if context is not None else {},
-                    redactions=context.redactions if context is not None else (),
+                    redactor=context.redactor if context is not None else Redactor(),
                 )
             except StateError as error:
                 raise StateError(

@@ -10,7 +10,7 @@ from agentworks.artifacts.native.mcp import MCP_CLAIM_ROLE
 from agentworks.errors import AgentworksError, StateError, UserAbort
 from agentworks.execution.files import guest_path
 from agentworks.harness_setup.dispatch import destination_id
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.workspaces.guest import stored_workspace_path
 
@@ -29,7 +29,7 @@ def cleanup_workspace_excludes(
 
     ``redactions`` are the values the operation's log redacts, kept out of its diagnostics too.
     """
-    _workspace_excludes(db, workspace, access, redactions=tuple(redactions))
+    _workspace_excludes(db, workspace, access, redactor=Redactor(redactions))
 
 
 def rehome_workspace_artifacts(
@@ -39,7 +39,7 @@ def rehome_workspace_artifacts(
 
     ``redactions`` are the values the operation's log redacts, kept out of its diagnostics too.
     """
-    _workspace_excludes(db, workspace, lambda: access, new_path=new_path, redactions=tuple(redactions))
+    _workspace_excludes(db, workspace, lambda: access, new_path=new_path, redactor=Redactor(redactions))
 
 
 def _relocated_record(record: SetupRecord, old_path: str, new_path: str, identity: str) -> SetupRecord:
@@ -86,7 +86,7 @@ def _workspace_excludes(
     access: Callable[[], VMAccess],
     *,
     new_path: str | None = None,
-    redactions: tuple[str, ...],
+    redactor: Redactor,
 ) -> None:
     """Retire, and on rehome re-establish, the workspace's Git exclusions.
 
@@ -133,7 +133,7 @@ def _workspace_excludes(
         def incomplete(reason: str, *, integration: str = record.integration) -> None:
             nonlocal current, incomplete_seen
             incomplete_seen = True
-            reason = sanitize_setup_diagnostic(reason, redactions=redactions)
+            reason = redactor.sanitize(reason)
             current = current.model_copy(
                 update={
                     "complete": False,
@@ -157,7 +157,7 @@ def _workspace_excludes(
                 checkpoint,
                 group=workspace.linux_group,
                 report_incomplete=incomplete,
-                redactions=redactions,
+                redactor=redactor,
             )
         except UserAbort:
             raise
@@ -185,7 +185,7 @@ def _workspace_excludes(
                     checkpoint,
                     group=workspace.linux_group,
                     report_incomplete=incomplete,
-                    redactions=redactions,
+                    redactor=redactor,
                     prior_workspace=old_path,
                     shared_paths=tuple(
                         claim.destination
@@ -230,10 +230,9 @@ def _workspace_excludes(
             failed.append(record.integration)
             for claim in retained:
                 output.warn(
-                    sanitize_setup_diagnostic(
+                    redactor.sanitize(
                         f"Workspace '{workspace.name}' via {record.integration}: retained artifact exclusion "
-                        f"'{claim.identifier}' at recorded path '{claim.destination}'.",
-                        redactions=redactions,
+                        f"'{claim.identifier}' at recorded path '{claim.destination}'."
                     )
                 )
     if failed:

@@ -17,6 +17,7 @@ from agentworks.execution.files import program_source
 from agentworks.execution.requests import PythonProgram
 from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import NativeClaim
+from agentworks.harness_setup.outcomes import Redactor
 from tests.artifacts.test_native_delivery import owned
 from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.vm_access_support import Call, RecordingVMAccess
@@ -92,7 +93,7 @@ def apply(
         checkpoint,
         group=group,
         report_incomplete=incomplete.append,
-        redactions=redactions,
+        redactor=Redactor(redactions),
     )
     return current, checkpoints, incomplete
 
@@ -430,7 +431,7 @@ def test_rebound_git_claims_roundtrip_every_persisted_checkpoint(db, repository)
         checkpoint,
         group="",
         report_incomplete=lambda reason: pytest.fail(reason),
-        redactions=(),
+        redactor=Redactor(),
     )
     assert checkpoints and all(state.records[0].claims == claims for state in checkpoints)
     assert read_native_setup(db, "workspace", "project").records[0].claims == claims

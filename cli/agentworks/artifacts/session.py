@@ -23,7 +23,7 @@ from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Script, Shell
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.harness_setup.outcomes import Redactor, sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 from agentworks.linux_users import managed_home
 from agentworks.schema import CapabilityConfig
@@ -116,7 +116,7 @@ def prepare_session_artifacts(
         run_id=run_id,
         ancestor_files=routed.ancestor_files,
         environment=dict(environment),
-        redactions=tuple(redactions),
+        redactor=Redactor(redactions),
     )
     setup_inputs = SetupInputs(
         "session",

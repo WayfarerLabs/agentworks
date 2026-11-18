@@ -13,13 +13,13 @@ from agentworks.errors import ExternalError, StateError
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Bytes, PythonProgram
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.execution.access import VMAccess
+    from agentworks.harness_setup.outcomes import Redactor
 
 GIT_EXCLUDE_ROLE = "artifact-git-exclude"
 METADATA_DEADLINE_SECONDS = 30
@@ -83,7 +83,7 @@ def _metadata(
     workspace: str,
     paths: Sequence[str],
     unavailable: Callable[[str], None],
-    redactions: Iterable[str],
+    redactor: Redactor,
 ) -> tuple[str, str, list[str]] | None:
     request = json.dumps({"workspace": workspace, "paths": paths}).encode()
     result = access.run(PythonProgram(_METADATA, stdin=Bytes(request), deadline=METADATA_DEADLINE_SECONDS))
@@ -110,10 +110,7 @@ def _metadata(
     except (ValueError, KeyError, TypeError, StateError):
         raise ExternalError(f"Git metadata for workspace artifact exclusions is unavailable at '{workspace}'") from None
     unavailable(
-        sanitize_setup_diagnostic(
-            f"Git could not resolve artifact exclusion metadata for '{workspace}': {unavailable_reason}",
-            redactions=redactions,
-        )
+        redactor.sanitize(f"Git could not resolve artifact exclusion metadata for '{workspace}': {unavailable_reason}")
     )
     return None
 
@@ -128,7 +125,7 @@ def reconcile_workspace_excludes(
     *,
     group: str,
     report_incomplete: Callable[[str], None],
-    redactions: Iterable[str],
+    redactor: Redactor,
     prior_workspace: str | None = None,
     shared_paths: Sequence[str] = (),
 ) -> None:
@@ -137,7 +134,7 @@ def reconcile_workspace_excludes(
     Claims cross persisted state, Git metadata crosses the guest boundary, and
     native file writes use a compare-and-publish guard against concurrent edits.
     Only Git's current destination authorizes I/O, never a stored destination.
-    ``redactions`` are resolved values to keep out of Git's diagnostics.
+    ``redactor`` keeps resolved values out of Git's diagnostics.
     Rehome alone supplies its verified old row path as prior_workspace; saved
     claims never select another source or authorize a migration by themselves.
     With no files, shared paths or prior claims it returns before checking
@@ -155,7 +152,7 @@ def reconcile_workspace_excludes(
     source_prefix = None
     if prior_workspace is not None and prior:
         source_workspace = guest_path(prior_workspace)
-        source_metadata = _metadata(access, source_workspace, (), report_incomplete, redactions)
+        source_metadata = _metadata(access, source_workspace, (), report_incomplete, redactor)
         if source_metadata is None:
             return
         source_prefix = source_metadata[0]
@@ -172,7 +169,7 @@ def reconcile_workspace_excludes(
                 )
             )
         )
-    metadata = _metadata(access, workspace, relative_paths, report_incomplete if prior else output.warn, redactions)
+    metadata = _metadata(access, workspace, relative_paths, report_incomplete if prior else output.warn, redactor)
     if metadata is None:
         return
     prefix, destination, tracked = metadata
@@ -186,10 +183,9 @@ def reconcile_workspace_excludes(
         remaining.pop(index)
         if _relative(claim, source_workspace, source_prefix) is None:
             output.warn(
-                sanitize_setup_diagnostic(
+                redactor.sanitize(
                     f"Stored artifact exclusion '{claim.identifier}' at recorded path '{claim.destination}' "
-                    "no longer matches this workspace; its association was released.",
-                    redactions=redactions,
+                    "no longer matches this workspace; its association was released."
                 )
             )
             continue

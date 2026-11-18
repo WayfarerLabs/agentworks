@@ -13,7 +13,7 @@ from agentworks.artifacts.native.common import ancestor_diagnostics
 from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
 from agentworks.execution.results import Completed, Result
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.harness_setup.outcomes import Redactor, sanitize_setup_diagnostic
 from tests.artifacts.test_native_probe import probe
 from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, local_vm_access
 
@@ -52,7 +52,7 @@ def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage, repre
     else:
         access.run_outcomes = [Result(Completed(19 if stage == "probe-status" else 0), b"invalid", payload.encode())]
     with pytest.raises(ExternalError) as caught:
-        probe_native(access, tool="grok", environment={"TOKEN": secret}, redactions=(secret,))
+        probe_native(access, tool="grok", environment={"TOKEN": secret}, redactor=Redactor((secret,)))
     assert_safe(str(caught.value), secret)
     if caught.value.hint:
         assert_safe(caught.value.hint, secret)
@@ -64,7 +64,7 @@ def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage, repre
 @pytest.mark.parametrize("representation", ["raw", "shell", "repr"])
 def test_advisory_ancestor_warning_redacts_normalized_runtime_values(representation):
     secret, payload = hostile_text(representation)
-    with patch("agentworks.output.warn") as warn, ancestor_diagnostics("grok-build", redactions=(secret,)):
+    with patch("agentworks.output.warn") as warn, ancestor_diagnostics("grok-build", redactor=Redactor((secret,))):
         raise ExternalError(payload, hint=payload)
     message = warn.call_args.args[0]
     assert secret[: len(secret) // 2] not in message and "\x1b" not in message and "\x07" not in message

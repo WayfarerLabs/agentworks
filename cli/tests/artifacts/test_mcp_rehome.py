@@ -15,6 +15,7 @@ from agentworks.harness_setup.cleanup import _relocated_record
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.harness_setup.readiness import evaluate_setup
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.schema import CapabilityConfig
@@ -63,7 +64,7 @@ def test_repeated_move_rebases_common_metadata(db, deletion, move_case, remove_o
         checkpoint,
         group=group,
         report_incomplete=lambda value: pytest.fail(value),
-        redactions=(),
+        redactor=Redactor(),
         shared_paths=(str(native),) if include_mcp else (),
     )
     db.update_workspace_path("project", str(old))

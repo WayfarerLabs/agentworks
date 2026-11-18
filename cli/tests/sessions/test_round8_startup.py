@@ -68,7 +68,8 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
     original_prepare = ShellIntegration.prepare_artifacts
 
     def prepare(self, context):
-        artifact_secrets.append(context.redactions)
+        # Records what the context's redactor leaves of the resolved value: it holds no secrets here.
+        artifact_secrets.append(context.redactor.sanitize(secret))
         return original_prepare(self, context)
 
     monkeypatch.setattr(ShellIntegration, "prepare_artifacts", prepare)
@@ -127,7 +128,7 @@ def test_unacknowledged_native_spawn_is_recovered_and_finishes_startup(
         assert Path(native.socket).stat().st_mode & 0o070 == 0
         assert native.native("show-option -wAqv -t %0 remain-on-exit").stdout.strip() == "off"
         assert passed_secrets == [()]
-        assert artifact_secrets == [()]
+        assert artifact_secrets == [secret]
         assert sum("new-session" in command for command, _ in native.calls) == 1
     finally:
         db.close()

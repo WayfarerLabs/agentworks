@@ -579,7 +579,8 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)); it reloads sshd only
   when it removes the old one, where every initialization used to reload sshd. Until that reload
   succeeds the fragment is kept as `/etc/ssh/agentworks-accept-env.reload-pending`, which sshd does
-  not read, so when the reload fails or a reinit is cut short before it, the next reinit reloads sshd.
+  not read, so when the reload fails or a reinit is cut short before it, the next reinit reloads
+  sshd.
 - **A file whose reload fails is put back.** When loading the sysctl baseline (now `sysctl -p` of
   that file alone, not `sysctl --system`), or `systemctl daemon-reload` after the tailscaled drop-in
   fails, times out or is interrupted, the file gets its previous content back (or is removed if it
@@ -843,12 +844,13 @@ for it can register. Beyond the version and the accessors:
 
 - **Harness integrations.** `_probe_target(access)` receives the launch target's `VMAccess` and
   passes it to `require_commands(commands, access, ...)`. A setup facet's invocation carries
-  `access`, `files`, that access's file operations under setup's per-request bound, and
-  `redactions`, every secret the operation resolved or logs, to sanitize any guest text an error
-  quotes, in place of `runner`; `request_environment(local)` gives a request's `env`, the setup
-  environment with the facet's own variables but never an `AGENTWORKS_*` one, which the runner
-  applied to every command. `SetupReadiness` no longer carries a runner. `probe_native` takes a
-  `VMAccess` first and the invocation's `redactions`. `check_required_commands` and
+  `access`, `files`, that access's file operations under setup's per-request bound, and `redactor`,
+  which sanitizes any guest text an error quotes against every secret the operation resolved or logs
+  without exposing those values, in place of `runner`; `request_environment(local)` gives a
+  request's `env`, the setup environment with the facet's own variables but never an `AGENTWORKS_*`
+  one, which the runner applied to every command. `SetupReadiness` no longer carries a runner.
+  `probe_native` takes a `VMAccess` first and the invocation's `redactor`, and
+  `SessionArtifactContext.redactions` is now `redactor` too. `check_required_commands` and
   `run_user_shell_command` take a `VMAccess` and an optional `deadline` in seconds, and
   `run_user_shell_command` returns the command's exit status.
 - **Git credential providers.** A provider's runup check reads the access the same way.

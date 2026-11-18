@@ -15,6 +15,7 @@ from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.artifacts.native.probe import _PROBE, _inventory_problems
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.package_sources import CaptureLimits
 from tests.artifacts.test_native_delivery import artifact
 from tests.conftest import requires_posix_shell
@@ -968,7 +969,7 @@ def test_native_probe_errors_redact_runtime_environment(returncode, padding):
     access = RecordingVMAccess([], Admin())
     access.run_outcomes = [Result(Completed(returncode), b"invalid", stderr.encode())]
     with pytest.raises(ExternalError) as caught:
-        probe_native(access, tool="claude", environment=environment, redactions=environment.values())
+        probe_native(access, tool="claude", environment=environment, redactor=Redactor(environment.values()))
     exposed = str(caught.value) + (caught.value.hint or "") + "".join(traceback.format_exception(caught.value))
     assert short not in exposed
     assert long.strip() not in exposed

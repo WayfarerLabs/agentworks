@@ -235,8 +235,10 @@ access (`invocation.access`), its file operations (`invocation.files`) and check
 configure native tooling at their owning scope. A request's `env` comes from
 `invocation.request_environment(local)`: the setup environment with the facet's own variables added,
 never an `AGENTWORKS_*` one. Guest text a facet quotes in an error or warning is sanitized with
-`invocation.redactions`, every secret the operation resolved or logs, which is wider than the
-facet's own `secrets`; `probe_native` takes it.
+`invocation.redactor` (`redactor.sanitize(text)`, or `redactor.sanitize_error(error)` in place),
+which redacts every secret the operation resolved or logs without handing those values to the facet:
+they are wider than its own `secrets`. `probe_native` takes it, and a session's
+`SessionArtifactContext.redactor` serves the same purpose at launch.
 
 ## Technical Overview
 

@@ -527,11 +527,13 @@ that moves the last one.
   `plugins/grok/harness_integration.py:174`, `:194`, `:210`); the native CLI and its resolution pass
   it too; file operations pass none, since the program reads no environment.
 - **Redaction.** `SetupRunner` and dispatch sanitized guest text with the operation log's own
-  secrets through the runner's logger. `SetupInvocation.redactions` replaces that: every secret the
-  operation resolved or its log registered (`SSHLogger.redactions`), always including `secrets`,
-  which a facet narrows to its own config secrets. The facets pass it to `probe_native`, and
-  `dispatch._sanitize` reads it. Session starts get the same set as the artifact context's
-  `redactions`, taken from the operation log.
+  secrets through the runner's logger. `SetupInvocation.redactor` replaces that: a
+  `harness_setup.outcomes.Redactor` over every secret the operation resolved or its log registered
+  (`SSHLogger.redactions`), always including `secrets`, which a facet narrows to its own config
+  secrets. It sanitizes text and errors without exposing the values, so narrowing `secrets` stays a
+  real scope: the complete set stays in core. The facets pass it to `probe_native`, and dispatch
+  sanitizes its own diagnostics with it. A session start's artifact context carries a `redactor`
+  over the same set, taken from the operation log.
 - **Elevation.** `SetupRunner` carried the environment across `sudo` with `--preserve-env` and a
   `bash -c` wrapper (`runner.py:55-57`, `5797e5110`). The envelope makes that hold by construction:
   agw-launch applies the request's `env` after `sudo -n` has started it (D4), so nothing has to

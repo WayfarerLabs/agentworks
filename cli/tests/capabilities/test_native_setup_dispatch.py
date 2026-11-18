@@ -1,14 +1,18 @@
 """Mutation prefixes, retirement order, and destination ownership at dispatch."""
 
-from dataclasses import replace
+from collections.abc import Iterator, Mapping
+from dataclasses import fields, is_dataclass, replace
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
 from agentworks.artifacts.model import ArtifactInputs
 from agentworks.artifacts.publication import ROOT_FILE_DIRECTORIES
 from agentworks.artifacts.routing import RoutingResult
+from agentworks.capabilities.harness_integration import harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
     UserSetupInvocation,
@@ -20,7 +24,7 @@ from agentworks.errors import ExternalError, StateError
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
-from agentworks.harness_setup.outcomes import SetupFailure
+from agentworks.harness_setup.outcomes import Redactor, SetupFailure
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
@@ -186,6 +190,57 @@ def test_failure_checkpoints_prefix_and_retry_completes(setup_case):
     failures.clear()
     run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert all(record.complete for record in read_native_setup(db, "agent", "agent").records)
+
+
+def _reachable_data(value: object, seen: set[int] | None = None, depth: int = 0) -> Iterator[str]:
+    """Every string an integration can read from ``value`` as data: fields, items and public attributes, not calls."""
+    seen = set() if seen is None else seen
+    if id(value) in seen or depth > 6 or callable(value) and not is_dataclass(value):
+        return
+    seen.add(id(value))
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _reachable_data(key, seen, depth + 1)
+            yield from _reachable_data(item, seen, depth + 1)
+    elif isinstance(value, (tuple, list, set, frozenset)):
+        for item in value:
+            yield from _reachable_data(item, seen, depth + 1)
+    elif is_dataclass(value):
+        for field in fields(value):
+            yield from _reachable_data(getattr(value, field.name), seen, depth + 1)
+    elif not isinstance(value, (int, float, bool, bytes, type(None))):
+        for name in dir(value):
+            if not name.startswith("_"):
+                yield from _reachable_data(getattr(value, name, None), seen, depth + 1)
+
+
+def test_an_integration_s_invocation_holds_no_value_beyond_its_declared_secrets(setup_case, monkeypatch):
+    """The operation's other secrets are redacted for the integration without being handed to it."""
+    db, inputs, invocation, _, _ = setup_case
+    declared, undeclared, logged = (f"{label}-{uuid4().hex}" for label in ("declared", "undeclared", "logged"))
+    invocation = replace(invocation, secrets={"declared": declared, "other": undeclared}, redactor=Redactor((logged,)))
+    first = harness_integration_for("first")
+    monkeypatch.setattr(first, "config_secret_refs", lambda self: (SimpleNamespace(name="declared"),))
+    received: list[SetupInvocation] = []
+    original = first.user_init
+
+    def initialize(self, call):
+        received.append(call)
+        return original(self, call)
+
+    monkeypatch.setattr(first, "user_init", initialize)
+
+    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+
+    assert received
+    for call in received:
+        assert call.secrets == {"declared": declared}
+        exposed = set(_reachable_data(call))
+        assert declared in exposed and undeclared not in exposed and logged not in exposed
+        sanitized = call.redactor.sanitize(f"{declared} {undeclared} {logged}")
+        assert not any(value in sanitized for value in (declared, undeclared, logged))
 
 
 def test_retirement_follows_desired_order_and_preserves_other_records(setup_case):

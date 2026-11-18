@@ -14,7 +14,7 @@ from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import ConnectivityError, ExternalError, StateError, UserAbort
 from agentworks.execution.oplog import OperationLogFile
 from agentworks.harness_setup.dispatch import run_setup
-from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
+from agentworks.harness_setup.outcomes import Redactor, SetupFailure, raise_setup_failures
 from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, read_native_setup, write_native_setup
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
 
@@ -180,7 +180,9 @@ def test_failure_message_and_hint_redact_all_operation_secrets(setup_case, monke
         logger = OperationLogFile("fixture", "setup", redactions=(extra,))
     # Core hands the invocation every secret the operation log registered.
     invocation = replace(
-        invocation, secrets={"token": token, "overlap": token[:8]}, redactions=logger.redactions if logger else ()
+        invocation,
+        secrets={"token": token, "overlap": token[:8]},
+        redactor=Redactor(logger.redactions if logger else ()),
     )
     reason = f"{uuid4()}: {token} {shlex.quote(token)} {extra if with_logger else ''}"
     hint = f"{uuid4()}: {token} {shlex.quote(token)}"

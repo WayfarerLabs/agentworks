@@ -27,11 +27,7 @@ from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, E
 from agentworks.execution.requests import Command
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
-from agentworks.harness_setup.outcomes import (
-    SetupFailure,
-    sanitize_setup_diagnostic,
-    sanitize_setup_error,
-)
+from agentworks.harness_setup.outcomes import SetupFailure, sanitize_setup_error
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
 
 if TYPE_CHECKING:
@@ -51,11 +47,6 @@ class _SetupInfrastructureFailure(Exception):
     def __init__(self, original: Exception) -> None:
         self.original = original
         super().__init__()
-
-
-def _sanitize(invocation: SetupInvocation, text: str) -> str:
-    """Redact diagnostics before they enter persisted state or the failure list."""
-    return sanitize_setup_diagnostic(text, redactions=invocation.redactions)
 
 
 def destination_id(vm: VMRow, access: VMAccess, *, location: str | None = None, username: str | None = None) -> str:
@@ -276,7 +267,7 @@ def run_setup(
                 if not isinstance(reason, str) or not reason.strip():
                     raise StateError("integration returned an invalid incomplete-setup reason")
                 try:
-                    reason = _sanitize(invocation, reason) or "Integration reported incomplete setup."
+                    reason = invocation.redactor.sanitize(reason) or "Integration reported incomplete setup."
                 except Exception as error:
                     raise _SetupInfrastructureFailure(error) from error
                 if reason not in current.incomplete_reasons:
@@ -343,14 +334,14 @@ def run_setup(
                         checkpoint,
                         group=call.linux_group,
                         report_incomplete=report_incomplete,
-                        redactions=call.redactions,
+                        redactor=call.redactor,
                         shared_paths=application.shared_paths,
                     )
             except _SetupInfrastructureFailure as error:
                 raise error.original from None
             except (ConfigError, StateError, ExternalError, ConnectivityError) as error:
-                reason = _sanitize(invocation, str(error)).strip() or type(error).__name__
-                hint = _sanitize(invocation, f"{error.hint} {remediation}" if error.hint else remediation)
+                reason = invocation.redactor.sanitize(str(error)).strip() or type(error).__name__
+                hint = invocation.redactor.sanitize(f"{error.hint} {remediation}" if error.hint else remediation)
                 current = current.model_copy(
                     update={
                         "complete": False,
@@ -381,8 +372,7 @@ def run_setup(
             # integration inputs. Core forwards their metadata only after the
             # integration's known-input application has been validated.
             if routing.unresolved_routes:
-                unresolved_reason = _sanitize(
-                    invocation,
+                unresolved_reason = invocation.redactor.sanitize(
                     " ".join(routing.unavailable_reasons)
                     or "The recorded upstream input has no readable captured content; repair its owning setup.",
                 )

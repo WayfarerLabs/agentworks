@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import Field, field_validator, model_validator
 
 from agentworks.artifacts.model import ArtifactFacet, ArtifactInputs
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.schema import AgwModel
 
 if TYPE_CHECKING:
@@ -105,7 +106,11 @@ class ArtifactApplication:
 
 @dataclass(frozen=True, kw_only=True)
 class SessionArtifactContext:
-    """Core-prepared immutable inputs and identities for a prospective launch."""
+    """Core-prepared immutable inputs and identities for a prospective launch.
+
+    ``redactor`` redacts the secrets the session start resolved, for guest
+    text an error or warning quotes.
+    """
 
     inputs: ArtifactInputs
     home: str
@@ -114,4 +119,4 @@ class SessionArtifactContext:
     run_id: str
     ancestor_files: tuple[OwnedArtifactFile, ...] = ()
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
-    redactions: tuple[str, ...] = field(default=(), repr=False)
+    redactor: Redactor = field(default_factory=Redactor, repr=False)

@@ -22,6 +22,7 @@ from agentworks.errors import StateError
 from agentworks.execution.access import Admin, Agent
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.harness_setup.state import read_native_setup
 from agentworks.linux_users import managed_home
 from agentworks.package_sources import PackageCapture
@@ -234,7 +235,7 @@ def apply_vm_setup(
                 files=files,
                 environment=environment,
                 secrets=values,
-                redactions=logger.redactions,
+                redactor=Redactor(logger.redactions),
                 prior=None,
                 checkpoint=lambda claims: None,
             )
@@ -245,7 +246,7 @@ def apply_vm_setup(
                 files=files,
                 environment=environment,
                 secrets=values,
-                redactions=logger.redactions,
+                redactor=Redactor(logger.redactions),
                 prior=None,
                 checkpoint=lambda claims: None,
                 username=vm.admin_username,
@@ -294,7 +295,7 @@ def apply_agent_setup(
         files=access.files(),
         environment=environment,
         secrets=values,
-        redactions=logger.redactions,
+        redactor=Redactor(logger.redactions),
         prior=None,
         checkpoint=lambda claims: None,
         username=username,
@@ -346,7 +347,7 @@ def apply_workspace_setup(
         files=access.files(),
         environment=environment,
         secrets=values,
-        redactions=logger.redactions,
+        redactor=Redactor(logger.redactions),
         prior=None,
         checkpoint=lambda claims: None,
         workspace_name=inputs.name,
