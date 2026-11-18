@@ -49,13 +49,14 @@ from ._helpers import (
 )
 from ._status import observe_console_statuses
 from .attach import (
+    _active_console_vm,
     _attach_loop_wrapper,
+    _console_pane_access,
     _console_runtime_presence,
     _console_tmux_presence,
     _live_access,
     _live_best_effort,
     _pane_runs_as_admin,
-    _prepare_console_access,
     _session_linux_user,
     _teardown_console_tmux,
     _tmux_session_presence,
@@ -121,7 +122,8 @@ __all__ = [
     "_live_best_effort",
     "_pane_secret_target",
     "_pane_runs_as_admin",
-    "_prepare_console_access",
+    "_active_console_vm",
+    "_console_pane_access",
     "_resolve_pane_env",
     "_resolve_workspace_path",
     "_member_secret_targets",

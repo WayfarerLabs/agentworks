@@ -42,7 +42,13 @@ from ._helpers import (
     parse_session_spec,
     tmux_session_name,
 )
-from .attach import _live_best_effort, _pane_runs_as_admin, _prepare_console_access, _session_linux_user
+from .attach import (
+    _active_console_vm,
+    _console_pane_access,
+    _live_best_effort,
+    _pane_runs_as_admin,
+    _session_linux_user,
+)
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
@@ -221,7 +227,7 @@ def create_console(
 
         with (
             closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _prepare_console_access(
+            _active_console_vm(
                 db,
                 config,
                 vm_name,
@@ -229,13 +235,19 @@ def create_console(
                 interaction=interaction,
                 resolver=resolver,
                 held_native_guard=held_native_guard,
-                targets=lambda vm: _mc._console_build_secret_targets(
+            ) as (vm, admin),
+        ):
+            access = _console_pane_access(
+                db,
+                config,
+                vm,
+                admin,
+                resolver=resolver,
+                targets=_mc._console_build_secret_targets(
                     db, registry, console=definition, vm=vm, members=definition.members
                 ),
                 members=definition.members,
-            ) as access,
-        ):
-            vm, admin = access.vm, access.admin
+            )
             secret_values = resolver.values
             try:
                 _mc._validate_console_build_values(

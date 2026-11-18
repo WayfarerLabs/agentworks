@@ -462,14 +462,14 @@ direct-SSH rollout gets that function's reinit hint instead of a failed pane. Th
 `console_access` (`sessions/multi_console/_access.py`) builds the operation's `ConsoleAccess`, the
 admin's access and each checked agent's, from the members whose shells park as an agent, and every
 operation calls it before it resolves a pane secret: in `prepare_console_reconcile` for a build (so
-`console start`, `restart` and reconciliation refuse while preparing), and in
-`_prepare_console_access` for `create_console` and `restore_session`, once the VM is active and
-before the pane-secret resolve, so a refused agent stops them before they can prompt for a pane
-secret. The activation gate runs first, so a stopped VM may be started, and its gate secrets
-resolved, before the refusal; `console start` records its running intent before it prepares
-(`lifecycle.py:86`). `restore_session` checks the agents before it probes the console's tmux
-(`restore.py:136-149`), so on a console that is not running a stale agent gets the reinit hint
-rather than the not-running refusal. `add-shell` and `add-sessions` first probe the console's tmux,
+`console start`, `restart` and reconciliation refuse while preparing), and in `_console_pane_access`
+for `create_console` and `restore_session`, once the VM is active and before the pane-secret
+resolve, so a refused agent stops them before they can prompt for a pane secret. The activation gate
+runs first, so a stopped VM may be started, and its gate secrets resolved, before the refusal;
+`console start` records its running intent before it prepares (`lifecycle.py:86`). `restore_session`
+probes the console's tmux and the window read-only first and checks only the agents of the panes it
+will open, so on a console that is not running it gives the not-running refusal, and an agent whose
+panes are all live is not asked. `add-shell` and `add-sessions` first probe the console's tmux,
 read-only; only a running console has a pane to park, so only then do they check the agents, before
 they resolve a pane secret or record anything. A stopped console's edit, or one whose probe cannot
 tell, is recorded and its live sync stays best effort, as before D2.
@@ -488,53 +488,54 @@ path, and stage 0, now the agent, fetches the request and execs the shell with i
 ### Console pane secrets in the boundary
 
 The operator ruled on 2026-11-12 to resolve all pane secrets up front
-([FRD, 2026-11-12](./frd.md#2026-11-12)). Console operations resolved their panes' secrets after the
+([FRD, 2026-11-12](./frd.md#2026-11-12)), and on 2026-11-18 that sessions and consoles alike observe
+read-only, decide, then resolve once exactly the secrets of what will change, before any change
+([FRD, 2026-11-18](./frd.md#2026-11-18)). Console operations resolved their panes' secrets after the
 VM gate, in a second pass ADR 0019 no longer sanctions now that PR B removed the Tailscale rejoin it
 was likened to (`2cc0553da`;
 `docs/adrs/0019-orchestration-layer-command-plans-over-node-graphs.md:11-15`). The two live resolves
 in `restore.py` (`:177-207`, `:372-399`) are the "commented post-bind resolve" of the plan's box:
 live code, each justified by a comment as a conditional-need exception. Per command:
 
-| Command                                   | Today                                                                                 | Becomes                                                                                                                                         |
-| ----------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `console create`                          | resolves every pane's secrets after the gate, always (`crud.py:151-158`)              | `_console_build_secret_targets` (`sessions/multi_console/secrets_env.py:164`) passed as the boundary's `targets`; values from `resolver.values` |
-| `console restart`                         | the same, always (`multi_console/attach.py:702`)                                      | the same                                                                                                                                        |
-| `console start`                           | the same, but only when the console is not running (`attach.py:699-702`)              | the same, always: a start of a running console now resolves every pane's secrets and creates nothing                                            |
-| `console restore-session`, window missing | every configured shell's secrets after the probes (`restore.py:186-203`)              | `_member_secret_targets` (`secrets_env.py:198`), a target per configured shell, in the boundary; the late resolve goes                          |
-| `console restore-session`, panes missing  | only the missing indices' secrets, after the validation guards (`restore.py:385-399`) | the same targets as above, every configured shell; the late resolve goes                                                                        |
-| `console add-sessions`, `add-shell`       | resolve once, with no gate (`crud.py:306`, `:620`)                                    | unchanged                                                                                                                                       |
+| Command                                   | Today                                                                                 | Becomes                                                                                                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `console create`                          | resolves every pane's secrets after the gate, always (`crud.py:151-158`)              | `_console_build_secret_targets` (`sessions/multi_console/secrets_env.py:164`) passed as the boundary's `targets`; values from `resolver.values`                                   |
+| `console restart`                         | the same, always (`multi_console/attach.py:702`)                                      | the same, always: a restart replaces the console, opening every pane                                                                                                              |
+| `console start`                           | the same, but only when the console is not running (`attach.py:699-702`)              | the same, only when its read-only presence probes choose a build: a start of a running console resolves nothing (2026-11-18 ruling)                                               |
+| `console restore-session`, window missing | every configured shell's secrets after the probes (`restore.py:186-203`)              | after the read-only probes, `_member_secret_targets` (`secrets_env.py:198`) for every configured shell, since the window is rebuilt whole, in the boundary; the late resolve goes |
+| `console restore-session`, panes missing  | only the missing indices' secrets, after the validation guards (`restore.py:385-399`) | after the probes and the tag validation, `_member_secret_targets` of only the missing indices, in the boundary; with nothing missing, nothing; the late resolve goes              |
+| `console add-sessions`, `add-shell`       | resolve once, with no gate (`crud.py:306`, `:620`)                                    | unchanged                                                                                                                                                                         |
 
-`_prepare_console_access` (`multi_console/attach.py`, which replaced `_prepare_vm_target` in batch
-D2) takes `targets` as a function of the `VMRow`, since both builders need the row
+As built, two helpers in `multi_console/attach.py` carry the boundary. `_active_console_vm` makes
+the not-found and Tailscale-address refusals before the gate, with nothing resolved, activates the
+VM through its prepared runtime (`prepare_vm_runtime`, whose gate secrets resolve through
+`resolver.resolve_gate`), and yields the VM row and the admin's access. `_console_pane_access` then
+registers the targets of the panes the operation will open
 (`sessions/multi_console/secrets_env.py:164`, `:198`; the build's shares the per-member loop of
-`_member_secret_targets`) and `_prepare_console_access` is where it is fetched. So the not-found and
-Tailscale-address refusals stay in one place before the gate, with nothing resolved. #885 replaced
-the `gated_vm_boundary` composition this paragraph first named with its prepared runtime
-(`prepare_vm_runtime`, whose gate secrets resolve through `resolver.resolve_gate`) before D2, so as
-built `_prepare_console_access` registers the targets on the operation's resolver before the gate
-and, once the VM is active, checks the agents of its `members`' shell panes, runs its one
-`resolver.resolve()`, and yields the operation's `ConsoleAccess`; callers read `resolver.values`.
-Its docstring's "documented conditional-need path" is gone. `console create` and `restore-session`
-resolve in that one boundary pass, before their first tmux request or database write, as ADR 0019
-promises.
+`_member_secret_targets`), checks those panes' agents, runs the one `resolver.resolve()`, and
+returns the operation's `ConsoleAccess`; callers read `resolver.values`. `console create` calls it
+at once with every pane. `restore-session` first observes the console and the window read-only
+(`_observe_window`, `multi_console/restore.py`), refusing what it cannot repair, and calls it with
+only the panes it will open. Both resolve in that one boundary pass, before their first tmux change
+or database write, as ADR 0019 promises. Fix round 1 of PR C split them out of
+`_prepare_console_access`, which registered every configured shell's targets before the gate.
 
 **`console start` and `restart` as built.** #885 (desired runtime state) reshaped them after this
 table was written: `realize_console` and reconciliation accept the running intent, prepare the
 console under its family guard (`prepare_console_reconcile`, which probes presence to choose the
 action), register the build's targets on the one resolver, and resolve once before any tmux change.
-So they resolve in one pass before their first tmux mutation, but a start of a running console
+So they resolve in one pass before their first tmux mutation, and a start of a running console
 resolves nothing, which that effort's FRD R7 requires ("already-satisfied targets ... must not
-request runtime-only secrets"). Batch D2 left that as #885 built it, so the `console start` row
-above is not built: open question 3.
+request runtime-only secrets") and the operator's 2026-11-18 ruling confirms for every console
+command (open question 3). The `console start` row above records that.
 
-**The cost, stated plainly.** `console create` and `restore-session` resolve their panes' secrets
-once the VM is active and before any tmux request. `restore-session` resolves every configured
-shell's secrets even when one pane, or none, is missing, so a non-interactive restore fails on a
-secret it would not have used, which `restore.py:376-384` avoided; and it resolves them before the
-tag validation, so an operator with corrupt tags may be prompted before learning of it. Both check
-every pane's agent before that resolve, so `restore-session` refuses an agent that predates the
-direct-SSH rollout even when its pane is not missing. The upgrade guide states each. What
-`console start` of a running console costs depends on open question 3.
+**The cost, stated plainly.** A console command that finds its VM stopped starts it, and resolves
+the gate's secrets, before it knows which panes it will open, since only the active VM can tell it;
+`console start` also records its running intent first. Beyond that, each resolves only what it will
+open: `console create` and `restart` every pane, `console start` of a running console none, and
+`restore-session` only its missing panes, after it has refused a console that is not running or a
+window it cannot repair, so a corrupt window is refused before any pane prompt. Each checks the
+agents of only the panes it will open, before that resolve. The upgrade guide states what changed.
 
 ## The requests that move
 
@@ -875,7 +876,7 @@ request that runs tmux is the builder's line; reverting any one call site to a r
 
 Every console request runs on the admin's access (the console's tmux server is the admin's), except
 an agent pane's parking connection and its access check, which run on the agent's.
-`_prepare_console_access` (`multi_console/attach.py`, batch D2) yields the operation's
+`_active_console_vm` and `_console_pane_access` (`multi_console/attach.py`) give the operation's
 `ConsoleAccess` and `_live_access` the admin's access; the gate and the SSH boundary are as before,
 with the pane secrets as the boundary's targets (above). A shell pane parks on its identity's access
 from the operation's `ConsoleAccess` (`sessions/multi_console/_access.py`), and a console build's
@@ -1078,10 +1079,9 @@ In the order they land, each with its tests:
   its environment, and reinit removes it. It does need the agent's own SSH access, as an agent
   session does: a console with an agent pane refuses an agent that predates the direct-SSH rollout,
   with the `agw agent reinit` hint.
-- Console pane secrets resolve in one pass before the console changes: `console start` of a running
-  console now resolves every pane secret (a non-interactive one fails unless they all resolve), and
-  `console restore-session` resolves every configured shell's secrets even when few or no panes are
-  missing.
+- Console pane secrets resolve in one pass before the console changes, and only for the panes it
+  will open: `console start` of a running console resolves none, and `console restore-session`
+  resolves only its missing panes' secrets, after it has refused a window it cannot repair.
 - Agent sessions' requests are written to the operation log, with environment names only.
 - `session stop`, `delete`, `attach` and pid repair bound each read of a session's state at 10
   seconds.
@@ -1140,8 +1140,11 @@ status and output once it is back.
 - Pane secrets in the boundary (decision 6), one pin each for `console create`, `restart`, `start`,
   and `restore-session` with a missing window and with missing panes: the command registers its
   targets on the boundary resolver, makes no `resolve_for_command` call, and resolves before its
-  first mutation (no tmux request and no database write precede the resolve). Two refusal pins, a
-  console not found and a VM with no Tailscale address, resolve nothing and dispatch nothing.
+  first mutation (no tmux change and no database write precede the resolve; only `create` makes no
+  tmux request first). `restore-session` registers only the panes it opens, resolves nothing with
+  nothing missing, and refuses an unknown presence probe, duplicate tags or a killed attach pane
+  before it resolves anything. Two refusal pins, a console not found and a VM with no Tailscale
+  address, resolve nothing and dispatch nothing.
 - Stop-all's shared log takes every concurrent plan's records without interleaving.
 
 **Tests that change in batch D because their path no longer calls `resolve_for_command`:**
@@ -1153,7 +1156,7 @@ which now resolves every pane secret, the accepted cost. As built (batch D2), #8
 the first two onto its prepared barrier; the late restore resolve's test moved to the boundary pins
 (`cli/tests/sessions/test_console_pane_secret_boundary.py`, which also holds the two refusal pins);
 and the third is unchanged, since a start of a running console still resolves nothing (open question
-3).
+3, resolved by the operator's 2026-11-18 ruling).
 
 **The guest programs.** `test_detached_program.py` beside `test_file_program.py`, on Linux CI, both
 interpreters. agw-launch's `TerminalCommand` and the inherited terminal variables join the
@@ -1335,7 +1338,9 @@ collateral it makes stale.
 - **D2**: the consoles onto the access, with a handover per pane and pane secrets in the boundary,
   deleting the env carry across sudo; `Handover.command(switch_user=)` arrives with its caller and
   the sudo T2 vectors (`T2-pane-through-sudo` and `T2-pane-through-sudo-empty-term`, lanes L and V).
-  Built, except the `console start` row of the pane-secret table (open question 3).
+  Built; the operator's 2026-11-18 ruling settled the `console start` row as #885 built it (open
+  question 3), and fix round 1 of PR C narrowed `restore-session` to resolve only the panes it
+  opens.
 - **D3**: the retired environment fragments' removal on create and reinit, with ADR 0026 superseding
   ADRs 0014 and 0017. Built, with slice 8's `AcceptEnv` search brought forward: no request sends
   environment by `SetEnv` (the legacy transports' builder, `agentworks.ssh._set_env_args`, which no
@@ -1448,4 +1453,6 @@ Edits this LLD needs in the HLA and the plan, for the lead to make:
    the desired-runtime FRD's R7 requires and #885 built (raised by batch D2). The ruling's question
    was the late resolves that ran after live tmux showed which panes were missing; #885's start
    decides its action from read-only presence probes and resolves once before any tmux change. Batch
-   D2 kept #885's behavior.
+   D2 kept #885's behavior. **Resolved** by the operator's 2026-11-18 ruling: every console command
+   observes read-only, decides, then resolves exactly the secrets of what will change, so a start or
+   reconciliation of a running console resolves nothing.

@@ -39,7 +39,7 @@ from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_
 from ._status import ConsoleStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
     from agentworks.config import Config
     from agentworks.db import ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
@@ -400,7 +400,7 @@ def kill_session_windows(
 
 
 @contextlib.contextmanager
-def _prepare_console_access(
+def _active_console_vm(
     db: Database,
     config: Config,
     vm_name: str,
@@ -409,19 +409,14 @@ def _prepare_console_access(
     interaction: TtyInteractionPolicy,
     held_native_guard: NativeMutationGuard,
     resolver: Resolver,
-    targets: Callable[[VMRow], Sequence[SecretTarget]],
-    members: Sequence[ConsoleSessionRow],
-) -> Iterator[ConsoleAccess]:
-    """Activate the VM, check the panes' agents, run the operation's one boundary resolve, and yield its accesses.
+) -> Iterator[tuple[VMRow, VMAccess]]:
+    """Activate the console's VM and yield its row and the admin's access, held active.
 
     The missing-VM and missing-address refusals come first, with nothing
-    resolved. ``targets`` gives the operation's pane secret targets from the
-    VM's row; they register on ``resolver`` before the activation gate opens.
-    Once the VM is active, :func:`console_access` checks the direct SSH of
-    every agent whose shell panes ``members`` configure, so a refused agent
-    stops the operation before the resolve can prompt; then the one resolve
-    runs, before the caller's first request, so every pane value is in
-    ``resolver.values`` before anything changes.
+    resolved. Activation resolves only its own gate secrets, through
+    ``resolver``. The caller then observes read-only, decides what it will
+    change, and calls :func:`_console_pane_access` for exactly the panes it
+    will open, before its first change.
     """
     import agentworks.execution as execution
     from agentworks.execution.access import Admin
@@ -429,7 +424,6 @@ def _prepare_console_access(
     from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
-    from ._access import console_access
     from .lifecycle import preflight_console_vm
 
     vm = db.get_vm(vm_name)
@@ -449,7 +443,6 @@ def _prepare_console_access(
                 held_native_guard=guard,
                 interaction=interaction,
             )
-            resolver.register_targets(targets(vm), allow_transient_auto_declare=True)
             context = prepare_vm_runtime(
                 db,
                 config,
@@ -461,12 +454,36 @@ def _prepare_console_access(
             )
             activate_vm_runtime(context)
             with context.node.hold_active():
-                access = console_access(db, config, vm, execution.vm_access(vm, config, Admin()), members)
-                resolver.resolve()
-                yield access
+                yield vm, execution.vm_access(vm, config, Admin())
     finally:
         if context is not None:
             context.clear_values()
+
+
+def _console_pane_access(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    admin: VMAccess,
+    *,
+    resolver: Resolver,
+    targets: Sequence[SecretTarget],
+    members: Sequence[ConsoleSessionRow],
+) -> ConsoleAccess:
+    """Check the agents of the panes an operation will open, then run its one boundary resolve.
+
+    ``targets`` are the secret targets of the panes the operation will open
+    and ``members`` configure exactly those panes. :func:`console_access`
+    checks the direct SSH of every agent among them, so a refused agent stops
+    the operation before the resolve can prompt; then the one resolve runs,
+    so every pane value is in ``resolver.values`` before anything changes.
+    """
+    from ._access import console_access
+
+    resolver.register_targets(targets, allow_transient_auto_declare=True)
+    access = console_access(db, config, vm, admin, members)
+    resolver.resolve()
+    return access
 
 
 def _live_access(db: Database, config: Config, vm_name: str) -> tuple[VMRow, VMAccess] | None:

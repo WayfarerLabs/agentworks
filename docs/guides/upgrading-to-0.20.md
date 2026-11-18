@@ -514,18 +514,17 @@ the VM once no backup is running.
   open a shell for an agent that has no SSH access of its own refuses before it prompts for a pane
   secret or changes the console's tmux or definition, with the `agw agent reinit` hint. It may
   already have started a stopped VM, and `console start` records that the console should run, before
-  that check. `restore-session` checks every agent of the session's shells, even when their panes
-  are not missing. `console add-shell` and `add-sessions` check only when the console is running,
-  since only then do they open the new shells; on a stopped console they record the new shell or
-  member as before.
+  that check. `restore-session` checks only the agents of the panes it restores. `console add-shell`
+  and `add-sessions` check only when the console is running, since only then do they open the new
+  shells; on a stopped console they record the new shell or member as before.
 - **A shell pane whose directory is gone opens in the home directory with a warning,** where the
   pane printed the message itself.
-- **Pane secrets resolve before the console changes.** `console create` and `restore-session`
-  resolve the secrets of every shell they could open in one pass, once the VM is active and before
-  any tmux request. `restore-session` resolves every configured shell's secrets even when few or no
-  panes are missing, so a non-interactive restore fails on a secret it would not have used, and it
-  resolves them before it checks the window's pane tags, so you may be prompted before a corrupt
-  window is refused.
+- **Pane secrets resolve before the console changes.** `console create`, `start`, `restart` and
+  `restore-session` resolve the secrets of the shells they will open in one pass, once the VM is
+  active and before they change the console's tmux or definition. A console that is already running
+  makes `console start` open nothing and resolve nothing, and `restore-session` resolves only the
+  panes it restores, after it has checked the window, so a window it cannot repair is refused before
+  any pane secret is asked for.
 - **`console attach` runs `tmux attach` itself,** with its arguments, rather than through the
   admin's shell. `[terminal] clear_on_detach` applies as before.
 - **A console build is logged by shape.** `console create`, `start` and `restart` write the admin's

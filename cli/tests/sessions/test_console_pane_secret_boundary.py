@@ -1,12 +1,12 @@
 """A console command's pane secrets resolve in its one boundary pass, before it changes anything.
 
-``console create`` and ``restore-session`` register every pane's targets on the
-boundary resolver before the activation gate and resolve once the VM is active,
-before their first tmux request or database write; ``restore-session`` takes
-a target for every configured shell, whatever turns out to be missing (operator
-ruling of 2026-11-12). ``console start`` and ``restart`` resolve their build's
-targets on the same resolver before any tmux change. Each resolves once, and
-none calls ``resolve_for_command``.
+``console create`` resolves every pane's targets once the VM is active, before
+its first tmux request or database write. ``restore-session`` first observes the
+window read-only and refuses what it cannot repair, then resolves only the
+targets of the panes it will open, before its first tmux change; with nothing
+missing it resolves nothing (operator ruling of 2026-11-18). ``console start``
+and ``restart`` resolve their build's targets on the same resolver before any
+tmux change. Each resolves at most once, and none calls ``resolve_for_command``.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from tests.console_helpers import create_console_record
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.db import Database
+    from agentworks.db import ConsoleSessionRow, Database
     from tests.conftest import _FakeResult, _ScriptedGuest
 
 CON = "aw-console-con"
@@ -99,35 +99,107 @@ def test_create_resolves_its_panes_before_any_tmux_request_or_database_write(
     assert db.get_console("con") is not None
 
 
+_READS = ("has-session", "list-windows", "list-panes")
+
+
+def _restorable(db: Database, monkeypatch: pytest.MonkeyPatch) -> list[SecretTarget]:
+    """Console ``con`` with members ``a`` and ``b``, ``b`` configuring three shells told apart by their
+    directories; each shell's target is labeled with its directory, and the targets are returned in
+    configured order."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a", "b+3"])
+    db.update_console_shells("con", "b", [{"cwd": f"s{index}", "admin": False} for index in range(3)])
+
+    def targets(*_args: object, member: ConsoleSessionRow, **_kwargs: object) -> list[SecretTarget]:
+        return [SecretTarget(vm={}, label=f"console-pane:{shell['cwd']}") for shell in member.shells]
+
+    monkeypatch.setattr(mc, "_member_secret_targets", targets)
+    return [SecretTarget(vm={}, label=f"console-pane:s{index}") for index in range(3)]
+
+
+def _restore(db: Database) -> None:
+    mc.restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
+
+
 @pytest.mark.parametrize("window_missing", [True, False])
-def test_restore_resolves_every_configured_shell_before_any_tmux_request(
+def test_restore_resolves_only_the_panes_it_opens_before_any_tmux_change(
     db: Database,
     console_guest_factory: Callable[..., _ScriptedGuest],
     monkeypatch: pytest.MonkeyPatch,
     window_missing: bool,
 ) -> None:
-    _seed_vm(db, with_tailscale=True)
-    _seed_sessions(db, ["a", "b"])
-    create_console_record(db, name="con", vm_name="vm1", session_specs=["a", "b+3"])
+    shells = _restorable(db, monkeypatch)
     model = TmuxModel()
     model.seed_session(CON, "a")
     if not window_missing:
         model.seed_window(CON, "b", pane_tags=(None, 0, 2))
     guest = console_guest_factory(model)
-    shells = [SecretTarget(vm={}, label=f"console-pane:{index}") for index in range(3)]
-    unasked = iter(shells)
-    monkeypatch.setattr(mc, "_pane_secret_target", lambda *a, **k: next(unasked))
     before = db._conn.total_changes
     boundary = _Boundary(db, guest, monkeypatch)
 
-    mc.restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
+    _restore(db)
 
-    # A target for every configured shell, though only index 1 (or the whole window) was missing.
-    assert _registered(boundary) == [tuple(shells)]
+    # The whole window's shells when it is gone; otherwise only index 1, the one with no live pane.
+    assert _registered(boundary) == [tuple(shells) if window_missing else (shells[1],)]
     assert _resolves(boundary) == 1
-    assert not [event for event in boundary.before_resolve() if event[0] == "tmux"]
+    early = [str(command) for kind, command in boundary.before_resolve() if kind == "tmux"]
+    assert early
+    assert all(any(read in command for read in _READS) for command in early)
     assert boundary.changes_at_resolve == before
     assert [tag for _pid, _pidx, tag in model.pane_rows(CON, "b") or []] == [None, 0, 1, 2]
+
+
+def test_restore_with_nothing_missing_resolves_nothing(
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _restorable(db, monkeypatch)
+    model = TmuxModel()
+    model.seed_session(CON, "a")
+    model.seed_window(CON, "b", pane_tags=(None, 0, 1, 2))
+    guest = console_guest_factory(model)
+    monkeypatch.setattr(mc, "_member_secret_targets", lambda *a, **k: pytest.fail("built pane targets"))
+    boundary = _Boundary(db, guest, monkeypatch)
+
+    _restore(db)
+
+    assert [kind for kind, _ in boundary.events if kind != "tmux"] == []
+
+
+@pytest.mark.parametrize(
+    "window",
+    [
+        pytest.param(lambda model: model.seed_window(CON, "b", pane_tags=(None, 0, 0)), id="duplicate-tags"),
+        pytest.param(lambda model: model.seed_window(CON, "b", pane_tags=(0, 1)), id="attach-pane-killed"),
+        pytest.param(None, id="presence-unknown"),
+    ],
+)
+def test_restore_refuses_what_it_cannot_repair_before_resolving_anything(
+    db: Database,
+    console_guest_factory: Callable[..., _ScriptedGuest],
+    monkeypatch: pytest.MonkeyPatch,
+    window: Callable[[TmuxModel], object] | None,
+) -> None:
+    from agentworks.sessions.tmux import ProbeStatus
+
+    _restorable(db, monkeypatch)
+    model = TmuxModel()
+    model.seed_session(CON, "a")
+    if window is None:
+        monkeypatch.setattr(mc, "_console_tmux_presence", lambda *a, **k: ProbeStatus.UNKNOWN)
+    else:
+        window(model)
+    guest = console_guest_factory(model)
+    monkeypatch.setattr(mc, "_member_secret_targets", lambda *a, **k: pytest.fail("built pane targets"))
+    before = db._conn.total_changes
+    boundary = _Boundary(db, guest, monkeypatch)
+
+    with pytest.raises(StateError):
+        _restore(db)
+
+    assert [kind for kind, _ in boundary.events if kind != "tmux"] == []
+    assert all(any(read in str(command) for read in _READS) for _kind, command in boundary.events)
+    assert db._conn.total_changes == before
 
 
 @pytest.mark.parametrize("operation", ["start", "restart"])

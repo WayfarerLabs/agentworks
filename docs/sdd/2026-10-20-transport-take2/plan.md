@@ -632,6 +632,9 @@ Definition of done: create and reinit run entirely on the new transport.
       to resolve every console pane's secrets in the boundary pass
       ([FRD, 2026-11-12](./frd.md#2026-11-12); `sessions-lld.md`, "Console pane secrets in the
       boundary"), and the refusal already hints at `agw vm reinit` (`vms/applied_state.py:262-273`).
+- [x] Apply the operator's 2026-11-18 ruling to `console restore-session`: it observes the window
+      read-only, refuses what it cannot repair, then checks the agents and resolves the secrets of
+      only the panes it opens, before its first tmux change (fix round 1 of PR C).
 - [ ] Live evidence:
   - session and console create, attach, detach and restore on Remote Lima from all three
     workstations and on WSL2;
