@@ -299,9 +299,9 @@ Under the lock, `write_if`:
 
 1. Creates `.agentworks-tmp-<24 hex>` relative to the parent descriptor with
    `O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC`, mode 0600, and writes the content. The
-   hex is the start of the destination name's SHA-256, so the name is fixed per destination and fits
-   whatever the name's length; a file already there is a killed write's (no live write holds it
-   under the lock), so it is unlinked first.
+   hex is 12 random bytes, so the name is fresh for each write and fits whatever the destination
+   name's length. Nothing proves a file already at a name is a killed write's rather than one
+   another writer named that way, so a taken name fails the write (status 1) and is left alone.
 2. `fchown(-1, gid)` when `group` names one (`native_files.py:146`), then `fchmod(mode)`; chown
    first, because it clears set-id bits.
 3. Compares the destination with `expected` (a digest, or `None` for absent): a mismatch is
@@ -333,10 +333,10 @@ Under the lock, `write_if`:
 
 ### Cleanup
 
-- **`write_if`.** A `finally` unlinks the temporary name, ignoring `ENOENT` after a successful
-  rename (`native_files.py:180-184`). Directories it created stay: R5 asks that cleanup touch only
-  what the operation created, which keeping them satisfies, and retirement has `prune_empty_parents`
-  for them.
+- **`write_if`.** A `finally` unlinks the temporary file this write created unless it was renamed,
+  so no write removes a file it did not create; one a write killed outright left stays. Directories
+  it created stay: R5 asks that cleanup touch only what the operation created, which keeping them
+  satisfies, and retirement has `prune_empty_parents` for them.
 - **What a dropped connection does.** Under `ssh -T` there is no pseudo-terminal, so no hangup
   reaches the payload when the connection drops; sshd closes the channel's pipes and the payload
   runs on (the predecessors measured guest trees outliving their request, HLA D5 "Deadlines"). The

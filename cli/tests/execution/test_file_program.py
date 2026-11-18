@@ -376,22 +376,52 @@ def test_write_refuses_a_directory_at_the_destination(guest: Guest) -> None:
     assert temporaries(guest.tree) == []
 
 
-@pytest.mark.parametrize("operation", ["write", "write_if"])
-def test_a_directory_at_the_temporary_name_makes_the_write_unsuitable_and_is_left_alone(
-    guest: Guest, operation: str
-) -> None:
+@pytest.mark.parametrize("planted", ["file", "directory"])
+@pytest.mark.parametrize("operation", ["write", "write_if", "refused write_if"])
+def test_a_write_leaves_every_sibling_it_did_not_create(guest: Guest, operation: str, planted: str) -> None:
+    """Whatever a sibling is named, temporary-looking included, no write removes or replaces it."""
     destination = guest.tree / "file"
     destination.write_bytes(b"before")
-    planted = guest.tree / file_program._temporary_name("file")
-    planted.mkdir()
-    (planted / "inside").write_bytes(b"kept")
+    names = [".agentworks-tmp-" + digest(b"file")[:24], ".agentworks-tmp-unrelated"]
+    for name in names:
+        if planted == "file":
+            (guest.tree / name).write_bytes(b"not ours")
+        else:
+            (guest.tree / name).mkdir()
+            (guest.tree / name / "inside").write_bytes(b"not ours")
+
+    if operation == "write":
+        result = guest.write(destination, b"after")
+    else:
+        expected = digest(b"before" if operation == "write_if" else b"something else")
+        result = guest.write_if(destination, b"after", expected=expected)
+
+    assert result.returncode == (file_program.EXIT_CONFLICT if operation == "refused write_if" else 0), result.stderr
+    assert destination.read_bytes() == (b"before" if operation == "refused write_if" else b"after")
+    assert temporaries(guest.tree) == names
+    for name in names:
+        kept = guest.tree / name if planted == "file" else guest.tree / name / "inside"
+        assert kept.read_bytes() == b"not ours"
+
+
+@pytest.mark.parametrize("operation", ["write", "write_if"])
+def test_a_temporary_name_that_is_already_taken_fails_the_write_and_is_left_alone(guest: Guest, operation: str) -> None:
+    destination = guest.tree / "file"
+    destination.write_bytes(b"before")
+    # Every temporary name the patched program draws is the one planted here.
+    taken = guest.tree / (".agentworks-tmp-" + "00" * 12)
+    taken.write_bytes(b"not ours")
+    patch = "import os\nos.urandom = lambda size: bytes(size)"
 
     write = guest.write if operation == "write" else guest.write_if
-    result = write(destination, b"after", **({} if operation == "write" else {"expected": digest(b"before")}))
+    result = write(
+        destination, b"after", patch=patch, **({} if operation == "write" else {"expected": digest(b"before")})
+    )
 
-    assert result.returncode == file_program.EXIT_UNSUITABLE, result.stderr
+    assert result.returncode == 1
     assert destination.read_bytes() == b"before"
-    assert (planted / "inside").read_bytes() == b"kept"
+    assert taken.read_bytes() == b"not ours"
+    assert temporaries(guest.tree) == [taken.name]
 
 
 @pytest.mark.parametrize("damage", ["short", "different"])
@@ -814,7 +844,8 @@ def test_a_termination_during_a_write_exits_nonzero_and_leaves_no_temporary_file
     assert temporaries(guest.tree) == []
 
 
-def test_the_next_write_replaces_what_a_killed_write_left_behind(guest: Guest) -> None:
+def test_a_killed_write_s_temporary_file_does_not_stop_the_next_write(guest: Guest) -> None:
+    """A write killed outright leaves its temporary file, which no later write can prove is not another's."""
     destination = guest.tree / "file"
     marker = guest.root / "writing"
     patch = (
@@ -840,13 +871,14 @@ def test_the_next_write_replaces_what_a_killed_write_left_behind(guest: Guest) -
         time.sleep(0.02)
     killed.kill()
     killed.wait(timeout=20)
-    assert len(temporaries(guest.tree)) == 1
+    left = temporaries(guest.tree)
+    assert len(left) == 1
 
     result = guest.write_if(destination, b"after")
 
     assert result.returncode == 0, result.stderr
     assert destination.read_bytes() == b"after"
-    assert temporaries(guest.tree) == []
+    assert temporaries(guest.tree) == left
 
 
 # -- Pruning ---------------------------------------------------------------------------------------

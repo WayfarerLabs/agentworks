@@ -104,15 +104,15 @@ Unconditional replacement with mode and ownership applied before publication (R5
 2. Take the lock.
 3. Walk the parent, creating missing components with `parent_mode` and `group`'s gid as `write_if`
    does for an absent destination (`file_program.py:100-127`).
-4. Unlink a killed write's temporary file, then create `.agentworks-tmp-<24 hex>` 0600 and write the
-   content (`file_program.py:265-276`).
+4. Create a fresh `.agentworks-tmp-<24 random hex>` 0600 exclusively and write the content; a taken
+   name fails the write and is left alone (`file_program.py:265-276`).
 5. `fchown(uid, gid)` for the `owner` and `group` given (`-1` for one not given), then
    `fchmod(mode)`: chown first, because it clears set-id bits (`file_program.py:277-280`).
 6. Open an existing destination as a regular file without following links: a link or another type is
    status 4, so `write` never replaces a link. This is the type check `write_if` gets from its
    compare (`files-lld.md:228-229`), with no digest to compare.
 7. `fsync`, rename over the destination, best-effort `fsync` of the directory; the `finally` unlinks
-   the temporary name (`file_program.py:291-306`).
+   the temporary file this write created unless it was renamed (`file_program.py:291-306`).
 
 `owner` sets the file's owner only; a created parent is the writing identity's, as for `write_if`.
 `write` and `write_if` share one function in the program, differing only in whether step 6 compares
@@ -175,33 +175,33 @@ since no conditional writer works beneath a dotfiles checkout.
 
 - **Input.** The workstation builds a gzip `tarfile` archive in memory (`arcname="."`), as
   `copy_dir_to` does on disk today (`transports/base.py:255-261`), and sends it as `Bytes`. The
-  destination and a tag, the first 16 hex of the SHA-256 of its last component, travel as the
-  environment values `AGW_TREE_DEST` and `AGW_TREE_TAG`, which the log names but never records.
+  destination travels as the environment value `AGW_TREE_DEST`, which the log names but never
+  records.
 - **The script** is the module constant `UPLOAD_TREE_SCRIPT`, so a test can run it directly. It runs
   under `set -eu`, in order:
   1. Refuse, with status 4, when the destination is a link or something other than a directory.
   2. `mkdir -p` the destination's parent, as today's `mkdir -p` (`transports/base.py:268-271`).
-  3. Recover a previous run's leftovers: with `new` and `old` being `<parent>/.agentworks-new-<tag>`
-     and `<parent>/.agentworks-old-<tag>`, an `old` with no destination is moved back to the
-     destination (a run killed between its renames), any other `old` is removed, and `new` is
-     removed.
-  4. Set the traps: `trap restore EXIT`, and for each of `HUP`, `INT` and `TERM` a trap that runs
+  3. Set the traps: `trap restore EXIT`, and for each of `HUP`, `INT` and `TERM` a trap that runs
      `restore` and then `exit $((128 + n))` with that signal's number. `restore` removes `new` when
-     present, and when `old` is present moves it back if the destination is absent, else removes it.
-     It is idempotent, so the `EXIT` trap that follows a signal's `exit` finds nothing to do.
-  5. `mkdir -m 0700 new`, then
+     this run made it, and when this run made `old` moves it back if the destination is absent, else
+     removes it. It forgets each once handled, so the `EXIT` trap that follows a signal's `exit`
+     finds nothing to do.
+  4. `new=$(mktemp -d <parent>/.agentworks-new-XXXXXXXXXX)` (0700), then
      `/usr/bin/tar -x -z -f - -C new --no-same-owner --no-same-permissions` reading the archive from
      stdin. A failure here, `tar`'s included, ends the script under `set -e`, and the `EXIT` trap
      removes `new`.
-  6. `mv -T` the destination to `old` when it exists, then `mv -T new` to the destination.
-  7. Clear the traps, then `rm -rf old || :`: a leftover `old` is harmless, and step 3 of the next
-     upload removes it.
+  5. When the destination exists, `old=$(mktemp -d <parent>/.agentworks-old-XXXXXXXXXX)` and `mv -T`
+     the destination over that empty directory; then `mv -T new` to the destination.
+  6. Clear the traps, then remove `old`, best effort.
+- **Only its own siblings.** `mktemp` creates each sibling exclusively under a fresh name, so the
+  script removes or moves only what this run made. A sibling that merely has such a name, a killed
+  run's included, is never touched: nothing proves it is a run's rather than another writer's.
 - **Not atomic.** Between the two renames the destination is absent. A failure or a signal there
-  runs `restore`; a `SIGKILL` or a reboot there leaves `old`, which the next upload to the same
-  destination moves back or removes in step 3, before it touches anything. Leftovers therefore need
-  no sweep beyond that step and no warning. Two uploads to one destination never overlap, because
-  create, reinit and agent initialization hold the VM's native mutation guard (`driver.py:183`,
-  `agents/realize.py:117`, `agents/manager/lifecycle.py:504`).
+  runs `restore`; a `SIGKILL` or a reboot there leaves the previous tree at its `old` sibling and no
+  destination, for the operator to move back, and the next upload creates the destination afresh.
+  Two uploads to one destination never overlap, because create, reinit and agent initialization hold
+  the VM's native mutation guard (`driver.py:183`, `agents/realize.py:117`,
+  `agents/manager/lifecycle.py:504`).
 - **Statuses.** 0; 4 is `PathRefused(UNSUITABLE)` naming the destination; anything else is
   `CommandFailed`, whose stderr tail names `tar`'s complaint (a corrupt archive leaves the
   destination as it was, since nothing moves before `tar` succeeds). `upload_tree` is the third
@@ -784,10 +784,10 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 
 **The plan's Tests box:**
 
-| Plan item                                                                                                    | Test                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `write` applies mode and owner before the rename                                                             | `test_file_program.py` runs `main` in-process with `os.rename` wrapped to `fstat` the source name relative to its directory before delegating: at that moment the temporary file has the requested mode and group, a set-gid mode included (which chown before chmod keeps); under the sudo lane, the requested owner too. The destination afterwards has them, with no `.agentworks-tmp-*` left                    |
-| a failed or interrupted tree upload leaves the previous tree in place, and a corrupt archive changes nothing | Over the L lane, `upload_tree` with a truncated archive leaves the destination byte-identical with no `.agentworks-*` sibling; `UPLOAD_TREE_SCRIPT` run directly with a shadowed `mv` that sends the script `SIGTERM` after the first rename restores the old tree and exits 143; a sibling `.agentworks-old-<tag>` with no destination, as a `SIGKILL` leaves, is moved back by the next upload before it extracts |
+| Plan item                                                                                                    | Test                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `write` applies mode and owner before the rename                                                             | `test_file_program.py` runs `main` in-process with `os.rename` wrapped to `fstat` the source name relative to its directory before delegating: at that moment the temporary file has the requested mode and group, a set-gid mode included (which chown before chmod keeps); under the sudo lane, the requested owner too. The destination afterwards has them, with no `.agentworks-tmp-*` left                                      |
+| a failed or interrupted tree upload leaves the previous tree in place, and a corrupt archive changes nothing | Over the L lane, `upload_tree` with a truncated archive leaves the destination byte-identical with no `.agentworks-*` sibling; `UPLOAD_TREE_SCRIPT` run directly with a shadowed `mv` that sends the script `SIGTERM` after the first rename restores the old tree and exits 143; over the L lane, `.agentworks-new-*` and `.agentworks-old-*` siblings the upload did not make, with or without a destination, are left as they were |
 
 **The file program, against a real local filesystem** (`cli/tests/execution/test_file_program.py`,
 Linux CI, both interpreters, as slice 5's tests run):
@@ -1041,12 +1041,11 @@ no longer use them. The departures from the tables above, each recorded where it
   admin"), so its install-command completion test is `-lic` and those helpers' warnings reach its
   operation log.
 - `ensure_directory` converges with `owner` or `group`, either one.
-- `UPLOAD_TREE_SCRIPT` moves an `old` sibling back only when it is a directory and not a link, and
-  removes anything else there; it makes each sibling writable and searchable (never through a link)
-  before removing it, and every removal is best effort, so a tree with read-only directories is
-  replaced on every upload and `restore` always reaches its rename. The git file source requires
-  `mktemp`'s output to be a guest path under its staging prefix before using it, and reads its
-  staging removal's completion and status, warning when it fails.
+- `UPLOAD_TREE_SCRIPT` touches only the siblings `mktemp` made for it; it makes each writable and
+  searchable (never through a link) before removing it, and every removal is best effort, so a tree
+  with read-only directories is replaced on every upload and `restore` always reaches its rename.
+  The git file source requires `mktemp`'s output to be a guest path under its staging prefix before
+  using it, and reads its staging removal's completion and status, warning when it fails.
 - Both accounts take one order: the profile and rc fragments, the mise config (when `mise_packages`
   is set), git credentials, dotfiles, the mise lockfile and install (`mise.install_mise`, which runs
   when there are packages, a lockfile or a config in the home, `mise._has_mise_config`),
@@ -1136,7 +1135,8 @@ no longer use them. The departures from the tables above, each recorded where it
   Windows drive letter (git's scp-style rule), is refused, so a remote written without `git::` is
   never read as a local file. An existing clone's origin is read with
   `git config --get remote.origin.url`, as configured, since `remote get-url` applies `insteadOf`.
-- A directory at a write's fixed temporary name is `PathRefused(UNSUITABLE)` and left alone.
+- A write's temporary name is fresh and created exclusively, so a write removes no sibling it did
+  not create, a killed write's included.
 - Each account's fragment writers ensure their own source lines, and
   `_ensure_agentworks_files_sourced` runs again before the user install commands and at the end, for
   the admin as for every agent (above, the shared order).

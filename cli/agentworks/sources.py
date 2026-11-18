@@ -19,7 +19,6 @@ repository on the guest.
 
 from __future__ import annotations
 
-import hashlib
 import io
 import re
 import stat
@@ -475,61 +474,66 @@ def _fetch_and_detach(files: Files, repo: str, ref: str, *, deadline: float, dep
 UPLOAD_TREE_SCRIPT = r"""set -eu
 dest=$AGW_TREE_DEST
 parent=${dest%/*}
-new="$parent/.agentworks-new-$AGW_TREE_TAG"
-old="$parent/.agentworks-old-$AGW_TREE_TAG"
 if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -d "$dest" ]; }; then
     exit 4
 fi
 mkdir -p -- "${parent:-/}"
 # A tree may hold directories its owner cannot write or search, which rm cannot empty until it may.
 # Only its directories are opened up (find follows no link): a file's mode lives on its inode, which a
-# hard link outside the tree may share. Removing what an upload left is best effort: the next upload
-# removes the rest.
+# hard link outside the tree may share. Removing what an upload made is best effort.
 remove() {
     for path in "$@"; do
         find "$path" -type d ! -perm -u=rwx -exec chmod u+rwx {} \; 2>/dev/null || :
     done
     rm -rf -- "$@" || :
 }
-# A run killed between its two renames left the previous tree at old and nothing at dest.
-if [ -d "$old" ] && [ ! -L "$old" ] && [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
-    mv -T -- "$old" "$dest"
-fi
-remove "$old" "$new"
+# Each sibling is one mktemp makes for this run, so restore and the last removal touch only this run's.
+new=
+old=
 restore() {
-    remove "$new"
-    if [ -e "$old" ] || [ -L "$old" ]; then
+    if [ -n "$new" ]; then
+        remove "$new"
+        new=
+    fi
+    if [ -n "$old" ]; then
         if [ -e "$dest" ] || [ -L "$dest" ]; then
             remove "$old"
         else
             mv -T -- "$old" "$dest"
         fi
+        old=
     fi
 }
 trap restore EXIT
 trap 'restore; exit 129' HUP
 trap 'restore; exit 130' INT
 trap 'restore; exit 143' TERM
-mkdir -m 0700 -- "$new"
+new=$(mktemp -d "$parent/.agentworks-new-XXXXXXXXXX")
 /usr/bin/tar -x -z -f - -C "$new" --no-same-owner --no-same-permissions
 if [ -e "$dest" ]; then
+    # The previous tree is renamed over the empty directory made for it.
+    old=$(mktemp -d "$parent/.agentworks-old-XXXXXXXXXX")
     mv -T -- "$dest" "$old"
 fi
 mv -T -- "$new" "$dest"
 trap - EXIT HUP INT TERM
-remove "$old"
+if [ -n "$old" ]; then
+    remove "$old"
+fi
 """
 """Replace the directory ``$AGW_TREE_DEST`` with the gzip tar archive on stdin, as one ``sh`` script.
 
-The archive is extracted into a sibling, ``.agentworks-new-$AGW_TREE_TAG``,
-and only then is the previous tree moved aside to ``.agentworks-old-<tag>``
+The archive is extracted into a sibling, ``.agentworks-new-<random>``, and
+only then is the previous tree moved aside to ``.agentworks-old-<random>``
 and the new one moved in. Any failure or signal from the extraction on puts
-the previous tree back; a run killed outright between the two renames leaves
-it at the ``old`` sibling, which the next upload to the same destination
-moves back before it does anything else. A sibling's directories are made
-writable and searchable before it is removed, so a tree with read-only
-directories is replaced like any other, and a sibling that cannot be
-removed never stops the previous tree coming back. A link or anything but a directory at the destination is status 4.
+the previous tree back. ``mktemp`` makes each sibling, so the script removes
+or moves only what it made, never a sibling that merely has such a name; a
+run killed outright between its two renames leaves the previous tree at its
+``old`` sibling and no destination, for the operator to recover. A sibling's
+directories are made writable and searchable before it is removed, so a tree
+with read-only directories is replaced like any other, and a sibling that
+cannot be removed never stops the previous tree coming back. A link or
+anything but a directory at the destination is status 4.
 """
 
 UNSUITABLE_TREE = 4
@@ -554,11 +558,10 @@ def upload_tree(files: Files, local_dir: Path, dest: str) -> None:
             tar.add(local_dir, arcname=".")
     except OSError as error:
         raise SourceRefError(f"could not read local source directory {format_host_path(local_dir)}: {error}") from None
-    tag = hashlib.sha256(dest.rsplit("/", 1)[1].encode("utf-8", "surrogateescape")).hexdigest()[:16]
     request = Script(
         UPLOAD_TREE_SCRIPT,
         Shell.SH,
-        env={"AGW_TREE_DEST": dest, "AGW_TREE_TAG": tag},
+        env={"AGW_TREE_DEST": dest},
         stdin=Bytes(archive.getvalue()),
         deadline=files.deadline,
     )

@@ -619,10 +619,7 @@ def test_upload_tree_sends_the_local_tree_as_one_unelevated_script_with_its_two_
 
     (request,) = guest.access.requests()
     assert isinstance(request, Script) and request.source == UPLOAD_TREE_SCRIPT and not request.elevated
-    assert request.env == {
-        "AGW_TREE_DEST": "/home/a/.dotfiles",
-        "AGW_TREE_TAG": hashlib.sha256(b".dotfiles").hexdigest()[:16],
-    }
+    assert request.env == {"AGW_TREE_DEST": "/home/a/.dotfiles"}
     assert isinstance(request.stdin, Bytes)
     with tarfile.open(fileobj=io.BytesIO(request.stdin.data), mode="r:gz") as archive:
         members = {member.name: archive.extractfile(member) for member in archive.getmembers() if member.isfile()}
@@ -702,11 +699,10 @@ def test_upload_tree_refuses_a_link_or_file_at_the_destination(lane: Files, tmp_
 
 
 def _run_script(dest: Path, archive: bytes, *, path: str = "/usr/bin:/bin") -> subprocess.CompletedProcess[bytes]:
-    tag = hashlib.sha256(dest.name.encode()).hexdigest()[:16]
     return subprocess.run(
         ["/bin/sh", "-c", UPLOAD_TREE_SCRIPT],
         input=archive,
-        env={"PATH": path, "AGW_TREE_DEST": str(dest), "AGW_TREE_TAG": tag},
+        env={"PATH": path, "AGW_TREE_DEST": str(dest)},
         capture_output=True,
         check=False,
         timeout=30,
@@ -741,16 +737,41 @@ def test_a_signal_between_the_renames_restores_the_previous_tree(tmp_path: Path)
     assert _siblings(dest) == []
 
 
-@requires_posix_tree
-def test_the_next_upload_moves_back_a_tree_a_killed_run_left_aside(tmp_path: Path) -> None:
+@pytest.mark.parametrize("previous", [True, False], ids=["replacing", "creating"])
+@pytest.mark.parametrize("planted", ["file", "directory"])
+def test_upload_tree_leaves_every_sibling_it_did_not_create(
+    lane: Files, tmp_path: Path, planted: str, previous: bool
+) -> None:
+    """Siblings named as an upload's staging would be, or as a killed run leaves them, are someone else's."""
     dest = tmp_path / "home" / ".dotfiles"
+    dest.parent.mkdir()
+    if previous:
+        _tree(dest, {"rc": b"old"})
     tag = hashlib.sha256(dest.name.encode()).hexdigest()[:16]
-    _tree(dest.parent / f".agentworks-old-{tag}", {"rc": b"old"})
-    # A corrupt archive fails the extraction after recovery, so what is left is what recovery did.
+    names = [f".agentworks-new-{tag}", f".agentworks-old-{tag}", ".agentworks-old-unrelated"]
+    for name in names:
+        if planted == "file":
+            (dest.parent / name).write_bytes(b"not ours")
+        else:
+            _tree(dest.parent / name, {"inside": b"not ours"})
+
+    upload_tree(lane, _tree(tmp_path / "local", {"rc": b"new"}), str(dest))
+
+    assert _contents(dest) == {"rc": b"new"}
+    assert _siblings(dest) == names
+    for name in names:
+        kept = dest.parent / name if planted == "file" else dest.parent / name / "inside"
+        assert kept.read_bytes() == b"not ours"
+
+
+@requires_posix_tree
+def test_a_failed_upload_with_no_previous_tree_leaves_nothing(tmp_path: Path) -> None:
+    dest = tmp_path / "home" / ".dotfiles"
+
     result = _run_script(dest, b"not an archive")
 
     assert result.returncode != 0
-    assert _contents(dest) == {"rc": b"old"}
+    assert not dest.exists()
     assert _siblings(dest) == []
 
 

@@ -249,14 +249,15 @@ def _destination_digest(parent: int, name: str) -> str | None:
         os.close(descriptor)
 
 
-def _temporary_name(name: str) -> str:
-    """The one temporary name beside the destination ``name``, whatever its length.
+def _temporary_name() -> str:
+    """A fresh temporary name for one write, the same length whatever the destination's name.
 
-    It is fixed, so the next write to the same destination replaces what a
-    write killed before its rename left behind. A directory at it makes the
-    write unsuitable, since no write leaves one.
+    Nothing else proves a temporary file is a write's own, so each write
+    creates its name exclusively and removes only that one. A write killed
+    outright leaves its file behind for good: no later write can tell it
+    from a file someone else named the same way.
     """
-    return _TEMPORARY_PREFIX + hashlib.sha256(name.encode("utf-8", "surrogateescape")).hexdigest()[:24]
+    return _TEMPORARY_PREFIX + os.urandom(12).hex()
 
 
 def _write(params: Params) -> int:
@@ -290,19 +291,14 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
         walk.close()
         return EXIT_CONFLICT
     parent = walk.parent
-    temporary = _temporary_name(walk.name)
+    temporary = _temporary_name()
+    created = renamed = False
     try:
-        # Under the lock no live write owns this name: a file there is a killed write's. A directory
-        # is no write's, so the name is unsuitable and is left alone, as the cleanup below leaves it.
-        try:
-            os.unlink(temporary, dir_fd=parent)
-        except FileNotFoundError:
-            pass
-        except IsADirectoryError:
-            return EXIT_UNSUITABLE
+        # Exclusive: a name that is already taken is someone else's, and fails the write untouched.
         output = os.open(
             temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent
         )
+        created = True
         try:
             view = memoryview(params["data"])
             while view:
@@ -325,6 +321,7 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
         finally:
             os.close(output)
         os.rename(temporary, walk.name, src_dir_fd=parent, dst_dir_fd=parent)
+        renamed = True
         # The write is done once renamed; making the rename durable is best effort, not its outcome.
         with contextlib.suppress(OSError):
             directory = os.open(".", _OPEN_DIRECTORY, dir_fd=parent)
@@ -334,8 +331,9 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
                 os.close(directory)
         return 0
     finally:
-        with contextlib.suppress(FileNotFoundError, IsADirectoryError):
-            os.unlink(temporary, dir_fd=parent)
+        if created and not renamed:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=parent)
         walk.close()
 
 

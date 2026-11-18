@@ -300,7 +300,7 @@ def test_no_request_carries_an_environment_but_apts_and_the_tree_upload_s(
     assert install_run("bash", "install-user-tool") in requests
     assert Command(("bash", "-lc", "./install.sh"), cwd=f"{HOME}/.dotfiles", deadline=120) in requests
     environments = {tuple(sorted(request.env)) for request in requests}
-    assert environments == {(), ("DEBIAN_FRONTEND",), ("AGW_TREE_DEST", "AGW_TREE_TAG")}
+    assert environments == {(), ("DEBIAN_FRONTEND",), ("AGW_TREE_DEST",)}
     assert guest.log.warned == []
 
 
