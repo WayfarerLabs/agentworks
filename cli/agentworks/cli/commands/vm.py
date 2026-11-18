@@ -274,10 +274,9 @@ def vm_import_host_keys(
     Matches each VM's tailnet address with OpenSSH's own ssh-keygen, so the
     result is what ssh would have trusted. A VM that already has a record is
     never changed. Every run rewrites the managed SSH config entries. Exits
-    non-zero while any selected VM has no record. For a VM
-    with no matching entry, verify its host key fingerprints against its console
-    or provider, gather the keys with ssh-keyscan into a file, and pass it with
-    --known-hosts.
+    non-zero while any selected VM has no record. For a VM with no matching
+    entry, verify its host key fingerprints against its console or provider,
+    gather the keys with ssh-keyscan into a file, and pass it with --known-hosts.
     """
     if all_vms == bool(names):
         raise typer.BadParameter("provide VM names or --all, not both")

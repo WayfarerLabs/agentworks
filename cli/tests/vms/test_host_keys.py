@@ -467,6 +467,37 @@ def test_exit_status_follows_whether_each_selected_vm_ends_with_a_record(
     assert render_import(list(_run(db, all_vms=True, known_hosts=source).values())) is True
 
 
+def test_a_refused_run_still_syncs_the_managed_entries(db: Database, tmp_path: Path, synced: list[object]) -> None:
+    _vm(db, "web", "100.64.0.1")
+
+    with pytest.raises(NotFoundError):
+        _run(db, "missing", known_hosts=tmp_path / "absent")
+    with pytest.raises(ConfigError):
+        _run(db, "web", known_hosts=tmp_path / "absent")
+
+    assert len(synced) == 2
+
+
+def test_a_failed_sync_leaves_the_outcomes_and_the_exit_status(
+    db: Database, tmp_path: Path, keys: list[HostKey], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _vm(db, "has", "100.64.0.1")
+    _vm(db, "lacks", "100.64.0.2")
+    source = tmp_path / "known_hosts"
+    source.write_text(_line("100.64.0.1", keys[0]))
+
+    def _fail(*_a: object, **_k: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", _fail)
+
+    outcomes = _run(db, all_vms=True, known_hosts=source)
+
+    assert _status(outcomes, "has") is ImportStatus.IMPORTED
+    assert _status(outcomes, "lacks") is ImportStatus.NO_MATCH
+    assert render_import(list(outcomes.values())) is False
+
+
 # -- The command -----------------------------------------------------------------------------
 
 
