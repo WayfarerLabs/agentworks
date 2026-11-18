@@ -11,7 +11,6 @@ class LineOrientedSecretUse(StrEnum):
     """The reviewed line-oriented boundaries that consume secrets."""
 
     ENVIRONMENT = "environment injection"
-    ENVIRONMENT_REVEAL = "environment reveal"
     GIT_CREDENTIAL = "Git authentication and credential storage"
     PROXMOX_API = "Proxmox API authentication"
     TAILSCALE = "Tailscale authentication"

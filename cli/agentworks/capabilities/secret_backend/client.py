@@ -7,13 +7,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.terminal import TERMINAL_UNSAFE_CATEGORIES
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from pydantic import BaseModel
-
-
-_UNSAFE_IDENTITY_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 
 def safe_identity(value: str) -> str:
@@ -25,7 +24,7 @@ def safe_identity(value: str) -> str:
     """
     if type(value) is not str or not value:
         raise ValueError("invalid secret identity")
-    if any(unicodedata.category(char) in _UNSAFE_IDENTITY_CATEGORIES for char in value):
+    if any(unicodedata.category(char) in TERMINAL_UNSAFE_CATEGORIES for char in value):
         raise ValueError("invalid secret identity")
     return value
 

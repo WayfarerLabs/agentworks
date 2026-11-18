@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from tests.conftest import CapturedOutput
+
 # ---------------------------------------------------------------------------
 # Test config fixture
 # ---------------------------------------------------------------------------
@@ -468,20 +470,51 @@ def test_show_env_rejects_non_enum_policy_before_any_source_work(
         show_env(db, config, vm_name="vm-1", reveal_secrets=True, interaction="refuse")  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        pytest.param("sentinel-lf\nforged-row\n", id="lf"),
-        pytest.param("sentinel-crlf\r\nforged-row\r\n", id="crlf"),
-    ],
-)
-def test_secret_reveal_rejects_multiline_before_rendering(
+# A value that would forge rows if printed raw: line breaks, a backslash followed by
+# `n` (which reads as a line break unless the backslash is doubled), a tab, an
+# escape sequence, a line separator and a bidirectional override.
+FORGING_VALUE = "first\\nhalf\nAPI_KEY  vm  forged-row\r\n\t\x1b[2J\u2028\u202eend"
+
+
+def _table_cell(captured_output: CapturedOutput, key: str) -> str:
+    """The value cell of ``key``'s one row in the printed table."""
+    (row,) = [line for line in captured_output.info if line.split(maxsplit=1)[:1] == [key]]
+    return row.split(maxsplit=2)[2]
+
+
+def _assert_one_row_that_reads_back(captured_output: CapturedOutput, key: str, value: str) -> None:
+    import unicodedata
+
+    from agentworks.terminal import TERMINAL_UNSAFE_CATEGORIES
+
+    cell = _table_cell(captured_output, key)
+    assert not [c for c in cell if unicodedata.category(c) in TERMINAL_UNSAFE_CATEGORIES]
+    # The escaping loses nothing: the cell decodes to exactly the value.
+    assert cell.encode("ascii").decode("unicode_escape") == value
+    assert not [line for line in captured_output.info if "forged-row" in line and not line.startswith(key)]
+
+
+def test_a_plaintext_value_with_controls_prints_escaped_on_one_row(
+    db: Database, tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    value = "first\\nhalf\t\x1b[2J\u2028\u202eend"
+    cfg = _write_config(tmp_path, vm_template=ManifestDoc("vm-template", "default", {"env": {"MULTI": value}}))
+    config = load_config(cfg, warn_issues=False)
+    _seed_db(db)
+
+    rows = show_env(db, config, vm_name="vm-1", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert next(row for row in rows if row.key == "MULTI").rendered_value == value
+    _assert_one_row_that_reads_back(captured_output, "MULTI", value)
+
+
+def test_a_revealed_secret_with_line_breaks_prints_escaped_on_one_row(
     db: Database,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    captured_output,
-    value: str,
+    captured_output: CapturedOutput,
 ) -> None:
+    value = FORGING_VALUE
     monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", value)
     cfg = _write_config(
         tmp_path,
@@ -496,43 +529,8 @@ def test_secret_reveal_rejects_multiline_before_rendering(
 
     rows = show_env(db, config, vm_name="vm-1", reveal_secrets=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    api = next(row for row in rows if row.key == "API_KEY")
-    assert api.rendered_value.startswith("<error: secret 'shared-token' cannot be used")
-    assert value not in repr(rows)
-    assert value not in repr(captured_output.lines)
-
-
-def test_secret_reveal_guard_rejects_nul_before_building_render_input(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from types import SimpleNamespace
-
-    from agentworks.env import EnvEntry
-    from agentworks.env.show import _reveal_values
-    from agentworks.secrets import SecretDecl
-
-    value = "sentinel-prefix\0sentinel-suffix"
-    monkeypatch.setattr(
-        "agentworks.resources.access.secret_decls",
-        lambda _registry: {"shared-token": SecretDecl(name="shared-token", description="")},
-    )
-    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda *_args: ())
-    monkeypatch.setattr(
-        "agentworks.secrets.resolve.resolve_partial_for_reveal",
-        lambda *_args, **_kwargs: SimpleNamespace(values={"shared-token": value}, outcomes=()),
-    )
-
-    values, errors = _reveal_values(
-        object(),  # type: ignore[arg-type]
-        object(),  # type: ignore[arg-type]
-        {"API_KEY": EnvEntry({"secret": "shared-token"})},
-        reveal=True,
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
-
-    assert values == {}
-    assert errors == {"shared-token": "secret 'shared-token' cannot be used for environment reveal"}
-    assert value not in repr((values, errors))
+    assert next(row for row in rows if row.key == "API_KEY").rendered_value == value
+    _assert_one_row_that_reads_back(captured_output, "API_KEY", value)
 
 
 # ---------------------------------------------------------------------------

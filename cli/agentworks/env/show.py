@@ -12,6 +12,7 @@ producers (``effective_env``, ``per_context_identity_env``,
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -23,6 +24,7 @@ from agentworks.errors import ValidationError
 from agentworks.interpolation import runtime_values
 from agentworks.secrets.outcomes import format_outcome
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
+from agentworks.terminal import TERMINAL_UNSAFE_CATEGORIES
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -432,12 +434,11 @@ def _reveal_values(
     Returns ``(values, errors)`` keyed by secret name: ONE batched
     resolve for every referenced secret (deduped by name; several env
     keys may reference one secret) so interactive prompts arrive up
-    front in a single interaction, run in the loop's collect mode --
+    front in a single interaction, run in the loop's collect mode:
     per-secret failures land in ``errors`` and render inline instead of
     aborting the table, while successfully-resolved values (including
-    already-answered prompts) are kept. Source resolution accepts opaque
-    multiline strings; this environment consumer applies its own line-safety
-    guard before any value reaches a render input.
+    already-answered prompts) are kept. A value is returned as resolved,
+    line breaks included; the table escapes it (:func:`_table_value`).
     """
     if not reveal:
         return {}, {}
@@ -465,22 +466,7 @@ def _reveal_values(
         for outcome in result.outcomes
         if outcome.status is not ResolutionStatus.RESOLVED
     }
-    from agentworks.secrets.line_safety import (
-        LineOrientedSecretUse,
-        require_line_safe_secret,
-    )
-
-    safe_values: dict[str, str] = {}
-    for name, value in result.values.items():
-        try:
-            safe_values[name] = require_line_safe_secret(
-                value,
-                use=LineOrientedSecretUse.ENVIRONMENT_REVEAL,
-                secret_name=name,
-            )
-        except ValidationError as exc:
-            errors[name] = str(exc)
-    return safe_values, errors
+    return dict(result.values), errors
 
 
 def _render_secret(
@@ -495,6 +481,23 @@ def _render_secret(
     if name in errors:
         return f"<error: {errors[name]}>"
     return values[name]
+
+
+def _table_value(value: str) -> str:
+    r"""``value`` as one table cell: ``\`` doubled and every terminal-unsafe character escaped.
+
+    A plaintext value or a revealed secret may hold line breaks, and a raw
+    one would end its row and print the rest as rows of its own. Each control,
+    format or separator character is shown as Python spells it in a string
+    (``\n``, ``\r``, ``\t``, ``\x1b``, ``\u202e``), and the backslash is
+    doubled, so every value has one spelling and no spelling two values.
+    """
+    return "".join(
+        character.encode("unicode_escape").decode("ascii")
+        if character == "\\" or unicodedata.category(character) in TERMINAL_UNSAFE_CATEGORIES
+        else character
+        for character in value
+    )
 
 
 def _print_table(
@@ -531,4 +534,4 @@ def _print_table(
     output.info(header)
     output.info(f"{'-' * key_w}  {'-' * scope_w}  {'-' * 5}")
     for r in sorted_rows:
-        output.info(f"{r.key:<{key_w}}  {r.scope:<{scope_w}}  {r.rendered_value}")
+        output.info(f"{r.key:<{key_w}}  {r.scope:<{scope_w}}  {_table_value(r.rendered_value)}")
