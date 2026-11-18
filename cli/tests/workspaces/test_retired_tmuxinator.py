@@ -272,32 +272,62 @@ def test_a_missing_discovery_directory_is_a_quiet_success(
     assert captured_output.warnings == []
 
 
-@requires_guest_shell
-def test_a_transport_error_on_one_command_still_runs_the_other(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
-) -> None:
-    target, workspace, entries = guest
-    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    link = entries / "ws-proj-console.yml"
-    link.symlink_to(workspace / ".tmuxinator.yml")
+def _replace_call(target: LocalFixtureTransport, number: int, outcome: SSHError | SSHResult) -> list[str]:
+    """Make the ``number``th command (the links one is first) raise or return
+    ``outcome`` instead of running; every other command runs for real. Returns the
+    commands as they are issued."""
     real_run = target.run
     calls: list[str] = []
 
-    def first_fails(command: str, **kwargs: object) -> SSHResult:
+    def replaced(command: str, **kwargs: object) -> SSHResult:
         calls.append(command)
-        if len(calls) == 1:
-            raise SSHError(f"connection dropped running {command}")
-        return real_run(command, **kwargs)
+        if len(calls) != number:
+            return real_run(command, **kwargs)
+        if isinstance(outcome, SSHError):
+            raise outcome
+        return outcome
 
-    target.run = first_fails  # type: ignore[method-assign]
+    target.run = replaced  # type: ignore[method-assign]
+    return calls
+
+
+def _project_and_link(workspace: Path, entries: Path) -> tuple[Path, Path]:
+    project = workspace / ".tmuxinator.yml"
+    project.write_text(_GENERATED)
+    link = entries / "ws-proj-console.yml"
+    link.symlink_to(project)
+    return project, link
+
+
+@requires_guest_shell
+@pytest.mark.parametrize("failing", [1, 2], ids=["links-command", "projects-command"])
+def test_a_transport_error_on_one_command_still_runs_the_other(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, failing: int
+) -> None:
+    target, workspace, entries = guest
+    project, link = _project_and_link(workspace, entries)
+    calls = _replace_call(target, failing, SSHError("connection dropped running sh -c 'script'"))
 
     _reinit(db, target)
 
     assert len(calls) == 2
-    assert link.is_symlink()
-    assert not (workspace / ".tmuxinator.yml").exists()
+    assert (link.is_symlink(), project.exists()) == (failing == 1, failing == 2)
     assert len(captured_output.warnings) == 1
-    assert "readlink" not in captured_output.warnings[0], "the warning must not carry the script"
+    assert "sh -c" not in captured_output.warnings[0], "the warning must not carry the script"
+
+
+@requires_guest_shell
+def test_a_failed_project_command_without_markers_still_warns(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, entries = guest
+    project, link = _project_and_link(workspace, entries)
+    _replace_call(target, 2, SSHResult(returncode=1, stdout="", stderr=""))
+
+    _reinit(db, target)
+
+    assert not link.is_symlink() and project.exists()
+    assert len(captured_output.warnings) == 1
 
 
 @requires_guest_shell
