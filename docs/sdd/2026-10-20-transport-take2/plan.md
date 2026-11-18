@@ -667,7 +667,7 @@ module, and `remote_exec.py` is deleted.
       entry, with a message naming the character, or record the gap in the Windows guidance. The
       execution core never runs that client, so only an operator's own `ssh` through the managed
       entries meets it. Raised by #910's review; #898 closed without tracking it.
-- [ ] Search for remaining users of the `AcceptEnv` fragment. If none remain, stop writing it and
+- [x] Search for remaining users of the `AcceptEnv` fragment. If none remain, stop writing it and
       supersede ADR 0014; otherwise record what still needs it in that ADR.
 - [ ] Settle when `run_as_root`'s `deadline` starts. Proxmox counts it from the call, so its agent
       wait spends it; the clouds start it at dispatch, after opening the route, reading the address

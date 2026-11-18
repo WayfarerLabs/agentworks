@@ -38,7 +38,12 @@ from agentworks.vms.admin import AdminConfig
 from agentworks.vms.hardening import HARDENING_FSTAB_NEW_LINE, HARDENING_FSTAB_PATH
 from agentworks.vms.initializer import driver
 from agentworks.vms.initializer.packages import apt_install, install_run
-from agentworks.vms.initializer.shell_env import AGENTWORKS_ZPROFILE_PATH, SKEL_BASHRC_PATH, SKEL_ZSHRC_PATH
+from agentworks.vms.initializer.shell_env import (
+    AGENTWORKS_SSHD_ACCEPT_ENV_PATH,
+    AGENTWORKS_ZPROFILE_PATH,
+    SKEL_BASHRC_PATH,
+    SKEL_ZSHRC_PATH,
+)
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.phase_b_support import StepGuest, is_file_operation
 from tests.test_tailscale_dns import DNS_PROBE, READ_RESOLV, RESOLVED_ACTIVE
@@ -77,8 +82,14 @@ def _is(expected: RunRequest) -> Callable[[RunRequest], bool]:
 ADMIN_GROUP = Command(("id", "-gn", "agentworks"), deadline=60)
 
 
+ABSENT = Result(Completed(0), json.dumps({"kind": "absent", "mode": None, "digest": None}).encode())
+
+
 class Guest(StepGuest):
-    """A steady guest: a hardened ``/etc/fstab``, a private admin group and empty files; all else succeeds."""
+    """A steady guest: a hardened ``/etc/fstab``, a private admin group, empty files and no retired sshd fragment.
+
+    All else succeeds.
+    """
 
     def __init__(self) -> None:
         super().__init__(local_files=False)
@@ -96,6 +107,8 @@ class Guest(StepGuest):
             return Result(Completed(0), f"{HARDENING_FSTAB_NEW_LINE}\n".encode())
         if call.request == ADMIN_GROUP:
             return Result(Completed(0), b"agentworks\n")
+        if _file_operation(call.request) == ("stat", AGENTWORKS_SSHD_ACCEPT_ENV_PATH):
+            return ABSENT
         return None
 
 

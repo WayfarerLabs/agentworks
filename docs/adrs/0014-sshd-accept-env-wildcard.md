@@ -4,16 +4,18 @@ Date: 2026-06-13
 
 ## Status
 
-Accepted. Where this document describes how the CLI sources secret values, that mechanism is
-superseded by ADR 0016's backend-chain model; the transport decision itself stands. ADR 0017, which
-refined the sudoers `env_keep` decision below for console agent panes, is superseded: a pane takes
+Superseded by the request envelope
+([transport take 2, HLA D3](../sdd/2026-10-20-transport-take2/hla.md#d3-the-request-envelope-r3-r4);
+[`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)), except for the
+sudoers `env_keep` decision, which still stands. Every request carries its environment on the
+client's stdin, so nothing sends environment through `SetEnv` and sshd has none to accept:
+`vm create` no longer writes the `AcceptEnv *` fragment, and `vm reinit` removes it and reloads
+sshd. ADR 0020's closed-stdin path belongs to the legacy transports, which no command uses. ADR
+0017, which refined the `env_keep` decision for console agent panes, is superseded too: a pane takes
 its environment from its parked request, so nothing crosses sudo.
 
-Amended: the commands that run through `agentworks.execution` send no environment through ssh (see
-[`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)). Their request
-carries it on the client's stdin, so nothing passes through `SetEnv` option parsing. `AcceptEnv *`
-and the coalesced `SetEnv` remain for the paths not yet migrated; whether the sshd fragment keeps a
-user is decided when the last of them moves. ADR 0020's closed-stdin path likewise stays until then.
+The text below is the record of the decision as it was taken. Where it describes how the CLI sources
+secret values, that mechanism was already superseded by ADR 0016's backend-chain model.
 
 ## Context
 

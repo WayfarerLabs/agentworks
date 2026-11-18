@@ -65,8 +65,9 @@ The session, workspace and backup modules also construct `SSHLogger`
 `vms/backup.py:82`). They take it from `vms.manager.operation_log` instead (below, "Operation
 logs"), so none of them imports `agentworks.ssh`; the logger itself and `LOG_DIR` stay slice 8's.
 
-**Out of this slice.** The `AcceptEnv` and `env_keep` fragments of ADR 0014 (slice 8's search), the
-operation log's move to `execution/oplog.py` (slice 8), and the other legacy modules.
+**Out of this slice.** The `env_keep` fragment of ADR 0014 (slice 8's search; the `AcceptEnv`
+fragment's search ran with batch D3, below), the operation log's move to `execution/oplog.py` (slice
+8), and the other legacy modules.
 
 ## Module layout
 
@@ -1176,7 +1177,8 @@ removes the `setenv` grant; the probe and memo are gone; and its first Negative,
 `tmux -e` argv, no longer applies. Its own text stays as the record. ADR 0014's Status paragraph,
 which cites 0017's refinement and says `SetEnv` remains for paths not yet migrated, is amended in
 the same batch: 0017 is superseded and no request sends environment by `SetEnv`; whether the sshd
-fragment keeps a user stays slice 8's search.
+fragment keeps a user stays slice 8's search. (Built: that search ran with D3, found none, and
+superseded ADR 0014 but for `env_keep`; Delivery, D3.)
 
 ## Collateral
 
@@ -1213,6 +1215,7 @@ footer. Nothing here touches the command reference's JSON issue-code contract, w
 | Backup interrupted during the archive and during the download                                                                                              | WSL2 and Remote Lima                            | I82, I20             |
 | Workspace create with a clone, copy between two VMs, rehome and repair                                                                                     | one cell                                        | I67, I87             |
 | `vm reinit` on a VM that has the setenv fragment removes it                                                                                                | one cell                                        | deletion 6           |
+| `vm reinit` on a VM that has the `AcceptEnv *` fragment removes it, and an ssh `SetEnv` of an unlisted name then no longer reaches a shell                 | one cell                                        | D3                   |
 
 I57, I80, I83, I84, I86 and I89 depend on failures or races a live run cannot provoke safely, so
 they have tests and no live cell.
@@ -1241,7 +1244,10 @@ collateral it makes stale.
   the sudo T2 vectors (`T2-pane-through-sudo` and `T2-pane-through-sudo-empty-term`, lanes L and V).
   Built, except the `console start` row of the pane-secret table (open question 3).
 - **D3**: the sudoers setenv grant's removal on reinit, with ADR 0017 superseded and ADR 0014
-  amended. Built.
+  amended. Built, with slice 8's `AcceptEnv` search brought forward: no request sends environment by
+  `SetEnv` (the only `SetEnv` builder left is `agentworks.ssh`'s, whose transports no command
+  reaches), so init removes the `AcceptEnv *` fragment too, reloading sshd only when it was there,
+  and ADR 0014 is superseded except for its `env_keep` decision.
 - **D4**: the admin's standing group access to agent tmux servers retired, with its reinit
   migration.
 - **D3 and D4 share one reinit pass** (decision 9): each guest-state retirement is an idempotent

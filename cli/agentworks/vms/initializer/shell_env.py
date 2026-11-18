@@ -1,14 +1,14 @@
-"""Profile / rc / identity / sshd / sudoers / skel fragment writers.
+"""Profile / rc / identity / sudoers / skel fragment writers, and the retired fragments' removal.
 
 These write the on-VM shell and system files that make agentworks-managed
 env vars, PATH entries, and identity visible to login shells, interactive
-shells, sshd, and sudo. All idempotent (append-if-missing, stage-validate-
+shells, and sudo. All idempotent (append-if-missing, stage-validate-
 promote, full overwrite), so every function here is safe to re-run on
 ``vm reinit``.
 
 Every file is written through the file program: ``Files.write`` for a file
 Agentworks owns whole, ``Files.update`` over what was read for one it edits.
-The system fragments (identity profile, zprofile block, sshd, sudoers, skel)
+The system fragments (identity profile, zprofile block, sudoers, skel)
 are written as root; the per-user profile and rc fragments and the rc files'
 source lines as the account itself, admin or agent. Nothing is written
 through a link: a linked rc file is accepted only when the file it links to
@@ -24,10 +24,11 @@ from agentworks import output
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 from agentworks.errors import ExternalError
 from agentworks.execution.errors import PathRefusal, PathRefused
+from agentworks.execution.files import Absent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.vms.home_layout import AGENTWORKS_PROFILE, AGENTWORKS_RC
 
-from .steps import STEP_FAILURES, status, update_and_apply, warn, warn_step
+from .steps import STEP_FAILURES, status, warn, warn_step
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -256,7 +257,7 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
         warn_step(log, "shell configuration failed", error)
 
 
-# -- VM-side identity / sshd / sudoers fragments -----------------------------
+# -- VM-side identity / sudoers fragments -----------------------------
 #
 # The on-VM system files agentworks init maintains:
 #
@@ -268,18 +269,14 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
 #     the one opening the shell. Also writes to /etc/zsh/zprofile because
 #     zsh skips /etc/profile.d by default.
 #
-#   /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf
-#     `AcceptEnv *`. Allows agentworks-issued SSH commands to inject env
-#     vars via the SetEnv mechanism (see docs/adrs/0014-sshd-accept-env-wildcard.md).
-#     Validated with `sshd -t` before sshd is reloaded.
-#
 #   /etc/sudoers.d/50-agentworks-env-keep
 #     `Defaults env_keep += "AGENTWORKS_* AW_*"`. Keeps agentworks-managed
 #     vars across a sudo boundary. Validated with `visudo -cf` on a staging
 #     path before install.
 #
-# Init also removes /etc/sudoers.d/51-agentworks-console-setenv, a grant
-# earlier releases installed and nothing uses now.
+# Init also removes two files earlier releases installed and nothing uses
+# now: /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf (`AcceptEnv *`)
+# and /etc/sudoers.d/51-agentworks-console-setenv (`Defaults:<admin> setenv`).
 
 AGENTWORKS_IDENTITY_PROFILE_PATH = "/etc/profile.d/agentworks-identity.sh"
 AGENTWORKS_ZPROFILE_PATH = "/etc/zsh/zprofile"
@@ -423,54 +420,39 @@ def _write_agentworks_identity_profile(files: Files, identity_env: dict[str, str
         warn_step(log, "identity profile write failed; re-run 'agw vm reinit' to retry", error)
 
 
-def _write_sshd_accept_env(files: Files, log: InitLog) -> None:
-    """Deploy ``AcceptEnv *`` to sshd_config.d/ and reload sshd.
+def _remove_sshd_accept_env(files: Files, log: InitLog) -> None:
+    """Remove the retired ``AcceptEnv *`` fragment from sshd_config.d/ and reload sshd when it was there.
 
-    The directive lets ``ssh -o SetEnv=KEY=VALUE`` calls from the CLI flow
-    through to the user's shell. See the agentworks AcceptEnv wildcard
-    ADR for the trust-anchor analysis behind the wildcard.
-
-    Validation strategy (write, validate, restore on failure): ``sshd -t``
-    validates the FULL merged config (it follows the
-    ``Include /etc/ssh/sshd_config.d/*.conf`` directive in
-    ``/etc/ssh/sshd_config``), so the snippet cannot be validated in
-    isolation. The fragment is written only when its content differs from
-    what was read, then validated and sshd reloaded; it counts as applied
-    only once both succeed. On any failure after the write (a rejection, a
-    timeout, a failed reload, an interrupt) the prior content is put back,
-    or the fragment removed when there was none, conditional on the
-    fragment still being the one this run wrote, so the next reinit
-    retries; a restore that fails too is warned about with what to do,
-    since a re-run sees nothing to retry. A steady-state reinit leaves sshd
-    alone. The window where an unvalidated fragment sits at the real path
-    is bounded by the ``sshd -t`` call and never affects the running sshd,
-    unless an unrelated process reloads sshd inside it (a ``dpkg``
-    postinst on openssh-server under ``unattended-upgrades``, say); the
-    snippet is a single ``AcceptEnv *`` line, so that bounded risk is
-    accepted.
+    Earlier releases installed it so ``ssh -o SetEnv=...`` could carry
+    environment into a guest shell (ADR 0014). Every request now carries its
+    environment in the request itself, so sshd has no environment to accept.
+    Agentworks owns the path outright: on create there is nothing to remove,
+    and on reinit the fragment goes and sshd reloads (``systemctl reload``
+    validates the merged config first), so the running sshd stops accepting
+    client environment. A steady-state reinit leaves sshd alone. A reload
+    that fails after the removal is warned about with what to run: the next
+    reinit finds nothing to remove, and sshd keeps the old setting until it
+    next reloads or restarts.
     """
-    log.step("sshd AcceptEnv")
-    output.info(f"Writing {AGENTWORKS_SSHD_ACCEPT_ENV_PATH}...")
-
-    body = (
-        b"# Managed by agentworks -- do not edit.\n"
-        b"# Allows agentworks-issued SSH commands to inject env vars via\n"
-        b"# `-o SetEnv=KEY=VALUE`; see the agentworks AcceptEnv wildcard ADR.\n"
-        b"AcceptEnv *\n"
-    )
+    log.step("sshd AcceptEnv removal")
     path = AGENTWORKS_SSHD_ACCEPT_ENV_PATH
-
-    def validate_and_reload() -> None:
-        files.access.run(Command(("sshd", "-t"), elevated=True, deadline=files.deadline), check=True)
-        files.access.run(Command(("systemctl", "reload", "ssh"), elevated=True, deadline=files.deadline), check=True)
-
     try:
-        prior = files.read(path, elevated=True)
-        update_and_apply(
-            files, log, path, body, observed=prior, mode=0o644, parent_mode=0o755, apply=validate_and_reload
-        )
+        if isinstance(files.stat(path, elevated=True), Absent):
+            return
+        output.info(f"Removing {path}...")
+        files.access.run(Command(("rm", "-f", "--", path), elevated=True, deadline=files.deadline), check=True)
     except STEP_FAILURES as error:
-        warn_step(log, "sshd AcceptEnv install failed", error)
+        warn_step(log, "removing the retired sshd AcceptEnv fragment failed; re-run 'agw vm reinit'", error)
+        return
+    try:
+        files.access.run(Command(("systemctl", "reload", "ssh"), elevated=True, deadline=files.deadline), check=True)
+    except STEP_FAILURES as error:
+        warn_step(
+            log,
+            f"removed {path}, but reloading sshd failed, so it keeps the old setting until it next reloads; "
+            "run 'sudo systemctl reload ssh' on the VM",
+            error,
+        )
 
 
 def _install_sudoers_fragment(files: Files, log: InitLog, *, path: str, body: str) -> None:

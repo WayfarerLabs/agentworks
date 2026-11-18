@@ -7,21 +7,19 @@ the step left on disk and which commands it ran, in order.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import stat
 import subprocess
-from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PathRefusal, PathRefused
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Command, PythonProgram
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
-from agentworks.vms.initializer import shell_env, steps
+from agentworks.vms.initializer import shell_env
 from tests.phase_b_support import StepGuest, is_file_operation, requires_file_program
 from tests.vm_access_support import Call, run_file_program_locally
 
@@ -159,282 +157,72 @@ def test_a_linked_zprofile_is_refused_with_a_warning_and_its_target_left_alone(
     assert len(guest.log.warned) == 1
 
 
-# -- sshd AcceptEnv ---------------------------------------------------------------------
+# -- The retired sshd AcceptEnv fragment -------------------------------------------------
 
-SSHD_TEST = Command(("sshd", "-t"), elevated=True, deadline=60)
 SSHD_RELOAD = Command(("systemctl", "reload", "ssh"), elevated=True, deadline=60)
 
 
-def test_a_new_sshd_fragment_is_written_validated_then_reloaded(guest: StepGuest) -> None:
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
-    assert fragment.read_bytes().endswith(b"AcceptEnv *\n")
-    assert stat.S_IMODE(fragment.stat().st_mode) == 0o644
-    assert guest.commands() == [SSHD_TEST, SSHD_RELOAD]
-    assert guest.log.warned == []
+def _rm(path: Path) -> Command:
+    return Command(("rm", "-f", "--", str(path)), elevated=True, deadline=60)
 
 
-def test_an_unchanged_sshd_fragment_is_neither_validated_nor_reloaded(guest: StepGuest) -> None:
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
-    before = fragment.stat().st_ino
-    guest.access.calls.clear()
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert guest.commands() == []
-    assert guest.writes() == []
-    assert fragment.stat().st_ino == before
-
-
-def test_a_rejected_sshd_fragment_restores_the_prior_content_and_never_reloads(guest: StepGuest) -> None:
+def _installed_accept_env(guest: StepGuest) -> Path:
+    """An installed fragment, which the guest's ``rm`` removes; file operations run locally."""
     fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
     fragment.parent.mkdir()
-    fragment.write_bytes(b"AcceptEnv LANG\n")
-    guest.respond(SSHD_TEST, _failed(b"sshd: bad configuration\n"))
+    fragment.write_bytes(b"AcceptEnv *\n")
 
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
+    def answer(call: Call) -> Result | BaseException | None:
+        if call.request == _rm(fragment):
+            fragment.unlink(missing_ok=True)
+            return Result(Completed(0))
+        return run_file_program_locally(call)
 
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-    assert guest.commands() == [SSHD_TEST]
-    assert len(guest.log.warned) == 1
-    assert list(fragment.parent.iterdir()) == [fragment]
-
-
-def test_a_rejected_new_sshd_fragment_is_removed_and_never_reloaded(guest: StepGuest) -> None:
-    guest.respond(SSHD_TEST, _failed())
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
-    assert not fragment.exists()
-    assert guest.commands() == [SSHD_TEST]
-    assert len(guest.log.warned) == 1
-
-
-def _prior_fragment() -> Path:
-    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
-    fragment.parent.mkdir()
-    fragment.write_bytes(b"AcceptEnv LANG\n")
+    guest.access.answer = answer
     return fragment
 
 
-def test_a_timeout_during_sshd_t_restores_the_prior_content(guest: StepGuest) -> None:
-    fragment = _prior_fragment()
-    guest.respond(SSHD_TEST, ExecutionIncomplete("box", Result(Unknown(UnknownReason.DEADLINE))))
+def test_an_installed_accept_env_fragment_is_removed_and_sshd_reloaded(guest: StepGuest) -> None:
+    fragment = _installed_accept_env(guest)
 
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
+    shell_env._remove_sshd_accept_env(guest.files, guest.log)
 
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-    assert guest.commands() == [SSHD_TEST]
+    assert not fragment.exists()
+    assert guest.commands() == [_rm(fragment), SSHD_RELOAD]
+    assert all(call.options["check"] for call in guest.access.calls if call.request in (_rm(fragment), SSHD_RELOAD))
+    assert guest.log.warned == []
+
+
+def test_no_accept_env_fragment_leaves_sshd_alone(guest: StepGuest) -> None:
+    shell_env._remove_sshd_accept_env(guest.files, guest.log)
+
+    assert guest.commands() == []
+    assert guest.writes() == []
+    assert guest.log.warned == []
+
+
+def test_a_failed_removal_warns_and_never_reloads(guest: StepGuest) -> None:
+    fragment = _path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")
+    fragment.parent.mkdir()
+    fragment.write_bytes(b"AcceptEnv *\n")
+    guest.respond(_rm(fragment), _failed(b"rm: cannot remove\n"))
+
+    shell_env._remove_sshd_accept_env(guest.files, guest.log)
+
+    assert guest.commands() == [_rm(fragment)]
     assert len(guest.log.warned) == 1
 
 
-def test_a_failed_reload_restores_the_prior_content_and_the_next_run_retries(guest: StepGuest) -> None:
-    fragment = _prior_fragment()
+def test_a_failed_reload_after_the_removal_warns_once(guest: StepGuest) -> None:
+    fragment = _installed_accept_env(guest)
     guest.respond(SSHD_RELOAD, _failed(b"Failed to reload ssh.service\n"))
 
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
+    shell_env._remove_sshd_accept_env(guest.files, guest.log)
 
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-    assert len(guest.log.warned) == 1
-    guest.access.responses.clear()
-    guest.access.calls.clear()
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes().endswith(b"AcceptEnv *\n")
-    assert guest.commands() == [SSHD_TEST, SSHD_RELOAD]
-    assert len(guest.log.warned) == 1
-    # A non-zero status from either is a failure, not an outcome to read.
-    assert all(call.options["check"] for call in guest.access.calls if call.request in (SSHD_TEST, SSHD_RELOAD))
-
-
-def test_an_interrupt_during_validation_restores_the_prior_content_and_propagates(guest: StepGuest) -> None:
-    fragment = _prior_fragment()
-    guest.respond(SSHD_TEST, KeyboardInterrupt())
-
-    with pytest.raises(KeyboardInterrupt):
-        shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-
-
-LOST = ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION)))
-
-
-def _fragment_write(call: Call) -> bool:
-    return _file_operation(call.request) == ("write_if", str(_path("AGENTWORKS_SSHD_ACCEPT_ENV_PATH")))
-
-
-Outcome = Result | BaseException | None
-
-
-def _answering(
-    guest: StepGuest,
-    *,
-    sshd_t: Outcome | Callable[[], Outcome] = None,
-    write: Outcome = None,
-    write_lands: bool = False,
-    restore: Outcome = None,
-) -> list[Call]:
-    """Answer ``sshd -t`` and the fragment's two writes (the step's, then the restore); returns those writes.
-
-    ``None`` runs the request as usual. A callable ``sshd_t`` runs as it is
-    asked (another writer, say) and returns the outcome. ``write_lands``
-    runs the write before answering it with ``write``.
-    """
-    run_program = run_file_program_locally
-    writes: list[Call] = []
-
-    def answer(call: Call) -> Outcome:
-        if call.request == SSHD_TEST:
-            outcome = sshd_t() if callable(sshd_t) else sshd_t
-        elif _fragment_write(call):
-            writes.append(call)
-            outcome = write if len(writes) == 1 else restore
-            if len(writes) == 1 and write_lands:
-                run_program(call)
-        else:
-            outcome = None
-        return outcome if outcome is not None else run_program(call)
-
-    guest.access.answer = answer
-    return writes
-
-
-def test_a_restore_that_cannot_reach_the_file_warns_it_is_stranded_beside_the_step_warning(guest: StepGuest) -> None:
-    fragment = _prior_fragment()
-    _answering(guest, sshd_t=_failed(b"sshd: bad configuration\n"), restore=LOST)
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes().endswith(b"AcceptEnv *\n")
-    stranded, step = guest.log.warned
-    assert str(fragment) in stranded
-    assert "sshd: bad configuration" in step
-
-
-def test_an_interrupt_whose_restore_is_refused_warns_the_fragment_is_stranded_and_propagates(
-    guest: StepGuest,
-) -> None:
-    fragment = _prior_fragment()
-    _answering(
-        guest,
-        sshd_t=KeyboardInterrupt(),
-        restore=PathRefused("box", "write_if", str(fragment), PathRefusal.UNSUITABLE),
-    )
-
-    with pytest.raises(KeyboardInterrupt):
-        shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    [stranded] = guest.log.warned
-    assert str(fragment) in stranded
-
-
-@contextlib.contextmanager
-def _delivers_a_held_interrupt() -> Iterator[None]:
-    yield
-    raise KeyboardInterrupt
-
-
-def test_an_interrupt_held_through_a_stranding_restore_still_warns(
-    guest: StepGuest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A Ctrl-C held while the restore ran arrives as it ends, after the stranded warning."""
-    fragment = _prior_fragment()
-    _answering(guest, sshd_t=_failed(), restore=LOST)
-    monkeypatch.setattr(steps, "interrupts_deferred", _delivers_a_held_interrupt)
-
-    with pytest.raises(KeyboardInterrupt):
-        shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    [stranded] = guest.log.warned
-    assert str(fragment) in stranded
-
-
-def test_a_restore_that_finds_another_writers_content_warns_nothing_more_and_the_next_run_retries(
-    guest: StepGuest,
-) -> None:
-    fragment = _prior_fragment()
-
-    def another_writer_then_rejection() -> Outcome:
-        fragment.write_bytes(b"AcceptEnv OTHER\n")
-        return _failed(b"sshd: bad configuration\n")
-
-    _answering(guest, sshd_t=another_writer_then_rejection)
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes() == b"AcceptEnv OTHER\n"
-    [step] = guest.log.warned
-    assert str(fragment) not in step
-    _answering(guest)
-    guest.access.calls.clear()
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes().endswith(b"AcceptEnv *\n")
-    assert guest.commands() == [SSHD_TEST, SSHD_RELOAD]
-
-
-def test_a_write_that_landed_with_its_connection_lost_is_put_back(guest: StepGuest) -> None:
-    fragment = _prior_fragment()
-    writes = _answering(guest, write=LOST, write_lands=True)
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-    assert len(writes) == 2  # the write that landed, then the restore
-    assert guest.commands() == []
-
-
-def test_a_write_that_landed_before_an_interrupt_is_put_back(guest: StepGuest) -> None:
-    fragment = _prior_fragment()
-    writes = _answering(guest, write=KeyboardInterrupt(), write_lands=True)
-
-    with pytest.raises(KeyboardInterrupt):
-        shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-    assert len(writes) == 2
-
-
-def test_a_write_that_did_not_land_is_not_reported_as_stranded(guest: StepGuest) -> None:
-    fragment = _prior_fragment()
-    writes = _answering(guest, write=LOST)
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-    assert len(writes) == 2  # the lost write, then the restore that found it had not landed
-    [step] = guest.log.warned
-    assert str(fragment) not in step
-
-
-def test_a_write_the_vm_refused_to_authenticate_is_not_put_back(guest: StepGuest) -> None:
-    """Nothing ran when the VM refused the key, so there is nothing to restore."""
-    _prior_fragment()
-    writes = _answering(guest, write=ExecutionIncomplete("box", Result(Unknown(UnknownReason.AUTH_FAILED))))
-
-    shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert len(writes) == 1
-
-
-def test_an_interrupt_held_after_a_write_that_did_not_land_warns_nothing(
-    guest: StepGuest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fragment = _prior_fragment()
-    _answering(guest, write=LOST)
-    monkeypatch.setattr(steps, "interrupts_deferred", _delivers_a_held_interrupt)
-
-    with pytest.raises(KeyboardInterrupt):
-        shell_env._write_sshd_accept_env(guest.files, guest.log)
-
-    assert fragment.read_bytes() == b"AcceptEnv LANG\n"
-    assert guest.log.warned == []
+    assert not fragment.exists()
+    assert guest.commands() == [_rm(fragment), SSHD_RELOAD]
+    [warning] = guest.log.warned
+    assert str(fragment) in warning
 
 
 # -- sudoers fragments ------------------------------------------------------------------

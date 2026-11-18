@@ -149,6 +149,12 @@ state. Until then they stay in place, unused:
 - **The console setenv sudoers grant**, `/etc/sudoers.d/51-agentworks-console-setenv`
   (`Defaults:<admin> setenv`), which carried an agent console shell's environment across `sudo` (see
   [Named consoles](#named-consoles)).
+- **sshd's environment wildcard**, `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`
+  (`AcceptEnv *`), which let an SSH client set any environment variable in a guest shell. Every
+  request now carries its environment in the request, so nothing Agentworks runs sends environment
+  through ssh. Reinit reloads sshd after removing it, and from then on sshd accepts only the
+  variables the rest of its configuration names (Debian's accepts the locale variables), so an
+  `ssh -o SetEnv=...` or `SendEnv` of your own outside those stops reaching the VM.
 
 ## Import existing host keys
 
@@ -553,22 +559,21 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
 
 - **System files are written without following links.** The files initialization owns under `/etc`
   (the cloud-init host-key drop-in, the sysctl baseline, `/etc/fstab`'s `/proc` line, the tailscaled
-  drop-in, the sshd and sudoers fragments, the identity profile, the `/etc/zsh/zprofile` block, the
-  skel seeds, the grub SVE drop-in and the apt source lists) are written by the file program, which
+  drop-in, the sudoers fragment, the identity profile, the `/etc/zsh/zprofile` block, the skel
+  seeds, the grub SVE drop-in and the apt source lists) are written by the file program, which
   refuses a symbolic link at the file or any parent; a sudoers fragment is staged that way and
   renamed into place once `visudo` accepts it. A refused file is a step warning, and the link's
   target is left as it is.
-- **sshd is reloaded only when its fragment changes.** The sshd fragment is written, checked with
-  `sshd -t` and sshd reloaded only when its content differs, where every initialization used to
-  reload sshd. It leaves no `.bak` file.
-- **A file whose reload fails is put back.** When `sshd -t` or the sshd reload, loading the sysctl
-  baseline (now `sysctl -p` of that file alone, not `sysctl --system`), or `systemctl daemon-reload`
-  after the tailscaled drop-in fails, times out or is interrupted, the file gets its previous
-  content back (or is removed if it is new), with a warning, so the next `vm reinit` tries again. If
-  putting it back fails, a separate warning names the file, which then holds content that is not in
-  effect and that the next `vm reinit` will not retry: put its previous content back or remove it,
-  then reinit. If something else changed the file in the meantime, nothing is put back and the next
-  `vm reinit` tries again.
+- **sshd is reloaded only when its fragment goes.** Initialization no longer writes an sshd fragment
+  ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)); it reloads sshd only
+  when it removes the old one, where every initialization used to reload sshd.
+- **A file whose reload fails is put back.** When loading the sysctl baseline (now `sysctl -p` of
+  that file alone, not `sysctl --system`), or `systemctl daemon-reload` after the tailscaled drop-in
+  fails, times out or is interrupted, the file gets its previous content back (or is removed if it
+  is new), with a warning, so the next `vm reinit` tries again. If putting it back fails, a separate
+  warning names the file, which then holds content that is not in effect and that the next
+  `vm reinit` will not retry: put its previous content back or remove it, then reinit. If something
+  else changed the file in the meantime, nothing is put back and the next `vm reinit` tries again.
 - **`/etc/fstab` keeps its owner, group and mode** when its `/proc` line changes, and a `hidepid`
   value already on that line is kept, a name such as `hidepid=invisible` included; only a missing
   `hidepid`, `hidepid=0` or `hidepid=off` becomes `hidepid=1`.
