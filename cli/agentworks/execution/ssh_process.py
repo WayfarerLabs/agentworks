@@ -137,15 +137,25 @@ class Destination:
     port: int = 22
 
     def __post_init__(self) -> None:
-        if not _HOST.fullmatch(self.host):
-            raise ValidationError("SSH host must be a literal DNS name or unbracketed IP address")
-        if ":" in self.host:
-            try:
-                IPv6Address(self.host)
-            except ValueError:
-                raise ValidationError("SSH IPv6 host must be an unbracketed address without a scope") from None
-        if not _USER.fullmatch(self.user):
-            raise ValidationError("SSH user must be a literal POSIX account name")
+        check_host(self.host)
+        check_user(self.user)
+
+
+def check_host(host: str) -> None:
+    """Refuse a host a :class:`Destination` refuses; shared with the managed SSH entries, which write the same rows."""
+    if not _HOST.fullmatch(host):
+        raise ValidationError("SSH host must be a literal DNS name or unbracketed IP address")
+    if ":" in host:
+        try:
+            IPv6Address(host)
+        except ValueError:
+            raise ValidationError("SSH IPv6 host must be an unbracketed address without a scope") from None
+
+
+def check_user(user: str) -> None:
+    """Refuse a user a :class:`Destination` refuses; shared with the managed SSH entries."""
+    if not _USER.fullmatch(user):
+        raise ValidationError("SSH user must be a literal POSIX account name")
 
 
 @dataclass(frozen=True)

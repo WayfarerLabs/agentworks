@@ -27,6 +27,8 @@ from agentworks.execution import ssh_process, trust
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
 
@@ -276,9 +278,10 @@ def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agen
     try:
         # Boundary: these are persisted values, and each becomes a token of a line ssh parses. The host and the
         # users follow the execution core's own rule for the same rows; an agent's name is also its alias.
-        _require_destination(vm.tailscale_host, vm.admin_username, "the admin")
+        _checked(ssh_process.check_host, vm.tailscale_host, "its tailnet address")
+        _checked(ssh_process.check_user, vm.admin_username, "its admin user")
         for agent in agents:
-            _require_destination(vm.tailscale_host, agent.linux_user, f"agent '{agent.name}'")
+            _checked(ssh_process.check_user, agent.linux_user, f"agent {agent.name!r}'s user")
             _require_alias_token(agent.name)
         verification = _verification_lines(vm.name)
     except AgentworksError as e:
@@ -296,12 +299,12 @@ def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agen
     return entries
 
 
-def _require_destination(host: str, user: str, whose: str) -> None:
-    """Refuse a host or account ``ssh_process.Destination`` refuses, naming the values and ``whose`` account it is."""
+def _checked(check: Callable[[str], None], value: str, what: str) -> None:
+    """Run one of ``ssh_process``'s checks, the rule every connection to the row applies, naming ``what`` failed."""
     try:
-        ssh_process.Destination(host, user)
+        check(value)
     except ValidationError as e:
-        raise ValidationError(f"{whose} (user {user!r} at {host!r}): {e}") from e
+        raise ValidationError(f"{what} {value!r}: {e}") from e
 
 
 # What an alias's name part may hold: nothing ssh would split, unquote, match as a pattern or end the line at.

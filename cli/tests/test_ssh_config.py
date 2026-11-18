@@ -767,7 +767,7 @@ def test_a_persisted_value_that_would_add_a_line_leaves_the_vms_entries_out(
     """Boundary: a row written by another version or by hand cannot add an option to an entry."""
     config, ssh_dir = _mock_config(tmp_path)
     vm, other = _mock_vm("web", "100.64.0.1"), _mock_vm("db", "100.64.0.2")
-    agent = _mock_agent("claude", "agt-claude", "web")
+    agent = _mock_agent("claude", "agt-one", "web")
     target = agent if field in ("linux_user", "name") else vm
     setattr(target, field, f"{getattr(target, field)}\n    ProxyCommand sh -c 'evil'")
     db = MagicMock()
