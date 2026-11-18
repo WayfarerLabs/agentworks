@@ -966,16 +966,17 @@ the workstation, version 8.5 or newer (`vm shell --platform` uses the platform's
 and needs no `python3`; Remote Lima and the clouds need the client, and check it only once they
 connect, a cloud inside its temporary network route). Agentworks uses the first `ssh` on `PATH`; on
 Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or `Program Files\OpenSSH`,
-never the `ssh` bundled with Git for Windows. `agw doctor` shows which client was resolved. The `vm`
-commands other than `vm shell --platform` and `vm describe`, and `agent shell` and `agent exec`,
-refuse an unsupported client before anything else runs; `vm describe` warns and leaves its live
-resources out instead. The other commands (workspace, session and console commands, `agent create`,
-`agent reinit` and `agent delete`) and the automatic start fail at their first request to the VM,
-after any VM start and secret prompt. These commands run `ssh -F none` in batch mode, so
-`~/.ssh/config` does not apply and an encrypted private key must be loaded in the SSH agent. The VM
-needs `python3`; a VM without it is reported as unable to run Agentworks requests, and
-`agw vm recover <name>` installs it. A command that is not found exits 127, one that cannot run
-exits 126, and a missing workspace directory exits 125.
+never the `ssh` bundled with Git for Windows. `agw doctor` shows which client was resolved.
+`vm create`, `vm start`, `vm rekey`, `vm recover`, `vm reinit`, `vm confirm-release`,
+`vm verify-connection`, `vm backup`, `vm exec`, `vm shell` (but not `vm shell --platform`),
+`vm port-forward`, `agent shell` and `agent exec` refuse an unsupported client before anything else
+runs; `vm describe` warns and leaves its live resources out instead. Every other command that
+reaches a VM, and the automatic start, fails at its first request to the VM, after any VM start and
+secret prompt. These commands run `ssh -F none` in batch mode, so `~/.ssh/config` does not apply and
+an encrypted private key must be loaded in the SSH agent. The VM needs `python3`; a VM without it is
+reported as unable to run Agentworks requests, and `agw vm recover <name>` installs it. A command
+that is not found exits 127, one that cannot run exits 126, and a missing workspace directory
+exits 125.
 
 `vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, on macOS and Linux
 also with `SIGTERM` or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started
@@ -1161,11 +1162,12 @@ The agent alias is keyed on the agent's operator-facing name (the same name you 
 prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
 `operator.ssh_agent_host_prefix` (default `awagent--`).
 
-Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation and
-every `vm import-host-keys` run, so a fresh `agw agent create` or `agw vm delete` keeps the file in
-sync without manual intervention. Each entry's `IdentityFile` is `operator.ssh_private_key`, so
-after changing that key, `agw vm recover` or `agw vm reinit` (which install the new key on the VM)
-rebuild the file too. Run `agw config sync-ssh-config` to force a rebuild.
+Entries are rebuilt declaratively from the database by `vm create`, `vm reinit`, `vm recover`,
+`vm rekey`, `vm delete`, `agent create`, `agent reinit`, `agent delete` and every
+`vm import-host-keys` run, so those commands keep the file in sync without manual intervention. Each
+entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key, `agw vm recover`
+or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
+`agw config sync-ssh-config` to force a rebuild.
 
 Every entry also carries `HostKeyAlias`, `StrictHostKeyChecking yes`, `GlobalKnownHostsFile` (the
 VM's store file) and `UserKnownHostsFile` set to the null device, plus `UpdateHostKeys no` and

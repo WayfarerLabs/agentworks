@@ -54,10 +54,10 @@ access and may honor the operator's configuration.
 **Trust bound to the VM.** Host keys live in an Agentworks store, one record per VM keyed by VM
 name, verified strictly on every connection, by Agentworks and by the operator's own `ssh` through
 the managed aliases. Only a VM Agentworks is creating has its key accepted on first use, at core's
-first connection after provisioning. A cloud's provisioning connection and `vm recover`'s host-key
-read also accept a key on first use, under a binding scoped to that one run and never persisted. An
-existing VM's key enters the store only by an explicit import or by `vm recover` reading it through
-the platform under the operator's confirmation.
+first connection after provisioning. Two connections also run unverified, a cloud's provisioning
+connection and `vm recover`'s host-key read, under a binding scoped to that one run and never
+persisted. An existing VM's key enters the store only by an explicit import or by `vm recover`
+reading it through the platform under the operator's confirmation.
 
 **Platforms keep only a root channel.** A platform provisions with whatever native access it needs,
 performs the VM's first Tailscale join, and returns the VM's tailnet address. After that it supplies
@@ -95,8 +95,8 @@ fixed in provisioning or initialization, not carried as a branch in core.
   guest's sshd (the clouds' public SSH, Lima), a broken sshd needs provider-native recovery or
   recreation.
 - **Four account shells.** sshd runs the constant first stage under the account's login shell, which
-  is verified only for `sh`, `dash`, `bash` and `zsh`, so an admin or agent login shell outside
-  those is a configuration error.
+  is verified only for `sh`, `dash`, `bash` and `zsh`. A template `shell` naming another is a
+  configuration error, and an existing account with another login shell draws a warning at reinit.
 - **A terminal attach costs two connections.**
 
 ## Alternatives considered

@@ -132,9 +132,9 @@ class TrustMismatch(StateError):
             entity_kind="vm",
             entity_name=vm_name,
             hint=(
-                "If the VM was rebuilt or rekeyed, verify its new host key through the platform console or "
-                f"provider, remove {store} and run 'agw vm import-host-keys {vm_name} --known-hosts FILE' with a "
-                "verified file. If you did not expect a change, do not connect."
+                "If the VM was rebuilt or its host keys were regenerated, verify its new host key through the "
+                f"platform console or provider, remove {store} and run 'agw vm import-host-keys {vm_name} "
+                "--known-hosts FILE' with a verified file. If you did not expect a change, do not connect."
             ),
         )
 
