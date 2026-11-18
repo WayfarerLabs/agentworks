@@ -157,16 +157,22 @@ vectors' rule:
 
 - DT1 (S and V): a payload still running after its launch's connection closed is observed, completed
   and downloaded through `ToFile` by later requests, every byte unchanged.
-- DT2 (V): root owns the VM's base and its parent, and neither is group- or world-writable. The
-  launch directory's own modes, launch identity and interrupt are `test_detached_program.py`'s,
-  which need no sudo.
+- DT2 (V): root owns the VM's base and its parent, and neither is group- or world-writable.
+
+Launch identity, interrupt and the launch directory's own modes need no sudo and are tested
+elsewhere: the guest program in `test_detached_program.py` and the client over the recording fake in
+`test_detached.py` (a fresh id per launch, the follow-up after a lost connection, and `interrupt`).
 
 The L and S lane fixtures request `private_detached_base` (the conformance `conftest.py`), which
 sends the program with its base under the worker's temporary directory, removed with `sudo -n`
-afterwards, so no test writes the runner's own `/var/lib`. `conformance/test_detached_resume.py`
-stops the S lane's own sshd while a launch waits for a file, creates the file on this machine
-meanwhile, and starts sshd again: while it is down an observation is an outcome backup's loop waits
-out, and once it is back the next one reads the finished payload's status and output.
+afterwards, so no test writes the runner's own `/var/lib`; L runs no detached vector today and
+requests it as a guard for any that comes. Each payload waits at most a minute for its `go` file, so
+one a failed test leaves behind ends by itself. `conformance/test_detached_resume.py` stops the S
+lane's own sshd while a launch waits for a file, creates the file on this machine meanwhile, and
+starts sshd again: while it is down an observation is an outcome backup's loop waits out, and once
+it is back the next one reads the finished payload's status and output.
+`conformance/test_rootless_sshd.py` shows the S lane's sshd counts as started only once it holds its
+port: a port a plain listener holds is retried and then reported unavailable.
 
 `conformance/test_attach_terminal.py`, `conformance/test_park.py` and `conformance/test_forward.py`
 cover what happens around the terminal half, a pane's handover (including one in a real tmux pane,

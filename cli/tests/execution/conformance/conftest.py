@@ -67,9 +67,11 @@ def detached_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 def private_detached_base(detached_base: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Send the detached program with its base at :func:`detached_base`, for a lane that runs it on this machine.
 
-    The L and S lanes run the program here as root, where the VM's base would
-    be the runner's own ``/var/lib``. The V lane does not request it, so it
-    keeps the VM's real base.
+    The S lane runs the program here as root, where the VM's base would be
+    the runner's own ``/var/lib``. No detached vector runs on L today; the L
+    lane requests this as well, as a guard, so a future elevated launch there
+    cannot write the runner's ``/var/lib`` either. The V lane does not
+    request it, so it keeps the VM's real base.
     """
     source = detached.program_source()
     declaration = f'BASE = "{detached_program.BASE}"'

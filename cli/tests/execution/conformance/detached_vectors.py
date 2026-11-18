@@ -40,6 +40,13 @@ REQUEST_DEADLINE = 60
 SETTLE_SECONDS = 20
 """How long a vector waits for a payload that is ending."""
 
+WAIT_FOR_GO = 'i=0; while [ ! -e go ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done; [ -e go ] || exit 124; '
+"""A payload's start: wait up to a minute for a ``go`` file in its working directory, then exit 124 without one.
+
+The bound means a root payload a failed test left waiting ends by itself,
+even when its interrupt and discard could not reach it.
+"""
+
 
 def payload(source: str, **env: str) -> Command:
     return Command(("sh", "-c", source), env=env, elevated=True)
@@ -81,7 +88,7 @@ def a_launch_outlives_its_connection_and_later_ones_observe_and_download_it(lane
         detached.launch(
             launch,
             payload(
-                'while [ ! -e go ]; do sleep 0.1; done; printf "$CONTENT" > result; echo finished',
+                WAIT_FOR_GO + 'printf "$CONTENT" > result; echo finished',
                 CONTENT="".join(f"\\{byte:03o}" for byte in content),
             ),
         )
@@ -106,9 +113,9 @@ def a_launch_outlives_its_connection_and_later_ones_observe_and_download_it(lane
 def the_detached_base_is_writable_by_root_alone(lane: Lane) -> None:
     """Root owns the base and its parent, and neither is group- or world-writable.
 
-    The parent comes from the VM's bootstrap rather than from the program, so
-    this asserts the invariant, not the exact modes; the launch directory's
-    own modes are a unit test.
+    The parent may predate the program (some platforms' bootstraps create
+    it), so this asserts the invariant, not the exact modes; the launch
+    directory's own modes are a unit test.
     """
     with one_launch(lane) as (detached, launch):
         detached.launch(launch, payload("true"))

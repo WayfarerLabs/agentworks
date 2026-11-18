@@ -21,6 +21,7 @@ from agentworks.execution import detached_program, reachability
 from agentworks.execution.detached import State
 from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.requests import Command
+from tests.execution.conformance.detached_vectors import WAIT_FOR_GO
 from tests.execution.conformance.lanes import SSHDLane, needs_sudo, require_linux_guest, rootless_sshd
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ def test_observation_resumes_once_the_vms_sshd_is_back(monkeypatch: pytest.Monke
         cleanup.callback(subprocess.run, go, check=False)
         detached.launch(
             launch,
-            Command(("sh", "-c", "while [ ! -e go ]; do sleep 0.1; done; echo finished"), elevated=True),
+            Command(("sh", "-c", WAIT_FOR_GO + "echo finished"), elevated=True),
         )
         assert detached.observe(launch).state is State.RUNNING
 
