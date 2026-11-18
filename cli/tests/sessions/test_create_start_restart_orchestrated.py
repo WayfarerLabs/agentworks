@@ -1981,13 +1981,13 @@ def test_create_refuses_a_nul_plaintext_before_resolving_writing_or_sending_anyt
     captured_env: dict[str, str] = {}
     _patch_session_ops(monkeypatch, events, captured_env)
     guests = _route_guests(monkeypatch, _Target(events), _Target(events))
-    resolved: list[object] = []
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", lambda *a, **k: resolved.append(a))
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.resolve_batch", lambda *a, **k: pytest.fail("a refused value reached resolution")
+    )
 
     with pytest.raises(ValidationError):
         create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert resolved == []
     assert guests.calls == []
     assert events == []
     assert captured_env == {}
