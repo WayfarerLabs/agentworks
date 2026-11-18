@@ -228,3 +228,58 @@ def test_direct_only_missing_capture_is_not_current(db):
     )
     db.instance_state.clear_applied_slice("agent", "agent", AppliedStateKey.ARTIFACT_INPUTS)
     assert inspect_owner_artifacts(db, fixture.registry, owner).capture_status == "missing"
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_null_bundle_selection_traverses_capture_and_offline_inspection(db, monkeypatch, direct):
+    from agentworks.agents.template import AgentTemplate
+    from agentworks.db import SessionMode
+    from agentworks.resources.registry import Registry
+    from agentworks.schema import CapabilityBlock
+    from agentworks.sessions.template import SessionTemplate
+    from agentworks.vms.admin import AdminConfig
+    from agentworks.vms.template import VMTemplate
+    from agentworks.workspaces.template import WorkspaceTemplate
+
+    registry = Registry.empty()
+    config = ArtifactsConfig.model_validate(
+        {"bundles": None, "declare": {"hints": {"local": {"text": "context"}}} if direct else None}
+    )
+    origin = Origin.built_in(source="nullable-fixture")
+    db.insert_vm("vm", "site", "vm", template="vm", admin_template="admin")
+    db.insert_agent("agent", "vm", "worker", template="agent")
+    db.insert_workspace("workspace", "/work", "vm", "project", template="workspace")
+    db.insert_session("run", "workspace", "session", SessionMode.AGENT, agent_name="agent", socket_path="/socket")
+    for component, model in (
+        ("vm", VMTemplate),
+        ("admin", AdminConfig),
+        ("agent", AgentTemplate),
+        ("workspace", WorkspaceTemplate),
+        ("session", SessionTemplate),
+    ):
+        template = model(name=component, artifacts=config)
+        if component == "session":
+            template = template.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
+        registry.add(f"{component}-template", component, template, origin)
+        kind = "vm" if component == "admin" else component
+        name = "vm" if component == "admin" else "run" if component == "session" else component
+        captured = capture_owner(registry, kind, name, component, config)
+        assert len(tuple(captured.inputs.items())) == int(direct)
+        write_capture(db, kind, name, component, captured, operation="fixture")
+    assert declaration_digest(registry, ArtifactsConfig(bundles=None)) == declaration_digest(
+        registry, ArtifactsConfig()
+    )
+
+    def forbid(*args, **kwargs):
+        pytest.fail("offline inspection tried to acquire artifact content")
+
+    monkeypatch.setattr("agentworks.artifacts.state.capture_owner", forbid)
+    monkeypatch.setattr("agentworks.artifacts.capture.capture_artifacts", forbid)
+    for selector, scopes in (
+        ({"session_name": "run"}, ["vm", "agent", "workspace", "session"]),
+        ({"vm_name": "vm", "admin": True}, ["vm", "admin"]),
+    ):
+        result = inspect_artifacts(db, registry, **selector)
+        assert [owner.scope for owner in result.owners] == scopes
+        assert all(owner.bundles == () and len(owner.artifacts) == int(direct) for owner in result.owners)
+        assert all(owner.capture_status == "current" for owner in result.owners)

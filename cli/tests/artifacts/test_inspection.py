@@ -322,7 +322,7 @@ def test_worked_manifests_build_without_acquiring_their_sources(
     assert all(getattr(bundle, kind) for kind in artifact_types)
 
 
-def test_removed_bundle_reference_preserves_unknown_and_historical_metadata(db: Database) -> None:
+def test_missing_additive_bundle_reference_preserves_unavailable_and_historical_metadata(db: Database) -> None:
     from agentworks.artifacts.inspection import inspect_artifacts
     from agentworks.db import VersionedPayload
     from tests.artifacts.test_routing import graph
@@ -334,9 +334,9 @@ def test_removed_bundle_reference_preserves_unknown_and_historical_metadata(db: 
     )
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     owner = result.owners[-1]
-    assert owner.bundles == ("missing-bundle",)
+    assert owner.bundles == ("agent-bundle", "missing-bundle")
     assert owner.capture_status == "unavailable"
-    assert owner.artifacts and not owner.artifacts[0].declared
+    assert owner.artifacts and owner.artifacts[0].declared
     assert owner.integrations[0].status == "unavailable"
 
 
@@ -443,7 +443,7 @@ def test_stale_inactive_capture_explains_available_passthrough_without_refresh(d
     fixture.registry.add(
         "harness-integration", "shell", HarnessIntegrationEntry(name="shell"), Origin.built_in(source="test")
     )
-    db.instance_state.put_desired_overlay(component, component, VersionedPayload(1, {"artifacts": {"bundles": []}}))
+    db.instance_state.put_desired_overlay(component, component, VersionedPayload(1, {"artifacts": {"bundles": None}}))
 
     def forbidden(*args, **kwargs):
         raise AssertionError("inspection acquired sources or changed instance state")
