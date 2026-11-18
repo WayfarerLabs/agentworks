@@ -530,9 +530,10 @@ error, whose request quotes the script. `create` waits for cloud-init through it
 (`cloud-init status --wait --long`, the cloud bootstrap's readiness command, a 420 s budget for
 cloud-init counted from the first attempt, each attempt's agent wait before its deadline and no
 retry with less than 60 s of the budget left, status 2 a warning, and any other failure quoting
-cloud-init's last lines as the cloud bootstrap does; a channel failure is asked again within that
-budget, since cloud-init can restart the guest agent and the command changes nothing), with no
-separate wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's
+cloud-init's last lines as the cloud bootstrap does; a failure after dispatch is asked again within
+that budget, since cloud-init can restart the guest agent and the command changes nothing, while
+`ChannelUnreachable`, where no agent answered and nothing was dispatched, propagates at once), with
+no separate wait for a guest IP, then runs the bootstrap through it with `run_bootstrap` and today's
 600-second deadline (`platform.py:600`), then joins and settles; `guest_agent_exec_wait` and
 `guest_agent_network` leave the API client. `out-data` and `err-data` are encoded with
 `errors="replace"`, since the API's JSON can carry a lone surrogate, and `_request` types

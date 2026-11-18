@@ -418,6 +418,22 @@ keeping the old values or bumping the schema version, the operator chose:]
 
 > Amend the contract text (Recommended)
 
+### 2026-11-18
+
+[Asked whether `console start` of a running console should resolve every pane secret, as the
+2026-11-12 ruling's table said, or nothing, as the desired-runtime FRD's R7 requires, the operator
+answered:]
+
+> So I feel like this is a bit of a departure from the original design, but I'm open to it. But we
+> should be consistent. What are we doing for sessions?
+
+[Told that sessions observe their status read-only, decide what will change, and resolve once only
+the secrets of what will launch, before any change, and given the recommendation that consoles
+follow the same rule (no change for `console start`; `console restore` probes pane presence first
+and resolves only the missing panes' secrets), the operator answered:]
+
+> I accept your recommendation here. Thanks!
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.

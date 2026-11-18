@@ -1010,8 +1010,9 @@ a shared helper moves every caller of it**, so no helper exists in two forms bet
     create's socket calls use an admin access beside its legacy targets. In the tests,
     `route_vm_access_to_target` and `files_over_target` (`cli/tests/vm_access_support.py`) run a
     moved step's requests on a legacy transport double; slice 7 removes them with the last legacy
-    targets. `RunCommand`'s readers take a `CommandResult` protocol, which `tmux.CommandOutcome` and
-    `SSHResult` both satisfy, so no result type mirrors another.
+    targets. `RunCommand`'s readers took a `CommandResult` protocol, which `tmux.CommandOutcome` and
+    `SSHResult` both satisfied, so no result type mirrored another; with `SSHResult` gone, they take
+    `CommandOutcome`.
 - **B, the user files, agents and closure.**
   - New: `ensure_directory`'s owner and elevation, with their tests; `upload_tree`, with the plan's
     tree-upload test; `ensure_source_line` and `source_files`; `normalize_destination` and
