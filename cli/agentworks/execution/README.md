@@ -4,9 +4,9 @@
 installed OpenSSH client at the VM's tailnet address, and every request is sent on the client's
 stdin, never on a command line or in the environment. Every core command that reaches a VM over SSH
 uses it, from create's first contact (Phase A) and the VM contract (`agentworks.vms.contract`) to
-sessions, consoles and backup. No command uses the legacy transport stack (`agentworks.transports`)
-any more, and this package must never import it or `agentworks.ssh`. A platform's own channel is not
-part of this package: core reaches it through `VMPlatform.run_as_root` and `native_shell`.
+sessions, consoles and backup, and core builds no `ssh` or `scp` command line anywhere else. A
+platform's own channel is not part of this package: core reaches it through `VMPlatform.run_as_root`
+and `native_shell`.
 
 ## Use
 
@@ -329,8 +329,8 @@ takes none of the five from it (conformance vector T2).
 On a Windows console the terminal half's remote command is led by a NUL, which stops Win32-OpenSSH
 from deleting the operator's lines on its first write; `ssh_process.nul_first_on_a_windows_console`
 says why and when. Every other `ssh -t` that runs a remote command uses it too (Remote Lima's native
-shell and the legacy attaches), but a login shell with no command, such as a public-SSH platform's
-native shell, gets none, because sshd's MOTD and lastlog fill its first write.
+shell), but a login shell with no command, such as a public-SSH platform's native shell, gets none,
+because sshd's MOTD and lastlog fill its first write.
 
 ## Root scripts
 
@@ -359,8 +359,7 @@ with `FeatureUnavailable` (`errors.py`) before the command's boundary resolves a
 ## Host-key trust
 
 `trust.py` owns the per-VM host-key store (`~/.config/agentworks/known_hosts/vm-<name>`, records
-under the alias `agentworks-vm-<name>`) and the OpenSSH options each trust mode selects. The legacy
-stack calls it; it imports nothing legacy.
+under the alias `agentworks-vm-<name>`) and the OpenSSH options each trust mode selects.
 
 - `TrustBinding(mode, vm_name, provisioning_file=None)` names how a connection to a VM establishes
   trust. `VM` verifies against the store with `StrictHostKeyChecking=yes` and raises `TrustMissing`
@@ -372,16 +371,14 @@ stack calls it; it imports nothing legacy.
   operator's own SSH configuration and `known_hosts`.
 - `ssh_options(trust)` returns the `-o` arguments. They pin the global known-hosts file to the null
   device and turn host-key updates, hashing and IP checks off, so no configuration file can change
-  them. VM options are read when a command is spawned, not when the transport is built.
+  them. VM options are read when a command is spawned, not when the access is built.
 - `entry_options(vm_name)` gives the managed SSH config lines that make the operator's own `ssh`
   verify against the store once the VM has a record.
 - `begin_enrollment`, `write_records`, `stored_keys` and `remove` are the record's lifecycle. Writes
   are atomic and private.
 
-Every `SSHTransport` and `SSHTarget` is constructed with an explicit trust choice, so a connection
-that skips the decision fails to type-check. `TrustMissing` is a state error, not an `SSHError`, so
-best-effort and retrying SSH handlers cannot absorb it. Operator guidance is in the command
-reference and the 0.20 upgrade guide.
+`TrustMissing` is a state error, not a connectivity error, so best-effort and retrying handlers
+cannot absorb it. Operator guidance is in the command reference and the 0.20 upgrade guide.
 
 ## Independence
 

@@ -56,12 +56,11 @@ def format_host_path(file: Path) -> str:
       ``admin.dotfiles_source`` (which may be a git URL, not a path at
       all) and ``apt.source_file``. Quoting input back unchanged is the
       point of those messages.
-    - **The body of an SSH log**, which is a verbatim transcript whose
-      command lines are the literal argv that ran. Naming the log file is
-      this rule's job (``ssh.py``'s ``display_path``); rewriting the
-      prose lines inside it while the ``$ ssh -i /home/you/...`` lines
-      beside them stayed absolute would recreate the mixed rendering one
-      level down.
+    - **The body of an operation log**, which is a verbatim transcript
+      whose records quote the literal argv that ran. Naming the log file is
+      this rule's job (``oplog.OperationLogFile.display_path``); rewriting
+      the prose lines inside it while the argv beside them stayed absolute
+      would recreate the mixed rendering one level down.
 
     A path outside ``$HOME`` needs no exclusion: it already falls through
     to the absolute form.

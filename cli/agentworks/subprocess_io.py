@@ -23,14 +23,12 @@ output has nothing to corrupt and stays in text mode.
 
 :func:`decode_stream` folds CRLF and lone CR to LF because text mode did that
 too, through universal newlines, in the direction that was never broken.
-Folding here keeps this module about stdin alone and keeps every
-``Transport.run`` returning output under one rule; ``vms/initializer/packages``
-compares command output against an expected string without stripping it, and
-is one of the consumers that rule protects.
+Folding here keeps this module about stdin alone and keeps a caller's decoded
+output the same on every workstation.
 
 Line-oriented secret delivery is what makes the stdin half matter.
 ``require_line_safe_secret`` rejects a value carrying CR, LF, or NUL precisely
-so the consumer receives one clean line, and a transport that appends its own
+so the consumer receives one clean line, and a channel that appends its own
 CR breaks that guarantee after the check has passed.
 
 The output side of this same platform trap is handled once at the process

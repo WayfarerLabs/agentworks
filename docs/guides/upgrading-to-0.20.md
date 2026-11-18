@@ -928,9 +928,13 @@ would change; the default accepts every hostname.
   say where its operator reaches a VM by hand.
 - **`read_host_keys(vm, ctx)`** has a default over `run_as_root`, used by `vm recover`. Override it
   only when the channel itself verifies the host key it is reading.
-- **The platform transports are removed.** `agentworks.transports` no longer exports
-  `ExecTransport`, `LimaTransport`, `RemoteLimaTransport`, `WSL2Transport`, `native_transport`,
-  `wait_for_reconnect` or `TailscaleWait`, and `agentworks.plugins.proxmox.transport` is gone.
+- **The legacy transports are removed.** `agentworks.transports` and `agentworks.ssh` are gone, with
+  `ExecTransport`, `LimaTransport`, `RemoteLimaTransport`, `WSL2Transport`, `SSHTransport`,
+  `native_transport`, `wait_for_reconnect`, `TailscaleWait`, `SSHTarget`, `SSHResult` and
+  `SSHError`, and so is `agentworks.plugins.proxmox.transport`. A platform reaches its VM through
+  its own `run_as_root` and core through `agentworks.execution`. The operation log is
+  `agentworks.execution.oplog.OperationLogFile`, and a platform writes to it only through
+  `request.progress`.
 
 ### Create returns an address
 
