@@ -554,10 +554,12 @@ Host connections such as Remote Lima's keep their own configuration and are not 
 - **Managed SSH entries.** `ssh_config.py` gives every managed VM and agent entry `HostKeyAlias`,
   `StrictHostKeyChecking yes` and the pinned options, with the store file as `GlobalKnownHostsFile`
   and the null device as `UserKnownHostsFile`, so the operator's own `ssh` verifies against the
-  store and never writes to it, whatever setting it reads first. A VM without a record has no key in
-  the store, so that `ssh` refuses it until the import or recovery records one. R8's end state
-  therefore does not depend on every operator importing ([trust-lld.md](./trust-lld.md), Managed SSH
-  entries).
+  store and never writes to it, whatever host-key checking or update setting it reads first. A
+  known-hosts file setting of the operator's read first takes precedence over the entry: what ssh
+  accepts goes to their file, or the store is skipped and the VM fails closed. A VM without a record
+  has no key in the store, so that `ssh` refuses it until the import or recovery records one. R8's
+  end state therefore does not depend on every operator importing ([trust-lld.md](./trust-lld.md),
+  Managed SSH entries).
 - **Legacy paths during migration.** Slice 1 gives the legacy VM-target factories an explicit trust
   binding in VM or Enroll mode. These are `transport()`, `agent_transport()`,
   `transport_for_user()`, Phase A's builder, the backup scp, the workspace-copy ssh, the port

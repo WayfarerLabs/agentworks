@@ -322,10 +322,12 @@ def _verification_lines(vm_name: str) -> str:
 
     The store file is the entry's ``GlobalKnownHostsFile`` and the user
     known-hosts file is the null device. ssh writes only to the user file, so
-    no setting of the operator's that takes effect first (an earlier
-    ``Host *``, or ``-o`` on the command line, with ``StrictHostKeyChecking
-    accept-new`` or ``no`` or ``UpdateHostKeys yes``) can write into the store:
-    whatever it accepts or learns goes nowhere. A VM with no record has no key
+    no host-key checking or update setting of the operator's that takes
+    effect first (an earlier ``Host *``, or ``-o`` on the command line, with
+    ``StrictHostKeyChecking accept-new`` or ``no`` or ``UpdateHostKeys yes``)
+    can write into the store. A known-hosts file setting of the operator's
+    read first takes precedence over these: what ssh accepts then goes to
+    their own file, or the store is skipped and the VM fails closed. A VM with no record has no key
     in its store, so strict checking refuses it; its entries also carry a
     comment naming the commands that record one. A record that cannot be read
     gets no comment: ssh reports the read failure itself.

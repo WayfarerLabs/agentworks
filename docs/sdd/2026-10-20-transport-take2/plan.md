@@ -671,7 +671,8 @@ module, and `remote_exec.py` is deleted.
       fresh-interpreter guard, the conftest blocker and the static legacy-import check.
 - [x] Make the managed SSH entries' store options unconditional, with release notes for operators
       who never imported. The entries name the store as `GlobalKnownHostsFile` and the null device
-      as `UserKnownHostsFile`, so no setting read first can write into the store (trust-lld).
+      as `UserKnownHostsFile`, so no host-key checking or update setting read first can write into
+      the store (trust-lld).
 - [x] Settle how a host path with an apostrophe and no whitespace reaches the ssh shipped with Git
       for Windows, which rejects both the quoted and the bare form of such an option value
       (`execution/trust.py`, `option_value`): refuse that path before writing a managed SSH config

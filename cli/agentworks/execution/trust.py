@@ -317,10 +317,10 @@ def _store_value(path: Path) -> str:
 
 
 def pinned_options() -> tuple[tuple[str, str], ...]:
-    """Settings every VM connection pins, whatever configuration says, as
-    (name, value). Shared by the spawn-time ``-o`` arguments and the managed
-    SSH entries (``ssh_config.py``), so the operator's own ``ssh`` pins what
-    Agentworks pins. Which known-hosts file each names is theirs to choose:
+    """The pins every VM connection shares, as (name, value): host-key updates,
+    hashing and IP checks off. The spawn-time ``-o`` arguments and the managed
+    SSH entries (``ssh_config.py``) both carry them, so the operator's own
+    ``ssh`` pins what Agentworks pins. Which known-hosts file each names is theirs to choose:
     the ``-o`` arguments pin the global one to the null device, and the
     managed entries name the store there instead."""
     return (

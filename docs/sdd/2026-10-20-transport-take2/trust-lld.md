@@ -244,18 +244,25 @@ existing ones (`ssh_config._verification_lines`):
 ```
 
 (`NUL` replaces `/dev/null` on Windows.) The store is the entry's global known-hosts file, which ssh
-reads and never writes: `accept-new`, `StrictHostKeyChecking no` and `UpdateHostKeys` write only to
-the first user file, which is the null device. So no setting of the operator's can write into the
-store, even one read before the entry (an earlier `Host *`, which the legacy layout's trailing
-managed section always follows, or `-o` from a tool such as Ansible), and the store can neither gain
-a first-use key, which `trust.stored_keys` would read as a record that import can never replace, nor
-a union of verified keys, which import deliberately refuses (`vms/manager/host_keys.py:139-141`).
-The other pins match `ssh_options` (`trust.pinned_options`). The execution core's own `-o` arguments
-are unchanged: they pin `GlobalKnownHostsFile` to the null device and name the store, or create's
-provisioning file, as the user file, and `-o` takes precedence over any configuration. Every change
-to a record is followed by `sync_ssh_config`: import, enrollment's existing post-create sync
-(`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase B fails), delete
-(`power.py:340`), and, in slice 4, recovery.
+reads and never writes: `accept-new` and `StrictHostKeyChecking no` write only to the first user
+file, which is the null device, and ssh disables `UpdateHostKeys` for a key it found in a global
+file (`-vv` logs `host key found in GlobalKnownHostsFile; disabling UpdateHostkeys`). So no host-key
+checking or update setting of the operator's can write into the store, even one read before the
+entry (an earlier `Host *`, which the legacy layout's trailing managed section always follows, or
+`-o` from a tool such as Ansible), and the store can neither gain a first-use key, which
+`trust.stored_keys` would read as a record that import can never replace, nor a union of verified
+keys, which import deliberately refuses (`vms/manager/host_keys.py:139-142`). A known-hosts file
+setting of the operator's read first is another matter: it takes precedence over the entry's. A
+read-first `UserKnownHostsFile` with `accept-new` writes a record-less VM's key into the operator's
+own file, and later strict connections through the entry trust it; a read-first
+`GlobalKnownHostsFile` makes ssh skip the store, so a recorded VM fails closed. Neither touches the
+store, so R8's store property holds; the operator guides say so. The other pins match `ssh_options`
+(`trust.pinned_options`). The execution core's own `-o` arguments are unchanged: they pin
+`GlobalKnownHostsFile` to the null device and name the store, or create's provisioning file, as the
+user file, and `-o` takes precedence over any configuration. Every change to a record is followed by
+`sync_ssh_config`: import, enrollment's post-create sync (`vms/initializer/driver.py:141-143`, right
+after Phase A, reached even when Phase B fails), delete (`vms/manager/power.py:323`), rekey
+(`power.py:485`) and recovery (`vms/manager/recover.py:142`).
 
 Slices 1 to 7 wrote the block only for a VM with a record, so the operator's own `ssh` kept working
 against their `known_hosts` until they imported. Slice 8 makes it unconditional, as D9 decided, so
@@ -267,27 +274,29 @@ R8's end state does not depend on every operator importing (`ssh_config._vm_entr
   then `Host key verification failed`, with no prompt) rather than reading `known_hosts` or
   accepting a key on first use. Each such entry carries one comment naming
   `agw vm import-host-keys <vm>` and `agw vm recover <vm>`; a record that cannot be read gets no
-  comment, since `ssh` reports the read failure itself. A relaxing setting of the operator's own can
-  let `ssh` connect without verifying, but what it accepts goes to the null device. The upgrade
-  guide carries the breaking-change note.
+  comment, since `ssh` reports the read failure itself. A host-key checking setting of the
+  operator's own can let `ssh` connect without verifying, and what it accepts goes to the null
+  device unless a known-hosts file setting of theirs is read first (above). The upgrade guide
+  carries the breaking-change note.
 - **Evidence.** Against OpenSSH 9.2p1, with a private sshd offering ed25519, ECDSA and RSA keys, a
   key accepted for login, and only the RSA key recorded under the alias in a store directory whose
   name holds a space:
   - a recorded VM verified (`Found key in <store>:1`, the alias line, then the command ran);
-  - a record-less VM, whose store file is empty, was refused as above;
+  - a record-less VM, whose store file is absent or empty, was refused as above;
   - `-o StrictHostKeyChecking=accept-new` with `-o HostKeyAlgorithms=ssh-ed25519` failed with
     `Host key for agentworks-vm-<name> has changed`; `-o UpdateHostKeys=yes` after a successful
     login left the store alone; a `Host *` block carrying both `StrictHostKeyChecking accept-new`
     and `UpdateHostKeys yes`, read before the entry, did the same for the recorded VM and, for the
     record-less one, logged in after `Permanently added ... to the list of known hosts`, which went
     to the null device;
-  - afterwards the recorded store file was byte-identical and the record-less one still empty;
+  - afterwards the recorded store file was byte-identical and the record-less one still absent or
+    empty;
   - with the store as `UserKnownHostsFile` instead, the layout this replaces, the same
     `-o UpdateHostKeys=yes` login grew the store from the one RSA line to RSA, ed25519 and ECDSA.
 
   `GlobalKnownHostsFile` takes the same value `_entry_value` writes: ssh parses its quoted arguments
   as it does `UserKnownHostsFile`'s (the run above used a quoted path with a space), and expands `~`
-  in it at use, where `ssh -G` prints it unexpanded (OpenSSH 8.5's `ssh.c` calls
+  in it at use, where `ssh -G` prints it unexpanded (`ssh.c`, in 8.5 as already in 7.9p1, calls
   `tilde_expand_paths` on `options.system_hostfiles` under "Expand ~ in known host file names", and
   9.2 opened `~/<dir with a space>/<file>` under the account's home). It gets no `%` or `${}`
   expansion, which `literal_path` already refuses. The ssh shipped with Git for Windows and native

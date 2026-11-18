@@ -1159,15 +1159,18 @@ or `agw vm reinit` (which install the new key on the VM) rebuild the file too. R
 
 Every entry also carries `HostKeyAlias`, `StrictHostKeyChecking yes`, `GlobalKnownHostsFile` (the
 VM's store file) and `UserKnownHostsFile` set to the null device, plus `UpdateHostKeys no` and
-`HashKnownHosts no`. Your own `ssh` reads the store and never writes to it: it writes known hosts
-only to the user file, so anything a setting of yours accepts or learns goes nowhere. Your own `ssh`
-therefore trusts exactly the keys Agentworks has recorded. It refuses a VM with no record
-(`Host key verification failed`) until `agw vm import-host-keys NAME` or `agw vm recover NAME`
-records one, and that VM's entries carry a comment naming both. A setting of your own that relaxes
-host-key checking for these hosts (`StrictHostKeyChecking accept-new` or `no`, or `UpdateHostKeys`,
-in an earlier `Host *` block or on the command line) can let `ssh` connect without verifying, to a
-VM with no record or, under `no`, past a key the store does not hold, but it never records a key in
-the store. See [Host keys](#host-keys).
+`HashKnownHosts no`. Your own `ssh` reads the store and never writes to it, because the store is its
+global known-hosts file and `ssh` writes known hosts only to the user file. With the entries' own
+settings, your own `ssh` therefore trusts exactly the keys Agentworks has recorded. It refuses a VM
+with no record (`Host key verification failed`) until `agw vm import-host-keys NAME` or
+`agw vm recover NAME` records one, and that VM's entries carry a comment naming both. A host-key
+checking setting of your own (`StrictHostKeyChecking accept-new` or `no`, in an earlier `Host *`
+block or on the command line) can let `ssh` connect without verifying, to a VM with no record or,
+under `no`, past a key the store does not hold. Neither that nor an update setting
+(`UpdateHostKeys`) ever records a key in the store. A known-hosts file setting of your own
+(`UserKnownHostsFile` or `GlobalKnownHostsFile`) read before the entry takes precedence over it:
+keys then go into your file rather than nowhere, and later connections trust them, or the store is
+skipped and the VM fails closed. See [Host keys](#host-keys).
 
 Paths in the entries are written relative to `~` when they are under your home directory. A VM whose
 store path cannot be written into an entry gets no entries, with a warning, rather than entries that
