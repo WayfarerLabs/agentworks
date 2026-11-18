@@ -260,7 +260,7 @@ When you run `agw vm create <name> --site proxmox`:
 6. Returns that address to core, which connects over Tailscale SSH, records the VM's host key,
    checks the VM contract (the live Debian release first), and completes initialization
 
-After provisioning, normal operations use Tailscale SSH, as they do on Lima and Azure VMs.
+After provisioning, normal operations use Tailscale SSH, as they do on every platform.
 
 ## Troubleshooting
 

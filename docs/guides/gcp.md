@@ -237,11 +237,12 @@ balanced disk type, and every stable name before its first insert. The final ins
 auto-deleted boot disk, no guest service account, an explicit IPv4-only interface, and one lifetime
 ephemeral external access config. The retained startup metadata contains no Tailscale or Google
 credential. After its durable success marker appears, Agentworks joins the VM to the tailnet once,
-as root over SSH to the external address, with the Tailscale key only on the join script's stdin
-(`tailscale up --auth-key=file:/dev/stdin`), and then reads the VM's Tailscale address the same way.
-If the address cannot be read, it logs the node out and the create fails and rolls back. The
-resulting VM row records the original canonical operator SSH source prefixes so later cleanup can
-reconstruct the create-time allow independently; it still does not store the VM's external IPv4.
+as root (`sudo` behind the admin's SSH to the external address), with the Tailscale key only on the
+join script's stdin (`tailscale up --auth-key=file:/dev/stdin`), and then reads the VM's Tailscale
+address the same way. If the address cannot be read, it logs the node out and the create fails and
+rolls back. The resulting VM row records the original canonical operator SSH source prefixes so
+later cleanup can reconstruct the create-time allow independently; it still does not store the VM's
+external IPv4.
 
 Starting a GCE VM resumes a suspended instance and starts a terminated instance. If shutdown or
 suspension is still in progress, Agentworks waits within the power-state timeout for it to settle

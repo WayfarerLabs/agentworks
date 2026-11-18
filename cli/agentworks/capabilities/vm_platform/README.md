@@ -74,6 +74,13 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   matches.
 - **MUST NOT** gate existing-VM operations on the current creation release or image catalog.
 - **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
+- **MUST** deliver a VM that passes the VM contract (`agentworks.vms.contract`), which core checks
+  over SSH before provisioning counts as complete: the requested Debian release, systemd as init,
+  the admin's passwordless `sudo`, OpenSSH reachable at the returned tailnet address with the
+  admin's key authorized, `python3` with its standard library (every request core sends runs it),
+  and the tools `install`, `flock`, `setsid` and `tar`. `PROVISIONING_PACKAGES` (`cloud_init.py`)
+  lists what a Debian image may lack, `openssh-server` and `python3` among them; the tools ship in
+  every Debian base system.
 - **MUST** implement `run_as_root`, core's channel for its own root scripts, which works without the
   VM's Tailscale state or identity, and declare `recovery_needs_guest_sshd` (below).
 - A native interactive shell is optional: a platform offers one by overriding `native_shell`. A
@@ -226,7 +233,10 @@ and DB migration.
   `wsl.exe` as the admin, the clouds' base runs an interactive SSH to the public address inside its
   route, and Proxmox offers none.
 - `recovery_needs_guest_sshd` **MUST** be declared (no default): `True` when the root channel goes
-  through the guest's sshd.
+  through the guest's sshd, as the clouds' public SSH and Lima's do. A broken sshd then leaves no
+  root script a way in, and `vm recover`'s failure hint points the operator at one that does not use
+  it (a provider's serial console) or at recreation. Proxmox's guest agent and WSL2's `wsl.exe` do
+  not need it, so their root scripts can repair sshd.
 
 Vm-platform is the contract that third-party VM platforms implement, as the bundled ones do. Its
 complete contract is version 2, and the six bundled implementations change atomically with the
@@ -833,3 +843,4 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
 - ADR 0016: the `vm-platform` capability / `vm-site` declarable split.
 - ADR 0018: Azure VM size from spec.
 - ADR 0019: the orchestration layer (command plans over node graphs) that drives the lifecycle.
+- ADR 0027: one SSH execution channel, with platforms keeping only a root channel.

@@ -746,7 +746,7 @@ just a vm-site.
 | `agw vm rekey <name>`                                                | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
 | `agw vm recover <name>`                                              | Repair a VM's SSH access, python3 and Tailscale node           |
 | `agw vm port-forward <name> <ports...>`                              | Forward local port(s) to a VM (like kubectl port-forward)      |
-| `agw vm logs <name>`                                                 | Show operation logs for a VM                                   |
+| `agw vm logs <name> [--all]`                                         | Show a VM's latest operation log, or every one with `--all`    |
 | `agw vm import-host-keys (--all \| <name>...)`                       | Import VM host keys from `known_hosts` into the host-key store |
 
 `vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to
@@ -959,19 +959,18 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
-`vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`,
-`vm start` and the automatic start of a stopped VM, `vm rekey` and `vm recover` for their final
-waits, `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, `vm backup`,
-and `vm describe` for its live resources, connect with the OpenSSH client on the workstation,
-version 8.5 or newer (`vm shell --platform` uses the platform's own path instead and needs no
-`python3`; Remote Lima and the clouds need the client, and check it only once they connect, a cloud
-inside its temporary network route). Agentworks uses the first `ssh` on `PATH`; on Windows it uses
-only the native Win32-OpenSSH under `System32\OpenSSH` or `Program Files\OpenSSH`, never the `ssh`
-bundled with Git for Windows. `agw doctor` shows which client was resolved, and these commands,
-other than `vm shell --platform` and `vm describe`, refuse an unsupported one before anything else
-runs; `vm describe` warns and leaves its live resources out instead. These commands run
-`ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must be
-loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
+Every command that reaches a VM over SSH (the `vm`, `agent`, `workspace`, `session` and `console`
+commands, create's checks of a new VM, initialization, the waits of `vm start`, the automatic start,
+`vm rekey` and `vm recover`, and `vm describe`'s live resources) connects with the OpenSSH client on
+the workstation, version 8.5 or newer (`vm shell --platform` uses the platform's own path instead
+and needs no `python3`; Remote Lima and the clouds need the client, and check it only once they
+connect, a cloud inside its temporary network route). Agentworks uses the first `ssh` on `PATH`; on
+Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or `Program Files\OpenSSH`,
+never the `ssh` bundled with Git for Windows. `agw doctor` shows which client was resolved, and
+these commands, other than `vm shell --platform` and `vm describe`, refuse an unsupported one before
+anything else runs; `vm describe` warns and leaves its live resources out instead. These commands
+run `ssh -F none` in batch mode, so `~/.ssh/config` does not apply and an encrypted private key must
+be loaded in the SSH agent. The VM needs `python3`; a VM without it is reported as unable to run
 Agentworks requests, and `agw vm recover <name>` installs it. A command that is not found exits 127,
 one that cannot run exits 126, and a missing workspace directory exits 125.
 
@@ -1020,12 +1019,13 @@ notice that the connection may have dropped.
 
 Agentworks verifies every connection to a VM against a per-VM host-key store, never against your
 `~/.ssh/known_hosts`. The store is one file per VM under `~/.config/agentworks/known_hosts/`, keyed
-by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records the key on
-its first connection and nowhere else; `vm delete` removes the file, and so does a `vm create` that
-fails and removes the VM's row. A command that reaches a VM over SSH refuses a VM with no recorded
-key, with a hint naming the import, rather than trusting it on first use; describe and listing
-commands warn per VM and carry on. `vm delete` still works without a record, but on a cloud VM it
-cannot then log the node out of Tailscale.
+by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records a new VM's
+key on its first connection, writing it to the store only; an existing VM's key enters the store
+only through `vm import-host-keys` or `vm recover`. `vm delete` removes the file, and so does a
+`vm create` that fails and removes the VM's row. A command that reaches a VM over SSH refuses a VM
+with no recorded key, with a hint naming the import, rather than trusting it on first use; describe
+and listing commands warn per VM and carry on. `vm delete` still works without a record, but on a
+cloud VM it cannot then log the node out of Tailscale.
 
 `agw vm import-host-keys (--all | <name>...) [--known-hosts <path>]` copies keys you already trust
 into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file

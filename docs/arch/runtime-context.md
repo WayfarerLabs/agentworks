@@ -116,14 +116,15 @@ remain redacted unless `--resolve` is explicit. Each value prints on one row, wi
 managed-config preview, not an observation of a process's live environment or user shell startup
 effects.
 
-Every consumer that reaches the VM over SSH (VM and agent shell and exec, sessions, and console
-shells) uses the [execution channel](../../cli/agentworks/execution/README.md), which sends
-environment values in its stdin request envelope; a console shell's travel in the request its
-terminal handover parks. No value is on a command line or in the client's `SetEnv` option, so the
-SSH client never expands one, and literal `${...}` text in an escaped plaintext or a secret reaches
-the workload as written. A value may hold line breaks, which arrive intact; a plaintext value with a
-NUL, which no process environment can hold, is refused when it is rendered, before any request
-carries it. Operation logs and diagnostics redact a secret's whole value in its usual spellings (see
+Every consumer that reaches the VM over SSH (VM and agent shell and exec, initialization and setup,
+sessions, and console shells) uses the
+[execution channel](../../cli/agentworks/execution/README.md), which sends environment values in its
+stdin request envelope; a console shell's travel in the request its terminal handover parks. No
+value is on a command line or in the client's `SetEnv` option, so the SSH client never expands one,
+and literal `${...}` text in an escaped plaintext or a secret reaches the workload as written. A
+value may hold line breaks, which arrive intact; a plaintext value with a NUL, which no process
+environment can hold, is refused when it is rendered, before any request carries it. Operation logs
+and diagnostics redact a secret's whole value in its usual spellings (see
 [Value handling](../../cli/agentworks/secrets/README.md#value-handling)), but not one line of a
 multi-line secret shown on its own.
 

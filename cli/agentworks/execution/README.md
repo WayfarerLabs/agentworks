@@ -6,7 +6,10 @@ stdin, never on a command line or in the environment. Every core command that re
 uses it, from create's first contact (Phase A) and the VM contract (`agentworks.vms.contract`) to
 sessions, consoles and backup, and core builds no `ssh` or `scp` command line anywhere else. A
 platform's own channel is not part of this package: core reaches it through `VMPlatform.run_as_root`
-and `native_shell`.
+and `native_shell`. [ADR 0027](../../../docs/adrs/0027-one-ssh-execution-channel.md) records why
+there is one channel, and
+[ADR 0026](../../../docs/adrs/0026-environment-travels-inside-the-request.md) why the environment
+travels inside the request.
 
 ## Use
 
@@ -143,10 +146,11 @@ Completion comes from the markers, never from ssh's exit status:
 - `NotDelivered(reason)`: the payload never started (`PYTHON_MISSING`, `STDLIB_MISSING`,
   `LAUNCHER_FAILED`, or `REFUSED` with the guest's refusal code).
 - `Unknown(reason)`: it may have run (`CONNECTION`, `HOST_KEY`, `TRUNCATED`, `DEADLINE`,
-  `OUTPUT_LIMIT`). `AUTH_FAILED` is the exception the evidence allows: ssh's 255 with no start
-  marker and `Permission denied (publickey` in its own log means the VM refused the configured key,
-  so nothing ran. `CONNECTION` stays "may have run": the start marker is written just before the
-  payload starts, so a connection lost then can drop it. Both errors' hints name `agw vm recover`.
+  `OUTPUT_LIMIT`, and `CONSUMER_LEFT` for a `stream` whose consumer left, below). `AUTH_FAILED` is
+  the exception the evidence allows: ssh's 255 with no start marker and
+  `Permission denied (publickey` in its own log means the VM refused the configured key, so nothing
+  ran. `CONNECTION` stays "may have run": the start marker is written just before the payload
+  starts, so a connection lost then can drop it. Both errors' hints name `agw vm recover`.
 
 `Result.require_completed` and `run(check=True)` turn the rest into typed errors (`errors.py`):
 `VMNotReady`, `TrustMismatch`, `RequestRefused`, `ExecutionIncomplete`, `CommandFailed`. No error,
