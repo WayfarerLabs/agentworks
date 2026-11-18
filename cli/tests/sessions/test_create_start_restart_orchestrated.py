@@ -1927,7 +1927,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert db.get_session("s1") is not None
 
 
-def test_create_multiline_environment_secret_refuses_before_session_mutation(
+def test_create_hands_a_multiline_environment_secret_to_the_session_intact(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -1936,7 +1936,7 @@ def test_create_multiline_environment_secret_refuses_before_session_mutation(
     from agentworks.vms import manager as vm_manager
 
     config = make_config()
-    environment_value = "session-create-sentinel\r\ninjected\r\n"
+    environment_value = "session-create-value\r\nsecond 100%\r\n"
     monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
     _seed_stopped_proxmox_vm(db)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
@@ -1945,27 +1945,53 @@ def test_create_multiline_environment_secret_refuses_before_session_mutation(
     captured_env: dict[str, str] = {}
     _patch_session_ops(monkeypatch, events, captured_env)
 
-    with pytest.raises(ValidationError) as caught:
-        create_session(
-            db,
-            config,
-            name="s1",
-            new_workspace=True,
-            workspace_name="fresh-ws",
-            new_agent=True,
-            agent_name="fresh-agent",
-            vm_name="box",
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert db.get_session("s1") is None
-    assert db.get_workspace("fresh-ws") is None
-    assert db.get_agent("fresh-agent") is None
+    assert "tmux_create" in events
+    assert captured_env["API_KEY"] == environment_value
+    assert db.get_session("s1") is not None
+
+
+def test_create_refuses_a_nul_plaintext_before_resolving_writing_or_sending_anything(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No exec'd environment can hold a NUL, so the value is refused while the command validates."""
+    from agentworks.sessions.manager import create_session
+    from agentworks.vms import manager as vm_manager
+
+    make_config()
+    template = ManifestDoc(
+        "session-template",
+        "default",
+        {
+            "harness_integration": {"name": "shell"},
+            "env": {"API_KEY": {"secret": "api-key"}, "NOTE": "before\0after"},
+        },
+    )
+    config = write_operator_config(
+        tmp_path, PLUGINS_ENABLED, manifests=[proxmox_site(), template, SESSION_ENV_MANIFESTS[1]]
+    )
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+    guests = _route_guests(monkeypatch, _Target(events), _Target(events))
+    resolved: list[object] = []
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", lambda *a, **k: resolved.append(a))
+
+    with pytest.raises(ValidationError):
+        create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolved == []
+    assert guests.calls == []
     assert events == []
     assert captured_env == {}
-    assert "session-create-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert db.get_session("s1") is None
 
 
 def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
@@ -2204,7 +2230,7 @@ def test_restart_validates_stored_overlay_references_before_lifecycle_work(
     assert captured_env == {}
 
 
-def test_restart_multiline_environment_secret_refuses_before_kill(
+def test_restart_hands_a_multiline_environment_secret_to_the_new_runtime_intact(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -2214,7 +2240,7 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     from agentworks.vms import manager as vm_manager
 
     config = make_config()
-    environment_value = "session-restart-sentinel\nsecond\n"
+    environment_value = "session-restart-value\nsecond\n"
     monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
     _seed_stopped_proxmox_vm(db)
     db.insert_session(
@@ -2243,24 +2269,16 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
         lambda *args, **kwargs: events.append("kill"),
     )
 
-    with pytest.raises(AgentworksError) as caught:
-        restart_session(
-            db,
-            config,
-            name="s1",
-            yes=True,
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    restart_session(
+        db,
+        config,
+        name="s1",
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
 
-    refreshed = db.get_session("s1")
-    assert refreshed is not None
-    assert refreshed.pid == 4242
-    assert "kill" not in events
-    assert "tmux_create" not in events
-    assert captured_env == {}
-    assert "session-restart-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert events.index("kill") < events.index("tmux_create")
+    assert captured_env["API_KEY"] == environment_value
 
 
 def test_invalid_selected_shell_command_preserves_running_session(

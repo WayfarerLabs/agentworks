@@ -223,12 +223,13 @@ def advisory_issues(resource: DeclaredResource, doc: Document) -> list[str]:
 
 
 def _env_hygiene_issues(owner: RefOwner, resource: DeclaredResource) -> list[str]:
-    """Two warnings an env table earns, on every kind that has one.
+    """The warning an env table earns, on every kind that has one: a key
+    that sets an agentworks-managed identity variable.
 
     Found by ANNOTATION (a mapping of ``EnvEntry``), not by a list of
     env-bearing kinds, which is the list the sixth such kind would not be
-    on. Neither check can live on the model: a model validator has no
-    channel but an exception, and neither of these is fatal.
+    on. The check cannot live on the model: a model validator has no
+    channel but an exception, and this is not fatal.
     """
     from agentworks.env.entry import EnvEntry
 
@@ -238,26 +239,12 @@ def _env_hygiene_issues(owner: RefOwner, resource: DeclaredResource) -> list[str
         if shape.collection is not Collection.MAPPING or shape.item_model is not EnvEntry:
             continue
         table: Mapping[str, EnvEntry] = getattr(resource, name, None) or {}
-        for key, entry in table.items():
-            issues.extend(_env_entry_issues(owner, name, key, entry))
-    return issues
-
-
-def _env_entry_issues(owner: RefOwner, field: str, key: str, entry: EnvEntry) -> list[str]:
-    issues: list[str] = []
-    if key.startswith(_AGENTWORKS_ENV_PREFIX):
-        issues.append(
-            f"{owner.display}.{field} sets agentworks-managed identity variable "
+        issues.extend(
+            f"{owner.display}.{name} sets agentworks-managed identity variable "
             f"{key!r}; identity values win at the runtime prelude, so your value "
             "will be ignored at command time. Remove the entry."
-        )
-    if entry.value is not None and ("\n" in entry.value or "\r" in entry.value):
-        # ADR 0014: a newline would corrupt the SSH ``-o SetEnv=KEY=VALUE``
-        # argument shape. The resolve loop applies the same check
-        # defensively to secret-resolved values.
-        issues.append(
-            f"{owner.display}.{field}.{key}: value contains a newline; SSH SetEnv "
-            "cannot transport it cleanly. Strip the newline at the source."
+            for key in table
+            if key.startswith(_AGENTWORKS_ENV_PREFIX)
         )
     return issues
 

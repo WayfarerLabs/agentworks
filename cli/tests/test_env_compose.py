@@ -67,18 +67,11 @@ def test_compose_env_renders_secrets_from_values() -> None:
     assert out["API_KEY"] == "resolved-value"
 
 
-@pytest.mark.parametrize("value", ["line-one\nline-two", "line-one\rline-two", "line-one\0line-two"])
-def test_compose_env_rejects_line_unsafe_secret_before_return(value: str) -> None:
-    with pytest.raises(ValidationError) as caught:
-        compose_env(
-            values={"shared": value},
-            ctx=_ctx(),
-            vm={"API_KEY": EnvEntry({"secret": "shared"})},
-        )
+@pytest.mark.parametrize("value", ["line-one\nline-two\n", "line-one\r\nline-two\r\n"])
+def test_compose_env_keeps_a_secret_with_line_breaks_whole(value: str) -> None:
+    out = compose_env(values={"shared": value}, ctx=_ctx(), vm={"API_KEY": EnvEntry({"secret": "shared"})})
 
-    assert value not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert out["API_KEY"] == value
 
 
 def test_compose_env_raises_loudly_on_uncovered_secret() -> None:
@@ -135,9 +128,22 @@ def test_secrets_bypass_substitution_and_escaping() -> None:
         assert out["TOKEN"] == secret_value
 
 
-@pytest.mark.parametrize("value", ["/srv/line\nbreak", "/srv/carriage\rreturn", "/srv/nul\0value"])
+@pytest.mark.parametrize("value", ["/srv/line\nbreak", "/srv/carriage\rreturn"])
 @pytest.mark.parametrize("scope", ["vm", "session"])
-def test_rendered_plaintext_is_checked_for_environment_delivery(value: str, scope: str) -> None:
+def test_rendered_plaintext_keeps_its_line_breaks(value: str, scope: str) -> None:
+    source = {"CONFIG": EnvEntry("${agw:workspace_dir}")}
+    out = compose_env(
+        values={},
+        ctx=_ctx(workspace_dir=value),
+        vm=source if scope == "vm" else {},
+        session=source if scope == "session" else None,
+    )
+    assert out["CONFIG"] == value
+
+
+@pytest.mark.parametrize("scope", ["vm", "session"])
+def test_rendered_plaintext_with_a_nul_is_refused(scope: str) -> None:
+    value = "/srv/nul\0value"
     source = {"CONFIG": EnvEntry("${agw:workspace_dir}")}
     with pytest.raises(ValidationError) as caught:
         compose_env(

@@ -67,7 +67,6 @@ class Resolver:
         self._interaction = interaction
         self._prompt_names = prompt_names
         self._decls: dict[str, SecretDecl] = {}
-        self._targets: list[SecretTarget] = []
         self._seeded: dict[str, str] = {}
         self._failed_gates: set[str] = set()
         self._values: dict[str, str] | None = None
@@ -86,7 +85,6 @@ class Resolver:
         self._values = None
         self._failed_gates.clear()
         self._decls.clear()
-        self._targets.clear()
 
     def _require_open(self) -> None:
         if self._closed:
@@ -119,11 +117,9 @@ class Resolver:
         self._require_open()
         from agentworks.secrets.orchestration import compute_needed_secrets
 
-        retained = list(targets)
-        self._targets.extend(retained)
         self.register(
             compute_needed_secrets(
-                retained,
+                targets,
                 self._registry,
                 allow_transient_auto_declare=allow_transient_auto_declare,
             )
@@ -210,9 +206,6 @@ class Resolver:
                     "Register every participating resource's secrets before "
                     "the preflight-boundary resolve."
                 )
-            from agentworks.secrets.orchestration import validate_target_values
-
-            validate_target_values(self._targets, self._values)
             return
         # An independently failed VM may share a credential with an eligible
         # workload. Fail its complete boundary before touching any new source.
@@ -225,9 +218,6 @@ class Resolver:
         else:
             batch = self._resolve_declarations(missing)
             resolved = {**self._seeded, **batch.complete_or_raise()}
-        from agentworks.secrets.orchestration import validate_target_values
-
-        validate_target_values(self._targets, resolved)
         self._values = resolved
 
     def resolve_gate(self, name: str) -> str:

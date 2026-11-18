@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import DesiredRuntimeState, ProvisioningStatus, SessionMode, VMStatus
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import StateError
 from agentworks.execution.access import Admin
 from agentworks.execution.requests import TerminalCommand
 from agentworks.execution.results import Completed, Result
@@ -169,7 +169,7 @@ def test_named_console_attach_holds_across_the_interactive_attach(
     assert target.attaches() == [(Admin(), ATTACH)]
 
 
-def test_console_restart_multiline_environment_secret_refuses_before_rebuild(
+def test_console_restart_hands_a_multiline_environment_secret_to_the_rebuild(
     db: Database,
     make_config,  # noqa: ANN001
     target: _Guest,
@@ -193,26 +193,21 @@ def test_console_restart_multiline_environment_secret_refuses_before_rebuild(
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **kw: None)
     monkeypatch.setattr(multi_console, "_console_tmux_presence", lambda *args: ProbeStatus.PRESENT)
-    rebuilds: list[str] = []
+    rebuilds: list[dict[str, str]] = []
+    monkeypatch.setattr("agentworks.sessions.multi_console._teardown_console_tmux", lambda *args: None)
     monkeypatch.setattr(
         "agentworks.sessions.multi_console._build_console_tmux",
-        lambda *args, **kwargs: rebuilds.append("rebuild"),
+        lambda *args, **kwargs: rebuilds.append(dict(kwargs["values"])),
     )
 
-    with pytest.raises(ValidationError) as caught:
-        multi_console.restart_console(
-            db,
-            config,
-            name="c1",
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    multi_console.restart_console(
+        db,
+        config,
+        name="c1",
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
 
-    assert rebuilds == []
-    assert target.attaches() == []
-    assert db.get_console("c1") is not None
-    assert "console-restart-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert [values["console-env"] for values in rebuilds] == [environment_value]
 
 
 def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(

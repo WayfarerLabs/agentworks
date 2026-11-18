@@ -107,20 +107,25 @@ its own credentials before remote preflight.
 The readiness path checks declared `required_commands` on an available target; a new target's probe
 defers until that target exists. These checks cover whether the template renders and whether
 declared commands are available. Command behavior is determined by execution. Launch renders the
-selected field again from its declaration before launch or destructive replacement. Native
-transports retain their documented env-delivery limitations.
+selected field again from its declaration before launch or destructive replacement.
 
 `agw env show --session NAME` previews winning plaintext values and their scopes from managed state
 without connecting to the VM. `--vm`, `--workspace`, and `--agent` select other contexts. Secrets
-remain redacted unless `--resolve` is explicit. This is a managed-config preview, not an observation
-of a process's live environment or user shell startup effects.
+remain redacted unless `--resolve` is explicit. Each value prints on one row, with a backslash as
+`\\` and line breaks and other control characters escaped (`\n`, `\r`, `\t`, `\x1b`). This is a
+managed-config preview, not an observation of a process's live environment or user shell startup
+effects.
 
 Every consumer that reaches the VM over SSH (VM and agent shell and exec, sessions, and console
 shells) uses the [execution channel](../../cli/agentworks/execution/README.md), which sends
 environment values in its stdin request envelope; a console shell's travel in the request its
 terminal handover parks. No value is on a command line or in the client's `SetEnv` option, so the
 SSH client never expands one, and literal `${...}` text in an escaped plaintext or a secret reaches
-the workload as written.
+the workload as written. A value may hold line breaks, which arrive intact; a plaintext value with a
+NUL, which no process environment can hold, is refused when it is rendered, before any request
+carries it. Operation logs and diagnostics redact a secret's whole value in its usual spellings (see
+[Value handling](../../cli/agentworks/secrets/README.md#value-handling)), but not one line of a
+multi-line secret shown on its own.
 
 ## Secrets
 

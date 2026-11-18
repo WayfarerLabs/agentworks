@@ -494,10 +494,10 @@ def _assert_one_row_that_reads_back(captured_output: CapturedOutput, key: str, v
     assert not [line for line in captured_output.info if "forged-row" in line and not line.startswith(key)]
 
 
-def test_a_plaintext_value_with_controls_prints_escaped_on_one_row(
+def test_a_plaintext_value_with_line_breaks_and_controls_prints_escaped_on_one_row(
     db: Database, tmp_path: Path, captured_output: CapturedOutput
 ) -> None:
-    value = "first\\nhalf\t\x1b[2J\u2028\u202eend"
+    value = FORGING_VALUE
     cfg = _write_config(tmp_path, vm_template=ManifestDoc("vm-template", "default", {"env": {"MULTI": value}}))
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)

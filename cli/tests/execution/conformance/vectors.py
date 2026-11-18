@@ -496,10 +496,14 @@ def terminal_command_whose_directory_is_missing_is_refused_before_the_terminal(l
 
 # -- T2: a pane's handover ---------------------------------------------------------------
 
+# A pane's environment value with line breaks, which the parked request carries whole.
+PANE_LINES = "first 100%\r\nsecond\n"
+
 # Typed into the pane's shell. Each probe prints a marker its own echoed line does not hold.
 PANE_KEYS = (
     b'printf \'%s2:%s:%s\\n\' T "$TERM" "$TOKEN"\n'
     b'printf \'%sX:%s|%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$TERM_PROGRAM_VERSION" "$SSH_TTY"\n'
+    b'python3 -c \'import os; print("T" "L:" + repr(os.environb[b"LINES_VALUE"]))\'\n'
     b"case $- in *i*) echo I''NTERACTIVE ;; esac\n"
     b"exit 0\n"
 )
@@ -520,7 +524,7 @@ def pane_handover(lane: Lane, *, term: str | None, switch_user: bool = False) ->
     token = lane.handover_token()
     owner_env = TMUX_VARIABLES | ({} if term is None else {"TERM": term})
 
-    with lane.access.park(LoginShell(cwd=lane.workdir, env={"TOKEN": secret})) as handover:
+    with lane.access.park(LoginShell(cwd=lane.workdir, env={"TOKEN": secret, "LINES_VALUE": PANE_LINES})) as handover:
         command = handover.command(switch_user=switch_user)
         shown = lane.pane(command, owner_env=owner_env, keys=PANE_KEYS)
 
@@ -528,6 +532,7 @@ def pane_handover(lane: Lane, *, term: str | None, switch_user: bool = False) ->
     assert handover.collected
     assert secret not in command  # the environment is in the parked request, not on the pane's command line
     assert f"T2:{term or DEFAULT_TERM}:{secret}".encode() in shown.stdout, shown.stdout
+    assert b"TL:" + repr(PANE_LINES.encode()).encode() in shown.stdout, shown.stdout
     assert b"INTERACTIVE" in shown.stdout, shown.stdout
     assert lane.wait_gone(f"/tmp/agw-handover-{token}")
     return shown.stdout

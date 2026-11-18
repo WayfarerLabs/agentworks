@@ -49,9 +49,10 @@ def render_plaintext(
             location=location,
             legacy_placeholders=LEGACY_PLACEHOLDERS if legacy else None,
         )
-        if any(character in value for character in ("\0", "\r", "\n")):
+        # Line breaks travel in the request intact; no exec'd environment can hold a NUL.
+        if "\0" in value:
             raise ValidationError(
-                f"{location}: environment value contains an unsupported line separator or NUL",
+                f"{location}: environment value contains a NUL byte",
                 entity_kind="template",
                 entity_name=location,
             )

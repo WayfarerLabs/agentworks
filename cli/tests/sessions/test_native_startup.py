@@ -210,15 +210,25 @@ def test_native_global_config_and_last_n_log_lines(native):
 
 def test_native_launch_env_reaches_the_workload_and_never_the_command_line(native):
     marker = uuid4().hex
+    lines = f"first {marker}\r\nsecond 100%\n"
+    received = native.root / "lines.out"
     script = native.root / "work.sh"
-    script.write_text('printf "env-%s\\n" "$AGW_PROBE"; exec sleep 30\n')
-    socket, _pid = launch(native, f"/bin/sh {shlex.quote(str(script))}", launch_options={"env": {"AGW_PROBE": marker}})
+    script.write_text(
+        f'printf %s "$AGW_LINES" > {shlex.quote(str(received))}; printf "env-%s\\n" "$AGW_PROBE"; exec sleep 30\n'
+    )
+    socket, _pid = launch(
+        native,
+        f"/bin/sh {shlex.quote(str(script))}",
+        launch_options={"env": {"AGW_PROBE": marker, "AGW_LINES": lines}},
+    )
     deadline = time.monotonic() + 5
     captured = ""
     while f"env-{marker}" not in captured and time.monotonic() < deadline:
         captured = tmux.capture_output("s1", run_command=native.run, socket_path=socket)
         time.sleep(0.02)
     assert f"env-{marker}" in captured
+    # A value with line breaks reaches the workload byte-exact.
+    assert received.read_bytes() == lines.encode()
     assert not any(marker in command for command, _ in native.calls)
 
 

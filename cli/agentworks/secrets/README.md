@@ -154,9 +154,16 @@ together: the former allows out-of-band impact, while the latter still disables 
 
 Resolved values live only in the private operation batch and scoped delivery cache. NUL is rejected
 before resolution succeeds. Carriage returns and line feeds are otherwise opaque value content. Each
-consumer enforces its own narrower syntax: environment injection, Git credentials, Proxmox headers,
-and Tailscale input require one logical line, while structured SDK credentials may remain multiline.
-Preview or verification proves existence, not suitability for every sink.
+consumer enforces its own narrower syntax: Git credentials, Proxmox headers, and Tailscale input
+require one logical line, while environment injection, which travels in the request, and structured
+SDK credentials take multiline values whole. Preview or verification proves existence, not
+suitability for every sink.
+
+Operation logs and guest diagnostics redact each secret an operation registers with them as a whole:
+the raw value, its shell-quoted and Python `repr` spellings, the value without leading or trailing
+line breaks, and bash's `$'...'` spelling (`printf %q`, `declare -p`) in the C locale, which for
+non-ASCII text differs from the UTF-8 locale's. One line of a multi-line secret shown on its own is
+not redacted: matching each line would also redact common lines such as a PEM `-----END` line.
 
 Factory construction and context entry perform no provider or broker work. Cleanup always runs;
 cleanup failure emits fixed source-only warning text and never masks the primary result or

@@ -12,7 +12,6 @@ from agentworks.db import SessionMode
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ValidationError
 from agentworks.secrets import SecretTarget
-from agentworks.secrets.orchestration import validate_target_values
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console as mc
 from agentworks.vms.admin import AdminConfig
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize("admin_shell", [True, False])
-def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
+def test_a_resolved_secret_and_bad_pane_context_preserve_all_runtimes(
     db: Database,
     console_guest_factory,
     monkeypatch: pytest.MonkeyPatch,
@@ -54,12 +53,8 @@ def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
     before = deepcopy(model._sessions)
     values = {"pane-key": "literal${agw:session_name}-secret"}
     secret_target = SecretTarget(vm={"TOKEN": EnvEntry.model_validate({"secret": "pane-key"})})
-    # The line-use check cannot validate the later consumer's runtime context.
-    validate_target_values([secret_target], values)
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: [secret_target])
-    monkeypatch.setattr(
-        "agentworks.secrets.resolver.Resolver.resolve", lambda self: validate_target_values([secret_target], values)
-    )
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", lambda self: None)
     monkeypatch.setattr("agentworks.secrets.resolver.Resolver.values", property(lambda self: dict(values)))
     monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda *a, **kw: pytest.fail("resolved a source"))
 

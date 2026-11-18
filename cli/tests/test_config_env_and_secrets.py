@@ -673,19 +673,6 @@ def test_agentworks_prefix_warning_fires_for_every_scope(tmp_path: Path) -> None
     assert unwarned == [], f"env tables whose AGENTWORKS_* override went unwarned: {unwarned}; issues were {issues}"
 
 
-def test_plaintext_env_with_newline_warns(tmp_path: Path) -> None:
-    """Per ADR 0014: a newline in a plaintext env value would corrupt
-    the SSH SetEnv argument shape. Catch it at decode so the operator
-    sees a clear message instead of an opaque SSH-side rejection."""
-    cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        manifests=[ManifestDoc("admin-template", "default", {"env": {"MULTILINE": "line1\nline2"}})],
-    )
-    issues = _manifest_issues(cfg_file)
-    assert any("MULTILINE" in issue and "newline" in issue for issue in issues), issues
-
-
 def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
     """A child session template with no env of its own inherits the parent's env
     unchanged. Pins None-vs-empty handling in the merge."""

@@ -389,6 +389,13 @@ refusing.
   shell.
 - **Large environment values are refused up front.** One `NAME=VALUE` environment string over
   131,071 bytes is refused before anything runs, because Linux cannot execute it.
+- **Environment values may hold line breaks.** A plaintext `env` value or a secret an `env` entry
+  references may now contain carriage returns and line feeds, which reach the guest intact here, in
+  sessions and in console shells. Config load no longer warns about such a plaintext value, and no
+  command refuses either. A plaintext value with a NUL is still refused, before it is sent.
+  `agw env show` prints each value on one row, with a backslash as `\\` and line breaks and other
+  control characters escaped (`\n`, `\r`, `\t`, `\x1b`), and `--resolve` shows a secret with line
+  breaks that way instead of reporting an error for it.
 - **`vm shell` and `agent shell` without `--workspace` no longer print the message of the day or the
   last-login line.** sshd prints them only when it runs the login shell itself.
 - **`vm port-forward` exits 0 when you stop it** with Ctrl-C, on macOS and Linux also with `SIGTERM`

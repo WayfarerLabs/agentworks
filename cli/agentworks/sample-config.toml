@@ -198,8 +198,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # backend name is a 0.14 configuration error with the exact source declaration
 # and mapping rewrite needed to fix it.
 # Values are opaque strings. Resolution preserves CR/LF and rejects NUL.
-# Line-oriented consumers such as env injection, Git credentials, Proxmox API
-# auth, and Tailscale joins reject incompatible values at their own boundary.
+# Env injection delivers a value with its line breaks intact. Line-oriented
+# consumers such as Git credentials, Proxmox API auth, and Tailscale joins
+# reject a value with line breaks at their own boundary.
 
 # =============================================================================
 # Sessions
