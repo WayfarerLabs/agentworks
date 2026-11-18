@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -77,13 +76,25 @@ def test_each_new_launch_has_a_fresh_id_on_this_vm() -> None:
         Command(("tar",), elevated=True, stdin=Bytes(b"paths")),
         Command(("tar",), elevated=True, cwd="/srv"),
         Command(("tar",), elevated=True, deadline=60),
+        Command(("tar",), elevated=True, log_streams=False),
         Script("tar", Shell.SH, elevated=True),
         Command(("tar", "a\0b"), elevated=True),
         Command(("",), elevated=True),
         Command(("tar",), elevated=True, env={"BAD-NAME": "x"}),
         Command(("tar",), elevated=True, env={"OK": "a\0b"}),
     ],
-    ids=["not-elevated", "stdin", "cwd", "deadline", "script", "nul-argument", "no-program", "env-name", "nul-env"],
+    ids=[
+        "not-elevated",
+        "stdin",
+        "cwd",
+        "deadline",
+        "unlogged",
+        "script",
+        "nul-argument",
+        "no-program",
+        "env-name",
+        "nul-env",
+    ],
 )
 def test_launch_refuses_a_request_detached_work_cannot_take_with_nothing_sent(command: Command) -> None:
     access = admin()
@@ -97,13 +108,8 @@ def test_launch_refuses_a_request_detached_work_cannot_take_with_nothing_sent(co
 
 @pytest.mark.parametrize(
     "launch",
-    [
-        Launch("other-vm", "a" * 32),
-        Launch("box", "A" * 32),
-        Launch("box", "../" + "a" * 29),
-        Launch("box", "a" * 32, "no"),  # type: ignore[arg-type]
-    ],
-    ids=["other-vm", "uppercase", "traversal", "logging-not-a-bool"],
+    [Launch("other-vm", "a" * 32), Launch("box", "A" * 32), Launch("box", "../" + "a" * 29)],
+    ids=["other-vm", "uppercase", "traversal"],
 )
 def test_a_launch_that_new_launch_could_not_have_chosen_is_refused_by_every_operation(launch: Launch) -> None:
     access = admin()
@@ -226,42 +232,6 @@ def test_an_unreadable_observation_is_an_external_error(answer: bytes) -> None:
 
     with pytest.raises(ExternalError):
         detached.observe(detached.new_launch())
-
-
-@pytest.mark.parametrize("logged", [True, False])
-def test_every_request_that_returns_the_payload_s_output_logs_it_only_as_the_launch_says(logged: bool) -> None:
-    access = admin()
-    access.run_outcomes = [
-        Result(Unknown(UnknownReason.CONNECTION)),
-        observed(State.RUNNING),
-        observed(State.EXITED, 0, tail=b"payload output"),
-        observed(State.EXITED, 0, tail=b"payload output"),
-        Result(Completed(1), b"payload output"),
-    ]
-    detached = access.detached()
-    launch = detached.new_launch(log_streams=logged)
-
-    detached.launch(launch, replace(ARCHIVE, log_streams=logged))
-    detached.observe(launch)
-    detached.interrupt(launch)
-    with pytest.raises(CommandFailed) as failed:
-        detached.observe(launch)
-
-    programs = [request for request in access.requests() if isinstance(request, PythonProgram)]
-    observing = [request for request in programs if request.args[0] in ("observe", "interrupt")]
-    assert [request.log_streams for request in observing] == [logged] * 4
-    assert failed.value.streams_logged is logged
-
-
-@pytest.mark.parametrize("logged", [True, False])
-def test_a_command_whose_stream_logging_differs_from_its_launch_s_is_refused_with_nothing_sent(logged: bool) -> None:
-    access = admin()
-    detached = access.detached()
-
-    with pytest.raises(ValidationError):
-        detached.launch(detached.new_launch(log_streams=logged), replace(ARCHIVE, log_streams=not logged))
-
-    assert access.requests() == []
 
 
 def test_download_cats_one_work_file_as_root_into_the_sink(tmp_path: Path) -> None:
