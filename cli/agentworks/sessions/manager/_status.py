@@ -413,10 +413,11 @@ def _batch_probe_command() -> str:
     It runs as root only to read the boot id and process presence and to
     switch to each row's account: every tmux client runs as that account
     (``tmux.owner_client_command``), after root refuses a socket path that is
-    a link, is not a socket, or is owned by another account, the checks
-    ``tmux.as_socket_owner_line`` makes for every other owner read, inlined
-    here for the program. A refused row reports ``SOCKET_GUARD_REFUSED``
-    (126) for both reads, which reads as unknown.
+    a link, is not a socket, or is owned by another account, the condition
+    ``tmux.as_socket_owner_line`` tests for every other owner read
+    (``tmux.socket_guard_condition``), here on the row's variables. A refused
+    row reports ``SOCKET_GUARD_REFUSED`` (126) for both reads, which reads as
+    unknown.
 
     Each row is probed in a background job that prints one line, prefixed
     with the row's position, and the program waits for every job, so nothing
@@ -426,10 +427,11 @@ def _batch_probe_command() -> str:
     delays no other row. Rows take no stdin, so the remaining rows stay out
     of every server's reach. Nothing is written on the guest.
     """
-    from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, owner_client_command
+    from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, owner_client_command, socket_guard_condition
 
     client = f'timeout -k {_BATCH_CLIENT_KILL_SECONDS} {_BATCH_CLIENT_TIMEOUT_SECONDS} tmux -S "$SOCK" "$@" </dev/null'
     as_owner = owner_client_command(client, owner_word='"$O"')
+    usable = socket_guard_condition('"$SOCK"', '"$O"')
     refused = SOCKET_GUARD_REFUSED
     return (
         # -v: od otherwise abbreviates repeated 16-byte lines as "*".
@@ -441,15 +443,13 @@ def _batch_probe_command() -> str:
         "probe_row() { "
         'I=$1; PID=$5; N=$(decode "$2") || exit 90; SOCK=$(decode "$3") || exit 90; O=$(decode "$4") || exit 90; '
         f"run_tmux() {{ {as_owner}; }}; "
-        'if [ -L "$SOCK" ] || { [ -e "$SOCK" ] && { [ ! -S "$SOCK" ] || '
-        '[ "$(stat -c %U -- "$SOCK" 2>/dev/null)" != "$O" ]; }; }; then '
-        f"H={refused}; HHEX=; S={refused}; SHEX=; else "
+        f"if {{ {usable}; }} 2>/dev/null; then "
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
         'HHEX=$(cap "$(printf %s "$HERR" | hex)"); '
         # 124 and 137 are timeout's own statuses: the server did not answer.
         'case "$H" in 124|137) S=$H; SHEX=;; '
         '*) SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(cap "$(printf %s "$SERR" | hex)");; esac; '
-        "fi; "
+        f"else H={refused}; HHEX=; S={refused}; SHEX=; fi; "
         'if [ "$PID" = - ]; then PFACT=; P=1; '
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
         'else printf absent; fi" 2>/dev/null); P=$?; fi; '

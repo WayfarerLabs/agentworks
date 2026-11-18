@@ -87,8 +87,9 @@ def _switch_stand_ins(bin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tmux_module, "RUNUSER_PATH", str(runuser))
 
 
-def _row(name: str, *, agent: bool = False) -> tuple[SessionRow, SessionTmuxServer]:
-    socket_path = f"{AGENT_SOCKETS if agent else ADMIN_SOCKETS}/{name}.sock"
+def _row(name: str, *, agent: bool = False, sockets: Path | None = None) -> tuple[SessionRow, SessionTmuxServer]:
+    """A row and its server; ``sockets`` puts an agent's socket in that directory, named for the agent."""
+    socket_path = f"{sockets or (AGENT_SOCKETS if agent else ADMIN_SOCKETS)}/{name}.sock"
     session = SessionRow(
         name=name,
         workspace_name="ws",
@@ -211,3 +212,39 @@ def test_a_row_line_stays_under_pipe_buf_whatever_its_clients_print(
         "loud": SessionStatus.UNKNOWN,
         "fine": SessionStatus.RUNNING,
     }
+
+
+@requires_symlinks
+@requires_posix_shell
+def test_a_row_whose_socket_fails_the_guard_is_unknown_and_never_reaches_tmux(
+    tmp_path: Path, shell: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The batch program refuses a row on the condition every other owner read tests (``socket_guard_condition``)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("base64", "cat", "od", "stat", "timeout", "tr"):
+        executable = shutil.which(name)
+        assert executable is not None
+        os.symlink(executable, bin_dir / name)
+    audit = tmp_path / "audit"
+    tmux = bin_dir / "tmux"
+    tmux.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\nexit 0\n')
+    tmux.chmod(0o755)
+    _switch_stand_ins(bin_dir, monkeypatch)
+    sockets = tmp_path / OWNER
+    sockets.mkdir()
+    linked = sockets / "linked.sock"
+    linked.symlink_to(sockets / "elsewhere.sock")
+    plain = sockets / "plain.sock"
+    plain.write_text("")
+    rows = [_row(name, agent=True, sockets=sockets) for name in ("linked", "plain", "fine")]
+    guest = _local_guest(
+        shell, {"PATH": f"{bin_dir}:/bin:/usr/bin", "HOME": str(tmp_path), "AGW_PROBE_AUDIT": str(audit)}
+    )
+
+    assert _status.batch_check_status(rows, admin=guest) == {
+        "linked": SessionStatus.UNKNOWN,
+        "plain": SessionStatus.UNKNOWN,
+        "fine": SessionStatus.RUNNING,
+    }
+    assert [line for line in audit.read_text().splitlines() if "linked" in line or "plain" in line] == []

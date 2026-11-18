@@ -212,6 +212,22 @@ with the same status (``sessions/manager/_status.py``, ``_batch_probe_command``)
 """
 
 
+def socket_guard_condition(socket_word: str, owner_word: str) -> str:
+    """The shell condition every socket-owner guard tests: true when the socket may be used as its owner.
+
+    It holds for a missing path and for a socket, not a link, that the
+    account ``owner_word`` names owns; it fails for a link, for a path that
+    exists but is not a socket, and for a socket another account owns.
+    ``socket_word`` and ``owner_word`` are each one shell word that expands to
+    the value: a quoted literal (``as_socket_owner_line``) or a quoted
+    variable in a guest program (the batch status script).
+    """
+    return (
+        f"test ! -L {socket_word} && {{ test ! -e {socket_word} || "
+        f'{{ test -S {socket_word} && test "$(stat -c %U -- {socket_word})" = {owner_word}; }}; }}'
+    )
+
+
 def as_socket_owner_line(
     command: str,
     *,
@@ -232,8 +248,8 @@ def as_socket_owner_line(
     request, as ``socket_owner_run_command`` sends it): root checks the
     socket and then runs ``command`` as ``owner`` (``owner_client_command``).
     Without it the caller already is ``owner``. The batch status script
-    (``_status._batch_probe_command``) runs the same checks per row in its
-    own loop.
+    (``_status._batch_probe_command``) tests the same condition
+    (``socket_guard_condition``) per row in its own loop.
 
     ``terminal`` is for an interactive client on the caller's terminal, such
     as ``tmux attach``: ``owner_client_command``'s ``pty`` gives ``command``
@@ -242,11 +258,8 @@ def as_socket_owner_line(
     """
     if terminal and not switch_user:
         raise ValueError("a relay terminal is only for a switch to the socket's owner")
-    q_socket, q_owner = shlex.quote(socket_path), shlex.quote(owner)
-    guard = (
-        f"test ! -L {q_socket} && {{ test ! -e {q_socket} || "
-        f'{{ test -S {q_socket} && test "$(stat -c %U -- {q_socket})" = {q_owner}; }}; }}'
-    )
+    q_owner = shlex.quote(owner)
+    guard = socket_guard_condition(shlex.quote(socket_path), q_owner)
     notice = f"printf '%s\\n' {shlex.quote(refusal)} >&2; " if refusal is not None else ""
     if switch_user:
         line = owner_client_command(f"/bin/sh -c {shlex.quote(command)}", owner_word=q_owner, pty=terminal)
