@@ -230,7 +230,7 @@ def _rehome_vm(
                 target.run(f"mkdir -- {np}", sudo=True)
             except BaseException:
                 output.warn(
-                    f"Rehome target reservation at {new_path!r} was not confirmed. "
+                    f"Rehome target reservation at {new_path} was not confirmed. "
                     "Any remaining path was left untouched; inspect and preserve its contents before retrying."
                 )
                 raise
@@ -245,18 +245,10 @@ def _rehome_vm(
                 # tokens concatenate in shell.
                 output.info("Copying workspace...")
                 has_rsync = target.run("which rsync", check=False, timeout=10)
-                try:
-                    if has_rsync.ok:
-                        target.run(f"rsync -a {op}/ {np}/", timeout=600)
-                    else:
-                        target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
-                except SSHError as error:
-                    error.add_hint(
-                        f"Source {old_path} and its database location are unchanged. "
-                        f"Partial target {new_path} was created by this rehome; confirm copying has stopped "
-                        f"before removing it and retrying. SSH log: {ssh_logger.display_path}."
-                    )
-                    raise
+                if has_rsync.ok:
+                    target.run(f"rsync -a {op}/ {np}/", timeout=600)
+                else:
+                    target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
 
                 # Verify copy succeeded
                 verify = target.run(f"test -d {np}", check=False, timeout=10)
@@ -265,7 +257,6 @@ def _rehome_vm(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
                         entity_name=ws_name,
-                        hint=f"SSH log: {ssh_logger.display_path}",
                     )
 
                 # Fix ownership, permissions, and ACLs on the new path
@@ -351,7 +342,10 @@ def _rehome_vm(
                     f"SSH log: {ssh_logger.display_path}"
                 )
                 raise
-            except AgentworksError:
+            except AgentworksError as error:
+                error.add_hint(
+                    f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} SSH log: {ssh_logger.display_path}"
+                )
                 raise
             except Exception as e:
                 raise ExternalError(

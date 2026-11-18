@@ -448,13 +448,15 @@ def _rehome_partial_state_hint(db: Database, ws_name: str, old_path: str, new_pa
     except Exception as e:
         return f"DB state could not be read ({e}); manual inspection needed."
     if ws is None:
-        return "Workspace row is missing from the DB; manual cleanup may be needed."
+        return "Workspace row is missing from the DB; manual inspection is needed."
     if ws.workspace_path == new_path:
         return (
             f"DB now points to {new_path}, but the on-VM move may be incomplete. "
             f"Use 'workspace describe {ws_name}' and verify the directory."
         )
+    if ws.workspace_path != old_path:
+        return f"DB now points to {ws.workspace_path}; inspect the rehome state manually."
     return (
-        f"DB still points to {old_path}. A partial copy of the workspace may exist "
-        f"at {new_path}; verify and clean up if needed."
+        f"DB still points to {old_path}. Target {new_path} was created by this rehome; "
+        "confirm copying has stopped before removing it and retrying."
     )

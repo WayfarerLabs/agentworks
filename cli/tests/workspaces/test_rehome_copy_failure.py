@@ -40,9 +40,8 @@ class CopyTarget(RehomeTransport):
         self.rsync = True
         self.copy_calls = 0
         self.race = False
-        self.lose_reservation_reply = False
+        self.reservation_error: BaseException | None = None
         self.copy_error = SSHError("copy stopped", entity_kind="vm", entity_name="box", hint="upstream hint")
-        self.reservation_error = SSHError("reservation reply lost")
         self.environment["COPY_FAIL"] = "0"
         bindir = root / "bin"
         bindir.mkdir()
@@ -68,7 +67,7 @@ class CopyTarget(RehomeTransport):
         if copy:
             self.copy_calls += 1
         result = super().run(command, **kwargs)
-        if reservation and self.lose_reservation_reply:
+        if reservation and self.reservation_error is not None:
             assert result.ok
             (self.destination / "unrelated.txt").write_bytes(b"preserve me\n")
             raise self.reservation_error
@@ -146,7 +145,8 @@ def test_unowned_or_unconfirmed_target_is_preserved_without_copy_hint(
         target.destination.mkdir(parents=True)
         (target.destination / "unrelated.txt").write_bytes(b"preserve me\n")
     target.race = reservation == "raced"
-    target.lose_reservation_reply = reservation == "unconfirmed"
+    if reservation == "unconfirmed":
+        target.reservation_error = SSHError("reservation reply lost")
 
     with pytest.raises(StateError if reservation == "present" else SSHError) as caught:
         rehome(db, rehome_case)
@@ -174,3 +174,106 @@ def test_success_updates_the_row_after_copying_both_files(db: Database, rehome_c
     assert target.copy_calls == 1
     for name in ("kept.txt", "later.txt"):
         assert (target.destination / name).read_bytes() == (target.source / name).read_bytes()
+
+
+@pytest.mark.parametrize("operation", ["chmod", "find"])
+def test_failure_after_copy_preserves_the_target_row_and_original_error(
+    db: Database, rehome_case: RehomeCase, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    target = rehome_case.target
+    original = SSHError("permission fixture failure", entity_kind="vm", entity_name="box", hint="upstream hint")
+    run = target.run
+
+    def fail(command: str, **kwargs: object) -> SSHResult:
+        if shlex.split(command)[0] == operation:
+            raise original
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(target, "run", fail)
+
+    with pytest.raises(SSHError) as caught:
+        rehome(db, rehome_case)
+
+    assert caught.value is original
+    assert (original.entity_kind, original.entity_name) == ("vm", "box")
+    assert original.hint is not None and original.hint.startswith("upstream hint")
+    assert str(target.source) in original.hint and str(target.destination) in original.hint
+    row = db.get_workspace("project")
+    assert row is not None and row.workspace_path == str(target.source)
+    for name in ("kept.txt", "later.txt"):
+        assert (target.destination / name).read_bytes() == (target.source / name).read_bytes()
+
+
+@pytest.mark.parametrize("relocated", [False, True])
+def test_failure_after_database_update_reports_the_actual_location(
+    db: Database, rehome_case: RehomeCase, monkeypatch: pytest.MonkeyPatch, relocated: bool
+) -> None:
+    target = rehome_case.target
+    location = target.home / "different location" if relocated else target.destination
+    original = StateError("workspace output fixture failure", hint="upstream hint")
+
+    def fail(*args: object) -> None:
+        if relocated:
+            db.update_workspace_path("project", str(location))
+        raise original
+
+    monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", fail)
+
+    with pytest.raises(StateError) as caught:
+        rehome(db, rehome_case)
+
+    assert caught.value is original
+    assert original.hint is not None and original.hint.startswith("upstream hint")
+    assert str(location) in original.hint and str(target.source) not in original.hint
+    if relocated:
+        assert str(target.destination) not in original.hint
+    row = db.get_workspace("project")
+    assert row is not None and row.workspace_path == str(location)
+    for name in ("kept.txt", "later.txt"):
+        assert (target.destination / name).read_bytes() == (target.source / name).read_bytes()
+
+
+def test_state_lookup_failure_keeps_the_original_exception(
+    db: Database, rehome_case: RehomeCase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = rehome_case.target
+    original = SSHError("permission fixture failure", hint="upstream hint")
+    run = target.run
+
+    def unavailable(*args: object) -> None:
+        raise RuntimeError("database fixture unavailable")
+
+    def fail(command: str, **kwargs: object) -> SSHResult:
+        if shlex.split(command)[0] == "chmod":
+            monkeypatch.setattr(db, "get_workspace", unavailable)
+            raise original
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(target, "run", fail)
+
+    with pytest.raises(SSHError) as caught:
+        rehome(db, rehome_case)
+
+    assert caught.value is original
+    assert original.hint is not None and original.hint.startswith("upstream hint")
+    for name in ("kept.txt", "later.txt"):
+        assert (target.destination / name).read_bytes() == (target.source / name).read_bytes()
+
+
+def test_interrupted_reservation_preserves_the_unconfirmed_target(
+    db: Database, rehome_case: RehomeCase, captured_output: CapturedOutput
+) -> None:
+    target = rehome_case.target
+    original = KeyboardInterrupt("reservation fixture interrupted")
+    target.reservation_error = original
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        rehome(db, rehome_case)
+
+    assert caught.value is original
+    assert len(captured_output.warnings) == 1
+    row = db.get_workspace("project")
+    assert row is not None and row.workspace_path == str(target.source)
+    assert (target.destination / "unrelated.txt").read_bytes() == b"preserve me\n"
+    assert target.copy_calls == 0
+    assert not (target.destination / "kept.txt").exists()
