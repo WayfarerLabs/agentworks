@@ -1087,8 +1087,8 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
   420-second budget, now counted with the agent waits outside each attempt's deadline, and retries
-  only while 60 seconds of it remain, so no attempt is dispatched with almost no time;
-  `guest_agent.run_as_root` refuses a deadline that is not positive before it asks anything.
+  only while 60 seconds of it remain, so no attempt is dispatched with almost no time. Every
+  caller's deadline is a positive constant or that remainder, so the channel does not re-check it.
 
 ## Live evidence
 

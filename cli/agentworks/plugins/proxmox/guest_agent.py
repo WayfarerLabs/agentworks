@@ -47,8 +47,8 @@ _ROOT_SHELL = ["/bin/bash", "-s"]
 def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: float) -> RawRun:
     """Run ``script`` through QGA once and return what the guest reported, or empty streams at the deadline.
 
-    ``deadline`` seconds, which must be positive, count from the dispatch,
-    once the guest agent has answered its ping; a guest agent that does not answer within
+    ``deadline`` seconds count from the dispatch, once the guest agent has
+    answered its ping; a guest agent that does not answer within
     ``AGENT_WAIT_SECONDS`` raises ``ChannelUnreachable`` before anything is
     dispatched. A dispatch failure, or status polls failing for
     ``STATUS_RETRY_SECONDS``, raises ``ConnectivityError`` saying how far the
@@ -58,8 +58,6 @@ def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: 
     token (401 or 403) is a ``TokenRejectedError`` instead, since no
     connection problem explains it.
     """
-    if not deadline > 0:
-        raise ValueError(f"a root script's deadline must be positive, not {deadline!r}")
     where = f"{vmid}@{node}"
     text = script.decode("utf-8")
     if len(text) > INPUT_DATA_LIMIT:
