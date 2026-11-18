@@ -530,7 +530,7 @@ class _SupportsDispatch(Protocol):
 class _ScriptedGuest:
     """The guest a test's recording accesses reach: it answers each request from its command line.
 
-    ``answer`` is a ``RecordingVMAccess`` answer (``install_fake_guest``
+    ``answer`` is a ``RecordingVMAccess`` answer (``install_scripted_guest``
     installs it for every access): a ``Command``'s line is ``shlex.join`` of
     its argv and a ``Script``'s is its source. ``commands`` records every
     line in order, and ``recorder`` is the access recorder, whose calls hold
@@ -749,10 +749,10 @@ def stub_vm_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args, **kwargs: None)
 
 
-def install_fake_guest(monkeypatch: pytest.MonkeyPatch, guest: _ScriptedGuest) -> _ScriptedGuest:
+def install_scripted_guest(monkeypatch: pytest.MonkeyPatch, guest: _ScriptedGuest) -> _ScriptedGuest:
     """Answer every ``VMAccess`` request from ``guest`` and stub the VM gates.
 
-    Shared by the ``fake_guest`` fixture (stateless) and the
+    Shared by the ``scripted_guest`` fixture (stateless) and the
     ``console_guest_factory`` fixture (stateful, model-backed), so both
     install the same seams and gate stubs. ``execution.vm_access`` builds
     recording accesses (``vm_access_support.route_vm_access_to_guest``) whose
@@ -769,9 +769,9 @@ def install_fake_guest(monkeypatch: pytest.MonkeyPatch, guest: _ScriptedGuest) -
 
 
 @pytest.fixture
-def fake_guest(monkeypatch: pytest.MonkeyPatch) -> _ScriptedGuest:
+def scripted_guest(monkeypatch: pytest.MonkeyPatch) -> _ScriptedGuest:
     """Install a stateless ``_ScriptedGuest`` that answers every ``VMAccess`` request, and stub the VM gates."""
-    return install_fake_guest(monkeypatch, _ScriptedGuest())
+    return install_scripted_guest(monkeypatch, _ScriptedGuest())
 
 
 @pytest.fixture
@@ -788,7 +788,7 @@ def console_guest_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - re
             assert model.has_session("aw-console-con")
 
     The installed guest answers through the same access seam and gate stubs
-    as ``fake_guest``; ``responses`` still layers per-test overrides
+    as ``scripted_guest``; ``responses`` still layers per-test overrides
     on top of the model (override map wins), so a test can force one command
     to fail while the rest stay stateful.
     """
@@ -796,7 +796,7 @@ def console_guest_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - re
     def _make(
         model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None
     ) -> _ScriptedGuest:
-        return install_fake_guest(monkeypatch, _ScriptedGuest(responses=responses, model=model))
+        return install_scripted_guest(monkeypatch, _ScriptedGuest(responses=responses, model=model))
 
     return _make
 

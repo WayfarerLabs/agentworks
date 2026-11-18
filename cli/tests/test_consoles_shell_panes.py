@@ -52,13 +52,13 @@ def _pane_command(split: str) -> list[str]:
     return shlex.split(shlex.split(split)[-1])
 
 
-def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_guest: _ScriptedGuest) -> None:
+def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, scripted_guest: _ScriptedGuest) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    fake_guest.commands.clear()
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.commands.clear()
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(
         db,
         _StubConfig(),
@@ -69,24 +69,24 @@ def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_guest: _Sc
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    splits = [c for c in fake_guest.commands if "split-window -t '=aw-console-con':a" in c]
+    splits = [c for c in scripted_guest.commands if "split-window -t '=aw-console-con':a" in c]
     assert len(splits) == 1
     # The pane's directory, the relative path joined under the workspace root, is in its parked request.
-    [park] = fake_guest.parks()
+    [park] = scripted_guest.parks()
     assert park.request.cwd == "/home/me/vm1/src"
-    layouts = [c for c in fake_guest.commands if "select-layout -t '=aw-console-con':a tiled" in c]
+    layouts = [c for c in scripted_guest.commands if "select-layout -t '=aw-console-con':a tiled" in c]
     assert len(layouts) == 1
 
 
-def test_delete_console_live_kills_tmux_session(db: Database, fake_guest: _ScriptedGuest) -> None:
+def test_delete_console_live_kills_tmux_session(db: Database, scripted_guest: _ScriptedGuest) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    fake_guest.commands.clear()
+    scripted_guest.commands.clear()
     delete_console(db, _StubConfig(), name="con", yes=True)
 
-    kill_session = [c for c in fake_guest.commands if "kill-session -t '=aw-console-con'" in c]
+    kill_session = [c for c in scripted_guest.commands if "kill-session -t '=aw-console-con'" in c]
     assert len(kill_session) == 1
     assert db.get_console("con") is None
 
@@ -109,50 +109,52 @@ def _seed_agent_session_console(db: Database) -> None:
     create_console(db, name="con", vm_name="vm1", session_specs=["s"])
 
 
-def test_an_agent_pane_parks_as_the_agent_and_switches_to_it(db: Database, fake_guest: _ScriptedGuest) -> None:
+def test_an_agent_pane_parks_as_the_agent_and_switches_to_it(db: Database, scripted_guest: _ScriptedGuest) -> None:
     """The agent's own connection parks the pane's shell, and the admin's tmux runs the handover behind `sudo -n -u`."""
     _seed_agent_session_console(db)
 
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    [park] = fake_guest.parks()
+    [park] = scripted_guest.parks()
     assert park.identity == BOT
     assert isinstance(park.request, LoginShell)
     assert park.request.cwd == "/home/me/vm1"
-    [split] = [c for c in fake_guest.commands if "split-window -t '=aw-console-con':s" in c]
+    [split] = [c for c in scripted_guest.commands if "split-window -t '=aw-console-con':s" in c]
     switched = _pane_command(split)
     assert switched[:5] == ["sudo", "-n", "-u", "bot-user", "--"]
     assert PARK_TOKEN in switched[-1]
     # The split itself runs as the admin, the console's tmux server's owner.
-    assert fake_guest.recorder is not None
-    splits = [call for call in _runs(fake_guest.recorder.calls) if "split-window" in str(command_line(call.request))]
+    assert scripted_guest.recorder is not None
+    splits = [
+        call for call in _runs(scripted_guest.recorder.calls) if "split-window" in str(command_line(call.request))
+    ]
     assert [call.identity for call in splits] == [Admin()]
 
 
-def test_an_admin_pane_parks_as_the_admin_with_no_switch(db: Database, fake_guest: _ScriptedGuest) -> None:
+def test_an_admin_pane_parks_as_the_admin_with_no_switch(db: Database, scripted_guest: _ScriptedGuest) -> None:
     """Admin shell on an admin-mode session: the admin parks and the pane runs the handover itself."""
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
-    [park] = fake_guest.parks()
+    [park] = scripted_guest.parks()
     assert park.identity == Admin()
-    [split] = [c for c in fake_guest.commands if "split-window -t '=aw-console-con':a" in c]
+    [split] = [c for c in scripted_guest.commands if "split-window -t '=aw-console-con':a" in c]
     assert "sudo" not in _pane_command(split)
 
 
 def test_an_agent_pane_checks_the_agents_access_before_anything_changes(
-    db: Database, fake_guest: _ScriptedGuest
+    db: Database, scripted_guest: _ScriptedGuest
 ) -> None:
     """On a running console, an agent that predates the direct-SSH rollout is refused before the shell is recorded."""
     _seed_agent_session_console(db)
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
-    assert fake_guest.recorder is not None
-    agent = fake_guest.recorder.access(BOT)
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    assert scripted_guest.recorder is not None
+    agent = scripted_guest.recorder.access(BOT)
     agent.answer = lambda _call: Result(Unknown(UnknownReason.AUTH_FAILED))  # ssh as the agent is refused
 
     with pytest.raises(StateError) as raised:
@@ -162,37 +164,37 @@ def test_an_agent_pane_checks_the_agents_access_before_anything_changes(
     assert raised.value.hint
     member = db.get_console_session("con", "s")
     assert member is not None and member.shells == []
-    assert fake_guest.parks() == []
+    assert scripted_guest.parks() == []
     assert agent.requests() == [Command(("true",), deadline=30)]
 
 
 def test_a_stopped_console_records_an_agent_pane_without_checking_the_agent(
-    db: Database, fake_guest: _ScriptedGuest
+    db: Database, scripted_guest: _ScriptedGuest
 ) -> None:
     """With no live tmux there is no pane to park, so the shell is recorded and the agent is not asked."""
     _seed_agent_session_console(db)
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(
         returncode=1, stderr="can't find session: aw-console-con"
     )
-    assert fake_guest.recorder is not None
-    agent = fake_guest.recorder.access(BOT)
+    assert scripted_guest.recorder is not None
+    agent = scripted_guest.recorder.access(BOT)
 
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
     member = db.get_console_session("con", "s")
     assert member is not None and len(member.shells) == 1
     assert agent.requests() == []
-    assert fake_guest.parks() == []
+    assert scripted_guest.parks() == []
 
 
 def test_a_console_whose_tmux_cannot_be_read_records_the_shell_then_fails(
-    db: Database, fake_guest: _ScriptedGuest
+    db: Database, scripted_guest: _ScriptedGuest
 ) -> None:
     """A probe that cannot tell checks no agent: the shell is recorded, then the live sync refuses to guess."""
     _seed_agent_session_console(db)
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=1, stderr="lost server")
-    assert fake_guest.recorder is not None
-    agent = fake_guest.recorder.access(BOT)
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=1, stderr="lost server")
+    assert scripted_guest.recorder is not None
+    agent = scripted_guest.recorder.access(BOT)
 
     with pytest.raises(StateError) as raised:
         add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
@@ -201,80 +203,80 @@ def test_a_console_whose_tmux_cannot_be_read_records_the_shell_then_fails(
     member = db.get_console_session("con", "s")
     assert member is not None and len(member.shells) == 1
     assert agent.requests() == []
-    assert fake_guest.parks() == []
+    assert scripted_guest.parks() == []
 
 
 def test_a_pane_whose_directory_is_gone_opens_in_the_home_directory(
-    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
+    db: Database, scripted_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
-    fake_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
-    fake_guest.admin().park_outcomes.append(RequestRefused("vm1", "cwd", Result(Unknown(UnknownReason.CONNECTION))))
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
+    scripted_guest.admin().park_outcomes.append(RequestRefused("vm1", "cwd", Result(Unknown(UnknownReason.CONNECTION))))
 
     add_shell(
         db, _StubConfig(), console_name="con", session_name="a", cwd="gone", interaction=TtyInteractionPolicy.REFUSE
     )
 
-    assert [park.request.cwd for park in fake_guest.parks()] == ["/home/me/vm1/gone", None]
+    assert [park.request.cwd for park in scripted_guest.parks()] == ["/home/me/vm1/gone", None]
     assert any("/home/me/vm1/gone" in warning for warning in captured_output.warnings)
-    assert [c for c in fake_guest.commands if "split-window" in c]
-    assert any(f"-t %7 {SHELL_INDEX_OPTION} 0" in c for c in fake_guest.commands)
+    assert [c for c in scripted_guest.commands if "split-window" in c]
+    assert any(f"-t %7 {SHELL_INDEX_OPTION} 0" in c for c in scripted_guest.commands)
 
 
 def test_a_refused_split_lets_the_parked_request_go(
-    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
+    db: Database, scripted_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
-    fake_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(returncode=1, stderr="no space")
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(returncode=1, stderr="no space")
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
     # The split ran inside the parking block, which left by exception, so the request went at once.
-    [park] = fake_guest.parks()
+    [park] = scripted_guest.parks()
     assert "raised" in park.options
-    assert not [c for c in fake_guest.commands if "set-option -p" in c]
+    assert not [c for c in scripted_guest.commands if "set-option -p" in c]
     # The one warning carries tmux's own reason.
     [warning] = captured_output.warnings
     assert "no space" in warning
 
 
 def test_a_pane_that_never_collects_its_request_is_a_failed_pane(
-    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
+    db: Database, scripted_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
-    fake_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
-    fake_guest.admin().park_collected = False
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
+    scripted_guest.admin().park_collected = False
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
     # The pane started no shell, so it is killed rather than left untagged, and the failure is warned.
-    assert not [c for c in fake_guest.commands if "set-option -p" in c]
-    assert [c for c in fake_guest.commands if "kill-pane" in c] == ["tmux kill-pane -t %7"]
+    assert not [c for c in scripted_guest.commands if "set-option -p" in c]
+    assert [c for c in scripted_guest.commands if "kill-pane" in c] == ["tmux kill-pane -t %7"]
     assert len(captured_output.warnings) == 1
 
 
 @pytest.mark.parametrize("killed", [True, False])
-def test_an_uncollected_pane_says_whether_its_kill_completed(fake_guest: _ScriptedGuest, killed: bool) -> None:
+def test_an_uncollected_pane_says_whether_its_kill_completed(scripted_guest: _ScriptedGuest, killed: bool) -> None:
     from agentworks.sessions.multi_console.tmux_build import _PaneShellNotStarted, _split_parked
 
-    fake_guest.responses["split-window"] = _FakeResult(stdout="%7\n")
+    scripted_guest.responses["split-window"] = _FakeResult(stdout="%7\n")
     if not killed:
-        fake_guest.responses["kill-pane"] = _FakeResult(returncode=1, stderr="no server running")
-    fake_guest.admin().park_collected = False
+        scripted_guest.responses["kill-pane"] = _FakeResult(returncode=1, stderr="no server running")
+    scripted_guest.admin().park_collected = False
 
     with pytest.raises(_PaneShellNotStarted) as raised:
         _split_parked(
-            fake_guest.run_command(),
-            fake_guest.admin(),
+            scripted_guest.run_command(),
+            scripted_guest.admin(),
             LoginShell(),
             window="'=aw-console-con':a",
             switch_user=False,
@@ -284,7 +286,7 @@ def test_an_uncollected_pane_says_whether_its_kill_completed(fake_guest: _Script
     assert raised.value.pane_may_remain is not killed
 
 
-def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, fake_guest: _ScriptedGuest) -> None:
+def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, scripted_guest: _ScriptedGuest) -> None:
     """The pane's composed environment, workspace identity only, is in its parked request and nowhere else.
 
     An add-shell pane is a sidecar shell rooted in the session's workspace,
@@ -292,24 +294,24 @@ def test_a_panes_environment_is_parked_never_on_a_command_line(db: Database, fak
     AGENTWORKS_AGENT reaches it from the agent's profile fragment.
     """
     _seed_agent_session_console(db)
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
 
     add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    [park] = fake_guest.parks()
+    [park] = scripted_guest.parks()
     env = dict(park.request.env)
     assert env["AGENTWORKS_WORKSPACE"] == "ws-vm1"
     assert "AGENTWORKS_WORKSPACE_DIR" in env
     assert not [key for key in env if key.startswith(("AGENTWORKS_SESSION", "AGENTWORKS_AGENT"))]
-    assert fake_guest.recorder is not None
-    assert not [call for call in _runs(fake_guest.recorder.calls) if call.request.env]
-    assert not [c for c in fake_guest.commands if "ws-vm1" in c and "split-window" in c]
+    assert scripted_guest.recorder is not None
+    assert not [call for call in _runs(scripted_guest.recorder.calls) if call.request.env]
+    assert not [c for c in scripted_guest.commands if "ws-vm1" in c and "split-window" in c]
 
 
 # -- Pane tagging ----------------------------------------------------------
 
 
-def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, fake_guest: _ScriptedGuest) -> None:
+def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, scripted_guest: _ScriptedGuest) -> None:
     """After split-window emits the new pane id, _split_shell_pane sets
     @agentworks-shell-index so restore-session can identify which configured
     shell a given live pane corresponds to."""
@@ -317,21 +319,21 @@ def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, fake_gue
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    fake_guest.commands.clear()
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.commands.clear()
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     # Simulate tmux split-window -P emitting a pane id.
-    fake_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
+    scripted_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
-    set_options = [c for c in fake_guest.commands if "set-option -p" in c and SHELL_INDEX_OPTION in c]
+    set_options = [c for c in scripted_guest.commands if "set-option -p" in c and SHELL_INDEX_OPTION in c]
     assert len(set_options) == 1
     # The first shell added is config index 0 (cs.shells was empty).
     assert f"-t %7 {SHELL_INDEX_OPTION} 0" in set_options[0]
 
 
 def test_split_shell_pane_warns_when_split_returns_no_pane_id(
-    db: Database, fake_guest: _ScriptedGuest, captured_output: CapturedOutput
+    db: Database, scripted_guest: _ScriptedGuest, captured_output: CapturedOutput
 ) -> None:
     """If split-window's stdout is empty (older tmux / weird transport), the
     tag step is skipped and the operator gets a warning that the pane is
@@ -341,13 +343,13 @@ def test_split_shell_pane_warns_when_split_returns_no_pane_id(
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    fake_guest.commands.clear()
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.commands.clear()
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
     # Default _FakeResult has empty stdout, so no pane_id to tag.
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 
-    set_options = [c for c in fake_guest.commands if "set-option -p" in c]
+    set_options = [c for c in scripted_guest.commands if "set-option -p" in c]
     assert set_options == []
     # The recovery hint includes the actual console name so it can be
     # copy/pasted verbatim.
@@ -372,9 +374,9 @@ def test_reorder_shell_panes_puts_tagged_shells_into_config_order(
     # tag 0 at index 2. This is what real tmux leaves after add-shell splits the
     # new shell in directly below the active session pane.
     model.seed_session(CON, "a", pane_tags=(None, 1, 0))
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
 
-    _reorder_shell_panes(target.run_command(), CON, "a", 2)
+    _reorder_shell_panes(guest.run_command(), CON, "a", 2)
 
     rows = model.pane_rows(CON, "a")
     assert rows is not None
@@ -419,7 +421,7 @@ def test_add_shell_reorders_shell_panes_into_config_order(
 @pytest.mark.parametrize("failure", ["refused", "incomplete"])
 def test_split_shell_pane_warns_when_set_option_fails(
     db: Database,
-    fake_guest: _ScriptedGuest,
+    scripted_guest: _ScriptedGuest,
     captured_output: CapturedOutput,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
@@ -432,19 +434,19 @@ def test_split_shell_pane_warns_when_set_option_fails(
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
 
-    fake_guest.commands.clear()
-    fake_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
-    fake_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
+    scripted_guest.commands.clear()
+    scripted_guest.responses["has-session -t '=aw-console-con'"] = _FakeResult(returncode=0)
+    scripted_guest.responses["split-window -t '=aw-console-con':a"] = _FakeResult(stdout="%7\n")
     if failure == "refused":
-        fake_guest.responses["set-option -p"] = _FakeResult(returncode=1, stderr="bad target")
+        scripted_guest.responses["set-option -p"] = _FakeResult(returncode=1, stderr="bad target")
     else:
-        answer = fake_guest.answer
+        answer = scripted_guest.answer
 
         def lost(call: Call) -> Result | None:
             line = command_line(call.request)
             return Result(Unknown(UnknownReason.CONNECTION)) if line and "set-option -p" in line else answer(call)
 
-        monkeypatch.setattr(fake_guest, "answer", lost)
+        monkeypatch.setattr(scripted_guest, "answer", lost)
 
     add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=TtyInteractionPolicy.REFUSE)
 

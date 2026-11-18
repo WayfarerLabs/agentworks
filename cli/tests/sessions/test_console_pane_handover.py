@@ -59,14 +59,14 @@ def _seed(db: Database, specs: list[str], *, admin_shell: bool = False) -> None:
     create_console_record(db, name="con", vm_name="vm1", session_specs=specs, add_admin_shell=admin_shell)
 
 
-def _parks(target: _ScriptedGuest) -> list[tuple[Identity, str]]:
-    return [(call.identity, call.request.env["TOKEN"]) for call in target.parks()]
+def _parks(guest: _ScriptedGuest) -> list[tuple[Identity, str]]:
+    return [(call.identity, call.request.env["TOKEN"]) for call in guest.parks()]
 
 
-def _assert_no_value_left_the_parked_requests(target: _ScriptedGuest) -> None:
-    assert target.recorder is not None
-    assert not [line for line in target.commands if MARKER in line or "quoted" in line]
-    assert not [call for call in target.recorder.calls if call.operation == "run" and call.request.env]
+def _assert_no_value_left_the_parked_requests(guest: _ScriptedGuest) -> None:
+    assert guest.recorder is not None
+    assert not [line for line in guest.commands if MARKER in line or "quoted" in line]
+    assert not [call for call in guest.recorder.calls if call.operation == "run" and call.request.env]
 
 
 def test_a_console_build_parks_every_shell_on_its_own_identity(
@@ -74,17 +74,17 @@ def test_a_console_build_parks_every_shell_on_its_own_identity(
 ) -> None:
     _seed(db, ["a+1", "s+1"], admin_shell=True)
     db.update_console_shells("con", "s", [{"cwd": None, "admin": False}, {"cwd": None, "admin": True}])
-    target = console_guest_factory(TmuxModel())
+    guest = console_guest_factory(TmuxModel())
 
     mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert _parks(target) == [
+    assert _parks(guest) == [
         (Admin(), f"{MARKER}:standalone"),
         (Admin(), f"{MARKER}:admin"),
         (BOT, f"{MARKER}:bot-user"),
         (Admin(), f"{MARKER}:admin"),
     ]
-    _assert_no_value_left_the_parked_requests(target)
+    _assert_no_value_left_the_parked_requests(guest)
 
 
 def test_add_shell_parks_the_new_shell_on_its_own_identity(
@@ -93,12 +93,12 @@ def test_add_shell_parks_the_new_shell_on_its_own_identity(
     _seed(db, ["s"])
     model = TmuxModel()
     model.seed_session(CON, "s")
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
 
     mc.add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert _parks(target) == [(BOT, f"{MARKER}:bot-user")]
-    _assert_no_value_left_the_parked_requests(target)
+    assert _parks(guest) == [(BOT, f"{MARKER}:bot-user")]
+    _assert_no_value_left_the_parked_requests(guest)
 
 
 def test_restoring_a_missing_window_parks_every_configured_shell(
@@ -109,13 +109,13 @@ def test_restoring_a_missing_window_parks_every_configured_shell(
     db.update_console_shells("con", "s", [{"cwd": None, "admin": False}, {"cwd": None, "admin": True}])
     model = TmuxModel()
     model.seed_session(CON, "a")
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
 
     mc.restore_session(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
     assert model.window_names(CON) == ["a", "s"]
-    assert _parks(target) == [(BOT, f"{MARKER}:bot-user"), (Admin(), f"{MARKER}:admin")]
-    _assert_no_value_left_the_parked_requests(target)
+    assert _parks(guest) == [(BOT, f"{MARKER}:bot-user"), (Admin(), f"{MARKER}:admin")]
+    _assert_no_value_left_the_parked_requests(guest)
 
 
 def test_restoring_missing_panes_parks_only_the_missing_shells(
@@ -125,10 +125,10 @@ def test_restoring_missing_panes_parks_only_the_missing_shells(
     db.update_console_shells("con", "s", [{"cwd": None, "admin": True}, {"cwd": None, "admin": False}])
     model = TmuxModel()
     model.seed_session(CON, "s", pane_tags=(None, 0))
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
 
     mc.restore_session(db, _StubConfig(), console_name="con", session_name="s", interaction=TtyInteractionPolicy.REFUSE)
 
     assert [tag for _pid, _pidx, tag in model.pane_rows(CON, "s") or []] == [None, 0, 1]
-    assert _parks(target) == [(BOT, f"{MARKER}:bot-user")]
-    _assert_no_value_left_the_parked_requests(target)
+    assert _parks(guest) == [(BOT, f"{MARKER}:bot-user")]
+    _assert_no_value_left_the_parked_requests(guest)

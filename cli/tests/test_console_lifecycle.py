@@ -39,7 +39,7 @@ def test_create_persists_and_publishes_only_canonical_runtime(
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     model = TmuxModel()
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
 
     create_console(
         db,
@@ -53,7 +53,7 @@ def test_create_persists_and_publishes_only_canonical_runtime(
     assert db.get_console("con") is not None
     assert model.has_session("aw-console-con")
     assert not model.has_session("aw-console-build+con")
-    assert any("rename-session -t '=aw-console-build+con' aw-console-con" in command for command in target.commands)
+    assert any("rename-session -t '=aw-console-build+con' aw-console-con" in command for command in guest.commands)
 
 
 def test_create_failure_retains_stopped_definition_and_cleans_staging(
@@ -149,13 +149,13 @@ def test_attach_never_realizes_an_absent_runtime(
     _seed_sessions(db, ["alpha"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
     model = TmuxModel()
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
 
     with pytest.raises(StateError):
         attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=_refuse())
 
     assert not model.has_session("aw-console-con")
-    assert not any("new-session" in command for command in target.commands)
+    assert not any("new-session" in command for command in guest.commands)
 
 
 def test_restart_resolves_inputs_before_destroying_running_runtime(
@@ -203,7 +203,7 @@ def test_console_transport_failure_never_triggers_teardown_or_build(
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
     model = TmuxModel()
-    target = console_guest_factory(
+    guest = console_guest_factory(
         model,
         {"has-session -t '=aw-console-con'": _FakeResult(returncode=255)},
     )
@@ -219,7 +219,7 @@ def test_console_transport_failure_never_triggers_teardown_or_build(
         )
 
     assert db.get_console("con") is None
-    assert not any("kill-session" in command or "new-session" in command for command in target.commands)
+    assert not any("kill-session" in command or "new-session" in command for command in guest.commands)
 
 
 def test_empty_console_is_rejected_before_registry_or_remote_work(

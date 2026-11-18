@@ -764,7 +764,7 @@ def _prep_delete_session(db: Database, monkeypatch: pytest.MonkeyPatch, *, creat
 
 def test_delete_session_interactive_offers_now_empty_workspace(
     db: Database,
-    fake_guest: _ScriptedGuest,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -786,7 +786,7 @@ def test_delete_session_interactive_offers_now_empty_workspace(
 
 def test_delete_session_yes_reports_now_empty_uncreated_workspace(
     db: Database,
-    fake_guest: _ScriptedGuest,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -810,7 +810,7 @@ def test_delete_session_yes_reports_now_empty_uncreated_workspace(
 
 def test_delete_session_yes_auto_deletes_created_workspace(
     db: Database,
-    fake_guest: _ScriptedGuest,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -829,7 +829,7 @@ def test_delete_session_yes_auto_deletes_created_workspace(
 
 def test_delete_session_warns_when_now_empty_workspace_delete_raises(
     db: Database,
-    fake_guest: _ScriptedGuest,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:

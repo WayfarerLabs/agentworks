@@ -37,7 +37,7 @@ PANE = SecretTarget(vm={}, label="console-pane:pin")
 class _Boundary:
     """What happened, in order: tmux lines, target registrations and the resolve, with the database's change count."""
 
-    def __init__(self, db: Database, target: _ScriptedGuest | None, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, db: Database, guest: _ScriptedGuest | None, monkeypatch: pytest.MonkeyPatch) -> None:
         self.events: list[tuple[str, object]] = []
         self.changes_at_resolve: int | None = None
         register, resolve = Resolver.register_targets, Resolver.resolve
@@ -55,15 +55,15 @@ class _Boundary:
         monkeypatch.setattr(Resolver, "register_targets", registering)
         monkeypatch.setattr(Resolver, "resolve", resolving)
         monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: pytest.fail("late resolve"))
-        if target is not None:
-            dispatch = target.dispatch
+        if guest is not None:
+            dispatch = guest.dispatch
 
             def recording(command: str) -> _FakeResult:
                 if command.startswith("tmux"):
                     self.events.append(("tmux", command))
                 return dispatch(command)
 
-            monkeypatch.setattr(target, "dispatch", recording)
+            monkeypatch.setattr(guest, "dispatch", recording)
 
     def before_resolve(self) -> list[tuple[str, object]]:
         first = next(index for index, (kind, _) in enumerate(self.events) if kind == "resolve")
@@ -83,10 +83,10 @@ def test_create_resolves_its_panes_before_any_tmux_request_or_database_write(
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a"])
-    target = console_guest_factory(TmuxModel())
+    guest = console_guest_factory(TmuxModel())
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **k: [PANE])
     before = db._conn.total_changes
-    boundary = _Boundary(db, target, monkeypatch)
+    boundary = _Boundary(db, guest, monkeypatch)
 
     mc.create_console(
         db, _StubConfig(), name="con", vm_name="vm1", session_specs=["a+1"], interaction=TtyInteractionPolicy.REFUSE
@@ -113,12 +113,12 @@ def test_restore_resolves_every_configured_shell_before_any_tmux_request(
     model.seed_session(CON, "a")
     if not window_missing:
         model.seed_window(CON, "b", pane_tags=(None, 0, 2))
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
     shells = [SecretTarget(vm={}, label=f"console-pane:{index}") for index in range(3)]
     unasked = iter(shells)
     monkeypatch.setattr(mc, "_pane_secret_target", lambda *a, **k: next(unasked))
     before = db._conn.total_changes
-    boundary = _Boundary(db, target, monkeypatch)
+    boundary = _Boundary(db, guest, monkeypatch)
 
     mc.restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -143,9 +143,9 @@ def test_start_and_restart_resolve_their_build_before_changing_tmux(
     model = TmuxModel()
     if operation == "restart":
         model.seed_session(CON, "a")
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **k: [PANE])
-    boundary = _Boundary(db, target, monkeypatch)
+    boundary = _Boundary(db, guest, monkeypatch)
 
     run = mc.start_console if operation == "start" else mc.restart_console
     run(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)

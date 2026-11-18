@@ -50,7 +50,7 @@ def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
     model = TmuxModel()
     model.seed_session("aw-console-con", "old")
     model.seed_session("aw-console-build+con", "partial")
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
     before = deepcopy(model._sessions)
     values = {"pane-key": "literal${agw:session_name}-secret"}
     secret_target = SecretTarget(vm={"TOKEN": EnvEntry.model_validate({"secret": "pane-key"})})
@@ -67,7 +67,7 @@ def test_valid_line_secret_and_bad_pane_context_preserve_all_runtimes(
         mc.restart_console(db, config, name="con", interaction=TtyInteractionPolicy.REFUSE)
 
     assert model._sessions == before
-    assert not any("kill-session" in command or "new-session" in command for command in target.commands)
+    assert not any("kill-session" in command or "new-session" in command for command in guest.commands)
     assert values["pane-key"] not in str(caught.value)
 
 
@@ -84,7 +84,7 @@ def test_healthy_or_cleanup_only_validation_skips_unused_environments(
     model.seed_session("aw-console-con", "old")
     if staging:
         model.seed_session("aw-console-build+con", "partial")
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
@@ -93,14 +93,14 @@ def test_healthy_or_cleanup_only_validation_skips_unused_environments(
             registry,
             console=console,
             vm=db.get_vm("vm1"),
-            admin=target.admin(),
+            admin=guest.admin(),
             held_native_guard=guard,
         )
-        before = list(target.commands)
+        before = list(guest.commands)
         monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: pytest.fail("composed unused admin env"))
         monkeypatch.setattr(mc, "_resolve_pane_env", lambda *a, **kw: pytest.fail("composed unused sidecar env"))
         mc.validate_console_values(prepared, {})
-        assert target.commands == before
+        assert guest.commands == before
 
 
 def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
@@ -126,7 +126,7 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
     )
     db.update_console_shells("con", "agent-session", [{"cwd": None, "admin": False}, {"cwd": None, "admin": True}])
     model = TmuxModel()
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     calls = []
     with mc.guarded_console_selection(db, "con") as (console, guard):
@@ -136,10 +136,10 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
             registry,
             console=console,
             vm=db.get_vm("vm1"),
-            admin=target.admin(),
+            admin=guest.admin(),
             held_native_guard=guard,
         )
-        before = list(target.commands)
+        before = list(guest.commands)
         monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: calls.append(("standalone",)) or {})
         monkeypatch.setattr(
             mc,
@@ -159,7 +159,7 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
             "agentworks.secrets.resolve.active_sources", lambda *a, **kw: pytest.fail("resolved a source")
         )
         mc.validate_console_values(prepared, {})
-        assert target.commands == before
+        assert guest.commands == before
     assert calls == [
         ("standalone",),
         ("admin-session", "admin", True),

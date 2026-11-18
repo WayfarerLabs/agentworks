@@ -120,9 +120,9 @@ def test_a_refused_agent_stops_the_operation_before_it_resolves_or_changes_anyth
         db.set_console_desired_runtime_state("con", DesiredRuntimeState.RUNNING)
     model = TmuxModel()
     run = operation(db, model)
-    target = console_guest_factory(model)
-    assert target.recorder is not None
-    agent = target.recorder.access(BOT)
+    guest = console_guest_factory(model)
+    assert guest.recorder is not None
+    agent = guest.recorder.access(BOT)
     agent.answer = lambda _call: Result(Unknown(UnknownReason.AUTH_FAILED))
     resolves: list[str] = []
     resolve = Resolver.resolve
@@ -146,7 +146,7 @@ def test_a_refused_agent_stops_the_operation_before_it_resolves_or_changes_anyth
     assert resolves == []
     assert list(db._conn.iterdump()) == database
     assert model._sessions == tmux
-    assert target.parks() == []
+    assert guest.parks() == []
 
 
 def test_add_sessions_on_a_console_that_is_not_running_records_the_member_without_checking_its_agent(
@@ -155,9 +155,9 @@ def test_add_sessions_on_a_console_that_is_not_running_records_the_member_withou
     """With no live tmux there is no pane to park, so the member is recorded and its agent is not asked."""
     _seed(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=["a", "s+1"])
-    target = console_guest_factory(TmuxModel())
-    assert target.recorder is not None
-    agent = target.recorder.access(BOT)
+    guest = console_guest_factory(TmuxModel())
+    assert guest.recorder is not None
+    agent = guest.recorder.access(BOT)
     agent.answer = lambda _call: Result(Unknown(UnknownReason.AUTH_FAILED))
 
     mc.add_sessions(db, _StubConfig(), console_name="con", session_specs=["t+1"], interaction=REFUSE)
@@ -165,4 +165,4 @@ def test_add_sessions_on_a_console_that_is_not_running_records_the_member_withou
     member = db.get_console_session("con", "t")
     assert member is not None and len(member.shells) == 1
     assert agent.requests() == []
-    assert target.parks() == []
+    assert guest.parks() == []

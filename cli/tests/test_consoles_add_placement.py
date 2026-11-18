@@ -92,14 +92,14 @@ def test_manager_places_new_block_at_requested_index(
 @pytest.mark.parametrize("start_index", [-1, 4])
 def test_manager_rejects_invalid_index_without_mutation(
     db: Database,
-    fake_guest: _ScriptedGuest,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     start_index: int,
 ) -> None:
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b", "c", "d"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
-    fake_guest.commands.clear()
+    scripted_guest.commands.clear()
     monkeypatch.setattr(
         "agentworks.secrets.resolve_for_command",
         lambda *args, **kwargs: pytest.fail("invalid placement must not resolve secrets"),
@@ -118,7 +118,7 @@ def test_manager_rejects_invalid_index_without_mutation(
     assert exc_info.value.entity_kind == "console"
     assert exc_info.value.entity_name == "con"
     assert [member.session_name for member in db.list_console_sessions("con")] == ["a", "b", "c"]
-    assert fake_guest.commands == []
+    assert scripted_guest.commands == []
 
 
 def test_manager_rolls_back_additions_when_reorder_fails(

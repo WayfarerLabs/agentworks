@@ -94,7 +94,7 @@ def test_attach_joins_existing_canonical_runtime_without_building(
     create_console_record(db, name="con", vm_name="vm1", session_specs=["alpha"])
     model = TmuxModel()
     model.seed_session("aw-console-con", "alpha")
-    target = console_guest_factory(model)
+    guest = console_guest_factory(model)
 
     assert (
         attach_console(
@@ -107,7 +107,7 @@ def test_attach_joins_existing_canonical_runtime_without_building(
         == 0
     )
     # The admin's terminal runs tmux's own argv, with no shell in between.
-    assert [(call.identity, call.request) for call in target.attaches()] == [
+    assert [(call.identity, call.request) for call in guest.attaches()] == [
         (Admin(), TerminalCommand(("tmux", "attach", "-t", "=aw-console-con")))
     ]
-    assert not any("new-session" in command for command in target.commands)
+    assert not any("new-session" in command for command in guest.commands)

@@ -169,7 +169,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     from agentworks.execution.attach import Handover
     from agentworks.execution.requests import LoginShell
     from tests._tmux_model import TmuxModel
-    from tests.conftest import _ScriptedGuest, install_fake_guest
+    from tests.conftest import _ScriptedGuest, install_scripted_guest
     from tests.vm_access_support import PARK_TOKEN
 
     _seed_vm(db)
@@ -179,8 +179,8 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     value = f"prefix'{marker}' $(touch ignored) suffix"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
-    target = install_fake_guest(monkeypatch, _ScriptedGuest(model=TmuxModel()))
-    admin = target.admin()
+    guest = install_scripted_guest(monkeypatch, _ScriptedGuest(model=TmuxModel()))
+    admin = guest.admin()
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
@@ -195,9 +195,9 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
         assert mc.observe_prepared_console(prepared).value == "running"
     # The value travels in the admin's parked request, and the window runs only the handover's command.
     assert [call.request for call in admin.calls if call.operation == "park"] == [LoginShell(env={"TOKEN": value})]
-    [command] = [line for line in target.commands if line.startswith("tmux new-session")]
+    [command] = [line for line in guest.commands if line.startswith("tmux new-session")]
     assert shlex.split(command)[-1] == Handover(PARK_TOKEN, "agentworks").command()
-    assert not [line for line in target.commands if marker in line]
+    assert not [line for line in guest.commands if marker in line]
     assert not [call for call in admin.calls if call.operation == "run" and call.request.env]
     logs = list(tmp_path.glob("**/*console-build*.log"))
     assert logs
@@ -208,7 +208,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
 def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Database, tmp_path, monkeypatch, failure):
     from agentworks.errors import ExternalError
     from tests._tmux_model import TmuxModel
-    from tests.conftest import _FakeResult, _ScriptedGuest, install_fake_guest
+    from tests.conftest import _FakeResult, _ScriptedGuest, install_scripted_guest
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
@@ -231,21 +231,21 @@ def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Datab
                     return _FakeResult(stdout="1\n")
             return super().dispatch(command)
 
-    target = install_fake_guest(monkeypatch, Guest(model=model))
-    admin = target.admin()
+    guest = install_scripted_guest(monkeypatch, Guest(model=model))
+    admin = guest.admin()
     admin.park_collected = failure != "handover"
     with pytest.raises(ExternalError):
-        mc._build_console_tmux(target.console_access(_vm(db)), db, registry, _console(db), values={}, layout="tiled")
+        mc._build_console_tmux(guest.console_access(_vm(db)), db, registry, _console(db), values={}, layout="tiled")
 
     assert [call.operation for call in admin.calls if call.operation != "run"] == ["park"]
     assert not model.has_session("aw-console-con")
-    assert not any("rename-session" in command for command in target.commands)
+    assert not any("rename-session" in command for command in guest.commands)
     assert _console(db).last_started_at is None
 
 
 def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, monkeypatch):
     import agentworks.sessions.multi_console.attach as attach
-    from tests.conftest import _FakeResult, _ScriptedGuest, install_fake_guest
+    from tests.conftest import _FakeResult, _ScriptedGuest, install_scripted_guest
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
@@ -265,11 +265,11 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
         def dispatch(self, command: str) -> _FakeResult:
             raise UserAbort("cancelled")
 
-    target = install_fake_guest(monkeypatch, Guest())
+    guest = install_scripted_guest(monkeypatch, Guest())
     monkeypatch.setattr(attach, "_teardown_console_tmux", teardown)
     with pytest.raises(UserAbort):
         mc._build_console_tmux(
-            target.console_access(_vm(db)),
+            guest.console_access(_vm(db)),
             db,
             registry,
             _console(db),
@@ -302,7 +302,7 @@ def test_stop_off_parent_accepts_without_transport_activation_or_hold(db: Databa
 
 
 @pytest.mark.parametrize("error_type", [UserAbort, StateError])
-def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_guest, monkeypatch, error_type):
+def test_start_acceptance_survives_infrastructure_failure(db: Database, scripted_guest, monkeypatch, error_type):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -321,7 +321,7 @@ def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_gue
     assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
 
 
-def test_start_below_stopped_parent_records_child_running_without_activation(db: Database, fake_guest, monkeypatch):
+def test_start_below_stopped_parent_records_child_running_without_activation(db: Database, scripted_guest, monkeypatch):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -340,7 +340,7 @@ def test_start_below_stopped_parent_records_child_running_without_activation(db:
     assert _vm(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
-def test_known_preflight_refusal_preserves_console_target(db: Database, fake_guest, monkeypatch):
+def test_known_preflight_refusal_preserves_console_target(db: Database, scripted_guest, monkeypatch):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 

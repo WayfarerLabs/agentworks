@@ -1141,7 +1141,7 @@ def test_reinit_runs_initialization_through_the_gate(
     assert any(role is Role.RESULT and level == 0 and "rvm" in text for role, level, text in captured_output.lines)
 
 
-def test_reinit_refuses_invalid_configured_identity_before_activation_or_transport(
+def test_reinit_refuses_invalid_configured_identity_before_activation_or_access(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
