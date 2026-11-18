@@ -3,9 +3,13 @@
 Set ``AGW_CONFORMANCE_VM`` to the name of a VM in the operator's own state and
 run ``uv run pytest tests/execution/conformance/test_live_vectors.py -m integration``
 from each workstation. The lane reaches the VM as the operator's configured
-admin, over the operator's real host-key store, and creates and removes only
+admin, over the operator's real host-key store, and creates and removes
 files and directories under ``/tmp`` named ``agw-conformance-*`` and
-``agw-handover-*``. Deadlines on every request bound a hung guest.
+``agw-handover-*``. The detached vectors (DT1, DT2) also create
+``/var/lib/agentworks/detached``, and its parent if absent, and leave both;
+they discard each launch they make, and every launch removes the sibling
+launch directories that are not running and are older than seven days.
+Deadlines on every request bound a hung guest.
 """
 
 from __future__ import annotations

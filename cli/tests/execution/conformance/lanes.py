@@ -388,13 +388,17 @@ def free_port() -> int:
         return int(probe.getsockname()[1])
 
 
+RESTART_ATTEMPTS = 5
+"""How often an sshd started on a given port tries: another worker's process may briefly hold the port."""
+
+
 @contextlib.contextmanager
 def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServer]:
     """A loopback sshd run by the current user, with a temporary host key and authorized key.
 
     Started again on the same ``directory`` and ``port``, it keeps the keys it
     made there, so a client that trusted the first server reaches the second
-    as the same VM.
+    as the same VM; a port it cannot bind is tried again, with a backoff.
     """
     sshd = find_sshd()
     if sshd is None:
@@ -403,9 +407,10 @@ def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServ
     host_key, client_key = directory / "host_key", directory / "client_key"
     for key in (host_key, client_key):
         if not key.exists():
-            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+            generate_key(key)
     authorized = directory / "authorized_keys"
     authorized.write_text(Path(f"{client_key}.pub").read_text())
+    attempts = 1 if port is None else RESTART_ATTEMPTS
     port = port or free_port()
     config = directory / "sshd_config"
     config.write_text(
@@ -427,29 +432,48 @@ def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServ
         )
         + "\n"
     )
-    server = subprocess.Popen([sshd, "-D", "-e", "-f", str(config)], stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    failure = b""
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(0.2 * 2**attempt)
+        server = subprocess.Popen(
+            [sshd, "-D", "-e", "-f", str(config)], stdin=subprocess.DEVNULL, stderr=subprocess.PIPE
+        )
+        if _listening(server, port):
+            break
+        failure = _stop(server)
+    else:
+        unavailable(f"sshd could not start listening on port {port}: {failure[:300]!r}")
     try:
-        deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-        while True:
-            if server.poll() is not None:
-                unavailable(f"sshd could not start: {(server.stderr.read() if server.stderr else b'')[:300]!r}")
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=1).close()
-                break
-            except OSError:
-                if time.monotonic() > deadline:
-                    unavailable("sshd did not start listening")
-                time.sleep(0.1)
         key_fields = Path(f"{host_key}.pub").read_text().split()
         yield SSHDServer(port, client_key, trust.HostKey(key_fields[0], key_fields[1]))
     finally:
-        server.terminate()
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            server.wait(timeout=5)
-        server.kill()
-        server.wait()
-        if server.stderr:
-            server.stderr.close()
+        _stop(server)
+
+
+def _listening(server: subprocess.Popen[bytes], port: int) -> bool:
+    """Whether ``server`` accepts connections on ``port`` before it exits or the startup bound passes."""
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while server.poll() is None and time.monotonic() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+def _stop(server: subprocess.Popen[bytes]) -> bytes:
+    """Stop ``server`` and return what it wrote to stderr."""
+    server.terminate()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        server.wait(timeout=5)
+    server.kill()
+    server.wait()
+    if server.stderr is None:
+        return b""
+    with server.stderr:
+        return server.stderr.read()
 
 
 class SSHDLane(LocalFilesystem):

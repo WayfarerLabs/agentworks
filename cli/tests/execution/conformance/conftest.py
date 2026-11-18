@@ -34,14 +34,18 @@ def sshd_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SSHDServer
 
 
 @pytest.fixture(params=L_CASES, ids=[f"{shell}-{label}" for shell, label in L_CASES])
-def local_lane(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalLane:
+def local_lane(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, private_detached_base: None
+) -> LocalLane:
     require_linux_guest()
     shell, label = request.param
     return LocalLane(monkeypatch, tmp_path, shell, python_interpreters()[label])
 
 
 @pytest.fixture
-def sshd_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sshd_server: SSHDServer) -> SSHDLane:
+def sshd_lane(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sshd_server: SSHDServer, private_detached_base: None
+) -> SSHDLane:
     return SSHDLane(monkeypatch, tmp_path, sshd_server)
 
 
@@ -59,20 +63,17 @@ def detached_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         subprocess.run(["sudo", "-n", "rm", "-rf", "--", str(guest)], check=False)
 
 
-@pytest.fixture(autouse=True)
-def _private_detached_base(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Send the detached program with its base at :func:`detached_base` in every non-integration test.
+@pytest.fixture
+def private_detached_base(detached_base: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Send the detached program with its base at :func:`detached_base`, for a lane that runs it on this machine.
 
-    The L and S lanes run the program on this machine as root, where the VM's
-    base would be the runner's own ``/var/lib``. Integration tests reach a VM
-    and keep its real base.
+    The L and S lanes run the program here as root, where the VM's base would
+    be the runner's own ``/var/lib``. The V lane does not request it, so it
+    keeps the VM's real base.
     """
-    if request.node.get_closest_marker("integration") is not None:
-        return
-    base = str(request.getfixturevalue("detached_base"))
     source = detached.program_source()
     declaration = f'BASE = "{detached_program.BASE}"'
     if source.count(declaration) != 1:
         raise RuntimeError(f"the detached program no longer declares {declaration}; update this fixture")
-    monkeypatch.setattr(detached, "program_source", lambda: source.replace(declaration, f'BASE = "{base}"'))
-    monkeypatch.setattr(detached_program, "BASE", base)
+    monkeypatch.setattr(detached, "program_source", lambda: source.replace(declaration, f'BASE = "{detached_base}"'))
+    monkeypatch.setattr(detached_program, "BASE", str(detached_base))

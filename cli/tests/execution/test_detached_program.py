@@ -236,6 +236,9 @@ def test_launch_returns_once_the_payload_runs_and_work_sizes_are_observed(guest:
 
     assert launched.returncode == 0
     assert time.monotonic() - started < 15
+    # The launch's directory and its working directory are private to the account that launched it.
+    for directory in (guest.directory(launch_id), guest.directory(launch_id) / "work"):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
     deadline = time.monotonic() + 20
     while (observed := guest.observe(launch_id)).work.get("archive") != 4096:
         assert time.monotonic() < deadline
