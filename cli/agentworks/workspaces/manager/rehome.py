@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -221,9 +222,21 @@ def _rehome_vm(
         # which double-wrote the "Finished" footer when an inner raise re-entered
         # an outer except.
         try:
+            # Reserve exclusively: a preflight check cannot rule out a raced-in
+            # target, and an unanswered mkdir does not establish ownership.
+            parent = shlex.quote(str(PurePosixPath(new_path).parent))
+            target.run(f"mkdir -p -- {parent}", sudo=True)
             try:
-                # Create target directory as root and chown to admin so rsync can write
-                target.run(f"mkdir -p {np}", sudo=True)
+                target.run(f"mkdir -- {np}", sudo=True)
+            except BaseException:
+                output.warn(
+                    f"Rehome target reservation at {new_path!r} was not confirmed. "
+                    "Any remaining path was left untouched; inspect and preserve its contents before retrying."
+                )
+                raise
+
+            try:
+                # Let the admin write into the confirmed new target.
                 target.run(f"chown {vm.admin_username} {np}", sudo=True)
 
                 # Copy with rsync (fall back to cp -a). Trailing slash matters for
@@ -232,10 +245,18 @@ def _rehome_vm(
                 # tokens concatenate in shell.
                 output.info("Copying workspace...")
                 has_rsync = target.run("which rsync", check=False, timeout=10)
-                if has_rsync.ok:
-                    target.run(f"rsync -a {op}/ {np}/", timeout=600)
-                else:
-                    target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
+                try:
+                    if has_rsync.ok:
+                        target.run(f"rsync -a {op}/ {np}/", timeout=600)
+                    else:
+                        target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
+                except SSHError as error:
+                    error.add_hint(
+                        f"Source {old_path} and its database location are unchanged. "
+                        f"Partial target {new_path} was created by this rehome; confirm copying has stopped "
+                        f"before removing it and retrying. SSH log: {ssh_logger.display_path}."
+                    )
+                    raise
 
                 # Verify copy succeeded
                 verify = target.run(f"test -d {np}", check=False, timeout=10)
