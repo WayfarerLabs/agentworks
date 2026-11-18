@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from agentworks.db import ConsoleRow
 from agentworks.errors import ConnectivityError, NotFoundError
 from agentworks.execution.errors import TrustMissing
+from agentworks.execution.requests import Script, Shell
+from agentworks.execution.results import Completed, Result
 from agentworks.sessions.multi_console._status import (
     ConsoleStatus,
     _enumerate_tmux_sessions,
@@ -21,23 +24,25 @@ from agentworks.sessions.multi_console.attach import (
     console_listing,
     render_console_listing,
 )
+from tests.vm_access_support import AccessRecorder, Admin, RecordingVMAccess, install_access_recorder
 
 
-@dataclass
-class _Result:
-    returncode: int
-    stdout: str = ""
-    stderr: str = ""
+def _admin(returncode: int, stdout: str = "", stderr: str = "") -> RecordingVMAccess:
+    """An admin access whose every request reports ``returncode`` with these streams."""
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(returncode), stdout.encode(), stderr.encode())
+    return access
 
 
-class _Target:
-    def __init__(self, result: _Result) -> None:
-        self.result = result
-        self.calls: list[dict[str, object]] = []
+def _recorder(monkeypatch: pytest.MonkeyPatch, returncode: int, stdout: str = "") -> AccessRecorder:
+    """Route ``execution.vm_access`` to recording accesses that each report ``returncode`` and ``stdout``."""
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = lambda _call: Result(Completed(returncode), stdout.encode())
+    return recorder
 
-    def run(self, command: str, **kwargs: object) -> _Result:
-        self.calls.append({"command": command, **kwargs})
-        return self.result
+
+def _vm(name: str) -> SimpleNamespace:
+    return SimpleNamespace(name=name)
 
 
 @pytest.mark.parametrize(
@@ -57,32 +62,24 @@ def test_console_status_classifier(
     assert classify_console_status(canonical_present=canonical, staging_present=staging) is expected
 
 
-def test_console_enumeration_is_bounded_and_noninteractive() -> None:
-    target = _Target(_Result(0, stdout="aw-console-alpha\noperator-session\n"))
+def test_console_enumeration_is_one_bounded_request_as_the_admin() -> None:
+    admin = _admin(0, stdout="aw-console-alpha\noperator-session\n")
 
-    assert _enumerate_tmux_sessions(target) == {"aw-console-alpha", "operator-session"}  # type: ignore[arg-type]
-    assert target.calls == [
-        {
-            "command": "tmux list-sessions -F '#{session_name}'",
-            "check": False,
-            "tty": False,
-            "timeout": 10,
-            "retries": 1,
-        }
-    ]
+    assert _enumerate_tmux_sessions(admin) == {"aw-console-alpha", "operator-session"}
+    assert admin.requests() == [Script("tmux list-sessions -F '#{session_name}'", Shell.SH, deadline=10)]
 
 
 def test_console_enumeration_accepts_only_authoritative_absence() -> None:
-    missing = _Target(_Result(1, stderr="no server running on /tmp/tmux-1000/default"))
-    mixed = _Target(_Result(1, stdout="no server running on /tmp/tmux-1000/default", stderr="extra"))
+    missing = _admin(1, stderr="no server running on /tmp/tmux-1000/default")
+    mixed = _admin(1, stdout="no server running on /tmp/tmux-1000/default", stderr="extra")
 
-    assert _enumerate_tmux_sessions(missing) == set()  # type: ignore[arg-type]
-    assert _enumerate_tmux_sessions(mixed) is None  # type: ignore[arg-type]
+    assert _enumerate_tmux_sessions(missing) == set()
+    assert _enumerate_tmux_sessions(mixed) is None
 
 
 @pytest.mark.parametrize("stdout", ["aw-console-alpha\n\n", "aw-console-alpha\x00tail\n", "aw-console-alpha\rjunk\n"])
 def test_console_success_stream_must_be_well_formed(stdout: str) -> None:
-    assert _enumerate_tmux_sessions(_Target(_Result(0, stdout=stdout))) is None  # type: ignore[arg-type]
+    assert _enumerate_tmux_sessions(_admin(0, stdout=stdout)) is None
 
 
 def test_console_observer_isolates_unreachable_vm_and_uses_exact_names(
@@ -93,7 +90,7 @@ def test_console_observer_isolates_unreachable_vm_and_uses_exact_names(
         ConsoleRow("alphabet", "vm-a", False, "", ""),
         ConsoleRow("beta", "vm-b", False, "", ""),
     ]
-    vms = {name: object() for name in ("vm-a", "vm-b")}
+    vms = {name: _vm(name) for name in ("vm-a", "vm-b")}
 
     class _DB:
         def get_vm(self, name: str) -> object:
@@ -103,9 +100,8 @@ def test_console_observer_isolates_unreachable_vm_and_uses_exact_names(
         if vm is vms["vm-b"]:
             raise ConnectivityError("offline")
 
-    target = _Target(_Result(0, stdout="aw-console-alpha\naw-console-build+alphabet\n"))
+    recorder = _recorder(monkeypatch, 0, stdout="aw-console-alpha\naw-console-build+alphabet\n")
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require)
-    monkeypatch.setattr("agentworks.transports.transport", lambda *_args, **_kwargs: target)
 
     result = observe_console_statuses(_DB(), object(), consoles)  # type: ignore[arg-type]
 
@@ -114,7 +110,7 @@ def test_console_observer_isolates_unreachable_vm_and_uses_exact_names(
         "alphabet": ConsoleStatus.RESIDUAL,
         "beta": ConsoleStatus.UNKNOWN,
     }
-    assert len(target.calls) == 1
+    assert recorder.operations == [("admin", "run")]
 
 
 def test_console_observer_reports_a_vm_without_a_host_key_record_and_observes_the_others(
@@ -122,7 +118,7 @@ def test_console_observer_reports_a_vm_without_a_host_key_record_and_observes_th
     captured_output,  # noqa: ANN001
 ) -> None:
     consoles = [ConsoleRow("alpha", "vm-a", False, "", ""), ConsoleRow("beta", "vm-b", False, "", "")]
-    vms = {name: object() for name in ("vm-a", "vm-b")}
+    vms = {name: _vm(name) for name in ("vm-a", "vm-b")}
 
     class _DB:
         def get_vm(self, name: str) -> object:
@@ -132,9 +128,8 @@ def test_console_observer_reports_a_vm_without_a_host_key_record_and_observes_th
         if vm is vms["vm-b"]:
             raise TrustMissing("vm-b")
 
-    target = _Target(_Result(0, stdout="aw-console-alpha\n"))
+    _recorder(monkeypatch, 0, stdout="aw-console-alpha\n")
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require)
-    monkeypatch.setattr("agentworks.transports.transport", lambda *_args, **_kwargs: target)
 
     result = observe_console_statuses(_DB(), object(), consoles)  # type: ignore[arg-type]
 
@@ -174,18 +169,16 @@ def test_console_observer_preserves_corrupt_ssh_applied_state(
         "agentworks.vms.manager.require_vm_ssh_boundary",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(structural),
     )
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *_args, **_kwargs: pytest.fail("transport constructed after structural failure"),
-    )
+    recorder = install_access_recorder(monkeypatch)
 
     with pytest.raises(StateError) as caught:
         observe_console_statuses(db, object(), [console])  # type: ignore[arg-type]
 
     assert caught.value is structural
+    assert recorder.calls == []
 
 
-def test_console_observer_uses_only_identity_and_transport_read_seams(
+def test_console_observer_uses_only_identity_and_access_read_seams(
     db,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -193,9 +186,8 @@ def test_console_observer_uses_only_identity_and_transport_read_seams(
     db.insert_console("alpha", "box")
     console = db.get_console("alpha")
     assert console is not None
-    target = _Target(_Result(0, stdout="aw-console-alpha\n"))
+    _recorder(monkeypatch, 0, stdout="aw-console-alpha\n")
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("agentworks.transports.transport", lambda *_args, **_kwargs: target)
     monkeypatch.setattr(
         "agentworks.orchestration.activation.activation_gate",
         lambda *_args, **_kwargs: pytest.fail("console observation activated a VM"),

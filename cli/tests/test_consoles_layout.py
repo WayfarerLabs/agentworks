@@ -34,7 +34,7 @@ def test_apply_layout_preset_emits_simple_select_layout(
     """Tmux preset layout names go straight to `select-layout`."""
     from agentworks.sessions.multi_console_layout import _apply_layout
 
-    _apply_layout(fake_target, "'=aw-console-con'", "alpha", "tiled")  # type: ignore[arg-type]
+    _apply_layout(fake_target.run_command(), "'=aw-console-con'", "alpha", "tiled")
     assert fake_target.commands == [
         "tmux select-layout -t '=aw-console-con':alpha tiled",
     ]
@@ -55,7 +55,7 @@ def test_apply_layout_aw_session_vertical_queries_then_applies_string(
     )
 
     _apply_layout(
-        fake_target,  # type: ignore[arg-type]
+        fake_target.run_command(),
         "'=aw-console-con'",
         "alpha",
         "aw-session-vertical",
@@ -178,11 +178,7 @@ def test_apply_layout_aw_session_vertical_silent_on_single_pane(
         returncode=0, stdout="80x36\n0 %1\n"
     )
 
-    _apply_aw_session_vertical_layout(
-        fake_target,
-        "'=aw-console-con'",
-        "alpha",  # type: ignore[arg-type]
-    )
+    _apply_aw_session_vertical_layout(fake_target.run_command(), "'=aw-console-con'", "alpha")
 
     # The query happens, but no select-layout call and no warning.
     assert not any("select-layout" in c for c in fake_target.commands)
@@ -202,11 +198,7 @@ def test_apply_layout_aw_session_vertical_warns_on_genuine_failure(
         returncode=0, stdout="80x4\n0 %1\n1 %2\n2 %3\n3 %4\n"
     )
 
-    _apply_aw_session_vertical_layout(
-        fake_target,
-        "'=aw-console-con'",
-        "alpha",  # type: ignore[arg-type]
-    )
+    _apply_aw_session_vertical_layout(fake_target.run_command(), "'=aw-console-con'", "alpha")
 
     assert any("could not build aw-session-vertical" in w for w in captured_output.warnings)
 
@@ -225,11 +217,7 @@ def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
         returncode=0, stdout="80x36\n1 %1\n2 %2\n"
     )
 
-    _apply_aw_session_vertical_layout(
-        fake_target,
-        "'=aw-console-con'",
-        "alpha",  # type: ignore[arg-type]
-    )
+    _apply_aw_session_vertical_layout(fake_target.run_command(), "'=aw-console-con'", "alpha")
 
     assert any("select-layout -t '=aw-console-con':alpha" in c for c in fake_target.commands)
     assert not any("could not build aw-session-vertical" in w for w in captured_output.warnings)
@@ -238,7 +226,7 @@ def test_apply_layout_aw_session_vertical_applies_under_pane_base_index_one(
 def test_focus_session_pane_emits_select_pane(fake_target: _FakeTarget) -> None:
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
-    _focus_session_pane(fake_target, "'=aw-console-con'", "alpha", 0)  # type: ignore[arg-type]
+    _focus_session_pane(fake_target.run_command(), "'=aw-console-con'", "alpha", 0)
     assert fake_target.commands == [
         "tmux select-pane -t '=aw-console-con':alpha.0",
     ]
@@ -250,7 +238,7 @@ def test_focus_session_pane_targets_base_index(fake_target: _FakeTarget) -> None
     literal 0 (which tmux rejects with `can't find pane: 0`)."""
     from agentworks.sessions.multi_console_layout import _focus_session_pane
 
-    _focus_session_pane(fake_target, "'=aw-console-con'", "alpha", 1)  # type: ignore[arg-type]
+    _focus_session_pane(fake_target.run_command(), "'=aw-console-con'", "alpha", 1)
     assert fake_target.commands == [
         "tmux select-pane -t '=aw-console-con':alpha.1",
     ]

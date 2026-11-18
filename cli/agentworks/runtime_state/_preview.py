@@ -258,9 +258,10 @@ def _preview_sessions(invocation: RuntimeInvocation) -> None:
 
 def _preview_consoles(invocation: RuntimeInvocation) -> None:
 
+    import agentworks.execution as execution
     import agentworks.sessions.multi_console as consoles
+    from agentworks.execution.access import Admin
     from agentworks.sessions.multi_console._status import classify_console_status
-    from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     for name, console in invocation.consoles.items():
@@ -272,7 +273,8 @@ def _preview_consoles(invocation: RuntimeInvocation) -> None:
                 canonical, staging = ProbeStatus.ABSENT, ProbeStatus.ABSENT
             elif context.observed_status is VMStatus.RUNNING:
                 require_vm_ssh_boundary(invocation.db, invocation.config, context.vm)
-                canonical, staging = consoles._console_runtime_presence(transport(context.vm, invocation.config), name)
+                admin = execution.vm_access(context.vm, invocation.config, Admin())
+                canonical, staging = consoles._console_runtime_presence(admin, name)
                 if ProbeStatus.UNKNOWN in {canonical, staging}:
                     raise StateError("console runtime observation is unknown")
             else:

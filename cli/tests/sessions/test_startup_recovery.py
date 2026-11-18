@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import traceback
 from pathlib import Path
 from types import SimpleNamespace
@@ -139,7 +140,6 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(
     tmp_path, monkeypatch, capsys, operation, value_shape, make_config, resolve_counter
 ):
     from agentworks import cli
-    from agentworks.sessions.tmux import _tmux_env_flags
 
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     marker = uuid4().hex
@@ -148,7 +148,7 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(
         "quoted": f"prefix'{marker}'suffix",
         "ansi": f"prefix'{marker}\x1b[31m'suffix",
     }[value_shape]
-    command = "tmux new-session" + _tmux_env_flags({"TOKEN": secret})
+    command = "tmux new-session -e " + shlex.quote("TOKEN=" + secret)
     failure = ExternalError(command, hint=command)
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["agw", "session", operation, "s1"])

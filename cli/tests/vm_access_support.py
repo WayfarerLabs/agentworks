@@ -78,9 +78,12 @@ class RecordingVMAccess(VMAccess):
     asked to write to a ``ToFile`` comes back empty too, its bytes written to
     the new file, with one progress report, only for ``Completed(0)``.
     ``stream_status``, ``attach_status`` and ``forward_status`` are returned
-    (or raised) by their operation. ``park`` yields a handover with the token
-    :data:`PARK_TOKEN` and, on leaving its block, sets ``collected`` to
-    ``park_collected``.
+    (or raised) by their operation. ``park`` consumes ``park_outcomes`` in
+    order, raising an exception there as entering raises a refusal; otherwise
+    it yields a handover with the token :data:`PARK_TOKEN` and, on leaving its
+    block, sets ``collected`` to ``park_collected``. A block that raises is
+    recorded in the call's ``options["raised"]``, which a real access answers
+    by letting the parked request go at once.
     """
 
     def __init__(
@@ -102,6 +105,7 @@ class RecordingVMAccess(VMAccess):
         self.stream_status: int | BaseException = 0
         self.attach_status: int | BaseException = 0
         self.park_collected = True
+        self.park_outcomes: list[BaseException | None] = []
         self.forward_status: int | BaseException = 0
 
     def run(
@@ -176,9 +180,17 @@ class RecordingVMAccess(VMAccess):
 
     @contextlib.contextmanager
     def park(self, request: LoginShell) -> Iterator[Handover]:
-        self.calls.append(Call(self.identity, "park", request))
+        call = Call(self.identity, "park", request, {})
+        self.calls.append(call)
+        outcome = self.park_outcomes.pop(0) if self.park_outcomes else None
+        if outcome is not None:
+            raise outcome
         handover = Handover(PARK_TOKEN, self._user)
-        yield handover
+        try:
+            yield handover
+        except BaseException as error:
+            call.options["raised"] = error
+            raise
         handover.collected = self.park_collected
 
     def forward(self, forwards: Sequence[Forward], *, verbose: bool = False) -> int:
@@ -254,6 +266,22 @@ def install_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
     monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
     monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
     return recorder
+
+
+def command_line(request: object) -> str | None:
+    """The shell line a ``Command`` or ``Script`` runs, for a double that models the guest by command text.
+
+    ``shlex.join`` of a command's argv, or a script's source; ``None`` for
+    any other request. A double that cares how the request runs reads the
+    request's own fields (``elevated``, ``deadline``, ``env``, ``stdin``).
+    """
+    from agentworks.execution.requests import Command, Script
+
+    if isinstance(request, Command):
+        return shlex.join(request.argv)
+    if isinstance(request, Script):
+        return request.source
+    return None
 
 
 def is_command_check(request: object) -> bool:
@@ -459,6 +487,7 @@ __all__ = [
     "answer_destination_identity",
     "check_result",
     "command_check_access",
+    "command_line",
     "files_over_target",
     "is_command_check",
     "presence_check",

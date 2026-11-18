@@ -142,6 +142,20 @@ MIGRATED_FILES = (
     "workspaces/manager/delete.py",
     "agents/manager/__init__.py",
     "agents/manager/_common.py",
+    "sessions/multi_console/__init__.py",
+    "sessions/multi_console/_access.py",
+    "sessions/multi_console/_helpers.py",
+    "sessions/multi_console/_status.py",
+    "sessions/multi_console/attach.py",
+    "sessions/multi_console/crud.py",
+    "sessions/multi_console/lifecycle.py",
+    "sessions/multi_console/restore.py",
+    "sessions/multi_console/runtime.py",
+    "sessions/multi_console/secrets_env.py",
+    "sessions/multi_console/tmux_build.py",
+    "sessions/multi_console_layout.py",
+    "runtime_state/_prepare.py",
+    "runtime_state/_preview.py",
 )
 
 

@@ -6,14 +6,10 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, NotFoundError, StateError, UserAbort
+from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, NotFoundError, UserAbort
 from agentworks.execution.errors import TrustMissing
 from agentworks.sessions.tmux import ProbeStatus
-from agentworks.status_observation import (
-    GUEST_OBSERVATION_ATTEMPTS,
-    GUEST_OBSERVATION_TIMEOUT_SECONDS,
-    cancelling_futures,
-)
+from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS, cancelling_futures
 
 from ._helpers import tmux_session_name, tmux_staging_name
 
@@ -22,7 +18,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import ConsoleRow, Database
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class ConsoleStatus(Enum):
@@ -47,18 +43,13 @@ def classify_console_status(
     return ConsoleStatus.STOPPED
 
 
-def _enumerate_tmux_sessions(target: Transport) -> set[str] | None:
-    """Return an authoritative default-server session-name snapshot."""
-    from agentworks.sessions.tmux import _normalized_probe_streams, _tmux_presence_from_result
+def _enumerate_tmux_sessions(admin: VMAccess) -> set[str] | None:
+    """Return an authoritative snapshot of the admin's default-server session names, in one bounded dispatch."""
+    from agentworks.sessions.tmux import _normalized_probe_streams, _tmux_presence_from_result, access_run_command
 
-    result = target.run(
-        "tmux list-sessions -F '#{session_name}'",
-        check=False,
-        tty=False,
-        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
-        retries=GUEST_OBSERVATION_ATTEMPTS,
-    )
-    raw_stdout = getattr(result, "stdout", "") or ""
+    probe = access_run_command(admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False)
+    result = probe("tmux list-sessions -F '#{session_name}'", check=False)
+    raw_stdout = result.stdout
     stdout, stderr = _normalized_probe_streams(result)
     if result.returncode == 0:
         if stderr or "\x00" in raw_stdout or "\r" in raw_stdout:
@@ -81,13 +72,14 @@ def observe_console_statuses(
     from concurrent.futures import as_completed
     from functools import partial
 
-    from agentworks.transports import transport
+    import agentworks.execution as execution
+    from agentworks.execution.access import Admin
     from agentworks.vms.applied_state import VMSSHIdentityPolicyError
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     statuses = {console.name: ConsoleStatus.UNKNOWN for console in consoles}
     by_vm: dict[str, list[ConsoleRow]] = {}
-    targets: dict[str, Transport] = {}
+    accesses: dict[str, VMAccess] = {}
     for console in consoles:
         by_vm.setdefault(console.vm_name, []).append(console)
 
@@ -110,19 +102,14 @@ def observe_console_statuses(
             continue
         except (ConfigError, ConnectivityError, VMSSHIdentityPolicyError):
             continue
-        try:
-            targets[vm_name] = transport(vm, config)
-        except UserAbort:
-            raise
-        except (ConnectivityError, StateError):
-            continue
+        accesses[vm_name] = execution.vm_access(vm, config, Admin())
 
     def observe_vm(vm_name: str) -> set[str] | None:
-        return _enumerate_tmux_sessions(targets[vm_name])
+        return _enumerate_tmux_sessions(accesses[vm_name])
 
-    if not targets:
+    if not accesses:
         return statuses
-    tasks = {vm_name: partial(observe_vm, vm_name) for vm_name in targets}
+    tasks = {vm_name: partial(observe_vm, vm_name) for vm_name in accesses}
     with cancelling_futures(tasks) as futures:
         for future in as_completed(futures):
             vm_name = futures[future]

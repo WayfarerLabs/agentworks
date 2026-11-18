@@ -279,7 +279,6 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
     import agentworks.sessions.multi_console as consoles
     from agentworks.execution.access import Admin
     from agentworks.sessions.multi_console._status import ConsoleStatus
-    from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     for name, session in invocation.sessions.items():
@@ -348,34 +347,34 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
             ):
                 invocation.record("console", name, action="parent-stop")
                 continue
-            target = None
+            admin = None
             if context.observed_status not in OFF:
                 require_vm_ssh_boundary(invocation.db, invocation.config, vm)
-                target = transport(vm, invocation.config)
+                admin = execution.vm_access(vm, invocation.config, Admin())
             if console.desired_runtime_state is DesiredRuntimeState.RUNNING:
-                assert target is not None
+                assert admin is not None
                 prepared_console = consoles.prepare_console_reconcile(
                     invocation.db,
+                    invocation.config,
                     invocation.registry,
                     console=console,
                     vm=vm,
-                    target=target,
-                    admin=execution.vm_access(vm, invocation.config, Admin()),
+                    admin=admin,
                     held_native_guard=invocation.guards[vm.name],
                 )
                 invocation.console_starts[name] = prepared_console
                 invocation.record("console", name, action=prepared_console.action.value)
             else:
                 prepared_console_stop = consoles.prepare_console_stop(
-                    invocation.db, console=console, vm=vm, target=target, held_native_guard=invocation.guards[vm.name]
+                    invocation.db, console=console, vm=vm, admin=admin, held_native_guard=invocation.guards[vm.name]
                 )
                 invocation.console_stops[name] = prepared_console_stop
                 invocation.record(
                     "console",
                     name,
                     action="stop",
-                    observation=ConsoleStatus.STOPPED if target is None else None,
-                    observation_from_parent=target is None,
+                    observation=ConsoleStatus.STOPPED if admin is None else None,
+                    observation_from_parent=admin is None,
                 )
         except UserAbort:
             raise

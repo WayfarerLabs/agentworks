@@ -15,8 +15,8 @@ mutates them from the console layer's own tmux commands, and answers the
 console layer's queries from that state. ``dispatch(command)`` parses the
 tmux subcommand off a command string and routes it to the same mutator /
 query methods that the model self-tests drive directly. A command the
-model does not understand (or a non-tmux command such as the sudo
-preserve-env probe) falls through to a default-OK ``_FakeResult``.
+model does not understand (or a non-tmux command such as an agent's
+access check) falls through to a default-OK ``_FakeResult``.
 
 These tmux behaviors are modeled faithfully, because that is where the
 bug class lives:
@@ -374,7 +374,7 @@ class TmuxModel:
         than full-string equality, so incidental changes to quoting or
         trailing arguments do not break dispatch. Anything the model does not
         recognize returns a default-OK result, matching the stateless fake's
-        fall-through so mixed command streams (sudo probes, select-pane,
+        fall-through so mixed command streams (access checks, select-pane,
         resize) stay quiet."""
         frame = runtime_probe_parts(command)
         if frame is not None:

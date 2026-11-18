@@ -20,7 +20,8 @@ outgrew a single 500-line file. The submodules are organized by concern:
   configured shell list.
 - ``runtime``: guarded preparation and value-only runtime actions.
 - ``lifecycle``: explicit intent acceptance and VM/resolver composition.
-- ``attach``: live-tmux probing, VM target preparation, and the high-level
+- ``_access``: the accesses one console operation uses on its VM.
+- ``attach``: live-tmux probing, VM access preparation, and the high-level
   lifecycle/list/describe entrypoints.
 
 Every name below is re-exported here so ``agentworks.sessions.multi_console``
@@ -32,6 +33,7 @@ package object rather than a direct cross-submodule import).
 
 from __future__ import annotations
 
+from ._access import ConsoleAccess, console_access, pane_agent
 from ._helpers import (
     ADMIN_SHELL_WINDOW,
     TMUX_PREFIX,
@@ -50,9 +52,9 @@ from .attach import (
     _attach_loop_wrapper,
     _console_runtime_presence,
     _console_tmux_presence,
+    _live_access,
     _live_best_effort,
-    _live_target,
-    _prepare_vm_target,
+    _prepare_vm_access,
     _session_linux_user,
     _teardown_console_tmux,
     _tmux_session_presence,
@@ -82,7 +84,6 @@ from .crud import (
 )
 from .restore import restore_session
 from .secrets_env import (
-    _SUDO_PRESERVE_PROBE_VAR,
     _admin_only_secret_target,
     _console_build_secret_targets,
     _pane_secret_target,
@@ -92,23 +93,20 @@ from .secrets_env import (
     _validate_console_build_values,
 )
 from .tmux_build import (
-    PreserveEnvMemo,
     SessionWindowBuild,
     _add_session_window,
     _build_console_tmux,
     _resolve_workspace_path,
     _split_shell_pane,
-    _sudo_can_preserve_env,
 )
 
 __all__ = [
     "ADMIN_SHELL_WINDOW",
-    "PreserveEnvMemo",
+    "ConsoleAccess",
     "SessionSpec",
     "SessionWindowBuild",
     "TMUX_PREFIX",
     "TMUX_STAGING_PREFIX",
-    "_SUDO_PRESERVE_PROBE_VAR",
     "_add_session_window",
     "_admin_only_secret_target",
     "_attach_loop_wrapper",
@@ -118,20 +116,20 @@ __all__ = [
     "_console_tmux_presence",
     "_teardown_console_tmux",
     "_tmux_session_presence",
+    "_live_access",
     "_live_best_effort",
-    "_live_target",
     "_pane_secret_target",
-    "_prepare_vm_target",
+    "_prepare_vm_access",
     "_resolve_pane_env",
     "_resolve_workspace_path",
     "_restore_session_secret_targets",
     "_session_linux_user",
     "_split_shell_pane",
-    "_sudo_can_preserve_env",
     "_validate_cwd",
     "add_sessions",
     "add_shell",
     "attach_console",
+    "console_access",
     "console_description",
     "console_listing",
     "create_console",
@@ -144,6 +142,7 @@ __all__ = [
     "list_consoles",
     "offer_delete_if_empty_consoles",
     "observe_console_statuses",
+    "pane_agent",
     "parse_session_spec",
     "remove_sessions",
     "reorder_sessions",

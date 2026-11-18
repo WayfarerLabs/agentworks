@@ -1,11 +1,11 @@
 """Reconcile a console session window's live tmux state against its
 configured shell list.
 
-``_prepare_vm_target``, ``_console_tmux_presence``,
+``_prepare_vm_access``, ``_console_tmux_presence``,
 ``_restore_session_secret_targets``, and ``_add_session_window`` are
 monkeypatched by tests directly on the ``agentworks.sessions.multi_console``
-package object (so a test can drive ``restore_session`` against a fake
-target without a live VM). A patch on the package object only rebinds the
+package object (so a test can drive ``restore_session`` against a recording
+access without a live VM). A patch on the package object only rebinds the
 package's own attribute, not the attribute of the module that actually
 defines the function, so every call site below goes through the package
 object at call time (``_mc.<name>(...)``) rather than a direct reference.
@@ -30,26 +30,26 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_shell_panes,
     _SessionWindowOrderOutcome,
 )
-from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
+from agentworks.sessions.tmux import ProbeStatus, access_run_command, exact_tmux_target
 
 from ._helpers import _require_console, tmux_session_name
 from .attach import _session_linux_user
-from .tmux_build import PreserveEnvMemo, _resolve_workspace_path, _split_shell_pane
+from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
+    from agentworks.sessions.tmux import RunCommand
 
 
 def _reconcile_configured_window_order(
     db: Database,
-    target: Transport,
+    run: RunCommand,
     console_name: str,
 ) -> bool:
     outcome = _reorder_session_windows(
-        target,
+        run,
         console_name=console_name,
         ordered_session_windows=[m.session_name for m in db.list_console_sessions(console_name)],
     )
@@ -89,6 +89,10 @@ def restore_session(
       cannot be reinserted additively, and recreating the window would take
       every live shell pane in it with it (plus, for a single-member console,
       the console's last window, and with it the whole tmux session).
+
+    Every configured shell's secrets resolve in the operation's one boundary
+    pass, before the first tmux request, whether or not its pane turns out to
+    be missing; each pane it opens parks a fresh handover.
     """
     from ._helpers import guarded_console_selection
 
@@ -112,9 +116,10 @@ def restore_session(
         # idle out between the window probe and the pane reconciliation.
         from agentworks.secrets.resolver import Resolver
 
+        configured_count = len(member.shells)
         with (
             closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _mc._prepare_vm_target(
+            _mc._prepare_vm_access(
                 db,
                 config,
                 console.vm_name,
@@ -122,9 +127,14 @@ def restore_session(
                 interaction=interaction,
                 resolver=resolver,
                 held_native_guard=held_native_guard,
-            ) as (vm, target),
+                targets=lambda vm: _mc._restore_session_secret_targets(
+                    db, registry, vm=vm, member=member, indices=list(range(configured_count))
+                ),
+            ) as (vm, admin),
         ):
-            presence = _mc._console_tmux_presence(target, console_name)
+            secret_values = resolver.values
+            run = access_run_command(admin, deadline=None, elevated=False)
+            presence = _mc._console_tmux_presence(admin, console_name)
             if presence is ProbeStatus.UNKNOWN:
                 raise StateError(
                     f"could not determine console '{console_name}' tmux state",
@@ -145,13 +155,9 @@ def restore_session(
             q_con = exact_tmux_target(tmux_session_name(console_name))
             q_win = shlex.quote(session_name)
             layout = named_console_template(registry).tmux_layout
-            configured_count = len(member.shells)
 
             # Window present?
-            res = target.run(
-                f"tmux list-windows -t {q_con} -F '#{{window_name}}'",
-                check=False,
-            )
+            res = run(f"tmux list-windows -t {q_con} -F '#{{window_name}}'", check=False)
             if not res.ok:
                 raise ExternalError(
                     f"failed to list windows for console '{console_name}': {res.stderr.strip()}",
@@ -185,33 +191,8 @@ def restore_session(
                     )
 
                 output.info(f"window '{session_name}' is missing; rebuilding from config...")
-                # Eager-prompting orchestration:
-                # the window-rebuild path also opens new shells (one per
-                # configured shell entry, via _add_session_window ->
-                # _split_shell_pane). Resolve every referenced secret BEFORE
-                # any pane is opened. Targets cover ALL configured shells in
-                # this case (the window is missing, so every pane is new).
-                # Conditional-need exception to the one-boundary-resolve
-                # contract: whether the window is missing is only knowable
-                # from live tmux state, post-bind.
-
-                all_indices = list(range(configured_count))
-                secret_values: dict[str, str] = {}
-                if all_indices:
-                    resolver.register_targets(
-                        _mc._restore_session_secret_targets(
-                            db,
-                            registry,
-                            vm=vm,
-                            member=member,
-                            indices=all_indices,
-                        ),
-                        allow_transient_auto_declare=True,
-                    )
-                resolver.resolve()
-                secret_values = resolver.values
                 result = _mc._add_session_window(
-                    target,
+                    _mc.console_access(db, config, vm, admin, [member]),
                     db,
                     registry,
                     values=secret_values,
@@ -219,7 +200,6 @@ def restore_session(
                     member=member,
                     vm=vm,
                     layout=layout,
-                    preserve_memo={},
                 )
                 if not result.built:
                     # _add_session_window warns and skips rather than raising, so
@@ -245,7 +225,7 @@ def restore_session(
                         entity_name=console_name,
                         hint=(f"Run `agw console restart {console_name}` to rebuild from scratch."),
                     )
-                _reconcile_configured_window_order(db, target, console_name)
+                _reconcile_configured_window_order(db, run, console_name)
                 output.result(f"Rebuilt window '{session_name}' in console '{console_name}'.")
                 return
 
@@ -256,7 +236,7 @@ def restore_session(
             # than a literal 0 because `pane-base-index 1` in the admin user's
             # ~/.tmux.conf makes the first pane report index 1 (the console tmux
             # server is started without -f, so it inherits that config).
-            all_panes = _list_panes_with_tags(target, q_con, q_win)
+            all_panes = _list_panes_with_tags(run, q_con, q_win)
             if all_panes is None:
                 raise ExternalError(
                     f"failed to list panes for window '{session_name}'",
@@ -345,8 +325,7 @@ def restore_session(
             # tag_values is now a subset of 0..configured_count-1 with no duplicates,
             # so len(tag_values) <= configured_count.
             if len(tag_values) == configured_count:
-                resolver.resolve()
-                window_order_changed = _reconcile_configured_window_order(db, target, console_name)
+                window_order_changed = _reconcile_configured_window_order(db, run, console_name)
                 if window_order_changed:
                     output.result(f"Restored configured window order in console '{console_name}'.")
                 else:
@@ -356,7 +335,7 @@ def restore_session(
                     )
                 # Still focus the session pane on this no-op path so post-restore
                 # landing focus is consistent whether or not repairs were needed.
-                _focus_session_pane(target, q_con, q_win, base_pidx)
+                _focus_session_pane(run, q_con, q_win, base_pidx)
                 return
 
             # Strict subset: figure out which config indices are missing.
@@ -378,42 +357,15 @@ def restore_session(
                     entity_name=session_name,
                 )
             session_user = _session_linux_user(db, session, vm)
-
-            # Eager-prompting orchestration: restore_session
-            # opens new shells for the missing pane indices. Conditional-need
-            # exception to the one-boundary-resolve contract: which panes are
-            # missing is only knowable from live tmux state, post-bind.
-            # Resolve secrets
-            # NOW -- after all the validation guards (untagged-panes /
-            # duplicate-tags / out-of-range / "already matches config" no-op)
-            # so an operator with a tag-corruption gets the actionable
-            # validation error instead of being prompted for credentials they
-            # would never end up using. Targets are scoped precisely to the
-            # missing config indices (not all configured shells) so non-
-            # interactive runs only fail on secrets that actually would be
-            # consumed.
-
-            resolver.register_targets(
-                _mc._restore_session_secret_targets(
-                    db,
-                    registry,
-                    vm=vm,
-                    member=member,
-                    indices=missing,
-                ),
-                allow_transient_auto_declare=True,
-            )
-            resolver.resolve()
-            secret_values = resolver.values
+            access = _mc.console_access(db, config, vm, admin, [member])
 
             output.info(f"Restoring {len(missing)} shell pane(s) in '{session_name}': config indices {missing}.")
             # Collect each split's outcome so a partial failure becomes a loud error
             # rather than a silent exit-0 leaving panes missing or untagged.
             failed: list[int] = []
-            preserve_memo: PreserveEnvMemo = {}
             for cidx in missing:
                 pane_id = _split_shell_pane(
-                    target,
+                    access,
                     db,
                     registry,
                     values=secret_values,
@@ -426,7 +378,6 @@ def restore_session(
                     session_user=session_user,
                     admin_user=vm.admin_username,
                     config_index=cidx,
-                    preserve_memo=preserve_memo,
                 )
                 if pane_id is None:
                     failed.append(cidx)
@@ -441,13 +392,13 @@ def restore_session(
 
             # New panes land at the tail; reorder so visual pane_index matches
             # config_index for every shell pane.
-            _reorder_shell_panes(target, q_con, q_win, configured_count)
+            _reorder_shell_panes(run, q_con, q_win, configured_count)
 
             # Re-apply the layout to redistribute geometry after the splits and
             # swaps, then land the operator on the session pane (matches attach /
             # recreate behavior; restore-session is a repair, not an attach, but
             # we still want consistent landing focus).
-            _apply_layout(target, q_con, q_win, layout)
-            _focus_session_pane(target, q_con, q_win, base_pidx)
-            _reconcile_configured_window_order(db, target, console_name)
+            _apply_layout(run, q_con, q_win, layout)
+            _focus_session_pane(run, q_con, q_win, base_pidx)
+            _reconcile_configured_window_order(db, run, console_name)
             output.result(f"Restored {output.count(len(missing), 'shell pane')} in '{session_name}'.")

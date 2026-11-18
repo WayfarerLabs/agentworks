@@ -62,7 +62,6 @@ def realize_console(
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
     from agentworks.secrets.resolver import Resolver
-    from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
@@ -107,10 +106,10 @@ def realize_console(
             with context.node.hold_active():
                 prepared = _mc.prepare_console_reconcile(
                     db,
+                    config,
                     registry,
                     console=console,
                     vm=vm,
-                    target=transport(vm, config),
                     admin=execution.vm_access(vm, config, Admin()),
                     held_native_guard=guard,
                     replace_running=replace_running,
@@ -139,9 +138,10 @@ def stop_console_runtime(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Accept stopped and tear down using provider observation without activation."""
+    import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
+    from agentworks.execution.access import Admin
     from agentworks.secrets.resolver import Resolver
-    from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import observe_vm_runtime, prepare_vm_runtime
 
@@ -176,20 +176,20 @@ def stop_console_runtime(
             status = context.observed_status
             if status is VMStatus.UNKNOWN:
                 raise StateError("parent VM power state is unknown", entity_kind="console", entity_name=name)
-            target = None
+            admin = None
             if status not in {VMStatus.STOPPED, VMStatus.DEALLOCATED}:
                 require_vm_ssh_boundary(db, config, vm)
-                target = transport(vm, config)
+                admin = execution.vm_access(vm, config, Admin())
             try:
                 prepared = _mc.prepare_console_stop(
                     db,
                     console=console,
                     vm=vm,
-                    target=target,
+                    admin=admin,
                     held_native_guard=guard,
                 )
                 resolver.resolve()
-                if target is None:
+                if admin is None:
                     current_status = observe_vm_runtime(context)
                     if current_status is VMStatus.UNKNOWN:
                         raise StateError("parent VM power state is unknown", entity_kind="console", entity_name=name)
@@ -199,11 +199,11 @@ def stop_console_runtime(
                             db,
                             console=console,
                             vm=vm,
-                            target=transport(vm, config),
+                            admin=execution.vm_access(vm, config, Admin()),
                             held_native_guard=guard,
                         )
                 _mc.execute_console_stop(prepared)
-                observation_from_parent = prepared.target is None
+                observation_from_parent = prepared.admin is None
             except UserAbort:
                 raise
             except AgentworksError:
@@ -237,11 +237,13 @@ def attach_running_console(
     """Guard runtime preparation, then release the family during interaction."""
     from contextlib import ExitStack
 
+    import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
+    from agentworks.execution.access import Admin
+    from agentworks.execution.requests import TerminalCommand
     from agentworks.secrets.resolver import Resolver
-    from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
+    from agentworks.sessions.tmux import ProbeStatus
     from agentworks.terminal import clear_screen_on_detach
-    from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
@@ -290,8 +292,8 @@ def attach_running_console(
                 else:
                     activate_vm_runtime(context)
                 holds.enter_context(context.node.hold_active())
-                target = transport(vm, config)
-                canonical, staging = _mc._console_runtime_presence(target, name)
+                admin = execution.vm_access(vm, config, Admin())
+                canonical, staging = _mc._console_runtime_presence(admin, name)
                 if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
                     raise StateError(
                         f"console '{name}' is not ready to attach",
@@ -299,8 +301,8 @@ def attach_running_console(
                         entity_name=name,
                         hint=f"Run `agw console start {name}`.",
                     )
-            return target.interactive(
-                f"tmux attach -t {exact_tmux_target(tmux_session_name(name))}",
+            return admin.attach(
+                TerminalCommand(("tmux", "attach", "-t", "=" + tmux_session_name(name))),
                 clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
             )
     finally:

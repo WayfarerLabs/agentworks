@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database
+from agentworks.execution.access import Admin
+from agentworks.execution.requests import TerminalCommand
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager import SessionTmuxServer
 from agentworks.sessions.multi_console import _attach_loop_wrapper, attach_console
@@ -93,8 +95,6 @@ def test_attach_joins_existing_canonical_runtime_without_building(
     model = TmuxModel()
     model.seed_session("aw-console-con", "alpha")
     target = console_target_factory(model)
-    interactive: list[str] = []
-    target.interactive = lambda command, **kwargs: interactive.append(command) or 0  # type: ignore[attr-defined]
 
     assert (
         attach_console(
@@ -106,5 +106,8 @@ def test_attach_joins_existing_canonical_runtime_without_building(
         )
         == 0
     )
-    assert interactive == ["tmux attach -t '=aw-console-con'"]
+    # The admin's terminal runs tmux's own argv, with no shell in between.
+    assert [(call.identity, call.request) for call in target.attaches()] == [
+        (Admin(), TerminalCommand(("tmux", "attach", "-t", "=aw-console-con")))
+    ]
     assert not any("new-session" in command for command in target.commands)

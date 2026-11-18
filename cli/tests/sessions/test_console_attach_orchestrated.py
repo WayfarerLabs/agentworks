@@ -8,29 +8,36 @@ with the imperative hold), the pre-gate no-Tailscale bail, and the VM
 scope reaching node readiness.
 
 Real config, registry, resolver, and backend loop (env-var backend);
-the platform's backend power ops, the reachability probe, and the SSH
-transport are the fakes.
+the platform's backend power ops, the reachability probe, and the VM's
+accesses (recording accesses) are the fakes.
 """
 
 from __future__ import annotations
 
 import contextlib
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.db import DesiredRuntimeState, ProvisioningStatus, SessionMode, VMStatus
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution.access import Admin
+from agentworks.execution.requests import TerminalCommand
+from agentworks.execution.results import Completed, Result
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.sessions.tmux import ProbeStatus
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import AccessRecorder, Call, RecordingVMAccess, command_line, install_access_recorder
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.db import Database
+
+ATTACH = TerminalCommand(("tmux", "attach", "-t", "=aw-console-c1"))
 
 
 @pytest.fixture(autouse=True)
@@ -66,34 +73,31 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: events.append("tailscale"))
 
 
-class _FakeTarget:
-    """Transport double: ``run`` reports the console tmux session as
-    already existing (the plain-attach path), ``interactive`` records
-    the attach command."""
+class _Guest:
+    """The VM's recording accesses: the console tmux session already exists (the plain-attach path)."""
 
-    def __init__(self) -> None:
-        self.interactive_calls: list[str] = []
+    def __init__(self, recorder: AccessRecorder) -> None:
+        self.recorder = recorder
 
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        if "aw-console-build+c1" in cmd:
-            return SimpleNamespace(
-                ok=False,
-                returncode=1,
-                stdout="",
-                stderr="can't find session: aw-console-build+c1",
-            )
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+    @property
+    def admin(self) -> RecordingVMAccess:
+        return self.recorder.access(Admin())
 
-    def interactive(self, cmd: str, **kwargs: object) -> int:
-        self.interactive_calls.append(cmd)
-        return 0
+    def attaches(self) -> list[object]:
+        return [(call.identity, call.request) for call in self.recorder.calls if call.operation == "attach"]
+
+
+def _console_running(call: Call) -> Result:
+    if "aw-console-build+c1" in (command_line(call.request) or ""):
+        return Result(Completed(1), b"", b"can't find session: aw-console-build+c1")
+    return Result(Completed(0))
 
 
 @pytest.fixture
-def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    fake = _FakeTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
-    return fake
+def target(monkeypatch: pytest.MonkeyPatch) -> _Guest:
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = _console_running
+    return _Guest(recorder)
 
 
 # -- the derived graph (the console-node ruling) ------------------------------
@@ -126,7 +130,7 @@ def test_attach_graph_is_the_live_vm_alone(
 def test_named_console_attach_holds_across_the_interactive_attach(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    target: _Guest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -150,24 +154,25 @@ def test_named_console_attach_holds_across_the_interactive_attach(
             events.append("hold-close")
 
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold)
-    interactive = target.interactive
+    admin = target.admin
+    attach = admin.attach
 
-    def _tracking(cmd: str, **kwargs: object) -> int:
+    def _tracking(request: TerminalCommand, **kwargs: bool) -> int:
         events.append("interactive")
-        return interactive(cmd, **kwargs)
+        return attach(request, **kwargs)
 
-    target.interactive = _tracking  # type: ignore[method-assign]
+    admin.attach = _tracking  # type: ignore[method-assign,assignment]
 
     multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
 
     assert events == ["hold-open", "hold-close", "hold-open", "interactive", "hold-close"]
-    assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
+    assert target.attaches() == [(Admin(), ATTACH)]
 
 
 def test_console_restart_multiline_environment_secret_refuses_before_rebuild(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    target: _Guest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     environment_value = "console-restart-sentinel\nsecond\n"
@@ -203,7 +208,7 @@ def test_console_restart_multiline_environment_secret_refuses_before_rebuild(
         )
 
     assert rebuilds == []
-    assert target.interactive_calls == []
+    assert target.attaches() == []
     assert db.get_console("c1") is not None
     assert "console-restart-sentinel" not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
@@ -214,7 +219,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _Guest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -228,7 +233,7 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
 
     assert events == ["status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
-    assert target.interactive_calls == ["tmux attach -t '=aw-console-c1'"]
+    assert target.attaches() == [(Admin(), ATTACH)]
 
 
 def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
@@ -254,25 +259,23 @@ def test_named_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
     assert resolve_counter == []
 
 
-class _FakeRestoreTarget:
-    """Transport double for the restore path: the console tmux session
-    exists, the session window is present, and the window carries only
-    its session pane (no shell panes), so a zero-shell member is
-    already intact."""
+def _restore_guest(commands: list[str]) -> Callable[[Call], Result]:
+    """The restore path's guest: the console tmux session exists, the session window is present, and
+    the window carries only its session pane (no shell panes), so a zero-shell member is already intact."""
 
-    def __init__(self) -> None:
-        self.commands: list[str] = []
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append(cmd)
+    def answer(call: Call) -> Result:
+        cmd = command_line(call.request) or ""
+        commands.append(cmd)
         if "window_index" in cmd and "window_name" in cmd:
-            return SimpleNamespace(ok=True, returncode=0, stdout="0|s1\n", stderr="")
+            return Result(Completed(0), b"0|s1\n")
         if "list-windows" in cmd:
-            return SimpleNamespace(ok=True, returncode=0, stdout="s1\n", stderr="")
+            return Result(Completed(0), b"s1\n")
         if "list-panes" in cmd:
             # Pane 0 is the session pane; no tagged shell panes.
-            return SimpleNamespace(ok=True, returncode=0, stdout="%0|0|\n", stderr="")
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
+            return Result(Completed(0), b"%0|0|\n")
+        return Result(Completed(0))
+
+    return answer
 
 
 def test_restore_session_stopped_vm_drives_the_real_gated_composition(
@@ -302,8 +305,8 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
     db._conn.commit()
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
-    fake = _FakeRestoreTarget()
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kwargs: fake)
+    commands: list[str] = []
+    install_access_recorder(monkeypatch).answer = _restore_guest(commands)
 
     multi_console.restore_session(
         db, config, console_name="c1", session_name="s1", interaction=TtyInteractionPolicy.REFUSE
@@ -311,10 +314,10 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
 
     assert events == ["status", "status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
-    assert any("has-session -t '=aw-console-c1'" in c for c in fake.commands)
-    assert any("list-windows -t '=aw-console-c1'" in c for c in fake.commands)
+    assert any("has-session -t '=aw-console-c1'" in c for c in commands)
+    assert any("list-windows -t '=aw-console-c1'" in c for c in commands)
     # The no-op landing focus still fires (post-restore focus parity).
-    assert any("select-pane -t '=aw-console-c1':s1.0" in c for c in fake.commands)
+    assert any("select-pane -t '=aw-console-c1':s1.0" in c for c in commands)
     assert any("already matches config" in m for m in captured_output.info)
 
 
@@ -337,20 +340,21 @@ def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda *a: pytest.fail("diagnostic attach started its parent"))
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", lambda *a, **k: pytest.fail("stopped intent acquired idle hold"))
     monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: pytest.fail("diagnostic attach waited"))
-    attach = target.interactive
+    admin = target.admin
+    attach = admin.attach
 
-    def unlocked_attach(command, **kwargs):
+    def unlocked_attach(request, **kwargs):
         with native_mutation_guard(db.path, "box"):
-            return attach(command, **kwargs)
+            return attach(request, **kwargs)
 
-    target.interactive = unlocked_attach
+    admin.attach = unlocked_attach
     if status is VMStatus.RUNNING:
         assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
-        assert len(target.interactive_calls) == 1
+        assert len(target.attaches()) == 1
     else:
         with pytest.raises(StateError):
             multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE)
-        assert target.interactive_calls == []
+        assert target.attaches() == []
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_vm("box") == before_vm
     assert db.get_console("c1") == before_console

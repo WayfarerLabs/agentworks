@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
 
 GUEST_OBSERVATION_TIMEOUT_SECONDS = 10
-GUEST_OBSERVATION_ATTEMPTS = 1
 
 
 @contextmanager

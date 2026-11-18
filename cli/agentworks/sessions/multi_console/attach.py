@@ -1,7 +1,7 @@
 """Live-tmux probing and high-level lifecycle/list/describe entrypoints.
 
-``kill_session_windows``, ``_console_tmux_presence``, ``_prepare_vm_target``,
-and ``_live_target`` are monkeypatched by tests directly on the
+``kill_session_windows``, ``_console_tmux_presence``, ``_prepare_vm_access``,
+and ``_live_access`` are monkeypatched by tests directly on the
 ``agentworks.sessions.multi_console`` package object (they intercept, e.g., the
 live-sync path of ``crud.remove_sessions`` or ``restore.restore_session``
 without a live VM). A patch on the package object only rebinds the package's
@@ -10,6 +10,9 @@ function in this file to another function in this same file go through the
 package object at call time (``_mc.<name>(...)``) rather than a bare
 reference, matching the calls made from other submodules for the same
 reason.
+
+The console's tmux server is the admin's, so every request here runs on the
+admin's access.
 """
 
 from __future__ import annotations
@@ -37,7 +40,7 @@ from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_
 from ._status import ConsoleStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, ShellEntry, VMRow
@@ -45,10 +48,10 @@ if TYPE_CHECKING:
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
+    from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.manager import SessionTmuxServer
-    from agentworks.transports import Transport
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
 # (validated at cap 64) and display-only, so this is a deliberately tighter,
@@ -238,46 +241,45 @@ done
 """
 
 
-def _tmux_session_presence(target: Transport, tmux_name: str) -> ProbeStatus:
-    """Probe an exact console tmux name without conflating failure and absence."""
-    from agentworks.sessions.tmux import _tmux_presence_from_result
-    from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
+def _tmux_session_presence(admin: VMAccess, tmux_name: str) -> ProbeStatus:
+    """Probe an exact console tmux name without conflating failure and absence.
 
-    q = exact_tmux_target(tmux_name)
+    One dispatch within the observation deadline; a probe that does not
+    complete raises its typed error rather than reading as absent.
+    """
+    from agentworks.sessions.tmux import _tmux_presence_from_result, access_run_command
+    from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
+
+    probe = access_run_command(admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False)
     return _tmux_presence_from_result(
-        target.run(
-            f"tmux has-session -t {q}",
-            check=False,
-            tty=False,
-            timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
-            retries=GUEST_OBSERVATION_ATTEMPTS,
-        ),
+        probe(f"tmux has-session -t {exact_tmux_target(tmux_name)}", check=False),
         missing_target_is_absent=True,
     )
 
 
-def _console_tmux_presence(target: Transport, console_name: str) -> ProbeStatus:
-    return _mc._tmux_session_presence(target, tmux_session_name(console_name))
+def _console_tmux_presence(admin: VMAccess, console_name: str) -> ProbeStatus:
+    return _mc._tmux_session_presence(admin, tmux_session_name(console_name))
 
 
-def _console_runtime_presence(target: Transport, console_name: str) -> tuple[ProbeStatus, ProbeStatus]:
+def _console_runtime_presence(admin: VMAccess, console_name: str) -> tuple[ProbeStatus, ProbeStatus]:
     """Return canonical and staging presence, refusing no state implicitly."""
     return (
-        _mc._console_tmux_presence(target, console_name),
-        _mc._tmux_session_presence(target, tmux_staging_name(console_name)),
+        _mc._console_tmux_presence(admin, console_name),
+        _mc._tmux_session_presence(admin, tmux_staging_name(console_name)),
     )
 
 
-def _teardown_console_tmux(target: Transport, console_name: str) -> None:
+def _teardown_console_tmux(admin: VMAccess, console_name: str) -> None:
     """Remove and verify the canonical and staging console runtimes."""
     from agentworks.sessions.tmux import (
-        ProbeStatus,
         _test_presence_from_result,
+        access_run_command,
         probe_tmux_session_after_teardown,
     )
 
+    run = access_run_command(admin, deadline=None, elevated=False)
     names = (tmux_session_name(console_name), tmux_staging_name(console_name))
-    initial = {name: _tmux_session_presence(target, name) for name in names}
+    initial = {name: _tmux_session_presence(admin, name) for name in names}
     if any(presence is ProbeStatus.UNKNOWN for presence in initial.values()):
         raise StateError(
             f"could not determine console '{console_name}' tmux state",
@@ -287,15 +289,14 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
     for tmux_name, presence in initial.items():
         if presence is ProbeStatus.ABSENT:
             continue
-        q = exact_tmux_target(tmux_name)
-        killed = target.run(f"tmux kill-session -t {q}", check=False)
+        killed = run(f"tmux kill-session -t {exact_tmux_target(tmux_name)}", check=False)
         if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
             raise StateError(
                 f"could not remove console '{console_name}' tmux state",
                 entity_kind="console",
                 entity_name=console_name,
             )
-    final = {name: probe_tmux_session_after_teardown(name, run_command=target.run, socket_path=None) for name in names}
+    final = {name: probe_tmux_session_after_teardown(name, run_command=run, socket_path=None) for name in names}
     if any(presence is not ProbeStatus.ABSENT for presence in final.values()):
         raise StateError(
             f"failed to verify removal of console '{console_name}' tmux state",
@@ -305,15 +306,16 @@ def _teardown_console_tmux(target: Transport, console_name: str) -> None:
         )
 
 
-def _teardown_console_staging(target: Transport, console_name: str) -> None:
+def _teardown_console_staging(admin: VMAccess, console_name: str) -> None:
     from agentworks.sessions.tmux import (
-        ProbeStatus,
         _test_presence_from_result,
+        access_run_command,
         probe_tmux_session_after_teardown,
     )
 
+    run = access_run_command(admin, deadline=None, elevated=False)
     staging_name = tmux_staging_name(console_name)
-    presence = _tmux_session_presence(target, staging_name)
+    presence = _tmux_session_presence(admin, staging_name)
     if presence is ProbeStatus.UNKNOWN:
         raise StateError(
             f"could not determine staging tmux state for console '{console_name}'",
@@ -322,18 +324,14 @@ def _teardown_console_staging(target: Transport, console_name: str) -> None:
         )
     if presence is ProbeStatus.ABSENT:
         return
-    q = exact_tmux_target(staging_name)
-    killed = target.run(f"tmux kill-session -t {q}", check=False)
+    killed = run(f"tmux kill-session -t {exact_tmux_target(staging_name)}", check=False)
     if _test_presence_from_result(killed) is ProbeStatus.UNKNOWN:
         raise StateError(
             f"could not remove staging tmux state for console '{console_name}'",
             entity_kind="console",
             entity_name=console_name,
         )
-    if (
-        probe_tmux_session_after_teardown(staging_name, run_command=target.run, socket_path=None)
-        is not ProbeStatus.ABSENT
-    ):
+    if probe_tmux_session_after_teardown(staging_name, run_command=run, socket_path=None) is not ProbeStatus.ABSENT:
         raise StateError(
             f"failed to remove staging tmux state for console '{console_name}'",
             entity_kind="console",
@@ -351,8 +349,8 @@ def kill_session_windows(
     Used by every code path that removes a session from a console
     (``session delete``, ``workspace delete --force``, ``agent delete --force``,
     ``console remove-sessions``). Pairs are grouped by console so we probe
-    ``has-session`` once per console rather than once per pair, one dispatch
-    within the observation deadline. ``kill-window`` runs with
+    ``has-session`` once per console rather than once per pair
+    (``_tmux_session_presence``). ``kill-window`` runs with
     ``check=False`` so a console that's live but lacks the window (operator
     killed it manually) doesn't fail the cleanup.
 
@@ -360,22 +358,17 @@ def kill_session_windows(
     other surprises are warned and swallowed because the DB has already
     settled by the time we reach here.
     """
-    from agentworks.sessions.tmux import _tmux_presence_from_result, access_run_command
-    from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
+    from agentworks.sessions.tmux import access_run_command
 
     if not pairs:
         return
     by_console: dict[str, list[str]] = {}
     for con, sess in pairs:
         by_console.setdefault(con, []).append(sess)
-    probe = access_run_command(admin, deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS, elevated=False)
     run = access_run_command(admin, deadline=None, elevated=False)
     try:
         for console_name, session_names in by_console.items():
-            q_con = exact_tmux_target(tmux_session_name(console_name))
-            presence = _tmux_presence_from_result(
-                probe(f"tmux has-session -t {q_con}", check=False), missing_target_is_absent=True
-            )
+            presence = _mc._console_tmux_presence(admin, console_name)
             if presence is ProbeStatus.UNKNOWN:
                 raise StateError(
                     f"could not determine console '{console_name}' tmux state",
@@ -384,6 +377,7 @@ def kill_session_windows(
                 )
             if presence is ProbeStatus.ABSENT:
                 continue
+            q_con = exact_tmux_target(tmux_session_name(console_name))
             for session_name in session_names:
                 run(f"tmux kill-window -t {q_con}:{shlex.quote(session_name)}", check=False)
     except AgentworksError:
@@ -395,7 +389,7 @@ def kill_session_windows(
 
 
 @contextlib.contextmanager
-def _prepare_vm_target(
+def _prepare_vm_access(
     db: Database,
     config: Config,
     vm_name: str,
@@ -404,10 +398,20 @@ def _prepare_vm_target(
     interaction: TtyInteractionPolicy,
     held_native_guard: NativeMutationGuard,
     resolver: Resolver,
-) -> Iterator[tuple[VMRow, Transport]]:
-    """Prepare canonical guest access using the invocation's secret resolver."""
+    targets: Callable[[VMRow], Sequence[SecretTarget]] | None = None,
+) -> Iterator[tuple[VMRow, VMAccess]]:
+    """Activate the VM, run the operation's one boundary resolve, and yield the row and the admin's access.
+
+    The missing-VM and missing-address refusals come first, with nothing
+    resolved. ``targets`` gives the operation's pane secret targets from the
+    VM's row; they register on ``resolver`` before the activation gate opens,
+    and the one resolve runs once the VM is active and before the caller's
+    first request, so every pane value is in ``resolver.values`` before
+    anything changes.
+    """
+    import agentworks.execution as execution
+    from agentworks.execution.access import Admin
     from agentworks.harness_setup.locking import native_mutation_guard
-    from agentworks.transports import transport
     from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
@@ -430,6 +434,8 @@ def _prepare_vm_target(
                 held_native_guard=guard,
                 interaction=interaction,
             )
+            if targets is not None:
+                resolver.register_targets(targets(vm), allow_transient_auto_declare=True)
             context = prepare_vm_runtime(
                 db,
                 config,
@@ -441,28 +447,29 @@ def _prepare_vm_target(
             )
             activate_vm_runtime(context)
             with context.node.hold_active():
-                yield vm, transport(vm, config)
+                resolver.resolve()
+                yield vm, execution.vm_access(vm, config, Admin())
     finally:
         if context is not None:
             context.clear_values()
 
 
-def _live_target(db: Database, config: Config, vm_name: str) -> tuple[VMRow, Transport] | None:
-    """Return (vm, target) for best-effort live sync without auto-starting the VM.
+def _live_access(db: Database, config: Config, vm_name: str) -> tuple[VMRow, VMAccess] | None:
+    """Return (vm, the admin's access) for best-effort live sync without auto-starting the VM.
 
     Returns None if the VM record is missing or has no Tailscale address.
-    The first SSH command will surface a transport error if the VM is offline;
+    The first request will surface a connection error if the VM is offline;
     callers should wrap that in _live_best_effort.
     """
-    from agentworks.transports import transport
+    import agentworks.execution as execution
+    from agentworks.execution.access import Admin
+    from agentworks.vms.manager import require_vm_ssh_boundary
 
     vm = db.get_vm(vm_name)
     if vm is None or vm.tailscale_host is None:
         return None
-    from agentworks.vms.manager import require_vm_ssh_boundary
-
     require_vm_ssh_boundary(db, config, vm)
-    return vm, transport(vm, config)
+    return vm, execution.vm_access(vm, config, Admin())
 
 
 @contextlib.contextmanager
@@ -810,10 +817,10 @@ def delete_console(
         # Best-effort tmux teardown. Don't block the DB delete on VM reachability.
         teardown_failed = False
         try:
-            live = _mc._live_target(db, config, console.vm_name)
+            live = _mc._live_access(db, config, console.vm_name)
             if live is not None:
-                _vm, target = live
-                _teardown_console_tmux(target, name)
+                _vm, admin = live
+                _teardown_console_tmux(admin, name)
         except UserAbort:
             raise
         except Exception as exc:

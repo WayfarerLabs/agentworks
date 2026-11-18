@@ -4,8 +4,7 @@ Two contracts live here:
 
 - The environment shape: a session's environment reaches the launch only as
   ``run_command``'s ``env``, which the request carries, never as
-  ``tmux new-session -e`` arguments on its command line. ``_tmux_env_flags``,
-  which the consoles still use, keeps its own tests here.
+  ``tmux new-session -e`` arguments on its command line.
 - The dead-workload capture path: remain-on-exit chained into the create,
   the liveness probes around the grant machinery, and the capture-and-raise
   (or could-not-verify) errors for a workload that dies instantly.
@@ -27,7 +26,6 @@ from agentworks.execution.requests import Script
 from agentworks.execution.results import Completed, Result
 from agentworks.sessions.tmux import (
     _pane_command,
-    _tmux_env_flags,
     _trim_captured_output,
     admin_socket_path,
     capture_tmux_server_fingerprint,
@@ -68,24 +66,6 @@ def test_pane_command_owns_exec_no_double_wrap() -> None:
     assert inner_count == 1, f"expected one ' exec ' segment, got {inner_count}: {out!r}"
 
 
-def test_tmux_env_flags_empty_input() -> None:
-    assert _tmux_env_flags({}) == ""
-    assert _tmux_env_flags(None) == ""
-
-
-def test_tmux_env_flags_emits_per_pair() -> None:
-    out = _tmux_env_flags({"A": "1", "B": "2"})
-    # Leading space so it concatenates cleanly onto a tmux command string.
-    assert out.startswith(" ")
-    assert " -e A=1" in out
-    assert " -e B=2" in out
-
-
-def test_tmux_env_flags_quotes_values_with_spaces() -> None:
-    out = _tmux_env_flags({"GREET": "hello world"})
-    assert "-e 'GREET=hello world'" in out
-
-
 @pytest.mark.skipif(shutil.which("zsh") is None, reason="zsh is not installed")
 def test_exact_tmux_target_survives_zsh_equals_expansion() -> None:
     target = exact_tmux_target("aw-console-test")
@@ -96,19 +76,6 @@ def test_exact_tmux_target_survives_zsh_equals_expansion() -> None:
         text=True,
     )
     assert result.stdout == "=aw-console-test"
-
-
-def test_tmux_env_flags_round_trip_through_shlex_for_single_quotes() -> None:
-    """The output is destined for the SSH remote shell, which parses it via
-    shell rules; values containing single quotes must round-trip cleanly
-    through ``shlex.split`` (same parser bash uses)."""
-    out = _tmux_env_flags({"PATH": "/it's/here", "OK": "fine"})
-    # Strip the leading space then split as the remote shell would.
-    tokens = shlex.split(out.lstrip())
-    # Expect two -e pairs.
-    assert tokens.count("-e") == 2
-    assert "PATH=/it's/here" in tokens
-    assert "OK=fine" in tokens
 
 
 def test_admin_socket_path_under_admin_socket_root() -> None:

@@ -11,7 +11,6 @@ import agentworks.bootstrap as bootstrap
 from agentworks.db import SessionMode
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ValidationError
-from agentworks.execution.access import Admin
 from agentworks.secrets import SecretTarget
 from agentworks.secrets.orchestration import validate_target_values
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -20,7 +19,6 @@ from agentworks.vms.admin import AdminConfig
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
 from tests.console_helpers import create_console_record
-from tests.vm_access_support import RecordingVMAccess
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -91,11 +89,11 @@ def test_healthy_or_cleanup_only_validation_skips_unused_environments(
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
+            _StubConfig(),  # type: ignore[arg-type]
             registry,
             console=console,
             vm=db.get_vm("vm1"),
-            target=target,
-            admin=RecordingVMAccess([], Admin()),
+            admin=target.admin(),
             held_native_guard=guard,
         )
         before = list(target.commands)
@@ -134,11 +132,11 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
+            _StubConfig(),  # type: ignore[arg-type]
             registry,
             console=console,
             vm=db.get_vm("vm1"),
-            target=target,
-            admin=RecordingVMAccess([], Admin()),
+            admin=target.admin(),
             held_native_guard=guard,
         )
         before = list(target.commands)

@@ -82,11 +82,7 @@ TMUX_BINARY = "/usr/bin/tmux"
 
 
 class CommandResult(Protocol):
-    """What a ``RunCommand`` returns: the decoded streams and the exit status.
-
-    ``CommandOutcome`` is ``access_run_command``'s; a legacy ``Transport.run``'s
-    ``SSHResult`` has the same shape.
-    """
+    """What a ``RunCommand`` returns: the decoded streams and the exit status (``CommandOutcome``)."""
 
     @property
     def stdout(self) -> str: ...
@@ -102,11 +98,9 @@ class CommandResult(Protocol):
 
 
 class RunCommand(Protocol):
-    """Callable that runs a shell command on a target: ``access_run_command`` over a ``VMAccess``, or ``Transport.run``.
+    """Callable that runs a shell command line on the VM: ``access_run_command`` over a ``VMAccess``.
 
-    Over a ``VMAccess`` the ``env`` kwarg travels in the request; over a
-    legacy ``Transport`` its SSH layer sends it as ``-o SetEnv=KEY=VALUE``
-    arguments.
+    The ``env`` kwarg travels in the request.
     """
 
     def __call__(
@@ -805,27 +799,6 @@ def _grant_server_access(
         '[ "$agw_socket_member_uid" = "$agw_socket_caller_uid" ]; then continue; fi; '
         f'tmux -S {q_sock} server-access -w -- "$u" || exit $?; done',
     )
-
-
-def _tmux_env_flags(env: dict[str, str] | None) -> str:
-    """Return ``-e KEY=VAL -e KEY=VAL`` flags for ``tmux new-session`` /
-    ``tmux split-window``.
-
-    Tmux's session-environment table propagates these vars to every pane in
-    the session (and to panes spawned later via ``split-window``). Belt-and-
-    suspenders with the SSH SetEnv layer: SetEnv brings the vars into the
-    SSH command's shell, which tmux then inherits when it spawns/starts the
-    server; tmux's ``-e`` makes the propagation explicit per-session, which
-    matters when the same operator opens multiple sessions on a long-lived
-    tmux server (each session ends up with its own per-session env).
-
-    Returns the empty string for empty / None input so call sites can
-    string-concat without conditionals.
-    """
-    if not env:
-        return ""
-    parts = [f"-e {shlex.quote(f'{k}={v}')}" for k, v in env.items()]
-    return " " + " ".join(parts)
 
 
 def _pane_command(command: str, q_path: str) -> str:

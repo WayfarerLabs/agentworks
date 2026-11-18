@@ -28,7 +28,11 @@ from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
-    from tests.vm_access_support import AccessRecorder
+    from agentworks.db import VMRow
+    from agentworks.execution.results import Result
+    from agentworks.sessions.multi_console import ConsoleAccess
+    from agentworks.sessions.tmux import RunCommand
+    from tests.vm_access_support import AccessRecorder, Call, RecordingVMAccess
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -484,17 +488,17 @@ def warnings(captured_output: CapturedOutput) -> Generator[list[str], None, None
 
 
 # ---------------------------------------------------------------------------
-# Fake tmux target (named-console tests)
+# Fake guest (named-console and session tests)
 #
-# Several test modules drive the named-console SSH layer through a stand-in
-# target that captures commands rather than actually running them on a VM.
-# Defined here so all test files that import the classes (or use the
-# fixture) share the same implementation.
+# Several test modules drive the console and session layers against a stand-in
+# guest that answers each request a recording access is asked, from its
+# command line, rather than running it on a VM. Defined here so all test files
+# that import the classes (or use the fixture) share the same implementation.
 # ---------------------------------------------------------------------------
 
 
 class _FakeResult:
-    """Minimal stand-in for ssh.SSHResult."""
+    """What a guest command printed and exited with, as a test scripts it."""
 
     def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
         self.returncode = returncode
@@ -504,6 +508,12 @@ class _FakeResult:
     @property
     def ok(self) -> bool:
         return self.returncode == 0
+
+    def result(self) -> Result:
+        """This as the completed ``Result`` a recording access returns."""
+        from agentworks.execution.results import Completed, Result
+
+        return Result(Completed(self.returncode), self.stdout.encode(), self.stderr.encode())
 
 
 class _SupportsDispatch(Protocol):
@@ -518,19 +528,22 @@ class _SupportsDispatch(Protocol):
 
 
 class _FakeTarget:
-    """Captures the commands run against it. Supports a per-test override map
-    that lets us simulate (e.g.) `has-session` returning nonzero on first probe.
+    """The guest a test's recording accesses reach: it answers each request from its command line.
 
-    Optionally stateful: pass a ``model`` (a ``tests._tmux_model.TmuxModel``)
-    and ``run()`` answers from live tmux state instead of a fixed default.
-    Resolution order is override map first, then the model, then default-OK,
-    so a test can still force a specific failure (e.g. "make this one
-    split-window fail") on top of an otherwise stateful target. Without a
-    model the target is the original stateless substring map, so every
-    existing test is unaffected.
+    ``answer`` is a ``RecordingVMAccess`` answer (``install_fake_target``
+    installs it for every access): a ``Command``'s line is ``shlex.join`` of
+    its argv and a ``Script``'s is its source. ``commands`` records every
+    line in order, and ``recorder`` is the access recorder, whose calls hold
+    the typed requests, parks included.
+
+    Supports a per-test override map that lets us simulate (e.g.)
+    `has-session` returning nonzero on first probe. Optionally stateful: pass
+    a ``model`` (a ``tests._tmux_model.TmuxModel``) and it answers from live
+    tmux state instead of a fixed default. Resolution order is override map
+    first, then the model, then default-OK, so a test can still force a
+    specific failure (e.g. "make this one split-window fail") on top of an
+    otherwise stateful guest.
     """
-
-    logger = None
 
     def __init__(
         self,
@@ -538,13 +551,14 @@ class _FakeTarget:
         *,
         model: _SupportsDispatch | None = None,
     ) -> None:
-        self.logger = None
         self.commands: list[str] = []
         # Substring -> response. First matching substring wins; default = ok.
         self.responses = responses or {}
         self.model = model
+        self.recorder: AccessRecorder | None = None
 
-    def run(self, command: str, **kwargs: object) -> _FakeResult:
+    def dispatch(self, command: str) -> _FakeResult:
+        """Record ``command`` and return what the guest answers for it."""
         from tests._runtime_probes import framed_runtime_result
 
         self.commands.append(command)
@@ -554,6 +568,43 @@ class _FakeTarget:
         if self.model is not None:
             return self.model.dispatch(command)
         return framed_runtime_result(command, _FakeResult())
+
+    def answer(self, call: Call) -> Result | None:
+        """Answer a ``Command`` or ``Script`` from its command line; ``None`` for anything else."""
+        from tests.vm_access_support import command_line
+
+        line = command_line(call.request)
+        return None if line is None else self.dispatch(line).result()
+
+    def admin(self) -> RecordingVMAccess:
+        """The admin's recording access, whose requests this guest answers."""
+        assert self.recorder is not None
+        return self.recorder.access()
+
+    def run_command(self) -> RunCommand:
+        """The admin's tmux ``RunCommand``, as the console modules build it, for a helper that takes one."""
+        from agentworks.sessions.tmux import access_run_command
+
+        return access_run_command(self.admin(), deadline=None, elevated=False)
+
+    def console_access(self, vm: VMRow, agents: dict[str, str] | None = None) -> ConsoleAccess:
+        """A console operation's accesses on ``vm``: the admin's and, unchecked, ``agents``' (Linux user to name)."""
+        from agentworks.execution.access import Agent
+        from agentworks.sessions.multi_console import ConsoleAccess
+
+        assert self.recorder is not None
+        accesses = {user: self.recorder.access(Agent(name, user)) for user, name in (agents or {}).items()}
+        return ConsoleAccess(vm, None, self.admin(), accesses)  # type: ignore[arg-type]
+
+    def parks(self) -> list[Call]:
+        """Every ``park`` the test's accesses were asked, in order."""
+        assert self.recorder is not None
+        return [call for call in self.recorder.calls if call.operation == "park"]
+
+    def attaches(self) -> list[Call]:
+        """Every ``attach`` the test's accesses were asked, in order."""
+        assert self.recorder is not None
+        return [call for call in self.recorder.calls if call.operation == "attach"]
 
 
 class _StubPlatform:
@@ -699,25 +750,24 @@ def stub_vm_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) -> _FakeTarget:
-    """Route the transport layer and every ``VMAccess`` through ``target`` and stub the VM gates.
+    """Answer every ``VMAccess`` request from ``target`` and stub the VM gates.
 
     Shared by the ``fake_target`` fixture (stateless) and the
     ``console_target_factory`` fixture (stateful, model-backed), so both
-    install the same seams and gate stubs. The console modules still build
-    the legacy transport (``agentworks.transports.transport``); every other
-    request reaches ``target`` through a recording access
-    (``vm_access_support.route_vm_access_to_target``). Returns ``target`` for
-    the caller to keep a reference.
+    install the same seams and gate stubs. ``execution.vm_access`` builds
+    recording accesses (``vm_access_support.install_access_recorder``) whose
+    requests ``target`` answers, every identity's alike; a required-command
+    check finds its command. Returns ``target`` for the caller to keep a
+    reference.
     """
-    from tests.vm_access_support import route_vm_access_to_target
+    from tests.vm_access_support import check_result, install_access_recorder, is_command_check
 
-    fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    route_vm_access_to_target(monkeypatch, target)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = lambda call: (
+        check_result(call.request, 0) if is_command_check(call.request) else target.answer(call)
+    )
+    target.recorder = recorder
     stub_vm_gates(monkeypatch)
-    # The interactive code path now lives on the transport itself; the
-    # fake target exposes it as a no-op so attach flows return cleanly.
-    target.interactive = lambda command, **kwargs: 0  # type: ignore[attr-defined]
     return target
 
 

@@ -81,10 +81,11 @@ class _StubConfig:
     """A no-op Config stand-in.
 
     Tests that don't install the ``fake_target`` fixture also use VMs seeded
-    with ``with_tailscale=False`` so ``_live_target`` returns None up front
-    and the SSH layer is never entered. If you set ``with_tailscale=True``
-    without monkey-patching ``transports.transport`` you will hit an
-    AttributeError on this stub -- prefer the ``fake_target`` fixture.
+    with ``with_tailscale=False`` so ``_live_access`` returns None up front
+    and no access is built. If you set ``with_tailscale=True`` without
+    routing ``execution.vm_access`` to recording accesses you will hit an
+    AttributeError on this stub (it has no ``operator``); prefer the
+    ``fake_target`` fixture.
 
     ``named_console`` provides only what multi_console reads from Config;
     extend here as new fields are added to NamedConsoleConfig.

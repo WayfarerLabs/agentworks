@@ -160,7 +160,7 @@ def test_preview_off_observation_is_qualified_for_both_targets(db, make_config, 
     runtime[0]["box"] = VMStatus.STOPPED
     before = (db.get_session("work"), db.get_console("view"), db.get_vm("box"))
     monkeypatch.setattr(manager, "observe_session_statuses", lambda *a, **k: pytest.fail("off guest inspected"))
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: pytest.fail("off guest transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest access"))
     rendered = []
     monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
     if kind == "session":
@@ -185,7 +185,7 @@ def test_off_console_reconciliation_qualifies_guest_free_result_before_final(
     db.set_console_desired_runtime_state("view", DesiredRuntimeState.STOPPED)
     runtime[0]["box"] = VMStatus.STOPPED
     before = db.get_console("view")
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: pytest.fail("off guest transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest access"))
     monkeypatch.setattr(mc, "_console_runtime_presence", lambda *a, **k: pytest.fail("off guest inspected"))
     rendered = []
     monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows: rendered.extend(rows))
@@ -227,7 +227,7 @@ def test_public_console_reports_the_final_stop_path(db, make_config, runtime, mo
     probes = []
     teardowns = []
 
-    def presence(target, name):
+    def presence(admin, name):
         probes.append(name)
         if scenario == "prepare-fallback":
             powers["box"] = VMStatus.STOPPED
@@ -236,18 +236,18 @@ def test_public_console_reports_the_final_stop_path(db, make_config, runtime, mo
 
     monkeypatch.setattr(mc, "_console_runtime_presence", presence)
     prepare = mc.prepare_console_stop
-    prepared_targets = []
+    prepared_accesses = []
 
     def observe_preparation(*args, **kwargs):
         prepared = prepare(*args, **kwargs)
-        prepared_targets.append(prepared.target)
+        prepared_accesses.append(prepared.admin)
         if scenario == "off-then-live":
             powers["box"] = VMStatus.RUNNING
         return prepared
 
     monkeypatch.setattr(mc, "prepare_console_stop", observe_preparation)
 
-    def teardown(target, name):
+    def teardown(admin, name):
         nonlocal present
         teardowns.append(name)
         if scenario == "execute-fallback":
@@ -261,7 +261,7 @@ def test_public_console_reports_the_final_stop_path(db, make_config, runtime, mo
     assert bool(probes) == (scenario != "off")
     assert bool(teardowns) == (scenario in {"live", "off-then-live", "execute-fallback"})
     if scenario == "off-then-live":
-        assert len(prepared_targets) == 2 and prepared_targets[0] is None and prepared_targets[1] is not None
+        assert len(prepared_accesses) == 2 and prepared_accesses[0] is None and prepared_accesses[1] is not None
     current = db.get_console("view")
     assert current == replace(before, desired_runtime_state=DesiredRuntimeState.STOPPED, updated_at=current.updated_at)
     assert not events

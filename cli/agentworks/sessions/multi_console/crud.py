@@ -2,7 +2,7 @@
 plus the live-tmux best-effort sync each one triggers when the console's
 tmux session is already up.
 
-``kill_session_windows``, ``_pane_secret_target``, ``_live_target``,
+``kill_session_windows``, ``_pane_secret_target``, ``_live_access``,
 ``_console_tmux_presence``, and ``_add_session_window`` are monkeypatched by
 tests directly on the ``agentworks.sessions.multi_console`` package object
 (so a test can, e.g., exercise ``remove_sessions``'s live-sync path without a
@@ -15,11 +15,12 @@ time (``_mc.<name>(...)``) rather than a direct or bare reference.
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
+from agentworks.db import ConsoleSessionRow
 from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.resources.access import named_console_template
@@ -28,7 +29,7 @@ from agentworks.sessions.multi_console_layout import (
     _reorder_session_windows,
     _reorder_shell_panes,
 )
-from agentworks.sessions.tmux import ProbeStatus, exact_tmux_target
+from agentworks.sessions.tmux import ProbeStatus, access_run_command, exact_tmux_target
 
 from ._helpers import (
     SessionSpec,
@@ -41,11 +42,11 @@ from ._helpers import (
     tmux_session_name,
 )
 from .attach import _live_best_effort, _session_linux_user
-from .tmux_build import PreserveEnvMemo, _resolve_workspace_path, _split_shell_pane
+from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import ConsoleSessionRow, Database, ShellEntry
+    from agentworks.db import Database, ShellEntry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -132,7 +133,6 @@ def create_console(
             )
 
         from agentworks.bootstrap import load_request_registry
-        from agentworks.db import ConsoleSessionRow
         from agentworks.secrets.resolver import Resolver
 
         definition = ConsoleDefinition(
@@ -155,7 +155,7 @@ def create_console(
 
         with (
             closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _mc._prepare_vm_target(
+            _mc._prepare_vm_access(
                 db,
                 config,
                 vm_name,
@@ -163,19 +163,11 @@ def create_console(
                 interaction=interaction,
                 resolver=resolver,
                 held_native_guard=held_native_guard,
-            ) as (vm, target),
-        ):
-            resolver.register_targets(
-                _mc._console_build_secret_targets(
-                    db,
-                    registry,
-                    console=definition,
-                    vm=vm,
-                    members=definition.members,
+                targets=lambda vm: _mc._console_build_secret_targets(
+                    db, registry, console=definition, vm=vm, members=definition.members
                 ),
-                allow_transient_auto_declare=True,
-            )
-            resolver.resolve()
+            ) as (vm, admin),
+        ):
             secret_values = resolver.values
             try:
                 _mc._validate_console_build_values(
@@ -186,26 +178,22 @@ def create_console(
                     members=definition.members,
                     values=secret_values,
                 )
-                _mc._teardown_console_tmux(target, name)
+                access = _mc.console_access(db, config, vm, admin, definition.members)
+                _mc._teardown_console_tmux(admin, name)
                 with db.transaction():
                     db.insert_console(name, vm_name, admin_shell=add_admin_shell)
                     for spec in specs:
                         db.add_console_session(name, spec.name, default_shells(spec.shells))
                 console = _require_console(db, name)
-                import agentworks.execution as execution
-                from agentworks.execution.access import Admin
-
                 from .tmux_build import _build_console_tmux
 
                 try:
                     _build_console_tmux(
-                        target,
+                        access,
                         db,
                         registry,
                         console,
                         vm,
-                        # Built beside this module's legacy target until consoles move.
-                        admin=execution.vm_access(vm, config, Admin()),
                         values=secret_values,
                         layout=named_console_template(registry).tmux_layout,
                     )
@@ -213,7 +201,7 @@ def create_console(
                     raise
                 except Exception as exc:
                     try:
-                        canonical, staging = _mc._console_runtime_presence(target, name)
+                        canonical, staging = _mc._console_runtime_presence(admin, name)
                     except UserAbort:
                         raise
                     except Exception:
@@ -288,7 +276,7 @@ def add_sessions(
                     entity_name=spec.name,
                 )
 
-        live = _mc._live_target(db, config, console.vm_name)
+        live = _mc._live_access(db, config, console.vm_name)
         registry = load_request_registry(config, live_database=db)
 
         # Eager-prompting orchestration: when
@@ -346,6 +334,14 @@ def add_sessions(
                     allow_transient_auto_declare=True,
                     interaction=interaction,
                 )
+        # The new members' agent panes connect as their agents, so check them before anything changes.
+        access = None
+        if live is not None:
+            new_members = [
+                ConsoleSessionRow(console_name, spec.name, position, default_shells(spec.shells))
+                for position, spec in enumerate(specs)
+            ]
+            access = _mc.console_access(db, config, live[0], live[1], new_members)
 
         with db.transaction():
             current_order = [member.session_name for member in db.list_console_sessions(console_name)]
@@ -375,10 +371,10 @@ def add_sessions(
         output.result(f"Added {len(specs)} session(s) to console '{console_name}'.")
 
         with _live_best_effort(f"add-sessions to '{console_name}'", console_name=console_name):
-            if live is None:
+            if access is None:
                 return
-            vm, target = live
-            presence = _mc._console_tmux_presence(target, console_name)
+            vm, admin = access.vm, access.admin
+            presence = _mc._console_tmux_presence(admin, console_name)
             if presence is ProbeStatus.UNKNOWN:
                 raise StateError(
                     f"could not determine console '{console_name}' tmux state",
@@ -387,12 +383,11 @@ def add_sessions(
                 )
             if presence is ProbeStatus.ABSENT:
                 return
-            preserve_memo: PreserveEnvMemo = {}
             for spec in specs:
                 member = db.get_console_session(console_name, spec.name)
                 assert member is not None
                 _mc._add_session_window(
-                    target,
+                    access,
                     db,
                     registry,
                     values=secret_values,
@@ -400,7 +395,6 @@ def add_sessions(
                     member=member,
                     vm=vm,
                     layout=named_console_template(registry).tmux_layout,
-                    preserve_memo=preserve_memo,
                     # Append each new member past the last window (not into a
                     # reclaimed low slot) so live order matches config even before
                     # the reorder pass below.
@@ -412,7 +406,7 @@ def add_sessions(
             # corrects any pre-existing drift left by an earlier op.
             ordered_windows = [m.session_name for m in db.list_console_sessions(console_name)]
             _reorder_session_windows(
-                target,
+                access_run_command(admin, deadline=None, elevated=False),
                 console_name=console_name,
                 ordered_session_windows=ordered_windows,
             )
@@ -447,7 +441,7 @@ def remove_sessions(
                     entity_kind="console-member",
                     entity_name=n,
                 )
-        live = _mc._live_target(db, config, console.vm_name)
+        live = _mc._live_access(db, config, console.vm_name)
         with db.transaction():
             for n in session_names:
                 db.remove_console_session(console_name, n)
@@ -455,18 +449,12 @@ def remove_sessions(
 
         with _live_best_effort(f"remove-sessions from '{console_name}'", console_name=console_name):
             if live is not None:
-                import agentworks.execution as execution
-                from agentworks.execution.access import Admin
-
-                vm, _target = live
+                _vm, admin = live
                 # kill_session_windows lives in .attach but is called through the
                 # package object here (not `from .attach import kill_session_windows`)
                 # so that tests monkeypatching `multi_console.kill_session_windows`
-                # intercept this call path. It takes the admin's access, which is
-                # built beside this module's legacy target until consoles move.
-                _mc.kill_session_windows(
-                    execution.vm_access(vm, config, Admin()), pairs=[(console_name, n) for n in session_names]
-                )
+                # intercept this call path.
+                _mc.kill_session_windows(admin, pairs=[(console_name, n) for n in session_names])
 
         # Offer/report AFTER the removal (and its best-effort live sync) settle.
         # Routed through the package object so this shares the exact offer/report
@@ -561,7 +549,7 @@ def reorder_sessions(
             output.info(f"Console '{console_name}' is already in the requested order; nothing to do.")
             return
 
-        live = _mc._live_target(db, config, console.vm_name)
+        live = _mc._live_access(db, config, console.vm_name)
         db.reorder_console_sessions(console_name, desired_order)
         output.result(
             f"Reordered {len(session_names)} session(s) starting at index {resolved_index} of console '{console_name}'."
@@ -570,8 +558,8 @@ def reorder_sessions(
         with _live_best_effort(f"reorder-sessions in '{console_name}'", console_name=console_name):
             if live is None:
                 return
-            _vm, target = live
-            presence = _mc._console_tmux_presence(target, console_name)
+            _vm, admin = live
+            presence = _mc._console_tmux_presence(admin, console_name)
             if presence is ProbeStatus.UNKNOWN:
                 raise StateError(
                     f"could not determine console '{console_name}' tmux state",
@@ -581,7 +569,7 @@ def reorder_sessions(
             if presence is ProbeStatus.ABSENT:
                 return
             _reorder_session_windows(
-                target,
+                access_run_command(admin, deadline=None, elevated=False),
                 console_name=console_name,
                 ordered_session_windows=desired_order,
             )
@@ -639,7 +627,7 @@ def add_shell(
                 entity_name=session_name,
             )
 
-        live = _mc._live_target(db, config, console.vm_name)
+        live = _mc._live_access(db, config, console.vm_name)
         registry = load_request_registry(config, live_database=db)
 
         # Eager-prompting orchestration: resolve any
@@ -682,6 +670,10 @@ def add_shell(
 
         new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
         new_shells = [*cs.shells, new_shell]
+        # An agent's pane connects as the agent, so check it before anything changes.
+        access = None
+        if live is not None:
+            access = _mc.console_access(db, config, live[0], live[1], [replace(cs, shells=[new_shell])])
         db.update_console_shells(console_name, session_name, new_shells)
         user_tag = "admin" if admin else "agent"
         output.result(
@@ -689,10 +681,10 @@ def add_shell(
         )
 
         with _live_best_effort(f"add-shell to '{console_name}:{session_name}'", console_name=console_name):
-            if live is None:
+            if access is None:
                 return
-            vm, target = live
-            presence = _mc._console_tmux_presence(target, console_name)
+            vm, admin_access = access.vm, access.admin
+            presence = _mc._console_tmux_presence(admin_access, console_name)
             if presence is ProbeStatus.UNKNOWN:
                 raise StateError(
                     f"could not determine console '{console_name}' tmux state",
@@ -709,7 +701,7 @@ def add_shell(
                 return
             session_user = _session_linux_user(db, session, vm)
             _split_shell_pane(
-                target,
+                access,
                 db,
                 registry,
                 values=secret_values,
@@ -724,8 +716,6 @@ def add_shell(
                 # new_shell is appended to cs.shells, so its index in the updated
                 # configured list is the previous list's length.
                 config_index=len(cs.shells),
-                # One pane, so no probe verdict to share with a sibling split.
-                preserve_memo={},
             )
             q_con = exact_tmux_target(tmux_session_name(console_name))
             q_win = shlex.quote(session_name)
@@ -735,9 +725,10 @@ def add_shell(
             # config order (`[0]`, `[1]`, ...), the same ordering invariant the
             # build/restore paths uphold. len(new_shells) is the full shell count
             # after this append.
-            _reorder_shell_panes(target, q_con, q_win, len(new_shells))
+            run = access_run_command(admin_access, deadline=None, elevated=False)
+            _reorder_shell_panes(run, q_con, q_win, len(new_shells))
             # Re-apply the layout to redistribute geometry after the split and
             # swaps (mirrors the restore_session sequence). No _focus_session_pane
             # here: the operator is mid-attach when they run `add-shell`; pulling
             # focus off their current pane would be jarring.
-            _apply_layout(target, q_con, q_win, named_console_template(registry).tmux_layout)
+            _apply_layout(run, q_con, q_win, named_console_template(registry).tmux_layout)

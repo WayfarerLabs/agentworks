@@ -8,17 +8,17 @@ import pytest
 
 import agentworks.bootstrap as bootstrap
 from agentworks.errors import ExternalError, StateError, UserAbort
-from agentworks.execution.access import Admin
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.multi_console.tmux_build import _build_console_tmux_unlogged
 from tests._consoles_support import _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests._tmux_model import TmuxModel
-from tests.conftest import _FakeTarget
 from tests.console_helpers import create_console_record
-from tests.vm_access_support import RecordingVMAccess
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.db import Database
+    from tests.conftest import _FakeResult, _FakeTarget
 
 
 _FAILURE_CASES = [
@@ -30,12 +30,35 @@ _FAILURE_CASES = [
 ]
 
 
+def _guest(
+    factory: Callable[..., _FakeTarget], model: TmuxModel, *, primary: BaseException, cleanup: BaseException | None
+) -> _FakeTarget:
+    """A modeled guest whose ``new-session`` raises ``primary`` and, after it, every request raises ``cleanup``."""
+    guest = factory(model)
+    modeled = guest.dispatch
+    failed: list[str] = []
+
+    def dispatch(command: str) -> _FakeResult:
+        if "tmux new-session" in command:
+            guest.commands.append(command)
+            failed.append(command)
+            raise primary
+        if failed and cleanup is not None:
+            guest.commands.append(command)
+            raise cleanup
+        return modeled(command)
+
+    guest.dispatch = dispatch  # type: ignore[method-assign]
+    return guest
+
+
 @pytest.mark.parametrize("logged", [False, True])
 @pytest.mark.parametrize("primary_type,cleanup_type", _FAILURE_CASES)
 def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     db: Database,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    console_target_factory: Callable[..., _FakeTarget],
     logged: bool,
     primary_type: type[BaseException],
     cleanup_type: type[BaseException],
@@ -47,52 +70,40 @@ def test_build_cleanup_preserves_failure_priority_and_never_publishes(
     primary = primary_type("build failed")
     cleanup = cleanup_type("cleanup interrupted")
     model = TmuxModel()
+    guest = _guest(console_target_factory, model, primary=primary, cleanup=cleanup)
+    vm = db.get_vm("vm1")
+    assert vm is not None
 
-    class Target(_FakeTarget):
-        creation_failed = False
-        cleanup_attempted = False
-
-        def run(self, command, **kwargs):
-            if "tmux new-session" in command:
-                self.commands.append(command)
-                self.creation_failed = True
-                raise primary
-            if self.creation_failed:
-                self.commands.append(command)
-                self.cleanup_attempted = True
-                raise cleanup
-            return super().run(command, **kwargs)
-
-    target = Target(model=model)
     build = mc._build_console_tmux if logged else _build_console_tmux_unlogged
     expected = cleanup if isinstance(cleanup, (UserAbort, KeyboardInterrupt)) else primary
     with pytest.raises(type(expected)) as caught:
         build(
-            target,
+            guest.console_access(vm),
             db,
             registry,
             db.get_console("con"),
-            db.get_vm("vm1"),
-            admin=RecordingVMAccess([], Admin()),
+            vm,
             values={},
             layout="tiled",
         )
 
     assert caught.value is expected
-    assert target.cleanup_attempted
+    # The cleanup was attempted after the failed creation.
+    new_session = next(i for i, command in enumerate(guest.commands) if "tmux new-session" in command)
+    assert guest.commands[new_session + 1 :]
     assert not model.has_session("aw-console-con")
-    assert not any("rename-session" in command for command in target.commands)
+    assert not any("rename-session" in command for command in guest.commands)
     console = db.get_console("con")
     assert console is not None
     assert console.last_started_at is None
-    assert target.logger is None
 
 
 @pytest.mark.parametrize("primary_type,close_type", _FAILURE_CASES)
-def test_log_close_preserves_failure_priority_and_restores_transport_logger(
+def test_log_close_preserves_failure_priority(
     db: Database,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    console_target_factory: Callable[..., _FakeTarget],
     primary_type: type[BaseException],
     close_type: type[BaseException],
 ) -> None:
@@ -110,33 +121,26 @@ def test_log_close_preserves_failure_priority_and_restores_transport_logger(
         raise closing
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger.close", close)
+    guest = _guest(console_target_factory, model, primary=primary, cleanup=None)
+    vm = db.get_vm("vm1")
+    assert vm is not None
 
-    class Target(_FakeTarget):
-        def run(self, command, **kwargs):
-            if "tmux new-session" in command:
-                self.commands.append(command)
-                raise primary
-            return super().run(command, **kwargs)
-
-    target = Target(model=model)
     expected = closing if isinstance(closing, (UserAbort, KeyboardInterrupt)) else primary
     with pytest.raises(type(expected)) as caught:
         mc._build_console_tmux(
-            target,
+            guest.console_access(vm),
             db,
             registry,
             db.get_console("con"),
-            db.get_vm("vm1"),
-            admin=RecordingVMAccess([], Admin()),
+            vm,
             values={},
             layout="tiled",
         )
 
     assert caught.value is expected
     assert closes == [True]
-    assert target.logger is None
     assert not model.has_session("aw-console-con")
-    assert not any("rename-session" in command for command in target.commands)
+    assert not any("rename-session" in command for command in guest.commands)
     console = db.get_console("con")
     assert console is not None
     assert console.last_started_at is None

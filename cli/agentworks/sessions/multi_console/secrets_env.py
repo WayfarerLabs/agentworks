@@ -35,12 +35,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
 
-# Deliberately matches no AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS entry, so it is
-# only ever preservable via `setenv`. That is what makes it a clean capability
-# probe: a var the allowlist already covers would pass even without the
-# fragment. test_consoles pins the two against each other.
-_SUDO_PRESERVE_PROBE_VAR = "AWPROBE"
-
 
 class _ConsoleDefinition(Protocol):
     @property
@@ -235,16 +229,11 @@ def _restore_session_secret_targets(
     member: ConsoleSessionRow,
     indices: list[int],
 ) -> list[SecretTarget]:
-    """SecretTargets for the specific missing shell-pane indices that
-    ``restore_session`` will open.
+    """SecretTargets for the shell panes at ``indices`` of ``member``'s configured shells.
 
-    Targets are scoped precisely to the caller-supplied indices: the
-    restore path's validation guards filter down to ``missing`` before
-    invoking this helper, so over-approximating would risk prompting
-    for secrets the command never actually consumes. (The window-
-    missing rebuild path in ``restore_session`` calls
-    ``_add_session_window`` directly; that path does its own
-    enumeration and doesn't route through this helper.)
+    ``restore_session`` passes every configured index to its boundary
+    resolve, before it knows which panes are missing, so the values for any
+    pane it opens are in hand before its first tmux request.
     """
     targets: list[SecretTarget] = []
     session = db.get_session(member.session_name)
@@ -295,7 +284,7 @@ def _resolve_pane_env(
 
     Agent pane: vm + workspace + agent operator env; workspace dynamic
     identity. ``AGENTWORKS_AGENT`` reaches the pane via the agent's
-    per-user profile fragment (static identity), not via SetEnv.
+    per-user profile fragment (static identity), not via the pane's environment.
 
     Returns ``{}`` when the session's row is missing fields that the env
     resolution needs (e.g. workspace lookup fails); the caller proceeds

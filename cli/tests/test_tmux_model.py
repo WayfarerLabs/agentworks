@@ -315,11 +315,11 @@ def test_swap_pane_exchanges_pane_positions() -> None:
 
 
 def test_non_tmux_and_unmodeled_commands_return_default_ok() -> None:
-    """The sudo preserve-env probe and cosmetic tmux commands (select-pane,
-    select-layout) the model has no state for return default-OK, matching the
-    stateless fake's fall-through."""
+    """A non-tmux command (an agent's access check) and cosmetic tmux commands
+    (select-pane, select-layout) the model has no state for return default-OK,
+    matching the stateless fake's fall-through."""
     model = TmuxModel()
     model.new_session(CON, "a")
-    assert model.dispatch("env FOO=1 sudo -n --preserve-env=FOO -u me true").ok
+    assert model.dispatch("true").ok
     assert model.dispatch(f"tmux select-pane -t {CON}:a.0").ok
     assert model.dispatch(f"tmux select-layout -t {CON}:a tiled").ok

@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 
-from agentworks.sessions.tmux import _tmux_env_flags
 from agentworks.ssh import SSHLogger, SSHResult
 
 
@@ -24,7 +23,7 @@ def test_actual_tmux_assignment_cannot_leak_a_registered_secret_fragment(
     }[value_shape]
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     logger = SSHLogger("redaction", "startup", redactions=(value,))
-    command = "tmux new-session" + _tmux_env_flags({"TOKEN": value, "PLAIN": "/home/agent"})
+    command = "tmux new-session " + shlex.join(["-e", "TOKEN=" + value, "-e", "PLAIN=/home/agent"])
     logger.log_command(command, SSHResult(1, "", ""))
     logger.close()
 

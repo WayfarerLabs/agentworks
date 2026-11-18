@@ -24,6 +24,8 @@ from agentworks.errors import (
     StateError,
     ValidationError,
 )
+from agentworks.execution.requests import Bytes
+from agentworks.execution.results import Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager._status import _encoded_probe_field
 from agentworks.sessions.multi_console import (
@@ -47,11 +49,19 @@ from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_regist
 from tests._runtime_probes import framed_runtime_result
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
+from tests.vm_access_support import Call, command_line
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def _batch_request(call: Call) -> tuple[str, str]:
+    """The batch status request's script and its rows, from its ``Bytes`` input."""
+    command = command_line(call.request)
+    assert command is not None and isinstance(call.request.stdin, Bytes)
+    return command, call.request.stdin.data.decode()
 
 
 def _batch_key(input_data: object, name: str) -> int:
@@ -61,7 +71,7 @@ def _batch_key(input_data: object, name: str) -> int:
     return names.index(name) + 1
 
 
-def _refuse_live_target(*args: object, **kwargs: object) -> None:
+def _refuse_live_access(*args: object, **kwargs: object) -> None:
     raise ConnectivityError("SSH identity unavailable")
 
 
@@ -155,7 +165,7 @@ def test_running_session_names_raises_on_unreachable(db: Database, fake_target: 
     db._conn.execute("UPDATE sessions SET pid = 100, boot_id = ? WHERE name = 'alpha'", (BOOT_ID,))
     db._conn.commit()
     # Probe returns empty stdout (simulates transport failure caught by check=False).
-    fake_target.run = lambda command, **kwargs: _FakeResult(returncode=255, stdout="")  # type: ignore[assignment]
+    fake_target.dispatch = lambda command: _FakeResult(returncode=255, stdout="")  # type: ignore[method-assign]
 
     with pytest.raises(ConnectivityError):
         running_session_names(db, _StubConfig(), "vm1")
@@ -205,12 +215,13 @@ def test_running_session_names_refuses_unproved_live_identity_without_repair(
     monkeypatch.setattr(manager, "ensure_pids_batch", refuse_repair)
     monkeypatch.setattr(manager, "_repair_session_pid", refuse_repair)
 
-    def stub_run(command: str, **kwargs: object) -> _FakeResult:
+    def batch_status(call: Call) -> Result:
+        command, rows = _batch_request(call)
         fake_target.commands.append(command)
-        key = _batch_key(kwargs.get("input_data"), "alpha")
-        return framed_runtime_result(command, _FakeResult(returncode=0, stdout=f"S:{key}:0::0::1::1:\n"))
+        key = _batch_key(rows, "alpha")
+        return framed_runtime_result(command, _FakeResult(returncode=0, stdout=f"S:{key}:0::0::1::1:\n")).result()
 
-    fake_target.run = stub_run  # type: ignore[assignment]
+    fake_target.answer = batch_status  # type: ignore[method-assign]
 
     with pytest.raises(ConnectivityError):
         running_session_names(db, _StubConfig(), "vm1")
@@ -230,7 +241,7 @@ def test_running_session_names_refuses_unresolved_incomplete_identity(
 
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["alpha"])
-    fake_target.run = lambda command, **kwargs: (  # type: ignore[assignment]
+    fake_target.dispatch = lambda command: (  # type: ignore[method-assign]
         fake_target.commands.append(command) or _FakeResult(returncode=255)
     )
 
@@ -258,12 +269,10 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
     # observe_session_statuses emits one compound shell command per VM. We
     # reply with status lines for alpha (alive) + beta (alive); gamma's line
     # claims the session is gone.
-    def stub_run(command: str, **kwargs: object) -> _FakeResult:
+    def batch_status(call: Call) -> Result:
+        command, input_data = _batch_request(call)
         fake_target.commands.append(command)
-        input_data = kwargs.get("input_data")
-        if isinstance(input_data, str) and all(
-            _encoded_probe_field(name) in input_data for name in ("alpha", "beta", "gamma")
-        ):
+        if all(_encoded_probe_field(name) in input_data for name in ("alpha", "beta", "gamma")):
             missing_session = b"can't find session: gamma".hex()
             missing_server = b"no server running on /gamma".hex()
             boot_hex = BOOT_ID.encode().hex()
@@ -280,10 +289,10 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
                         f"0:{boot_hex}:0:{absent_hex}\n"
                     ),
                 ),
-            )
-        return _FakeResult()
+            ).result()
+        return _FakeResult().result()
 
-    fake_target.run = stub_run  # type: ignore[assignment]
+    fake_target.answer = batch_status  # type: ignore[method-assign]
 
     names = running_session_names(db, _StubConfig(), "vm1")
     assert names == ["alpha", "beta"]
@@ -526,7 +535,7 @@ def test_reorder_sessions_noop_when_already_in_requested_order(
     _seed_sessions(db, ["a", "b", "c"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b", "c"])
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console._live_target",
+        "agentworks.sessions.multi_console._live_access",
         lambda *args, **kwargs: pytest.fail("a no-op reorder must not preflight live sync"),
     )
 
@@ -544,8 +553,8 @@ def test_add_sessions_live_preflight_refusal_preserves_membership(
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console._live_target",
-        _refuse_live_target,
+        "agentworks.sessions.multi_console._live_access",
+        _refuse_live_access,
     )
     monkeypatch.setattr("agentworks.sessions.multi_console._pane_secret_target", lambda *args, **kwargs: object())
     monkeypatch.setattr(
@@ -568,8 +577,8 @@ def test_remove_sessions_live_preflight_refusal_preserves_membership(
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console._live_target",
-        _refuse_live_target,
+        "agentworks.sessions.multi_console._live_access",
+        _refuse_live_access,
     )
 
     with pytest.raises(ConnectivityError):
@@ -583,8 +592,8 @@ def test_reorder_sessions_live_preflight_refusal_preserves_order(db: Database, m
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a", "b"])
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console._live_target",
-        _refuse_live_target,
+        "agentworks.sessions.multi_console._live_access",
+        _refuse_live_access,
     )
 
     with pytest.raises(ConnectivityError):
@@ -600,8 +609,8 @@ def test_add_shell_live_preflight_refusal_preserves_shells(db: Database, monkeyp
     original_shells = db.get_console_session("con", "a")
     assert original_shells is not None
     monkeypatch.setattr(
-        "agentworks.sessions.multi_console._live_target",
-        _refuse_live_target,
+        "agentworks.sessions.multi_console._live_access",
+        _refuse_live_access,
     )
     monkeypatch.setattr("agentworks.sessions.multi_console._pane_secret_target", lambda *args, **kwargs: object())
     monkeypatch.setattr(
@@ -702,7 +711,7 @@ def test_delete_console_db_only_when_vm_unreachable(
     captured_output: CapturedOutput,
 ) -> None:
     """delete_console removes the DB row even when the VM has no tailscale host
-    (so _live_target returns None and tmux teardown is a no-op)."""
+    (so _live_access returns None and tmux teardown is a no-op)."""
     _seed_vm(db, with_tailscale=False)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])

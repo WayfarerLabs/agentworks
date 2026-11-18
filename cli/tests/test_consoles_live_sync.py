@@ -30,7 +30,6 @@ from tests._runtime_probes import owner_probe_line, owner_switch, socket_guard
 from tests._tmux_model import TmuxModel
 from tests.conftest import _FakeResult, _FakeTarget
 from tests.console_helpers import create_console_record as create_console
-from tests.vm_access_support import access_over_target
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -69,14 +68,14 @@ def _mark_stopped(db: Database, name: str, target: _FakeTarget, monkeypatch: pyt
         target.responses[f"tmux -S {q_socket} {operation}"] = _FakeResult(
             returncode=1, stderr=f"no server running on {socket_path}"
         )
-    original = target.run
+    original = target.dispatch
 
-    def run(command: str, **kwargs: object) -> _FakeResult:
+    def dispatch(command: str) -> _FakeResult:
         if owner_probe_line(command) == f"test -e {q_socket}":
             return _FakeResult(returncode=1)
-        return original(command, **kwargs)
+        return original(command)
 
-    monkeypatch.setattr(target, "run", run)
+    monkeypatch.setattr(target, "dispatch", dispatch)
 
 
 def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_target: _FakeTarget) -> None:
@@ -491,7 +490,7 @@ def test_kill_session_windows_kills_live_only(db: Database, fake_target: _FakeTa
     )
 
     kill_session_windows(
-        access_over_target(fake_target),
+        fake_target.admin(),
         pairs=[("alive", "s"), ("dead", "s")],
     )
 
@@ -506,7 +505,7 @@ def test_kill_session_windows_empty_is_noop(
     from agentworks.sessions.multi_console import kill_session_windows
 
     kill_session_windows(
-        access_over_target(fake_target),
+        fake_target.admin(),
         pairs=[],
     )
     assert fake_target.commands == []
@@ -522,7 +521,7 @@ def test_kill_session_windows_groups_by_console(
     fake_target.responses["has-session -t '=aw-console-c'"] = _FakeResult(returncode=0)
 
     kill_session_windows(
-        access_over_target(fake_target),
+        fake_target.admin(),
         pairs=[("c", "a"), ("c", "b"), ("c", "d")],
     )
 
@@ -546,10 +545,10 @@ def test_kill_session_windows_transport_failure_warns(
     def boom(command: str, **kwargs: object) -> _FakeResult:
         raise RuntimeError("ssh blew up")
 
-    fake_target.run = boom  # type: ignore[assignment]
+    fake_target.dispatch = boom  # type: ignore[assignment]
 
     kill_session_windows(
-        access_over_target(fake_target),
+        fake_target.admin(),
         pairs=[("alpha", "s"), ("beta", "s")],
     )
 
@@ -567,11 +566,11 @@ def test_kill_session_windows_agentworks_error_propagates(
     def boom(command: str, **kwargs: object) -> _FakeResult:
         raise ConnectivityError("vm unreachable", entity_kind="vm", entity_name="vm1")
 
-    fake_target.run = boom  # type: ignore[assignment]
+    fake_target.dispatch = boom  # type: ignore[assignment]
 
     with pytest.raises(ConnectivityError):
         kill_session_windows(
-            access_over_target(fake_target),
+            fake_target.admin(),
             pairs=[("alpha", "s")],
         )
 
@@ -897,7 +896,7 @@ def test_delete_session_warns_when_offered_console_delete_raises(
 # The empty-console offer/report path is the SAME shared helper the
 # session-delete cascade above exercises (#248/#261); these tests prove
 # ``remove_sessions`` wires into it. The VM is seeded without Tailscale so
-# ``_live_target`` returns None and the offer runs with no SSH work; that is
+# ``_live_access`` returns None and the offer runs with no SSH work; that is
 # also the repro's shape (a console emptied on a non-live VM). The offer only
 # prompts in an interactive context, so tests exercising the prompt declare
 # ``is_interactive`` (the report-but-keep path when non-interactive is covered

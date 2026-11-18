@@ -2,7 +2,8 @@
 
 Carved out of ``multi_console.py`` to keep that file focused on the
 public API (create_console, attach_console, add_sessions, etc.) and DB
-orchestration. The functions here all operate on a live tmux target +
+orchestration. The functions here all run tmux lines through a
+``RunCommand`` (``access_run_command`` over the admin's access) on
 quoted console/window names; none of them take a Database or Config
 instance as an argument (the module does import the
 ``AW_SESSION_VERTICAL_LAYOUT`` constant from config, but it doesn't
@@ -37,7 +38,7 @@ from agentworks import output
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
-    from agentworks.transports import Transport
+    from agentworks.sessions.tmux import RunCommand
 
 
 # Tmux pane-option key used to tag a shell pane with its config index.
@@ -55,7 +56,7 @@ class _SessionWindowOrderOutcome(Enum):
 # -- Layout application ----------------------------------------------------
 
 
-def _apply_layout(target: Transport, q_con: str, q_win: str, layout: str) -> bool:
+def _apply_layout(run: RunCommand, q_con: str, q_win: str, layout: str) -> bool:
     """Apply *layout* to a single console window.
 
     Tmux preset names (`tiled`, `main-vertical`, etc.) go through
@@ -72,17 +73,16 @@ def _apply_layout(target: Transport, q_con: str, q_win: str, layout: str) -> boo
     layout failure today and we preserve that contract.
     """
     if layout == AW_SESSION_VERTICAL_LAYOUT:
-        return _apply_aw_session_vertical_layout(target, q_con, q_win)
-    return target.run(
+        return _apply_aw_session_vertical_layout(run, q_con, q_win)
+    return run(
         f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout)}",
         check=False,
     ).ok
 
 
-def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str) -> bool:
+def _apply_aw_session_vertical_layout(run: RunCommand, q_con: str, q_win: str) -> bool:
     """Build and apply a hand-computed tmux layout string for
-    ``aw-session-vertical``. Two transport round trips through the
-    ``Transport`` abstraction (one ``target.run`` chains two tmux
+    ``aw-session-vertical``. Two requests (the first chains two tmux
     commands with ``&&`` to gather the query; the second applies the
     computed layout).
 
@@ -93,7 +93,7 @@ def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str)
     too-small geometry gets a warning so an operator who sees a wrong
     layout has a breadcrumb.
     """
-    query = target.run(
+    query = run(
         f"tmux display-message -t {q_con}:{q_win} -p "
         f"'#{{window_width}}x#{{window_height}}' && "
         f"tmux list-panes -t {q_con}:{q_win} -F '#{{pane_index}} #{{pane_id}}'",
@@ -113,7 +113,7 @@ def _apply_aw_session_vertical_layout(target: Transport, q_con: str, q_win: str)
             f"output); tmux will keep its current layout"
         )
         return False
-    return target.run(
+    return run(
         f"tmux select-layout -t {q_con}:{q_win} {shlex.quote(layout_string)}",
         check=False,
     ).ok
@@ -234,7 +234,7 @@ def _tmux_layout_checksum(s: str) -> int:
     return csum
 
 
-def _focus_session_pane(target: Transport, q_con: str, q_win: str, base_pidx: int) -> bool:
+def _focus_session_pane(run: RunCommand, q_con: str, q_win: str, base_pidx: int) -> bool:
     """Move tmux's active pane to the session pane of a window.
 
     Called after building or repairing a window so the operator lands on
@@ -249,13 +249,13 @@ def _focus_session_pane(target: Transport, q_con: str, q_win: str, base_pidx: in
     listing, and the build path captures it from the session pane created by
     `tmux new-window`.
     """
-    return target.run(f"tmux select-pane -t {q_con}:{q_win}.{base_pidx}", check=False).ok
+    return run(f"tmux select-pane -t {q_con}:{q_win}.{base_pidx}", check=False).ok
 
 
 # -- Pane / window reordering ----------------------------------------------
 
 
-def _list_panes_with_tags(target: Transport, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
+def _list_panes_with_tags(run: RunCommand, q_con: str, q_win: str) -> list[tuple[str, int, int | None]] | None:
     """Return every live pane for a console window as (pane_id, pane_index,
     config_index_or_None), including the session pane.
 
@@ -267,7 +267,7 @@ def _list_panes_with_tags(target: Transport, q_con: str, q_win: str) -> list[tup
 
     Returns None if the tmux query failed.
     """
-    res = target.run(
+    res = run(
         f"tmux list-panes -t {q_con}:{q_win} -F '#{{pane_id}}|#{{pane_index}}|#{{{SHELL_INDEX_OPTION}}}'",
         check=False,
     )
@@ -295,7 +295,7 @@ def _list_panes_with_tags(target: Transport, q_con: str, q_win: str) -> list[tup
     return panes
 
 
-def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_count: int) -> None:
+def _reorder_shell_panes(run: RunCommand, q_con: str, q_win: str, configured_count: int) -> None:
     """Reorder shell panes so the pane tagged @agentworks-shell-index N sits
     one slot after the session pane plus N. The session pane is the
     lowest-indexed pane in the window (index 0 normally, index 1 when the
@@ -308,7 +308,7 @@ def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_c
     our local map. Best-effort: if a swap fails, we keep going and let
     select-layout handle the geometry.
     """
-    all_panes = _list_panes_with_tags(target, q_con, q_win)
+    all_panes = _list_panes_with_tags(run, q_con, q_win)
     if not all_panes:
         # Failed query, or a window with no panes we could parse: either way
         # there is nothing we can reorder safely.
@@ -336,7 +336,7 @@ def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_c
             (pid for pid, pidx in pidx_by_pid.items() if pidx == target_pidx),
             None,
         )
-        res = target.run(
+        res = run(
             f"tmux swap-pane -s {shlex.quote(src_pid)} -t {q_con}:{q_win}.{target_pidx}",
             check=False,
         )
@@ -351,7 +351,7 @@ def _reorder_shell_panes(target: Transport, q_con: str, q_win: str, configured_c
 
 
 def _reorder_session_windows(
-    target: Transport,
+    run: RunCommand,
     *,
     console_name: str,
     ordered_session_windows: list[str],
@@ -380,7 +380,7 @@ def _reorder_session_windows(
     from agentworks.sessions.tmux import exact_tmux_target
 
     q_con = exact_tmux_target(tmux_session_name(console_name))
-    res = target.run(
+    res = run(
         f"tmux list-windows -t {q_con} -F '#{{window_index}}|#{{window_name}}'",
         check=False,
     )
@@ -441,7 +441,7 @@ def _reorder_session_windows(
         if src_idx == target_idx:
             continue
         displaced_name = name_by_widx[target_idx]
-        swap = target.run(
+        swap = run(
             f"tmux swap-window -s {q_con}:{src_idx} -t {q_con}:{target_idx}",
             check=False,
         )

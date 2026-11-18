@@ -4,10 +4,13 @@ console rebuild.
 
 ``attach.py`` imports ``_build_console_tmux`` from this module at load time
 (the attach entrypoint needs it), so this module keeps its own references
-back into ``attach`` (``_attach_loop_wrapper``, ``_session_linux_user``) and
-into ``secrets_env`` (``_SUDO_PRESERVE_PROBE_VAR``)
+back into ``attach`` (``_attach_loop_wrapper``, ``_session_linux_user``)
 as function-local imports rather than module-level ones, to avoid a circular
 import between the two modules.
+
+Every request runs on the admin's access (``ConsoleAccess.admin``), since the
+console's tmux server is the admin's; a shell pane parks its environment on
+its own identity's access (``ConsoleAccess.pane``).
 
 ``_resolve_pane_env`` (defined in ``secrets_env``) is also monkeypatched by
 tests directly on the ``agentworks.sessions.multi_console`` package object,
@@ -31,12 +34,15 @@ from agentworks.sessions.tmux import exact_tmux_target
 from ._helpers import ADMIN_SHELL_WINDOW, tmux_session_name, tmux_staging_name
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
     from agentworks.execution.access import VMAccess
+    from agentworks.execution.requests import LoginShell
     from agentworks.resources.registry import Registry
-    from agentworks.transports import Transport
+    from agentworks.sessions.tmux import RunCommand
+
+    from ._access import ConsoleAccess
 
 
 def _resolve_workspace_path(db: Database, session: SessionRow) -> str | None:
@@ -70,94 +76,39 @@ class SessionWindowBuild:
     failed_shells: list[int] = field(default_factory=list)
 
 
-# Agent linux user -> whether this VM's sudoers honors --preserve-env for it.
-# Keyed on the user alone because a console is single-VM by construction, so
-# one memo never spans VMs. Scoped to one console operation by the caller and
-# never persisted: a VM's sudoers can change out of band, so the answer is only
-# trustworthy for as long as the command that asked.
-PreserveEnvMemo = dict[str, bool]
+class _PaneNotCreated(Exception):
+    """A split tmux refused, or whose pane never collected its request: the pane has no shell."""
 
 
-def _sudo_can_preserve_env(
-    target: Transport,
+def _split_parked(
+    run: RunCommand,
+    parking: VMAccess,
+    request: LoginShell,
     *,
-    session_user: str,
-    vm: VMRow,
-    admin_user: str,
-    memo: PreserveEnvMemo,
-) -> bool:
-    """Report whether this VM's sudoers lets the admin use ``--preserve-env``.
+    window: str,
+    switch_user: bool,
+    redactions: Iterable[str],
+) -> str:
+    """Park ``request`` on ``parking``, split ``window`` with a pane that collects it, and return tmux's output.
 
-    VM init grants the admin ``Defaults:<admin> setenv`` (see
-    ``_write_sudoers_console_setenv``). Without it sudo does not merely drop
-    the vars it cannot preserve, it refuses the whole command: the keys reach
-    the policy as command-line ``env_add`` vars (the list form of
-    ``--preserve-env`` does not set ``MODE_PRESERVE_ENV``), so sudoers runs
-    ``validate_env_vars``, rejects every name outside ``env_keep``, and aborts.
-    A pane that asked for the flag anyway would exit on spawn.
-
-    So ask before committing to the flag. The probe sets its own var rather
-    than reusing a composed key: it needs a name no ``env_keep`` pattern
-    covers, and it must not depend on the composed env having reached this
-    process (it has not, on non-SSH transports). It goes through ``env`` rather
-    than a ``VAR=val cmd`` prefix because this string runs under the admin's
-    login shell, which is operator-configurable and need not be POSIX (fish
-    only took ``VAR=val cmd`` in 3.1; csh never did). ``-n`` keeps the probe
-    from blocking on a password prompt if the admin's NOPASSWD grant is gone.
-
-    Scoped to the setenv gate specifically. The probe runs as ``MODE_RUN`` just
-    as the real ``sudo --login`` invocation does (``--login`` only adds the
-    ``MODE_LOGIN_SHELL`` flag), so the ``!def_setenv`` check fires identically
-    for both. It does not attempt to predict a sudoers that restricts *which
-    commands* the admin may run as the agent; the admin holds
-    ``ALL=(ALL) NOPASSWD:ALL``, so no such restriction exists to model.
-
-    Probes and warns once per agent user per ``memo``, on the first miss.
-    Building a console splits a pane per shell per session, all asking this
-    same question of the same VM, so without the memo the probe round-trips
-    per pane and an identical multi-line warning repeats until it buries the
-    rest of the attach output. ``memo`` is required rather than defaulted for
-    that reason: every caller either shares one across its splits or passes an
-    empty one to say it has a single pane, and neither is a default we can
-    guess correctly on their behalf.
+    The split runs inside the parking block, so a split tmux refuses lets the
+    parked request go at once; one whose pane does not collect the request
+    within the handover's wait started no shell.
     """
-    from agentworks.vms.initializer import AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH
+    from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 
-    # Lazy import: secrets_env imports attach at module level (for
-    # _session_linux_user), and attach imports _build_console_tmux from this
-    # module at module level, so a module-level import back to secrets_env
-    # here would complete a three-way circular import.
-    from .secrets_env import _SUDO_PRESERVE_PROBE_VAR
-
-    if session_user in memo:
-        return memo[session_user]
-
-    probe = target.run(
-        f"env {_SUDO_PRESERVE_PROBE_VAR}=1 sudo -n "
-        f"--preserve-env={_SUDO_PRESERVE_PROBE_VAR} "
-        f"-u {shlex.quote(session_user)} true",
-        check=False,
-    )
-    memo[session_user] = probe.ok
-    if not probe.ok:
-        # Report what sudo said rather than diagnosing it. A refused `setenv`
-        # is the expected cause, but the probe fails for any reason (unknown
-        # agent user, sudo missing, a transport blip), and sudo's own text
-        # already tells those apart.
-        detail = probe.stderr.strip() or f"exit {probe.returncode}"
-        output.warn(
-            f"{vm.name}: agent-scope env and secrets will not reach console "
-            f"shell panes for '{session_user}'. Preserving them across the "
-            f"pane's sudo needs `Defaults:{admin_user} setenv` in "
-            f"{AGENTWORKS_SUDOERS_CONSOLE_SETENV_PATH}, which VM init deploys; "
-            f"if this VM predates it, `agw vm reinit {vm.name}` will add it. "
-            f"sudo said: {detail}"
-        )
-    return probe.ok
+    with parking.park(request) as handover:
+        command = handover.command(switch_user=switch_user)
+        res = run(f"tmux split-window -t {window} -P -F '#{{pane_id}}' {shlex.quote(command)}", check=False)
+        if not res.ok:
+            raise _PaneNotCreated(sanitize_setup_diagnostic(res.stderr.strip(), redactions=redactions))
+    if not handover.collected:
+        raise _PaneNotCreated("the pane did not collect its shell's request")
+    return res.stdout
 
 
 def _split_shell_pane(
-    target: Transport,
+    access: ConsoleAccess,
     db: Database,
     registry: Registry,
     *,
@@ -171,7 +122,6 @@ def _split_shell_pane(
     session_user: str,
     admin_user: str,
     config_index: int,
-    preserve_memo: PreserveEnvMemo,
     tmux_name: str | None = None,
 ) -> str | None:
     """Split off one shell pane in an existing console window and tag the new
@@ -179,46 +129,36 @@ def _split_shell_pane(
     restore-session detect which specific shell (out of an ordered list) is
     missing after an accidental kill.
 
-    Env reaches the pane via:
+    The pane's environment reaches it by the terminal handover: its login
+    shell, with ``pane_env`` and the working directory, is parked on the pane
+    identity's own access (the admin's, or the agent's, which
+    ``console_access`` checked), and the pane's command is the handover's,
+    which collects it. An agent's pane in the admin's tmux server switches to
+    the agent with ``sudo -n -u`` first, so the environment never crosses
+    sudo and no value reaches a tmux argument or the SSH command line. A
+    working directory that cannot be entered warns and opens the shell in
+    the home directory instead.
 
-    1. ``tmux split-window -e KEY=VAL`` flags (load-bearing): tmux sets
-       these vars on the pane process before exec. In the agent-pane
-       branch the pane then ``sudo --login``s to the agent user, which
-       resets the environment. Two mechanisms carry vars across that
-       crossing: agentworks-managed vars (``AGENTWORKS_*``, ``AW_*``)
-       survive via the sudoers env_keep fragment, and arbitrarily-named
-       operator env / secrets survive via ``sudo --preserve-env=<keys>``
-       (permitted by the ``Defaults:<admin> setenv`` fragment). Both
-       fragments are deployed by VM init. A VM without the setenv
-       fragment refuses the ``--preserve-env`` command outright rather
-       than dropping the vars, so ``_sudo_can_preserve_env`` asks first
-       and we warn and fall back to a plain ``sudo --login`` (env_keep
-       vars only) rather than hand back a pane that dies on spawn. See
-       docs/adrs/0017-console-pane-preserve-env.md.
-    2. SSH SetEnv on ``target.run`` (SSH transport only;
-       non-SSH transports are a no-op because the tmux client is
-       talking to an already-running server and the client's env
-       doesn't flow into server-spawned panes). For SSH this is
-       belt-and-suspenders in the rare case where the console tmux
-       server has just been (re)started; in steady state channel (1)
-       is what reaches the pane.
-
-    Returns the new pane id on full success (split + tag both completed), or
-    None if either step failed (tmux refused the split, or the pane was created
-    but its id couldn't be captured so the tag couldn't be set). `add_shell`
-    ignores the return value (best-effort). `_add_session_window` records which
-    config indices came back None in its `SessionWindowBuild.failed_shells`, and
-    `restore_session` checks each return so a partial restore is loud rather
-    than a silent exit-0."""
+    Returns the new pane id on full success (split, collection and tag all
+    completed), or None with a warning when the pane could not be created,
+    did not start its shell, or could not be tagged. A request that does not
+    complete counts as such a failure; a trust or readiness error, or a
+    refused identity, propagates, since every later pane would fail the same
+    way. `add_shell` ignores the return value (best-effort).
+    `_add_session_window` records which config indices came back None in its
+    `SessionWindowBuild.failed_shells`, and `restore_session` checks each
+    return so a partial restore is loud rather than a silent exit-0."""
+    from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
+    from agentworks.execution.requests import LoginShell
     from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
     from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION
-    from agentworks.sessions.tmux import _tmux_env_flags
+    from agentworks.sessions.tmux import access_run_command
+    from agentworks.vms.initializer.steps import describe_failure
 
     cwd = shell["cwd"]
     full_path = posixpath.join(workspace_path, cwd) if cwd else workspace_path
-    q_full = shlex.quote(full_path)
     q_con = exact_tmux_target(tmux_name or tmux_session_name(console_name))
-    q_win = shlex.quote(window_name)
+    window = f"{q_con}:{shlex.quote(window_name)}"
     use_admin = shell["admin"] or session_user == admin_user
 
     pane_env = _mc._resolve_pane_env(
@@ -230,69 +170,35 @@ def _split_shell_pane(
         pane_user=admin_user if use_admin else session_user,
         is_admin_pane=use_admin,
     )
-    env_flags = _tmux_env_flags(pane_env)
+    run = access_run_command(access.admin, deadline=None, elevated=False)
+    parking = access.pane(None if use_admin else session_user)
 
-    # Login shell in both branches keeps profile/aliases consistent with the
-    # session pane behavior (sessions use $SHELL -l via create_session).
-    # Diagnostic on cd failure so a missing cwd shows the actual path.
-    # The echo argument is shlex.quoted so paths containing shell metacharacters
-    # (quotes, $(...), backticks) print literally rather than triggering
-    # expansion. -P -F '#{pane_id}' makes split-window print the new pane's ID
-    # to stdout so we can target set-option at that exact pane immediately after.
-    q_diag = shlex.quote(f"cwd missing: {full_path}")
-    if use_admin:
-        bootstrap = f'cd {q_full} || echo {q_diag}; exec "$SHELL" -l'
-        cmd = (
-            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} -c {q_full} {shlex.quote(bootstrap)}"
-        )
-    else:
-        q_user = shlex.quote(session_user)
-        bootstrap = f'cd {q_full} || echo {q_diag}; exec "$SHELL" -l'
-        # Carry the composed operator/secret env across the sudo boundary.
-        # tmux set these vars on the pane process (env_flags, above), but
-        # `sudo --login` resets the environment and would drop every var
-        # except the AGENTWORKS_*/AW_* env_keep allowlist. --preserve-env
-        # names the composed keys explicitly so arbitrarily-named agent-scope
-        # vars and secrets survive. sudo reads their VALUES from its inherited
-        # environment (tmux -e set them), not from its command line, so only
-        # the names land on the SUDO argv; passing VAR=value to sudo instead
-        # would respell the values there. (The values are already on the tmux
-        # -e argv from env_flags above, a pre-existing exposure this does not
-        # add to.) Honored because VM init grants the admin `Defaults:<admin>
-        # setenv` (see _write_sudoers_console_setenv).
-        #
-        # Ask sudo first, because a VM without that fragment does not drop the
-        # un-preservable vars: it refuses the whole command, which would exit
-        # the pane process on spawn. Skip the question when there is no env to
-        # preserve (nothing to ask about, and no empty `--preserve-env=`).
-        # _sudo_can_preserve_env warns on a miss; a caller that splits panes in
-        # a loop passes a memo so that happens once rather than per pane.
-        preserve = ""
-        if pane_env and _sudo_can_preserve_env(
-            target,
-            session_user=session_user,
-            vm=vm,
-            admin_user=admin_user,
-            memo=preserve_memo,
-        ):
-            preserve = f" --preserve-env={shlex.quote(','.join(pane_env))}"
-        pane_cmd = f"exec sudo --login{preserve} -u {q_user} bash -c {shlex.quote(bootstrap)}"
-        cmd = (
-            f"tmux split-window -t {q_con}:{q_win} -P -F '#{{pane_id}}'{env_flags} -c {q_full} {shlex.quote(pane_cmd)}"
+    def redact(text: str) -> str:
+        return sanitize_setup_diagnostic(text, redactions=values.values())
+
+    def split(request: LoginShell) -> str:
+        return _split_parked(
+            run, parking, request, window=window, switch_user=not use_admin, redactions=values.values()
         )
 
     try:
-        res = target.run(cmd, check=False, env=pane_env)
-    except AgentworksError as error:
+        try:
+            out = split(LoginShell(cwd=full_path, env=pane_env))
+        except RequestRefused as refused:
+            if refused.code != "cwd":
+                raise
+            output.warn(f"cannot enter {full_path} for a shell pane in '{window_name}'; it opens in the home directory")
+            out = split(LoginShell(env=pane_env))
+    except _PaneNotCreated as failure:
+        output.warn(f"failed to add shell pane in '{window_name}': {failure}")
+        return None
+    except (ExecutionIncomplete, CommandFailed, RequestRefused) as error:
         sanitize_setup_error(error, redactions=values.values())
-        raise
-    if not res.ok:
-        diagnostic = sanitize_setup_diagnostic(res.stderr.strip(), redactions=values.values())
-        output.warn(f"failed to add shell pane in '{window_name}': {diagnostic}")
+        output.warn(f"failed to add shell pane in '{window_name}': {describe_failure(error, redact)}")
         return None
 
     q_console = shlex.quote(console_name)
-    pane_id = res.stdout.strip()
+    pane_id = out.strip()
     if not pane_id:
         # tmux is supposed to print the new pane id on stdout under `-P -F`;
         # an empty stdout means we lost the handle and can't tag the pane.
@@ -306,19 +212,19 @@ def _split_shell_pane(
         )
         return None
     q_pane = shlex.quote(pane_id)
-    tag_res = target.run(
-        f"tmux set-option -p -t {q_pane} {SHELL_INDEX_OPTION} {config_index}",
-        check=False,
-    )
-    if not tag_res.ok:
+    try:
+        tag_res = run(f"tmux set-option -p -t {q_pane} {SHELL_INDEX_OPTION} {config_index}", check=False)
+        tag_failure = None if tag_res.ok else redact(tag_res.stderr.strip()) or "tmux refused set-option"
+    except ExecutionIncomplete as error:
+        tag_failure = describe_failure(error, redact)
+    if tag_failure is not None:
         # The split happened (the pane is live) but tagging failed. Treat this
         # as a failure: callers like restore_session must know the pane is
         # untagged so the operator gets a loud signal rather than a future
         # untagged-pane error on the next restore-session.
-        diagnostic = sanitize_setup_diagnostic(tag_res.stderr.strip(), redactions=values.values())
         output.warn(
             f"added shell pane in '{window_name}' but tagging failed "
-            f"({diagnostic or 'tmux refused set-option'}); "
+            f"({tag_failure}); "
             f"the pane is untagged. Use `agw console restart "
             f"{q_console}` to rebuild and retag from scratch."
         )
@@ -326,7 +232,7 @@ def _split_shell_pane(
     return pane_id
 
 
-def _last_window_index(target: Transport, q_con: str) -> int | None:
+def _last_window_index(run: RunCommand, q_con: str) -> int | None:
     """Return the highest live window index in the console, or None if the
     listing failed or produced nothing parseable.
 
@@ -339,7 +245,7 @@ def _last_window_index(target: Transport, q_con: str) -> int | None:
     a failed listing returns None and the caller falls back to plain
     ``new-window``.
     """
-    res = target.run(f"tmux list-windows -t {q_con} -F '#{{window_index}}'", check=False)
+    res = run(f"tmux list-windows -t {q_con} -F '#{{window_index}}'", check=False)
     if not res.ok:
         return None
     indices: list[int] = []
@@ -352,7 +258,7 @@ def _last_window_index(target: Transport, q_con: str) -> int | None:
 
 
 def _add_session_window(
-    target: Transport,
+    access: ConsoleAccess,
     db: Database,
     registry: Registry,
     *,
@@ -361,7 +267,6 @@ def _add_session_window(
     member: ConsoleSessionRow,
     vm: VMRow,
     layout: str,
-    preserve_memo: PreserveEnvMemo,
     place_last: bool = False,
     tmux_name: str | None = None,
 ) -> SessionWindowBuild:
@@ -395,6 +300,7 @@ def _add_session_window(
     success. Live `add_sessions` remains best effort after its durable update.
     """
     from agentworks.sessions.multi_console_layout import _apply_layout, _focus_session_pane
+    from agentworks.sessions.tmux import access_run_command
 
     # Lazy import: attach.py imports _build_console_tmux from this module at
     # load time, so a module-level import back here would be circular.
@@ -419,6 +325,7 @@ def _add_session_window(
         output.warn(f"session '{session.name}' has no valid tmux socket ({exc}); skipping window")
         return SessionWindowBuild(built=False)
 
+    run = access_run_command(access.admin, deadline=None, elevated=False)
     runtime_name = tmux_name or tmux_session_name(console_name)
     q_con = exact_tmux_target(runtime_name)
     q_session = shlex.quote(session.name)
@@ -430,7 +337,7 @@ def _add_session_window(
     # new-window; the caller's reorder pass still settles order.
     new_window_target = q_con
     if place_last:
-        last_index = _last_window_index(target, q_con)
+        last_index = _last_window_index(run, q_con)
         if last_index is not None:
             new_window_target = f"{q_con}:{last_index + 1}"
 
@@ -439,7 +346,7 @@ def _add_session_window(
     # inherited `pane-base-index 1`) and is what _focus_session_pane targets;
     # capturing it here avoids a second round trip and keeps focus correct
     # under either base index.
-    res = target.run(
+    res = run(
         f"tmux new-window -t {new_window_target} -n {q_session} -P -F '#{{pane_index}}' {shlex.quote(wrapper)}",
         check=False,
     )
@@ -470,7 +377,7 @@ def _add_session_window(
             return SessionWindowBuild(built=False)
         for config_index, shell in enumerate(member.shells):
             pane_id = _split_shell_pane(
-                target,
+                access,
                 db,
                 registry,
                 values=values,
@@ -483,43 +390,43 @@ def _add_session_window(
                 session_user=session_user,
                 admin_user=vm.admin_username,
                 config_index=config_index,
-                preserve_memo=preserve_memo,
                 tmux_name=runtime_name,
             )
             if pane_id is None:
                 failed_shells.append(config_index)
-        if not _apply_layout(target, q_con, q_session, layout) and tmux_name is not None:
+        if not _apply_layout(run, q_con, q_session, layout) and tmux_name is not None:
             return SessionWindowBuild(built=False)
     # Focus the session pane so the operator lands on the attach output
     # rather than the most-recently-created shell pane. Done unconditionally
     # (cheap, and consistent across windows with and without shells).
-    if not _focus_session_pane(target, q_con, q_session, base_pidx) and tmux_name is not None:
+    if not _focus_session_pane(run, q_con, q_session, base_pidx) and tmux_name is not None:
         return SessionWindowBuild(built=False)
     return SessionWindowBuild(built=True, failed_shells=failed_shells)
 
 
 def _build_console_tmux_unlogged(
-    target: Transport,
+    access: ConsoleAccess,
     db: Database,
     registry: Registry,
     console: ConsoleRow,
     vm: VMRow,
     *,
-    admin: VMAccess,
     values: Mapping[str, str],
     layout: str,
     members: Sequence[ConsoleSessionRow] | None = None,
 ) -> None:
     """Build under a reserved name and publish only a complete console.
 
-    ``admin`` is the admin's access, on which the admin-shell window parks its
-    environment; every other request still runs on ``target``.
+    The admin-shell window parks its environment on the admin's access, and
+    each shell pane on its own identity's (see ``_split_shell_pane``).
     """
     from agentworks.execution.requests import LoginShell
-    from agentworks.sessions.tmux import ProbeStatus
+    from agentworks.sessions.tmux import ProbeStatus, access_run_command
 
     from .attach import _teardown_console_tmux, _tmux_session_presence
 
+    admin = access.admin
+    run = access_run_command(admin, deadline=None, elevated=False)
     members = tuple(db.list_console_sessions(console.name) if members is None else members)
     if not members and not console.admin_shell:
         raise ExternalError(
@@ -530,7 +437,7 @@ def _build_console_tmux_unlogged(
 
     canonical_name = tmux_session_name(console.name)
     staging_name = tmux_staging_name(console.name)
-    canonical_presence = _tmux_session_presence(target, canonical_name)
+    canonical_presence = _tmux_session_presence(admin, canonical_name)
     if canonical_presence is ProbeStatus.UNKNOWN:
         raise ExternalError(
             f"could not determine canonical tmux state for console '{console.name}'",
@@ -543,7 +450,7 @@ def _build_console_tmux_unlogged(
             entity_kind="console",
             entity_name=console.name,
         )
-    _teardown_console_tmux(target, console.name)
+    _teardown_console_tmux(admin, console.name)
     q_staging_create = shlex.quote(staging_name)
 
     def staging_failed() -> ExternalError:
@@ -556,7 +463,7 @@ def _build_console_tmux_unlogged(
     def admin_shell_alive() -> bool:
         """Whether the admin shell window's pane still runs: gone, or dead under ``remain-on-exit``, is not."""
         q_window = exact_tmux_target(f"{staging_name}:{ADMIN_SHELL_WINDOW}")
-        listed = target.run(f"tmux list-panes -t {q_window} -F '#{{pane_dead}}'", check=False)
+        listed = run(f"tmux list-panes -t {q_window} -F '#{{pane_dead}}'", check=False)
         return listed.ok and listed.stdout.split() == ["0"]
 
     try:
@@ -568,9 +475,10 @@ def _build_console_tmux_unlogged(
             # reaches a tmux argument or the SSH command line.
             pane_env = _mc._resolve_admin_env(db, registry, values=values, vm=vm)
             with admin.park(LoginShell(env=pane_env)) as handover:
-                created = target.run(
+                created = run(
                     f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(ADMIN_SHELL_WINDOW)} "
-                    f"{shlex.quote(handover.command())}"
+                    f"{shlex.quote(handover.command())}",
+                    check=False,
                 )
                 if not created.ok:
                     raise staging_failed()  # inside the block, so the parked request goes at once
@@ -590,17 +498,16 @@ def _build_console_tmux_unlogged(
         else:
             # tmux requires one window while the real windows are constructed.
             placeholder = "_PLACEHOLDER"
-            created = target.run(f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(placeholder)}")
+            created = run(f"tmux new-session -d -s {q_staging_create} -n {shlex.quote(placeholder)}", check=False)
             if not created.ok:
                 raise staging_failed()
             placeholder_used = True
 
         if members:
             output.detail(f"Adding {len(members)} session window(s) to console '{console.name}'...")
-        preserve_memo: PreserveEnvMemo = {}
         for member in members:
             built = _mc._add_session_window(
-                target,
+                access,
                 db,
                 registry,
                 values=values,
@@ -608,7 +515,6 @@ def _build_console_tmux_unlogged(
                 member=member,
                 vm=vm,
                 layout=layout,
-                preserve_memo=preserve_memo,
                 tmux_name=staging_name,
             )
             if not built.built or built.failed_shells:
@@ -620,15 +526,15 @@ def _build_console_tmux_unlogged(
                 )
 
         if placeholder_used:
-            removed = target.run(f"tmux kill-window -t {exact_tmux_target(f'{staging_name}:{placeholder}')}")
+            removed = run(f"tmux kill-window -t {exact_tmux_target(f'{staging_name}:{placeholder}')}", check=False)
             if not removed.ok:
                 raise ExternalError(
                     f"failed to remove the staging placeholder for console '{console.name}'",
                     entity_kind="console",
                     entity_name=console.name,
                 )
-        published = target.run(
-            f"tmux rename-session -t {exact_tmux_target(staging_name)} {shlex.quote(canonical_name)}"
+        published = run(
+            f"tmux rename-session -t {exact_tmux_target(staging_name)} {shlex.quote(canonical_name)}", check=False
         )
         if not published.ok:
             raise ExternalError(
@@ -636,8 +542,8 @@ def _build_console_tmux_unlogged(
                 entity_kind="console",
                 entity_name=console.name,
             )
-        canonical_presence = _tmux_session_presence(target, canonical_name)
-        staging_presence = _tmux_session_presence(target, staging_name)
+        canonical_presence = _tmux_session_presence(admin, canonical_name)
+        staging_presence = _tmux_session_presence(admin, staging_name)
         if canonical_presence is not ProbeStatus.PRESENT or staging_presence is not ProbeStatus.ABSENT:
             raise ExternalError(
                 f"console '{console.name}' staging publication could not be verified",
@@ -648,7 +554,7 @@ def _build_console_tmux_unlogged(
     except (KeyboardInterrupt, Exception):
         # Ordinary cleanup failures preserve the primary error; new cancellation wins.
         try:
-            _teardown_console_tmux(target, console.name)
+            _teardown_console_tmux(admin, console.name)
         except UserAbort:
             raise
         except Exception:
@@ -657,47 +563,46 @@ def _build_console_tmux_unlogged(
 
 
 def _build_console_tmux(
-    target: Transport,
+    access: ConsoleAccess,
     db: Database,
     registry: Registry,
     console: ConsoleRow,
     vm: VMRow,
     *,
-    admin: VMAccess,
     values: Mapping[str, str],
     layout: str,
     members: Sequence[ConsoleSessionRow] | None = None,
 ) -> None:
-    """Build with redacted diagnostics and a value-scoped SSH transcript (see ``_build_console_tmux_unlogged``)."""
-    from agentworks.harness_setup.outcomes import sanitize_setup_error
-    from agentworks.ssh import SSHLogger
+    """Build with redacted diagnostics, logging the admin's requests to ``console-build``.
 
-    previous_logger = target.logger
-    logger = SSHLogger(vm.name, "console-build", redactions=tuple(values.values()))
-    target.logger = logger
+    A log that fails to close never masks the build's own failure, though a
+    cancellation raised while closing it wins. See
+    ``_build_console_tmux_unlogged``.
+    """
+    from agentworks.harness_setup.outcomes import sanitize_setup_error
+    from agentworks.vms.manager import operation_log
+
+    primary: BaseException | None = None
     try:
-        _build_console_tmux_unlogged(
-            target,
-            db,
-            registry,
-            console,
-            vm,
-            admin=admin,
-            values=values,
-            layout=layout,
-            members=members,
-        )
-    except BaseException as error:
-        if isinstance(error, AgentworksError):
-            sanitize_setup_error(error, redactions=values.values())
-        try:
-            logger.close()
-        except UserAbort:
+        with operation_log(vm.name, "console-build", redactions=tuple(values.values())) as log:
+            try:
+                _build_console_tmux_unlogged(
+                    access.logged(log),
+                    db,
+                    registry,
+                    console,
+                    vm,
+                    values=values,
+                    layout=layout,
+                    members=members,
+                )
+            except BaseException as error:
+                primary = error
+                if isinstance(error, AgentworksError):
+                    sanitize_setup_error(error, redactions=values.values())
+                raise
+    except Exception as error:
+        if primary is None or error is primary or isinstance(error, UserAbort):
             raise
-        except Exception:
-            pass
-        raise
-    else:
-        logger.close()
-    finally:
-        target.logger = previous_logger
+    if primary is not None:
+        raise primary
