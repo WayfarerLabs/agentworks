@@ -106,18 +106,18 @@ under `/run/agentworks/admin-tmux-sockets` is the admin's own, and the admin's c
 unchanged. A socket directly inside `/run/agentworks/agent-tmux-sockets/<user>` belongs to `<user>`,
 which must be a Linux account name other than `root` and the admin. Clients started from the VM
 admin's connection switch to that account first, with `sudo` and `runuser`, starting in `/`: status
-probes, identity repair and observation, the startup-protection check, teardown from `session stop`
-and `session stop --all` and from agent or workspace deletion, `session logs`, `session attach`,
-named console windows, the workspace's tmuxinator windows and stale-socket cleanup. Startup, startup
-recovery, and the teardown inside `session delete` and `session restart` already connect as the
-agent. Status, describe, logs, attach and lifecycle commands also require the owner to be the
-session's own agent or VM admin, and the socket's name to be the one Agentworks gives it. Any other
-path is observed as `UNKNOWN`, never probed, and refused by lifecycle operations, logs and attach.
-Before each switch, root checks the socket itself: one that is a link, is not a socket, or belongs
-to another account is never read and shows as `UNKNOWN`, and `session attach` refuses it with a
-one-line reason. The batched status request reads the boot ID and process presence as root, which
-runs no tmux client. A legacy row without a socket path needs no switch: its session lives on the
-connecting account's own default tmux server, into which an agent cannot plant a server.
+probes, identity repair and observation, the startup-protection check, teardown from
+`session stop --all` and from agent or workspace deletion, `session logs`, `session attach`, named
+console windows, the workspace's tmuxinator windows and stale-socket cleanup. Startup, startup
+recovery, and the teardown inside `session stop`, `session delete` and `session restart` already
+connect as the agent. Status, describe, logs, attach and lifecycle commands also require the owner
+to be the session's own agent or VM admin, and the socket's name to be the one Agentworks gives it.
+Any other path is observed as `UNKNOWN`, never probed, and refused by lifecycle operations, logs and
+attach. Before each switch, root checks the socket itself: one that is a link, is not a socket, or
+belongs to another account is never read and shows as `UNKNOWN`, and `session attach` refuses it
+with a one-line reason. The batched status request reads the boot ID and process presence as root,
+which runs no tmux client. A legacy row without a socket path needs no switch: its session lives on
+the connecting account's own default tmux server, into which an agent cannot plant a server.
 
 A workspace's tmuxinator config gives an agent session's window the same switch. A config an earlier
 release generated runs plain tmux clients as the VM admin, including against agent sessions'
