@@ -716,6 +716,11 @@ module, and `remote_exec.py` is deleted.
       still appear" warning precedes a held Ctrl-C; the route's operation wait checked by the
       timeout it is given rather than the wall clock; one copy of the rule that an insert's steps
       replace an unknown read's sentence; and one rendering of the zone flag.
+- [x] Close round 6's private review (fix round 6 of PR C; execution-lld, Presence probes): the git
+      source's checkout probes and the mise lockfile check also use `probe_presence`, and an
+      unanswered lockfile check skips the install rather than install unlocked; a failed dotfiles
+      sync no longer claims the checkout is unchanged; the unanswered agent probes are tested in one
+      file; and every attach and park conformance vector lives in `terminal_vectors.py`.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:

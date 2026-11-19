@@ -317,9 +317,11 @@ Every Phase B step catches `STEP_FAILURES` and warns with `warn_step`, except:
 - **The mise lockfile** (`mise.py:78-98`) catches `STEP_FAILURES`; today it caught only
   `SourceRefError`, so a failed `mkdir` there failed initialization.
 - **Probes whose failure has a meaning**: an install-command check that cannot run means "not
-  installed" (`packages.py:290-292`), the `config.toml` probe and the lockfile probe mean "absent"
-  (`driver.py:612-624`, `mise.py:144-148`), and `mise prune` is best effort (`mise.py:191-195`).
-  Each catches `STEP_FAILURES` and does what today's `except SSHError` did.
+  installed" (`packages.py:290-292`), the `config.toml` probe means "absent" (`driver.py:612-624`),
+  and `mise prune` is best effort (`mise.py:191-195`). Each catches `STEP_FAILURES` and does what
+  today's `except SSHError` did. The lockfile probe is the exception since PR C's round 6: one that
+  does not answer warns and skips the install, since reading it as "absent" would install unlocked
+  (execution-lld, Presence probes).
 - **The dotfiles sync and install** (`driver.py:570-594`) catch `STEP_FAILURES`, where today they
   catch `Exception`. `SourceRefError` is an `ExternalError`, and a local source's `OSError` becomes
   one where it is read (`sources.py`), so no wider catch is needed.
