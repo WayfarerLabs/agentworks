@@ -469,13 +469,22 @@ operation calls it before it resolves a pane secret: in `prepare_console_reconci
 for `create_console` and `restore_session`, once the VM is active and before the pane-secret
 resolve, so a refused agent stops them before they can prompt for a pane secret. The activation gate
 runs first, so a stopped VM may be started, and its gate secrets resolved, before the refusal;
-`console start` records its running intent before it prepares (`lifecycle.py:86`). `restore_session`
-probes the console's tmux and the window read-only first and checks only the agents of the panes it
-will open, so on a console that is not running it gives the not-running refusal, and an agent whose
-panes are all live is not asked. `add-shell` and `add-sessions` first probe the console's tmux,
-read-only; only a running console has a pane to park, so only then do they check the agents, before
-they resolve a pane secret or record anything. A stopped console's edit, or one whose probe cannot
-tell, is recorded and its live sync stays best effort, as before D2.
+`console start` records its running intent before it prepares (`lifecycle.py:86`). Ahead of both,
+and of the gate, `validate_console_definition` (`multi_console/runtime.py`) refuses from stored rows
+alone a member whose window a build could not complete: `validate_console_window` checks the
+session's VM, its agent, and its stored tmux socket through `resolve_session_tmux_server`, the rule
+the build's attach pane applies. The build only skips such a window, after it has staged or, for a
+restart, torn the console down, so `start` and `restart` refuse first, with nothing resolved, the VM
+untouched and a running console intact (fix round 2 of PR #876); reconciliation applies the same
+check while it prepares. `restore_session` probes the console's tmux and the window read-only first
+and checks only the agents of the panes it will open, so on a console that is not running it gives
+the not-running refusal, and an agent whose panes are all live is not asked. A window it will
+rebuild whole gets `validate_console_window` too, after that observation and before
+`_console_pane_access`, so a bad socket refuses before any pane prompt. `add-shell` and
+`add-sessions` first probe the console's tmux, read-only; only a running console has a pane to park,
+so only then do they check the agents, before they resolve a pane secret or record anything. A
+stopped console's edit, or one whose probe cannot tell, is recorded and its live sync stays best
+effort, as before D2.
 
 **What replaces the sudo carry.** Today an agent pane runs
 `exec sudo --login --preserve-env=<keys> -u <agent> bash -c '<bootstrap>'`
