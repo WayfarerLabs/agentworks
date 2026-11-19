@@ -1136,8 +1136,8 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     on is treated as one whose answer was lost. EC2's route calls (the dry-run revokes, the
     authorizes, the address read, and the revokes that close the route and the provisioning access)
     go through a `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each; a poke whose
-    authorize ran out of time revokes what it planned and warns that the allow may still be added
-    after.
+    authorize ran out of time, or was interrupted, revokes what it planned and, with interrupts
+    still held, warns that the allow may still be added after.
   - **Proxmox and the local channels.** Proxmox: the identity check's reads and the agent wait's
     `AGENT_WAIT_SECONDS`, each request with a socket timeout of at most `REQUEST_TIMEOUT_SECONDS`,
     which, as above, bounds its silence rather than its whole time. Local-process channels (Lima,

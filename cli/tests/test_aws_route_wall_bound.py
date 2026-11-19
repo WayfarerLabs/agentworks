@@ -1,7 +1,8 @@
-"""An EC2 route's calls end at their bound on the wall clock, its held revoke included."""
+"""EC2 route calls that do not finish: each ends at its bound, and an authorize cut short is revoked and named."""
 
 from __future__ import annotations
 
+import signal
 import threading
 import time
 from typing import TYPE_CHECKING, Any
@@ -80,5 +81,32 @@ def test_a_poke_whose_authorize_outlives_the_bound_revokes_and_warns_it_may_stil
     elapsed = time.monotonic() - started
 
     assert elapsed < _CAP / 2
+    (warning,) = captured_output.warnings
+    assert _DETECTED_PREFIX in warning
+
+
+def test_an_interrupted_authorize_is_revoked_and_named_even_when_a_second_ctrl_c_lands_during_the_revoke(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The authorize may still land after its revoke; the warning goes out before either interrupt propagates."""
+    install_fakes(monkeypatch)
+    platform = _platform()
+    ec2 = _ec2(platform)
+    revoke = ec2.revoke_security_group_ingress
+
+    def _interrupted_authorize(**_kwargs: Any) -> Any:
+        raise KeyboardInterrupt
+
+    def _revoke_then_ctrl_c(**kwargs: Any) -> Any:
+        if not kwargs.get("DryRun"):
+            signal.raise_signal(signal.SIGINT)
+        return revoke(**kwargs)
+
+    monkeypatch.setattr(ec2, "authorize_security_group_ingress", _interrupted_authorize)
+    monkeypatch.setattr(ec2, "revoke_security_group_ingress", _revoke_then_ctrl_c)
+
+    with pytest.raises(KeyboardInterrupt), platform._transient_route(_vm(), RunContext(config=_config())):
+        pytest.fail("the body must not run when the poke is interrupted")
+
     (warning,) = captured_output.warnings
     assert _DETECTED_PREFIX in warning

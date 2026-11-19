@@ -242,11 +242,13 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     one prefix at a time so overlap with a concurrent route does not prevent
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
     If an actual authorize fails partway through, or is interrupted, all
-    planned tuples are revoked best-effort before the failure propagates
-    (:func:`remove_ssh_allow`, which holds interrupts until it is done). An
-    authorize that ran out of time (a bounded client's
-    :class:`~agentworks.capabilities.vm_platform.wall_bound.CallTimedOut`)
-    may still land after that revoke, so it also warns naming the prefixes.
+    planned tuples are revoked best-effort before the failure propagates,
+    holding interrupts until that is done. An authorize cut short, by an
+    interrupt or by running out of time (a bounded client's
+    :class:`~agentworks.capabilities.vm_platform.wall_bound.CallTimedOut`),
+    may still land after that revoke, so it also warns naming the prefixes,
+    while interrupts are still held: a second Ctrl-C delivered first would
+    skip the warning.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
@@ -261,20 +263,19 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
                 if error_code(exc) == _DUPLICATE_PERMISSION_CODE:
                     continue
                 raise
-    except KeyboardInterrupt:
+    except BaseException as exc:
         # The route's own finally never runs for a poke that did not return, so this revoke cleans up.
-        remove_ssh_allow(ec2, security_group_id, prefixes)
+        with interrupts_deferred():
+            remove_ssh_allow_interruptibly(ec2, security_group_id, prefixes)
+            if not isinstance(exc, Exception) or isinstance(exc, CallTimedOut):
+                output.warn(
+                    f"An SSH allow for {', '.join(prefixes)} on security group '{security_group_id}' was cut "
+                    "short, so AWS may still add it after its revoke; check the group and revoke any TCP/22 rule "
+                    "for those sources."
+                )
+        if isinstance(exc, Exception):
+            raise wrap_ec2_error(exc) from exc
         raise
-    except Exception as exc:
-        failure = wrap_ec2_error(exc)
-        remove_ssh_allow(ec2, security_group_id, prefixes)
-        if isinstance(exc, CallTimedOut):
-            output.warn(
-                f"AWS did not answer an SSH allow for {', '.join(prefixes)} on security group "
-                f"'{security_group_id}' in time, so it may still be added after its revoke; check the group "
-                "and revoke any TCP/22 rule for those sources."
-            )
-        raise failure from exc
 
 
 def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
