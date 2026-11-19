@@ -125,29 +125,58 @@ def test_a_ctrl_c_during_the_held_removal_waits_for_the_removals_warning(
     assert any(route in warning for warning in captured_output.warnings)
 
 
+def test_a_ctrl_c_during_the_held_removal_waits_for_the_may_still_appear_warning(
+    monkeypatch: pytest.MonkeyPatch, created: tuple[GCEPlatform, FakeClients, VMRow], captured_output: CapturedOutput
+) -> None:
+    """The same for an insert whose outcome stayed unknown: the removal finds nothing, and its warning that the
+    rule may still appear is out before the interrupt is delivered."""
+    platform, cache, vm = created
+    cache.firewalls.insert_failures = [TimeoutError("no answer"), TimeoutError("no answer")]
+    before = len(cache.firewalls.insert_requests)
+    read = cache.firewalls.get
+
+    def _ctrl_c_on_reading_the_route(*, firewall: str, **kwargs: Any) -> Any:
+        requests = cache.firewalls.insert_requests
+        if len(requests) > before and firewall == requests[before].firewall_resource.name:
+            signal.raise_signal(signal.SIGINT)
+        return read(firewall=firewall, **kwargs)
+
+    monkeypatch.setattr(cache.firewalls, "get", _ctrl_c_on_reading_the_route)
+
+    with pytest.raises(KeyboardInterrupt), platform._transient_route(vm, gce_ctx()):
+        pytest.fail("the body must not run when the insert does not return")
+
+    route = cache.firewalls.insert_requests[before].firewall_resource.name
+    assert route not in cache.firewalls.resources
+    assert any(route in warning for warning in captured_output.warnings)
+
+
 def test_a_removals_operation_wait_gets_only_what_its_reads_and_delete_left(
     monkeypatch: pytest.MonkeyPatch, created: tuple[GCEPlatform, FakeClients, VMRow], hold: Callable[..., None]
 ) -> None:
-    """A wait that blocks for all it is given ends with the removal's one bound, not a fresh one of its own."""
+    """The wait is given what is left of the removal's one bound, not a fresh one of its own."""
     platform, cache, vm = created
     real_delete = cache.firewalls.delete
+    given: list[float] = []
 
-    def _blocks_for_its_timeout(*, timeout: float) -> None:
-        threading.Event().wait(timeout)
-
-    def _delete_whose_wait_blocks(**kwargs: Any) -> FakeOperation:
+    def _delete_whose_wait_records_its_timeout(**kwargs: Any) -> FakeOperation:
         operation = real_delete(**kwargs)
-        operation.result = _blocks_for_its_timeout  # type: ignore[method-assign]
+        real_result = operation.result
+
+        def _result(*, timeout: float) -> Any:
+            given.append(timeout)
+            return real_result(timeout=timeout)
+
+        operation.result = _result  # type: ignore[method-assign]
         return operation
 
     with platform._transient_route(vm, gce_ctx()):
         monkeypatch.setattr(gcp_platform, "_OPERATION_TIMEOUT_SECONDS", 2.0)
         hold(cache.firewalls, "get", times=1, seconds=1.2)
-        monkeypatch.setattr(cache.firewalls, "delete", _delete_whose_wait_blocks)
-        started = time.monotonic()
-    elapsed = time.monotonic() - started
+        monkeypatch.setattr(cache.firewalls, "delete", _delete_whose_wait_records_its_timeout)
 
-    assert 1.9 < elapsed < 2.6  # one 2s bound, where a wait given the whole bound again would take 1.2 + 2
+    (timeout,) = given
+    assert timeout < 0.9  # what the 1.2 s read left of one 2 s bound, where a fresh bound would give 2
 
 
 def test_the_provisioning_access_close_is_bounded(

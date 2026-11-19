@@ -7,7 +7,7 @@ from google.api_core import exceptions as api_exceptions
 from google.cloud import compute_v1
 
 from agentworks.capabilities.vm_platform import ssh_exposure
-from agentworks.errors import AgentworksError
+from agentworks.errors import AgentworksError, AuthorizationError
 from agentworks.plugins.gcp.errors import GCECapacityError
 from tests._gcp_platform_fakes import FakeClients, api_error, gce_ctx, gce_guest, gce_platform, gce_request
 
@@ -40,8 +40,10 @@ _UNANSWERED = api_error(api_exceptions.ServiceUnavailable, "lost")
         (TimeoutError(), [], AgentworksError, "operation-insert-201"),
         (KeyboardInterrupt("first"), [], KeyboardInterrupt, "operation-insert-201"),
         (None, [_UNANSWERED, _UNANSWERED], AgentworksError, None),
+        # A refusal of the same-requestId retry answers the retry alone: the first try may still land.
+        (None, [_UNANSWERED, api_error(api_exceptions.PermissionDenied, "denied")], AuthorizationError, None),
     ],
-    ids=("wait-times-out", "wait-interrupted", "insert-unanswered"),
+    ids=("wait-times-out", "wait-interrupted", "insert-unanswered", "retry-refused-after-no-answer"),
 )
 def test_an_instance_insert_still_unresolved_keeps_the_deny_and_reports_it(
     monkeypatch: pytest.MonkeyPatch,

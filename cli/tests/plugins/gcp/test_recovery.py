@@ -1,4 +1,5 @@
-"""Recovery commands reach the shell as the exact argv they name, whatever the names hold."""
+"""Recovery commands reach the shell as the exact argv they name, whatever the names hold, and a delete is
+offered only for a resource whose owned provider ID is known."""
 
 from __future__ import annotations
 
@@ -7,7 +8,7 @@ import shlex
 import pytest
 
 from agentworks.plugins.gcp.compute import provider_operation_name
-from agentworks.plugins.gcp.recovery import GcloudResource
+from agentworks.plugins.gcp.recovery import GcloudResource, may_still_appear
 
 _HOSTILE = "p'; touch /tmp/owned #"
 
@@ -57,3 +58,23 @@ def test_only_a_plain_resource_name_is_taken_as_an_operation_name(name: object, 
     operation = type("Operation", (), {"name": name})()
 
     assert provider_operation_name(operation) == (name if accepted else None)
+
+
+@pytest.mark.parametrize(
+    "resource",
+    [GcloudResource("instance", "proj", "vm-1", "us-central1-a"), GcloudResource("firewall rule", "proj", "rule-1")],
+    ids=("instance", "firewall-rule"),
+)
+@pytest.mark.parametrize("operation_name", ["operation-1", None])
+def test_an_insert_that_may_still_appear_offers_its_delete_only_with_an_owned_id(
+    resource: GcloudResource, operation_name: str | None
+) -> None:
+    """Without the ID its own insert recorded, a resource of that name may be someone else's: no delete."""
+    owned = may_still_appear(resource, operation_name=operation_name, expected_id="4242")
+    unowned = may_still_appear(resource, operation_name=operation_name, expected_id=None)
+
+    for steps in (owned, unowned):
+        assert resource.insert_wait(operation_name) in steps
+        assert resource.describe() in steps
+    assert resource.delete() in owned and "'4242'" in owned
+    assert resource.delete() not in unowned
