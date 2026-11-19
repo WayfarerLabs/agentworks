@@ -753,7 +753,7 @@ def test_a_read_error_in_file_input_ends_the_client_and_raises_the_error() -> No
 
     # The pump raised instead of reporting the child's outcome, and ended the client.
     process = session._proc  # noqa: SLF001 - the point is that the client was ended
-    assert process is not None and process.poll() is not None
+    assert process is not None and process.returncode is not None  # the pump reaped it
 
 
 def test_a_read_error_in_the_operators_input_still_reads_as_its_end() -> None:
