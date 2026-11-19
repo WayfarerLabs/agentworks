@@ -36,6 +36,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import (
@@ -97,6 +98,12 @@ _DEBIAN_SSM_RELEASES: dict[DebianRelease, str] = {
 # The payload is gzipped (cloud-init decompresses natively), so this bounds the
 # COMPRESSED bytes; a pre-launch guard raises typed if even that is over.
 _MAX_USER_DATA_BYTES = 16384
+
+# How long one EC2 call on a route may take on the wall clock, each on its own:
+# the dry-run revokes and authorizes that open it, the address read, and the
+# revokes that close it and the provisioning access. botocore's read_timeout
+# bounds only each socket read, so the bound comes from the shared wall bound.
+_ROUTE_CALL_TIMEOUT_SECONDS = 300.0
 
 
 class EC2Platform(PublicAddressPlatform):
@@ -720,7 +727,7 @@ class EC2Platform(PublicAddressPlatform):
             output.warn(f"VM '{vm.name}' has no recorded bootstrap SSH prefixes; cannot close provisioning access")
             return
         try:
-            ec2 = self._client("ec2", self._region_of(vm), ctx)
+            ec2 = self._route_client(vm, ctx)
         except Exception as exc:
             raise ProvisioningError(
                 f"could not close or check the bootstrap SSH allow for {', '.join(prefixes)} on security group "
@@ -748,7 +755,7 @@ class EC2Platform(PublicAddressPlatform):
         mutates ingress and cleans up any partial poke itself. Once the poke
         succeeds, this context's ``finally`` owns the matching close.
         """
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
+        ec2 = self._route_client(vm, ctx)
         security_group_id = self._security_group_id(vm)
         prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
         poke_ssh_allow(ec2, security_group_id, prefixes)
@@ -809,7 +816,18 @@ class EC2Platform(PublicAddressPlatform):
         return str(vm.platform_metadata.get("region") or self.config.region)
 
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
-        return self._public_ip(self._client("ec2", self._region_of(vm), ctx), self._instance_id(vm))
+        return self._public_ip(self._route_client(vm, ctx), self._instance_id(vm))
+
+    def _route_client(self, vm: VMRow, ctx: RunContext) -> Any:
+        """The VM's EC2 client, each call through it bounded by ``_ROUTE_CALL_TIMEOUT_SECONDS`` on the wall clock.
+
+        A call that runs out raises ``CallTimedOut``, which the route's
+        callers handle as they handle any failed call: a poke revokes
+        everything it planned, and a revoke warns that the allow may stay
+        open. A call given up on may still take effect, botocore's retries
+        included (see :mod:`~agentworks.capabilities.vm_platform.wall_bound`).
+        """
+        return BoundedClient(self._client("ec2", self._region_of(vm), ctx), _ROUTE_CALL_TIMEOUT_SECONDS)
 
     def _public_ip(self, ec2: Any, instance_id: str) -> str:
         """The instance's live auto-assigned public IP (never cached)."""

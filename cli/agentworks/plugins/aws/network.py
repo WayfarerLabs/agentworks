@@ -47,6 +47,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut
 from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError, TokenRejectedError
 from agentworks.interrupts import interrupts_deferred
 
@@ -242,7 +243,10 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
     If an actual authorize fails partway through, or is interrupted, all
     planned tuples are revoked best-effort before the failure propagates
-    (:func:`remove_ssh_allow`, which holds interrupts until it is done).
+    (:func:`remove_ssh_allow`, which holds interrupts until it is done). An
+    authorize that ran out of time (a bounded client's
+    :class:`~agentworks.capabilities.vm_platform.wall_bound.CallTimedOut`)
+    may still land after that revoke, so it also warns naming the prefixes.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
@@ -264,6 +268,12 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     except Exception as exc:
         failure = wrap_ec2_error(exc)
         remove_ssh_allow(ec2, security_group_id, prefixes)
+        if isinstance(exc, CallTimedOut):
+            output.warn(
+                f"AWS did not answer an SSH allow for {', '.join(prefixes)} on security group "
+                f"'{security_group_id}' in time, so it may still be added after its revoke; check the group "
+                "and revoke any TCP/22 rule for those sources."
+            )
         raise failure from exc
 
 
