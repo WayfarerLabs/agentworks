@@ -139,11 +139,11 @@ def accept_console_running(
     console: ConsoleRow,
     held_native_guard: NativeMutationGuard,
 ) -> None:
+    """Record running intent for ``console``, whose definition the caller validated under the same guard."""
     with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
         current = _require_console(db, console.name)
         if current != console:
             raise StateError("console definition changed before start acceptance")
-        validate_console_definition(db, console)
         db.set_console_desired_runtime_state(console.name, DesiredRuntimeState.RUNNING)
 
 
@@ -169,14 +169,15 @@ def prepare_console_reconcile(
 ) -> PreparedConsoleReconcile:
     """Observe and collect build requirements without changing tmux state.
 
-    A build also checks the direct SSH of every agent whose shell panes it
+    The caller validated the console's definition under the same guard,
+    before accepting running intent. A build also checks the direct SSH of every agent whose shell panes it
     will park for, so an agent that predates the rollout is refused here.
     """
     with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
         current = _require_console(db, console.name)
         if current != console or vm.name != console.vm_name:
             raise StateError("console definition changed before runtime preparation")
-        members = validate_console_definition(db, console)
+        members = tuple(db.list_console_sessions(console.name))
         canonical, staging = _presence(admin, console.name)
         if replace_running:
             action = ConsoleAction.REPLACE

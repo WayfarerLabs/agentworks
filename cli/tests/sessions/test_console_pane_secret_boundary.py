@@ -311,7 +311,10 @@ def test_start_and_restart_refuse_a_member_socket_before_changing_anything(
     assert boundary.events == []
     assert guest.commands == []
     assert db._conn.total_changes == before
-    if operation == "restart":
+    if operation == "start":
+        console = db.get_console("con")
+        assert console is not None and console.desired_runtime_state is DesiredRuntimeState.STOPPED
+    else:
         assert model.window_names(CON) == ["a", "b"]
         assert [tag for _pid, _pidx, tag in model.pane_rows(CON, "a") or []] == [None, 0]
 
