@@ -177,8 +177,9 @@ class Files:
     ) -> None:
         """Replace ``path`` with ``data`` only while it still has digest ``expected`` (``None``: still absent).
 
-        The file is written beside the destination with ``mode`` (and ``group``,
-        set first), then renamed over it. With ``expected=None`` missing parents
+        The file is written beside the destination, private to the writer until
+        the destination is checked, then given ``mode`` (and ``group``, set
+        first) and renamed over it. With ``expected=None`` missing parents
         are created with ``parent_mode``; otherwise a missing parent is a
         conflict. ``preserve_metadata`` gives the new file the existing
         one's owner, group, mode and extended attributes instead. A changed
@@ -211,10 +212,11 @@ class Files:
     ) -> None:
         """Replace ``path`` with ``data`` whatever it holds, creating missing parents with ``parent_mode``.
 
-        The file is written beside the destination with ``owner`` and
-        ``group`` (each kept as the writing identity's when not given), then
-        ``mode``, and renamed over it, so the destination never holds the
-        content without them. The existing file's metadata is not kept, and a
+        The file is written beside the destination, private to the writer until
+        the destination is checked, then given ``owner`` and ``group`` (each
+        kept as the writing identity's when not given), then ``mode``, and
+        renamed over it, so the destination never holds the content without
+        them. The existing file's metadata is not kept, and a
         link or anything but a regular file at the destination is
         ``PathRefused``. A created parent belongs to the writing identity.
         """
