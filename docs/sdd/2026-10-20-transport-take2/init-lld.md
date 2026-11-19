@@ -904,11 +904,16 @@ prior content is restored (superseded: D3 retired both fragments under ADR 0026,
 their removal, proved by `tests/test_initializer_system_fragments.py`'s
 `test_an_installed_accept_env_fragment_is_removed_and_sshd_reloaded`,
 `test_no_accept_env_fragment_leaves_sshd_alone` and
-`test_the_retired_sudoers_fragments_are_removed_by_one_elevated_rm`); I64 by
-`test_authorized_keys.py` moved (mode, owner, each `STEP_FAILURES` type on the admin's write giving
-the unproven outcome, the agent's failure raising); I65 and I66 by
-`cli/tests/agents/test_agent_home_permissions.py` and `test_create_reinit_orchestrated.py` moved;
-I67 by `test_initializer_workspaces_dir.py`'s order test; I68 by `tests/vms/test_dotfiles.py` and
+`test_the_retired_sudoers_fragments_are_removed_by_one_elevated_rm`. Main's #929, merged in fix
+round 3, brought the validated install back for the admin's own grant: bootstrap stages it at a
+dotted name, validates it with `visudo -cf` and renames it into place
+(`capabilities/vm_platform/sudoers.py`), and every initialization validates it and repairs its mode
+(`_repair_admin_sudoers`), proved by `tests/vms/test_admin_sudoers.py` and
+`tests/vms/test_phase_b_driver.py`); I64 by `test_authorized_keys.py` moved (mode, owner, each
+`STEP_FAILURES` type on the admin's write giving the unproven outcome, the agent's failure raising);
+I65 and I66 by `cli/tests/agents/test_agent_home_permissions.py` and
+`test_create_reinit_orchestrated.py` moved; I67 by `test_initializer_workspaces_dir.py`'s order
+test; I68 by `tests/vms/test_dotfiles.py` and
 `test_agent_home_permissions.py::test_a_failed_git_dotfiles_sync_skips_the_agent_install`; I69 and
 I70 by `test_initializer_apt.py` and `test_initializer_env_fragments.py`; I71 by
 `test_git_config.py`; I72 by `test_git_credential_scoping.py` and the recording test above; I73 by

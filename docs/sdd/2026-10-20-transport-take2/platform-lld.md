@@ -1103,12 +1103,13 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   refusal, a slot race among them, costs no warning; the warning is left to a create whose outcome
   nobody saw. Since no create's request is retried, an answer azure-core would itself have retried
   (as its `RetryPolicy` decides: 408, 429, 500, 502, 503, 504, any status from 506, or an error
-  carrying `Retry-After`) waits before the next attempt as azure-core would have: `Retry-After`
-  capped at `_POKE_RETRY_AFTER_MAX_SECONDS` (30 s), else a backoff doubling from 0.8 s. The waits
-  between the five attempts come to at most two minutes, and hold no interrupts. GCP's firewall
-  insert already had a bound. Proxmox: the identity check's reads, each at most
-  `REQUEST_TIMEOUT_SECONDS`, and the agent wait's `AGENT_WAIT_SECONDS`. Local-process channels
-  (Lima, Remote Lima, WSL2) dispatch at spawn.
+  carrying `Retry-After`) waits before the next attempt, on azure-core's backoff factor:
+  `Retry-After` capped at `_POKE_RETRY_AFTER_MAX_SECONDS` (30 s), else a backoff doubling from 0.8 s
+  (azure-core's own first retry waits 0 s; the poke always waits). A `Retry-After` that cannot be
+  parsed takes the backoff. The waits between the five attempts come to at most two minutes, and
+  hold no interrupts. GCP's firewall insert already had a bound. Proxmox: the identity check's
+  reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the agent wait's `AGENT_WAIT_SECONDS`.
+  Local-process channels (Lima, Remote Lima, WSL2) dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
   420-second budget, now counted with the agent waits outside each attempt's deadline, and retries

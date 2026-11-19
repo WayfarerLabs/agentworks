@@ -437,7 +437,7 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     last error raises wrapped. Each create's request is sent once, without
     azure-core's retries, so an error Azure answered it with speaks for the
     only try. An answer azure-core would have retried (a throttle, a
-    timeout, a server error) gets the wait it would have had before the next
+    timeout, a server error) gets a wait on azure-core's backoff factor before the next
     attempt (see :func:`_back_off_after`), so a throttled or briefly
     unavailable network provider does not burn every attempt at once.
 
@@ -501,7 +501,10 @@ def _back_off_after(error: Exception, attempts: int) -> None:
     answer = PipelineResponse(response.request, response, PipelineContext(None))
     if not policy.is_retry(policy.configure_retries({}), answer):
         return
-    retry_after = policy.get_retry_after(answer)
+    try:
+        retry_after = policy.get_retry_after(answer)
+    except ValueError:  # a Retry-After azure-core cannot parse takes the backoff
+        retry_after = None
     if retry_after is not None:
         wait = min(retry_after, _POKE_RETRY_AFTER_MAX_SECONDS)
     else:

@@ -1,4 +1,4 @@
-"""Profile / rc / identity / skel fragment writers, and the retired sshd and sudoers fragments' removal.
+"""Shell and identity fragment writers, the retired fragments' removal, and the admin grant's repair.
 
 These write the on-VM shell and system files that make agentworks-managed
 env vars, PATH entries, and identity visible to login shells and
@@ -13,6 +13,8 @@ are written as root; the per-user profile and rc fragments and the rc files'
 source lines as the account itself, admin or agent. Nothing is written
 through a link: a linked rc file is accepted only when the file it links to
 already sources the fragment, and otherwise warned about with the line to add.
+The admin grant's mode repair is the one change made through a link: its
+``chmod`` follows a link to the grant.
 """
 
 from __future__ import annotations
@@ -498,7 +500,7 @@ def _remove_retired_sudoers_fragments(files: Files, log: InitLog) -> None:
 
 
 def _repair_admin_sudoers(files: Files, log: InitLog, admin_user: str) -> None:
-    """Validate the admin's sudo grant and repair its mode to 0440 in place, on reinit.
+    """Validate the admin's sudo grant and repair its mode to 0440 in place, on every initialization.
 
     The grant is the one bootstrap installs (``admin_sudoers_script``), the
     sudoers file elevation itself relies on, so it is never replaced here:

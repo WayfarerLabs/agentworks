@@ -208,13 +208,17 @@ def test_a_create_azure_did_not_refuse_before_its_poller_is_named(
         ((429, {"Retry-After": "7"}, {"error": {"code": "Throttled"}}), 7.0),
         ((429, {"Retry-After": "600"}, {"error": {"code": "Throttled"}}), azure_network._POKE_RETRY_AFTER_MAX_SECONDS),
         (_refused(503), azure_network._POKE_RETRY_BACKOFF_SECONDS),
+        (
+            (429, {"Retry-After": "soon"}, {"error": {"code": "Throttled"}}),
+            azure_network._POKE_RETRY_BACKOFF_SECONDS,
+        ),
     ],
-    ids=["retry-after", "retry-after-capped", "backoff"],
+    ids=["retry-after", "retry-after-capped", "backoff", "retry-after-unparsable"],
 )
 def test_an_answer_azure_core_would_retry_waits_before_the_next_attempt(
     monkeypatch: pytest.MonkeyPatch, answer: _Answer, wait: float
 ) -> None:
-    """The create goes unretried, so the poke gives its next attempt the wait azure-core would have."""
+    """The create goes unretried, so the poke waits before its next attempt on azure-core's backoff factor."""
     create, adapter = _through_sdk([answer])
     fakes, _first, deleted_at = _poke_after(monkeypatch, create)
 
