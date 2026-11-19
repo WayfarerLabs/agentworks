@@ -13,11 +13,13 @@ their route calls too. azure-core's per-call options
 bound on one silent try.
 
 A call given up on may still take effect, its own azure-core retries
-included. The poke removes the rule whose create it gave up on, at once,
-with no settle (see ``network.poke_ssh_allow``); the heal's and the
-convergence's writes are the desired state, so one that lands late does no
-harm. The removal runs with interrupts deferred, so a Ctrl-C can wait the
-whole bound for it.
+included. The poke removes the rule whose create it gave up on: at once
+when the create never returned a poller, and after letting it settle for up
+to ``network._UNFINISHED_CREATE_SETTLE_SECONDS`` when it did (see
+``network.poke_ssh_allow``). The heal's and the convergence's writes are
+the desired state, so one that lands late does no harm. The removal runs
+with interrupts deferred, so a Ctrl-C can wait its whole bound for it, and
+the settle before it too.
 """
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ _ROUTE_REQUEST_RETRIES = 2
 
 
 class _RouteCallTimeout(AzureError):
-    """An Azure call on a route did not finish within ``_OPERATION_TIMEOUT_SECONDS``, ``seconds`` here."""
+    """An Azure call on a route did not finish within its bound, ``_OPERATION_TIMEOUT_SECONDS``, held in ``seconds``."""
 
     def __init__(self, what: str) -> None:
         self.seconds = _OPERATION_TIMEOUT_SECONDS
@@ -112,8 +114,11 @@ def _finish_route_operation(poller: Any, what: str, deadline: float) -> Any:
 
     ``deadline`` is the one the operation's first request was given, so the
     wait takes what that request left. The wait is itself a bounded call, so
-    it wakes for Ctrl-C as the first request's does.
+    it wakes for Ctrl-C as the first request's does. A poller already done
+    returns its result however little of the bound is left.
     """
+    if poller.done():
+        return poller.result()
     result = _bounded_route_call(partial(poller.result, timeout=max(0.0, deadline - time.monotonic())), what, deadline)
     if not poller.done():
         raise _RouteCallTimeout(what)

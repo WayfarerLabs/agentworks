@@ -437,9 +437,10 @@ def _remove_unfinished_allow(
     Before a poller, the outcome is known only when ``error`` is Azure's 4xx
     answer to the create: the create is never retried, and azure-core
     resends it only after an explicit answer (a redirect, or a 401
-    challenge), so every try was turned away and the rule never exists. A request with no answer may have reached Azure,
-    and a 5xx (a gateway timeout among them) does not say the network
-    provider never took it, so both warn.
+    challenge), so every try was turned away and the rule never exists. A
+    request with no answer may have reached Azure, and a 5xx (a gateway
+    timeout among them) does not say the network provider never took it,
+    so both warn.
 
     A create with a poller gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS``
     more first, so the delete does not race it, reading the state its

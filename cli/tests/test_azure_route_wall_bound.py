@@ -248,7 +248,7 @@ class TestRouteOperationsAreBounded:
 
         def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
             fakes.clock.now += 250.0  # the delete request's tries
-            return _WaitRecorded(None)
+            return _WaitRecorded(None, finishes=False)  # still running, so the wait is made
 
         monkeypatch.setattr(fakes.network.security_rules, "begin_delete", _delete)
         azure_network.remove_ssh_allow(fakes.network, "rg1", "vm1", f"{TRANSIENT_ALLOW_RULE_PREFIX}x")  # type: ignore[arg-type]
@@ -347,3 +347,13 @@ class TestRouteOperationsAreBounded:
         # Both wrap their failures, the timeout among them.
         assert isinstance(caught.value.__cause__, _RouteCallTimeout)
         assert not rules.transient_names()
+
+    def test_a_poller_already_done_returns_its_result_with_none_of_the_bound_left(self) -> None:
+        """The first request can spend the whole bound on an operation Azure finished at once."""
+
+        class _Done(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                time.sleep(0.05)  # longer than a wait with nothing left of the bound
+                return super().result(timeout)
+
+        assert route_calls._finish_route_operation(_Done("rule"), "creating a rule", time.monotonic() - 1.0) == "rule"
