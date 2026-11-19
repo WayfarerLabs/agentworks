@@ -778,15 +778,16 @@ new connection layer, so they need what [What these commands need](#what-these-c
   Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
   `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow.
   Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
-  ignored, so a closed terminal cannot cut the removal short. A second Ctrl-C cannot cut it short
-  either: a root script's or shell's allow is removed and then the VM's provisioning access is
-  closed, each waiting for its provider for at most 300 seconds before it warns that the rule may
-  remain, so up to 600 seconds in all on AWS and GCP, and 660 on Azure, which may first let an
-  interrupted allow settle for up to 60 seconds. During `vm create`'s rollback a second Ctrl-C still
-  abandons the rest of the rollback, as its message says, once any removal in flight has finished.
-  Closing the console window on Windows may start that cleanup, but Windows ends the process within
-  seconds, so it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead,
-  and delete a rule a closed window left behind from the VM's firewall in the provider's console.
+  ignored, so a closed terminal cannot cut the removal short. A second Ctrl-C cannot cut short a
+  root script's or shell's cleanup either: its allow is removed and then the VM's provisioning
+  access is closed, each waiting for its provider for at most 300 seconds before it warns that the
+  rule may remain, so up to 600 seconds in all on AWS and GCP, and 660 on Azure, which may first let
+  an interrupted allow settle for up to 60 seconds. During `vm create`'s rollback a second Ctrl-C
+  abandons it at once, as its message says, the removal of an allow in progress included; the create
+  then names, or on AWS retains for explicit deletion, what it could not confirm removed. Closing
+  the console window on Windows may start that cleanup, but Windows ends the process within seconds,
+  so it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead, and delete
+  a rule a closed window left behind from the VM's firewall in the provider's console.
 - **A Lima VM's create-time bootstrap runs once.** Lima runs its provisioning on every boot, and a
   Lima VM created before 0.20 runs Agentworks' bootstrap again at each start: it resets the admin's
   `.bashrc` and `.zshrc` to the seed, which drops your edits and the lines `vm reinit` adds, puts
