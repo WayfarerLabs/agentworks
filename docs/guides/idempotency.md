@@ -169,28 +169,29 @@ access was restored.
 Every file Agentworks writes on a VM after provisioning it (initialization's files, artifact
 publication and the tmux config among them), a local dotfiles upload and a fresh git dotfiles clone
 are staged beside the destination and renamed into place, so none of these destinations is left half
-written. Provisioning itself writes in place, the bootstrap of the admin account (its shell rc files
-and `authorized_keys`) and WSL2's `/etc/wsl.conf` and fstab included; the admin's sudo grant is the
+written. Provisioning writes in place, including the admin account's bootstrap (its shell rc files
+and `authorized_keys`) and WSL2's `/etc/wsl.conf` and fstab; the admin's sudo grant is the
 exception, staged, validated with `visudo -cf` and renamed into place. A git file source, such as a
 `mise.lock`, is fetched into a staging directory under `/var/tmp` and removed afterwards. A
-controller killed without a chance to clean up can leave any of these behind, and nothing collects
-them:
+controller, or a provisioning script on the VM, killed without a chance to clean up can leave any of
+these behind, and nothing collects them:
 
-| Leftover                                 | Where                                  | What it is                                                             |
-| ---------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
-| `.agentworks-tmp-*`                      | beside any file staged this way        | A file write staged before its rename                                  |
-| `.agentworks-new-*`, `.agentworks-old-*` | beside a local dotfiles destination    | The uploaded tree, possibly partly extracted, and the tree it replaces |
-| `.agentworks-clone-*`                    | in a git dotfiles destination's parent | A fresh clone being checked out before its move into place             |
-| `/var/tmp/agentworks-source-ref-*`       | on the VM                              | A git file source's repository, fetched to read one file               |
+| Leftover                                 | Where                                  | What it is                                                                                                         |
+| ---------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `.agentworks-tmp-*`                      | beside any file staged this way        | A file write staged before its rename                                                                              |
+| `.agentworks-new-*`, `.agentworks-old-*` | beside a local dotfiles destination    | The uploaded tree, possibly partly extracted, and the tree it replaces                                             |
+| `.agentworks-clone-*`                    | in a git dotfiles destination's parent | A fresh clone being checked out before its move into place                                                         |
+| `/var/tmp/agentworks-source-ref-*`       | on the VM                              | A git file source's repository, fetched to read one file                                                           |
+| `/etc/sudoers.d/.agentworks-sudoers.*`   | on the VM                              | The admin's sudo grant staged before its validation and rename; sudo skips a name with a dot, so it grants nothing |
 
 A matching name alone proves neither that Agentworks made an entry nor that no run is still using
 it, so remove one only while no Agentworks command is running against that VM. A `.agentworks-old-*`
 directory can be the only remaining copy of the destination it replaced, including anything that
 existed only on the VM: inspect it, and move it back or copy out what you need, before discarding
-it. Agentworks never reads these again, and a later run recreates the destination each was staging.
-A `.agentworks-tmp-*` file is worth removing, since it can hold the content of a file later rotated
-or retired; it stays mode 0600 to its writer until just before its rename, when it takes its final
-owner and mode.
+it. Agentworks never reads these again, and a later run recreates the destination each was staging,
+except the admin's sudo grant, which only provisioning installs. A `.agentworks-tmp-*` file is worth
+removing, since it can hold the content of a file later rotated or retired; it stays mode 0600 to
+its writer until just before its rename, when it takes its final owner and mode.
 
 ## Workspace creation and interruption
 
