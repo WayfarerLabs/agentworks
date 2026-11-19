@@ -37,6 +37,8 @@ def test_direct_definitions_reuse_all_five_strict_bundle_maps_in_generated_schem
         "spec": {"artifacts": {"declare": MAPS}},
     }
     validator.validate(document)
+    document["spec"]["artifacts"]["bundles"] = None
+    validator.validate(document)
     document["spec"]["artifacts"]["declare"] = None
     validator.validate(document)
     document["spec"]["artifacts"]["declare"] = {"bundles": ["nested"]}
@@ -104,8 +106,10 @@ def test_direct_type_maps_merge_across_template_layers_and_replace_whole_specs(k
         ({}, True, ["team"]),
         ({"declare": {}}, True, ["team"]),
         ({"declare": None}, False, ["team"]),
-        ({"bundles": []}, True, []),
-        ({"bundles": [], "declare": None}, False, []),
+        ({"bundles": []}, True, ["team"]),
+        ({"bundles": [], "declare": None}, False, ["team"]),
+        ({"bundles": None}, True, None),
+        ({"bundles": None, "declare": None}, False, None),
     ],
 )
 def test_instance_overlay_inherit_and_clear_are_independent(
@@ -125,7 +129,8 @@ def test_instance_overlay_inherit_and_clear_are_independent(
 
 
 @pytest.mark.parametrize(
-    "selection", [{}, {"declare": {}}, {"declare": None}, {"bundles": []}, {"bundles": [], "declare": None}]
+    "selection",
+    [{}, {"declare": {}}, {"declare": None}, {"bundles": []}, {"bundles": None}, {"bundles": None, "declare": None}],
 )
 def test_admin_overlay_preserves_direct_clear_through_composite_vm_codec(selection):
     base = AdminConfig.model_validate(
@@ -136,7 +141,7 @@ def test_admin_overlay_preserves_direct_clear_through_composite_vm_codec(selecti
     assert overlays.payload.value["admin"] == {"artifacts": selection}
     value = resolve_admin({"base": base}, "base", overlay=overlays.admin).value
     assert bool(value.artifacts.declare) is ("declare" not in selection or selection["declare"] is not None)
-    assert value.artifacts.bundles == selection.get("bundles", ["team"])
+    assert value.artifacts.bundles == (None if "bundles" in selection and selection["bundles"] is None else ["team"])
 
 
 @pytest.mark.parametrize(("kind", "model", "resolve"), KINDS, ids=[row[0] for row in KINDS])
@@ -156,16 +161,17 @@ def test_template_direct_clear_then_redeclare_does_not_revive_ancestor_entries(k
 @pytest.mark.parametrize("kind", ["vm", "agent", "workspace", "session"])
 @pytest.mark.parametrize(
     "raw",
-    [{"artifacts": None}, {"artifacts": {"declare": {"hints": {"note": None}}}}, {"artifacts": {"bundles": None}}],
+    [{"artifacts": None}, {"artifacts": {"declare": {"hints": {"note": None}}}}],
 )
-def test_direct_clear_does_not_expand_instance_null_surface(kind, raw):
+def test_artifact_clears_do_not_allow_null_configs_or_entry_tombstones(kind, raw):
     with pytest.raises(SpecValidationError):
         parse_instance_spec(kind, json.dumps(raw))
 
 
 @pytest.mark.parametrize("kind", ["vm", "agent", "workspace", "session"])
-def test_stored_instance_codec_retains_direct_clear(db, kind):
-    raw = {"artifacts": {"declare": None}}
+@pytest.mark.parametrize("selection", [{"bundles": None}, {"declare": None}, {"bundles": None, "declare": None}])
+def test_stored_instance_codec_retains_independent_clears(db, kind, selection):
+    raw = {"artifacts": selection}
     if kind == "vm":
         overlays = parse_vm_instance_specs(json.dumps(raw), json.dumps(raw))
         assert overlays is not None

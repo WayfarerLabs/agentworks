@@ -192,6 +192,7 @@ def final_observations(invocation: RuntimeInvocation) -> None:
                 observed = sessions.observe_session_runtime(
                     current,
                     admin_target=admin,
+                    server=sessions.resolve_session_tmux_server(invocation.db, current),
                     session_target=prepared.session_target if prepared is not None and prepared.legacy else None,
                 )
             else:

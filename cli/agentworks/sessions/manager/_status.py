@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, SessionStatus
 from agentworks.errors import (
     AgentworksError,
     ConfigError,
@@ -26,6 +26,7 @@ from agentworks.sessions.tmux import (
     runtime_probe_command,
     runtime_probe_payload,
     runtime_probe_stderr,
+    server_owner_run_command,
 )
 from agentworks.status_observation import (
     GUEST_OBSERVATION_ATTEMPTS,
@@ -34,9 +35,31 @@ from agentworks.status_observation import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.transports import Transport
+
+    from ._tmux_server import SessionTmuxServer
+
+# Bounds each tmux client in the batch probe. A row runs at most two clients,
+# so its worst case is _batch_row_bound_seconds(); rows are probed
+# concurrently, so the batch request needs that bound only once on top of
+# the ordinary guest timeout.
+_BATCH_CLIENT_TIMEOUT_SECONDS = 2
+_BATCH_CLIENT_KILL_SECONDS = 1
+# Each row reports one line, written in one write. Capping every hex field
+# keeps that line well under PIPE_BUF (4096 bytes on Linux), so concurrent
+# rows' lines never interleave on the shared stdout pipe. An oversized field
+# becomes a newline, which no canonical fact contains.
+_BATCH_FIELD_HEX_LIMIT = 512
+
+
+def _batch_row_bound_seconds() -> int:
+    """The longest one row's tmux clients can take in the batch probe."""
+    return 2 * (_BATCH_CLIENT_TIMEOUT_SECONDS + _BATCH_CLIENT_KILL_SECONDS)
+
 
 _PID_PRESENT_FACT = "present"
 _PID_ABSENT_FACT = "absent"
@@ -91,10 +114,13 @@ def check_session_status(
     session: SessionRow,
     *,
     target: Transport | None = None,
+    server: SessionTmuxServer | None = None,
 ) -> SessionStatus:
     """Determine session status. Dispatches by session type.
 
-    No DB side effects. Raises ``StateError`` when the session row predates
+    A row with a socket path needs ``target`` and ``server``, the row's
+    tmux server as ``resolve_session_tmux_server`` validated it. No DB side
+    effects. Raises ``StateError`` when the session row predates
     the per-session-socket model introduced by the env-and-secrets SDD
     (``socket_path is None`` for an admin session). The hint points the
     operator at ``agw session restart <name>``, which migrates the row to
@@ -104,10 +130,12 @@ def check_session_status(
     can't safely migrate, so they surface the typed error and let the
     operator restart.
     """
+    if server is not None and server.socket_path != session.socket_path:
+        raise TypeError("session status needs the tmux server resolved from this row")
     if session.socket_path is not None:
-        if target is None:
-            raise TypeError("dedicated session status requires a transport")
-        return _check_dedicated_session(session, target=target)
+        if target is None or server is None:
+            raise TypeError("dedicated session status requires a transport and the row's resolved tmux server")
+        return _check_dedicated_session(session, target=target, server=server)
     if session.pid is None or session.boot_id is None:
         return SessionStatus.UNKNOWN
     raise _legacy_session_status_error(session)
@@ -127,22 +155,21 @@ def _legacy_session_status_error(session: SessionRow) -> StateError:
     )
 
 
-def _check_dedicated_session(session: SessionRow, *, target: Transport) -> SessionStatus:
+def _check_dedicated_session(session: SessionRow, *, target: Transport, server: SessionTmuxServer) -> SessionStatus:
     """Sessions with their own tmux server and socket. Applies uniformly to
     admin and agent sessions after the env-and-secrets SDD migrated admin
     sessions to per-session sockets.
     """
-    socket_path = session.socket_path
-    assert socket_path is not None
+    socket_path, owner = server.socket_path, server.owner
     # Match batch observation and fingerprint repair: admin inspection of an
-    # agent server uses the existing privileged read boundary, even before
-    # startup completed its shared socket permissions.
-    run_command = partial(target.run, sudo=session.mode == SessionMode.AGENT.value)
+    # agent server runs its tmux clients as the agent, which works even
+    # before startup completed its shared socket permissions.
+    run_command = server_owner_run_command(target, owner)
     session_presence = probe_tmux_session(session.name, run_command=run_command, socket_path=socket_path)
     if session_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
     if session_presence is ProbeStatus.PRESENT:
-        if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, target=target):
+        if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, target=target, server=server):
             return SessionStatus.RUNNING
         return SessionStatus.UNKNOWN
 
@@ -171,7 +198,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     pid_presence = _pid_presence(
         session.pid,
         target=target,
-        sudo=session.mode == SessionMode.AGENT.value,
+        sudo=owner is not None,
     )
     if pid_presence is ProbeStatus.UNKNOWN:
         return SessionStatus.UNKNOWN
@@ -180,7 +207,7 @@ def _check_dedicated_session(session: SessionRow, *, target: Transport) -> Sessi
     return SessionStatus.BROKEN  # same boot, process alive, socket unreachable
 
 
-def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
+def _pending_launch_is_owned(session: SessionRow, *, target: Transport, server: SessionTmuxServer) -> bool:
     """Observe a dispatched attempt without adopting its native identity."""
     from agentworks.sessions.tmux import (
         _matches_launch_attempt,
@@ -189,17 +216,17 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
         require_socket_path,
     )
 
-    if session.pid is not None or session.run_id is None or session.socket_path is None:
+    if session.pid is not None or session.run_id is None:
         return False
     boot_id = canonical_boot_id(session.boot_id)
     if boot_id is None:
         return False
     bounded = cast("Transport", _BoundedStatusTarget(target))
-    sudo = session.mode == SessionMode.AGENT.value
+    socket_path, owner = server.socket_path, server.owner
     try:
         stored_ticks = _mgr._validated_stored_start_ticks(session)
-        require_socket_path(session.socket_path, run_command=partial(bounded.run, sudo=sudo))
-        probe = capture_tmux_server_fingerprint(target=bounded, socket_path=session.socket_path, sudo=sudo)
+        require_socket_path(socket_path, run_command=partial(bounded.run, sudo=owner is not None))
+        probe = capture_tmux_server_fingerprint(target=bounded, socket_path=socket_path, owner=owner)
         observed = probe.fingerprint
         return (
             probe.status is ProbeStatus.PRESENT
@@ -208,12 +235,12 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
             and (stored_ticks is None or stored_ticks == observed.start_ticks)
             and _matches_launch_attempt(
                 target=bounded,
-                socket_path=session.socket_path,
+                socket_path=socket_path,
                 session_name=session.name,
                 session_uuid=session.session_uuid,
                 run_id=session.run_id,
                 fingerprint=observed,
-                sudo=sudo,
+                owner=owner,
             )
         )
     except UserAbort:
@@ -223,37 +250,41 @@ def _pending_launch_is_owned(session: SessionRow, *, target: Transport) -> bool:
 
 
 def batch_check_status(
-    sessions: list[SessionRow],
+    rows: Sequence[tuple[SessionRow, SessionTmuxServer]],
     *,
     target: Transport,
 ) -> dict[str, SessionStatus]:
     """Probe session presence together, verifying pending launch candidates separately.
 
-    Returns {session_name: SessionStatus}. An unrecorded present server remains
-    ``UNKNOWN`` unless its exact native launch identity matches the pending
-    attempt. Observation never adopts that identity into the persisted row.
+    Each row comes with its tmux server as ``resolve_session_tmux_server``
+    validated it. Returns {session_name: SessionStatus}. An unrecorded
+    present server remains ``UNKNOWN`` unless its exact native launch
+    identity matches the pending attempt. Observation never adopts that
+    identity into the persisted row.
     """
     from agentworks.sessions.tmux import canonical_boot_id
 
-    checkable = [s for s in sessions if s.socket_path is not None]
-    if not checkable:
+    if not rows:
         return {}
+    for session, server in rows:
+        if server.socket_path != session.socket_path:
+            raise TypeError("batch status needs each row's own resolved tmux server")
 
     cmd = runtime_probe_command(_batch_probe_command(), "BATCH")
     result = target.run(
         cmd,
         check=False,
-        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS,
+        # Rows run concurrently, so one row's bound covers them all.
+        timeout=GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
         retries=GUEST_OBSERVATION_ATTEMPTS,
         tty=False,
-        input_data=_batch_probe_data(checkable),
+        input_data=_batch_probe_data(rows),
     )
     stdout = runtime_probe_payload(getattr(result, "stdout", "") or "", "BATCH")
 
-    status_map: dict[str, SessionStatus] = {
-        session.name: SessionStatus.UNKNOWN for session in checkable if session.socket_path is not None
-    }
-    sessions_by_key = {_encoded_probe_field(session.name): session for session in checkable}
+    status_map = {session.name: SessionStatus.UNKNOWN for session, _server in rows}
+    # Lines arrive in any order, keyed by the row's 1-based position in the request.
+    rows_by_key = {str(index): row for index, row in enumerate(rows, start=1)}
 
     if (
         result.returncode != 0
@@ -274,19 +305,20 @@ def batch_check_status(
         if len(fields) != 10:
             return status_map
         key = fields[1]
-        if fields[0] != "S" or key not in sessions_by_key or key in frames or not _valid_batch_frame(fields):
+        if fields[0] != "S" or key not in rows_by_key or key in frames or not _valid_batch_frame(fields):
             return status_map
         frames[key] = fields
-    if set(frames) != set(sessions_by_key):
-        return status_map
+    # A row without a line, such as one whose job died, stays UNKNOWN.
 
     for key, fields in frames.items():
-        session = sessions_by_key[key]
+        session, server = rows_by_key[key]
         name = session.name
 
         has_presence = _batch_tmux_presence(fields[2], fields[3], missing_target_is_absent=True)
         if has_presence is ProbeStatus.PRESENT:
-            if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(session, target=target):
+            if session.pid not in {None, PID_STOPPED} or _pending_launch_is_owned(
+                session, target=target, server=server
+            ):
                 status_map[name] = SessionStatus.RUNNING
             continue
         if has_presence is ProbeStatus.UNKNOWN:
@@ -339,12 +371,15 @@ def _encoded_probe_field(value: str) -> str:
     return base64.b64encode(value.encode()).decode("ascii")
 
 
-def _batch_probe_data(sessions: list[SessionRow]) -> str:
-    """Encode selected session rows as non-sensitive stdin protocol data."""
+def _batch_probe_data(rows: Sequence[tuple[SessionRow, SessionTmuxServer]]) -> str:
+    """Encode selected session rows and their server owners as non-sensitive stdin protocol data.
+
+    Each record is ``name socket pid owner``. ``owner`` is ``-`` for the
+    admin's own servers; otherwise it names the account each probe of that
+    row runs as.
+    """
     records = []
-    for session in sessions:
-        assert session.socket_path is not None
-        mode = "a" if session.mode == SessionMode.AGENT.value else "u"
+    for session, server in rows:
         pid = (
             str(session.pid)
             if isinstance(session.pid, int) and not isinstance(session.pid, bool) and session.pid > 0
@@ -354,9 +389,9 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
             " ".join(
                 (
                     _encoded_probe_field(session.name),
-                    _encoded_probe_field(session.socket_path),
-                    mode,
+                    _encoded_probe_field(server.socket_path),
                     pid,
+                    _encoded_probe_field(server.owner) if server.owner is not None else "-",
                 )
             )
         )
@@ -364,30 +399,47 @@ def _batch_probe_data(sessions: list[SessionRow]) -> str:
 
 
 def _batch_probe_command() -> str:
-    """Build the constant-size loop program for a VM's session rows."""
+    """Build the constant-size program that probes a VM's session rows.
+
+    Each row is probed in a background job that prints one line, prefixed
+    with the row's position, and the program waits for every job, so nothing
+    it starts outlives it. Every tmux client is bounded, and a row whose
+    has-session times out skips list-sessions, so a row costs at most
+    ``_batch_row_bound_seconds`` whatever its server does, and a stuck server
+    delays no other row. Rows take no stdin, so the remaining rows stay out
+    of every server's reach. Nothing is written on the guest.
+    """
+    from agentworks.sessions.tmux import owner_client_command
+
+    client = f'timeout -k {_BATCH_CLIENT_KILL_SECONDS} {_BATCH_CLIENT_TIMEOUT_SECONDS} tmux -S "$SOCK" "$@" </dev/null'
+    as_owner = owner_client_command(client, owner_word='"$OWNER"')
     return (
-        "hex() { od -An -tx1 | tr -d ' \\n'; }; "
+        # -v: od otherwise abbreviates repeated 16-byte lines as "*".
+        "hex() { od -An -v -tx1 | tr -d ' \\n'; }; "
+        f'cap() {{ if [ ${{#1}} -le {_BATCH_FIELD_HEX_LIMIT} ]; then printf %s "$1"; else printf 0a; fi; }}; '
         'decode() { printf %s "$1" | base64 -d; }; '
         "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
-        'BOOT_HEX=$(printf %s "$BOOT" | hex); '
-        "while read -r N64 S64 M PID; do "
-        'N=$(decode "$N64") || exit 90; SOCK=$(decode "$S64") || exit 90; '
-        'run_tmux() { if [ "$M" = a ]; then sudo -n tmux -S "$SOCK" "$@"; '
-        'else tmux -S "$SOCK" "$@"; fi; }; '
+        'BOOT_HEX=$(cap "$(printf %s "$BOOT" | hex)"); '
+        "probe_row() { "
+        'I=$1; PID=$4; O64=$5; N=$(decode "$2") || exit 90; SOCK=$(decode "$3") || exit 90; '
+        'if [ "$O64" != - ]; then OWNER=$(decode "$O64") || exit 90; fi; '
+        f'run_tmux() {{ if [ "$O64" != - ]; then {as_owner}; else {client}; fi; }}; '
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
-        'HHEX=$(printf %s "$HERR" | hex); '
-        "SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; "
-        'SHEX=$(printf %s "$SERR" | hex); '
+        'HHEX=$(cap "$(printf %s "$HERR" | hex)"); '
+        # 124 and 137 are timeout's own statuses: the server did not answer.
+        'case "$H" in 124|137) S=$H; SHEX=;; '
+        '*) SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(cap "$(printf %s "$SERR" | hex)");; esac; '
         'if [ "$PID" = - ]; then PFACT=; P=1; '
-        'elif [ "$M" = a ]; then '
+        'elif [ "$O64" != - ]; then '
         'PFACT=$(sudo -n sh -c "if test -d /proc/$PID; then printf present; '
         'else printf absent; fi" 2>/dev/null); P=$?; '
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
         'else printf absent; fi" 2>/dev/null); P=$?; fi; '
-        'PHEX=$(printf %s "$PFACT" | hex); '
+        'PHEX=$(cap "$(printf %s "$PFACT" | hex)"); '
         'printf "S:%s:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
-        '"$N64" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; '
-        "done"
+        '"$I" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; }; '
+        "I=0; while read -r N64 S64 PID O64; do I=$((I + 1)); "
+        'probe_row "$I" "$N64" "$S64" "$PID" "$O64" </dev/null & done; wait'
     )
 
 
@@ -436,8 +488,11 @@ def observe_session_statuses(
 
     from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
-    # Resolve each session's VM and group
+    from ._tmux_server import resolve_session_tmux_server
+
+    # Resolve each session's VM and tmux server, and group
     by_vm: dict[str, list[SessionRow]] = {}
+    servers: dict[str, SessionTmuxServer] = {}
     vm_targets: dict[str, Transport] = {}
     legacy_targets: dict[str, Transport] = {}
     unavailable_vms: set[str] = set()
@@ -449,6 +504,11 @@ def observe_session_statuses(
             vm = _mgr._require_vm_for_workspace(db, ws)
         except NotFoundError:
             # Guard-free readers can race a normal workspace or VM deletion.
+            continue
+        try:
+            server = resolve_session_tmux_server(db, s)
+        except StateError:
+            # Never probed: a row the owner rule refuses stays UNKNOWN.
             continue
         if ws.vm_name in unavailable_vms:
             continue
@@ -478,6 +538,8 @@ def observe_session_statuses(
                 unavailable_vms.add(ws.vm_name)
                 continue
         by_vm.setdefault(ws.vm_name, []).append(s)
+        if server is not None:
+            servers[s.name] = server
         if include_legacy and s.socket_path is None:
             try:
                 legacy_targets[s.name] = _mgr._build_session_target(
@@ -496,7 +558,10 @@ def observe_session_statuses(
         return result_map
 
     def _check_vm(vm_name: str) -> dict[str, SessionStatus]:
-        statuses = batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
+        statuses = batch_check_status(
+            [(session, servers[session.name]) for session in by_vm[vm_name] if session.name in servers],
+            target=vm_targets[vm_name],
+        )
         for session in by_vm[vm_name]:
             target = legacy_targets.get(session.name)
             if target is None:

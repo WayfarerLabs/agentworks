@@ -10,6 +10,7 @@ Shared seed helpers and stub Config classes live in
 
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -51,6 +52,13 @@ if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 BOOT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def _batch_key(input_data: object, name: str) -> int:
+    """The position batch status gives ``name`` in its request, which keys that row's reply line."""
+    assert isinstance(input_data, str)
+    names = [base64.b64decode(record.split()[0]).decode() for record in input_data.splitlines()]
+    return names.index(name) + 1
 
 
 def _refuse_live_target(*args: object, **kwargs: object) -> None:
@@ -199,9 +207,8 @@ def test_running_session_names_refuses_unproved_live_identity_without_repair(
 
     def stub_run(command: str, **kwargs: object) -> _FakeResult:
         fake_target.commands.append(command)
-        return framed_runtime_result(
-            command, _FakeResult(returncode=0, stdout=f"S:{_encoded_probe_field('alpha')}:0::0::1::1:\n")
-        )
+        key = _batch_key(kwargs.get("input_data"), "alpha")
+        return framed_runtime_result(command, _FakeResult(returncode=0, stdout=f"S:{key}:0::0::1::1:\n"))
 
     fake_target.run = stub_run  # type: ignore[assignment]
 
@@ -267,9 +274,9 @@ def test_running_session_names_uses_live_status_check(db: Database, fake_target:
                 _FakeResult(
                     returncode=0,
                     stdout=(
-                        f"S:{_encoded_probe_field('alpha')}:0::0::0:{boot_hex}:0:{present_hex}\n"
-                        f"S:{_encoded_probe_field('beta')}:0::0::0:{boot_hex}:0:{present_hex}\n"
-                        f"S:{_encoded_probe_field('gamma')}:1:{missing_session}:1:{missing_server}:"
+                        f"S:{_batch_key(input_data, 'alpha')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                        f"S:{_batch_key(input_data, 'beta')}:0::0::0:{boot_hex}:0:{present_hex}\n"
+                        f"S:{_batch_key(input_data, 'gamma')}:1:{missing_session}:1:{missing_server}:"
                         f"0:{boot_hex}:0:{absent_hex}\n"
                     ),
                 ),

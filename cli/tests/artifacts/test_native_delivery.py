@@ -11,7 +11,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import get_args
 
 import pytest
 
@@ -618,9 +617,10 @@ def test_session_delivery_defaults_to_unhandled_before_native_validation(render)
     ],
 )
 def test_config_workaround_names_match_native_delivery(integration, workarounds):
-    annotation = integration.config_model.model_fields["enabled_workarounds"].annotation
-    names = get_args(get_args(annotation)[0])
-    assert set(names) == set(workarounds.values())
+    names = set(workarounds.values())
+    for name in names:
+        selected = integration.config_model.model_validate({"enabled_workarounds": [name]})
+        assert selected.enabled_workarounds == [name]
 
 
 @pytest.mark.parametrize("type", list(ArtifactType))
@@ -761,14 +761,14 @@ def test_skipped_inputs_do_not_probe_or_require_launch_target(monkeypatch, imple
         (GrokBuildIntegration.config_model, "session-home-skills"),
     ],
 )
-def test_workaround_config_replaces_inherited_optins_and_refuses_unknown_names(config, workaround):
+def test_workaround_defaults_stay_conservative_and_unknown_names_are_rejected(config, workaround):
     from pydantic import ValidationError
 
     from agentworks.schema import merge_model
 
     assert config().enabled_workarounds == []
     value, _ = merge_model(config, {"enabled_workarounds": [workaround]}, {"enabled_workarounds": []})
-    assert config.model_validate(value).enabled_workarounds == []
+    assert config.model_validate(value).enabled_workarounds == [workaround]
     with pytest.raises(ValidationError):
         config.model_validate({"enabled_workarounds": ["unknown-workaround"]})
 

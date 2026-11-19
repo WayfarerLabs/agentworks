@@ -111,12 +111,13 @@ def test_start_emits_guarded_tokens_once_and_rebinds_next_launch(monkeypatch, to
 
 
 @pytest.mark.parametrize("tool,class_name,workaround", TOOLS)
-def test_disabled_session_delivery_keeps_effective_native_override_available(tool, class_name, workaround):
+@pytest.mark.parametrize("workarounds", [[], None])
+def test_disabled_session_delivery_keeps_effective_native_override_available(tool, class_name, workaround, workarounds):
     flags = {"claude": "disable-slash-commands", "codex": "profile", "grok": "disable-skills"}
     selected = integration(
         tool,
         class_name,
-        {"extra_args": ["--${agw:workspace_name}", "custom"]},
+        {"extra_args": ["--${agw:workspace_name}", "custom"], "enabled_workarounds": workarounds},
         artifacts=context(artifact(ArtifactType.RULE)),
     )
     selected.prepare_context({"workspace_name": flags[tool]}, intent=HarnessLaunchIntent.CREATE)

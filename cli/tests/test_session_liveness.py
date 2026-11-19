@@ -16,6 +16,7 @@ from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution.errors import TrustMissing
 from agentworks.execution.trust import HOST_TRUST
 from agentworks.sessions.manager import (
+    SessionTmuxServer,
     _needs_repair,
     _repair_session_pid,
     _validated_stored_start_ticks,
@@ -27,14 +28,44 @@ from agentworks.sessions.manager._status import (
     _batch_probe_command,
     _batch_probe_data,
     _BoundedStatusTarget,
-    _encoded_probe_field,
 )
 from agentworks.sessions.tmux import ProbeStatus, probe_tmux_server_pid, runtime_probe_command
-from tests._runtime_probes import framed_runtime_result
+from tests._runtime_probes import framed_runtime_result, server_owner_parts
 from tests.conftest import requires_posix_shell, requires_symlinks
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# Agent sessions' servers live in their owner's socket directory; probes made
+# from the admin connection run as that owner.
+AGENT_OWNER = "agt-owner"
+AGENT_SOCKETS = f"/run/agentworks/agent-tmux-sockets/{AGENT_OWNER}"
+ADMIN = "admin"
+ADMIN_SOCKETS = f"/run/agentworks/admin-tmux-sockets/{ADMIN}"
+
+
+class _OwnerRows:
+    """The workspace, VM and agent rows a repair resolves its server owner from."""
+
+    def get_workspace(self, name: str) -> SimpleNamespace:
+        return SimpleNamespace(vm_name="vm")
+
+    def get_vm(self, name: str) -> SimpleNamespace:
+        return SimpleNamespace(admin_username=ADMIN)
+
+    def get_agent(self, name: str) -> SimpleNamespace:
+        return SimpleNamespace(linux_user=AGENT_OWNER)
+
+
+def _server(session: SessionRow) -> SessionTmuxServer | None:
+    """The server ``resolve_session_tmux_server`` validates for these fixture rows."""
+    if session.socket_path is None:
+        return None
+    return SessionTmuxServer(session.socket_path, AGENT_OWNER if session.mode == SessionMode.AGENT.value else None)
+
+
+def _with_servers(sessions: list[SessionRow]) -> list[tuple[SessionRow, SessionTmuxServer]]:
+    return [(session, server) for session in sessions if (server := _server(session)) is not None]
 
 
 @dataclass
@@ -67,6 +98,7 @@ class _FakeTarget:
         timeout: int | None = None,
         retries: int | None = None,
         input_data: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> _FakeResult:
         self.commands.append(command)
         self.call_options.append((tty, timeout, retries))
@@ -97,7 +129,7 @@ def _session(
 
 
 def _batch_row(
-    name: str,
+    index: int,
     *,
     has_returncode: int = 0,
     has_diagnostic: str = "",
@@ -109,7 +141,7 @@ def _batch_row(
     pid_fact: str = "present",
 ) -> str:
     return (
-        f"S:{_encoded_probe_field(name)}:{has_returncode}:{has_diagnostic.encode().hex()}:"
+        f"S:{index}:{has_returncode}:{has_diagnostic.encode().hex()}:"
         f"{server_returncode}:{server_diagnostic.encode().hex()}:"
         f"{boot_returncode}:{boot_id.encode().hex()}:{pid_returncode}:{pid_fact.encode().hex()}"
     )
@@ -121,8 +153,8 @@ def _batch_row(
 def test_batch_mixed() -> None:
     """Batch: agent running, admin stopped, NULL-PID excluded."""
     sessions = [
-        _session("a1", pid=100, socket_path="/sock1", mode="agent", boot_id=BOOT_CURRENT),
-        _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
+        _session("a1", pid=100, socket_path=f"{AGENT_SOCKETS}/sock1", mode="agent", boot_id=BOOT_CURRENT),
+        _session("s1", pid=200, socket_path=f"{ADMIN_SOCKETS}/sock2", mode="admin", boot_id=BOOT_CURRENT),
         _session("s2", pid=None),
     ]
     target = _FakeTarget(
@@ -130,10 +162,10 @@ def test_batch_mixed() -> None:
             "has-session": _FakeResult(
                 ok=True,
                 stdout=(
-                    _batch_row("a1")
+                    _batch_row(1)
                     + "\n"
                     + _batch_row(
-                        "s1",
+                        2,
                         has_returncode=1,
                         has_diagnostic="can't find session: s1",
                         server_returncode=1,
@@ -147,19 +179,19 @@ def test_batch_mixed() -> None:
             ),
         }
     )
-    result = batch_check_status(sessions, target=target)
+    result = batch_check_status(_with_servers(sessions), target=target)
     assert result["a1"] == SessionStatus.RUNNING
     assert result["s1"] == SessionStatus.STOPPED
     assert "s2" not in result
 
 
 def test_batch_empty() -> None:
-    assert batch_check_status([], target=_FakeTarget()) == {}
+    assert batch_check_status(_with_servers([]), target=_FakeTarget()) == {}
 
 
 def test_batch_all_missing_pid() -> None:
     sessions = [_session("s1", pid=None)]
-    assert batch_check_status(sessions, target=_FakeTarget()) == {}
+    assert batch_check_status(_with_servers(sessions), target=_FakeTarget()) == {}
 
 
 def test_session_observer_treats_disappeared_workspace_as_unknown() -> None:
@@ -168,7 +200,7 @@ def test_session_observer_treats_disappeared_workspace_as_unknown() -> None:
             return None
 
     statuses = observe_session_statuses(
-        [_session("s1", socket_path="/sock")],
+        [_session("s1", socket_path=f"{ADMIN_SOCKETS}/sock")],
         db=_DB(),
         config=object(),  # type: ignore[arg-type]
     )
@@ -179,10 +211,10 @@ def test_session_observer_preserves_corrupt_ssh_applied_state(
     db,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db.insert_vm("box", site="site", hostname="box")
+    db.insert_vm("box", site="site", hostname="box", admin_username=ADMIN)
     db.update_vm_tailscale("box", "100.64.0.9")
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
-    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path="/tmp/alpha.sock")
+    db.insert_session("alpha", "ws", "default", SessionMode.ADMIN, socket_path=f"{ADMIN_SOCKETS}/alpha.sock")
     session = db.get_session("alpha")
     assert session is not None
     structural = StateError("corrupt SSH applied state", entity_kind="vm", entity_name="box")
@@ -199,20 +231,6 @@ def test_session_observer_preserves_corrupt_ssh_applied_state(
         observe_session_statuses([session], db=db, config=object())
 
     assert caught.value is structural
-
-
-def test_batch_builds_compound_command() -> None:
-    """Compound command includes has-session for both agent and admin sessions."""
-    sessions = [
-        _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
-        _session("s1", pid=200, socket_path="/sock2", mode="admin", boot_id=BOOT_CURRENT),
-    ]
-    target = _FakeTarget({"has-session": _FakeResult(ok=True, stdout=f"{_batch_row('a1')}\n{_batch_row('s1')}\n")})
-    batch_check_status(sessions, target=target)
-    assert len(target.commands) == 1
-    assert target.call_options == [(False, 10, 1)]
-    assert 'if [ "$M" = a ]; then sudo -n tmux' in target.commands[0]
-    assert 'sudo -n sh -c "if test -d /proc/$PID' in target.commands[0]
 
 
 def test_bounded_singular_status_target_forces_safe_policy() -> None:
@@ -242,22 +260,24 @@ def test_bounded_singular_status_target_forces_safe_policy() -> None:
 def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH, SUN_PATH_MAX
+    from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
+    from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH, SUN_PATH_MAX, agent_socket_path
     from agentworks.transports import SSHTransport
 
     sessions = []
     for index in range(512):
         suffix = f"{index:08x}"
         name = ("s" * (MAX_SESSION_NAME_LENGTH - len(suffix))) + suffix
-        fixed = f"/{suffix}/{name}"
-        socket_path = "/" + ("p" * (SUN_PATH_MAX - 2 - len(fixed))) + fixed
+        socket_path = agent_socket_path("agt-" + "p" * (LINUX_USERNAME_MAX_LENGTH - 4), name)
         assert len(socket_path) == SUN_PATH_MAX - 1
         sessions.append(_session(name, pid=100_000 + index, socket_path=socket_path, mode="agent"))
 
     completed = subprocess.CompletedProcess(
         [],
         0,
-        stdout=("AGW_RUNTIME_BATCH=" + "\n".join(_batch_row(session.name) for session in sessions) + "\n").encode(),
+        stdout=(
+            "AGW_RUNTIME_BATCH=" + "\n".join(_batch_row(index) for index, _ in enumerate(sessions, start=1)) + "\n"
+        ).encode(),
         stderr=b"",
     )
     calls: list[tuple[list[str], dict[str, object]]] = []
@@ -268,14 +288,14 @@ def test_batch_fleet_uses_constant_argv_and_unbounded_stdin_data(
 
     monkeypatch.setattr("agentworks.transports.ssh.subprocess.run", run_process)
 
-    status_map = batch_check_status(sessions, target=SSHTransport("vm-host", trust=HOST_TRUST))
+    status_map = batch_check_status(_with_servers(sessions), target=SSHTransport("vm-host", trust=HOST_TRUST))
 
     assert len(calls) == 1
     argv, kwargs = calls[0]
     assert argv[-1] == runtime_probe_command(_batch_probe_command(), "BATCH")
     assert len(" ".join(argv).encode()) < 32_767
     payload = kwargs["input"]
-    assert payload == _batch_probe_data(sessions).encode()
+    assert payload == _batch_probe_data(_with_servers(sessions)).encode()
     assert isinstance(payload, bytes)
     assert len(payload) > 32_767
     assert "-T" in argv
@@ -301,17 +321,20 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
     bin_dir.mkdir()
     audit = tmp_path / "audit"
 
-    for name in ("base64", "cat", "od", "tr"):
+    for name in ("base64", "cat", "od", "timeout", "tr"):
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)
 
     tmux = bin_dir / "tmux"
+    # Rows run concurrently, so each fake records a call as one line in one write.
     tmux.write_text(
         "#!/bin/sh\n"
-        'printf tmux >> "$AGW_PROBE_AUDIT"\n'
-        'for arg in "$@"; do printf \'\\t%s\' "$arg" >> "$AGW_PROBE_AUDIT"; done\n'
-        "printf '\\n' >> \"$AGW_PROBE_AUDIT\"\n"
+        'line="${AGW_AS:+as\t$AGW_AS\t}tmux"\n'
+        'for arg in "$@"; do line="$line\t$arg"; done\n'
+        # A client that can read anything from stdin could hand later rows to its server.
+        'if IFS= read -r input; then line="$line\tSTDIN"; fi\n'
+        'printf \'%s\\n\' "$line" >> "$AGW_PROBE_AUDIT"\n'
     )
     tmux.chmod(0o755)
 
@@ -322,11 +345,17 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
         '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
         "  exit 97\n"
         "fi\n"
-        'case "$2" in tmux|sh) ;; *)\n'
+        'case "$2" in sh) shift; exec "$@" ;; /usr/sbin/runuser) ;; *)\n'
         '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
         "  exit 97\n"
         "esac\n"
-        "shift\n"
+        # Root's account switch: only ever to the row's owner, only for a bounded tmux client.
+        'if [ "$3" != -u ] || [ "$5" != -- ] || [ "$6" != timeout ]; then\n'
+        '  printf \'unexpected\\tsudo\\t%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
+        "  exit 97\n"
+        "fi\n"
+        "AGW_AS=$4; export AGW_AS\n"
+        "shift 5\n"
         'exec "$@"\n'
     )
     sudo.chmod(0o755)
@@ -360,10 +389,10 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
 
     before = snapshot()
     sessions = [
-        _session("admin", socket_path="/tmp/admin.sock"),
-        _session("agent", socket_path="/tmp/agent.sock", mode="agent"),
-        _session("admin-pid", pid=10101, socket_path="/tmp/admin-pid.sock"),
-        _session("agent-pid", pid=20202, socket_path="/tmp/agent-pid.sock", mode="agent"),
+        _session("admin", socket_path=f"{ADMIN_SOCKETS}/admin.sock"),
+        _session("agent", socket_path=f"{AGENT_SOCKETS}/agent.sock", mode="agent"),
+        _session("admin-pid", pid=10101, socket_path=f"{ADMIN_SOCKETS}/admin-pid.sock"),
+        _session("agent-pid", pid=20202, socket_path=f"{AGENT_SOCKETS}/agent-pid.sock", mode="agent"),
     ]
     environment = os.environ.copy()
     environment.update(
@@ -383,7 +412,7 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
 
     result = subprocess.run(
         ["/bin/bash", "--noprofile", "--norc", "-c", program],
-        input=_batch_probe_data(sessions),
+        input=_batch_probe_data(_with_servers(sessions)),
         text=True,
         capture_output=True,
         check=False,
@@ -394,22 +423,26 @@ def test_batch_probe_executes_only_read_only_guest_operations(tmp_path: Path) ->
 
     assert result.returncode == 0
     assert result.stderr == ""
-    parsed = batch_check_status(sessions, target=_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)}))
+    parsed = batch_check_status(
+        _with_servers(sessions), target=_FakeTarget({"has-session": _FakeResult(stdout=result.stdout)})
+    )
     assert parsed == {
         session.name: SessionStatus.UNKNOWN if session.pid is None else SessionStatus.RUNNING for session in sessions
     }
-    assert audit.read_text().splitlines() == [
-        "tmux\t-S\t/tmp/admin.sock\thas-session\t-t\t=admin",
-        "tmux\t-S\t/tmp/admin.sock\tlist-sessions",
-        "tmux\t-S\t/tmp/agent.sock\thas-session\t-t\t=agent",
-        "tmux\t-S\t/tmp/agent.sock\tlist-sessions",
-        "tmux\t-S\t/tmp/admin-pid.sock\thas-session\t-t\t=admin-pid",
-        "tmux\t-S\t/tmp/admin-pid.sock\tlist-sessions",
-        "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
-        "tmux\t-S\t/tmp/agent-pid.sock\thas-session\t-t\t=agent-pid",
-        "tmux\t-S\t/tmp/agent-pid.sock\tlist-sessions",
-        "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
-    ]
+    assert sorted(audit.read_text().splitlines()) == sorted(
+        [
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin.sock\thas-session\t-t\t=admin",
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin.sock\tlist-sessions",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent.sock\thas-session\t-t\t=agent",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent.sock\tlist-sessions",
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin-pid.sock\thas-session\t-t\t=admin-pid",
+            f"tmux\t-S\t{ADMIN_SOCKETS}/admin-pid.sock\tlist-sessions",
+            "sh\t-c\tif test -d /proc/10101; then printf present; else printf absent; fi",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent-pid.sock\thas-session\t-t\t=agent-pid",
+            f"as\t{AGENT_OWNER}\ttmux\t-S\t{AGENT_SOCKETS}/agent-pid.sock\tlist-sessions",
+            "sh\t-c\tif test -d /proc/20202; then printf present; else printf absent; fi",
+        ]
+    )
     assert snapshot() == before
 
 
@@ -419,11 +452,11 @@ def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(
     """An indeterminate cross-user probe never becomes stopped state."""
     from agentworks.sessions.tmux import FingerprintProbe
 
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     calls: list[bool] = []
 
     def capture(**kwargs: object) -> FingerprintProbe:
-        calls.append(kwargs.get("sudo") is True)
+        calls.append(kwargs.get("owner") == AGENT_OWNER)
         return FingerprintProbe(ProbeStatus.UNKNOWN)
 
     monkeypatch.setattr("agentworks.sessions.tmux.capture_tmux_server_fingerprint", capture)
@@ -432,7 +465,7 @@ def test_agent_fingerprint_repair_uses_elevation_and_refuses_unknown(
         lambda *args, **kwargs: pytest.fail("indeterminate fingerprint entered absence proof"),
     )
 
-    class _NoMutationDB:
+    class _NoMutationDB(_OwnerRows):
         def compare_and_set_session_runtime_repair(self, *args: object, **kwargs: object) -> None:
             pytest.fail("indeterminate repair mutated session runtime state")
 
@@ -449,7 +482,7 @@ def test_repair_can_converge_without_pre_table_narration(
     """Listing can retain repair side effects while leaving status to its table."""
     from agentworks.sessions.tmux import FingerprintProbe
 
-    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{ADMIN_SOCKETS}/sock", mode="admin", boot_id=BOOT_CURRENT)
     updates: list[dict[str, object]] = []
 
     monkeypatch.setattr(
@@ -461,7 +494,7 @@ def test_repair_can_converge_without_pre_table_narration(
         lambda *args, **kwargs: True,
     )
 
-    class _DB:
+    class _DB(_OwnerRows):
         def compare_and_set_session_runtime_repair(self, expected: SessionRuntimeSnapshot, **kwargs: object) -> None:
             updates.append({"name": expected.name, **kwargs})
 
@@ -478,14 +511,14 @@ BOOT_STALE = "11111111-2222-3333-4444-555555555555"
 
 def test_agent_ok() -> None:
     """Agent session: has-session succeeds and reports running."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    assert check_session_status(session, target=target) == SessionStatus.RUNNING
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.RUNNING
 
 
 def test_agent_stopped_pid_dead() -> None:
     """Agent session: has-session fails, PID dead -> STOPPED."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -494,12 +527,12 @@ def test_agent_stopped_pid_dead() -> None:
             "test -d /proc/42": _FakeResult(ok=True, stdout="absent"),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.STOPPED
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.STOPPED
 
 
 def test_agent_stopped_stale_boot() -> None:
     """Agent session: has-session fails, stale boot -> STOPPED (no PID check)."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_STALE)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_STALE)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -507,14 +540,14 @@ def test_agent_stopped_stale_boot() -> None:
             "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.STOPPED
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.STOPPED
     # PID should NOT be checked (stale boot short-circuits)
     assert not any("test -d /proc" in cmd for cmd in target.commands)
 
 
 def test_agent_broken() -> None:
     """Agent session: has-session fails, same boot, PID alive -> BROKEN."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -523,12 +556,12 @@ def test_agent_broken() -> None:
             "test -d /proc/42": _FakeResult(ok=True, stdout="present"),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.BROKEN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.BROKEN
 
 
 def test_agent_status_elevates_cross_user_pid_probe() -> None:
     """The admin-side singular status path can inspect an agent-owned PID."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
 
     class _ElevatedPidTarget(_FakeTarget):
         def __init__(self) -> None:
@@ -552,12 +585,12 @@ def test_agent_status_elevates_cross_user_pid_probe() -> None:
             return super().run(command, **kwargs)
 
     target = _ElevatedPidTarget()
-    assert check_session_status(session, target=target) == SessionStatus.BROKEN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.BROKEN
     assert target.pid_sudo == [True]
 
 
 def test_agent_status_treats_sudo_refusal_as_unknown() -> None:
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -567,7 +600,7 @@ def test_agent_status_treats_sudo_refusal_as_unknown() -> None:
         }
     )
 
-    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.UNKNOWN
 
 
 def test_agent_repair_does_not_treat_sudo_refusal_as_absence(
@@ -575,7 +608,7 @@ def test_agent_repair_does_not_treat_sudo_refusal_as_absence(
 ) -> None:
     from agentworks.sessions.tmux import FingerprintProbe
 
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     monkeypatch.setattr(
         "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(ProbeStatus.ABSENT),
@@ -587,7 +620,7 @@ def test_agent_repair_does_not_treat_sudo_refusal_as_absence(
         }
     )
 
-    class _NoMutationDB:
+    class _NoMutationDB(_OwnerRows):
         def compare_and_set_session_runtime_repair(self, *args: object, **kwargs: object) -> None:
             pytest.fail("sudo refusal mutated session runtime state")
 
@@ -596,22 +629,85 @@ def test_agent_repair_does_not_treat_sudo_refusal_as_absence(
 
 
 def test_reachable_server_without_canonical_session_is_residual() -> None:
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
             "list-sessions": _FakeResult(ok=True),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.RESIDUAL
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.RESIDUAL
     assert not any("/proc/42" in command for command in target.commands)
+
+
+class _CallRecordingTarget(_FakeTarget):
+    def __init__(self, responses: dict[str, _FakeResult] | None = None) -> None:
+        super().__init__(responses)
+        self.calls: list[tuple[str, bool]] = []
+
+    def run(self, command: str, **kwargs: object) -> _FakeResult:
+        self.calls.append((command, kwargs.get("sudo") is True))
+        return super().run(command, **kwargs)  # type: ignore[arg-type]
+
+
+def test_agent_status_runs_every_tmux_probe_as_the_owner() -> None:
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
+    target = _CallRecordingTarget(
+        {
+            "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
+            "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
+            "boot_id": _FakeResult(ok=True, stdout=BOOT_CURRENT + "\n"),
+            "test -d /proc/42": _FakeResult(ok=True, stdout="present"),
+        }
+    )
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.BROKEN
+    tmux_calls = [(command, elevated) for command, elevated in target.calls if "tmux " in command]
+    assert [("has-session" in command, "list-sessions" in command) for command, _ in tmux_calls] == [
+        (True, False),
+        (False, True),
+    ]
+    for command, _elevated in tmux_calls:
+        owned = server_owner_parts(command)
+        assert owned is not None and owned[0] == AGENT_OWNER
+
+
+def test_pending_agent_launch_observation_runs_as_the_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.sessions.manager._status import _pending_launch_is_owned
+    from agentworks.sessions.tmux import FingerprintProbe, TmuxServerFingerprint
+
+    session = SessionRow(
+        name="s1",
+        workspace_name="ws",
+        template="default",
+        mode="agent",
+        created_at="",
+        updated_at="",
+        pid=None,
+        socket_path=f"{AGENT_SOCKETS}/s1.sock",
+        boot_id=BOOT_CURRENT,
+        run_id="22222222-2222-4222-8222-222222222222",
+    )
+    owners: list[object] = []
+
+    def capture(**kwargs: object) -> FingerprintProbe:
+        owners.append(kwargs.get("owner"))
+        return FingerprintProbe(ProbeStatus.PRESENT, TmuxServerFingerprint(42, BOOT_CURRENT, 77))
+
+    def matches(**kwargs: object) -> bool:
+        owners.append(kwargs.get("owner"))
+        return True
+
+    monkeypatch.setattr("agentworks.sessions.tmux.capture_tmux_server_fingerprint", capture)
+    monkeypatch.setattr("agentworks.sessions.tmux._matches_launch_attempt", matches)
+    assert _pending_launch_is_owned(session, target=_FakeTarget(), server=_server(session))  # type: ignore[arg-type]
+    assert owners == [AGENT_OWNER, AGENT_OWNER]
 
 
 def test_admin_ok() -> None:
     """Admin session: has-session succeeds and reports running."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{ADMIN_SOCKETS}/sock", mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
-    assert check_session_status(session, target=target) == SessionStatus.RUNNING
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.RUNNING
 
 
 def test_admin_stopped_dead_pid() -> None:
@@ -620,7 +716,7 @@ def test_admin_stopped_dead_pid() -> None:
     After the env-and-secrets SDD admin sessions also have per-session
     sockets, so the status check uses the same path as agent sessions
     (BROKEN applies if the PID is alive on the same boot)."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{ADMIN_SOCKETS}/sock", mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -629,7 +725,7 @@ def test_admin_stopped_dead_pid() -> None:
             "test -d /proc/42": _FakeResult(ok=True, stdout="absent"),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.STOPPED
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.STOPPED
 
 
 def test_admin_broken_after_setenv_pivot() -> None:
@@ -638,7 +734,7 @@ def test_admin_broken_after_setenv_pivot() -> None:
     BROKEN (they shared the default tmux server, so a PID-alive socket-
     unreachable state didn't exist). With per-session admin sockets the
     same BROKEN semantic that applies to agents now applies to admin."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="admin", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{ADMIN_SOCKETS}/sock", mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -647,7 +743,7 @@ def test_admin_broken_after_setenv_pivot() -> None:
             "test -d /proc/42": _FakeResult(ok=True, stdout="present"),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.BROKEN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.BROKEN
 
 
 def test_legacy_admin_session_without_socket_raises_state_error() -> None:
@@ -657,7 +753,7 @@ def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     session = _session("s1", pid=42, mode="admin", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
     with pytest.raises(StateError) as exc:
-        check_session_status(session, target=target)
+        check_session_status(session, target=target, server=_server(session))
     assert exc.value.entity_kind == "session"
     assert exc.value.entity_name == "s1"
     assert exc.value.hint is not None
@@ -665,17 +761,17 @@ def test_legacy_admin_session_without_socket_raises_state_error() -> None:
 
 def test_unknown_no_pid() -> None:
     session = _session("s1", pid=None)
-    assert check_session_status(session, target=_FakeTarget()) == SessionStatus.UNKNOWN
+    assert check_session_status(session, target=_FakeTarget(), server=_server(session)) == SessionStatus.UNKNOWN
 
 
 def test_unknown_no_boot_id() -> None:
     """A legacy row without boot identity remains indeterminate."""
     session = _session("s1", pid=42, boot_id=None)
-    assert check_session_status(session, target=_FakeTarget()) == SessionStatus.UNKNOWN
+    assert check_session_status(session, target=_FakeTarget(), server=_server(session)) == SessionStatus.UNKNOWN
 
 
 def test_missing_start_ticks_alone_does_not_trigger_eager_identity_repair() -> None:
-    session = _session("s1", pid=42, socket_path="/sock", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{ADMIN_SOCKETS}/sock", boot_id=BOOT_CURRENT)
     assert session.tmux_server_start_ticks is None
 
     assert not _needs_repair(session)
@@ -694,10 +790,10 @@ def test_present_dedicated_session_requires_a_recorded_pid_for_running_inventory
     boot_id: str | None,
     expected: SessionStatus,
 ) -> None:
-    session = _session("s1", pid=pid, socket_path="/sock", boot_id=boot_id)
+    session = _session("s1", pid=pid, socket_path=f"{ADMIN_SOCKETS}/sock", boot_id=boot_id)
     target = _FakeTarget({"has-session": _FakeResult(ok=True)})
 
-    assert check_session_status(session, target=target) == expected
+    assert check_session_status(session, target=target, server=_server(session)) == expected
     assert len(target.commands) == 1
 
 
@@ -712,7 +808,7 @@ def test_incomplete_dedicated_identity_stays_unknown_when_tmux_is_absent(
     pid: int | None,
     boot_id: str | None,
 ) -> None:
-    session = _session("s1", pid=pid, socket_path="/sock", boot_id=boot_id)
+    session = _session("s1", pid=pid, socket_path=f"{ADMIN_SOCKETS}/sock", boot_id=boot_id)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -720,20 +816,20 @@ def test_incomplete_dedicated_identity_stays_unknown_when_tmux_is_absent(
         }
     )
 
-    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.UNKNOWN
 
 
 def test_stopped_pid_sentinel() -> None:
     from agentworks.db import PID_STOPPED
 
-    session = _session("s1", pid=PID_STOPPED, socket_path="/sock")
+    session = _session("s1", pid=PID_STOPPED, socket_path=f"{ADMIN_SOCKETS}/sock")
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
             "list-sessions": _FakeResult(ok=False, stderr="no server running on /sock"),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.STOPPED
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.STOPPED
 
 
 # -- get_tmux_server_pid ----------------------------------------------------
@@ -764,8 +860,8 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
     from agentworks.db import PID_STOPPED
 
     sessions = [
-        _session("ok1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
-        _session("stopped1", pid=PID_STOPPED, socket_path="/stopped", boot_id=BOOT_CURRENT),
+        _session("ok1", pid=100, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT),
+        _session("stopped1", pid=PID_STOPPED, socket_path=f"{ADMIN_SOCKETS}/stopped", boot_id=BOOT_CURRENT),
     ]
     target = _FakeTarget(
         {
@@ -773,9 +869,9 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
                 ok=True,
                 stdout="\n".join(
                     (
-                        _batch_row("ok1"),
+                        _batch_row(1),
                         _batch_row(
-                            "stopped1",
+                            2,
                             has_returncode=1,
                             has_diagnostic="can't find session: stopped1",
                             server_returncode=1,
@@ -788,7 +884,7 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
             )
         }
     )
-    result = batch_check_status(sessions, target=target)
+    result = batch_check_status(_with_servers(sessions), target=target)
 
     assert result["ok1"] == SessionStatus.RUNNING
     assert result["stopped1"] == SessionStatus.STOPPED
@@ -799,7 +895,7 @@ def test_batch_status_pid_stopped_not_unknown() -> None:
 
 def test_agent_unknown_when_boot_id_unreadable() -> None:
     """If boot_id can't be read, return UNKNOWN (don't offer --force on unverified PID)."""
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -807,7 +903,7 @@ def test_agent_unknown_when_boot_id_unreadable() -> None:
             "boot_id": _FakeResult(ok=False, stdout=""),
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.UNKNOWN
 
 
 @pytest.mark.parametrize(
@@ -818,7 +914,7 @@ def test_agent_unknown_when_boot_id_unreadable() -> None:
     ],
 )
 def test_agent_unknown_when_observed_boot_identity_is_untrusted(boot_result: _FakeResult) -> None:
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget(
         {
             "has-session": _FakeResult(ok=False, stderr="can't find session: s1"),
@@ -826,19 +922,19 @@ def test_agent_unknown_when_observed_boot_identity_is_untrusted(boot_result: _Fa
             "boot_id": boot_result,
         }
     )
-    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.UNKNOWN
 
 
 def test_transport_failure_is_unknown_not_absent() -> None:
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     target = _FakeTarget({"has-session": _FakeResult(returncode=255)})
 
-    assert check_session_status(session, target=target) == SessionStatus.UNKNOWN
+    assert check_session_status(session, target=target, server=_server(session)) == SessionStatus.UNKNOWN
 
 
 @pytest.mark.parametrize("value", [0, -1, "bad", True])
 def test_stored_process_start_ticks_must_be_a_positive_integer(value: object) -> None:
-    session = _session("s1", pid=42, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("s1", pid=42, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     object.__setattr__(session, "tmux_server_start_ticks", value)
 
     with pytest.raises(StateError):
@@ -850,7 +946,7 @@ def test_stored_process_start_ticks_must_be_a_positive_integer(value: object) ->
 
 def test_batch_empty_boot_id_is_unknown() -> None:
     sessions = [
-        _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT),
+        _session("a1", pid=100, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT),
     ]
     # Agent failure with empty boot_id field
     target = _FakeTarget(
@@ -859,7 +955,7 @@ def test_batch_empty_boot_id_is_unknown() -> None:
                 ok=True,
                 stdout=(
                     _batch_row(
-                        "a1",
+                        1,
                         has_returncode=1,
                         has_diagnostic="can't find session: a1",
                         server_returncode=1,
@@ -871,14 +967,14 @@ def test_batch_empty_boot_id_is_unknown() -> None:
             ),
         }
     )
-    result = batch_check_status(sessions, target=target)
+    result = batch_check_status(_with_servers(sessions), target=target)
     assert result["a1"] == SessionStatus.UNKNOWN
 
 
 def test_batch_sudo_refusal_is_unknown() -> None:
-    session = _session("a1", pid=100, socket_path="/sock", mode="agent", boot_id=BOOT_CURRENT)
+    session = _session("a1", pid=100, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent", boot_id=BOOT_CURRENT)
     row = _batch_row(
-        "a1",
+        1,
         has_returncode=1,
         has_diagnostic="can't find session: a1",
         server_returncode=1,
@@ -888,29 +984,31 @@ def test_batch_sudo_refusal_is_unknown() -> None:
     )
 
     assert (
-        batch_check_status([session], target=_FakeTarget({"has-session": _FakeResult(stdout=row)}))["a1"]
+        batch_check_status(_with_servers([session]), target=_FakeTarget({"has-session": _FakeResult(stdout=row)}))["a1"]
         is SessionStatus.UNKNOWN
     )
 
 
 def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
     sessions = [
-        _session("valid", pid=100, socket_path="/valid", mode="agent", boot_id=BOOT_CURRENT),
-        _session("invalid", pid=200, socket_path="/invalid", mode="agent", boot_id="not-a-uuid"),
+        _session("valid", pid=100, socket_path=f"{AGENT_SOCKETS}/valid", mode="agent", boot_id=BOOT_CURRENT),
+        _session("invalid", pid=200, socket_path=f"{AGENT_SOCKETS}/invalid", mode="agent", boot_id="not-a-uuid"),
     ]
     output = "\n".join(
         _batch_row(
-            name,
+            index,
             has_returncode=1,
             has_diagnostic=f"can't find session: {name}",
             server_returncode=1,
             server_diagnostic=f"no server running on /{name}",
             pid_fact="absent",
         )
-        for name in ("valid", "invalid")
+        for index, name in enumerate(("valid", "invalid"), start=1)
     )
 
-    result = batch_check_status(sessions, target=_FakeTarget({"has-session": _FakeResult(stdout=output)}))
+    result = batch_check_status(
+        _with_servers(sessions), target=_FakeTarget({"has-session": _FakeResult(stdout=output)})
+    )
 
     assert result["valid"] is SessionStatus.STOPPED
     assert result["invalid"] is SessionStatus.UNKNOWN
@@ -919,25 +1017,37 @@ def test_batch_malformed_stored_boot_id_does_not_drop_valid_sibling() -> None:
 @pytest.mark.parametrize(
     "result",
     [
-        _FakeResult(returncode=1, stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\n", stderr="transport noise"),
-        _FakeResult(stdout=f"unframed\n{_batch_row('alpha')}\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('alpha')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('other')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\nS:{_encoded_probe_field('beta')}:0:not-hex:0::0::0:\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\r\n{_batch_row('beta')}\n"),
-        _FakeResult(stdout=f"{_batch_row('alpha')}\n{_batch_row('beta')}\x00\n"),
+        _FakeResult(returncode=1, stdout=f"{_batch_row(1)}\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(2)}\n", stderr="transport noise"),
+        _FakeResult(stdout=f"unframed\n{_batch_row(1)}\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(1)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(3)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\nS:2:0:not-hex:0::0::0:\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\r\n{_batch_row(2)}\n"),
+        _FakeResult(stdout=f"{_batch_row(1)}\n{_batch_row(2)}\x00\n"),
     ],
 )
 def test_batch_response_must_be_complete_authoritative_framing(result: _FakeResult) -> None:
     sessions = [_session(name, socket_path=f"/{name}") for name in ("alpha", "beta")]
 
-    assert batch_check_status(sessions, target=_FakeTarget({"has-session": result})) == {
+    assert batch_check_status(_with_servers(sessions), target=_FakeTarget({"has-session": result})) == {
         "alpha": SessionStatus.UNKNOWN,
         "beta": SessionStatus.UNKNOWN,
     }
+
+
+def test_batch_row_without_a_line_is_unknown_and_spares_its_siblings() -> None:
+    sessions = [
+        _session(name, pid=100 + index, socket_path=f"{ADMIN_SOCKETS}/{name}", boot_id=BOOT_CURRENT)
+        for index, name in enumerate(("alpha", "beta"))
+    ]
+    # Only the second row reported, as when the first row's job failed.
+    output = _batch_row(2) + "\n"
+
+    assert batch_check_status(
+        _with_servers(sessions), target=_FakeTarget({"has-session": _FakeResult(stdout=output)})
+    ) == {"alpha": SessionStatus.UNKNOWN, "beta": SessionStatus.RUNNING}
 
 
 def test_session_observer_isolates_one_vm_transport_failure(
@@ -956,7 +1066,7 @@ def test_session_observer_isolates_one_vm_transport_failure(
             workspace_name,
             "default",
             SessionMode.ADMIN,
-            socket_path=f"/tmp/{session_name}.sock",
+            socket_path=f"/run/agentworks/admin-tmux-sockets/agentworks/{session_name}.sock",
         )
         session = db.get_session(session_name)
         assert session is not None
@@ -980,10 +1090,12 @@ def test_session_observer_isolates_one_vm_transport_failure(
         lambda vm, _config, **_kwargs: SimpleNamespace(vm_name=vm.name),
     )
 
-    def batch(rows: list[SessionRow], *, target: object, **_kwargs: object) -> dict[str, SessionStatus]:
+    def batch(
+        rows: list[tuple[SessionRow, SessionTmuxServer]], *, target: object, **_kwargs: object
+    ) -> dict[str, SessionStatus]:
         if target.vm_name == "vm-b":  # type: ignore[attr-defined]
             raise ConnectivityError("offline")
-        return {row.name: SessionStatus.RUNNING for row in rows}
+        return {row.name: SessionStatus.RUNNING for row, _server in rows}
 
     monkeypatch.setattr("agentworks.sessions.manager._status.batch_check_status", batch)
 
@@ -1006,7 +1118,11 @@ def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_th
         db.update_vm_tailscale(vm_name, f"100.64.0.{1 if vm_name == 'vm-a' else 2}")
         db.insert_workspace(f"ws-{vm_name}", f"/srv/ws-{vm_name}", vm_name, f"ws-{vm_name}")
         db.insert_session(
-            f"session-{vm_name}", f"ws-{vm_name}", "default", SessionMode.ADMIN, socket_path=f"/tmp/{vm_name}.sock"
+            f"session-{vm_name}",
+            f"ws-{vm_name}",
+            "default",
+            SessionMode.ADMIN,
+            socket_path=f"/run/agentworks/admin-tmux-sockets/agentworks/session-{vm_name}.sock",
         )
         session = db.get_session(f"session-{vm_name}")
         assert session is not None
@@ -1023,7 +1139,7 @@ def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_th
     )
     monkeypatch.setattr(
         "agentworks.sessions.manager._status.batch_check_status",
-        lambda rows, *, target, **_kwargs: {row.name: SessionStatus.RUNNING for row in rows},
+        lambda rows, *, target, **_kwargs: {row.name: SessionStatus.RUNNING for row, _server in rows},
     )
 
     assert observe_session_statuses(sessions, db=db, config=object()) == {
@@ -1040,10 +1156,10 @@ def test_session_observer_reports_a_vm_without_a_host_key_record_and_observes_th
 def test_ensure_pid_raises_on_unresolvable() -> None:
     from agentworks.sessions.manager import _ensure_pid
 
-    session = _session("s1", pid=None, socket_path="/sock", mode="agent")
+    session = _session("s1", pid=None, socket_path=f"{AGENT_SOCKETS}/sock", mode="agent")
 
     class _FailTarget:
-        def run(self, command, *, check=True, sudo=False, tty=None, timeout=None):
+        def run(self, command, *, check=True, sudo=False, tty=None, timeout=None, env=None):
             # has-session succeeds but display-message fails -> can't recover PID
             if "has-session" in command:
                 return _FakeResult(ok=True)
@@ -1051,7 +1167,7 @@ def test_ensure_pid_raises_on_unresolvable() -> None:
                 return _FakeResult(ok=False, stdout="")
             return _FakeResult(ok=True)
 
-    class _FakeDb:
+    class _FakeDb(_OwnerRows):
         def get_session(self, name):
             return session
 

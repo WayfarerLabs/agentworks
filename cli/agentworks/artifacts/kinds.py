@@ -32,8 +32,8 @@ class _ArtifactBundleKind:
         Agent Skills directory format.
 
         Select bundles through `artifacts.bundles` on VM, admin, agent, workspace, or
-        session declarations. An omitted list inherits; a supplied list replaces the
-        inherited list, including an empty list. Selections at other scopes remain intact.
+        session declarations. Lists append and deduplicate in inherited order. Omission or
+        an empty list inherits; null clears the selection. Other scopes remain intact.
 
         Declare artifacts directly in the same five maps under `artifacts.declare` at any
         owning scope. Direct definitions apply after the selected bundles. Omission or an

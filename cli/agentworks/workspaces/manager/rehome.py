@@ -242,22 +242,21 @@ def _rehome_vm(
         # which double-wrote the "Finished" footer when an inner raise re-entered
         # an outer except.
         try:
+            # Reserve exclusively: a preflight check cannot rule out a raced-in
+            # target, and an unanswered mkdir does not establish ownership.
+            parent = shlex.quote(str(PurePosixPath(new_path).parent))
+            target.run(f"mkdir -p -- {parent}", sudo=True)
             try:
-                # Create the target directory as root, exclusively, so a target
-                # that exists fails here whatever the check above saw; then chown
-                # it to admin so rsync can write. A failed or lost response is
-                # not confirmation either way, so the path is left for the
-                # operator to inspect. Like every AgentworksError in this block,
-                # the failure propagates without the partial-state hint.
-                target.run(f"mkdir -p -- {shlex.quote(str(PurePosixPath(new_path).parent))}", sudo=True)
-                try:
-                    target.run(f"mkdir -- {np}", sudo=True)
-                except BaseException:
-                    output.warn(
-                        f"Rehome target reservation at {new_path!r} was not confirmed. "
-                        "Any remaining path was left untouched; inspect and preserve its contents before retrying."
-                    )
-                    raise
+                target.run(f"mkdir -- {np}", sudo=True)
+            except BaseException:
+                output.warn(
+                    f"Rehome target reservation at {new_path} was not confirmed. "
+                    "Any remaining path was left untouched; inspect and preserve its contents before retrying."
+                )
+                raise
+
+            try:
+                # Let the admin write into the confirmed new target.
                 target.run(f"chown {vm.admin_username} {np}", sudo=True)
 
                 # Copy with rsync (fall back to cp -a). Trailing slash matters for
@@ -286,7 +285,6 @@ def _rehome_vm(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
                         entity_name=ws_name,
-                        hint=f"SSH log: {ssh_logger.display_path}",
                     )
 
                 # Fix ownership, permissions, and ACLs on the new path
@@ -372,7 +370,10 @@ def _rehome_vm(
                     f"SSH log: {ssh_logger.display_path}"
                 )
                 raise
-            except AgentworksError:
+            except AgentworksError as error:
+                error.add_hint(
+                    f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} SSH log: {ssh_logger.display_path}"
+                )
                 raise
             except Exception as e:
                 raise ExternalError(
