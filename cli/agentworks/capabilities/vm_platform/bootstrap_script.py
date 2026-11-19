@@ -176,13 +176,12 @@ fi
 # Each part resumes on its own, so a run cut short anywhere in this step
 # finishes it on the next run, and an existing /swapfile is never replaced.
 # /swapfile appears only once it is a complete swap area: it is built under
-# a fresh name mktemp makes, flushed and renamed into place, and a build
-# that fails or is signalled removes that file and nothing else. A run
-# killed outright leaves its /swapfile.* file, which no later run touches,
-# since nothing proves it is a build's. An existing /swapfile that is not a
-# swap area, or a link to nothing, stops the bootstrap rather than being
-# overwritten. Activation and the fstab line are each checked before they
-# are done, so neither repeats.
+# /swapfile.agentworks-partial, flushed and renamed into place, and a partial
+# one from an earlier run is removed and started again. That name is
+# Agentworks' own in a root-only directory, so whatever holds it is a build's.
+# An existing /swapfile that is not a swap area, or a link to nothing, stops
+# the bootstrap rather than being overwritten. Activation and the fstab line
+# are each checked before they are done, so neither repeats.
 echo "##STEP## Swap file"
 if [ "$SWAP_GB" -gt 0 ]; then
     if [ -L /swapfile ] && [ ! -e /swapfile ]; then
@@ -197,17 +196,12 @@ if [ "$SWAP_GB" -gt 0 ]; then
         SWAP_DONE="swap file already exists"
     else
         SWAP_MB=$((SWAP_GB * 1024))
-        SWAP_STAGING=$(mktemp /swapfile.XXXXXXXXXX)
-        trap 'rm -f -- "$SWAP_STAGING"' EXIT
-        trap 'exit 129' HUP
-        trap 'exit 130' INT
-        trap 'exit 143' TERM
-        fallocate -l "${{SWAP_MB}}M" "$SWAP_STAGING"
-        chmod 600 "$SWAP_STAGING"
-        mkswap "$SWAP_STAGING"
+        rm -f /swapfile.agentworks-partial
+        fallocate -l "${{SWAP_MB}}M" /swapfile.agentworks-partial
+        chmod 600 /swapfile.agentworks-partial
+        mkswap /swapfile.agentworks-partial
         sync
-        mv -- "$SWAP_STAGING" /swapfile
-        trap - EXIT HUP INT TERM
+        mv /swapfile.agentworks-partial /swapfile
         SWAP_DONE="${{SWAP_GB}} GiB swap file created"
     fi
     grep -q '^/swapfile ' /proc/swaps || swapon /swapfile
