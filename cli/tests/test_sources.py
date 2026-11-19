@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentworks.agents.template import AgentTemplate
-from agentworks.execution.errors import CommandFailed, PathRefused
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PathRefused
 from agentworks.execution.requests import Bytes, Command, Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.sources import (
@@ -394,6 +394,29 @@ def test_fetch_dir_refuses_a_destination_it_did_not_clone(found: str) -> None:
     assert not any(
         isinstance(request, Command) and {"clone", "fetch"} & set(request.argv) for request in guest.commands()
     )
+
+
+@pytest.mark.parametrize("probe", [IS_CLONE, EXISTS, IS_LINK], ids=["clone", "exists", "link"])
+@pytest.mark.parametrize(
+    ("outcome", "error"),
+    [
+        (Result(Completed(2)), CommandFailed),  # test answered neither true (0) nor false (1)
+        (Result(Unknown(UnknownReason.CONNECTION)), ExecutionIncomplete),  # the probe may never have run
+    ],
+    ids=["status-2", "incomplete"],
+)
+def test_a_destination_probe_that_did_not_answer_clones_nothing(
+    probe: Command, outcome: Result, error: type[Exception]
+) -> None:
+    """An unanswered probe is not an absent destination, so nothing is cloned into place on the guess."""
+    guest = _absent_destination_guest()
+    guest.respond(probe, outcome)
+
+    with pytest.raises(error):
+        fetch_dir(parse_source_ref(f"git::{URL}"), guest.files, DEST)
+
+    assert guest.commands()[-1] == probe
+    assert not any(isinstance(request, Command) and "clone" in request.argv for request in guest.commands())
 
 
 def test_a_credential_in_an_existing_clone_s_origin_reaches_neither_the_warning_nor_the_log() -> None:

@@ -37,6 +37,7 @@ from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Bytes, Command, Script, Shell
 from agentworks.path_rendering import format_host_path
+from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 
 if TYPE_CHECKING:
     from agentworks.execution.files import Files
@@ -407,7 +408,7 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
     succeed: a failure is ``CommandFailed``, so the caller can tell a sync
     that did not happen from one that did. Anything else at ``dest``, a
     link that does not lead to a clone included, is refused before anything
-    is fetched.
+    is fetched, and so is a destination whose probe did not answer.
 
     The existing clone's origin is its configured URL, read as written
     (``insteadOf`` rewrites apply to what git fetches, not to what the
@@ -417,10 +418,11 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
     """
     access = files.access
 
-    def succeeds(argv: tuple[str, ...]) -> bool:
-        return access.run(Command(argv, deadline=files.deadline)).require_completed(access.vm_name) == 0
+    def present(argv: tuple[str, ...]) -> bool:
+        probe = Command(argv, deadline=files.deadline)
+        return probe_presence(access, probe, absent_status=TEST_FALSE_STATUS) is not None
 
-    if succeeds(("test", "-d", f"{dest}/.git")):
+    if present(("test", "-d", f"{dest}/.git")):
         url = ("git", "-C", dest, "config", "--get", "remote.origin.url")
         probe = Command(url, deadline=files.deadline, log_streams=False)
         remote = access.run(probe)
@@ -431,7 +433,7 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
             raise SourceRefError(f"{dest} exists but is a clone of a different repository")
         if log:
             log.output(f"Updating {source.path} in {dest} (ref: {source.ref or 'default'})")
-    elif succeeds(("test", "-e", dest)) or succeeds(("test", "-L", dest)):
+    elif present(("test", "-e", dest)) or present(("test", "-L", dest)):
         raise SourceRefError(f"{dest} exists but is not a git repo")
     else:
         _clone_into_place(source, files, dest)
