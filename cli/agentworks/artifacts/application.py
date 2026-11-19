@@ -119,4 +119,4 @@ class SessionArtifactContext:
     run_id: str
     ancestor_files: tuple[OwnedArtifactFile, ...] = ()
     environment: Mapping[str, str] = field(default_factory=dict, repr=False)
-    redactor: Redactor = field(default_factory=Redactor, repr=False)
+    redactor: Redactor = field(default_factory=Redactor, repr=False, compare=False)

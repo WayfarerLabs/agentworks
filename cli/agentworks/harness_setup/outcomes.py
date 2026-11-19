@@ -83,8 +83,9 @@ class Redactor:
     registered and gives it to integrations, which sanitize the guest text
     an error or warning quotes without receiving those values themselves.
     Integrations are trusted Python, so this scopes what core delivers; it
-    is not an isolation boundary. Immutable: :meth:`including` returns a new
-    one.
+    is not an isolation boundary. :meth:`including` returns a new one rather
+    than changing this one. Equality is identity, so a dataclass that holds
+    one leaves it out of its comparison.
     """
 
     __slots__ = ("_values",)
