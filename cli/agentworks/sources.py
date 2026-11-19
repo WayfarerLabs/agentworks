@@ -327,13 +327,7 @@ def _read_git_file(source: SourceRef, files: Files, *, log: _Output | None) -> b
     if not source.subpath:
         raise SourceRefError(f"git source must name a file in the repository: {source.path!r}")
     access = files.access
-    created = access.run(Command(("mktemp", "-d", f"{_STAGING_PREFIX}XXXXXX"), deadline=files.deadline), check=True)
-    try:
-        tmp_dir = guest_path(created.stdout.decode("utf-8", "replace").strip())
-    except StateError:
-        tmp_dir = ""
-    if not tmp_dir.startswith(_STAGING_PREFIX):
-        raise SourceRefError(f"mktemp on VM '{access.vm_name}' did not name a staging directory")
+    tmp_dir = _staging_dir(files, _STAGING_PREFIX)
     try:
         access.run(Command(("git", "init", "-q", "--", tmp_dir), deadline=files.deadline), check=True)
         access.run(
@@ -349,6 +343,23 @@ def _read_git_file(source: SourceRef, files: Files, *, log: _Output | None) -> b
         return data
     finally:
         _remove_staging(files, tmp_dir)
+
+
+def _staging_dir(files: Files, prefix: str) -> str:
+    """Make a fresh directory named ``prefix`` and ``mktemp``'s suffix on the guest, and return its path.
+
+    Boundary: the path is the guest's output, so it must be a normalized
+    absolute path that is ``prefix`` and a suffix of one component.
+    """
+    created = files.access.run(Command(("mktemp", "-d", f"{prefix}XXXXXX"), deadline=files.deadline), check=True)
+    try:
+        staging = guest_path(created.stdout.decode("utf-8", "replace").strip())
+    except StateError:
+        staging = ""
+    suffix = staging.removeprefix(prefix)
+    if not staging.startswith(prefix) or not suffix or "/" in suffix:
+        raise SourceRefError(f"mktemp on VM '{files.access.vm_name}' did not name a staging directory")
+    return staging
 
 
 def _remove_staging(files: Files, tmp_dir: str) -> None:
@@ -445,10 +456,7 @@ def _clone_into_place(source: SourceRef, files: Files, dest: str) -> None:
     parent = str(PurePosixPath(guest_path(dest)).parent)
     prefix = f"{parent.rstrip('/')}/{_CLONE_STAGING_NAME}"
     access.run(Command(("mkdir", "-p", "--", parent), deadline=files.deadline), check=True)
-    created = access.run(Command(("mktemp", "-d", f"{prefix}XXXXXX"), deadline=files.deadline), check=True)
-    staging = created.stdout.decode("utf-8", "replace").strip()
-    if not staging.startswith(prefix) or "/" in staging.removeprefix(prefix):
-        raise SourceRefError(f"mktemp on VM '{access.vm_name}' did not name a staging directory")
+    staging = _staging_dir(files, prefix)
     checkout = f"{staging}/checkout"
     try:
         clone = ("git", "clone", "--no-checkout", "--", source.path, checkout)

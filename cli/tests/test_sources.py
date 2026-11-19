@@ -286,7 +286,7 @@ def test_a_staging_removal_that_does_not_succeed_warns_and_keeps_the_fetch_error
     assert len(captured_output.warnings) == 1
 
 
-@pytest.mark.parametrize("named", ["/tmp/elsewhere", "relative", ""])
+@pytest.mark.parametrize("named", ["/tmp/elsewhere", "relative", "", "/var/tmp/agentworks-source-ref-a/b"])
 def test_a_mktemp_that_names_no_staging_directory_clones_nothing(named: str) -> None:
     guest = StepGuest(local_files=False)
     guest.respond(MKTEMP, Result(Completed(0), f"{named}\n".encode()))
