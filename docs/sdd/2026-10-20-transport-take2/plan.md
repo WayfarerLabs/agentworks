@@ -697,6 +697,13 @@ module, and `remote_exec.py` is deleted.
       provisioning close within one shared 300 s (`capabilities/vm_platform/wall_bound.py`,
       `agentworks/deadline.py`), with a warning naming any rule whose create or insert outcome
       stayed unknown (fix round 4 of PR C; platform-lld, The bounds before dispatch).
+- [x] Settle what an unknown provider outcome leaves behind (fix round 5 of PR C; platform-lld, The
+      bounds before dispatch): GCE create's rollback keeps the lifetime deny while an unresolved
+      instance insert may still create the instance, and reports each resource an unresolved insert
+      may still create with its operation; an EC2 authorize warns unless EC2 refused the one request
+      sent; and every warning about a rule that may still appear asks for ownership before a delete.
+      Also: a second Ctrl-C only requests abandonment, and can lag on Windows; and the published
+      complexity review's tests and cleanups.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
