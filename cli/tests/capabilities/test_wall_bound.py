@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.vm_platform import wall_bound
-from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, CallTimedOut, call_within
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, CallTimedOut, Deadline, call_within
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -70,26 +70,30 @@ def test_ctrl_c_ends_a_bounded_call_promptly(release: threading.Event) -> None:
 
 def test_a_call_that_finishes_as_its_bound_runs_out_counts_as_finished(monkeypatch: pytest.MonkeyPatch) -> None:
     """The wait can end unfinished just before the call does; the call's result still wins over the bound."""
-    let_finish, returned = threading.Event(), threading.Event()
+    let_finish = threading.Event()
+    worker: list[threading.Thread] = []
 
     def _call() -> str:
+        worker.append(threading.current_thread())
         let_finish.wait(_CAP)
-        returned.set()
         return "finished"
 
     class _Clock:
-        """Reads 0 until the bound is checked after a wait, then lets the call finish and reads past the bound."""
+        """Reads 0 for the deadline and the first wait, then lets the call finish and reads past the bound.
+
+        It counts on ``call_within``'s order of reads: the deadline, the first wait's remaining time, and
+        then the check of whether the bound has run out, the read this clock finishes the call during.
+        """
 
         def __init__(self) -> None:
             self.reads = 0
 
         def monotonic(self) -> float:
             self.reads += 1
-            if self.reads < 3:  # the deadline, then the first wait's remaining time
+            if self.reads < 3:
                 return 0.0
             let_finish.set()
-            returned.wait(_CAP)
-            time.sleep(0.1)  # the worker marks itself finished just after its call returns
+            worker[0].join(_CAP)  # the worker has returned and marked itself finished
             return 1.0
 
     monkeypatch.setattr(wall_bound, "time", _Clock())
@@ -97,9 +101,24 @@ def test_a_call_that_finishes_as_its_bound_runs_out_counts_as_finished(monkeypat
     assert call_within(_call, 0.0) == "finished"
 
 
-def test_a_bounded_client_runs_each_method_on_a_bounded_call_and_reads_other_attributes_through() -> None:
-    client = SimpleNamespace(region="r1", where=lambda: threading.current_thread().name)
+def test_calls_sharing_a_deadline_each_get_what_the_ones_before_left(release: threading.Event) -> None:
+    deadline = Deadline(0.4)
+    call_within(lambda: release.wait(0.3), deadline)
+
+    started = time.monotonic()
+    with pytest.raises(CallTimedOut) as caught:
+        call_within(lambda: release.wait(_CAP), deadline)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.3
+    assert caught.value.seconds == 0.4
+
+
+def test_a_bounded_client_bounds_each_method_and_refuses_other_attributes() -> None:
+    """A nested group of methods read as an attribute would be called unbounded."""
+    client = SimpleNamespace(group=SimpleNamespace(), where=lambda: threading.current_thread().name)
     bounded = BoundedClient(client, 5.0)
 
     assert bounded.where() == wall_bound.THREAD_NAME
-    assert bounded.region == "r1"
+    with pytest.raises(TypeError):
+        _ = bounded.group

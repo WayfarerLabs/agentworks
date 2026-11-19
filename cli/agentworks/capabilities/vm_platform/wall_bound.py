@@ -37,24 +37,45 @@ THREAD_NAME = "agw-bounded-call"
 
 
 class CallTimedOut(TimeoutError):
-    """A bounded call did not finish within its ``seconds``."""
+    """A bounded call, ``what``, did not finish within its bound of ``seconds``."""
+
+    def __init__(self, seconds: float, what: str = "the provider call") -> None:
+        super().__init__(f"{what} did not finish within {seconds:.0f}s")
+        self.seconds = seconds
+        self.what = what
+
+
+class Deadline:
+    """One bound of ``seconds`` on the wall clock, from now, shared by several calls.
+
+    Each call through it gets what the ones before it left, so a sequence of
+    calls, such as a removal's reads, delete and wait, ends within the one
+    bound however many calls it makes.
+    """
 
     def __init__(self, seconds: float) -> None:
-        super().__init__(f"the provider call did not finish within {seconds:.0f}s")
         self.seconds = seconds
+        self._at = time.monotonic() + seconds
+
+    def remaining(self) -> float:
+        """The seconds left, or 0 once the bound has run out."""
+        return max(0.0, self._at - time.monotonic())
 
 
-def call_within[T](call: Callable[[], T], seconds: float) -> T:
-    """``call()``'s result, or :class:`CallTimedOut` once ``seconds`` pass on the monotonic clock.
+def call_within[T](call: Callable[[], T], bound: float | Deadline, *, what: str = "the provider call") -> T:
+    """``call()``'s result, or :class:`CallTimedOut` once ``bound`` runs out on the monotonic clock.
 
-    ``call`` runs on a daemon thread, in a copy of the caller's context, and
-    what it raised is raised here. The wait holds no interrupts, so Ctrl-C
-    outside :func:`~agentworks.interrupts.interrupts_deferred` ends it
-    promptly: at once, or within ``WAKE_SECONDS`` when the signal reached
-    another thread. A call that finishes as its bound runs out counts as
-    finished.
+    ``bound`` is the call's own seconds, or a :class:`Deadline` it shares
+    with other calls. ``call`` runs on a daemon thread, in a copy of the
+    caller's context (so it sees the caller's context variables, as an
+    inline call would), and what it raised is raised here. The wait holds no
+    interrupts, so Ctrl-C outside
+    :func:`~agentworks.interrupts.interrupts_deferred` ends it promptly: at
+    once, or within ``WAKE_SECONDS`` when the signal reached another thread.
+    A call that finishes as its bound runs out counts as finished.
     """
-    deadline = time.monotonic() + seconds
+    stated = bound.seconds if isinstance(bound, Deadline) else bound
+    deadline = time.monotonic() + (bound.remaining() if isinstance(bound, Deadline) else bound)
     context = contextvars.copy_context()
     outcome: list[tuple[T, None] | tuple[None, BaseException]] = []
     finished = threading.Event()
@@ -70,7 +91,7 @@ def call_within[T](call: Callable[[], T], seconds: float) -> T:
     threading.Thread(target=_run, name=THREAD_NAME, daemon=True).start()
     while not finished.wait(min(WAKE_SECONDS, max(0.0, deadline - time.monotonic()))):
         if time.monotonic() >= deadline and not finished.is_set():
-            raise CallTimedOut(seconds)
+            raise CallTimedOut(stated, what)
     ((result, error),) = outcome
     if error is not None:
         raise error
@@ -78,23 +99,27 @@ def call_within[T](call: Callable[[], T], seconds: float) -> T:
 
 
 class BoundedClient:
-    """``client``, with each of its methods called through :func:`call_within`, each within ``seconds``.
+    """``client``, with each method it is called with run through :func:`call_within` within ``bound``.
 
-    Attributes that are not methods are read through unchanged, and what a
-    method returns is the client's own: an operation or poller it returns
-    waits unbounded unless its caller bounds that wait too.
+    ``bound`` is each call's own seconds, or a :class:`Deadline` they all
+    share. A ``BoundedClient`` given another is a new bound on the same
+    client. Reading an attribute that is not a method raises ``TypeError``,
+    so a nested group of methods cannot be reached unbounded. What a method
+    returns is the client's own: an operation, poller, pager, paginator or
+    waiter it returns makes further requests unbounded unless its caller
+    bounds them too.
     """
 
-    def __init__(self, client: Any, seconds: float) -> None:
-        self._client = client
-        self._seconds = seconds
+    def __init__(self, client: Any, bound: float | Deadline) -> None:
+        self._client: Any = client._client if isinstance(client, BoundedClient) else client
+        self._bound = bound
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._client, name)
         if not callable(attribute):
-            return attribute
+            raise TypeError(f"'{name}' is not a method, and a bounded client bounds only method calls")
 
         def bounded(*args: Any, **kwargs: Any) -> Any:
-            return call_within(partial(attribute, *args, **kwargs), self._seconds)
+            return call_within(partial(attribute, *args, **kwargs), self._bound, what=name)
 
         return bounded
