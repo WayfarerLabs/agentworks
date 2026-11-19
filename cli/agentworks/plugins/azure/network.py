@@ -136,14 +136,14 @@ _POKE_RETRY_BACKOFF_SECONDS = 0.8
 # create had not finished. GCP bounds its firewall operations the same way.
 _OPERATION_TIMEOUT_SECONDS = 300.0
 
-# The azure-core per-call bounds on each request a route call sends, since the
-# client's own (300s to read, several retries with backoff) would let one
-# request outlast _OPERATION_TIMEOUT_SECONDS many times over: a try gives up
-# after 10s without a connection or 60s without data, and is retried at most
-# twice, so three tries and azure-core's backoff of a few seconds between them
-# end well inside the bound, and a long-running operation's wait takes what
-# remains of it. A wait Azure asks for between tries (Retry-After) is the one
-# azure-core adds on top.
+# The azure-core per-call bounds on every read a route call sends, and every
+# operation's first request, since the client's own (300s to read, several
+# retries with backoff) would let one request outlast _OPERATION_TIMEOUT_SECONDS
+# many times over: a try gives up after 10s without a connection or 60s without
+# data, and is retried at most twice, so three tries and azure-core's backoff of
+# a few seconds between them end well inside the bound, and a long-running
+# operation's wait takes what remains of it. A wait Azure asks for between tries
+# (Retry-After) is the one azure-core adds on top.
 _ROUTE_CONNECTION_TIMEOUT_SECONDS = 10.0
 _ROUTE_READ_TIMEOUT_SECONDS = 60.0
 _ROUTE_REQUEST_RETRIES = 2
@@ -238,6 +238,10 @@ def _route_operation_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[s
     with (its 30s polling interval among them), short of the endpoint that
     resolves a relative status URL. ARM sends absolute ones, and a status read
     that failed would count as the operation failing, not as its success.
+    The interval matches only because ``ARMPolling`` and the clients both
+    default to 30s: a ``polling_interval`` passed to the client constructors
+    (``AzureVMPlatform._compute_client`` and ``_network_client``) would not
+    apply to route operations.
     """
     from azure.mgmt.core.polling.arm_polling import ARMPolling
 

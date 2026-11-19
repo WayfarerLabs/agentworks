@@ -1079,13 +1079,13 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   provider call its client's timeout; Azure's calls on the route (the public-IP heal's reads and
   operations, the deny re-pin, the legacy-rule delete, the poke's slot read and create, and the
   removal) each take at most `_OPERATION_TIMEOUT_SECONDS` (300 s), where they had no bound. Every
-  request they send carries azure-core per-call bounds (10 s to connect, 60 s without data, at most
-  two retries), so its tries end inside the bound, and a long-running operation's wait takes what
-  its first request left. The generated `begin_*` methods hand per-call options on to the status
-  polling they build, so each is given its polling explicitly (`ARMPolling` with the defaults the
-  client builds it with) and its status reads keep the client's own timeouts and retries. Only a
-  wait Azure asks for between tries (`Retry-After`) adds to the bound. A poke whose create does not
-  finish in time raises without another attempt, after giving the create up to
+  read, and every operation's first request, carries azure-core per-call bounds (10 s to connect, 60
+  s without data, at most two retries), so its tries end inside the bound, and a long-running
+  operation's wait takes what its first request left. The generated `begin_*` methods hand per-call
+  options on to the status polling they build, so each is given its polling explicitly (`ARMPolling`
+  with the defaults the client builds it with) and its status reads keep the client's own timeouts
+  and retries. Only a wait Azure asks for between tries (`Retry-After`) adds to the bound. A poke
+  whose create does not finish in time raises without another attempt, after giving the create up to
   `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more and then removing the rule, since a delete racing
   the create can fail or find nothing and let the rule land after it. An interrupted create gets the
   same settle before the interrupt propagates, and so does one whose wait failed, before the poke

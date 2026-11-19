@@ -1058,9 +1058,19 @@ class TestRouteOperationsAreBounded:
         assert waits == [azure_network._OPERATION_TIMEOUT_SECONDS - 250.0]
 
     def test_a_route_requests_retries_fit_inside_the_operation_bound(self) -> None:
-        """Every try of a first request, at its connection and read bounds, ends before the operation's wait must."""
+        """A first request's tries at their connection and read bounds, with azure-core's backoff, end inside it."""
+        from azure.core.pipeline.policies import RetryPolicy
+
+        policy = RetryPolicy()
         per_try = azure_network._ROUTE_CONNECTION_TIMEOUT_SECONDS + azure_network._ROUTE_READ_TIMEOUT_SECONDS
-        assert (azure_network._ROUTE_REQUEST_RETRIES + 1) * per_try < azure_network._OPERATION_TIMEOUT_SECONDS
+        backoff = sum(
+            policy.get_backoff_time(
+                {"history": [None] * failed, "backoff": policy.backoff_factor, "max_backoff": policy.backoff_max}
+            )
+            for failed in range(1, azure_network._ROUTE_REQUEST_RETRIES + 1)
+        )
+        tries = azure_network._ROUTE_REQUEST_RETRIES + 1
+        assert tries * per_try + backoff < azure_network._OPERATION_TIMEOUT_SECONDS
 
     @staticmethod
     def _poke_with(
