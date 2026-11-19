@@ -35,9 +35,9 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
+from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
-from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.execution.results import Completed, Result
 from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
 from tests.vm_access_support import AccessRecorder, Admin, Agent, install_access_recorder
@@ -617,33 +617,3 @@ def test_an_agent_s_dotfiles_may_own_its_config_directory(
 
     uploads = [r for r in recorder.requests("run") if isinstance(r, Script) and "AGW_TREE_DEST" in r.env]
     assert [upload.env["AGW_TREE_DEST"] for upload in uploads] == [f"{HOME}/.config"]
-
-
-@pytest.mark.parametrize(
-    ("outcome", "error"),
-    [
-        (Completed(1), CommandFailed),  # getent answered neither found (0) nor not-found (2)
-        (Unknown(UnknownReason.CONNECTION), ExecutionIncomplete),  # the probe may never have run
-    ],
-)
-def test_unanswered_user_probe_raises_before_any_user_mutation(
-    db: Database,
-    config: Any,
-    monkeypatch: pytest.MonkeyPatch,
-    outcome: Completed | Unknown,
-    error: type[Exception],
-) -> None:
-    """A ``getent passwd`` that did not answer is not a gone user: the step
-    raises, and neither ``useradd`` nor any later bootstrap command runs on
-    the guess."""
-
-    recorders: list[AccessRecorder] = []
-
-    def unanswered(recorder: AccessRecorder) -> None:
-        recorders.append(recorder)
-        recorder.answer = lambda call: Result(outcome) if isinstance(call.request, Command) else None
-
-    with pytest.raises(error):
-        _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=unanswered)
-
-    assert [_commands(recorder) for recorder in recorders] == [[("getent", "passwd", LINUX_USER)]]

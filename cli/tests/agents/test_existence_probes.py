@@ -1,7 +1,8 @@
-"""An agent existence probe that does not complete raises, and never reads as an absent account.
+"""An agent existence probe that does not answer raises, and never reads as an absent account.
 
 Over a recording access: each probe's request gets an outcome that is not a
-completion (a lost connection, a deadline), and the create or reinit must
+completion (a lost connection, a deadline) or a status that is neither the
+probe's yes nor its no (getent's 1, test's 2), and the create or reinit must
 raise the typed error before any ``useradd`` is sent (issue #899).
 """
 
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
-from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from tests.vm_access_support import AccessRecorder, install_access_recorder
@@ -22,7 +23,12 @@ if TYPE_CHECKING:
     from tests.vm_access_support import Call
 
 LINUX_USER = "agt-dev"
-UNANSWERED = (Unknown(UnknownReason.CONNECTION), Unknown(UnknownReason.DEADLINE))
+CONNECTION = Unknown(UnknownReason.CONNECTION)
+DEADLINE = Unknown(UnknownReason.DEADLINE)
+# getent exits 0 for found and 2 for not found; 1 is its own usage or database error.
+GETENT_ERROR = Completed(1)
+# test exits 0 for true and 1 for false; 2 is its own error.
+TEST_ERROR = Completed(2)
 
 
 def _vm() -> Any:
@@ -41,10 +47,27 @@ def _useradds(recorder: AccessRecorder) -> list[object]:
     return [r for r in recorder.requests("run") if isinstance(r, Command) and r.argv[0] == "useradd"]
 
 
-@pytest.mark.parametrize("completion", UNANSWERED, ids=["connection", "deadline"])
-@pytest.mark.parametrize("probe", ["account", "home"])
+@pytest.mark.parametrize(
+    ("probe", "completion", "error"),
+    [
+        ("account", CONNECTION, ExecutionIncomplete),
+        ("account", DEADLINE, ExecutionIncomplete),
+        ("account", GETENT_ERROR, CommandFailed),
+        ("home", CONNECTION, ExecutionIncomplete),
+        ("home", DEADLINE, ExecutionIncomplete),
+        ("home", TEST_ERROR, CommandFailed),
+    ],
+    ids=[
+        "account-connection",
+        "account-deadline",
+        "account-getent-1",
+        "home-connection",
+        "home-deadline",
+        "home-test-2",
+    ],
+)
 def test_create_raises_when_an_ownership_probe_goes_unanswered(
-    monkeypatch: pytest.MonkeyPatch, completion: object, probe: str
+    monkeypatch: pytest.MonkeyPatch, probe: str, completion: object, error: type[Exception]
 ) -> None:
     recorder = install_access_recorder(monkeypatch)
     unanswered = _is_account_probe if probe == "account" else _is_home_probe
@@ -58,7 +81,7 @@ def test_create_raises_when_an_ownership_probe_goes_unanswered(
 
     recorder.answer = answer
 
-    with pytest.raises(ExecutionIncomplete):
+    with pytest.raises(error):
         agent_initializer.create_new_agent_user(
             _vm(), SimpleNamespace(), LINUX_USER, shell="bash", logger=SimpleNamespace(record=lambda *a: None)
         )
@@ -66,14 +89,18 @@ def test_create_raises_when_an_ownership_probe_goes_unanswered(
     assert _useradds(recorder) == []
 
 
-@pytest.mark.parametrize("completion", UNANSWERED, ids=["connection", "deadline"])
+@pytest.mark.parametrize(
+    ("completion", "error"),
+    [(CONNECTION, ExecutionIncomplete), (DEADLINE, ExecutionIncomplete), (GETENT_ERROR, CommandFailed)],
+    ids=["connection", "deadline", "getent-1"],
+)
 def test_reinit_raises_when_the_account_probe_goes_unanswered(
-    monkeypatch: pytest.MonkeyPatch, completion: object
+    monkeypatch: pytest.MonkeyPatch, completion: object, error: type[Exception]
 ) -> None:
     recorder = install_access_recorder(monkeypatch)
     recorder.answer = lambda call: Result(completion) if _is_account_probe(call.request) else None  # type: ignore[arg-type]
 
-    with pytest.raises(ExecutionIncomplete):
+    with pytest.raises(error):
         agent_initializer.create_agent_on_vm(
             _vm(),
             SimpleNamespace(),  # type: ignore[arg-type]
