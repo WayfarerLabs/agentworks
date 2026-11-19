@@ -35,11 +35,12 @@ class GcloudResource:
     zone: str | None = None
 
     def _scope(self, zone_flag: str) -> str:
+        """Where this resource's operations are: ``zone_flag`` and the zone, or ``--global`` for a firewall rule."""
         return "--global" if self.zone is None else f"{zone_flag} {shlex.quote(self.zone)}"
 
     def _command(self, verb: str) -> str:
         group = "instances" if self.kind == "instance" else "firewall-rules"
-        location = "" if self.zone is None else f" --zone {shlex.quote(self.zone)}"
+        location = "" if self.zone is None else f" {self._scope('--zone')}"
         return (
             f"gcloud compute {group} {verb} {shlex.quote(self.name)} --project {shlex.quote(self.project_id)}{location}"
         )
@@ -105,8 +106,8 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
     may_appear = report.may_appear
     instance = GcloudResource("instance", coordinates.project_id, coordinates.instance_name, coordinates.zone)
     actions.extend(
-        _resource_guidance(
-            role="instance",
+        resource_guidance(
+            subject="Instance",
             resource=instance,
             state=_instance_state_guidance(
                 instance,
@@ -134,8 +135,8 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
     ):
         rule = GcloudResource("firewall rule", coordinates.project_id, name)
         actions.extend(
-            _resource_guidance(
-                role=role,
+            resource_guidance(
+                subject=role.capitalize(),
                 resource=rule,
                 state=_firewall_state_guidance(
                     rule,
@@ -209,9 +210,9 @@ def _owned_id(ownership: InstanceOwnership | FirewallOwnership | None) -> str | 
     return None if ownership is None else ownership.resource_id
 
 
-def _resource_guidance(
+def resource_guidance(
     *,
-    role: str,
+    subject: str,
     resource: GcloudResource,
     state: str | None,
     uncertain: bool,
@@ -219,24 +220,24 @@ def _resource_guidance(
     insert: UnresolvedInsert | None,
     expected_id: str | None,
 ) -> list[str]:
-    """The sentences one resource needs: its state's, and its unresolved insert's.
+    """The sentences one resource needs: its read's ``state``, and its unresolved insert's steps led by ``subject``.
 
     Steps for an insert that may still create the resource cover a read of
-    it whose ownership is unknown too, so those replace that read's
-    sentence and carry the provider ID it observed.
+    it whose ownership is unknown (``uncertain``) too, so those replace that
+    read's sentence and carry the provider ID it observed.
     """
     if insert is None:
         return [] if state is None else [state]
     sentences = [] if state is None or uncertain else [state]
     sentences.append(
-        f"{role.capitalize()} insert outcome unknown, so it may still appear "
-        f"({insert_identity(insert, expected_id=expected_id, observed_id=observed_id if uncertain else None)}). "
+        f"{subject} insert outcome unknown, so it may still appear "
+        f"({_insert_identity(insert, expected_id=expected_id, observed_id=observed_id if uncertain else None)}). "
         + may_still_appear(resource, operation_name=insert.operation_name, expected_id=expected_id)
     )
     return sentences
 
 
-def insert_identity(insert: UnresolvedInsert, *, expected_id: str | None, observed_id: str | None) -> str:
+def _insert_identity(insert: UnresolvedInsert, *, expected_id: str | None, observed_id: str | None) -> str:
     """What an unresolved insert's steps name: the expected and any observed provider ID, and its operation."""
     observed = f", observed '{observed_id}'" if observed_id is not None else ""
     return (

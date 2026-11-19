@@ -706,6 +706,16 @@ module, and `remote_exec.py` is deleted.
       that may still appear gates a delete on the owned provider ID. Also: a second Ctrl-C only
       requests abandonment, and can lag on Windows; and the published complexity review's tests and
       cleanups.
+- [x] Merge main after #915 and #922, and close the round 6 review (fix round 6 of PR C): #915's
+      refusal to act on an unanswered presence probe holds on `VMAccess`, where `probe_presence`
+      raises on any status but the probe's own present and absent answers, for the agent user and
+      home, the backup's workspace paths, create's and copy's occupancy check, and rehome's
+      directory checks; #922's host-load independence holds in the conformance vectors and the
+      credential helper tests. Also: tests that GCE's steps offer a delete only with an owned ID,
+      that an instance insert whose retry alone was refused stays unknown, and that the route's "may
+      still appear" warning precedes a held Ctrl-C; the route's operation wait checked by the
+      timeout it is given rather than the wall clock; one copy of the rule that an insert's steps
+      replace an unknown read's sentence; and one rendering of the zone flag.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:

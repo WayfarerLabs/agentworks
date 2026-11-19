@@ -81,9 +81,8 @@ from agentworks.plugins.gcp.network import (
 )
 from agentworks.plugins.gcp.recovery import (
     GcloudResource,
-    insert_identity,
     manual_cleanup_guidance,
-    may_still_appear,
+    resource_guidance,
     rollback_after_interrupt,
     rollback_then_raise,
 )
@@ -655,32 +654,25 @@ class GCEPlatform(PublicAddressPlatform):
                     ownership=attempt.ownership,
                     timeout=_OPERATION_TIMEOUT_SECONDS,
                 )
-                # The insert's own steps cover a read of unknown ownership too, carrying its observed ID.
+                not_absent = (
+                    f"GCE transient SSH rule '{route_name}' was not proven absent in project "
+                    f"'{identity.project_id}'; inspect provider ID "
+                    f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
+                )
                 may_appear = attempt.outcome_unknown and not result.seen_owned
-                uncertain = result.state is FirewallState.INDETERMINATE
-                if result.state is not FirewallState.ABSENT and not (may_appear and uncertain):
-                    output.warn(
-                        f"GCE transient SSH rule '{route_name}' was not proven absent in project "
-                        f"'{identity.project_id}'; inspect provider ID "
-                        f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
-                    )
-                if may_appear:
-                    known = attempt.ownership.resource_id if attempt.ownership is not None else None
-                    names = insert_identity(
-                        UnresolvedInsert(attempt.operation_name),
-                        expected_id=known,
-                        observed_id=result.observed_resource_id if uncertain else None,
-                    )
-                    output.warn(
-                        f"GCE transient SSH rule '{route_name}' in project '{identity.project_id}' was not confirmed "
-                        f"created, so it may still appear after its removal ({names}), open to source(s) "
-                        f"{', '.join(prefixes)}. "
-                        + may_still_appear(
-                            GcloudResource("firewall rule", identity.project_id, route_name),
-                            operation_name=attempt.operation_name,
-                            expected_id=known,
-                        )
-                    )
+                for warning in resource_guidance(
+                    subject=(
+                        f"GCE transient SSH rule '{route_name}' (project '{identity.project_id}', open to "
+                        f"source(s) {', '.join(prefixes)})"
+                    ),
+                    resource=GcloudResource("firewall rule", identity.project_id, route_name),
+                    state=None if result.state is FirewallState.ABSENT else not_absent,
+                    uncertain=result.state is FirewallState.INDETERMINATE,
+                    observed_id=result.observed_resource_id,
+                    insert=UnresolvedInsert(attempt.operation_name) if may_appear else None,
+                    expected_id=attempt.ownership.resource_id if attempt.ownership is not None else None,
+                ):
+                    output.warn(warning)
 
     def _route_client(self, kind: GcpClientKind, ctx: RunContext) -> Any:
         """The ``kind`` client, each call through it bounded by ``_OPERATION_TIMEOUT_SECONDS`` on the wall clock.
