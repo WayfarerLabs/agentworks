@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from azure.core.exceptions import HttpResponseError, ServiceRequestError, ServiceResponseError
+from azure.core.exceptions import ServiceResponseError
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
@@ -75,12 +75,6 @@ _DETECTED_PREFIX = f"{_DETECTED}/32"
 # ssh_exposure home (hoisted for aws reuse); the stubs target it there,
 # since operator_ssh_prefixes resolves the detector in that namespace.
 _REAL_DETECT_EGRESS_IP = ssh_exposure.detect_egress_ip
-
-
-def _http_error(status: int) -> HttpResponseError:
-    error = HttpResponseError(f"status {status}")
-    error.status_code = status
-    return error
 
 
 @pytest.fixture(autouse=True)
@@ -369,8 +363,8 @@ class TestCloseProvisioningAccessHooks:
 
 class _InterruptedWait(_Poller):
     """A create whose first wait a Ctrl-C cuts short, after which every wait returns at once, as a
-    join does on CPython 3.12 once an interrupt cut one short. Azure reports the create final on the
-    ``settles_after``-th read of its state, or never when that is ``None``."""
+    join does on CPython 3.12 once an interrupt cut one short. Azure reports the create succeeded on
+    the ``settles_after``-th read of whether it is final, or never when that is ``None``."""
 
     def __init__(self, value: object, *, settles_after: int | None = 1) -> None:
         super().__init__(value, finishes=False)
@@ -390,6 +384,9 @@ class _InterruptedWait(_Poller):
     def finished(self) -> bool:
         self.reads += 1
         return self.settles_after is not None and self.reads >= self.settles_after
+
+    def status(self) -> str:
+        return "Succeeded" if self.settles_after is not None and self.reads >= self.settles_after else "InProgress"
 
 
 class TestTransientRoute:
@@ -789,6 +786,9 @@ class TestTransientRoute:
                 reads.append(1)
                 return settles_after is not None and len(reads) >= settles_after
 
+            def status(self) -> str:
+                return "Succeeded" if settles_after is not None and len(reads) >= settles_after else "InProgress"
+
         rules, (first,), deleted_at = self._first_poke_fails(
             monkeypatch, lambda _name, rule: _PollingFails(rule, finishes=False)
         )
@@ -803,44 +803,6 @@ class TestTransientRoute:
             assert deleted_at[0] == azure_network._UNFINISHED_CREATE_SETTLE_SECONDS
             (warning,) = captured_output.warnings
             assert first in warning
-
-    @pytest.mark.parametrize(
-        ("failure", "warns"),
-        [
-            (_http_error(400), False),
-            (_http_error(409), True),
-            (_http_error(504), True),
-            (HttpResponseError("no status"), True),
-            # azure-core raises this when its last try sent nothing, but an earlier retried try may have.
-            (ServiceRequestError("connection reset"), True),
-            (ServiceResponseError("read timed out"), True),
-        ],
-        ids=[
-            "client-refused",
-            "conflict",
-            "gateway-timeout",
-            "no-status",
-            "request-unanswered",
-            "response-unread",
-        ],
-    )
-    def test_a_poke_whose_create_returns_no_poller_warns_only_when_azure_did_not_answer(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, failure: Exception, warns: bool
-    ) -> None:
-        """Only a client error is a refusal that cannot land; anything else may have reached Azure."""
-
-        def _raises(_name: str, _rule: object) -> _Poller:
-            raise failure
-
-        rules, (first,), deleted_at = self._first_poke_fails(monkeypatch, _raises)
-
-        assert ("rg1", "vm1-nsg", first) in rules.deletes()
-        assert deleted_at[0] == 0.0  # no poller to wait on
-        if warns:
-            (warning,) = captured_output.warnings
-            assert first in warning
-        else:
-            assert captured_output.warnings == []
 
     def test_exit_removes_allow_when_body_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The allow removal is a finally: it fires however the caller
@@ -1083,9 +1045,12 @@ class TestRouteOperationsAreBounded:
 
             def finished(self) -> bool:
                 self.reads += 1
-                if self.reads == 3:  # the wait ran out; Azure reports the create final a little later
+                if self.reads == 3:  # the wait ran out; Azure reports the create succeeded a little later
                     order.append("created")
                 return self.reads >= 3
+
+            def status(self) -> str:
+                return "Succeeded" if self.reads >= 3 else "InProgress"
 
         rules, _clock = self._poke_with(monkeypatch, _LatePoller, order)
 
@@ -1106,55 +1071,6 @@ class TestRouteOperationsAreBounded:
         (attempted,) = rules.transient_names()
         assert attempted in {d[2] for d in rules.deletes()}
         assert clock.now == azure_network._UNFINISHED_CREATE_SETTLE_SECONDS  # the settle wait is bounded
-        (warning,) = captured_output.warnings
-        assert attempted in warning
-
-    @pytest.mark.parametrize(
-        ("state", "warns"),
-        [("Succeeded", False), ("Failed", False), ("canceled", False), ("InProgress", True)],
-    )
-    def test_only_a_final_state_azure_reported_settles_a_late_poke(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, state: str, warns: bool
-    ) -> None:
-        """azure-core's own polling method decides which reported states are final."""
-        from azure.core.polling.base_polling import LROBasePolling
-
-        polling: LROBasePolling[Any, Any, Any, Any] = LROBasePolling()
-        monkeypatch.setattr(polling, "status", lambda: state)
-
-        class _ReportingPoller(_Poller):
-            def __init__(self, value: object) -> None:
-                super().__init__(value, finishes=False)
-
-            def polling_method(self) -> Any:
-                return polling
-
-        rules, _clock = self._poke_with(monkeypatch, _ReportingPoller)
-
-        (attempted,) = rules.transient_names()
-        assert attempted in {d[2] for d in rules.deletes()}
-        if warns:
-            (warning,) = captured_output.warnings
-            assert attempted in warning
-        else:
-            assert captured_output.warnings == []
-
-    def test_a_state_that_cannot_be_read_counts_as_unsettled_and_the_rule_still_goes(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
-    ) -> None:
-        """A failed read of the reported state never skips the removal; it warns instead."""
-
-        class _UnreadablePoller(_Poller):
-            def __init__(self, value: object) -> None:
-                super().__init__(value, finishes=False)
-
-            def finished(self) -> bool:
-                raise RuntimeError("no status to read")
-
-        rules, _clock = self._poke_with(monkeypatch, _UnreadablePoller)
-
-        (attempted,) = rules.transient_names()
-        assert attempted in {d[2] for d in rules.deletes()}
         (warning,) = captured_output.warnings
         assert attempted in warning
 

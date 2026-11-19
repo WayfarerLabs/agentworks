@@ -1082,18 +1082,21 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   whose create does not finish in time raises without another attempt, after giving the create up to
   `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more and then removing the rule, since a delete racing
   the create can fail or find nothing and let the rule land after it. An interrupted create gets the
-  same settle before the interrupt propagates, and so does one Azure accepted whose wait then
-  failed, before the poke retries. The settle reads the state Azure last reported for the create
-  (its poller's `polling_method().finished()`) about once a second rather than joining the poller,
-  since polling also ends on a transport error while the create runs, and on CPython 3.12 a join
-  that Ctrl-C cut short makes every later join return at once. Unless Azure reported a final state,
-  a warning names the rule for removal by hand. A create that raised before returning a poller is
-  removed at once: silently when Azure refused it with a client error, since nothing can land, and
-  with that warning otherwise, since azure-core retries a timeout, a throttle and a server error
-  before raising, and a 409 can mean another operation is in progress. GCP's firewall insert already
-  had a bound. Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the
-  agent wait's `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at
-  spawn.
+  same settle before the interrupt propagates, and so does one whose wait failed, before the poke
+  retries. The settle reads the state the create's poller holds (`polling_method().finished()`)
+  about once a second rather than joining the poller, since polling also ends on a transport error
+  while the create runs, and on CPython 3.12 a join that Ctrl-C cut short makes every later join
+  return at once. Only the `Succeeded` Azure reported (`polling_method().status()`, read
+  case-insensitively, a failed read counting as not) makes the delete authoritative; any other
+  outcome warns naming the rule for removal by hand. No failure proves a create cannot land:
+  azure-core records its own failure to observe the operation (a refused status read, or one without
+  a status) as `Failed`, and retries a request whose answer it did not read before raising the last
+  try's error, so a final 403 can follow a first try Azure carried out. A create that raised before
+  returning a poller has nothing to wait on and is removed at once with the warning. The cost is a
+  warning for each attempt Azure plainly refused, slot races among them. GCP's firewall insert
+  already had a bound. Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`,
+  and the agent wait's `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2)
+  dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
   420-second budget, now counted with the agent waits outside each attempt's deadline, and retries

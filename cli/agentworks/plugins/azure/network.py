@@ -132,7 +132,7 @@ _OPERATION_TIMEOUT_SECONDS = 300.0
 # and the rule then lands after.
 _UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
-# How often that wait reads the state Azure last reported for the create. It
+# How often that wait reads the state the create's polling method holds. It
 # reads rather than joining the poller: the poller's polling thread also ends on
 # a transport error while the operation still runs, and on CPython 3.12 a join
 # that Ctrl-C cut short marks the still-running thread stopped, so every later
@@ -382,14 +382,16 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     swallowed) before moving on: the create may have succeeded
     server-side even though the client-side wait failed, and only this
     function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path. A create Azure refused outright (a client error
-    before any poller, see :func:`_refused_outright`) cannot land, so its
-    rule goes at once. Any other unfinished create (its wait failed, ran out
-    or was interrupted, or its request got no answer) may still land, so
-    it is given time to settle before its rule is removed, with a warning
-    naming the rule when it has not. A timeout or interrupt then
-    propagates; the route's own exit never runs for a poke that did not
-    return.
+    caller's exit path. No failure proves that a create cannot land:
+    azure-core retries a request whose answer it did not read before it
+    raises the last try's error, and records a failure to observe the
+    operation as the operation failing. So every create that did not
+    return normally is given time to settle before its rule is removed,
+    with a warning naming the rule unless Azure reported the create
+    succeeded, which proves the rule exists and so that the delete removed
+    it. A request Azure plainly refused warns too, once per attempt it
+    costs. A timeout or interrupt then propagates; the route's own exit
+    never runs for a poke that did not return.
     """
     from uuid import uuid4
 
@@ -407,60 +409,38 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
                 _allow_ssh_rule(rule_name, prefixes, priority),
             )
             _finish_route_operation(poller, f"creating the '{rule_name}' rule on NSG '{name}-nsg'")
-        except _RouteOperationTimeout:
-            # Another attempt would wait as long again; the rule may still land, so it goes.
+        except BaseException as exc:
+            # The create did not return, so the rule may exist or still land, and only this name finds it.
             _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
-            raise
-        except Exception as exc:
-            if poller is None and _refused_outright(exc):
-                # Azure refused the request, so nothing it asked for can land.
-                remove_ssh_allow(network, rg, name, rule_name, prefixes)
-            else:
-                # Accepted with its wait failing, or sent with no answer: the rule may still land.
-                _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
+            if not isinstance(exc, Exception) or isinstance(exc, _RouteOperationTimeout):
+                raise  # an interrupt, or a timeout that another attempt would wait out as long again
             last_exc = exc
             continue
-        except BaseException:
-            # An interrupt mid-create: the rule may exist or still land, and only this name finds it.
-            _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
-            raise
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
     raise wrap_azure_error(last_exc) from last_exc
 
 
-def _refused_outright(exc: Exception) -> bool:
-    """Whether ``exc`` is Azure refusing a request, so nothing it asked for can land.
-
-    Only a client error counts. azure-core retries a timeout, a throttle
-    and most server errors before raising, so a final 5xx (or 408, 429)
-    can follow an earlier try Azure is still carrying out, and a 409 can
-    mean another operation on the same resource is in progress.
-    """
-    from azure.core.exceptions import HttpResponseError
-
-    if not isinstance(exc, HttpResponseError):
-        return False
-    status = exc.status_code
-    return isinstance(status, int) and 400 <= status < 500 and status not in (408, 409, 429)
-
-
 def _remove_unfinished_allow(
     network: NetworkManagementClient, rg: str, name: str, rule_name: str, prefixes: list[str], create: Any | None
 ) -> None:
-    """Remove the poke's rule whose ``create`` had not finished, holding interrupts.
+    """Remove the poke's rule whose ``create`` did not return, holding interrupts.
 
-    That is a create whose wait ran out, failed or was interrupted, or one
-    whose request got no answer before it returned a poller (``create`` is
-    ``None``: interrupted, or a transport error). The create gets up to
-    ``_UNFINISHED_CREATE_SETTLE_SECONDS`` more first, so the delete does not
-    race it. Only a final state Azure reported counts as settled, read every
-    ``_UNFINISHED_CREATE_POLL_SECONDS`` from the poller's polling method; when
-    polling itself has failed that state never changes and the wait takes
-    its whole bound. When the create has not settled, or there is no poller
-    to wait on, the rule may land after the delete, so the warning names it
-    for removal by hand. The warning goes out before the held interrupt is
-    delivered, which would otherwise skip it.
+    That is a create that raised, ran out of time or was interrupted,
+    whether or not it had returned a poller (``create`` is ``None`` when
+    it had not). A create with a poller gets up to
+    ``_UNFINISHED_CREATE_SETTLE_SECONDS`` more first, so the delete does
+    not race it, reading the state its polling method holds every
+    ``_UNFINISHED_CREATE_POLL_SECONDS`` until that state is final; when
+    polling itself has stopped that state never changes and the wait takes
+    its whole bound. The delete is authoritative only when that state is
+    the ``Succeeded`` Azure reported, since then the rule exists. Any
+    other outcome may leave a rule that lands after the delete: azure-core
+    records its own failure to observe the operation as ``Failed``, and a
+    create that raised before its poller may follow an earlier try of the
+    same request that got no answer. So the warning names the rule for
+    removal by hand, and goes out before the held interrupt is delivered,
+    which would otherwise skip it.
     """
     with interrupts_deferred():
         settled = create is not None and _create_settled(create)
@@ -473,19 +453,33 @@ def _remove_unfinished_allow(
             while not settled and (remaining := deadline - time.monotonic()) > 0:
                 time.sleep(min(_UNFINISHED_CREATE_POLL_SECONDS, remaining))
                 settled = _create_settled(create)
+        created = create is not None and _create_succeeded(create)
         remove_ssh_allow(network, rg, name, rule_name, prefixes)
-        if not settled:
+        if not created:
             output.warn(
-                f"Azure had not finished creating the '{rule_name}' rule on NSG '{name}-nsg' when it was removed, "
-                f"so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that "
+                f"Could not confirm that Azure created the '{rule_name}' rule on NSG '{name}-nsg' before removing "
+                f"it, so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that "
                 "rule by name."
             )
 
 
 def _create_settled(create: Any) -> bool:
-    """Whether Azure has reported a final state for ``create``; a failed read counts as not."""
+    """Whether ``create``'s polling method holds a final state; a failed read counts as not."""
     try:
         return bool(create.polling_method().finished())
+    except Exception:
+        return False
+
+
+def _create_succeeded(create: Any) -> bool:
+    """Whether Azure reported that ``create`` succeeded; a failed read counts as not.
+
+    azure-core sets the state it holds from Azure's answers, except that
+    it records a failure to observe the operation (a status read Azure
+    refused, or one without a status) as ``Failed``, never ``Succeeded``.
+    """
+    try:
+        return str(create.polling_method().status()).lower() == "succeeded"
     except Exception:
         return False
 
