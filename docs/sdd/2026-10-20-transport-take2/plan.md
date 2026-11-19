@@ -692,6 +692,11 @@ module, and `remote_exec.py` is deleted.
       and make the clouds match, or state in the contract that the wait before dispatch has its own
       bound. Raised by #866's round 8 review. Settled at dispatch, with Proxmox moved to match and
       Azure's route operations bounded (platform-lld, When `run_as_root`'s deadline starts).
+- [x] Bound every Azure, GCE and EC2 call on a route on the wall clock, since the SDKs' timeouts
+      bound only silence: each call before dispatch within 300 s, and each held removal and
+      provisioning close within one shared 300 s (`capabilities/vm_platform/wall_bound.py`,
+      `agentworks/deadline.py`), with a warning naming any rule whose create or insert outcome
+      stayed unknown (fix round 4 of PR C; platform-lld, The bounds before dispatch).
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
