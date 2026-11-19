@@ -144,7 +144,9 @@ _POKE_RETRY_AFTER_MAX_SECONDS = 30.0
 # before it removes the rule, with interrupts deferred: a delete while the
 # create is in flight can fail (AnotherOperationInProgress) or find nothing,
 # and the rule then lands after. With the removal's own
-# _OPERATION_TIMEOUT_SECONDS, a Ctrl-C can be held 360s in all.
+# _OPERATION_TIMEOUT_SECONDS, that held step can take 360s; the close of the
+# provisioning access that follows it is a second, so a Ctrl-C can be held
+# 660s in all.
 _UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
 # How often that wait reads the state the create's polling method holds. It
@@ -429,7 +431,7 @@ def _remove_unfinished_allow(
     ``None`` when it had not, as when its first request ran out of time).
     Interrupts are held for the settle below, when there is a
     poller, and the removal's own ``_OPERATION_TIMEOUT_SECONDS``: at most
-    360s in all. The removal is silent only when the outcome
+    360s for this step. The removal is silent only when the outcome
     is known; otherwise the warning names the rule for removal by hand, and
     goes out before the held interrupt is delivered, which would otherwise
     skip it.

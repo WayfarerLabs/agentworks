@@ -256,21 +256,22 @@ it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a
 that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
 `ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
 `interrupts_deferred`, so an interrupt that lands during the removal waits for it; every cloud
-bounds that wait, warning that the rule may remain when the provider has not answered in time. Each
-held removal, and the close of the provisioning access, shares one bound of 300 s across its calls,
-so an interrupt waits at most that long, and on Azure up to 60 s more when a poke's accepted create
-had not finished and is let settle first. When the VM never answers,
-`PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the `ssh_allow_cidrs`
-advice, unless the address refused the last probe's connection: the allow let it through, and the
-`ChannelUnreachable` it raises names a restart for an SSH server that is not running. Azure also
-heals a missing public IP and converges the NSG onto the baseline-deny model on enter; concurrent
-operations on one VM each own an independent rule, so they never cross-remove. EC2 needs no
-public-IP heal (a running instance receives an address automatically), but its rule model forces a
-divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a name, so two
-concurrent routes from one operator egress share ONE rule rather than owning independent ones. The
-poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the per-op remove tolerant
-(tolerate `InvalidPermission.NotFound`, or a success that lists the rule under
-`UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
+bounds that wait, warning that the rule may remain when the provider has not answered in time. The
+route's removal and the close of the provisioning access that always follows it are separate held
+steps, each sharing one bound of 300 s across its calls, so an interrupt that lands during the
+removal can wait for both: at most 600 s on GCP and EC2, and 660 s on Azure, where a poke's accepted
+create that had not finished is let settle for up to 60 s before its removal. When the VM never
+answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
+through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
+running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on
+enter; concurrent operations on one VM each own an independent rule, so they never cross-remove. EC2
+needs no public-IP heal (a running instance receives an address automatically), but its rule model
+forces a divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a
+name, so two concurrent routes from one operator egress share ONE rule rather than owning
+independent ones. The poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the
+per-op remove tolerant (tolerate `InvalidPermission.NotFound`, or a success that lists the rule
+under `UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
 `plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
 route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
 so a credentials-configured site authenticates as itself with no ambient fallback.

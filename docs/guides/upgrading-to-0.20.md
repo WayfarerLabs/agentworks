@@ -778,10 +778,12 @@ new connection layer, so they need what [What these commands need](#what-these-c
   Ctrl-C: `vm create` rolls back, bootstrap allow included, and a root script (`vm recover`,
   `vm rekey`, the logout at `vm delete`) or a `vm shell --platform` session removes its own allow.
   Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
-  ignored, so a closed terminal cannot cut the removal short; a second Ctrl-C still abandons the
-  cleanup, as its message says, though one that lands while a firewall rule's removal is in flight
-  waits for that removal to finish first, for at most 300 seconds on every cloud (up to 360 on Azure
-  when an interrupted allow is let settle before its removal), then warns that the rule may remain.
+  ignored, so a closed terminal cannot cut the removal short. A second Ctrl-C cannot cut it short
+  either: a root script's or shell's allow is removed and then the VM's provisioning access is
+  closed, each waiting for its provider for at most 300 seconds before it warns that the rule may
+  remain, so up to 600 seconds in all on AWS and GCP, and 660 on Azure, which may first let an
+  interrupted allow settle for up to 60 seconds. During `vm create`'s rollback a second Ctrl-C still
+  abandons the rest of the rollback, as its message says, once any removal in flight has finished.
   Closing the console window on Windows may start that cleanup, but Windows ends the process within
   seconds, so it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead,
   and delete a rule a closed window left behind from the VM's firewall in the provider's console.
