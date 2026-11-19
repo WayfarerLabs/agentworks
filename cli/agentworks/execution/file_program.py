@@ -276,8 +276,10 @@ def _write_if(params: Params) -> int:
 def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, preserve: bool) -> int:
     """Publish ``data`` at the path through a temporary sibling renamed over it.
 
-    The temporary file gets its owner, group and mode before the rename, so
-    the destination never holds content without them. ``compare`` checks the
+    The temporary file stays 0600 and the writer's own through every check,
+    and gets its final owner, group and mode only after them, just before the
+    rename: it never grants anyone access the published file does not, and the
+    destination never holds content without them. ``compare`` checks the
     destination's digest against ``expected``; without it, an existing
     destination need only be a regular file.
     """
@@ -303,10 +305,6 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
             view = memoryview(params["data"])
             while view:
                 view = view[os.write(output, view) :]
-            # chown first: it clears set-id bits that fchmod then sets.
-            if uid != -1 or gid != -1:
-                os.fchown(output, uid, gid)
-            os.fchmod(output, params["mode"])
             # Opening the destination is also its type check: a link or anything but a regular file is unsuitable.
             existing = _open_regular(parent, walk.name)
             try:
@@ -314,6 +312,11 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
                     return EXIT_CONFLICT
                 if preserve and existing is not None:
                     _copy_metadata(existing, output)
+                else:
+                    # chown first: it clears set-id bits that fchmod then sets.
+                    if uid != -1 or gid != -1:
+                        os.fchown(output, uid, gid)
+                    os.fchmod(output, params["mode"])
             finally:
                 if existing is not None:
                     os.close(existing)
@@ -340,18 +343,21 @@ def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, p
 def _copy_metadata(source: int, target: int) -> None:
     """Give ``target`` the owner, group, mode and extended attributes (ACLs included) of ``source``.
 
-    Attributes come after the mode, so an ACL's mask survives the ``fchmod``;
-    one the new file inherited from a default directory ACL is removed.
+    Attributes come before the mode: the mode of a file with an ACL is that
+    ACL's, so ``fchmod`` leaves the copied ACL as it is, and ``target`` never
+    holds the mode without the ACL that narrows it. One the new file inherited
+    from a default directory ACL is removed.
     """
     metadata = os.fstat(source)
+    # chown first: it clears set-id bits that fchmod then sets.
     os.fchown(target, metadata.st_uid, metadata.st_gid)
-    os.fchmod(target, stat.S_IMODE(metadata.st_mode))
     wanted, present = _attributes(source), _attributes(target)
     for key in present.keys() - wanted.keys():
         os.removexattr(target, key)
     for key, value in wanted.items():
         if present.get(key) != value:
             os.setxattr(target, key, value)
+    os.fchmod(target, stat.S_IMODE(metadata.st_mode))
 
 
 def _attributes(descriptor: int) -> dict[str, bytes]:

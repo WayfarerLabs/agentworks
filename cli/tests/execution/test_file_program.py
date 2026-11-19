@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -732,6 +734,93 @@ def test_preserve_on_a_filesystem_without_extended_attributes_keeps_the_mode(gue
     assert result.returncode == 0, result.stderr
     assert destination.read_bytes() == b"after"
     assert stat.S_IMODE(destination.stat().st_mode) == 0o640
+
+
+_RECORD_STAGING = (
+    "import json, os\n"
+    "def snapshot(label):\n"
+    "    for name in os.listdir({directory!r}):\n"
+    "        if name.startswith('.agentworks-tmp-'):\n"
+    "            path = os.path.join({directory!r}, name)\n"
+    "            seen = os.stat(path, follow_symlinks=False)\n"
+    "            try:\n"
+    "                acl = os.getxattr(path, 'system.posix_acl_access', follow_symlinks=False).hex()\n"
+    "            except OSError:\n"
+    "                acl = None\n"
+    "            with open({record!r}, 'a') as handle:\n"
+    "                handle.write(json.dumps([label, seen.st_mode, seen.st_gid, acl]) + '\\n')\n"
+    "def observed(function, label, after):\n"
+    "    def wrapper(*args, **kwargs):\n"
+    "        if not after:\n"
+    "            snapshot(label)\n"
+    "        result = function(*args, **kwargs)\n"
+    "        if after:\n"
+    "            snapshot(label)\n"
+    "        return result\n"
+    "    return wrapper\n"
+    "for name in ('fchown', 'fchmod', 'setxattr', 'removexattr'):\n"
+    "    setattr(os, name, observed(getattr(os, name), 'metadata', True))\n"
+    "os.rename = observed(os.rename, 'metadata', False)\n"
+    "file_program._open_regular = observed(file_program._open_regular, 'check', False)\n"
+    "file_program._digest = observed(file_program._digest, 'check', False)"
+)
+
+
+def _grants(mode: int, gid: int, acl: str | None) -> dict[tuple[str, int], int]:
+    """The access a file's mode and access ACL give anyone but its owner, by owning or named group, user or other."""
+    if acl is None:
+        return {("group", gid): mode >> 3 & 7, ("other", 0): mode & 7}
+    raw = bytes.fromhex(acl)
+    entries = [struct.unpack_from("<HHI", raw, offset) for offset in range(4, len(raw), 8)]
+    mask = next((perm for tag, perm, _ in entries if tag == 0x10), 7)
+    keys = {2: "user", 4: "group", 8: "group", 0x20: "other"}
+    grants: dict[tuple[str, int], int] = {}
+    for tag, perm, ident in entries:
+        if tag in keys:
+            key = (keys[tag], gid if tag == 4 else 0 if tag == 0x20 else ident)
+            grants[key] = grants.get(key, 0) | (perm if tag == 0x20 else perm & mask)
+    return grants
+
+
+@pytest.mark.parametrize("case", ["write_if preserving", "write_if preserving an ACL", "write_if", "write"])
+def test_staging_is_private_through_every_check_and_never_wider_than_the_published_file(
+    guest: Guest, case: str
+) -> None:
+    destination = guest.tree / "file"
+    destination.write_bytes(b"before")
+    destination.chmod(0o600)
+    if case == "write_if preserving an ACL":
+        destination.chmod(0o640)
+        setfacl = shutil.which("setfacl")
+        if setfacl is None or subprocess.run([setfacl, "-m", f"g::-,u:{os.getuid()}:r", str(destination)]).returncode:
+            pytest.skip("setfacl, and a filesystem that keeps ACLs, provision the ACL fixture")
+    record = guest.root / "staging.jsonl"
+    patch = _RECORD_STAGING.format(directory=str(guest.tree), record=str(record))
+    if case == "write":
+        result = guest.write(destination, b"after", mode=0o644, patch=patch)
+    else:
+        preserve = case != "write_if"
+        result = guest.write_if(
+            destination, b"after", expected=digest(b"before"), mode=0o644, preserve=preserve, patch=patch
+        )
+
+    assert result.returncode == 0, result.stderr
+    published = destination.stat()
+    try:
+        acl: str | None = os.getxattr(destination, "system.posix_acl_access").hex()
+    except OSError:
+        acl = None
+    final = _grants(published.st_mode, published.st_gid, acl)
+    snapshots = [json.loads(line) for line in record.read_text().splitlines()]
+    assert {label for label, *_ in snapshots} == {"check", "metadata"}
+    for label, mode, gid, staged_acl in snapshots:
+        staged = _grants(mode, gid, staged_acl)
+        if label == "check":
+            assert (stat.S_IMODE(mode), any(staged.values())) == (0o600, False)
+        assert all(perm & ~final.get(key, 0) == 0 for key, perm in staged.items()), (label, staged, final)
+    assert stat.S_IMODE(published.st_mode) == {"write_if preserving": 0o600, "write_if preserving an ACL": 0o640}.get(
+        case, 0o644
+    )
 
 
 def test_preserve_keeps_the_existing_owner_and_group(guest: Guest, as_root: None) -> None:

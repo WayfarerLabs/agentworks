@@ -269,8 +269,8 @@ is 2. Vector F6 runs on every platform's V lane, since `/run/lock` comes from ea
 **One rule: a mutating operation holds the lock from its walk to its last system call.**
 
 - `write_if`: read and verify the content (below), then take the lock, walk and create parents,
-  create the temporary file, write it, set its group and mode, compare the destination, copy
-  metadata when asked, `fsync` it, rename, `fsync` the directory, exit.
+  create the temporary file, write it, compare the destination, give it the destination's metadata
+  when asked or else its group and mode, `fsync` it, rename, `fsync` the directory, exit.
 - `remove_if`, `ensure_directory` and `prune_empty_parents`: take the lock, walk, act, exit.
 - `read` and `stat` take no lock. A rename replaces the inode atomically, so a reader sees the old
   file or the new one whole.
@@ -302,18 +302,21 @@ Under the lock, `write_if`:
    hex is 12 random bytes, so the name is fresh for each write and fits whatever the destination
    name's length. Nothing proves a file already at a name is a killed write's rather than one
    another writer named that way, so a taken name fails the write (status 1) and is left alone.
-2. `fchown(-1, gid)` when `group` names one (`native_files.py:146`), then `fchmod(mode)`; chown
-   first, because it clears set-id bits.
-3. Compares the destination with `expected` (a digest, or `None` for absent): a mismatch is
-   status 2.
-4. With `preserve` and an existing destination: `fchown` to its owner and group, `fchmod` to its
-   mode, then removes every extended attribute the temporary file has that the destination lacks (an
-   ACL inherited from a default directory ACL) and sets every one the destination has, ACLs
-   included. This is `native_files.py:155-172`'s order, so an ACL's mask survives the `fchmod`. A
-   filesystem that keeps no extended attributes (`ENOTSUP`) has none to copy, and one removed while
-   the copy reads it (`ENODATA`) is left out. A failure exits before the rename, leaving the
-   original untouched (`cli/tests/artifacts/test_generated_sections.py:226-247`).
-5. `fsync`s the temporary file, after the attribute copy so the copy is durable too.
+2. Compares the destination with `expected` (a digest, or `None` for absent): a mismatch is
+   status 2. Until this check passes the temporary file stays 0600 and the writer's own, so a
+   compare of a large destination never leaves the new content readable under a mode it will not be
+   published with.
+3. With `preserve` and an existing destination: `fchown` to its owner and group, then removes every
+   extended attribute the temporary file has that the destination lacks (an ACL inherited from a
+   default directory ACL) and sets every one the destination has, ACLs included, then `fchmod` to
+   its mode. The mode of a file with an ACL is that ACL's, so the `fchmod` leaves the copied ACL as
+   it is, and the file never holds the mode without the ACL that narrows it. A filesystem that keeps
+   no extended attributes (`ENOTSUP`) has none to copy, and one removed while the copy reads it
+   (`ENODATA`) is left out. A failure exits before the rename, leaving the original untouched
+   (`cli/tests/artifacts/test_generated_sections.py:226-247`).
+4. Otherwise `fchown(-1, gid)` when `group` names one (`native_files.py:146`), then `fchmod(mode)`;
+   chown first, because it clears set-id bits.
+5. `fsync`s the temporary file, after its metadata so that is durable too.
 6. Renames it over the destination, then `fsync`s the directory through an
    `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` open of `.` relative to the parent (an `O_PATH` descriptor
    cannot be `fsync`ed; `native_files.py:174-179`). That `fsync` is best effort: the write is in
@@ -619,16 +622,17 @@ None restates the implementation or our prose (`no-prose-policing-tests`).
 
 **The plan's Tests box:**
 
-| Plan item                                                                   | Test                                                                                                                                                                                                         |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `write_if` and `remove_if` detect a concurrent writer                       | The test changes the destination after the caller read it; the operation raises `FileConflict` and the destination keeps the test's bytes. Two concurrent `write_if`s with one expectation: exactly one wins |
-| a truncated stdin publishes nothing                                         | A `write_if` whose stdin ends short of `size`, and one whose bytes differ from `sha256`: status 6, the destination untouched, no temporary file, no created parent                                           |
-| JSON null survives an update                                                | The native settings merge over an existing document holding `null`                                                                                                                                           |
-| a malformed destination is refused                                          | The native settings merge over malformed JSON and TOML raises `ConfigError`; the file is byte-identical                                                                                                      |
-| a symlinked destination is refused                                          | A link at the destination and at a parent, for every operation: `PathRefused(UNSUITABLE)`, and the link's target is untouched                                                                                |
-| cleanup touches only what the operation created                             | A conflict, a denied rename and an attribute-copy failure each leave no `.agentworks-tmp-*`; an unrelated pre-existing one survives; created parents remain                                                  |
-| `preserve_metadata=True` keeps owner, group, mode and ACLs                  | `cli/tests/artifacts/test_generated_sections.py:193-265`, moved; owner and group under the sudo lane (below)                                                                                                 |
-| a request's stdin is absent from logs and exceptions (a conformance vector) | Vector F1                                                                                                                                                                                                    |
+| Plan item                                                                   | Test                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `write_if` and `remove_if` detect a concurrent writer                       | The test changes the destination after the caller read it; the operation raises `FileConflict` and the destination keeps the test's bytes. Two concurrent `write_if`s with one expectation: exactly one wins                                                                                          |
+| a truncated stdin publishes nothing                                         | A `write_if` whose stdin ends short of `size`, and one whose bytes differ from `sha256`: status 6, the destination untouched, no temporary file, no created parent                                                                                                                                    |
+| JSON null survives an update                                                | The native settings merge over an existing document holding `null`                                                                                                                                                                                                                                    |
+| a malformed destination is refused                                          | The native settings merge over malformed JSON and TOML raises `ConfigError`; the file is byte-identical                                                                                                                                                                                               |
+| a symlinked destination is refused                                          | A link at the destination and at a parent, for every operation: `PathRefused(UNSUITABLE)`, and the link's target is untouched                                                                                                                                                                         |
+| cleanup touches only what the operation created                             | A conflict, a denied rename and an attribute-copy failure each leave no `.agentworks-tmp-*`; an unrelated pre-existing one survives; created parents remain                                                                                                                                           |
+| `preserve_metadata=True` keeps owner, group, mode and ACLs                  | `cli/tests/artifacts/test_generated_sections.py:193-265`, moved; owner and group under the sudo lane (below)                                                                                                                                                                                          |
+| the temporary file never grants access the published file does not          | `test_file_program.py` records the temporary file's mode, group and ACL at each check of the destination and after each metadata call: 0600 and private at every check, never wider than the published file after, for `write`, `write_if`, and `write_if` preserving a 0600 file and one with an ACL |
+| a request's stdin is absent from logs and exceptions (a conformance vector) | Vector F1                                                                                                                                                                                                                                                                                             |
 
 The plan's two other items, "`write` applies mode and owner before the rename" and "a tree upload
 replacing the directory above the target", go to slice 6 with `write` and `upload_tree`.

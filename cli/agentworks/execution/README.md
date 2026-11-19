@@ -191,20 +191,21 @@ normalized (`guest_path`). Nothing is read or written through a symbolic link: e
 opened relative to its parent without following links, and a link or the wrong type anywhere on the
 path is `PathRefused(UNSUITABLE)`, a permission denial `PathRefused(DENIED)`. `write` and `write_if`
 read their whole content and check its size and SHA-256 before creating anything, so a dropped
-connection publishes nothing (`FileContentMismatch`); each writes a sibling temporary file with the
-requested owner, group and mode, set before the rename, so the destination never holds the content
-without them. Each write creates a fresh temporary name exclusively and removes only the file it
-created, so no write removes or replaces a sibling it did not make; one a write killed outright left
-stays, since nothing proves it is that write's. `write` keeps nothing of the file it replaces, and a
-link or anything but a regular file there is refused. With `write_if`, `preserve_metadata=True`
-gives the temporary file the existing file's owner, group, mode and extended attributes instead, and
-a changed destination is `FileConflict`, with nothing written. `update` is how a caller that reads,
-decides and writes publishes: an unchanged file keeps its inode, mode and ACLs, and a file another
-writer changed since the read is `FileConflict`, never retried. `ensure_directory` leaves an
-existing directory as it is, unless given an `owner` or `group`: then it opens the directory, new or
-existing, without following a link and sets them and `mode` on that descriptor, which is how an
-elevated caller places a directory inside another account's home. `read` and `stat` keep their
-streams out of the operation log.
+connection publishes nothing (`FileContentMismatch`); each writes a sibling temporary file that
+stays private to the writer through every check of the destination and gets its final owner, group
+and mode only after them, before the rename, so it never grants access the published file does not
+and the destination never holds the content without them. Each write creates a fresh temporary name
+exclusively and removes only the file it created, so no write removes or replaces a sibling it did
+not make; one a write killed outright left stays, since nothing proves it is that write's. `write`
+keeps nothing of the file it replaces, and a link or anything but a regular file there is refused.
+With `write_if`, `preserve_metadata=True` gives the temporary file the existing file's owner, group,
+mode and extended attributes instead, and a changed destination is `FileConflict`, with nothing
+written. `update` is how a caller that reads, decides and writes publishes: an unchanged file keeps
+its inode, mode and ACLs, and a file another writer changed since the read is `FileConflict`, never
+retried. `ensure_directory` leaves an existing directory as it is, unless given an `owner` or
+`group`: then it opens the directory, new or existing, without following a link and sets them and
+`mode` on that descriptor, which is how an elevated caller places a directory inside another
+account's home. `read` and `stat` keep their streams out of the operation log.
 
 Every mutating operation holds one VM-wide lock, `/run/lock/agentworks-files.lock`, from its walk to
 its last system call, whichever identity runs it: opened read-only, created world-readable only when
