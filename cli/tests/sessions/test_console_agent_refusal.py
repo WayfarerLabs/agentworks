@@ -166,3 +166,24 @@ def test_add_sessions_on_a_console_that_is_not_running_records_the_member_withou
     assert member is not None and len(member.shells) == 1
     assert agent.requests() == []
     assert guest.parks() == []
+
+
+def test_restoring_an_admin_pane_does_not_check_an_agent_whose_panes_are_all_live(
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest]
+) -> None:
+    """Restore checks the agents of only the panes it opens, so a refused agent with nothing missing is not asked."""
+    _seed(db)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a", "s+2"])
+    db.update_console_shells("con", "s", [{"cwd": "agent", "admin": False}, {"cwd": "admin", "admin": True}])
+    model = TmuxModel()
+    model.seed_session(CON, "a")
+    model.seed_window(CON, "s", pane_tags=(None, 0))
+    guest = console_guest_factory(model)
+    assert guest.recorder is not None
+    agent = guest.recorder.access(BOT)
+    agent.answer = lambda _call: Result(Unknown(UnknownReason.AUTH_FAILED))
+
+    mc.restore_session(db, _StubConfig(), console_name="con", session_name="s", interaction=REFUSE)
+
+    assert agent.requests() == []
+    assert [tag for _pid, _pidx, tag in model.pane_rows(CON, "s") or []] == [None, 0, 1]
