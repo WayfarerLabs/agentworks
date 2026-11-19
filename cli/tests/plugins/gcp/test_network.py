@@ -183,9 +183,8 @@ def test_selected_network_is_re_read_and_identity_checked() -> None:
     network = compute_v1.Network(name="default", self_link=_NETWORK)
     client = _GetClient(network)
     assert (
-        get_network(  # type: ignore[arg-type]
-            _Cache(networks=client),
-            RunContext(),
+        get_network(
+            client,
             project_id="project-a",
             network_url=_NETWORK,
         )
@@ -195,9 +194,8 @@ def test_selected_network_is_re_read_and_identity_checked() -> None:
 
     wrong = _GetClient(compute_v1.Network(name="default", self_link="projects/project-a/global/networks/other"))
     with pytest.raises(ConfigError, match="unexpected resource identity"):
-        get_network(  # type: ignore[arg-type]
-            _Cache(networks=wrong),
-            RunContext(),
+        get_network(
+            wrong,
             project_id="project-a",
             network_url=_NETWORK,
         )

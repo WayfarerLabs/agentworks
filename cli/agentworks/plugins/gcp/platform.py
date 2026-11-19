@@ -18,6 +18,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient
 from agentworks.db import VMStatus
 from agentworks.errors import AgentworksError, ConnectivityError, StateError
 from agentworks.interrupts import interrupts_deferred
@@ -81,6 +82,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
+    from agentworks.plugins.gcp.auth import GcpClientKind
 
 
 _OPERATION_TIMEOUT_SECONDS = 300.0
@@ -234,8 +236,7 @@ class GCEPlatform(PublicAddressPlatform):
         get_zone(self._clients, ctx, self.config.project_id, self.config.zone)
         network = resolve_network(self._clients, ctx, self.config)
         live_network = get_network(
-            self._clients,
-            ctx,
+            self._clients.client("networks", ctx),
             project_id=self.config.project_id,
             network_url=network.network_url,
         )
@@ -266,8 +267,7 @@ class GCEPlatform(PublicAddressPlatform):
         get_zone(self._clients, ctx, self.config.project_id, self.config.zone)
         network = resolve_network(self._clients, ctx, self.config)
         live_network = get_network(
-            self._clients,
-            ctx,
+            self._clients.client("networks", ctx),
             project_id=self.config.project_id,
             network_url=network.network_url,
         )
@@ -580,7 +580,7 @@ class GCEPlatform(PublicAddressPlatform):
         only covers the shared base's check.
         """
         identity = _VMIdentity.from_row(vm)
-        instances = self._clients.client("instances", ctx)
+        instances = self._route_client("instances", ctx)
         current = self._owned_instance(instances, identity)
         if current is None:
             raise StateError(
@@ -596,22 +596,27 @@ class GCEPlatform(PublicAddressPlatform):
 
     @contextlib.contextmanager
     def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
+        """Open this call's own SSH allow, removed with interrupts held on every exit.
+
+        Every provider call it makes, the removal's included, goes through
+        :meth:`_route_client`, and each operation wait is bounded by
+        ``wait_for_extended_operation``.
+        """
         identity = _VMIdentity.from_row(vm)
-        instances = self._clients.client("instances", ctx)
+        instances = self._route_client("instances", ctx)
         current = self._owned_instance(instances, identity)
         if current is None:
             raise StateError(f"GCE instance '{identity.instance_name}' no longer exists")
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
 
         live_network = get_network(
-            self._clients,
-            ctx,
+            self._route_client("networks", ctx),
             project_id=identity.project_id,
             network_url=identity.network_url,
         )
         require_classic_first(live_network, project_id=identity.project_id)
         prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
-        firewalls = self._clients.client("firewalls", ctx)
+        firewalls = self._route_client("firewalls", ctx)
         route_name = transient_route_name(vm.hostname)
         require_firewall_name_available(firewalls, project_id=identity.project_id, rule_name=route_name)
         route = build_ssh_allow_firewall(
@@ -645,6 +650,18 @@ class GCEPlatform(PublicAddressPlatform):
                     f"'{identity.project_id}'; inspect provider ID "
                     f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
                 )
+
+    def _route_client(self, kind: GcpClientKind, ctx: RunContext) -> Any:
+        """The ``kind`` client, each call through it bounded by ``_OPERATION_TIMEOUT_SECONDS`` on the wall clock.
+
+        The route's calls come before the script's deadline starts, and its
+        removal holds interrupts, so each needs a bound of its own (see
+        :mod:`~agentworks.capabilities.vm_platform.wall_bound`). A timed-out
+        call raises ``ConnectivityError``, as an unreachable one does, so the
+        insert's same-``requestId`` retry and the removal's ownership check
+        treat an insert given up on as they treat one whose answer was lost.
+        """
+        return BoundedClient(self._clients.client(kind, ctx), _OPERATION_TIMEOUT_SECONDS)
 
     def _owned_instance(
         self,

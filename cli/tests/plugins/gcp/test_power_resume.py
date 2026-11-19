@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -10,6 +12,7 @@ import pytest
 from google.cloud import compute_v1
 
 from agentworks.errors import AlreadyExistsError, NotFoundError, StateError
+from agentworks.plugins.gcp import instance as gcp_instance
 from agentworks.plugins.gcp.errors import GCEIndeterminateOperationError, GCEOperationError
 from tests._gcp_platform_fakes import FakeClients, FakeOperation, gce_ctx, gce_guest, gce_platform, gce_request
 from tests.plugins.gcp.test_platform import _vm
@@ -126,8 +129,8 @@ def test_power_transition_settles_before_dispatch(
         sleep_calls.append(seconds)
         cache.instances.resource = ready
 
-    monkeypatch.setattr("agentworks.plugins.gcp.instance.time.sleep", finish_transition)
-    monkeypatch.setattr("agentworks.plugins.gcp.instance.time.monotonic", lambda: elapsed)
+    # The settle's clock only: the time module itself is shared with every other wait, bounded calls among them.
+    monkeypatch.setattr(gcp_instance, "time", SimpleNamespace(monotonic=lambda: elapsed, sleep=finish_transition))
     platform.start(vm, gce_ctx())
 
     assert sleep_calls == [2.0]
@@ -215,7 +218,7 @@ def test_power_poll_timeout_never_reverses_or_cleans_up(
 
     _capture_resume(monkeypatch, cache, stay_suspended)
     ticks = iter((0.0, 301.0))
-    monkeypatch.setattr("agentworks.plugins.gcp.instance.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr(gcp_instance, "time", SimpleNamespace(monotonic=lambda: next(ticks), sleep=time.sleep))
     with pytest.raises(GCEOperationError):
         platform.start(vm, gce_ctx())
 

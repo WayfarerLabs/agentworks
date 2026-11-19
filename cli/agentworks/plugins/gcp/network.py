@@ -223,16 +223,9 @@ def resolve_network(clients: GcpClientCache, ctx: RunContext, config: GcpGCEConf
     return NetworkSelection(region, network_url, None)
 
 
-def get_network(
-    clients: GcpClientCache,
-    ctx: RunContext,
-    *,
-    project_id: str,
-    network_url: str,
-) -> Any:
-    """Read the selected network from its resolved resource URL."""
+def get_network(client: Any, *, project_id: str, network_url: str) -> Any:
+    """Read the selected network from its resolved resource URL with the networks ``client``."""
     network_name = canonical_resource_url(network_url).rsplit("/", 1)[-1]
-    client = clients.client("networks", ctx)
     network = call_google_optional(
         lambda: client.get(project=project_id, network=network_name),
         operation="reading the selected network",

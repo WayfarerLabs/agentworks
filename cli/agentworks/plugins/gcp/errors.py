@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from enum import Enum
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from agentworks.capabilities.vm_platform.wall_bound import call_within
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -135,10 +137,17 @@ def call_google_optional[T](call: Callable[[], T], *, operation: str, resource: 
 
 
 def wait_for_extended_operation(operation: Any, *, label: str, zone: str | None, timeout: float) -> None:
-    """Wait once for a Compute extended operation and sanitize failure data."""
+    """Wait once, at most ``timeout`` on the wall clock, for a Compute extended operation and sanitize failure data.
+
+    The operation checks its own ``timeout`` only between the status reads
+    it polls with, each bounded by nothing but its silence, so the wait runs
+    as a bounded call (see
+    :mod:`~agentworks.capabilities.vm_platform.wall_bound`); one that runs
+    out is an indeterminate outcome like any other unfinished wait.
+    """
     failure: AgentworksError | None = None
     try:
-        operation.result(timeout=timeout)
+        call_within(partial(operation.result, timeout=timeout), timeout)
     except Exception:
         if _cached_operation_is_done(operation):
             failure = _completed_operation_failure(
