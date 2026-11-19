@@ -301,7 +301,7 @@ def test_a_mktemp_that_names_no_staging_directory_clones_nothing(named: str) -> 
 
 DEST = "/home/a/.dotfiles"
 IS_CLONE = Command(("test", "-d", f"{DEST}/.git"), deadline=60)
-EXISTS = Command(("test", "-d", DEST), deadline=60)
+EXISTS = Command(("test", "-e", DEST), deadline=60)
 ORIGIN = Command(("git", "-C", DEST, "config", "--get", "remote.origin.url"), deadline=60, log_streams=False)
 
 
@@ -529,6 +529,21 @@ def test_a_first_clone_whose_ref_is_missing_leaves_nothing_to_block_another_orig
     fetch_dir(SourceRef("git", str(other), "", "v1"), lane, str(dest))
     assert _git(dest, "config", "--get", "remote.origin.url") == str(other)
     assert (dest / "rc").read_text() == "one"
+
+
+@requires_git
+def test_a_file_at_the_destination_is_refused_before_anything_is_cloned(
+    lane: Files, tmp_path: Path, origin: Path
+) -> None:
+    dest = tmp_path / "home" / ".dotfiles"
+    dest.parent.mkdir()
+    dest.write_bytes(b"not a checkout")
+
+    with pytest.raises(SourceRefError):
+        fetch_dir(SourceRef("git", str(origin), "", "v1"), lane, str(dest))
+
+    assert dest.read_bytes() == b"not a checkout"
+    assert _siblings(dest) == []
 
 
 @requires_git

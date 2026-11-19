@@ -405,8 +405,9 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
     alike. A fresh clone is made beside ``dest`` and moved there only once its
     ref is checked out (:func:`_clone_into_place`). Every git command must
     succeed: a failure is ``CommandFailed``, so the caller can tell a sync
-    that did not happen from one that did. A directory that is not a clone,
-    or a link that does not lead to one, is refused.
+    that did not happen from one that did. Anything else at ``dest``, a
+    link that does not lead to a clone included, is refused before anything
+    is fetched.
 
     The existing clone's origin is its configured URL, read as written
     (``insteadOf`` rewrites apply to what git fetches, not to what the
@@ -430,7 +431,7 @@ def _fetch_git_dir(source: SourceRef, files: Files, dest: str, *, log: _Output |
             raise SourceRefError(f"{dest} exists but is a clone of a different repository")
         if log:
             log.output(f"Updating {source.path} in {dest} (ref: {source.ref or 'default'})")
-    elif succeeds(("test", "-d", dest)) or succeeds(("test", "-L", dest)):
+    elif succeeds(("test", "-e", dest)) or succeeds(("test", "-L", dest)):
         raise SourceRefError(f"{dest} exists but is not a git repo")
     else:
         _clone_into_place(source, files, dest)

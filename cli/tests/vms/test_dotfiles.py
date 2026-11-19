@@ -30,7 +30,7 @@ def _sync(guest: StepGuest) -> None:
 def test_a_failed_dotfiles_sync_skips_the_install_and_says_the_destination_is_unchanged() -> None:
     guest = StepGuest(local_files=False)
     guest.respond(Command(("test", "-d", f"{DOTFILES}/.git"), deadline=60), Result(Completed(1)))
-    guest.respond(Command(("test", "-d", DOTFILES), deadline=60), Result(Completed(1)))
+    guest.respond(Command(("test", "-e", DOTFILES), deadline=60), Result(Completed(1)))
     guest.respond(Command(("test", "-L", DOTFILES), deadline=60), Result(Completed(1)))
     staging = f"{HOME}/.agentworks-clone-Ab12Cd"
     guest.respond(
