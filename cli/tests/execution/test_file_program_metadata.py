@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 
@@ -111,7 +112,35 @@ _RECORD_STAGING = (
 )
 
 
-@pytest.mark.parametrize("case", ["write_if preserving", "write_if preserving an ACL", "write_if", "write"])
+_ACL_MASK = 0x10
+
+
+def _private(mode: int, acl: str | None) -> bool:
+    """Whether only the owner can open a file: no group or other mode bits, and an access ACL's mask grants nothing.
+
+    A file created under a directory's default ACL carries an access ACL even at mode 0600; its mask is what bounds
+    every entry but the owner's.
+    """
+    if stat.S_IMODE(mode) & 0o077:
+        return False
+    if acl is None:
+        return True
+    # A system.posix_acl_access value: a little-endian u32 version, then (u16 tag, u16 permissions, u32 id) entries.
+    masks = [
+        permissions for tag, permissions, _id in struct.iter_unpack("<HHI", bytes.fromhex(acl)[4:]) if tag == _ACL_MASK
+    ]
+    return masks == [0]
+
+
+def _set_acl(path: os.PathLike[str], *spec: str) -> None:
+    setfacl = shutil.which("setfacl")
+    if setfacl is None or subprocess.run([setfacl, *spec, str(path)]).returncode:
+        pytest.skip("setfacl, and a filesystem that keeps ACLs, provision the ACL fixture")
+
+
+@pytest.mark.parametrize(
+    "case", ["write_if preserving", "write_if preserving an ACL", "write_if", "write", "write under a default ACL"]
+)
 def test_staging_is_private_through_every_check_and_never_wider_than_the_published_file(
     guest: Guest, case: str
 ) -> None:
@@ -120,12 +149,12 @@ def test_staging_is_private_through_every_check_and_never_wider_than_the_publish
     destination.chmod(0o600)
     if case == "write_if preserving an ACL":
         destination.chmod(0o640)
-        setfacl = shutil.which("setfacl")
-        if setfacl is None or subprocess.run([setfacl, "-m", f"g::-,u:{os.getuid()}:r", str(destination)]).returncode:
-            pytest.skip("setfacl, and a filesystem that keeps ACLs, provision the ACL fixture")
+        _set_acl(destination, "-m", f"g::-,u:{os.getuid()}:r")
+    elif case == "write under a default ACL":
+        _set_acl(guest.tree, "-d", "-m", f"u:{os.getuid()}:rw")
     record = guest.root / "staging.jsonl"
     patch = _RECORD_STAGING.format(directory=str(guest.tree), record=str(record))
-    if case == "write":
+    if case in ("write", "write under a default ACL"):
         result = guest.write(destination, b"after", mode=0o644, patch=patch)
     else:
         preserve = case != "write_if"
@@ -143,7 +172,7 @@ def test_staging_is_private_through_every_check_and_never_wider_than_the_publish
     snapshots = [json.loads(line) for line in record.read_text().splitlines()]
     assert {label for label, *_ in snapshots} == {"check", "metadata"}
     for label, mode, gid, staged_acl in snapshots:
-        private = stat.S_IMODE(mode) == 0o600 and staged_acl is None
+        private = _private(mode, staged_acl)
         assert private or [stat.S_IMODE(mode), gid, staged_acl] == final, (label, oct(mode), staged_acl, final)
         if label == "check":
             assert private
