@@ -18,6 +18,7 @@ import builtins
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX
 
 if TYPE_CHECKING:
@@ -47,7 +48,8 @@ def _authorization_denied() -> Exception:
 class _Poller:
     """A begin_* long-running-operation stub: ``.result()`` yields a value, or with
     ``finishes=False`` stands for an operation still running when its wait ends.
-    ``status()`` reports Azure's state for it, as azure-core's poller does."""
+    Its polling method is itself, whose ``finished()`` says whether Azure reported
+    a final state for it, as azure-core's polling method does."""
 
     def __init__(self, value: object, *, finishes: bool = True) -> None:
         self._value = value
@@ -59,8 +61,25 @@ class _Poller:
     def done(self) -> bool:
         return self._finishes
 
-    def status(self) -> str:
-        return "Succeeded" if self._finishes else "InProgress"
+    def polling_method(self) -> _Poller:
+        return self
+
+    def finished(self) -> bool:
+        return self._finishes
+
+
+class _FakeClock:
+    """Stands in for the ``time`` module the network helpers wait with: a sleep
+    advances ``now`` at once, so a bounded wait spends its whole bound instantly."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
 
 
 class _FakeSecurityRules:
@@ -258,8 +277,9 @@ class _FakeCompute(SimpleNamespace):
 
 class _FakeAzure(SimpleNamespace):
     """What ``_install_fakes`` returns: the network and compute holders
-    the tests configure and assert on, plus ``events``, the shared
-    cross-client delete-sequence log."""
+    the tests configure and assert on, ``events``, the shared
+    cross-client delete-sequence log, and ``clock``, the network
+    helpers' time."""
 
 
 def _install_fakes(
@@ -313,4 +333,6 @@ def _install_fakes(
     monkeypatch.setattr("azure.identity.DefaultAzureCredential", _FakeDefaultCred)
     monkeypatch.setattr("azure.mgmt.compute.ComputeManagementClient", _FakeComputeClient)
     monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetworkClient)
-    return _FakeAzure(network=network, compute=compute, events=events)
+    clock = _FakeClock()
+    monkeypatch.setattr(azure_network, "time", clock)
+    return _FakeAzure(network=network, compute=compute, events=events, clock=clock)

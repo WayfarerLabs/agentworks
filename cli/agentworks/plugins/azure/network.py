@@ -38,6 +38,7 @@ priority band [100, 199] under the deny:
 from __future__ import annotations
 
 import contextlib
+import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -125,17 +126,18 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 # GCP bounds its firewall operations the same way.
 _OPERATION_TIMEOUT_SECONDS = 300.0
 
-# How much longer a poke whose create timed out or was interrupted waits for
-# that create before it removes the rule, with interrupts deferred: a delete
-# while the create is in flight can fail (AnotherOperationInProgress) or find
-# nothing, and the rule then lands after.
+# How much longer a poke whose create did not finish waits for that create
+# before it removes the rule, with interrupts deferred: a delete while the
+# create is in flight can fail (AnotherOperationInProgress) or find nothing,
+# and the rule then lands after.
 _UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
-# The operation states Azure reports as final, which azure-core's polling
-# compares case-insensitively. A poller's done() is no such report: its polling
-# thread also ends on a transport error while the operation still runs, and on
-# CPython 3.12 a join that Ctrl-C cut short marks a still-running thread done.
-_TERMINAL_OPERATION_STATES = frozenset({"succeeded", "failed", "canceled"})
+# How often that wait reads the state Azure last reported for the create. It
+# reads rather than joining the poller: the poller's polling thread also ends on
+# a transport error while the operation still runs, and on CPython 3.12 a join
+# that Ctrl-C cut short marks the still-running thread stopped, so every later
+# join returns at once.
+_UNFINISHED_CREATE_POLL_SECONDS = 1.0
 
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
@@ -425,24 +427,27 @@ def _remove_unfinished_allow(
 
     That is a create whose wait ran out or was interrupted, or one whose
     request was interrupted before it returned a poller (``create`` is
-    ``None``). The create gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS``
-    more first, so the delete does not race it. Only a final state Azure
-    reported counts as settled: the wait can also end because polling
-    failed (a transport error) while the operation still runs. When the
-    create has not settled, or there is no poller to wait on, the rule may
-    land after the delete, so the warning names it for removal by hand. The
-    warning goes out before the held interrupt is delivered, which would
-    otherwise skip it.
+    ``None``). The create gets up to
+    ``_UNFINISHED_CREATE_SETTLE_SECONDS`` more first, so the delete does not
+    race it. Only a final state Azure reported counts as settled, read every
+    ``_UNFINISHED_CREATE_POLL_SECONDS`` from the poller's polling method; when
+    polling itself has failed that state never changes and the wait takes
+    its whole bound. When the create has not settled, or there is no poller
+    to wait on, the rule may land after the delete, so the warning names it
+    for removal by hand. The warning goes out before the held interrupt is
+    delivered, which would otherwise skip it.
     """
     with interrupts_deferred():
-        if create is not None:
+        settled = create is not None and _create_settled(create)
+        if create is not None and not settled:
             output.info(
                 f"Waiting up to {_UNFINISHED_CREATE_SETTLE_SECONDS:.0f}s for Azure to settle "
                 f"the '{rule_name}' rule before removing it..."
             )
-            with contextlib.suppress(Exception):
-                create.result(timeout=_UNFINISHED_CREATE_SETTLE_SECONDS)
-        settled = create is not None and str(create.status()).lower() in _TERMINAL_OPERATION_STATES
+            deadline = time.monotonic() + _UNFINISHED_CREATE_SETTLE_SECONDS
+            while not settled and (remaining := deadline - time.monotonic()) > 0:
+                time.sleep(min(_UNFINISHED_CREATE_POLL_SECONDS, remaining))
+                settled = _create_settled(create)
         remove_ssh_allow(network, rg, name, rule_name, prefixes)
         if not settled:
             output.warn(
@@ -450,6 +455,14 @@ def _remove_unfinished_allow(
                 f"so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that "
                 "rule by name."
             )
+
+
+def _create_settled(create: Any) -> bool:
+    """Whether Azure has reported a final state for ``create``; a failed read counts as not."""
+    try:
+        return bool(create.polling_method().finished())
+    except Exception:
+        return False
 
 
 def remove_ssh_allow(
