@@ -131,6 +131,12 @@ _OPERATION_TIMEOUT_SECONDS = 300.0
 # nothing, and the rule then lands after.
 _UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
+# The operation states Azure reports as final, which azure-core's polling
+# compares case-insensitively. A poller's done() is no such report: its polling
+# thread also ends on a transport error while the operation still runs, and on
+# CPython 3.12 a join that Ctrl-C cut short marks a still-running thread done.
+_TERMINAL_OPERATION_STATES = frozenset({"succeeded", "failed", "canceled"})
+
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
@@ -420,9 +426,11 @@ def _remove_unfinished_allow(
     That is a create whose wait ran out or was interrupted, or one whose
     request was interrupted before it returned a poller (``create`` is
     ``None``). The create gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS``
-    more first, so the delete does not race it. When it still has not
-    finished, or there is no poller to wait on, the rule may land after the
-    delete, so the warning names it for removal by hand.
+    more first, so the delete does not race it. Only a final state Azure
+    reported counts as settled: the wait can also end because polling
+    failed (a transport error) while the operation still runs. When the
+    create has not settled, or there is no poller to wait on, the rule may
+    land after the delete, so the warning names it for removal by hand.
     """
     with interrupts_deferred():
         if create is not None:
@@ -432,7 +440,7 @@ def _remove_unfinished_allow(
             )
             with contextlib.suppress(Exception):
                 create.result(timeout=_UNFINISHED_CREATE_SETTLE_SECONDS)
-        settled = create is not None and create.done()
+        settled = create is not None and str(create.status()).lower() in _TERMINAL_OPERATION_STATES
         remove_ssh_allow(network, rg, name, rule_name, prefixes)
     if not settled:
         output.warn(

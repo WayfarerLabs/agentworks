@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from azure.core.exceptions import HttpResponseError, ServiceRequestError
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
@@ -942,6 +943,53 @@ class TestRouteOperationsAreBounded:
         assert attempted in {d[2] for d in rules.deletes()}
         (warning,) = captured_output.warnings
         assert attempted in warning
+
+    @pytest.mark.parametrize(
+        ("failure", "state", "warns"),
+        [
+            (None, "Succeeded", False),
+            (ServiceRequestError("connection reset"), "InProgress", True),
+            (HttpResponseError("the create failed"), "Failed", False),
+            (HttpResponseError("the create was canceled"), "canceled", False),
+        ],
+        ids=["succeeded", "polling-failed", "create-failed", "create-canceled"],
+    )
+    def test_only_a_final_state_azure_reported_settles_a_late_poke(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure: Exception | None,
+        state: str,
+        warns: bool,
+    ) -> None:
+        """Polling also ends on a transport error while the create still runs, so done() proves nothing."""
+
+        class _SettleWaitEnds(_Poller):
+            def __init__(self, value: object) -> None:
+                super().__init__(value, finishes=False)
+                self.waits = 0
+
+            def result(self, timeout: float | None = None) -> object:
+                self.waits += 1
+                if self.waits > 1 and failure is not None:
+                    raise failure
+                return super().result(timeout) if self.waits == 1 else self._value
+
+            def done(self) -> bool:
+                return self.waits > 1  # the first wait ran out; the second ends with polling over
+
+            def status(self) -> str:
+                return state if self.waits > 1 else "InProgress"
+
+        rules = self._poke_with(monkeypatch, _SettleWaitEnds)
+
+        (attempted,) = rules.transient_names()
+        assert attempted in {d[2] for d in rules.deletes()}
+        if warns:
+            (warning,) = captured_output.warnings
+            assert attempted in warning
+        else:
+            assert captured_output.warnings == []
 
     @pytest.mark.parametrize("hung", ["deny", "public-ip"])
     def test_a_heal_or_convergence_that_does_not_finish_fails_the_route_before_any_poke(

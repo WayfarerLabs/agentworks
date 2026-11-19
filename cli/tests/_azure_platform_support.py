@@ -46,7 +46,8 @@ def _authorization_denied() -> Exception:
 
 class _Poller:
     """A begin_* long-running-operation stub: ``.result()`` yields a value, or with
-    ``finishes=False`` stands for an operation still running when its wait ends."""
+    ``finishes=False`` stands for an operation still running when its wait ends.
+    ``status()`` reports Azure's state for it, as azure-core's poller does."""
 
     def __init__(self, value: object, *, finishes: bool = True) -> None:
         self._value = value
@@ -57,6 +58,9 @@ class _Poller:
 
     def done(self) -> bool:
         return self._finishes
+
+    def status(self) -> str:
+        return "Succeeded" if self._finishes else "InProgress"
 
 
 class _FakeSecurityRules:
