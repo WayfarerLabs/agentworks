@@ -10,7 +10,6 @@ import json
 import os
 import shutil
 import stat
-import struct
 import subprocess
 import sys
 
@@ -112,24 +111,13 @@ _RECORD_STAGING = (
 )
 
 
-_ACL_MASK = 0x10
+def _private(mode: int) -> bool:
+    """Whether only the owner can open a file: no group or other mode bits.
 
-
-def _private(mode: int, acl: str | None) -> bool:
-    """Whether only the owner can open a file: no group or other mode bits, and an access ACL's mask grants nothing.
-
-    A file created under a directory's default ACL carries an access ACL even at mode 0600; its mask is what bounds
-    every entry but the owner's.
+    That covers an access ACL too, such as a file created under a directory's default ACL carries even at mode 0600:
+    Linux reports the ACL's mask, which bounds every entry but the owner's, as the group bits.
     """
-    if stat.S_IMODE(mode) & 0o077:
-        return False
-    if acl is None:
-        return True
-    # A system.posix_acl_access value: a little-endian u32 version, then (u16 tag, u16 permissions, u32 id) entries.
-    masks = [
-        permissions for tag, permissions, _id in struct.iter_unpack("<HHI", bytes.fromhex(acl)[4:]) if tag == _ACL_MASK
-    ]
-    return masks == [0]
+    return not stat.S_IMODE(mode) & 0o077
 
 
 def _set_acl(path: os.PathLike[str], *spec: str) -> None:
@@ -172,7 +160,7 @@ def test_staging_is_private_through_every_check_and_never_wider_than_the_publish
     snapshots = [json.loads(line) for line in record.read_text().splitlines()]
     assert {label for label, *_ in snapshots} == {"check", "metadata"}
     for label, mode, gid, staged_acl in snapshots:
-        private = _private(mode, staged_acl)
+        private = _private(mode)
         assert private or [stat.S_IMODE(mode), gid, staged_acl] == final, (label, oct(mode), staged_acl, final)
         if label == "check":
             assert private
