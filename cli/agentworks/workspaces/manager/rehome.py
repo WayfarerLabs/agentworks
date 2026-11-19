@@ -231,7 +231,8 @@ def _rehome_vm(
             except BaseException:
                 output.warn(
                     f"Rehome target reservation at {new_path} was not confirmed. "
-                    "Any remaining path was left untouched; inspect and preserve its contents before retrying."
+                    "Any remaining path was left untouched; inspect and preserve its contents before retrying. "
+                    f"Operation log: {log.display_path}"
                 )
                 raise
 
