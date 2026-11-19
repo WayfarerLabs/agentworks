@@ -647,15 +647,16 @@ the package attribute so one patch reaches every manager.
   existing `ConnectivityError`). Every other outcome raises as it is: `VMNotReady`, `TrustMismatch`,
   `RequestRefused` or `ExecutionIncomplete`. This keeps incident row I19, so I19 is re-proved in
   slice 2 as well as 6.
-- **Presence probes.** A guard that refuses, skips or exclusively creates because of a "does it
-  exist" probe calls `remote_presence.probe_presence`, which returns the result on 0, `None` on the
-  probe's own definite absent status (`test`'s 1, `getent`'s 2) and raises `CommandFailed` on any
-  other status. An outcome that is not a completion already raises, and `sudo -n` runs before the
-  launcher, so neither ssh's nor sudo's status can be read as an answer. This carries #899's fix (PR
-  #915) onto `VMAccess`: the agent account, home and getent probes, the backup path check, the
-  create, copy and rehome path checks, and the git source's checkout probes. Idempotent "make sure
-  it exists" steps (a group, a package key) keep reading nonzero as absent, since a wrong answer
-  only repeats them.
+- **Presence probes.** A guard whose wrong "absent" answer would do harm that a rerun does not undo
+  calls `remote_presence.probe_presence`, which returns the result on 0, `None` on the probe's own
+  definite absent status (`test`'s 1, `getent`'s 2) and raises `CommandFailed` on any other status.
+  An outcome that is not a completion already raises, and `sudo -n` runs before the launcher, so
+  neither ssh's nor sudo's status can be read as an answer. This carries #899's fix (PR #915) onto
+  `VMAccess`: the agent account, home and getent probes, the backup path check, the create, copy and
+  rehome path checks, the git source's checkout probes, and the mise lockfile check (an unanswered
+  one skips the install rather than install unlocked). Steps a rerun converges keep reading nonzero
+  as absent: making sure a group or package key exists, removing the retired socket group, and the
+  mise config check.
 - **Behavior changes** for release notes and the 0.20 guide:
   - OpenSSH 8.5 or newer is required for these six commands, and Windows needs the native build.
   - A VM without `python3` is `VMNotReady`, not a shell error.
