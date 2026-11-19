@@ -276,12 +276,14 @@ def _write_if(params: Params) -> int:
 def _replace(params: Params, *, uid: int, expected: str | None, compare: bool, preserve: bool) -> int:
     """Publish ``data`` at the path through a temporary sibling renamed over it.
 
-    The temporary file stays 0600 and the writer's own through every check,
-    and gets its final owner, group and mode only after them, just before the
-    rename: it never grants anyone access the published file does not, and the
-    destination never holds content without them. ``compare`` checks the
-    destination's digest against ``expected``; without it, an existing
-    destination need only be a regular file.
+    The temporary file stays 0600 and private to its writer through every
+    check. Only after them, just before the rename, does it take its final
+    owner and group, staying private to that owner, and then its final mode
+    (after a preserved copy's extended attributes, ACLs included). So it grants
+    nobody but its owner access until it carries the published file's
+    metadata, and the destination never holds content without that metadata.
+    ``compare`` checks the destination's digest against ``expected``; without
+    it, an existing destination need only be a regular file.
     """
     import grp
 
