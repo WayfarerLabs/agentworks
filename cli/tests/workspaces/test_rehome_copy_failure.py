@@ -92,7 +92,6 @@ def rehome_case(db: Database, deletion, tmp_path: Path, monkeypatch: pytest.Monk
     db.update_workspace_path("project", str(target.source))
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
     monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", lambda *a, **k: nullcontext())
-    monkeypatch.setattr("agentworks.workspaces.templates.resolve_live_tmuxinator", lambda *a, **k: False)
     monkeypatch.setattr("agentworks.workspaces.acls.apply_workspace_acls", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", lambda *a, **k: tmp_path / "x")
     return RehomeCase(target, deletion.config)
