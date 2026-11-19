@@ -20,7 +20,15 @@ from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs,
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.capabilities.vm_platform.wall_bound import BoundedClient
 from agentworks.db import VMStatus
-from agentworks.errors import AgentworksError, ConnectivityError, StateError
+from agentworks.errors import (
+    AgentworksError,
+    AlreadyExistsError,
+    AuthorizationError,
+    ConnectivityError,
+    NotFoundError,
+    StateError,
+    TokenRejectedError,
+)
 from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
@@ -50,7 +58,7 @@ from agentworks.plugins.gcp.compute import (
     verify_zonal_operation,
 )
 from agentworks.plugins.gcp.config import IMAGE_FAMILIES, GcpGCEConfig, machine_catalog, select_machine_type
-from agentworks.plugins.gcp.errors import GCEError, GCEOperationError, call_google
+from agentworks.plugins.gcp.errors import GCEError, GCEOperationError, GCEQuotaError, call_google
 from agentworks.plugins.gcp.instance import (
     InstanceInsertAttempt,
     build_instance_resource,
@@ -598,9 +606,13 @@ class GCEPlatform(PublicAddressPlatform):
     def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         """Open this call's own SSH allow, removed with interrupts held on every exit.
 
-        Every provider call it makes, the removal's included, goes through
-        :meth:`_route_client`, and each operation wait is bounded by
-        ``wait_for_extended_operation``.
+        Each provider call that opens it goes through :meth:`_route_client`,
+        and each operation wait is bounded by ``wait_for_extended_operation``;
+        the removal shares one bound across its calls (see
+        ``delete_matching_firewall``). An insert that did not return, short of
+        a definitive refusal, may still land after a removal that found
+        nothing, so that removal warns naming the rule and its sources, while
+        interrupts are still held.
         """
         identity = _VMIdentity.from_row(vm)
         instances = self._route_client("instances", ctx)
@@ -626,14 +638,19 @@ class GCEPlatform(PublicAddressPlatform):
             operator_prefixes=prefixes,
         )
         attempt = FirewallInsertAttempt.create(route_name)
+        insert_failure: BaseException | None = None
         try:
-            insert_firewall_reconciled(
-                firewalls,
-                project_id=identity.project_id,
-                firewall=route,
-                attempt=attempt,
-                timeout=_OPERATION_TIMEOUT_SECONDS,
-            )
+            try:
+                insert_firewall_reconciled(
+                    firewalls,
+                    project_id=identity.project_id,
+                    firewall=route,
+                    attempt=attempt,
+                    timeout=_OPERATION_TIMEOUT_SECONDS,
+                )
+            except BaseException as exc:
+                insert_failure = exc
+                raise
             yield
         finally:
             with interrupts_deferred():
@@ -644,12 +661,18 @@ class GCEPlatform(PublicAddressPlatform):
                     ownership=attempt.ownership,
                     timeout=_OPERATION_TIMEOUT_SECONDS,
                 )
-            if result.state is not FirewallState.ABSENT:
-                output.warn(
-                    f"GCE transient SSH rule '{route_name}' was not proven absent in project "
-                    f"'{identity.project_id}'; inspect provider ID "
-                    f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
-                )
+                if result.state is not FirewallState.ABSENT:
+                    output.warn(
+                        f"GCE transient SSH rule '{route_name}' was not proven absent in project "
+                        f"'{identity.project_id}'; inspect provider ID "
+                        f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
+                    )
+                elif insert_failure is not None and not _insert_refused(insert_failure, attempt):
+                    output.warn(
+                        f"GCE transient SSH rule '{route_name}' in project '{identity.project_id}' was not confirmed "
+                        f"created, so it may still appear after its removal, open to source(s) {', '.join(prefixes)}; "
+                        "check for it and delete it once its provider identity shows it is this route's"
+                    )
 
     def _route_client(self, kind: GcpClientKind, ctx: RunContext) -> Any:
         """The ``kind`` client, each call through it bounded by ``_OPERATION_TIMEOUT_SECONDS`` on the wall clock.
@@ -658,8 +681,8 @@ class GCEPlatform(PublicAddressPlatform):
         removal holds interrupts, so each needs a bound of its own (see
         :mod:`~agentworks.capabilities.vm_platform.wall_bound`). A timed-out
         call raises ``ConnectivityError``, as an unreachable one does, so the
-        insert's same-``requestId`` retry and the removal's ownership check
-        treat an insert given up on as they treat one whose answer was lost.
+        insert's same-``requestId`` retry treats an insert given up on as one
+        whose answer was lost.
         """
         return BoundedClient(self._clients.client(kind, ctx), _OPERATION_TIMEOUT_SECONDS)
 
@@ -771,3 +794,17 @@ class GCEPlatform(PublicAddressPlatform):
             rule = vm.platform_metadata.get("allow_rule")
             named = f" '{rule}'" if rule else ""
             output.warn(f"Could not verify closure of the provider-ID-owned GCE provisioning allow{named}; inspect it")
+
+
+def _insert_refused(failure: BaseException, attempt: FirewallInsertAttempt) -> bool:
+    """Whether the route's insert ``failure`` says its rule never lands.
+
+    That is Google Cloud's definitive answer to the insert request, or a
+    failure of the insert operation it accepted once that operation's
+    identity was captured. Anything else (an interrupt, a call that ran out
+    of time or lost its answer, an operation whose identity never arrived)
+    leaves the insert's outcome unknown.
+    """
+    if isinstance(failure, (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError)):
+        return True
+    return isinstance(failure, GCEOperationError) and attempt.ownership is not None

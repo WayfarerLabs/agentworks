@@ -70,7 +70,7 @@ class FakeFirewalls:
         self.insert_requests: list[compute_v1.InsertFirewallRequest] = []
         self.delete_requests: list[compute_v1.DeleteFirewallRequest] = []
         self.get_failures: dict[str, list[Exception]] = {}
-        self.insert_failures: list[Exception | None] = []
+        self.insert_failures: list[BaseException | None] = []
         self.insert_wait_failures: list[BaseException | None] = []
         self.delete_failures: list[BaseException] = []
         self._next_id = 101
@@ -126,7 +126,7 @@ class FakeInstances:
         self.stop_requests: list[compute_v1.StopInstanceRequest] = []
         self.delete_requests: list[compute_v1.DeleteInstanceRequest] = []
         self.get_failures: list[Exception] = []
-        self.insert_failures: list[Exception | None] = []
+        self.insert_failures: list[BaseException | None] = []
         self.insert_wait_failures: list[BaseException] = []
         self.insert_operation_errors: list[object] = []
         self.delete_failures: list[Exception] = []

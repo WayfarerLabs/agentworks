@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator
 from typing import cast
 
@@ -62,7 +63,8 @@ class _Operation:
         self.error = error
 
     def result(self, *, timeout: float) -> None:
-        self.log.append(f"wait:{self.name}:{timeout}")
+        # A firewall removal's wait gets what its reads and delete left of the bound, a hair under it.
+        self.log.append(f"wait:{self.name}:{math.ceil(timeout)}")
         if self.failure is not None:
             raise self.failure
 

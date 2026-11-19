@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, Deadline
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -464,13 +465,20 @@ def delete_matching_firewall(
     ownership: FirewallOwnership | None,
     timeout: float,
 ) -> FirewallReconciliation:
-    """Delete only a verified provider incarnation, then prove the result.
+    """Delete only a verified provider incarnation, then prove the result, all within ``timeout``.
 
     GCE delete accepts only a rule name, not a provider-ID precondition. The
     ownership read therefore closes concurrent identical inserts but is not an
     atomic defense against a hostile delete/recreate between this read and the
     name-based delete.
+
+    Its reads, delete and operation wait share one bound of ``timeout`` on
+    the wall clock (a ``Deadline``), each taking what the ones before left,
+    since its callers hold interrupts while it runs; a call left without time
+    fails, and the result says the rule was not proven absent.
     """
+    deadline = Deadline(timeout)
+    client = BoundedClient(client, deadline)
     try:
         result = inspect_firewall(
             client,
@@ -511,7 +519,7 @@ def delete_matching_firewall(
             operation,
             label=f"firewall rule {expected.name}",
             zone=None,
-            timeout=timeout,
+            timeout=deadline.remaining(),
         )
     except AgentworksError:
         pass

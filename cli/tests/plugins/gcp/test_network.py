@@ -684,7 +684,8 @@ def test_definitive_firewall_delete_wait_failure_still_accepts_verified_absence(
     )
 
     assert result.state is FirewallState.ABSENT
-    assert operation.calls == [11]
+    ((wait,),) = [operation.calls]
+    assert 0 < wait <= 11  # what the removal's reads and delete left of its one bound
     assert [name for name, _kwargs in client.calls] == ["get", "delete", "get"]
 
 
