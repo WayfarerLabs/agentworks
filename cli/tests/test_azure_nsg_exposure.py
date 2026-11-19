@@ -643,6 +643,37 @@ class TestTransientRoute:
         (warning,) = captured_output.warnings
         assert name in warning
 
+    def test_a_held_interrupt_does_not_skip_the_unsettled_rule_warning(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """A second Ctrl-C held through the removal is delivered when the hold ends, after the warning is out."""
+        network = _install_fakes(monkeypatch).network
+        rules: _FakeSecurityRules = network.security_rules
+        real_create, real_delete = rules.begin_create_or_update, rules.begin_delete
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            poller = real_create(rg, nsg, rule_name, rule)
+            return (
+                _InterruptedWait(rule, finishes=False) if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) else poller
+            )
+
+        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                signal.raise_signal(signal.SIGINT)
+            return real_delete(rg, nsg, rule_name)
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        monkeypatch.setattr(rules, "begin_delete", interrupted_delete)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(KeyboardInterrupt), _platform()._transient_route(vm, RunContext()):
+            pytest.fail("the body must not run when the poke is interrupted")
+
+        (attempted,) = rules.transient_names()
+        assert ("rg1", "vm1-nsg", attempted) in rules.deletes()
+        (warning,) = captured_output.warnings
+        assert attempted in warning
+
     def test_poke_attempt_cleanup_failure_warns(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:

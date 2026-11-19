@@ -430,7 +430,9 @@ def _remove_unfinished_allow(
     reported counts as settled: the wait can also end because polling
     failed (a transport error) while the operation still runs. When the
     create has not settled, or there is no poller to wait on, the rule may
-    land after the delete, so the warning names it for removal by hand.
+    land after the delete, so the warning names it for removal by hand. The
+    warning goes out before the held interrupt is delivered, which would
+    otherwise skip it.
     """
     with interrupts_deferred():
         if create is not None:
@@ -442,11 +444,12 @@ def _remove_unfinished_allow(
                 create.result(timeout=_UNFINISHED_CREATE_SETTLE_SECONDS)
         settled = create is not None and str(create.status()).lower() in _TERMINAL_OPERATION_STATES
         remove_ssh_allow(network, rg, name, rule_name, prefixes)
-    if not settled:
-        output.warn(
-            f"Azure had not finished creating the '{rule_name}' rule on NSG '{name}-nsg' when it was removed, so it "
-            f"may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that rule by name."
-        )
+        if not settled:
+            output.warn(
+                f"Azure had not finished creating the '{rule_name}' rule on NSG '{name}-nsg' when it was removed, "
+                f"so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that "
+                "rule by name."
+            )
 
 
 def remove_ssh_allow(
