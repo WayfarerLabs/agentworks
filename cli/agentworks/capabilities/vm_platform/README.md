@@ -219,10 +219,10 @@ and DB migration.
   VM to answer before it dispatches anything (the clouds' public SSH and Proxmox's guest agent)
   **MUST** raise `root_script.ChannelUnreachable` when that wait runs out, since nothing was
   dispatched: callers then stop instead of retrying, and do not try a logout they could not deliver.
-  Any other channel failure raises `ConnectivityError`, whose outcome is unknown. Its docstring in
-  `base.py` is the full contract. The clouds inherit theirs from `public_ssh.PublicAddressPlatform`,
-  supplying how to read the live public address, the console hint for a VM without one, and their
-  route (below).
+  Any other channel failure raises another `AgentworksError`, which core treats as an unknown
+  outcome and never dispatches again. Its docstring in `base.py` is the full contract. The clouds
+  inherit theirs from `public_ssh.PublicAddressPlatform`, supplying how to read the live public
+  address, the console hint for a VM without one, and their route (below).
 - `read_host_keys(vm, ctx)` has a default over `run_as_root`; the clouds' base reads under an
   Unverified provisioning file and refuses a VM that already has a record.
 - `native_shell(vm, ctx) -> int` is optional: the default offers no shell, and a platform offers one
@@ -256,18 +256,21 @@ it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a
 that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
 `ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
 `interrupts_deferred`, so an interrupt that lands during the removal waits for it; every cloud
-bounds that wait, warning that the rule may remain when the provider has not answered in time. When
-the VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
-`ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
-through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
-running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on
-enter; concurrent operations on one VM each own an independent rule, so they never cross-remove. EC2
-needs no public-IP heal (a running instance receives an address automatically), but its rule model
-forces a divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a
-name, so two concurrent routes from one operator egress share ONE rule rather than owning
-independent ones. The poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the
-per-op remove tolerant (tolerate `InvalidPermission.NotFound`, or a success that lists the rule
-under `UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
+bounds that wait, warning that the rule may remain when the provider has not answered in time. Each
+held removal, and the close of the provisioning access, shares one bound of 300 s across its calls,
+so an interrupt waits at most that long, and on Azure up to 60 s more when a poke's accepted create
+had not finished and is let settle first. When the VM never answers,
+`PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the `ssh_allow_cidrs`
+advice, unless the address refused the last probe's connection: the allow let it through, and the
+`ChannelUnreachable` it raises names a restart for an SSH server that is not running. Azure also
+heals a missing public IP and converges the NSG onto the baseline-deny model on enter; concurrent
+operations on one VM each own an independent rule, so they never cross-remove. EC2 needs no
+public-IP heal (a running instance receives an address automatically), but its rule model forces a
+divergence: an EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a name, so two
+concurrent routes from one operator egress share ONE rule rather than owning independent ones. The
+poke is therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the per-op remove tolerant
+(tolerate `InvalidPermission.NotFound`, or a success that lists the rule under
+`UnknownIpPermissions`), failing CLOSED (the deny baseline), never open; see
 `plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
 route, so concurrent routes close independently. The route's calls read the credential from `ctx`,
 so a credentials-configured site authenticates as itself with no ambient fallback.
@@ -840,7 +843,7 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
   under the orchestration layer.
 - `public_ssh.py`: the clouds' shared base and their SSH to the public address.
 - `wall_bound.py`: the wall-clock bound on each provider call a cloud makes before dispatch and in
-  its held removal.
+  its held removals, which GCP also puts on every operation wait.
 - `lima_host.py`: where Lima's `limactl` runs, its root channel and native shell.
 - `docs/guides/idempotency.md`: the canonical table of what `vm reinit` reconciles.
 - ADR 0012: VM hardening at init.

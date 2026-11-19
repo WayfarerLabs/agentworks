@@ -780,11 +780,11 @@ new connection layer, so they need what [What these commands need](#what-these-c
   Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
   ignored, so a closed terminal cannot cut the removal short; a second Ctrl-C still abandons the
   cleanup, as its message says, though one that lands while a firewall rule's removal is in flight
-  waits for that removal to finish first (each cloud bounds that wait, then warns that the rule may
-  remain). Closing the console window on Windows may start that cleanup, but Windows ends the
-  process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
-  Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the
-  provider's console.
+  waits for that removal to finish first, for at most 300 seconds on every cloud (up to 360 on Azure
+  when an interrupted allow is let settle before its removal), then warns that the rule may remain.
+  Closing the console window on Windows may start that cleanup, but Windows ends the process within
+  seconds, so it cannot be relied on to finish: end the command with Ctrl-C or Ctrl-Break instead,
+  and delete a rule a closed window left behind from the VM's firewall in the provider's console.
 - **A Lima VM's create-time bootstrap runs once.** Lima runs its provisioning on every boot, and a
   Lima VM created before 0.20 runs Agentworks' bootstrap again at each start: it resets the admin's
   `.bashrc` and `.zshrc` to the seed, which drops your edits and the lines `vm reinit` adds, puts

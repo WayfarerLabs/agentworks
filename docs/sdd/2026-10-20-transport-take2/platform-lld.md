@@ -1077,8 +1077,8 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   deadline. Counting the clouds from the call instead would need every deadline resized to cover a
   firewall rule, an address read and a boot, and would still not bound the provider calls.
 - **The bounds before dispatch.** Every cloud waits for SSH with `PublicSSH.wait_until_answering`
-  (120 s) and bounds each provider call on its route on the wall clock, its address read and its
-  held removal included.
+  (120 s), bounds each provider call that opens its route on the wall clock, its address read
+  included, and bounds each held removal by one bound shared across its calls.
   - **The wall bound.** The cloud SDKs bound only silence: azure-core and google-cloud-compute hand
     their timeout to requests, and botocore its `read_timeout` to urllib3, as a limit on each socket
     read, so a body that keeps arriving resets it with every chunk and nothing bounds a request's
@@ -1086,20 +1086,24 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     (`call_within`, or each method of a `BoundedClient`) and stops waiting when its bound runs out,
     raising `CallTimedOut` whatever the provider sends, a `Retry-After` included. The wait wakes
     every `WAKE_SECONDS` (0.25 s), so a Ctrl-C that reached another thread still ends it promptly,
-    and a call that finishes as its bound runs out counts as finished. A call given up on keeps
-    running, its SDK's own retries included, so it may still take effect after the caller has moved
-    on; each cloud says below what its callers do about that.
+    and a call that finishes as its bound runs out counts as finished. A `Deadline` gives several
+    calls one bound, each taking what the ones before it left. A `BoundedClient` refuses an
+    attribute that is not a method, so a nested group cannot be reached unbounded; what its methods
+    return (an operation, poller, pager, paginator or waiter) makes further requests unbounded
+    unless its caller bounds them too. A call given up on keeps running, its SDK's own retries
+    included, so it may still take effect after the caller has moved on; each cloud says below what
+    its callers do about that.
   - **Azure's route calls.** The public-IP heal's reads and operations, the deny re-pin, the
     legacy-rule delete, the poke's slot read and create, the address read (the VM, its NIC, the
     public IP) and the removal each take at most `_OPERATION_TIMEOUT_SECONDS` (300 s), raising
     `_RouteCallTimeout`. A long-running operation's first request and its wait share one bound, and
-    the wait is a bounded call too. Every read and every first request also carries azure-core
-    per-call bounds (10 s to connect, 60 s without data, at most two retries), so one silent try
-    cannot spend the bound. The generated `begin_*` methods hand per-call options on to the status
-    polling they build, so each is given its polling explicitly (`ARMPolling` with the defaults the
-    client builds it with) and its status reads keep the client's own timeouts and retries. The
-    heal's and the convergence's writes are the desired state, so one given up on that lands late
-    does no harm.
+    the wait is a bounded call too; a poller already done returns its result however little of the
+    bound is left. Every read and every first request also carries azure-core per-call bounds (10 s
+    to connect, 60 s without data, at most two retries), so one silent try cannot spend the bound.
+    The generated `begin_*` methods hand per-call options on to the status polling they build, so
+    each is given its polling explicitly (`ARMPolling` with the defaults the client builds it with)
+    and its status reads keep the client's own timeouts and retries. The heal's and the
+    convergence's writes are the desired state, so one given up on that lands late does no harm.
   - **The Azure poke's create.** A create that does not finish in time raises without another
     attempt. One Azure accepted gets up to `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more before
     the rule is removed, since a delete racing the create can fail or find nothing and let the rule
@@ -1128,16 +1132,27 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     s (azure-core's own first retry waits 0 s; the poke always waits). A `Retry-After` that cannot
     be parsed takes the backoff. The waits between the five attempts come to at most two minutes,
     and hold no interrupts.
-  - **GCE and EC2.** GCE's route calls (the instance and network reads, the name check, the insert
-    and its same-`requestId` retry, the removal's reads and delete) go through a `BoundedClient` of
-    `_OPERATION_TIMEOUT_SECONDS` (300 s) each, and every extended-operation wait is a bounded call
-    of its own timeout (`wait_for_extended_operation`), since the operation checks that timeout only
-    between its status reads. A call that runs out is a `ConnectivityError`, so an insert given up
-    on is treated as one whose answer was lost. EC2's route calls (the dry-run revokes, the
-    authorizes, the address read, and the revokes that close the route and the provisioning access)
-    go through a `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each; a poke whose
-    authorize ran out of time, or was interrupted, revokes what it planned and, with interrupts
-    still held, warns that the allow may still be added after.
+  - **GCE and EC2 opening their routes.** GCE's opening calls (the instance and network reads, the
+    name check, the insert and its same-`requestId` retry) and its address read go through a
+    `BoundedClient` of `_OPERATION_TIMEOUT_SECONDS` (300 s) each, and every extended-operation wait
+    is a bounded call of its own timeout (`wait_for_extended_operation`), since the operation checks
+    that timeout only between its status reads. A call that runs out is a `ConnectivityError`, so an
+    insert given up on is retried with its `requestId` as one whose answer was lost. An insert that
+    did not return, short of Google Cloud's definitive refusal or a failure of the operation it
+    accepted, may still land after a removal that found nothing, so that removal warns naming the
+    rule and its sources. EC2's opening calls (the dry-run revokes and the authorizes) and its
+    address read go through a `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each; a poke
+    whose authorize ran out of time, or was interrupted, revokes what it planned and warns that the
+    allow may still be added after.
+  - **The held removals.** Each cloud's route removal, and its close of the provisioning access,
+    runs with interrupts held and shares one 300 s bound across its calls: Azure's delete and its
+    wait (`_run_route_operation`); GCE's reads, delete and operation wait
+    (`delete_matching_firewall`, whose `timeout` is the whole removal's), the route's and the
+    provisioning allow's alike; and EC2's per-prefix revokes (`_REMOVAL_TIMEOUT_SECONDS`), the
+    route's, the poke's own cleanup and the provisioning access's. Every warning a removal gives
+    goes out while interrupts are still held. So a Ctrl-C waits at most 300 s for a removal, except
+    on Azure after a poke whose accepted create had not finished, whose settle comes first: 360 s in
+    all.
   - **Proxmox and the local channels.** Proxmox: the identity check's reads and the agent wait's
     `AGENT_WAIT_SECONDS`, each request with a socket timeout of at most `REQUEST_TIMEOUT_SECONDS`,
     which, as above, bounds its silence rather than its whole time. Local-process channels (Lima,
