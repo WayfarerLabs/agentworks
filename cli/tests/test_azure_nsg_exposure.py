@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from azure.core.exceptions import HttpResponseError, ServiceRequestError, ServiceResponseError
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
@@ -59,6 +60,8 @@ from tests._azure_platform_support import (
 from tests.conftest import provisioning_trust_for_tests
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.db import VMRow
     from tests.conftest import CapturedOutput
 
@@ -731,6 +734,96 @@ class TestTransientRoute:
             warning = next(w for w in captured_output.warnings if rule_name in w)
             assert "vm1-nsg" in warning
             assert _DETECTED_PREFIX in warning
+
+    @staticmethod
+    def _first_poke_fails(
+        monkeypatch: pytest.MonkeyPatch, first: Callable[[str, object], _Poller]
+    ) -> tuple[_FakeSecurityRules, list[str], list[float]]:
+        """Open a route whose first transient create goes through ``first`` and whose retry succeeds.
+
+        Returns the rules, the first attempt's rule name, and the fake clock's reading at each
+        transient delete.
+        """
+        fakes = _install_fakes(monkeypatch)
+        rules: _FakeSecurityRules = fakes.network.security_rules
+        real_create, real_delete = rules.begin_create_or_update, rules.begin_delete
+        first_name: list[str] = []
+        deleted_at: list[float] = []
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) and not first_name:
+                first_name.append(rule_name)
+                return first(rule_name, rule)
+            return real_create(rg, nsg, rule_name, rule)
+
+        def _delete(rg: str, nsg: str, rule_name: str) -> _Poller:
+            if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
+                deleted_at.append(fakes.clock.now)
+            return real_delete(rg, nsg, rule_name)
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        monkeypatch.setattr(rules, "begin_delete", _delete)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+        with _platform()._transient_route(vm, RunContext()):
+            assert rules.transient_names(), "the retry opens the route"
+        return rules, first_name, deleted_at
+
+    @pytest.mark.parametrize("settles_after", [3, None], ids=["settles", "never-settles"])
+    def test_an_accepted_poke_whose_wait_fails_settles_before_its_rule_goes(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, settles_after: int | None
+    ) -> None:
+        """Polling can fail while the create still runs, so the rule is removed only once it settles, then retried."""
+        reads: list[int] = []
+
+        class _PollingFails(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                raise ServiceResponseError("polling connection reset")
+
+            def finished(self) -> bool:
+                reads.append(1)
+                return settles_after is not None and len(reads) >= settles_after
+
+        rules, (first,), deleted_at = self._first_poke_fails(
+            monkeypatch, lambda _name, rule: _PollingFails(rule, finishes=False)
+        )
+
+        events = [(e[0], e[3]) for e in rules.events]
+        (retry,) = rules.transient_names()
+        assert events.index(("delete", first)) < events.index(("create", retry))
+        if settles_after is not None:
+            assert len(reads) == settles_after
+            assert captured_output.warnings == []
+        else:
+            assert deleted_at[0] == azure_network._UNFINISHED_CREATE_SETTLE_SECONDS
+            (warning,) = captured_output.warnings
+            assert first in warning
+
+    @pytest.mark.parametrize(
+        ("failure", "warns"),
+        [
+            (HttpResponseError("Conflict: priority in use"), False),
+            (ServiceRequestError("connection reset"), True),
+            (ServiceResponseError("read timed out"), True),
+        ],
+        ids=["service-refused", "request-unanswered", "response-unread"],
+    )
+    def test_a_poke_whose_create_returns_no_poller_warns_only_when_azure_did_not_answer(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, failure: Exception, warns: bool
+    ) -> None:
+        """A refused create cannot land; one whose request went unanswered may have reached Azure."""
+
+        def _raises(_name: str, _rule: object) -> _Poller:
+            raise failure
+
+        rules, (first,), deleted_at = self._first_poke_fails(monkeypatch, _raises)
+
+        assert ("rg1", "vm1-nsg", first) in rules.deletes()
+        assert deleted_at[0] == 0.0  # no poller to wait on
+        if warns:
+            (warning,) = captured_output.warnings
+            assert first in warning
+        else:
+            assert captured_output.warnings == []
 
     def test_exit_removes_allow_when_body_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The allow removal is a finally: it fires however the caller

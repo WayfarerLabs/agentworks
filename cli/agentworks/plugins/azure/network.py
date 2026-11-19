@@ -382,12 +382,18 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     swallowed) before moving on: the create may have succeeded
     server-side even though the client-side wait failed, and only this
     function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path. A create whose wait runs out or is interrupted
-    is given time to settle before its rule is removed, and the timeout or
-    interrupt then propagates; the route's own exit never runs for a poke
-    that did not return.
+    caller's exit path. A create Azure refused outright
+    (``HttpResponseError`` before any poller) cannot land, so its rule
+    goes at once. Any other unfinished create (its wait failed, ran out
+    or was interrupted, or its request got no answer) may still land, so
+    it is given time to settle before its rule is removed, with a warning
+    naming the rule when it has not. A timeout or interrupt then
+    propagates; the route's own exit never runs for a poke that did not
+    return.
     """
     from uuid import uuid4
+
+    from azure.core.exceptions import HttpResponseError
 
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
     last_exc: Exception | None = None
@@ -408,7 +414,12 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
             _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
             raise
         except Exception as exc:
-            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            if poller is None and isinstance(exc, HttpResponseError):
+                # Azure refused the request, so nothing it asked for can land.
+                remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            else:
+                # Accepted with its wait failing, or sent with no answer: the rule may still land.
+                _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
             last_exc = exc
             continue
         except BaseException:
@@ -425,9 +436,9 @@ def _remove_unfinished_allow(
 ) -> None:
     """Remove the poke's rule whose ``create`` had not finished, holding interrupts.
 
-    That is a create whose wait ran out or was interrupted, or one whose
-    request was interrupted before it returned a poller (``create`` is
-    ``None``). The create gets up to
+    That is a create whose wait ran out, failed or was interrupted, or one
+    whose request got no answer before it returned a poller (``create`` is
+    ``None``: interrupted, or a transport error). The create gets up to
     ``_UNFINISHED_CREATE_SETTLE_SECONDS`` more first, so the delete does not
     race it. Only a final state Azure reported counts as settled, read every
     ``_UNFINISHED_CREATE_POLL_SECONDS`` from the poller's polling method; when
