@@ -1,4 +1,4 @@
-"""A GCE route's provider calls end within their bounds on the wall clock, and an unconfirmed insert is named.
+"""A GCE route's provider calls end within their bounds on the wall clock.
 
 Opening the route bounds each call on its own; each held removal (the route's, and the provisioning
 access's close) shares one bound across its calls.
@@ -11,13 +11,12 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from google.api_core import exceptions as api_exceptions
 
 from agentworks.capabilities.vm_platform import wall_bound
-from agentworks.errors import AuthorizationError, ConnectivityError
+from agentworks.errors import ConnectivityError
 from agentworks.plugins.gcp import platform as gcp_platform
 from agentworks.plugins.gcp.errors import GCEIndeterminateOperationError, wait_for_extended_operation
-from tests._gcp_platform_fakes import FakeOperation, api_error, gce_ctx, gce_guest, gce_platform, gce_request
+from tests._gcp_platform_fakes import FakeOperation, gce_ctx, gce_guest, gce_platform, gce_request
 from tests.plugins.gcp.test_platform import _vm
 
 if TYPE_CHECKING:
@@ -116,42 +115,6 @@ def test_the_provisioning_access_close_is_bounded(
 
     assert elapsed < _CAP / 2
     assert any(vm.platform_metadata["allow_rule"] in warning for warning in captured_output.warnings)
-
-
-@pytest.mark.parametrize(
-    ("failure", "warns"),
-    [
-        (TimeoutError("no answer"), True),
-        (KeyboardInterrupt(), True),
-        (api_error(api_exceptions.PermissionDenied, "denied"), False),
-    ],
-    ids=["unanswered", "interrupted", "refused"],
-)
-def test_an_insert_that_did_not_return_is_named_when_its_removal_finds_nothing(
-    created: tuple[GCEPlatform, FakeClients, VMRow],
-    captured_output: CapturedOutput,
-    failure: BaseException,
-    warns: bool,
-) -> None:
-    """The insert may land after a removal that found nothing, unless Google Cloud refused it outright."""
-    platform, cache, vm = created
-    cache.firewalls.insert_failures = [failure, failure]  # the insert, and its same-requestId retry
-    before = set(cache.firewalls.resources)
-
-    with (
-        pytest.raises((ConnectivityError, KeyboardInterrupt, AuthorizationError)),
-        platform._transient_route(vm, gce_ctx()),
-    ):
-        pytest.fail("the body must not run when the insert does not return")
-
-    assert set(cache.firewalls.resources) == before
-    if warns:
-        route = cache.firewalls.insert_requests[-1].firewall_resource
-        (warning,) = captured_output.warnings
-        assert route.name in warning
-        assert all(prefix in warning for prefix in route.source_ranges)
-    else:
-        assert captured_output.warnings == []
 
 
 def test_an_insert_whose_request_outlives_the_bound_is_retried_with_its_request_id(

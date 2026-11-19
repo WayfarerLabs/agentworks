@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -103,10 +103,15 @@ class FirewallState(Enum):
 
 @dataclass(frozen=True)
 class FirewallReconciliation:
-    """One firewall state plus the provider ID observed for that exact name."""
+    """One firewall state plus the provider ID observed for that exact name.
+
+    ``removed`` is set only by :func:`delete_matching_firewall`, when it
+    found the rule and deleted it.
+    """
 
     state: FirewallState
     observed_resource_id: str | None
+    removed: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,12 +124,21 @@ class FirewallOwnership:
 
 @dataclass
 class FirewallInsertAttempt:
-    """The unique request identity and learned resource identity for one insert."""
+    """The unique request identity and learned resource identity for one insert.
+
+    ``outcome_unknown`` says whether a request this attempt sent may still
+    create the rule though nothing has shown whether it will:
+    :func:`insert_firewall_reconciled` sets it when it sends the insert and
+    clears it once the outcome is known, so an insert cut short, or one
+    whose first try went unanswered, leaves it set whatever ends the
+    attempt.
+    """
 
     rule_name: str
     request_id: str
     ownership: FirewallOwnership | None = None
     submitted: bool = False
+    outcome_unknown: bool = False
 
     @classmethod
     def create(cls, rule_name: str) -> FirewallInsertAttempt:
@@ -375,6 +389,7 @@ def insert_firewall_reconciled(
         request_id=attempt.request_id,
     )
     attempt.submitted = True
+    attempt.outcome_unknown = True
 
     operation: Any | None = None
     initial_failure: AgentworksError | None = None
@@ -385,6 +400,7 @@ def insert_firewall_reconciled(
             resource=f"firewall rule {project_id}/{firewall.name}",
         )
     except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+        attempt.outcome_unknown = False  # a definitive answer to the only request sent
         raise
     except (ConnectivityError, GCEError) as exc:
         initial_failure = exc
@@ -400,7 +416,7 @@ def insert_firewall_reconciled(
                 resource=f"firewall rule {project_id}/{firewall.name}",
             )
         except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
-            raise
+            raise  # an answer to the retry alone: the first try may still land
         except (ConnectivityError, GCEError):
             retry_failed = True
         if retry_failed:
@@ -433,6 +449,9 @@ def insert_firewall_reconciled(
         )
     except GCEIndeterminateOperationError as exc:
         wait_failure = exc
+    except GCEOperationError:
+        attempt.outcome_unknown = False  # the operation completed, and failed
+        raise
 
     state = reconcile_firewall(
         client,
@@ -441,6 +460,7 @@ def insert_firewall_reconciled(
         ownership=attempt.ownership,
     )
     if state is FirewallState.REALIZED:
+        attempt.outcome_unknown = False
         return attempt.ownership
     if state is FirewallState.MISMATCHED:
         raise AlreadyExistsError(
@@ -451,6 +471,7 @@ def insert_firewall_reconciled(
         )
     if wait_failure is not None:
         raise wait_failure
+    attempt.outcome_unknown = False  # the operation completed without the rule
     raise GCEOperationError(
         f"GCE firewall rule '{firewall.name}' was absent after its insert operation completed",
         entity_kind="gcp-firewall-rule",
@@ -477,7 +498,8 @@ def delete_matching_firewall(
     the wall clock (a ``Deadline``), each taking what the ones before left,
     since its callers hold interrupts while it runs. A call with nothing
     left of the bound is not made and fails, so the result says the rule
-    was not proven absent.
+    was not proven absent; ``removed`` says it found the rule and deleted
+    it.
     """
     deadline = Deadline.after(timeout)
     client = BoundedClient(client, deadline)
@@ -527,7 +549,7 @@ def delete_matching_firewall(
         pass
 
     try:
-        return inspect_firewall(
+        final = inspect_firewall(
             client,
             project_id=project_id,
             expected=expected,
@@ -535,6 +557,7 @@ def delete_matching_firewall(
         )
     except AgentworksError:
         return FirewallReconciliation(FirewallState.INDETERMINATE, None)
+    return replace(final, removed=final.state is FirewallState.ABSENT)
 
 
 def _verify_firewall_operation(
