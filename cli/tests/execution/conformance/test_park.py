@@ -98,7 +98,8 @@ def test_a_tmux_pane_collects_its_request_and_has_the_panes_terminal(local_lane:
             subprocess.run([*tmux, "new-session", "-d", pane], check=True, env=environment)
 
         assert handover.collected
-        probe = f'printf "%s:%s:%s:%s:%s:%s\\n" "$TERM" "$TOKEN" "$PWD" "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" > {shown}'
+        fields = '"$TERM" "$TOKEN" "$PWD" "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM"'
+        probe = f'printf "%s:%s:%s:%s:%s:%s\\n" {fields} > {shlex.quote(str(shown))}'
         subprocess.run([*tmux, "send-keys", probe, "Enter"], check=True, env=environment)
         deadline = time.monotonic() + 20
         while not (shown.exists() and shown.read_text().endswith("\n")) and time.monotonic() < deadline:
