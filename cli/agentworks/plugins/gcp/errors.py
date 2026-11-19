@@ -6,7 +6,7 @@ from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from agentworks.capabilities.vm_platform.wall_bound import call_within
+from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut, call_within
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -86,6 +86,13 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
         return GCEQuotaError(
             f"Google Cloud quota was exhausted while {operation}{target}",
             hint="review the project's Compute Engine quotas before retrying",
+            **common,
+        )
+    if isinstance(exc, CallTimedOut):
+        # Ours, not Google's: the call ran out of its bound, or had none left to be sent with.
+        return ConnectivityError(
+            f"a Google Cloud call ran out of its time bound while {operation}{target}",
+            hint="retry the operation once Google Cloud answers promptly",
             **common,
         )
     if isinstance(

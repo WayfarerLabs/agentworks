@@ -11,10 +11,13 @@ from google.api_core import exceptions as api_exceptions
 from google.api_core import extended_operation
 from google.cloud import compute_v1
 
+from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut
+from agentworks.errors import ConnectivityError
 from agentworks.plugins.gcp.errors import (
     GCECapacityError,
     GCEIndeterminateOperationError,
     GCEOperationError,
+    google_error,
     wait_for_extended_operation,
 )
 
@@ -274,3 +277,12 @@ def test_true_normal_success_does_not_refresh_or_probe_http_error_fields(error: 
 
     assert operation.result_calls == [29]
     assert operation.done_calls == 0
+
+
+def test_a_call_that_ran_out_of_its_bound_is_unreachable_in_type_only() -> None:
+    """The bound is ours, and the call may never have been sent, so it is not reported as Google unreachable."""
+    timed_out = google_error(CallTimedOut("get", 300.0, shared=False), operation="reading a rule")
+    unreachable = google_error(TimeoutError("socket"), operation="reading a rule")
+
+    assert isinstance(timed_out, ConnectivityError)
+    assert str(timed_out) != str(unreachable)

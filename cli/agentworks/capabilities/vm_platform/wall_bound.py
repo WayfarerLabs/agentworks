@@ -49,9 +49,9 @@ class CallTimedOut(TimeoutError):
         if not shared:
             message = f"{what} did not finish within {seconds:.0f}s"
         elif seconds is None:
-            message = f"{what} did not finish before the deadline it shared with the calls before it"
+            message = f"{what} did not finish before the deadline it shares with other calls"
         else:
-            message = f"{what} did not finish within the {seconds:.0f}s bound it shared with the calls before it"
+            message = f"{what} did not finish within the {seconds:.0f}s bound it shares with other calls"
         super().__init__(message)
         self.what = what
         self.seconds = seconds

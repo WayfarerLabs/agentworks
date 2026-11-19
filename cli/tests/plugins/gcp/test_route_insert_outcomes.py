@@ -85,9 +85,13 @@ def test_an_insert_refused_on_its_only_try_is_not_named(
     assert captured_output.warnings == []
 
 
-def _answered_with(monkeypatch: pytest.MonkeyPatch, cache: FakeClients, **operation: Any) -> None:
-    """The insert answers with an operation shaped by ``operation``, and its rule never appears."""
+def _answered_with(monkeypatch: pytest.MonkeyPatch, cache: FakeClients, **operation: Any) -> list[FakeOperation]:
+    """The insert answers with an operation shaped by ``operation``, and its rule never appears.
+
+    Returns the operations it answered with, as the route received them.
+    """
     insert = cache.firewalls.insert
+    answered: list[FakeOperation] = []
 
     def _insert(**kwargs: Any) -> FakeOperation:
         accepted = insert(**kwargs)
@@ -99,9 +103,11 @@ def _answered_with(monkeypatch: pytest.MonkeyPatch, cache: FakeClients, **operat
             "target_id": accepted.target_id,
             **operation,
         }
-        return FakeOperation(**shape)
+        answered.append(FakeOperation(**shape))
+        return answered[-1]
 
     monkeypatch.setattr(cache.firewalls, "insert", _insert)
+    return answered
 
 
 def test_an_insert_whose_operation_completed_with_a_failure_is_not_named(
@@ -137,14 +143,25 @@ def test_an_insert_whose_wait_ran_out_is_named_by_its_provider_id(
     monkeypatch: pytest.MonkeyPatch, created: tuple[GCEPlatform, FakeClients, VMRow], captured_output: CapturedOutput
 ) -> None:
     platform, cache, vm = created
-    _answered_with(monkeypatch, cache, failure=TimeoutError("still running"))
+    answered = _answered_with(monkeypatch, cache, failure=TimeoutError("still running"))
 
     _open(platform, vm, GCEIndeterminateOperationError)
 
-    (request_id,) = {request.request_id for request in cache.firewalls.insert_requests[-1:]}
-    assert request_id
+    (accepted,) = answered
     (warning,) = captured_output.warnings
-    assert str(cache.firewalls._next_id - 1) in warning
+    assert f"'{accepted.target_id}'" in warning
+
+
+def test_an_insert_whose_operation_completed_without_the_rule_is_not_named(
+    monkeypatch: pytest.MonkeyPatch, created: tuple[GCEPlatform, FakeClients, VMRow], captured_output: CapturedOutput
+) -> None:
+    """The operation finished and the rule is not there, so nothing is left to land."""
+    platform, cache, vm = created
+    _answered_with(monkeypatch, cache)
+
+    _open(platform, vm, GCEOperationError)
+
+    assert captured_output.warnings == []
 
 
 def test_a_removal_that_found_and_deleted_the_rule_does_not_name_it(
