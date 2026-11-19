@@ -1,28 +1,171 @@
-"""The terminal vectors, T1 and T2: a terminal command, and a pane's handover.
+"""Every attach and park vector: the handover, T1 (a terminal command) and T2 (a pane's handover).
 
-They join :mod:`vectors`' list, so the lanes they name run them. T1 attaches a
-``TerminalCommand`` to the lane's stand-in terminal; T2 parks a login shell and
-runs its handover command in a pane whose owner sets tmux's variables, directly
-and through ``sudo -n -u`` as an agent's pane does.
+They join :mod:`vectors`' list, so the lanes they name run them. The handover
+vectors attach a ``LoginShell`` to the lane's stand-in terminal: its success,
+refusals, waits and what it leaves behind, and on L the account startup files
+that would hold or taint it. T1 attaches a ``TerminalCommand``; T2 parks a login
+shell and runs its handover command in a pane whose owner sets tmux's
+variables, directly and through ``sudo -n -u`` as an agent's pane does.
 """
 
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
+import threading
 from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.execution import ssh_process
 from agentworks.execution.agw_launch import DEFAULT_TERM
-from agentworks.execution.errors import RequestRefused
+from agentworks.execution.errors import ExecutionIncomplete, RequestRefused
 from agentworks.execution.requests import LoginShell, TerminalCommand
-from agentworks.execution.results import Completed
-from tests.execution.conformance.lanes import needs_sudo
+from agentworks.execution.results import Completed, Unknown, UnknownReason
+from tests.execution.conformance.lanes import local, needs_startup_files, needs_sudo, startup_file
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.execution.conformance.lanes import Lane
+    from tests.execution.conformance.lanes import Lane, TerminalHalf
+
+
+# -- Handover ---------------------------------------------------------------------------
+
+
+def handover_hands_the_terminal_a_login_shell(lane: Lane) -> None:
+    token = lane.handover_token()
+    with lane.terminal(b"pwd\nexit 7\n") as terminal:
+        code = lane.access.attach(LoginShell(cwd=lane.workdir))
+
+    assert code == 7
+    assert terminal.stdout.splitlines()[-1] == lane.workdir.encode()
+    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
+
+
+def handover_refuses_before_the_terminal_is_touched(lane: Lane) -> None:
+    lane.handover_token()
+    with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
+        lane.access.attach(LoginShell(cwd=f"{lane.workdir}/no-such-directory-agw"))
+
+    assert raised.value.code == "cwd"
+    assert terminal.calls == 0
+
+
+def handover_never_reuses_an_existing_name(lane: Lane) -> None:
+    token = lane.handover_token()
+    planted = f"/tmp/agw-handover-{token}"
+    lane.mkdir(planted)
+    try:
+        with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
+            lane.access.attach(LoginShell())
+
+        assert raised.value.code == "handover"
+        assert terminal.calls == 0
+        assert lane.exists(planted)  # the launcher removed nothing it did not create
+    finally:
+        lane.remove_dir(planted)
+
+
+def handover_whose_second_connection_never_arrives_leaves_nothing(lane: Lane) -> None:
+    token = lane.handover_token()
+    with lane.terminal(behavior=lambda argv, half: 0) as terminal:
+        assert lane.access.attach(LoginShell()) == 0
+
+    assert terminal.calls == 1
+    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
+
+
+def handover_gives_up_after_its_wait(lane: Lane) -> None:
+    lane.shorten_handover_wait(1)
+    directory = f"/tmp/agw-handover-{lane.handover_token()}"
+    gone_while_parked: list[bool] = []
+
+    def never_connects(argv: list[str], half: object) -> int:
+        # The client holds the parking connection's stdin open until this returns, so the launcher's
+        # end-of-input cleanup cannot fire yet and only its own wait can remove the directory. Polling
+        # for less than the unshortened 30 second wait proves the shortened one ended it.
+        gone_while_parked.append(lane.wait_gone(directory, seconds=20))
+        return 0
+
+    with lane.terminal(behavior=never_connects):
+        assert lane.access.attach(LoginShell()) == 0
+
+    assert gone_while_parked == [True]
+
+
+def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: Lane) -> None:
+    account = local(lane)
+    needs_startup_files(account)
+    account.startup(startup_file(account), "cat >/dev/null\n")  # holds the request and the connection open
+    account.shorten_parking_wait(2)
+    caught: list[BaseException] = []
+
+    def attach() -> None:
+        try:
+            account.access.attach(LoginShell(cwd=account.workdir))
+        except BaseException as error:  # noqa: BLE001 - the thread hands every outcome to the vector
+            caught.append(error)
+
+    # A regression in the bound would hang the attach forever, so the vector bounds itself.
+    with account.terminal() as terminal:
+        thread = threading.Thread(target=attach, daemon=True)
+        thread.start()
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "the parking wait did not end"
+
+    assert len(caught) == 1
+    assert isinstance(caught[0], ExecutionIncomplete)
+    assert caught[0].result.completion == Unknown(UnknownReason.DEADLINE)
+    assert terminal.calls == 0
+
+
+# What a startup file the attach's terminal half runs exports; none of it is the attach terminal's.
+PLANTED_TERMINAL_VARIABLES = "export TMUX=/tmp/agw-planted,1,0 TMUX_PANE=%9 TERM_PROGRAM=planted\n"
+ATTACH_KEYS = b'printf \'%sA:%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$SSH_TTY"\nexit 0\n'
+
+
+def attach_takes_no_pane_variables_from_its_environment(lane: Lane) -> None:
+    account = local(lane)
+    needs_startup_files(account)
+    account.startup(startup_file(account), PLANTED_TERMINAL_VARIABLES)  # read by the shell that runs stage 0
+    account.quiet_interactive_startup()
+
+    def on_a_pty(argv: list[str], half: TerminalHalf) -> int:
+        # The terminal half on script's pty, as ssh -t gives it one, so the launcher takes its tty path.
+        completed = subprocess.run(
+            ["script", "-q", "-e", "-c", shlex.join(argv), "/dev/null"],
+            input=ATTACH_KEYS,
+            capture_output=True,
+            timeout=60,
+            env=ssh_process.child_environment(),
+            check=False,
+        )
+        half.stdout = completed.stdout
+        return completed.returncode
+
+    with account.terminal(behavior=on_a_pty) as terminal:
+        assert account.access.attach(LoginShell(cwd=account.workdir)) == 0
+
+    marker = re.search(rb"TA:([^|\r\n]*)\|([^|\r\n]*)\|([^|\r\n]*)\|([^\r\n]*)", terminal.stdout)
+    assert marker is not None, terminal.stdout
+    tmux, pane, program, ssh_tty = marker.groups()
+    assert (tmux, pane, program) == (b"", b"", b"")
+    assert ssh_tty.startswith(b"/dev/")  # an attach's terminal is an SSH terminal
+
+
+def handover_shell_starts_with_clean_dispositions(lane: Lane) -> None:
+    account = local(lane)
+    needs_startup_files(account)
+    account.startup(startup_file(account), "trap '' HUP INT TERM USR1 USR2\n")
+    home = account.make_dir()
+
+    with account.terminal(b"grep -E 'SigIgn|SigBlk' /proc/self/status\nexit 0\n") as terminal:
+        code = account.access.attach(LoginShell(cwd=account.workdir, env={"HOME": home}))
+
+    assert code == 0
+    assert terminal.stdout.decode().splitlines() == ["SigBlk:\t0000000000000000", "SigIgn:\t0000000000000000"]
 
 
 # -- T1: a terminal command --------------------------------------------------------------
@@ -139,6 +282,13 @@ def pane_through_sudo_with_an_empty_term_gets_the_default(lane: Lane) -> None:
 
 
 ENTRIES: list[tuple[str, str, Callable[..., None]]] = [
+    ("handover-success", "LSV", handover_hands_the_terminal_a_login_shell),
+    ("handover-refused-before-terminal", "LSV", handover_refuses_before_the_terminal_is_touched),
+    ("handover-existing-name", "LSV", handover_never_reuses_an_existing_name),
+    ("handover-second-connection-never-arrives", "LSV", handover_whose_second_connection_never_arrives_leaves_nothing),
+    ("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
+    ("parking-never-reports", "L", parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone),
+    ("handover-clean-dispositions", "L", handover_shell_starts_with_clean_dispositions),
     ("T1-terminal-command", "LSV", terminal_command_runs_its_argv_from_path_with_the_requested_environment),
     ("T1-terminal-command-cannot-run", "LSV", terminal_command_that_cannot_run_exits_with_the_shell_status),
     (
@@ -150,4 +300,5 @@ ENTRIES: list[tuple[str, str, Callable[..., None]]] = [
     ("T2-pane-default-term", "LSV", pane_without_term_gets_the_default),
     ("T2-pane-through-sudo", "LV", pane_through_sudo_takes_only_term),
     ("T2-pane-through-sudo-empty-term", "LV", pane_through_sudo_with_an_empty_term_gets_the_default),
+    ("T2-attach-takes-no-pane-variables", "L", attach_takes_no_pane_variables_from_its_environment),
 ]

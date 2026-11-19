@@ -299,6 +299,22 @@ def needs_sudo(lane: Lane) -> None:
         unavailable("the elevation vectors need passwordless sudo")
 
 
+def local(lane: Lane) -> LocalLane:
+    if not isinstance(lane, LocalLane):
+        pytest.skip("local lane only")
+    return lane
+
+
+def needs_startup_files(lane: LocalLane) -> None:
+    """sh and dash read no startup file under ``-c``, so a vector about startup files has nothing to test there."""
+    if lane.shell_name not in ("bash", "zsh"):
+        pytest.skip(f"{lane.shell_name} reads no startup file for a non-interactive command")
+
+
+def startup_file(lane: LocalLane) -> str:
+    return ".zshenv" if lane.shell_name == "zsh" else ".bashrc"
+
+
 def require_shell(name: str) -> str:
     """The shell's path; a missing one fails on CI and skips elsewhere."""
     found = find_shell(name)

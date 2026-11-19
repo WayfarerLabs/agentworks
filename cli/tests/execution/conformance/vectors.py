@@ -10,12 +10,10 @@ from __future__ import annotations
 import ast
 import io
 import os
-import re
 import shlex
 import signal
 import subprocess
 import tempfile
-import threading
 import time
 from dataclasses import dataclass
 from functools import partial
@@ -25,9 +23,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ValidationError
-from agentworks.execution import ssh_process
-from agentworks.execution.errors import ExecutionIncomplete, RequestRefused, TrustMismatch
-from agentworks.execution.requests import Command, LoginShell, Script, Shell, shell_command_line
+from agentworks.execution.errors import TrustMismatch
+from agentworks.execution.requests import Command, Script, Shell, shell_command_line
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -36,7 +33,16 @@ from agentworks.execution.results import (
     UnknownReason,
 )
 from tests.execution.conformance import detached_vectors, file_vectors, program_vectors, terminal_vectors
-from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, TerminalHalf, needs_sudo
+from tests.execution.conformance.lanes import (
+    Lane,
+    LocalFilesystem,
+    LocalLane,
+    SSHDLane,
+    local,
+    needs_startup_files,
+    needs_sudo,
+    startup_file,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -57,22 +63,6 @@ def script(source: str, shell: Shell = Shell.SH, **options: object) -> Script:
 
 def refused(code: str) -> NotDelivered:
     return NotDelivered(NotDeliveredReason.REFUSED, code)
-
-
-def local(lane: Lane) -> LocalLane:
-    if not isinstance(lane, LocalLane):
-        pytest.skip("local lane only")
-    return lane
-
-
-def needs_startup_files(lane: LocalLane) -> None:
-    """sh and dash read no startup file under ``-c``, so a vector about startup files has nothing to test there."""
-    if lane.shell_name not in ("bash", "zsh"):
-        pytest.skip(f"{lane.shell_name} reads no startup file for a non-interactive command")
-
-
-def startup_file(lane: LocalLane) -> str:
-    return ".zshenv" if lane.shell_name == "zsh" else ".bashrc"
 
 
 # -- Shared by L, S and V ---------------------------------------------------------------
@@ -411,130 +401,6 @@ def payload_leaves_the_shared_streams_non_blocking_and_full(lane: Lane) -> None:
     assert err.getvalue() == b"x" * len(err.getvalue()) != b""
 
 
-# -- Handover ---------------------------------------------------------------------------
-
-
-def handover_hands_the_terminal_a_login_shell(lane: Lane) -> None:
-    token = lane.handover_token()
-    with lane.terminal(b"pwd\nexit 7\n") as terminal:
-        code = lane.access.attach(LoginShell(cwd=lane.workdir))
-
-    assert code == 7
-    assert terminal.stdout.splitlines()[-1] == lane.workdir.encode()
-    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
-
-
-def handover_refuses_before_the_terminal_is_touched(lane: Lane) -> None:
-    lane.handover_token()
-    with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
-        lane.access.attach(LoginShell(cwd=f"{lane.workdir}/no-such-directory-agw"))
-
-    assert raised.value.code == "cwd"
-    assert terminal.calls == 0
-
-
-def handover_never_reuses_an_existing_name(lane: Lane) -> None:
-    token = lane.handover_token()
-    planted = f"/tmp/agw-handover-{token}"
-    lane.mkdir(planted)
-    try:
-        with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
-            lane.access.attach(LoginShell())
-
-        assert raised.value.code == "handover"
-        assert terminal.calls == 0
-        assert lane.exists(planted)  # the launcher removed nothing it did not create
-    finally:
-        lane.remove_dir(planted)
-
-
-def handover_whose_second_connection_never_arrives_leaves_nothing(lane: Lane) -> None:
-    token = lane.handover_token()
-    with lane.terminal(behavior=lambda argv, half: 0) as terminal:
-        assert lane.access.attach(LoginShell()) == 0
-
-    assert terminal.calls == 1
-    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
-
-
-def handover_gives_up_after_its_wait(lane: Lane) -> None:
-    lane.shorten_handover_wait(1)
-    directory = f"/tmp/agw-handover-{lane.handover_token()}"
-    gone_while_parked: list[bool] = []
-
-    def never_connects(argv: list[str], half: object) -> int:
-        # The client holds the parking connection's stdin open until this returns, so the launcher's
-        # end-of-input cleanup cannot fire yet and only its own wait can remove the directory. Polling
-        # for less than the unshortened 30 second wait proves the shortened one ended it.
-        gone_while_parked.append(lane.wait_gone(directory, seconds=20))
-        return 0
-
-    with lane.terminal(behavior=never_connects):
-        assert lane.access.attach(LoginShell()) == 0
-
-    assert gone_while_parked == [True]
-
-
-def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: Lane) -> None:
-    account = local(lane)
-    needs_startup_files(account)
-    account.startup(startup_file(account), "cat >/dev/null\n")  # holds the request and the connection open
-    account.shorten_parking_wait(2)
-    caught: list[BaseException] = []
-
-    def attach() -> None:
-        try:
-            account.access.attach(LoginShell(cwd=account.workdir))
-        except BaseException as error:  # noqa: BLE001 - the thread hands every outcome to the vector
-            caught.append(error)
-
-    # A regression in the bound would hang the attach forever, so the vector bounds itself.
-    with account.terminal() as terminal:
-        thread = threading.Thread(target=attach, daemon=True)
-        thread.start()
-        thread.join(timeout=30)
-        assert not thread.is_alive(), "the parking wait did not end"
-
-    assert len(caught) == 1
-    assert isinstance(caught[0], ExecutionIncomplete)
-    assert caught[0].result.completion == Unknown(UnknownReason.DEADLINE)
-    assert terminal.calls == 0
-
-
-# What a startup file the attach's terminal half runs exports; none of it is the attach terminal's.
-PLANTED_TERMINAL_VARIABLES = "export TMUX=/tmp/agw-planted,1,0 TMUX_PANE=%9 TERM_PROGRAM=planted\n"
-ATTACH_KEYS = b'printf \'%sA:%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$SSH_TTY"\nexit 0\n'
-
-
-def attach_takes_no_pane_variables_from_its_environment(lane: Lane) -> None:
-    account = local(lane)
-    needs_startup_files(account)
-    account.startup(startup_file(account), PLANTED_TERMINAL_VARIABLES)  # read by the shell that runs stage 0
-    account.quiet_interactive_startup()
-
-    def on_a_pty(argv: list[str], half: TerminalHalf) -> int:
-        # The terminal half on script's pty, as ssh -t gives it one, so the launcher takes its tty path.
-        completed = subprocess.run(
-            ["script", "-q", "-e", "-c", shlex.join(argv), "/dev/null"],
-            input=ATTACH_KEYS,
-            capture_output=True,
-            timeout=60,
-            env=ssh_process.child_environment(),
-            check=False,
-        )
-        half.stdout = completed.stdout
-        return completed.returncode
-
-    with account.terminal(behavior=on_a_pty) as terminal:
-        assert account.access.attach(LoginShell(cwd=account.workdir)) == 0
-
-    marker = re.search(rb"TA:([^|\r\n]*)\|([^|\r\n]*)\|([^|\r\n]*)\|([^\r\n]*)", terminal.stdout)
-    assert marker is not None, terminal.stdout
-    tmux, pane, program, ssh_tty = marker.groups()
-    assert (tmux, pane, program) == (b"", b"", b"")
-    assert ssh_tty.startswith(b"/dev/")  # an attach's terminal is an SSH terminal
-
-
 def memfd_refusing_the_noexec_seal_still_runs_the_script(lane: Lane) -> None:
     # Kernels before 6.3 reject MFD_NOEXEC_SEAL with EINVAL, and so does any kernel for a flag it does not know.
     account = local(lane)
@@ -732,19 +598,6 @@ def login_flag_runs_the_account_login_startup(lane: Lane) -> None:
         assert account.run(script(probe, shell, login=False, env={"HOME": home})).stdout == b"unset\n", shell
 
 
-def handover_shell_starts_with_clean_dispositions(lane: Lane) -> None:
-    account = local(lane)
-    needs_startup_files(account)
-    account.startup(startup_file(account), "trap '' HUP INT TERM USR1 USR2\n")
-    home = account.make_dir()
-
-    with account.terminal(b"grep -E 'SigIgn|SigBlk' /proc/self/status\nexit 0\n") as terminal:
-        code = account.access.attach(LoginShell(cwd=account.workdir, env={"HOME": home}))
-
-    assert code == 0
-    assert terminal.stdout.decode().splitlines() == ["SigBlk:\t0000000000000000", "SigIgn:\t0000000000000000"]
-
-
 # -- Elevation (E1, E2, E4, E6) ----------------------------------------------------------
 
 
@@ -828,15 +681,6 @@ def build() -> list[Vector]:
         Vector("background-child-holds-both-streams", "LSV", background_child_holds_both_streams),
         Vector("no-trailing-newline-and-refusal", "LS", output_without_a_trailing_newline_and_a_refusal),
         Vector("deadline", "LS", deadline),
-        Vector("handover-success", "LSV", handover_hands_the_terminal_a_login_shell),
-        Vector("handover-refused-before-terminal", "LSV", handover_refuses_before_the_terminal_is_touched),
-        Vector("handover-existing-name", "LSV", handover_never_reuses_an_existing_name),
-        Vector(
-            "handover-second-connection-never-arrives",
-            "LSV",
-            handover_whose_second_connection_never_arrives_leaves_nothing,
-        ),
-        Vector("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
         Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),
@@ -876,9 +720,6 @@ def build() -> list[Vector]:
         Vector(
             "resets-signals-descriptors-session-variables", "L", signals_descriptors_and_session_variables_are_reset
         ),
-        Vector("handover-clean-dispositions", "L", handover_shell_starts_with_clean_dispositions),
-        Vector("T2-attach-takes-no-pane-variables", "L", attach_takes_no_pane_variables_from_its_environment),
-        Vector("parking-never-reports", "L", parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone),
         Vector("memfd-noexec-seal-refused", "L", memfd_refusing_the_noexec_seal_still_runs_the_script),
         Vector("memfd-cannot-be-created", "L", memfd_that_cannot_be_created_is_not_delivered),
     ]
