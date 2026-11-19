@@ -667,12 +667,19 @@ class GCEPlatform(PublicAddressPlatform):
                         f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
                     )
                 elif attempt.outcome_unknown and not result.removed:
+                    project = identity.project_id
                     known = attempt.ownership.resource_id if attempt.ownership is not None else None
-                    check = f"provider ID '{known}'" if known else f"the name '{route_name}'"
+                    then = (
+                        f"only while it reports provider ID '{known}', run "
+                        f"`gcloud compute firewall-rules delete {route_name} --project {project}`"
+                        if known
+                        else "its provider ID is unknown, so do not delete it by name; escalate ownership"
+                    )
                     output.warn(
-                        f"GCE transient SSH rule '{route_name}' in project '{identity.project_id}' was not confirmed "
-                        f"created, so it may still appear after its removal, open to source(s) {', '.join(prefixes)}; "
-                        f"check for a rule with {check} and delete it"
+                        f"GCE transient SSH rule '{route_name}' in project '{project}' was not confirmed created, "
+                        f"so it may still appear after its removal, open to source(s) {', '.join(prefixes)}. "
+                        f"Inspect `gcloud compute firewall-rules describe {route_name} --project {project} "
+                        f"--format='value(id)'`; {then}."
                     )
 
     def _route_client(self, kind: GcpClientKind, ctx: RunContext) -> Any:

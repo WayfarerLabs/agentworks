@@ -470,8 +470,8 @@ def _remove_unfinished_allow(
         if not known:
             output.warn(
                 f"Could not confirm that Azure created the '{rule_name}' rule on NSG '{name}-nsg' before removing "
-                f"it, so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that "
-                "rule by name."
+                f"it, so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG, and delete "
+                "that rule only if it allows TCP/22 from exactly those sources, escalating otherwise."
             )
 
 
