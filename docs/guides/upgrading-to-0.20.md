@@ -623,8 +623,9 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
 - **Local dotfiles are replaced through a temporary copy.** A local `dotfiles_source` directory is
   unpacked beside the destination first, and the previous tree is put back if the upload fails or is
   interrupted. A run killed outright between its two renames leaves the previous tree in a
-  `.agentworks-old-*` directory beside the destination; no later run touches it, so move it back or
-  remove it yourself. The replacement no longer leaves the reinit partial.
+  `.agentworks-old-*` directory beside the destination, and one killed during the unpacking leaves a
+  partial `.agentworks-new-*` directory. No later run touches either; remove them, since the next
+  reinit recreates the destination. The replacement no longer leaves the reinit partial.
 - **`dotfiles_destination` is checked before the dotfiles sync.** The value, as rendered for the
   account when it holds `${agw:NAME}` references, is a path in the home (`dots` or `~/dots`) or an
   absolute path. It may not name the home itself or one of its parents, may not be, hold or lie
