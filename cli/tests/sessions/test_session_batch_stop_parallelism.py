@@ -72,7 +72,7 @@ def _plan(
         stored_boot_id=BOOT_ID,
         stored_start_ticks=start_ticks or 2000 + ordinal,
         target=cast("Transport", target or _Target(name)),
-        sudo=False,
+        owner=None,
         force=False,
     )
 

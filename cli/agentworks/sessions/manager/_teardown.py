@@ -7,16 +7,15 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor
 from concurrent.futures import wait as _wait_for_futures
 from dataclasses import dataclass
 from functools import partial
-from pathlib import PurePosixPath
 from threading import Event
 from time import monotonic, sleep
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionMode, SessionRuntimeSnapshot
+from agentworks.db import PID_STOPPED, SessionRuntimeSnapshot
 from agentworks.errors import BrokenStateError, ConnectivityError, ExternalError, StateError, UserAbort
-from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT, ProbeStatus
+from agentworks.sessions.tmux import ProbeStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -46,8 +45,15 @@ class DedicatedTeardownPlan:
     stored_boot_id: str
     stored_start_ticks: int
     target: Transport
-    sudo: bool
+    # The server's account when ``target`` is not that account (the VM admin
+    # tearing down an agent session); ``None`` when ``target`` owns it.
+    owner: str | None
     force: bool
+
+    @property
+    def sudo(self) -> bool:
+        """Whether non-tmux work (process reads, socket removal) runs as root."""
+        return self.owner is not None
 
 
 class _SubmissionGate:
@@ -67,33 +73,6 @@ class _SubmissionGate:
     def permits_mutation(self) -> bool:
         self._released.wait()
         return not self._aborted.is_set()
-
-
-def _validated_socket_path(db: Database, session: SessionRow) -> str:
-    """Validate persisted socket identity before destructive use."""
-    socket_path = session.socket_path
-    if socket_path is None:
-        raise StateError(
-            f"session '{session.name}' has no dedicated tmux socket",
-            entity_kind="session",
-            entity_name=session.name,
-        )
-    if session.mode == SessionMode.AGENT.value:
-        agent = db.get_agent(session.agent_name or "")
-        owner_dir = f"{AGENT_SOCKET_ROOT}/{agent.linux_user}" if agent is not None else ""
-    else:
-        workspace = db.get_workspace(session.workspace_name)
-        vm = db.get_vm(workspace.vm_name) if workspace is not None else None
-        owner_dir = f"{ADMIN_SOCKET_ROOT}/{vm.admin_username}" if vm is not None else ""
-    path = PurePosixPath(socket_path)
-    if not path.is_absolute() or str(path.parent) != owner_dir or path.name in {"", ".", ".."}:
-        raise StateError(
-            f"session '{session.name}' has an invalid managed tmux socket path",
-            entity_kind="session",
-            entity_name=session.name,
-            hint="Repair the persisted session row before retrying destructive cleanup.",
-        )
-    return socket_path
 
 
 def _validated_pid(session: SessionRow) -> int:
@@ -124,7 +103,7 @@ def prepare_dedicated_teardown(
     batch coordinator supply complete-fingerprint rows; invalid state fails
     closed instead of inventing work.
     """
-    socket_path = _validated_socket_path(db, session)
+    server = _mgr.require_session_tmux_server(db, session)
     pid = _validated_pid(session)
     if session.boot_id is None or session.tmux_server_start_ticks is None:
         raise StateError(
@@ -141,12 +120,12 @@ def prepare_dedicated_teardown(
         session_uuid=session.session_uuid,
         run_id=session.run_id,
         vm_name=vm_name,
-        socket_path=socket_path,
+        socket_path=server.socket_path,
         stored_pid=pid,
         stored_boot_id=boot_id,
         stored_start_ticks=start_ticks,
         target=target,
-        sudo=not target_owns_session,
+        owner=None if target_owns_session else server.owner,
         force=force,
     )
 
@@ -234,7 +213,7 @@ def _execute_reachable_dedicated_teardown(
     observed_start_ticks: int,
 ) -> None:
     """Destroy one already-captured exact process incarnation."""
-    from agentworks.sessions.tmux import kill_server
+    from agentworks.sessions.tmux import kill_server, server_owner_run_command
 
     if (
         observed_pid != plan.stored_pid
@@ -247,10 +226,7 @@ def _execute_reachable_dedicated_teardown(
             entity_name=plan.session_name,
         )
 
-    def run_runtime(command: str, *, check: bool = True, env: dict[str, str] | None = None) -> object:
-        return plan.target.run(command, sudo=plan.sudo, check=check, env=env)
-
-    kill_server(run_command=run_runtime, socket_path=plan.socket_path)
+    kill_server(run_command=server_owner_run_command(plan.target, plan.owner), socket_path=plan.socket_path)
     # Acknowledging kill-server can precede the server finishing its exit.
     # Bound further observations, without retrying mutation or uncertain probes.
     deadline = monotonic() + DEDICATED_TEARDOWN_EXIT_GRACE_SECONDS
@@ -317,7 +293,7 @@ def execute_dedicated_teardown(plan: DedicatedTeardownPlan) -> None:
     probe = capture_tmux_server_fingerprint(
         target=plan.target,
         socket_path=plan.socket_path,
-        sudo=plan.sudo,
+        owner=plan.owner,
     )
     if probe.status is not ProbeStatus.PRESENT:
         _recover_unreachable_dedicated_runtime(
@@ -373,10 +349,12 @@ def teardown_dedicated_session(
 
     expected = SessionRuntimeSnapshot.from_session(session)
     if not has_complete_runtime_fields(session):
-        socket_path = _validated_socket_path(db, session)
-        sudo = not target_owns_session
+        server = _mgr.require_session_tmux_server(db, session)
+        socket_path = server.socket_path
+        owner = None if target_owns_session else server.owner
+        sudo = owner is not None
         require_socket_path(socket_path, run_command=partial(target.run, sudo=sudo))
-        probe = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, sudo=sudo)
+        probe = capture_tmux_server_fingerprint(target=target, socket_path=socket_path, owner=owner)
         if session.pid == PID_STOPPED and probe.status is ProbeStatus.ABSENT:
             _remove_stale_socket(session_name=session.name, socket_path=socket_path, target=target, sudo=sudo)
             db.compare_and_set_session_stopped(expected)
@@ -418,7 +396,7 @@ def teardown_dedicated_session(
             session_uuid=session.session_uuid,
             run_id=session.run_id,
             fingerprint=observed,
-            sudo=sudo,
+            owner=owner,
         ):
             raise StateError(
                 f"session '{session.name}' has an incomplete stored runtime identity",

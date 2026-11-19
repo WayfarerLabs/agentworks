@@ -66,7 +66,9 @@ def translate_component(raw: JsonObject, base: dict[str, CapabilityConfig] | Non
         activations["claude-code"] = claude
     if claude is not None:
         for field, entries in legacy.items():
-            claude[field] = list(dict.fromkeys([*claude.get(field, []), *entries]))
+            if not entries and field in claude and claude[field] is None:
+                continue
+            claude[field] = list(dict.fromkeys([*(claude.get(field) or []), *entries]))
     if activations:
         result["harness_integrations"] = cast("dict[str, JsonValue]", activations)
     return result

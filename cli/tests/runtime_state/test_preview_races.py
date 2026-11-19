@@ -58,7 +58,7 @@ def test_preview_workspace_deletion_during_grouped_observation_isolated(
     monkeypatch.setattr(manager, "observe_session_statuses", observe)
     monkeypatch.setattr(
         "agentworks.sessions.manager._status.batch_check_status",
-        lambda rows, **k: {row.name: SessionStatus.STOPPED for row in rows},
+        lambda rows, **k: {row.name: SessionStatus.STOPPED for row, _server in rows},
     )
     monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
     with pytest.raises(StateError):

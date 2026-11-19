@@ -597,7 +597,7 @@ def incomplete_standard_library_is_not_delivered(lane: Lane) -> None:
         "#!/bin/sh\n"
         "# Stands in for a python3 whose standard library lacks json.\n"
         'program="$4"; shift 4\n'
-        f"exec {account.python} -I -S -c "
+        f"exec {shlex.quote(account.python)} -I -S -c "
         '\'import sys; sys.modules["json"] = None; program = sys.argv[1]; sys.argv = ["-c"] + sys.argv[2:]; '
         'exec(program)\' "$program" "$@"\n'
     )

@@ -15,7 +15,9 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
+from agentworks.sessions.manager._status import _batch_row_bound_seconds
 from agentworks.sessions.multi_console import console_listing
+from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 from agentworks.vms.manager import inspect
 from tests._runtime_probes import framed_runtime_result
 
@@ -91,11 +93,11 @@ def _seed_session(db: Database) -> None:
         "ws",
         "default",
         SessionMode.ADMIN,
-        socket_path="/tmp/work.sock",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/work.sock",
     )
     db.update_session_runtime(
         "work",
-        socket_path="/tmp/work.sock",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/work.sock",
         pid=100,
         boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         tmux_server_start_ticks=1,
@@ -169,14 +171,14 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     events: list[str] = []
     vm = db.get_vm("box")
     assert vm is not None
-    name_key = base64.b64encode(b"work").decode("ascii")
 
     class Target:
         def run(self, _command: str, **kwargs: object) -> _Result:
             input_data = kwargs.pop("input_data")
+            # The guest timeout plus one row's bound, whatever the row count.
             assert kwargs == {
                 "check": False,
-                "timeout": 10,
+                "timeout": GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
                 "retries": 1,
                 "tty": False,
             }
@@ -184,12 +186,14 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
             assert input_data.endswith("\n")
             lines = input_data.splitlines()
             assert len(lines) == 1
-            encoded_name, encoded_socket, mode, pid = lines[0].split()
+            encoded_name, encoded_socket, pid, owner = lines[0].split()
             assert base64.b64decode(encoded_name, validate=True).decode() == "work"
-            assert base64.b64decode(encoded_socket, validate=True).decode() == "/tmp/work.sock"
-            assert (mode, pid) == ("u", "100")
+            assert base64.b64decode(encoded_socket, validate=True).decode() == (
+                "/run/agentworks/admin-tmux-sockets/agentworks/work.sock"
+            )
+            assert (pid, owner) == ("100", "-")
             events.append("transport-read")
-            return framed_runtime_result(_command, _Result(0, f"S:{name_key}:0::0::0::0:\n"))
+            return framed_runtime_result(_command, _Result(0, "S:1:0::0::0::0:\n"))
 
     def open_transport(*args: object, **kwargs: object) -> Target:
         assert len(args) == 2

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -221,9 +222,21 @@ def _rehome_vm(
         # which double-wrote the "Finished" footer when an inner raise re-entered
         # an outer except.
         try:
+            # Reserve exclusively: a preflight check cannot rule out a raced-in
+            # target, and an unanswered mkdir does not establish ownership.
+            parent = shlex.quote(str(PurePosixPath(new_path).parent))
+            target.run(f"mkdir -p -- {parent}", sudo=True)
             try:
-                # Create target directory as root and chown to admin so rsync can write
-                target.run(f"mkdir -p {np}", sudo=True)
+                target.run(f"mkdir -- {np}", sudo=True)
+            except BaseException:
+                output.warn(
+                    f"Rehome target reservation at {new_path} was not confirmed. "
+                    "Any remaining path was left untouched; inspect and preserve its contents before retrying."
+                )
+                raise
+
+            try:
+                # Let the admin write into the confirmed new target.
                 target.run(f"chown {vm.admin_username} {np}", sudo=True)
 
                 # Copy with rsync (fall back to cp -a). Trailing slash matters for
@@ -244,7 +257,6 @@ def _rehome_vm(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
                         entity_name=ws_name,
-                        hint=f"SSH log: {ssh_logger.display_path}",
                     )
 
                 # Fix ownership, permissions, and ACLs on the new path
@@ -330,7 +342,10 @@ def _rehome_vm(
                     f"SSH log: {ssh_logger.display_path}"
                 )
                 raise
-            except AgentworksError:
+            except AgentworksError as error:
+                error.add_hint(
+                    f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} SSH log: {ssh_logger.display_path}"
+                )
                 raise
             except Exception as e:
                 raise ExternalError(

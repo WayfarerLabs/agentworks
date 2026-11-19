@@ -21,6 +21,7 @@ import contextlib
 import getpass
 import io
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -337,7 +338,7 @@ class LocalLane(LocalFilesystem):
             "SSH_CLIENT=203.0.113.5 52000 22",
             "SSH_CONNECTION=203.0.113.5 52000 10.0.0.2 22",
         ]
-        command = remote_command.replace(ssh_process.DEFAULT_PYTHON, self.python, 1)
+        command = remote_command.replace(ssh_process.DEFAULT_PYTHON, shlex.quote(self.python), 1)
         guest = ["/usr/bin/env", "-i", *environment, self.shell, "-c", command]
         return [sys.executable, "-I", "-S", "-c", SSH_STAND_IN, *guest]
 
@@ -391,9 +392,9 @@ def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
             [
                 "ListenAddress 127.0.0.1",
                 f"Port {port}",
-                f"HostKey {host_key}",
-                f"AuthorizedKeysFile {authorized}",
-                f"PidFile {directory / 'sshd.pid'}",
+                f'HostKey "{host_key}"',
+                f'AuthorizedKeysFile "{authorized}"',
+                f'PidFile "{directory / "sshd.pid"}"',
                 "UsePAM no",
                 "StrictModes no",
                 "PasswordAuthentication no",
