@@ -234,8 +234,9 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
 
 
 _SWAP_STUBS = {
-    # fallocate -l SIZE PATH
-    "fallocate": 'echo "$1 $2" > "$3"\n',
+    # fallocate -l SIZE PATH; refuses a path that exists, so a build passes only by starting from nothing
+    # rather than on whatever fallocate would make of a leftover (it follows a link, and keeps a file's bytes)
+    "fallocate": '[ ! -e "$3" ] && [ ! -L "$3" ] || exit 1\necho "$1 $2" > "$3"\n',
     # mkswap PATH; fails while $STUBS/interrupt exists, as a run cut short after fallocate would stop
     "mkswap": '[ ! -e "$STUBS/interrupt" ] || exit 130\necho swap-area >> "$1"\n',
     # swapon PATH; refuses a file that is not a swap area, and records an activation as /proc/swaps would
