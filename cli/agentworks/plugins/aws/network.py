@@ -47,7 +47,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, CallTimedOut, Deadline
 from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError, TokenRejectedError
 from agentworks.interrupts import interrupts_deferred
 
@@ -88,6 +88,10 @@ _DUPLICATE_PERMISSION_CODE = "InvalidPermission.Duplicate"
 _PERMISSION_NOT_FOUND_CODE = "InvalidPermission.NotFound"
 _GROUP_NOT_FOUND_CODES = frozenset({"InvalidGroup.NotFound", "InvalidGroupId.NotFound"})
 _INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound"})
+
+# How long one held removal of a route's allows may take on the wall clock, its
+# per-prefix revokes together: interrupts wait this long at most.
+_REMOVAL_TIMEOUT_SECONDS = 300.0
 
 
 class EC2Error(ProvisioningError):
@@ -243,12 +247,13 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
     If an actual authorize fails partway through, or is interrupted, all
     planned tuples are revoked best-effort before the failure propagates,
-    holding interrupts until that is done. An authorize cut short, by an
-    interrupt or by running out of time (a bounded client's
+    holding interrupts until that is done (within one bound, as
+    :func:`remove_ssh_allow` does). An authorize cut short, by an interrupt
+    or by running out of time (a bounded client's
     :class:`~agentworks.capabilities.vm_platform.wall_bound.CallTimedOut`),
-    may still land after that revoke, so it also warns naming the prefixes,
-    while interrupts are still held: a second Ctrl-C delivered first would
-    skip the warning.
+    may still land after that revoke, so it also warns naming the prefixes;
+    the warning goes out before the held interrupt is delivered, which would
+    otherwise skip it.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
@@ -266,7 +271,7 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     except BaseException as exc:
         # The route's own finally never runs for a poke that did not return, so this revoke cleans up.
         with interrupts_deferred():
-            remove_ssh_allow_interruptibly(ec2, security_group_id, prefixes)
+            remove_ssh_allow_interruptibly(_removal_client(ec2), security_group_id, prefixes)
             if not isinstance(exc, Exception) or isinstance(exc, CallTimedOut):
                 output.warn(
                     f"An SSH allow for {', '.join(prefixes)} on security group '{security_group_id}' was cut "
@@ -283,10 +288,17 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
 
     A revoke cut short leaves the allow open, so every removal holds them
     (:func:`~agentworks.interrupts.interrupts_deferred`) except create's
-    rollback.
+    rollback. Since they are held, its revokes share one bound of
+    ``_REMOVAL_TIMEOUT_SECONDS`` on the wall clock, however many prefixes it
+    revokes.
     """
     with interrupts_deferred():
-        remove_ssh_allow_interruptibly(ec2, security_group_id, prefixes)
+        remove_ssh_allow_interruptibly(_removal_client(ec2), security_group_id, prefixes)
+
+
+def _removal_client(ec2: Any) -> BoundedClient:
+    """``ec2`` with every call through it sharing one ``_REMOVAL_TIMEOUT_SECONDS`` bound, starting now."""
+    return BoundedClient(ec2, Deadline(_REMOVAL_TIMEOUT_SECONDS))
 
 
 def remove_ssh_allow_interruptibly(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
@@ -303,10 +315,11 @@ def remove_ssh_allow_interruptibly(ec2: Any, security_group_id: str, prefixes: S
     than raising, because every call site must keep unwinding. Only what was
     actually revoked is reported as closed.
 
-    It holds no interrupts: only create's rollback calls it directly, since
-    there a second Ctrl-C is how the operator abandons a cleanup that hangs,
-    and the create retains what it could not confirm. Everything else calls
-    :func:`remove_ssh_allow`."""
+    It holds no interrupts and adds no bound of its own. Create's rollback
+    calls it as it is, since there a second Ctrl-C is how the operator
+    abandons a cleanup that hangs, and the create retains what it could not
+    confirm; the poke's own cleanup holds interrupts and bounds it itself.
+    Everything else calls :func:`remove_ssh_allow`."""
     warnings: list[str] = []
     revoked: list[str] = []
     for prefix in prefixes:
@@ -320,9 +333,10 @@ def remove_ssh_allow_interruptibly(ec2: Any, security_group_id: str, prefixes: S
             if code == _PERMISSION_NOT_FOUND_CODE or code in _GROUP_NOT_FOUND_CODES:
                 continue
             err = wrap_ec2_error(exc)
+            exposure = "may remain open" if isinstance(exc, CallTimedOut) else "stays open"
             warnings.append(
                 f"could not revoke the SSH allow for {prefix} on security group "
-                f"'{security_group_id}': {err}. The VM's SSH port stays open to "
+                f"'{security_group_id}': {err}. The VM's SSH port {exposure} to "
                 f"{prefix}; revoke it manually to restore zero inbound exposure."
             )
             continue
