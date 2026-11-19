@@ -162,16 +162,18 @@ access was restored.
 
 ## Interrupted writes
 
-Every file Agentworks writes on a VM (initialization's files, artifact publication and the tmux
-config among them), a local dotfiles upload and a fresh git dotfiles clone are staged beside the
-destination and renamed into place, so none of these destinations is left half written. A git file
-source, such as a `mise.lock`, is fetched into a staging directory under `/var/tmp` and removed
-afterwards. A controller killed without a chance to clean up can leave any of these behind, and
-nothing collects them:
+Every file Agentworks writes on a VM through its file operations (initialization's files, artifact
+publication and the tmux config among them), a local dotfiles upload and a fresh git dotfiles clone
+are staged beside the destination and renamed into place, so none of these destinations is left half
+written. The bootstrap that prepares a new VM's admin account is the exception: its writes, such as
+that account's shell rc files and its `authorized_keys`, happen in place. A git file source, such as
+a `mise.lock`, is fetched into a staging directory under `/var/tmp` and removed afterwards. A
+controller killed without a chance to clean up can leave any of these behind, and nothing collects
+them:
 
 | Leftover                                 | Where                                  | What it is                                                             |
 | ---------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
-| `.agentworks-tmp-*`                      | beside any file Agentworks writes      | A file write staged before its rename                                  |
+| `.agentworks-tmp-*`                      | beside any file staged this way        | A file write staged before its rename                                  |
 | `.agentworks-new-*`, `.agentworks-old-*` | beside a local dotfiles destination    | The uploaded tree, possibly partly extracted, and the tree it replaces |
 | `.agentworks-clone-*`                    | in a git dotfiles destination's parent | A fresh clone being checked out before its move into place             |
 | `/var/tmp/agentworks-source-ref-*`       | on the VM                              | A git file source's repository, fetched to read one file               |
