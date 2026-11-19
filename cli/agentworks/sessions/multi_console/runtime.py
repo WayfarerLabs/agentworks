@@ -170,8 +170,9 @@ def prepare_console_reconcile(
     """Observe and collect build requirements without changing tmux state.
 
     The caller validated the console's definition under the same guard,
-    before accepting running intent. A build also checks the direct SSH of every agent whose shell panes it
-    will park for, so an agent that predates the rollout is refused here.
+    before accepting running intent. A build also checks the direct SSH of
+    every agent whose shell panes it will park for, so an agent that
+    predates the rollout is refused here.
     """
     with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
         current = _require_console(db, console.name)
