@@ -335,7 +335,9 @@ class TestCloseProvisioningAccessHooks:
                 waits.append(timeout)
                 return super().result(timeout)
 
-        monkeypatch.setattr(network.security_rules, "begin_delete", lambda *_args: _HungPoller(None, finishes=False))
+        monkeypatch.setattr(
+            network.security_rules, "begin_delete", lambda *_args, **_options: _HungPoller(None, finishes=False)
+        )
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         _platform().close_provisioning_access(vm, RunContext())  # no raise
@@ -469,7 +471,7 @@ class TestTransientRoute:
 
         armed = False
 
-        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+        def interrupted_delete(rg: str, nsg: str, rule_name: str, **options: Any) -> Any:
             if armed:
                 signal.raise_signal(signal.SIGINT)
             return delete(rg, nsg, rule_name)
@@ -493,7 +495,7 @@ class TestTransientRoute:
         rules: _FakeSecurityRules = network.security_rules
         real_delete = rules.begin_delete
 
-        def _delete(rg: str, nsg: str, rule_name: str) -> _Poller:
+        def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
             if rule_name == LEGACY_SSH_RULE_NAME:
                 raise ResourceNotFoundError("no legacy rule")
             return real_delete(rg, nsg, rule_name)
@@ -526,7 +528,7 @@ class TestTransientRoute:
             def result(self, timeout: float | None = None) -> object:
                 raise RuntimeError("client-side poll failure")
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             # Record first (the server-side create succeeded), then hand
             # back a poller whose result() dies client-side.
             poller = real_create(rg, nsg, rule_name, rule)
@@ -554,7 +556,7 @@ class TestTransientRoute:
         rules: _FakeSecurityRules = network.security_rules
         real_create = rules.begin_create_or_update
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 return _InterruptedWait(rule)
@@ -576,13 +578,13 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
         real_delete = rules.begin_delete
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 return _InterruptedWait(rule)
             return poller
 
-        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+        def interrupted_delete(rg: str, nsg: str, rule_name: str, **options: Any) -> Any:
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 signal.raise_signal(signal.SIGINT)
             return real_delete(rg, nsg, rule_name)
@@ -611,14 +613,14 @@ class TestTransientRoute:
         created: list[_InterruptedWait] = []
         deleted_at: list[float] = []
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             if not rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 return poller
             created.append(_InterruptedWait(rule, settles_after=settles_after))
             return created[-1]
 
-        def _delete(rg: str, nsg: str, rule_name: str) -> _Poller:
+        def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 assert settles_after is None or created[-1].reads == settles_after, "the delete must follow the settle"
                 deleted_at.append(fakes.clock.now)
@@ -649,7 +651,7 @@ class TestTransientRoute:
         real_create = rules.begin_create_or_update
         attempted: list[str] = []
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 attempted.append(rule_name)
                 raise KeyboardInterrupt
@@ -674,7 +676,7 @@ class TestTransientRoute:
         rules: _FakeSecurityRules = network.security_rules
         real_create, real_delete = rules.begin_create_or_update, rules.begin_delete
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             return (
                 _InterruptedWait(rule, settles_after=None)
@@ -682,7 +684,7 @@ class TestTransientRoute:
                 else poller
             )
 
-        def interrupted_delete(rg: str, nsg: str, rule_name: str) -> Any:
+        def interrupted_delete(rg: str, nsg: str, rule_name: str, **options: Any) -> Any:
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 signal.raise_signal(signal.SIGINT)
             return real_delete(rg, nsg, rule_name)
@@ -716,7 +718,7 @@ class TestTransientRoute:
             def result(self, timeout: float | None = None) -> object:
                 raise RuntimeError("client-side poll failure")
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 # The create landed server-side; poison the cleanup too.
@@ -753,13 +755,13 @@ class TestTransientRoute:
         first_name: list[str] = []
         deleted_at: list[float] = []
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) and not first_name:
                 first_name.append(rule_name)
                 return first(rule_name, rule)
             return real_create(rg, nsg, rule_name, rule)
 
-        def _delete(rg: str, nsg: str, rule_name: str) -> _Poller:
+        def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 deleted_at.append(fakes.clock.now)
             return real_delete(rg, nsg, rule_name)
@@ -875,7 +877,7 @@ class TestPerOperationAllows:
         real_create = rules.begin_create_or_update
         collided = {"fired": False}
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) and not collided["fired"]:
                 # A concurrent operation wins slot 100 between our list
                 # and our create: their rule lands, ours is rejected.
@@ -1003,6 +1005,63 @@ class TestEnsureDenyRaises:
 class TestRouteOperationsAreBounded:
     """A route opens before the script's deadline starts, so each Azure operation it waits on has a bound."""
 
+    def test_every_call_on_a_route_bounds_its_requests_and_only_the_pokes_create_goes_unretried(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """azure-core's own bounds would let one request outlast the operation's; a poll keeps the client's."""
+        from azure.mgmt.core.polling.arm_polling import ARMPolling
+
+        fakes = _install_fakes(monkeypatch, public_ip_attached=False)
+        network = fakes.network
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with _platform()._transient_route(vm, RunContext()):
+            pass
+
+        calls = [
+            *network.network_interfaces.options,
+            *fakes.compute.virtual_machines.options,
+            *network.public_ip_addresses.options,
+            *network.security_rules.options,
+        ]
+        assert {method for method, _options in calls} == {"get", "list", "begin_create_or_update", "begin_delete"}
+        _deny_create, poke_create = (
+            options for method, options in network.security_rules.options if method == "begin_create_or_update"
+        )
+        assert poke_create["retry_total"] == 0
+        for method, options in calls:
+            assert options["connection_timeout"] == azure_network._ROUTE_CONNECTION_TIMEOUT_SECONDS
+            assert options["read_timeout"] == azure_network._ROUTE_READ_TIMEOUT_SECONDS
+            if options is not poke_create:
+                assert options["retry_total"] == azure_network._ROUTE_REQUEST_RETRIES
+            # A begin_* call hands its options on to the polling it builds unless it is given one.
+            assert isinstance(options.get("polling"), ARMPolling) == method.startswith("begin_")
+
+    def test_a_removal_waits_only_for_what_its_first_request_left_of_the_bound(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fakes = _install_fakes(monkeypatch)
+        waits: list[float | None] = []
+
+        class _WaitRecorded(_Poller):
+            def result(self, timeout: float | None = None) -> object:
+                waits.append(timeout)
+                return super().result(timeout)
+
+        def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
+            fakes.clock.now += 250.0  # the delete request's tries
+            return _WaitRecorded(None)
+
+        monkeypatch.setattr(fakes.network.security_rules, "begin_delete", _delete)
+        azure_network.remove_ssh_allow(fakes.network, "rg1", "vm1", f"{TRANSIENT_ALLOW_RULE_PREFIX}x")  # type: ignore[arg-type]
+
+        assert waits == [azure_network._OPERATION_TIMEOUT_SECONDS - 250.0]
+
+    def test_a_route_requests_retries_fit_inside_the_operation_bound(self) -> None:
+        """Every try of a first request, at its connection and read bounds, ends before the operation's wait must."""
+        per_try = azure_network._ROUTE_CONNECTION_TIMEOUT_SECONDS + azure_network._ROUTE_READ_TIMEOUT_SECONDS
+        assert (azure_network._ROUTE_REQUEST_RETRIES + 1) * per_try < azure_network._OPERATION_TIMEOUT_SECONDS
+
     @staticmethod
     def _poke_with(
         monkeypatch: pytest.MonkeyPatch, poller_type: type[_Poller], order: list[str] | None = None
@@ -1011,11 +1070,11 @@ class TestRouteOperationsAreBounded:
         rules: _FakeSecurityRules = fakes.network.security_rules
         real_create, real_delete = rules.begin_create_or_update, rules.begin_delete
 
-        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+        def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
             poller = real_create(rg, nsg, rule_name, rule)
             return poller_type(rule) if rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX) else poller
 
-        def _delete(rg: str, nsg: str, rule_name: str) -> _Poller:
+        def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
             if order is not None and rule_name.startswith(TRANSIENT_ALLOW_RULE_PREFIX):
                 order.append("deleted")
             return real_delete(rg, nsg, rule_name)
@@ -1059,21 +1118,6 @@ class TestRouteOperationsAreBounded:
         assert waits and all(wait is not None for wait in waits)
         assert captured_output.warnings == []
 
-    def test_a_poke_whose_create_never_finishes_is_removed_and_named_for_removal_by_hand(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
-    ) -> None:
-        class _HungPoller(_Poller):
-            def __init__(self, value: object) -> None:
-                super().__init__(value, finishes=False)
-
-        rules, clock = self._poke_with(monkeypatch, _HungPoller)
-
-        (attempted,) = rules.transient_names()
-        assert attempted in {d[2] for d in rules.deletes()}
-        assert clock.now == azure_network._UNFINISHED_CREATE_SETTLE_SECONDS  # the settle wait is bounded
-        (warning,) = captured_output.warnings
-        assert attempted in warning
-
     @pytest.mark.parametrize("hung", ["deny", "public-ip"])
     def test_a_heal_or_convergence_that_does_not_finish_fails_the_route_before_any_poke(
         self, monkeypatch: pytest.MonkeyPatch, hung: str
@@ -1082,9 +1126,11 @@ class TestRouteOperationsAreBounded:
         rules: _FakeSecurityRules = network.security_rules
         hung_poller = _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"), finishes=False)
         if hung == "deny":
-            monkeypatch.setattr(rules, "begin_create_or_update", lambda *_args: hung_poller)
+            monkeypatch.setattr(rules, "begin_create_or_update", lambda *_args, **_options: hung_poller)
         else:
-            monkeypatch.setattr(network.public_ip_addresses, "begin_create_or_update", lambda *_args: hung_poller)
+            monkeypatch.setattr(
+                network.public_ip_addresses, "begin_create_or_update", lambda *_args, **_options: hung_poller
+            )
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         with pytest.raises(AzureError) as caught, _platform()._transient_route(vm, RunContext()):

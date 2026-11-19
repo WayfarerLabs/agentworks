@@ -837,7 +837,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         module's ``poke_ssh_allow`` / ``remove_ssh_allow``, which carry
         the full contracts).
 
-        Each Azure operation enter waits on is bounded on its own (the
+        Each Azure call enter makes is bounded on its own (the
         network module's ``_OPERATION_TIMEOUT_SECONDS``), not the whole
         enter, so opening the route can take more than one bound; it comes
         before the script's deadline, which starts at dispatch.

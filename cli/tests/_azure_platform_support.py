@@ -91,10 +91,12 @@ class _FakeSecurityRules:
     injection drives the 404-tolerance and removal-failure paths. The
     shared ``events`` list records creations and deletions in call
     order so ordering contracts (deny re-pin before allow poke) can be
-    asserted."""
+    asserted. ``options`` records each call's azure-core per-call options
+    by method name, in call order."""
 
     def __init__(self) -> None:
         self.events: list[tuple[str, str, str, str, Any]] = []
+        self.options: list[tuple[str, dict[str, Any]]] = []
         self.create_error: BaseException | None = None
         self.delete_error: BaseException | None = None
         # Live rules by name: what list() serves the poke's slot
@@ -102,14 +104,16 @@ class _FakeSecurityRules:
         # (e.g. a legacy deny at 100, or a full band).
         self.rules: dict[str, Any] = {}
 
-    def begin_create_or_update(self, rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+    def begin_create_or_update(self, rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
+        self.options.append(("begin_create_or_update", options))
         if self.create_error is not None:
             raise self.create_error
         self.events.append(("create", rg, nsg, rule_name, rule))
         self.rules[rule_name] = rule
         return _Poller(rule)
 
-    def begin_delete(self, rg: str, nsg: str, rule_name: str) -> _Poller:
+    def begin_delete(self, rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
+        self.options.append(("begin_delete", options))
         if self.delete_error is not None:
             raise self.delete_error
         self.events.append(("delete", rg, nsg, rule_name, None))
@@ -129,7 +133,8 @@ class _FakeSecurityRules:
     # The SDK method is genuinely named ``list``; annotate via builtins
     # so the method does not shadow the builtin in this class's other
     # annotations (mypy resolves them in class scope).
-    def list(self, rg: str, nsg: str) -> builtins.list[Any]:
+    def list(self, rg: str, nsg: str, **options: Any) -> builtins.list[Any]:
+        self.options.append(("list", options))
         return [rule for rule in self.rules.values()]
 
 
@@ -137,9 +142,11 @@ class _FakePublicIps:
     def __init__(self, events: list[tuple[str, str, str, str]] | None = None) -> None:
         self.created: list[tuple[str, str]] = []
         self.deleted: list[tuple[str, str]] = []
+        self.options: list[tuple[str, dict[str, Any]]] = []
         self._events = events if events is not None else []
 
-    def begin_create_or_update(self, rg: str, name: str, params: object) -> _Poller:
+    def begin_create_or_update(self, rg: str, name: str, params: object, **options: Any) -> _Poller:
+        self.options.append(("begin_create_or_update", options))
         self.created.append((rg, name))
         return _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"))
 
@@ -159,14 +166,17 @@ class _FakeNics:
         self.deleted: list[tuple[str, str]] = []
         self.create_error: BaseException | None = None
         self.delete_error: BaseException | None = None
+        self.options: list[tuple[str, dict[str, Any]]] = []
         self._events = events if events is not None else []
         pip = SimpleNamespace(id="/pip/id") if public_ip_attached else None
         self.nic = SimpleNamespace(ip_configurations=[SimpleNamespace(public_ip_address=pip)])
 
-    def get(self, rg: str, name: str) -> Any:
+    def get(self, rg: str, name: str, **options: Any) -> Any:
+        self.options.append(("get", options))
         return self.nic
 
-    def begin_create_or_update(self, rg: str, name: str, nic: object) -> _Poller:
+    def begin_create_or_update(self, rg: str, name: str, nic: object, **options: Any) -> _Poller:
+        self.options.append(("begin_create_or_update", options))
         if self.create_error is not None:
             raise self.create_error
         self.updated.append((rg, name, nic))
@@ -242,9 +252,14 @@ class _FakeVMs:
 
 class _FakeVMsWithLocation(_FakeVMs):
     """Compute stub for the route path: location reads serve the heal's
-    public-IP region lookup."""
+    public-IP region lookup, recording their per-call options."""
 
-    def get(self, rg: str, name: str, **_kw: object) -> Any:
+    def __init__(self, events: list[tuple[str, str, str, str]] | None = None) -> None:
+        super().__init__(events)
+        self.options: list[tuple[str, dict[str, Any]]] = []
+
+    def get(self, rg: str, name: str, **options: Any) -> Any:
+        self.options.append(("get", options))
         return SimpleNamespace(location="eastus")
 
 

@@ -117,14 +117,26 @@ ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
 # the next free slot.
 _POKE_ALLOCATION_ATTEMPTS = 5
 
-# How long one Azure operation on a route may take, each on its own: the
-# public-IP heal, the NSG convergence and the poke that open it, and the
-# removal that closes it. The route opens before the script's deadline starts,
-# so the run_as_root contract needs that bounded by itself. The removal runs
-# with interrupts deferred, so a Ctrl-C can wait this long for it, and up to
-# _UNFINISHED_CREATE_SETTLE_SECONDS longer when a poke's create had not finished.
-# GCP bounds its firewall operations the same way.
+# How long one Azure call on a route may take, each on its own: the reads and
+# long-running operations of the public-IP heal, the NSG convergence and the
+# poke that open it, and the removal that closes it. The route opens before the
+# script's deadline starts, so the run_as_root contract needs that bounded by
+# itself. The removal runs with interrupts deferred, so a Ctrl-C can wait this
+# long for it, and up to _UNFINISHED_CREATE_SETTLE_SECONDS longer when a poke's
+# create had not finished. GCP bounds its firewall operations the same way.
 _OPERATION_TIMEOUT_SECONDS = 300.0
+
+# The azure-core per-call bounds on each request a route call sends, since the
+# client's own (300s to read, several retries with backoff) would let one
+# request outlast _OPERATION_TIMEOUT_SECONDS many times over: a try gives up
+# after 10s without a connection or 60s without data, and is retried at most
+# twice, so three tries and azure-core's backoff of a few seconds between them
+# end well inside the bound, and a long-running operation's wait takes what
+# remains of it. A wait Azure asks for between tries (Retry-After) is the one
+# azure-core adds on top.
+_ROUTE_CONNECTION_TIMEOUT_SECONDS = 10.0
+_ROUTE_READ_TIMEOUT_SECONDS = 60.0
+_ROUTE_REQUEST_RETRIES = 2
 
 # How much longer a poke whose create did not finish waits for that create
 # before it removes the rule, with interrupts deferred: a delete while the
@@ -197,13 +209,40 @@ class _RouteOperationTimeout(AzureError):
     """An operation opening a route did not finish within ``_OPERATION_TIMEOUT_SECONDS``."""
 
 
-def _finish_route_operation(poller: Any, what: str) -> Any:
-    """``poller``'s result, waiting at most ``_OPERATION_TIMEOUT_SECONDS``, or :class:`_RouteOperationTimeout`.
+def _route_call_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[str, Any]:
+    """The azure-core per-call options that bound a route call's requests (see ``_ROUTE_REQUEST_RETRIES``)."""
+    return {
+        "connection_timeout": _ROUTE_CONNECTION_TIMEOUT_SECONDS,
+        "read_timeout": _ROUTE_READ_TIMEOUT_SECONDS,
+        "retry_total": retries,
+    }
 
-    The operation may still finish after the wait ends, so a caller that
-    created something removes it.
+
+def _route_operation_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[str, Any]:
+    """:func:`_route_call_options` for a long-running operation's first request only.
+
+    The generated ``begin_*`` methods pass their per-call options on to the
+    status polling they build, so the polling is given explicitly, and its
+    status reads keep the client's own timeouts and retries: azure-mgmt-core's
+    ``ARMPolling`` with its defaults, which are the ones the client builds
+    with (its 30s polling interval among them), short of the endpoint that
+    resolves a relative status URL. ARM sends absolute ones, and a status read
+    that failed would count as the operation failing, not as its success.
     """
-    result = poller.result(timeout=_OPERATION_TIMEOUT_SECONDS)
+    from azure.mgmt.core.polling.arm_polling import ARMPolling
+
+    return {**_route_call_options(retries=retries), "polling": ARMPolling()}
+
+
+def _finish_route_operation(poller: Any, what: str, deadline: float) -> Any:
+    """``poller``'s result, waiting until ``deadline`` on the monotonic clock, or :class:`_RouteOperationTimeout`.
+
+    ``deadline`` is ``_OPERATION_TIMEOUT_SECONDS`` after the operation's
+    first request was sent, so the wait takes what that request left. The
+    operation may still finish after the wait ends, so a caller that created
+    something removes it.
+    """
+    result = poller.result(timeout=max(0.0, deadline - time.monotonic()))
     if not poller.done():
         summary = f"Azure did not finish {what} within {_OPERATION_TIMEOUT_SECONDS:.0f}s"
         raise _RouteOperationTimeout(summary, detail=summary)
@@ -299,22 +338,27 @@ def converge_nsg(network: NetworkManagementClient, rg: str, name: str) -> None:
     from azure.core.exceptions import ResourceNotFoundError
 
     try:
+        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
         _finish_route_operation(
             network.security_rules.begin_create_or_update(
                 rg,
                 f"{name}-nsg",
                 DENY_ALL_INBOUND_RULE_NAME,
                 _deny_all_inbound_rule(),
+                **_route_operation_options(),
             ),
             f"ensuring the '{DENY_ALL_INBOUND_RULE_NAME}' rule on NSG '{name}-nsg'",
+            deadline,
         )
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 
     try:
+        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
         _finish_route_operation(
-            network.security_rules.begin_delete(rg, f"{name}-nsg", LEGACY_SSH_RULE_NAME),
+            network.security_rules.begin_delete(rg, f"{name}-nsg", LEGACY_SSH_RULE_NAME, **_route_operation_options()),
             f"deleting the legacy '{LEGACY_SSH_RULE_NAME}' rule on NSG '{name}-nsg'",
+            deadline,
         )
     except ResourceNotFoundError:
         pass
@@ -339,7 +383,7 @@ def _lowest_free_allow_priority(network: NetworkManagementClient, rg: str, name:
     from agentworks.errors import StateError
 
     try:
-        rules = network.security_rules.list(rg, f"{name}-nsg")
+        rules = network.security_rules.list(rg, f"{name}-nsg", **_route_call_options())
         # list() returns a lazy ItemPaged: the HTTP requests happen
         # during iteration, so the wrap must cover the comprehension,
         # not just the call.
@@ -376,22 +420,14 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     priority uniqueness per direction, so losing a slot race to a
     concurrent allocation surfaces as a create error; the loser re-lists
     and takes the next free slot. After the attempts are exhausted the
-    last error raises wrapped. A failed attempt cleans up its own rule
-    name (via :func:`remove_ssh_allow`: 404-tolerant, and a cleanup
-    failure warns naming the rule, NSG, and prefixes rather than being
-    swallowed) before moving on: the create may have succeeded
-    server-side even though the client-side wait failed, and only this
-    function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path. No failure proves that a create cannot land:
-    azure-core retries a request whose answer it did not read before it
-    raises the last try's error, and records a failure to observe the
-    operation as the operation failing. So every create that did not
-    return normally is given time to settle before its rule is removed,
-    with a warning naming the rule unless Azure reported the create
-    succeeded, which proves the rule exists and so that the delete removed
-    it. A request Azure plainly refused warns too, once per attempt it
-    costs. A timeout or interrupt then propagates; the route's own exit
-    never runs for a poke that did not return.
+    last error raises wrapped. Each create's request is sent once, without
+    azure-core's retries, so an error Azure answered it with speaks for the
+    only try. Every create that did not return normally, whatever stopped
+    it, goes through :func:`_remove_unfinished_allow` before anything else
+    happens: only this function knows the nonce name, so that cleanup
+    cannot be left to the caller's exit path. A timeout or interrupt then
+    propagates; the route's own exit never runs for a poke that did not
+    return.
     """
     from uuid import uuid4
 
@@ -402,16 +438,18 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
         rule_name = f"{TRANSIENT_ALLOW_RULE_PREFIX}{uuid4().hex[:8]}"
         poller: Any = None
         try:
+            deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
             poller = network.security_rules.begin_create_or_update(
                 rg,
                 f"{name}-nsg",
                 rule_name,
                 _allow_ssh_rule(rule_name, prefixes, priority),
+                **_route_operation_options(retries=0),
             )
-            _finish_route_operation(poller, f"creating the '{rule_name}' rule on NSG '{name}-nsg'")
+            _finish_route_operation(poller, f"creating the '{rule_name}' rule on NSG '{name}-nsg'", deadline)
         except BaseException as exc:
             # The create did not return, so the rule may exist or still land, and only this name finds it.
-            _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
+            _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller, exc)
             if not isinstance(exc, Exception) or isinstance(exc, _RouteOperationTimeout):
                 raise  # an interrupt, or a timeout that another attempt would wait out as long again
             last_exc = exc
@@ -422,25 +460,38 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
 
 
 def _remove_unfinished_allow(
-    network: NetworkManagementClient, rg: str, name: str, rule_name: str, prefixes: list[str], create: Any | None
+    network: NetworkManagementClient,
+    rg: str,
+    name: str,
+    rule_name: str,
+    prefixes: list[str],
+    create: Any | None,
+    error: BaseException,
 ) -> None:
-    """Remove the poke's rule whose ``create`` did not return, holding interrupts.
+    """Remove the poke's rule whose create did not return, holding interrupts.
 
-    That is a create that raised, ran out of time or was interrupted,
-    whether or not it had returned a poller (``create`` is ``None`` when
-    it had not). A create with a poller gets up to
-    ``_UNFINISHED_CREATE_SETTLE_SECONDS`` more first, so the delete does
-    not race it, reading the state its polling method holds every
-    ``_UNFINISHED_CREATE_POLL_SECONDS`` until that state is final; when
-    polling itself has stopped that state never changes and the wait takes
-    its whole bound. The delete is authoritative only when that state is
-    the ``Succeeded`` Azure reported, since then the rule exists. Any
-    other outcome may leave a rule that lands after the delete: azure-core
-    records its own failure to observe the operation as ``Failed``, and a
-    create that raised before its poller may follow an earlier try of the
-    same request that got no answer. So the warning names the rule for
-    removal by hand, and goes out before the held interrupt is delivered,
-    which would otherwise skip it.
+    That is a create that raised ``error``, ran out of time or was
+    interrupted, whether or not it had returned a poller (``create`` is
+    ``None`` when it had not). The removal is silent only when the outcome
+    is known; otherwise the warning names the rule for removal by hand, and
+    goes out before the held interrupt is delivered, which would otherwise
+    skip it.
+
+    Before a poller, the outcome is known only when ``error`` is Azure's 4xx
+    answer to the create's request: that request was sent once, so the
+    answer refuses the only try and the rule never exists. A request with no
+    answer may have reached Azure, and a 5xx (a gateway timeout among them)
+    does not say the network provider never took it, so both warn.
+
+    A create with a poller gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS``
+    more first, so the delete does not race it, reading the state its
+    polling method holds every ``_UNFINISHED_CREATE_POLL_SECONDS`` until
+    that state is final; when polling itself has stopped that state never
+    changes and the wait takes its whole bound. Its outcome is known only
+    when that state is the ``Succeeded`` Azure reported, since then the rule
+    exists and the delete removes it: azure-core records its own failure to
+    observe the operation (a status read Azure refused, or one without a
+    status) as ``Failed``, so no other state proves the rule will not land.
     """
     with interrupts_deferred():
         settled = create is not None and _create_settled(create)
@@ -453,14 +504,21 @@ def _remove_unfinished_allow(
             while not settled and (remaining := deadline - time.monotonic()) > 0:
                 time.sleep(min(_UNFINISHED_CREATE_POLL_SECONDS, remaining))
                 settled = _create_settled(create)
-        created = create is not None and _create_succeeded(create)
+        known = _create_succeeded(create) if create is not None else _refused_by_azure(error)
         remove_ssh_allow(network, rg, name, rule_name, prefixes)
-        if not created:
+        if not known:
             output.warn(
                 f"Could not confirm that Azure created the '{rule_name}' rule on NSG '{name}-nsg' before removing "
                 f"it, so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG and delete that "
                 "rule by name."
             )
+
+
+def _refused_by_azure(error: BaseException) -> bool:
+    """Whether ``error`` is Azure's 4xx answer to a request, which it therefore did not carry out."""
+    from azure.core.exceptions import HttpResponseError
+
+    return isinstance(error, HttpResponseError) and error.response is not None and 400 <= (error.status_code or 0) < 500
 
 
 def _create_settled(create: Any) -> bool:
@@ -472,12 +530,7 @@ def _create_settled(create: Any) -> bool:
 
 
 def _create_succeeded(create: Any) -> bool:
-    """Whether Azure reported that ``create`` succeeded; a failed read counts as not.
-
-    azure-core sets the state it holds from Azure's answers, except that
-    it records a failure to observe the operation (a status read Azure
-    refused, or one without a status) as ``Failed``, never ``Succeeded``.
-    """
+    """Whether ``create``'s polling method holds the ``Succeeded`` Azure reported; a failed read counts as not."""
     try:
         return str(create.polling_method().status()).lower() == "succeeded"
     except Exception:
@@ -514,9 +567,10 @@ def remove_ssh_allow(
     Ctrl-C and the terminations wait for the removal to finish
     (:func:`~agentworks.interrupts.interrupts_deferred`), since a removal cut
     short leaves the rule open. So it waits at most
-    ``_OPERATION_TIMEOUT_SECONDS`` for Azure, which is as long as the
-    operator waits; an operation still running then is an outcome nobody saw,
-    so it warns that the rule may remain.
+    ``_OPERATION_TIMEOUT_SECONDS`` for Azure, its delete request's tries
+    included (see ``_ROUTE_REQUEST_RETRIES``), and that is as long as the
+    operator waits; an operation still running then is an outcome nobody
+    saw, so it warns that the rule may remain.
     """
     with interrupts_deferred():
         _delete_ssh_allow(network, rg, name, rule_name, prefixes)
@@ -529,8 +583,9 @@ def _delete_ssh_allow(
 
     scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
     try:
-        poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name)
-        poller.result(timeout=_OPERATION_TIMEOUT_SECONDS)
+        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
+        poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name, **_route_operation_options())
+        poller.result(timeout=max(0.0, deadline - time.monotonic()))
     except ResourceNotFoundError:
         return
     except Exception as exc:
@@ -573,28 +628,33 @@ def ensure_public_ip(
     )
 
     try:
-        nic = network.network_interfaces.get(rg, f"{name}-nic")
+        nic = network.network_interfaces.get(rg, f"{name}-nic", **_route_call_options())
         if nic.ip_configurations and nic.ip_configurations[0].public_ip_address is not None:
             return
 
         output.info("Restoring missing public IP...")
+        location = _get_vm_location(compute, rg, name)
+        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
         ip_poller = network.public_ip_addresses.begin_create_or_update(
             rg,
             f"{name}-ip",
             PublicIPAddress(
-                location=_get_vm_location(compute, rg, name),
+                location=location,
                 sku=PublicIPAddressSku(name="Standard"),
                 properties=PublicIPAddressPropertiesFormat(public_ip_allocation_method="Static"),
                 tags={"owner": "agentworks"},
             ),
+            **_route_operation_options(),
         )
-        ip_result = _finish_route_operation(ip_poller, f"creating the public IP '{name}-ip'")
+        ip_result = _finish_route_operation(ip_poller, f"creating the public IP '{name}-ip'", deadline)
 
         if nic.ip_configurations:
             nic.ip_configurations[0].public_ip_address = PublicIPAddress(id=ip_result.id)
+        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
         _finish_route_operation(
-            network.network_interfaces.begin_create_or_update(rg, f"{name}-nic", nic),
+            network.network_interfaces.begin_create_or_update(rg, f"{name}-nic", nic, **_route_operation_options()),
             f"attaching the public IP to '{name}-nic'",
+            deadline,
         )
 
     except Exception as exc:
@@ -898,6 +958,6 @@ def rollback_create_on_interrupt(
 
 def _get_vm_location(compute: ComputeManagementClient, rg: str, name: str) -> str:
     """Get the Azure region for a VM by querying the compute API, using
-    the caller's (cached) compute client."""
-    vm_info = compute.virtual_machines.get(rg, name)
+    the caller's (cached) compute client, bounded as a route call."""
+    vm_info = compute.virtual_machines.get(rg, name, **_route_call_options())
     return vm_info.location or "eastus"

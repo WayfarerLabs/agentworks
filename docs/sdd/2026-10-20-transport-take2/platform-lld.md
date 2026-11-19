@@ -1076,10 +1076,16 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   deadline. Counting the clouds from the call instead would need every deadline resized to cover a
   firewall rule, an address read and a boot, and would still not bound the provider calls.
 - **The bounds before dispatch.** The clouds: `PublicSSH.wait_until_answering` (120 s); each
-  provider call its client's timeout; Azure's long-running operations on the route (the public-IP
-  heal, the deny re-pin, the legacy-rule delete and the poke) each wait at most
-  `_OPERATION_TIMEOUT_SECONDS` (300 s, the removal's bound too), where they had no bound. A poke
-  whose create does not finish in time raises without another attempt, after giving the create up to
+  provider call its client's timeout; Azure's calls on the route (the public-IP heal's reads and
+  operations, the deny re-pin, the legacy-rule delete, the poke's slot read and create, and the
+  removal) each take at most `_OPERATION_TIMEOUT_SECONDS` (300 s), where they had no bound. Every
+  request they send carries azure-core per-call bounds (10 s to connect, 60 s without data, at most
+  two retries), so its tries end inside the bound, and a long-running operation's wait takes what
+  its first request left. The generated `begin_*` methods hand per-call options on to the status
+  polling they build, so each is given its polling explicitly (`ARMPolling` with the defaults the
+  client builds it with) and its status reads keep the client's own timeouts and retries. Only a
+  wait Azure asks for between tries (`Retry-After`) adds to the bound. A poke whose create does not
+  finish in time raises without another attempt, after giving the create up to
   `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more and then removing the rule, since a delete racing
   the create can fail or find nothing and let the rule land after it. An interrupted create gets the
   same settle before the interrupt propagates, and so does one whose wait failed, before the poke
@@ -1087,16 +1093,17 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   about once a second rather than joining the poller, since polling also ends on a transport error
   while the create runs, and on CPython 3.12 a join that Ctrl-C cut short makes every later join
   return at once. Only the `Succeeded` Azure reported (`polling_method().status()`, read
-  case-insensitively, a failed read counting as not) makes the delete authoritative; any other
-  outcome warns naming the rule for removal by hand. No failure proves a create cannot land:
-  azure-core records its own failure to observe the operation (a refused status read, or one without
-  a status) as `Failed`, and retries a request whose answer it did not read before raising the last
-  try's error, so a final 403 can follow a first try Azure carried out. A create that raised before
-  returning a poller has nothing to wait on and is removed at once with the warning. The cost is a
-  warning for each attempt Azure plainly refused, slot races among them. GCP's firewall insert
-  already had a bound. Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`,
-  and the agent wait's `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2)
-  dispatch at spawn.
+  case-insensitively, a failed read counting as not) makes that delete authoritative; any other
+  outcome warns naming the rule for removal by hand, since azure-core records its own failure to
+  observe the operation (a refused status read, or one without a status) as `Failed`. The poke sends
+  its create's request once (`retry_total=0`), so a create that raised before returning a poller is
+  removed at once, and its outcome is known only when the error is Azure's 4xx answer to that
+  request, which refuses the only try: that removal is silent. A create with no answer, or with a
+  5xx one (a gateway timeout does not say the network provider never took the request), warns. So a
+  refusal, a slot race among them, costs no warning; the warning is left to a create whose outcome
+  nobody saw. GCP's firewall insert already had a bound. Proxmox: the identity check's reads, each
+  at most `REQUEST_TIMEOUT_SECONDS`, and the agent wait's `AGENT_WAIT_SECONDS`. Local-process
+  channels (Lima, Remote Lima, WSL2) dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
   420-second budget, now counted with the agent waits outside each attempt's deadline, and retries

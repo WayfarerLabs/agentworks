@@ -80,15 +80,15 @@ class _FakeVMs:
 
 
 class _FakePublicIps:
-    def begin_create_or_update(self, rg: str, name: str, params: object) -> _Poller:
+    def begin_create_or_update(self, rg: str, name: str, params: object, **_kw: object) -> _Poller:
         return _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"))
 
 
 class _FakeNics:
-    def get(self, rg: str, name: str) -> object:
+    def get(self, rg: str, name: str, **_kw: object) -> object:
         return SimpleNamespace(ip_configurations=[SimpleNamespace(public_ip_address=None)])
 
-    def begin_create_or_update(self, rg: str, name: str, nic: object) -> _Poller:
+    def begin_create_or_update(self, rg: str, name: str, nic: object, **_kw: object) -> _Poller:
         return _Poller(None)
 
 

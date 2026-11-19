@@ -1,29 +1,29 @@
 """Which outcomes of an Azure poke's create let its cleanup delete stand without a warning.
 
 A create that did not return normally is removed, and its rule named for
-removal by hand, unless Azure reported that the create succeeded. Most
-cases drive the real azure-core poller and generated network client over
-an in-memory transport, since what they pin is how azure-core records
-what Azure answered: a failure to observe the operation becomes its own
-``Failed``, and a refused request can follow an earlier try that got no
-answer. Retries go to the fake rules, so the poke returns and the first
-attempt's cleanup is what each case inspects.
+removal by hand, unless its outcome is known: Azure refused its only
+request, or reported that it succeeded. Most cases drive the real
+azure-core poller and generated network client over an in-memory
+``requests`` adapter, since what they pin is how azure-core sends the
+create and records what Azure answered: the request goes once, and a
+failure to observe the operation becomes its own ``Failed``. Retries go
+to the fake rules, so the poke returns and the first attempt's cleanup is
+what each case inspects.
 """
 
 from __future__ import annotations
 
+import io
 import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from azure.core.credentials import AccessToken, AccessTokenInfo
-from azure.core.exceptions import ServiceRequestError, ServiceResponseError
-from azure.core.pipeline.transport import HttpTransport
+import requests
+from azure.core.credentials import AccessToken
+from azure.core.pipeline.transport import RequestsTransport
 from azure.core.polling.base_polling import LROBasePolling
-from azure.core.rest import HttpRequest
-from azure.core.rest._http_response_impl import HttpResponseImpl
-from azure.core.utils import CaseInsensitiveDict
 from azure.mgmt.network import NetworkManagementClient
+from requests.adapters import BaseAdapter
 
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX, _RouteOperationTimeout, poke_ssh_allow
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 _PREFIX = "198.18.0.7/32"
 _MONITOR = "https://management.azure.com/subscriptions/sub-A/providers/Microsoft.Network/operations/1?api-version=1"
 
-# An answer is a status, headers and a JSON body (raw bytes when not JSON), or an error the transport raises.
+# An answer is a status, headers and a JSON body (raw bytes when not JSON), or an error the adapter raises.
 _Answer = tuple[int, dict[str, str], object] | Exception
 
 _ACCEPTED: _Answer = (201, {"Azure-AsyncOperation": _MONITOR}, {"properties": {"provisioningState": "Updating"}})
@@ -55,50 +55,31 @@ class _Credential:
     def get_token(self, *_scopes: str, **_kwargs: object) -> AccessToken:
         return AccessToken("token", 2**31)
 
-    def get_token_info(self, *_scopes: str, **_kwargs: object) -> AccessTokenInfo:
-        return AccessTokenInfo("token", 2**31)
 
-
-class _ScriptedTransport(HttpTransport):  # type: ignore[type-arg]
-    """Answers each request with the next scripted answer, repeating the last; retry backoff takes no time."""
+class _ScriptedAdapter(BaseAdapter):
+    """Answers each request with the next scripted answer, repeating the last, and records its method."""
 
     def __init__(self, answers: list[_Answer]) -> None:
+        super().__init__()
         self._answers = answers
         self.methods: list[str] = []
 
-    def __enter__(self) -> _ScriptedTransport:
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        return None
-
-    def open(self) -> None:
-        return None
-
-    def close(self) -> None:
-        return None
-
-    def sleep(self, duration: float) -> None:
-        return None
-
-    def send(self, request: HttpRequest, **_kwargs: object) -> HttpResponseImpl:  # type: ignore[override]
-        self.methods.append(request.method)
+    def send(self, request: requests.PreparedRequest, *_args: object, **_kwargs: object) -> requests.Response:
+        self.methods.append(str(request.method))
         answer = self._answers.pop(0) if len(self._answers) > 1 else self._answers[0]
         if isinstance(answer, Exception):
             raise answer
         status, headers, body = answer
-        response = HttpResponseImpl(
-            request=request,
-            internal_response=None,
-            status_code=status,
-            headers=CaseInsensitiveDict(headers),
-            reason="scripted",
-            content_type="application/json",
-            stream_download_generator=None,
-        )
-        response._content = body if isinstance(body, bytes) else json.dumps(body).encode()
-        response._is_closed = True
+        response = requests.Response()
+        response.status_code = status
+        response.headers.update(headers)
+        response.raw = io.BytesIO(body if isinstance(body, bytes) else json.dumps(body).encode())
+        response.request = request
+        response.url = str(request.url)
         return response
+
+    def close(self) -> None:
+        return None
 
 
 def _poke_after(monkeypatch: pytest.MonkeyPatch, first: Callable[..., Any]) -> tuple[_FakeAzure, str, list[float]]:
@@ -112,16 +93,16 @@ def _poke_after(monkeypatch: pytest.MonkeyPatch, first: Callable[..., Any]) -> t
     first_name: list[str] = []
     deleted_at: list[float] = []
 
-    def _create(rg: str, nsg: str, rule_name: str, rule: object) -> Any:
+    def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> Any:
         if not first_name:
             first_name.append(rule_name)
-            return first(rg, nsg, rule_name, rule)
-        return real_create(rg, nsg, rule_name, rule)
+            return first(rg, nsg, rule_name, rule, **options)
+        return real_create(rg, nsg, rule_name, rule, **options)
 
-    def _delete(rg: str, nsg: str, rule_name: str) -> Any:
+    def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> Any:
         if first_name and rule_name == first_name[0]:
             deleted_at.append(fakes.clock.now)
-        return real_delete(rg, nsg, rule_name)
+        return real_delete(rg, nsg, rule_name, **options)
 
     monkeypatch.setattr(rules, "begin_create_or_update", _create)
     monkeypatch.setattr(rules, "begin_delete", _delete)
@@ -130,15 +111,18 @@ def _poke_after(monkeypatch: pytest.MonkeyPatch, first: Callable[..., Any]) -> t
     return fakes, first_name[0], deleted_at
 
 
-def _through_sdk(answers: list[_Answer]) -> Callable[..., Any]:
-    """A first create sent by the generated client over a transport giving ``answers``."""
+def _through_sdk(answers: list[_Answer]) -> tuple[Callable[..., Any], _ScriptedAdapter]:
+    """A create sent by the generated client over an adapter giving ``answers``, and that adapter."""
+    adapter = _ScriptedAdapter(answers)
+    session = requests.Session()
+    session.mount("https://", adapter)
     sdk = NetworkManagementClient(
         _Credential(),  # type: ignore[arg-type]
         "sub-A",
-        transport=_ScriptedTransport(answers),
-        polling_interval=0,
+        transport=RequestsTransport(session=session, session_owner=False),
+        retry_backoff_factor=0,
     )
-    return sdk.security_rules.begin_create_or_update
+    return sdk.security_rules.begin_create_or_update, adapter
 
 
 def _assert_named(captured_output: CapturedOutput, rule_name: str) -> None:
@@ -161,7 +145,8 @@ def test_an_accepted_create_that_azure_core_records_as_failed_is_named(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, monitor: _Answer
 ) -> None:
     """azure-core records a status read it could not use as ``Failed``, which says nothing of the create."""
-    fakes, first, deleted_at = _poke_after(monkeypatch, _through_sdk([_ACCEPTED, monitor]))
+    create, _adapter = _through_sdk([_ACCEPTED, monitor])
+    fakes, first, deleted_at = _poke_after(monkeypatch, create)
 
     assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
     assert deleted_at == [0.0]  # a final state, if not Azure's, ends the settle at once
@@ -172,34 +157,63 @@ def test_a_create_azure_reported_succeeded_is_removed_without_a_warning(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
     """The final read failing after Azure reported success leaves a rule that exists, so its delete is authoritative."""
-    fakes, first, _deleted_at = _poke_after(
-        monkeypatch, _through_sdk([_ACCEPTED, _reported("Succeeded"), (200, {}, b"{not json")])
-    )
+    create, _adapter = _through_sdk([_ACCEPTED, _reported("Succeeded"), (200, {}, b"{not json")])
+    fakes, first, _deleted_at = _poke_after(monkeypatch, create)
 
     assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
+    assert captured_output.warnings == []
+
+
+@pytest.mark.parametrize("status", [400, 403, 409], ids=["bad-request", "forbidden", "conflict"])
+def test_a_create_azure_refused_is_removed_without_a_warning(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, status: int
+) -> None:
+    """The create's request is sent once, so Azure's refusal of it says the rule never exists."""
+    create, adapter = _through_sdk([_refused(status)])
+    fakes, first, deleted_at = _poke_after(monkeypatch, create)
+
+    assert adapter.methods == ["PUT"]
+    assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
+    assert deleted_at == [0.0]  # no poller to wait on
     assert captured_output.warnings == []
 
 
 @pytest.mark.parametrize(
     "answers",
     [
-        [_refused(400)],
-        [_refused(403)],
-        [ServiceResponseError("read timed out"), _refused(403)],
+        [requests.exceptions.ReadTimeout("read timed out"), _refused(403)],
+        [requests.exceptions.ConnectionError("connection reset")],
         [_refused(504)],
-        [ServiceRequestError("connection reset")],
     ],
-    ids=["bad-request", "forbidden", "forbidden-after-unanswered-try", "gateway-timeout", "request-unsent"],
+    ids=["unanswered", "request-unsent", "gateway-timeout"],
 )
-def test_a_create_that_raised_before_its_poller_is_named(
+def test_a_create_azure_did_not_refuse_before_its_poller_is_named(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, answers: list[_Answer]
 ) -> None:
-    """azure-core retries a request it got no answer to, so its last error does not prove the first try failed."""
-    fakes, first, deleted_at = _poke_after(monkeypatch, _through_sdk(answers))
+    """Without Azure's 4xx answer the only try may have reached the network provider; nothing is resent to find out."""
+    create, adapter = _through_sdk(answers)
+    fakes, first, deleted_at = _poke_after(monkeypatch, create)
 
+    assert adapter.methods == ["PUT"]
     assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
     assert deleted_at == [0.0]  # no poller to wait on
     _assert_named(captured_output, first)
+
+
+def test_the_creates_status_reads_keep_azure_cores_retries(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """Only the create's own request goes unretried; a status read Azure could not serve is read again."""
+    create, adapter = _through_sdk([_ACCEPTED, _refused(503), _reported("Succeeded"), (200, {}, {"name": "rule"})])
+    fakes = _install_fakes(monkeypatch)
+    rules = fakes.network.security_rules
+    monkeypatch.setattr(rules, "begin_create_or_update", create)
+
+    poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+
+    assert adapter.methods == ["PUT", "GET", "GET", "GET"]
+    assert rules.deletes() == []
+    assert captured_output.warnings == []
 
 
 class _TimedOut(_Poller):
@@ -218,7 +232,7 @@ def _time_out_with(monkeypatch: pytest.MonkeyPatch, polling: object) -> tuple[_F
     rules = fakes.network.security_rules
     real_create = rules.begin_create_or_update
 
-    def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+    def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
         real_create(rg, nsg, rule_name, rule)
         return _TimedOut(polling)
 
