@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, Deadline
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient
+from agentworks.deadline import Deadline
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -474,10 +475,11 @@ def delete_matching_firewall(
 
     Its reads, delete and operation wait share one bound of ``timeout`` on
     the wall clock (a ``Deadline``), each taking what the ones before left,
-    since its callers hold interrupts while it runs; a call left without time
-    fails, and the result says the rule was not proven absent.
+    since its callers hold interrupts while it runs. A call with nothing
+    left of the bound is not made and fails, so the result says the rule
+    was not proven absent.
     """
-    deadline = Deadline(timeout)
+    deadline = Deadline.after(timeout)
     client = BoundedClient(client, deadline)
     try:
         result = inspect_firewall(
@@ -519,7 +521,7 @@ def delete_matching_firewall(
             operation,
             label=f"firewall rule {expected.name}",
             zone=None,
-            timeout=deadline.remaining(),
+            timeout=deadline.remaining() or 0.0,  # never unbounded: made from a timeout
         )
     except AgentworksError:
         pass

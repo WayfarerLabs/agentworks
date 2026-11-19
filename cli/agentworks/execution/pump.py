@@ -6,7 +6,7 @@ caller's sinks. It starts the process through ``ssh_process.spawn`` and
 otherwise knows nothing about ssh, which is what lets the conformance suite
 run it against a local shell.
 
-A :class:`Deadline` bounds the local wait and never claims the guest command
+A :class:`~agentworks.deadline.Deadline` bounds the local wait and never claims the guest command
 stopped.
 """
 
@@ -20,9 +20,9 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks.deadline import Deadline
 from agentworks.execution import ssh_process
 from agentworks.execution.envelope import StreamFilter
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES
@@ -40,27 +40,6 @@ _NATURAL_EXIT_SECONDS = 1.0
 _REAP_SECONDS = 0.5
 _EXIT_DRAIN_SECONDS = 0.1
 _STDIN_QUEUE_CHUNKS = 4
-
-
-@dataclass(frozen=True)
-class Deadline:
-    """One local observation budget, not guest cancellation; None is unbounded."""
-
-    expires_at: float | None
-
-    @classmethod
-    def after(cls, seconds: float | None) -> Deadline:
-        return cls(None if seconds is None else time.monotonic() + seconds)
-
-    def remaining(self) -> float | None:
-        if self.expires_at is None:
-            return None
-        return max(0.0, self.expires_at - time.monotonic())
-
-    @property
-    def expired(self) -> bool:
-        remaining = self.remaining()
-        return remaining is not None and remaining <= 0
 
 
 Sink = Callable[[bytes], None]

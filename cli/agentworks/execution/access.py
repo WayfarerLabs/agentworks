@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.deadline import Deadline
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, forwarding, pump, ssh_process
@@ -377,7 +378,7 @@ class VMAccess:
                 fail_on_input_error=isinstance(request.stdin, FromFile),
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
-                deadline=pump.Deadline.after(request.deadline),
+                deadline=Deadline.after(request.deadline),
             ) as session:
                 stop = session.pump()
                 session.end()

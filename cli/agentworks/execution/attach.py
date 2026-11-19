@@ -22,10 +22,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.deadline import Deadline
 from agentworks.execution import ssh_process
 from agentworks.execution.agw_launch import HANDOVER_WAIT_SECONDS
 from agentworks.execution.errors import ExecutionIncomplete
-from agentworks.execution.pump import Deadline, PipeSession, StopReason
+from agentworks.execution.pump import PipeSession, StopReason
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.terminal import emit_clear, guarded_terminal
 

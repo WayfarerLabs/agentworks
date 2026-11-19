@@ -47,7 +47,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, CallTimedOut, Deadline
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, CallTimedOut
+from agentworks.deadline import Deadline
 from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError, TokenRejectedError
 from agentworks.interrupts import interrupts_deferred
 
@@ -298,7 +299,7 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
 
 def _removal_client(ec2: Any) -> BoundedClient:
     """``ec2`` with every call through it sharing one ``_REMOVAL_TIMEOUT_SECONDS`` bound, starting now."""
-    return BoundedClient(ec2, Deadline(_REMOVAL_TIMEOUT_SECONDS))
+    return BoundedClient(ec2, Deadline.after(_REMOVAL_TIMEOUT_SECONDS))
 
 
 def remove_ssh_allow_interruptibly(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:

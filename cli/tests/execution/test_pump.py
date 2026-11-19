@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.deadline import Deadline
 from agentworks.execution import envelope, pump, ssh_process
 from agentworks.execution.errors import ClientUnsupported
-from agentworks.execution.pump import Capture, Deadline, PipeSession, StopReason
+from agentworks.execution.pump import Capture, PipeSession, StopReason
 from agentworks.execution.results import Completed, Unknown, UnknownReason
 
 if TYPE_CHECKING:

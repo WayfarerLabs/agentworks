@@ -24,11 +24,11 @@ the settle before it too.
 
 from __future__ import annotations
 
-import time
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut, call_within
+from agentworks.deadline import Deadline
 from agentworks.plugins.azure.errors import AzureError
 
 if TYPE_CHECKING:
@@ -86,31 +86,29 @@ def _route_operation_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[s
     return {**_route_call_options(retries=retries), "polling": ARMPolling()}
 
 
-def _bounded_route_call[T](call: Callable[[], T], what: str, deadline: float | None = None) -> T:
-    """``call()``'s result, waiting until ``deadline`` on the monotonic clock, or :class:`_RouteCallTimeout`.
+def _bounded_route_call[T](call: Callable[[], T], what: str, deadline: Deadline | None = None) -> T:
+    """``call()``'s result, waiting until ``deadline`` runs out, or :class:`_RouteCallTimeout`.
 
-    ``deadline`` defaults to ``_OPERATION_TIMEOUT_SECONDS`` from now; an
-    operation's first request and wait share theirs (see
+    With no ``deadline`` the call gets ``_OPERATION_TIMEOUT_SECONDS`` of its
+    own; an operation's first request and wait share one (see
     :func:`_start_route_operation`). The call runs through
     :func:`~agentworks.capabilities.vm_platform.wall_bound.call_within`, so
     Ctrl-C still ends the wait promptly.
     """
-    if deadline is None:
-        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
     try:
-        return call_within(call, max(0.0, deadline - time.monotonic()))
+        return call_within(call, _OPERATION_TIMEOUT_SECONDS if deadline is None else deadline)
     except CallTimedOut:
         raise _RouteCallTimeout(what) from None
 
 
-def _start_route_operation(start: Callable[[], Any], what: str) -> tuple[Any, float]:
+def _start_route_operation(start: Callable[[], Any], what: str) -> tuple[Any, Deadline]:
     """The poller ``start`` returns, from a first request bounded like any call, and the deadline its wait shares."""
-    deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
+    deadline = Deadline.after(_OPERATION_TIMEOUT_SECONDS)
     return _bounded_route_call(start, what, deadline), deadline
 
 
-def _finish_route_operation(poller: Any, what: str, deadline: float) -> Any:
-    """``poller``'s result, waiting until ``deadline`` on the monotonic clock, or :class:`_RouteCallTimeout`.
+def _finish_route_operation(poller: Any, what: str, deadline: Deadline) -> Any:
+    """``poller``'s result, waiting until ``deadline`` runs out, or :class:`_RouteCallTimeout`.
 
     ``deadline`` is the one the operation's first request was given, so the
     wait takes what that request left. The wait is itself a bounded call, so
@@ -119,7 +117,7 @@ def _finish_route_operation(poller: Any, what: str, deadline: float) -> Any:
     """
     if poller.done():
         return poller.result()
-    result = _bounded_route_call(partial(poller.result, timeout=max(0.0, deadline - time.monotonic())), what, deadline)
+    result = _bounded_route_call(partial(poller.result, timeout=deadline.remaining()), what, deadline)
     if not poller.done():
         raise _RouteCallTimeout(what)
     return result

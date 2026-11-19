@@ -18,10 +18,13 @@ the caller has moved on. Each platform says what its callers do about that.
 from __future__ import annotations
 
 import contextvars
+import math
 import threading
 import time
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
+
+from agentworks.deadline import Deadline
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,45 +40,46 @@ THREAD_NAME = "agw-bounded-call"
 
 
 class CallTimedOut(TimeoutError):
-    """A bounded call, ``what``, did not finish within its bound of ``seconds``."""
+    """A bounded call, ``what``, ran out of its bound: its own ``seconds``, or a shared deadline's.
 
-    def __init__(self, seconds: float, what: str = "the provider call") -> None:
-        super().__init__(f"{what} did not finish within {seconds:.0f}s")
-        self.seconds = seconds
-        self.what = what
-
-
-class Deadline:
-    """One bound of ``seconds`` on the wall clock, from now, shared by several calls.
-
-    Each call through it gets what the ones before it left, so a sequence of
-    calls, such as a removal's reads, delete and wait, ends within the one
-    bound however many calls it makes.
+    ``seconds`` is ``None`` for a shared deadline made without a stated budget.
     """
 
-    def __init__(self, seconds: float) -> None:
+    def __init__(self, what: str, seconds: float | None, *, shared: bool) -> None:
+        if not shared:
+            message = f"{what} did not finish within {seconds:.0f}s"
+        elif seconds is None:
+            message = f"{what} did not finish before the deadline it shared with the calls before it"
+        else:
+            message = f"{what} did not finish within the {seconds:.0f}s bound it shared with the calls before it"
+        super().__init__(message)
+        self.what = what
         self.seconds = seconds
-        self._at = time.monotonic() + seconds
-
-    def remaining(self) -> float:
-        """The seconds left, or 0 once the bound has run out."""
-        return max(0.0, self._at - time.monotonic())
 
 
 def call_within[T](call: Callable[[], T], bound: float | Deadline, *, what: str = "the provider call") -> T:
     """``call()``'s result, or :class:`CallTimedOut` once ``bound`` runs out on the monotonic clock.
 
-    ``bound`` is the call's own seconds, or a :class:`Deadline` it shares
-    with other calls. ``call`` runs on a daemon thread, in a copy of the
-    caller's context (so it sees the caller's context variables, as an
-    inline call would), and what it raised is raised here. The wait holds no
-    interrupts, so Ctrl-C outside
+    ``bound`` is the call's own seconds, or a :class:`~agentworks.deadline.Deadline`
+    it shares with other calls, each taking what the ones before it left. A
+    call with nothing left is not dispatched: it raises at once. ``call``
+    runs on a daemon thread, in a copy of the caller's context (so it sees
+    the caller's context variables, as an inline call would), and what it
+    raised is raised here. The wait holds no interrupts, so Ctrl-C outside
     :func:`~agentworks.interrupts.interrupts_deferred` ends it promptly: at
     once, or within ``WAKE_SECONDS`` when the signal reached another thread.
     A call that finishes as its bound runs out counts as finished.
     """
-    stated = bound.seconds if isinstance(bound, Deadline) else bound
-    deadline = time.monotonic() + (bound.remaining() if isinstance(bound, Deadline) else bound)
+    shared = isinstance(bound, Deadline)
+    if isinstance(bound, Deadline):
+        left = bound.remaining()
+        seconds_left = math.inf if left is None else left
+        stated = bound.seconds
+    else:
+        seconds_left = stated = bound
+    if seconds_left <= 0:
+        raise CallTimedOut(what, stated, shared=shared)
+    deadline = time.monotonic() + seconds_left
     context = contextvars.copy_context()
     outcome: list[tuple[T, None] | tuple[None, BaseException]] = []
     finished = threading.Event()
@@ -91,7 +95,7 @@ def call_within[T](call: Callable[[], T], bound: float | Deadline, *, what: str 
     threading.Thread(target=_run, name=THREAD_NAME, daemon=True).start()
     while not finished.wait(min(WAKE_SECONDS, max(0.0, deadline - time.monotonic()))):
         if time.monotonic() >= deadline and not finished.is_set():
-            raise CallTimedOut(stated, what)
+            raise CallTimedOut(what, stated, shared=shared)
     ((result, error),) = outcome
     if error is not None:
         raise error
@@ -101,10 +105,11 @@ def call_within[T](call: Callable[[], T], bound: float | Deadline, *, what: str 
 class BoundedClient:
     """``client``, with each method it is called with run through :func:`call_within` within ``bound``.
 
-    ``bound`` is each call's own seconds, or a :class:`Deadline` they all
-    share. A ``BoundedClient`` given another is a new bound on the same
-    client. Reading an attribute that is not a method raises ``TypeError``,
-    so a nested group of methods cannot be reached unbounded. What a method
+    ``bound`` is each call's own seconds, or a
+    :class:`~agentworks.deadline.Deadline` they all share. A
+    ``BoundedClient`` given another is a new bound on the same client.
+    Reading an attribute that is not a method raises ``TypeError``, so a
+    nested group of methods cannot be reached unbounded. What a method
     returns is the client's own: an operation, poller, pager, paginator or
     waiter it returns makes further requests unbounded unless its caller
     bounds them too.

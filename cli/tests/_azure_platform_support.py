@@ -25,9 +25,9 @@ from typing import Any, NamedTuple
 
 import pytest
 
+from agentworks import deadline as deadline_module
 from agentworks.capabilities.vm_platform import ssh_exposure
 from agentworks.plugins.azure import network as azure_network
-from agentworks.plugins.azure import route_calls
 from agentworks.plugins.azure.network import (
     ALLOW_PRIORITY_BAND_END,
     ALLOW_PRIORITY_BAND_START,
@@ -381,7 +381,7 @@ def _install_fakes(
     monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetworkClient)
     clock = _FakeClock()
     monkeypatch.setattr(azure_network, "time", clock)
-    monkeypatch.setattr(route_calls, "time", clock)
+    monkeypatch.setattr(deadline_module, "time", clock)  # the clock the route calls' deadlines count on
     return _FakeAzure(network=network, compute=compute, events=events, clock=clock)
 
 

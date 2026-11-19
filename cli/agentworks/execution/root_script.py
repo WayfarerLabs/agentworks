@@ -20,6 +20,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from agentworks.deadline import Deadline
 from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution import envelope, pump, ssh_process, trust
 from agentworks.execution.requests import Script, Shell
@@ -178,7 +179,7 @@ def run_process(argv: Sequence[str], script: bytes, deadline: float) -> RawRun:
         nonce=None,
         on_stdout=stdout,
         on_stderr=stderr,
-        deadline=pump.Deadline.after(deadline),
+        deadline=Deadline.after(deadline),
     ) as session:
         session.pump()
         session.end()

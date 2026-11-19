@@ -21,8 +21,10 @@ import pytest
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 
+from agentworks import deadline as deadline_module
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import wall_bound
+from agentworks.deadline import Deadline
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure import route_calls
 from agentworks.plugins.azure.errors import AzureError
@@ -113,7 +115,7 @@ def test_a_poke_whose_create_outlives_the_bound_removes_and_names_its_rule_witho
     fakes = _install_fakes(monkeypatch)
     # The held request ends the bound on the wall clock.
     monkeypatch.setattr(azure_network, "time", time)
-    monkeypatch.setattr(route_calls, "time", time)
+    monkeypatch.setattr(deadline_module, "time", time)
     rules = fakes.network.security_rules
     monkeypatch.setattr(
         rules,
@@ -356,4 +358,5 @@ class TestRouteOperationsAreBounded:
                 time.sleep(0.05)  # longer than a wait with nothing left of the bound
                 return super().result(timeout)
 
-        assert route_calls._finish_route_operation(_Done("rule"), "creating a rule", time.monotonic() - 1.0) == "rule"
+        spent = Deadline(time.monotonic() - 1.0)
+        assert route_calls._finish_route_operation(_Done("rule"), "creating a rule", spent) == "rule"
