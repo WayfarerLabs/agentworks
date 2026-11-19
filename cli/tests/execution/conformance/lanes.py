@@ -2,9 +2,10 @@
 
 - **L** runs ``$SHELL -c <remote command>`` locally, through the real
   ``VMAccess`` and pump, with ``ssh_process.build_argv`` replaced by a local
-  shell. The account's startup files are set per vector and ``SSH_CLIENT`` is
-  exported as sshd does. It covers the shells and runs on every Linux CI host;
-  elsewhere it skips, since agw-launch is a Linux guest program.
+  shell behind a stand-in for ssh and sshd (:data:`SSH_STAND_IN`). The
+  account's startup files are set per vector and ``SSH_CLIENT`` is exported as
+  sshd does. It covers the shells and runs on every Linux CI host; elsewhere it
+  skips, since agw-launch is a Linux guest program.
 - **S** runs the real client against a rootless local ``sshd`` (loopback, a
   temporary host key and ``AuthorizedKeysFile``, no PAM) and ``trust.write_records``
   for the test host key. It skips when no ``sshd`` binary exists, and fails on CI;
@@ -20,6 +21,7 @@ import contextlib
 import getpass
 import io
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -47,6 +49,22 @@ if TYPE_CHECKING:
 
 SHELLS = ("sh", "dash", "bash", "zsh")
 STARTUP_TIMEOUT_SECONDS = 15
+
+SSH_STAND_IN = (
+    "import subprocess, sys\n"
+    "status = subprocess.Popen(sys.argv[1:], start_new_session=True).wait()\n"
+    "sys.exit(255 if status < 0 else status)\n"
+)
+"""The L lane's client: it runs the account shell as sshd does, and reports its status as ssh does.
+
+sshd starts the account shell in a session of its own, and when the client dies
+it only closes the shell's streams. A shell that execs its one command (bash and
+zsh do) would otherwise be the client itself, and ending the client would
+SIGKILL the launcher, which never happens on a guest. ssh exits 255 when the
+remote command is killed by a signal. Unlike ssh, it does not wait for the
+guest's streams to close, so S is the lane that covers attach's end-then-kill
+path for a background child.
+"""
 
 
 @dataclass(frozen=True)
@@ -108,12 +126,19 @@ class Lane:
         raise NotImplementedError
 
     def wait_gone(self, path: str, seconds: float = 5.0) -> bool:
+        return self._poll(lambda: not self.exists(path), seconds)
+
+    def wait_present(self, path: str, seconds: float = 5.0) -> bool:
+        return self._poll(lambda: self.exists(path), seconds)
+
+    @staticmethod
+    def _poll(condition: Callable[[], bool], seconds: float) -> bool:
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            if not self.exists(path):
+            if condition():
                 return True
             time.sleep(0.05)
-        return not self.exists(path)
+        return condition()
 
     # -- The terminal half ---------------------------------------------------
 
@@ -313,8 +338,9 @@ class LocalLane(LocalFilesystem):
             "SSH_CLIENT=203.0.113.5 52000 22",
             "SSH_CONNECTION=203.0.113.5 52000 10.0.0.2 22",
         ]
-        command = remote_command.replace(ssh_process.DEFAULT_PYTHON, self.python, 1)
-        return ["/usr/bin/env", "-i", *environment, self.shell, "-c", command]
+        command = remote_command.replace(ssh_process.DEFAULT_PYTHON, shlex.quote(self.python), 1)
+        guest = ["/usr/bin/env", "-i", *environment, self.shell, "-c", command]
+        return [sys.executable, "-I", "-S", "-c", SSH_STAND_IN, *guest]
 
 
 # -- S ----------------------------------------------------------------------------------
@@ -366,9 +392,9 @@ def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
             [
                 "ListenAddress 127.0.0.1",
                 f"Port {port}",
-                f"HostKey {host_key}",
-                f"AuthorizedKeysFile {authorized}",
-                f"PidFile {directory / 'sshd.pid'}",
+                f'HostKey "{host_key}"',
+                f'AuthorizedKeysFile "{authorized}"',
+                f'PidFile "{directory / "sshd.pid"}"',
                 "UsePAM no",
                 "StrictModes no",
                 "PasswordAuthentication no",

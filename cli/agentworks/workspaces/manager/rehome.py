@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -15,6 +16,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.path_rendering import format_host_path
+from agentworks.remote_presence import TEST_FALSE_EXIT, probe_presence
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
@@ -174,17 +176,36 @@ def _rehome_vm(
         target = transport(vm, config)
 
         # Verify source exists
-        src_check = target.run(f"test -d {shlex.quote(old_path)}", check=False, timeout=10)
-        if not src_check.ok:
+        src_check = probe_presence(
+            target,
+            f"test -d {shlex.quote(old_path)}",
+            absent_exit=TEST_FALSE_EXIT,
+            timeout=10,
+            vm_name=vm.name,
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
+        if src_check is None:
             raise StateError(
                 f"source directory {old_path} does not exist on VM",
                 entity_kind="workspace",
                 entity_name=ws_name,
             )
 
-        # Verify target does not exist
-        dst_check = target.run(f"test -d {shlex.quote(new_path)}", check=False, timeout=10)
-        if dst_check.ok:
+        # Verify target does not exist. This check only gives the clear early
+        # refusal; the exclusive mkdir below is what keeps an existing target
+        # (including one under a parent the admin cannot search) from being
+        # copied into.
+        dst_check = probe_presence(
+            target,
+            f"test -d {shlex.quote(new_path)}",
+            absent_exit=TEST_FALSE_EXIT,
+            timeout=10,
+            vm_name=vm.name,
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
+        if dst_check is not None:
             raise StateError(
                 f"target directory {new_path} already exists on VM",
                 entity_kind="workspace",
@@ -218,9 +239,21 @@ def _rehome_vm(
         # which double-wrote the "Finished" footer when an inner raise re-entered
         # an outer except.
         try:
+            # Reserve exclusively: a preflight check cannot rule out a raced-in
+            # target, and an unanswered mkdir does not establish ownership.
+            parent = shlex.quote(str(PurePosixPath(new_path).parent))
+            target.run(f"mkdir -p -- {parent}", sudo=True)
             try:
-                # Create target directory as root and chown to admin so rsync can write
-                target.run(f"mkdir -p {np}", sudo=True)
+                target.run(f"mkdir -- {np}", sudo=True)
+            except BaseException:
+                output.warn(
+                    f"Rehome target reservation at {new_path} was not confirmed. "
+                    "Any remaining path was left untouched; inspect and preserve its contents before retrying."
+                )
+                raise
+
+            try:
+                # Let the admin write into the confirmed new target.
                 target.run(f"chown {vm.admin_username} {np}", sudo=True)
 
                 # Copy with rsync (fall back to cp -a). Trailing slash matters for
@@ -235,13 +268,20 @@ def _rehome_vm(
                     target.run(f"cp -a {op}/. {np}/", sudo=True, timeout=600)
 
                 # Verify copy succeeded
-                verify = target.run(f"test -d {np}", check=False, timeout=10)
-                if not verify.ok:
+                verify = probe_presence(
+                    target,
+                    f"test -d {np}",
+                    absent_exit=TEST_FALSE_EXIT,
+                    timeout=10,
+                    vm_name=vm.name,
+                    entity_kind="workspace",
+                    entity_name=ws_name,
+                )
+                if verify is None:
                     raise ExternalError(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
                         entity_name=ws_name,
-                        hint=f"SSH log: {ssh_logger.display_path}",
                     )
 
                 # Fix ownership, permissions, and ACLs on the new path
@@ -305,7 +345,10 @@ def _rehome_vm(
                     f"SSH log: {ssh_logger.display_path}"
                 )
                 raise
-            except AgentworksError:
+            except AgentworksError as error:
+                error.add_hint(
+                    f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} SSH log: {ssh_logger.display_path}"
+                )
                 raise
             except Exception as e:
                 raise ExternalError(

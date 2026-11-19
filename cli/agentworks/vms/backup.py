@@ -15,6 +15,7 @@ from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
 from agentworks.path_rendering import format_host_path
 from agentworks.programs import resolve_program
+from agentworks.remote_presence import SUDO_SAFE_ABSENT_EXIT, probe_presence, sudo_safe_test
 from agentworks.vms.applied_state import canonicalize_vm_applied_slice
 from agentworks.vms.manager import _guard_incomplete_vm, gated_vm_boundary
 
@@ -229,6 +230,7 @@ def backup_vm(
                         workspaces,
                         local_archive,
                         vm.admin_username,
+                        vm_name=vm_name,
                     )
                 else:
                     output.info("No VM workspaces to archive.")
@@ -264,6 +266,8 @@ def _archive_workspaces(
     vm_workspaces: list[WorkspaceRow],
     local_archive: Path,
     admin_username: str,
+    *,
+    vm_name: str,
 ) -> tuple[list[str], list[str]]:
     """Create a single zstd-compressed tar of all workspace paths and transfer locally.
 
@@ -280,7 +284,7 @@ def _archive_workspaces(
     that ``None`` to a literal "agentworks" would silently chown to the
     wrong account on a VM whose admin-template renamed the admin user.
 
-    Returns (archived_paths, skipped_paths) -- paths that were actually included
+    Returns (archived_paths, skipped_paths): paths that were actually included
     and paths that were skipped because they didn't exist on the VM.
     """
 
@@ -297,7 +301,16 @@ def _archive_workspaces(
         valid: list[WorkspaceRow] = []
         skipped: list[str] = []
         for ws in vm_workspaces:
-            if target.run(f"test -d {shlex.quote(ws.workspace_path)}", sudo=True, check=False).ok:
+            path_probe_result = probe_presence(
+                target,
+                sudo_safe_test(f"test -d {shlex.quote(ws.workspace_path)}"),
+                absent_exit=SUDO_SAFE_ABSENT_EXIT,
+                sudo=True,
+                vm_name=vm_name,
+                entity_kind="workspace",
+                entity_name=ws.name,
+            )
+            if path_probe_result is not None:
                 valid.append(ws)
             else:
                 output.warn(f"path not found, skipping: {ws.workspace_path}")

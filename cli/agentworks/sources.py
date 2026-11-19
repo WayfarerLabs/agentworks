@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import ExternalError
 from agentworks.path_rendering import format_host_path
+from agentworks.remote_presence import TEST_FALSE_EXIT, probe_presence
 
 if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
@@ -278,11 +279,12 @@ def _fetch_local_dir(
     if not local_path.is_dir():
         raise SourceRefError(f"local source is not a directory: {format_host_path(local_path)}")
 
-    # Check if destination exists and warn
-    if target.run(f"test -d {shlex.quote(dest)}", check=False).ok:
+    # Replace, never merge into, an existing destination: an unanswered probe
+    # or a failed removal raises rather than letting the copy land on top.
+    if probe_presence(target, f"test -d {shlex.quote(dest)}", absent_exit=TEST_FALSE_EXIT) is not None:
         if logger:
             logger.warning(f"overwriting existing {dest}")
-        target.run(f"rm -rf {shlex.quote(dest)}", check=False)
+        target.run(f"rm -rf {shlex.quote(dest)}")
 
     target.copy_dir_to(local_path, dest)
     if logger:

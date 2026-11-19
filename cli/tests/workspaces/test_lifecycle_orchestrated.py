@@ -1598,6 +1598,112 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
 
+@pytest.mark.parametrize("unanswered", ["test -d /srv/ws1", "test -d /dst/ws1"])
+def test_rehome_refuses_when_a_directory_check_did_not_run(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    unanswered: str,
+) -> None:
+    """ssh's transport failure (exit 255) on either directory check is not
+    an answer: in particular it never reads as "target absent", so rehome
+    raises before creating or copying into a target that may exist."""
+    from agentworks.ssh import SSHError
+
+    class _Target(_RehomeTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd == unanswered:
+                self.commands.append(cmd)
+                return SimpleNamespace(ok=False, returncode=255, stdout="", stderr="")
+            return super().run(cmd, **kwargs)
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    fake = _Target()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+
+    with pytest.raises(SSHError):
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert fake.commands[-1] == unanswered
+    assert not any(c.startswith(("mkdir", "rsync", "cp -a")) for c in fake.commands)
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/srv/ws1"
+
+
+def test_rehome_creates_the_target_exclusively(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A target the check reports absent (``test -d`` answers 1 under a parent
+    the admin cannot search) but that exists is never copied into: the
+    exclusive ``mkdir`` fails on it, rehome warns that the reservation was not
+    confirmed, and the failure propagates with no unwind and no partial-state
+    hint, since the path may never have been ours."""
+    from agentworks.ssh import SSHError
+
+    class _Target(_RehomeTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd == "mkdir -- /dst/ws1":
+                self.commands.append(cmd)
+                raise SSHError(f"SSH command failed (exit 1): {cmd}\nstderr: File exists")
+            return super().run(cmd, **kwargs)
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    fake = _Target()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+
+    with pytest.raises(SSHError) as raised:
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert raised.value.hint is None
+    assert len(captured_output.warnings) == 1
+    assert fake.commands[-2:] == ["mkdir -p -- /dst", "mkdir -- /dst/ws1"]
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/srv/ws1"
+
+
+def test_rehome_copy_verification_that_did_not_answer_raises_the_transport_error(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The post-copy check reports ssh's failure as itself, not as a copy
+    that went missing, and the row stays at the old path."""
+    from agentworks.ssh import SSHError
+
+    class _Target(_RehomeTarget):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd == "test -d /dst/ws1" and self._copied:
+                self.commands.append(cmd)
+                return SimpleNamespace(ok=False, returncode=255, stdout="", stderr="")
+            return super().run(cmd, **kwargs)
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    fake = _Target()
+    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
+
+    with pytest.raises(SSHError):
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert fake.commands[-1] == "test -d /dst/ws1"
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/srv/ws1"
+
+
 # -- copy: the sequential two-boundary composition ----------------------------
 
 

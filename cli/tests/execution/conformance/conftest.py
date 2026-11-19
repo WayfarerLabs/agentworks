@@ -25,7 +25,7 @@ L_CASES = [(shell, label) for shell in SHELLS for label in python_interpreters()
 
 @pytest.fixture(scope="session")
 def sshd_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SSHDServer]:
-    with rootless_sshd(tmp_path_factory.mktemp("sshd")) as server:
+    with rootless_sshd(tmp_path_factory.mktemp("sshd with spaces")) as server:
         yield server
 
 
@@ -33,6 +33,8 @@ def sshd_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SSHDServer
 def local_lane(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LocalLane:
     require_linux_guest()
     shell, label = request.param
+    tmp_path = tmp_path / "local lane"
+    tmp_path.mkdir()
     return LocalLane(monkeypatch, tmp_path, shell, python_interpreters()[label])
 
 

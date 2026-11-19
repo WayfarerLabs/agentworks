@@ -74,8 +74,12 @@ layer.
 | PATH additions         | Overwritten from config                                                                |
 | Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                           |
 | sshd AcceptEnv         | Drop-in overwritten; sshd reloaded                                                     |
+| Admin sudo grant       | Existing grant validated with `visudo -cf`, then mode repaired to 0440 in place        |
 | sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion               |
 | sudoers console setenv | Same; scoped to the VM's admin user                                                    |
+
+If the admin grant is missing, is not a regular file, or fails validation, reinit warns and leaves
+it unchanged. Its contents and any symlink to a regular grant are preserved.
 
 ### Additive only
 

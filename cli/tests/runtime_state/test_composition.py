@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 
 
 REFUSE = TtyInteractionPolicy.REFUSE
+# Bounds the waits on worker threads only so a broken run fails instead of hanging. Healthy runs end
+# the waits in milliseconds; a loaded host can still delay a thread by seconds.
+HANG_GUARD_SECONDS = 30
 BOOT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 

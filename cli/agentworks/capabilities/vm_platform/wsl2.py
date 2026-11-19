@@ -909,20 +909,6 @@ class WSL2Platform(VMPlatform):
                 _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
                 import shlex
 
-                _wsl(
-                    [
-                        "--distribution",
-                        vm_name,
-                        "--user",
-                        "root",
-                        "--",
-                        "bash",
-                        "-c",
-                        f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
-                        f" > /etc/sudoers.d/{shlex.quote(admin_username)}",
-                    ]
-                )
-
                 # Configure wsl.conf: default user, systemd and the hostname
                 output.info("Enabling systemd...")
                 _wsl(

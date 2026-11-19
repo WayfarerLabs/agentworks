@@ -57,6 +57,7 @@ from .shell_env import (
     _write_agentworks_rc,
     _write_skel_seeds,
     _write_sshd_accept_env,
+    _write_sudoers_admin,
     _write_sudoers_console_setenv,
     _write_sudoers_env_keep,
 )
@@ -398,6 +399,7 @@ def _phase_b_setup(
         # rely on the SetEnv path. These targets don't touch zsh-shipped files,
         # so dpkg conffile handling doesn't apply.
         _write_sshd_accept_env(ts_target, logger)
+        _write_sudoers_admin(ts_target, logger, admin_username)
         _write_sudoers_env_keep(ts_target, logger)
         # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
         _write_sudoers_console_setenv(ts_target, logger, admin_username)
@@ -609,8 +611,7 @@ def _phase_b_setup(
                 synced = True
             except Exception as e:
                 msg = (
-                    f"dotfiles sync failed, so '{dotfiles_command}' did not run and {dest} "
-                    f"still holds its previous contents: {e}"
+                    f"dotfiles sync failed, so '{dotfiles_command}' did not run and {dest} may be left incomplete: {e}"
                 )
                 logger.warning(msg)
                 output.warn(msg)

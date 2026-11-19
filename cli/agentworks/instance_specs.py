@@ -606,8 +606,13 @@ def _validate_json_tree(value: object) -> None:
         item, path = pending.pop()
         if item is None:
             # Each call validates one owning component. Null opts out of an
-            # activation or clears that component's inherited direct artifacts.
-            if (len(path) == 2 and path[0] == "harness_integrations") or path == ("artifacts", "declare"):
+            # activation or clears that component's inherited artifact selections.
+            if (
+                (len(path) == 2 and path[0] == "harness_integrations")
+                or path in (("artifacts", "declare"), ("artifacts", "bundles"))
+                or path == ("harness_integration", "enabled_workarounds")
+                or (len(path) == 3 and path[0] == "harness_integrations" and path[2] in ("marketplaces", "plugins"))
+            ):
                 continue
             location = ".".join(path) or "<root>"
             raise ValidationError(f"instance spec cannot contain null at {location}")

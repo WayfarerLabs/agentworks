@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
+from agentworks.remote_presence import TEST_FALSE_EXIT, probe_presence
 from agentworks.ssh import SSHError
 from agentworks.transports import transport
 from agentworks.workspaces.acls import apply_workspace_acls
@@ -62,12 +63,16 @@ def create_vm_workspace(
     ws_group = workspace_group(ws_name)
 
     # Refuse to create if directory already exists
-    exists = target.run(
+    path_probe_result = probe_presence(
+        target,
         f"test -d {quoted_workspace} || test -e {quoted_workspace} || test -L {quoted_workspace}",
-        check=False,
+        absent_exit=TEST_FALSE_EXIT,
         timeout=10,
+        vm_name=vm.name,
+        entity_kind="workspace",
+        entity_name=ws_name,
     )
-    if exists.ok:
+    if path_probe_result is not None:
         raise AlreadyExistsError(
             f"workspace path {workspace_path!r} already exists on the VM.",
             entity_kind="workspace",
