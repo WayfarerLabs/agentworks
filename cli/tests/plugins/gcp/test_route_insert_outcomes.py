@@ -139,7 +139,7 @@ def test_an_insert_whose_operation_identity_never_arrived_is_named(
     _assert_named(captured_output, _route(cache), _route(cache).name)
 
 
-def test_an_insert_whose_wait_ran_out_is_named_by_its_provider_id(
+def test_an_insert_whose_wait_ran_out_is_named_by_its_provider_id_and_operation(
     monkeypatch: pytest.MonkeyPatch, created: tuple[GCEPlatform, FakeClients, VMRow], captured_output: CapturedOutput
 ) -> None:
     platform, cache, vm = created
@@ -150,6 +150,28 @@ def test_an_insert_whose_wait_ran_out_is_named_by_its_provider_id(
     (accepted,) = answered
     (warning,) = captured_output.warnings
     assert f"'{accepted.target_id}'" in warning
+    assert accepted.name in warning  # the operation to watch until it reports DONE
+
+
+def test_an_unresolved_insert_whose_removal_could_not_read_the_rule_gets_the_insert_s_steps(
+    monkeypatch: pytest.MonkeyPatch, created: tuple[GCEPlatform, FakeClients, VMRow], captured_output: CapturedOutput
+) -> None:
+    """A failed read proves nothing about an insert that may still land, so the warning keeps its operation."""
+    platform, cache, vm = created
+    answered = _answered_with(monkeypatch, cache, failure=TimeoutError("still running"))
+    reads = cache.firewalls.get
+
+    def _read_then_fail(*, firewall: str, **kwargs: Any) -> Any:
+        if answered and firewall == _route(cache).name:  # every read of the rule once the insert was accepted
+            raise api_error(api_exceptions.ServiceUnavailable, "down")
+        return reads(firewall=firewall, **kwargs)
+
+    monkeypatch.setattr(cache.firewalls, "get", _read_then_fail)
+
+    _open(platform, vm, ConnectivityError)
+
+    (accepted,) = answered
+    assert any(accepted.name in warning for warning in captured_output.warnings)
 
 
 def test_an_insert_whose_operation_completed_without_the_rule_is_not_named(

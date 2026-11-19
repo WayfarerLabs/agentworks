@@ -12,16 +12,16 @@ from google.cloud import compute_v1
 
 from agentworks.plugins.gcp.cleanup import (
     CleanupCoordinates,
+    CleanupTarget,
     InstanceOwnership,
     InstanceState,
     RollbackReport,
     UnresolvedInsert,
     UnresolvedInserts,
-    rollback_after_interrupt,
     rollback_partial_create,
-    rollback_then_raise,
 )
 from agentworks.plugins.gcp.network import FirewallOwnership, FirewallState
+from agentworks.plugins.gcp.recovery import rollback_after_interrupt, rollback_then_raise
 
 _COORDINATES = CleanupCoordinates(
     project_id="project-a",
@@ -34,6 +34,13 @@ _NETWORK = "projects/project-a/global/networks/default"
 _INSTANCE_OWNERSHIP = InstanceOwnership("201")
 _ALLOW_OWNERSHIP = FirewallOwnership(_COORDINATES.allow_rule, "101")
 _DENY_OWNERSHIP = FirewallOwnership(_COORDINATES.deny_rule, "102")
+
+
+def _target(unresolved: UnresolvedInserts | None = None) -> CleanupTarget:
+    """The fixture VM's resources, each owned, with ``unresolved`` inserts outstanding."""
+    return CleanupTarget(
+        _COORDINATES, _INSTANCE_OWNERSHIP, _ALLOW_OWNERSHIP, _DENY_OWNERSHIP, unresolved or UnresolvedInserts()
+    )
 
 
 def _api_error(kind: type[Exception], message: str) -> Exception:
@@ -177,6 +184,12 @@ def test_total_rollback_closes_allow_before_instance_and_deny_after_absence() ->
     allow = _allow()
     deny = _deny()
     report = rollback_partial_create(
+        CleanupTarget(
+            _COORDINATES,
+            InstanceOwnership("201"),
+            FirewallOwnership(allow.name, "101"),
+            FirewallOwnership(deny.name, "102"),
+        ),
         instances=_Instances(iter([_instance(), None]), log),
         firewalls=_Firewalls(
             {
@@ -185,15 +198,10 @@ def test_total_rollback_closes_allow_before_instance_and_deny_after_absence() ->
             },
             log,
         ),
-        coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
-        allow_ownership=FirewallOwnership(allow.name, "101"),
-        deny_ownership=FirewallOwnership(deny.name, "102"),
-        instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
-        unresolved=UnresolvedInserts(),
     )
     assert report.clean
     assert log == [
@@ -217,6 +225,7 @@ def test_definitive_instance_delete_wait_failure_still_accepts_verified_absence(
     allow = _allow()
     deny = _deny()
     report = rollback_partial_create(
+        _target(),
         instances=_Instances(
             iter([_instance(), None]),
             log,
@@ -231,15 +240,10 @@ def test_definitive_instance_delete_wait_failure_still_accepts_verified_absence(
             },
             log,
         ),
-        coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
-        allow_ownership=_ALLOW_OWNERSHIP,
-        deny_ownership=_DENY_OWNERSHIP,
-        instance_ownership=_INSTANCE_OWNERSHIP,
         instance_possible=True,
         timeout=9,
-        unresolved=UnresolvedInserts(),
     )
 
     assert report.clean
@@ -252,6 +256,12 @@ def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
     allow = _allow()
     deny = _deny()
     report = rollback_partial_create(
+        CleanupTarget(
+            _COORDINATES,
+            InstanceOwnership("201"),
+            FirewallOwnership(allow.name, "101"),
+            FirewallOwnership(deny.name, "102"),
+        ),
         instances=_Instances(iter([_instance(), _instance()]), log),
         firewalls=_Firewalls(
             {
@@ -260,15 +270,10 @@ def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
             },
             log,
         ),
-        coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
-        allow_ownership=FirewallOwnership(allow.name, "101"),
-        deny_ownership=FirewallOwnership(deny.name, "102"),
-        instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
-        unresolved=UnresolvedInserts(),
     )
     assert report.instance is InstanceState.SURVIVING
     assert report.instance_resource_id == "201"
@@ -285,6 +290,12 @@ def test_indeterminate_instance_keeps_deny() -> None:
     deny = _deny()
     unknown = _api_error(api_exceptions.ServiceUnavailable, "unknown")
     report = rollback_partial_create(
+        CleanupTarget(
+            _COORDINATES,
+            InstanceOwnership("201"),
+            FirewallOwnership(allow.name, "101"),
+            FirewallOwnership(deny.name, "102"),
+        ),
         instances=_Instances(iter([unknown, unknown]), log),
         firewalls=_Firewalls(
             {
@@ -293,15 +304,10 @@ def test_indeterminate_instance_keeps_deny() -> None:
             },
             log,
         ),
-        coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
-        allow_ownership=FirewallOwnership(allow.name, "101"),
-        deny_ownership=FirewallOwnership(deny.name, "102"),
-        instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
-        unresolved=UnresolvedInserts(),
     )
     assert report.instance is InstanceState.INDETERMINATE
     assert report.instance_resource_id is None
@@ -314,6 +320,7 @@ def test_mismatched_rule_is_retained_not_deleted() -> None:
     allow = _allow()
     deny = _deny()
     report = rollback_partial_create(
+        CleanupTarget(_COORDINATES, None, _ALLOW_OWNERSHIP, _DENY_OWNERSHIP),
         instances=_Instances(iter([]), log),
         firewalls=_Firewalls(
             {
@@ -322,15 +329,10 @@ def test_mismatched_rule_is_retained_not_deleted() -> None:
             },
             log,
         ),
-        coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
-        allow_ownership=FirewallOwnership(allow.name, "101"),
-        deny_ownership=FirewallOwnership(deny.name, "102"),
-        instance_ownership=None,
         instance_possible=False,
         timeout=9,
-        unresolved=UnresolvedInserts(),
     )
     assert report.allow is FirewallState.MISMATCHED
     assert "firewall:delete:vm-a-allow" not in log
@@ -360,6 +362,9 @@ def test_instance_without_matching_provider_ownership_is_retained(
     allow = _allow()
     deny = _deny()
     report = rollback_partial_create(
+        CleanupTarget(
+            _COORDINATES, ownership, FirewallOwnership(allow.name, "101"), FirewallOwnership(deny.name, "102")
+        ),
         instances=_Instances(iter([instance]), log),
         firewalls=_Firewalls(
             {
@@ -368,15 +373,10 @@ def test_instance_without_matching_provider_ownership_is_retained(
             },
             log,
         ),
-        coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
-        allow_ownership=FirewallOwnership(allow.name, "101"),
-        deny_ownership=FirewallOwnership(deny.name, "102"),
-        instance_ownership=ownership,
         instance_possible=True,
         timeout=9,
-        unresolved=UnresolvedInserts(),
     )
     assert report.instance is expected_state
     assert report.instance_resource_id == observed_id
@@ -388,17 +388,13 @@ def test_instance_without_matching_provider_ownership_is_retained(
 def test_ordinary_cleanup_cannot_replace_primary_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     primary = RuntimeError("safe primary")
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
 
     with pytest.raises(RuntimeError) as caught:
         rollback_then_raise(
             primary,
             lambda: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
-            _COORDINATES,
-            instance_ownership=_INSTANCE_OWNERSHIP,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            unresolved=UnresolvedInserts(),
+            _target(),
         )
 
     assert caught.value is primary
@@ -423,7 +419,7 @@ def test_interrupt_after_partial_ordinary_rollback_converges_and_supersedes_prim
 ) -> None:
     log: list[str] = []
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
     first = KeyboardInterrupt("first")
     ordinary = RuntimeError("ordinary-provider-secret")
     ordinary.__cause__ = RuntimeError("ordinary-provider-secret")
@@ -440,28 +436,20 @@ def test_interrupt_after_partial_ordinary_rollback_converges_and_supersedes_prim
 
     def rollback() -> RollbackReport:
         return rollback_partial_create(
+            _target(),
             instances=instances,
             firewalls=firewalls,
-            coordinates=_COORDINATES,
             expected_allow=allow,
             expected_deny=deny,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            instance_ownership=_INSTANCE_OWNERSHIP,
             instance_possible=True,
             timeout=9,
-            unresolved=UnresolvedInserts(),
         )
 
     with pytest.raises(KeyboardInterrupt) as caught:
         rollback_then_raise(
             ordinary,
             rollback,
-            _COORDINATES,
-            instance_ownership=_INSTANCE_OWNERSHIP,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            unresolved=UnresolvedInserts(),
+            _target(),
         )
 
     assert caught.value is first
@@ -481,7 +469,7 @@ def test_second_interrupt_after_partial_ordinary_rollback_is_only_abandon_signal
 ) -> None:
     log: list[str] = []
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
     first = KeyboardInterrupt("first")
     second = KeyboardInterrupt("second")
     allow = _allow()
@@ -497,28 +485,20 @@ def test_second_interrupt_after_partial_ordinary_rollback_is_only_abandon_signal
 
     def rollback() -> RollbackReport:
         return rollback_partial_create(
+            _target(),
             instances=instances,
             firewalls=firewalls,
-            coordinates=_COORDINATES,
             expected_allow=allow,
             expected_deny=deny,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            instance_ownership=_INSTANCE_OWNERSHIP,
             instance_possible=True,
             timeout=9,
-            unresolved=UnresolvedInserts(),
         )
 
     with pytest.raises(KeyboardInterrupt) as caught:
         rollback_then_raise(
             RuntimeError("ordinary"),
             rollback,
-            _COORDINATES,
-            instance_ownership=_INSTANCE_OWNERSHIP,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            unresolved=UnresolvedInserts(),
+            _target(),
         )
 
     assert caught.value is first
@@ -534,18 +514,14 @@ def test_second_interrupt_after_partial_ordinary_rollback_is_only_abandon_signal
 def test_first_interrupt_rolls_back_and_reraises_original_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     primary = KeyboardInterrupt("first")
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
     report = RollbackReport(InstanceState.ABSENT, FirewallState.ABSENT, FirewallState.ABSENT)
 
     with pytest.raises(KeyboardInterrupt) as caught:
         rollback_after_interrupt(
             primary,
             lambda: report,
-            _COORDINATES,
-            instance_ownership=_INSTANCE_OWNERSHIP,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            unresolved=UnresolvedInserts(),
+            _target(),
         )
 
     assert caught.value is primary
@@ -557,17 +533,13 @@ def test_first_interrupt_rolls_back_and_reraises_original_identity(monkeypatch: 
 def test_second_interrupt_abandons_promptly_with_exact_safe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     primary = KeyboardInterrupt("first")
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
 
     with pytest.raises(KeyboardInterrupt) as caught:
         rollback_after_interrupt(
             primary,
             lambda: (_ for _ in ()).throw(KeyboardInterrupt("second")),
-            _COORDINATES,
-            instance_ownership=_INSTANCE_OWNERSHIP,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            unresolved=UnresolvedInserts(),
+            _target(),
         )
 
     assert caught.value is primary
@@ -586,35 +558,89 @@ def test_second_interrupt_abandons_promptly_with_exact_safe_actions(monkeypatch:
 
 def test_abandoned_cleanup_names_each_unresolved_insert_operation(monkeypatch: pytest.MonkeyPatch) -> None:
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
 
     with pytest.raises(KeyboardInterrupt):
         rollback_after_interrupt(
             KeyboardInterrupt("first"),
             lambda: (_ for _ in ()).throw(KeyboardInterrupt("second")),
-            _COORDINATES,
-            instance_ownership=_INSTANCE_OWNERSHIP,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            unresolved=UnresolvedInserts(instance=UnresolvedInsert("operation-insert-201")),
+            _target(unresolved=UnresolvedInserts(instance=UnresolvedInsert("operation-insert-201"))),
         )
 
     assert "operation-insert-201" in "\n".join(warnings)
 
 
+_OPERATION = "operation-insert-201"
+_INSERT = UnresolvedInsert(_OPERATION)
+
+
+def _rollback_with_unresolved_instance(log: list[str], instance_reads: list[object]) -> RollbackReport:
+    allow = _allow()
+    deny = _deny()
+    return rollback_partial_create(
+        _target(UnresolvedInserts(instance=_INSERT)),
+        instances=_Instances(iter(instance_reads), log),
+        firewalls=_Firewalls({allow.name: iter([allow, None]), deny.name: iter([deny, None])}, log),
+        expected_allow=allow,
+        expected_deny=deny,
+        instance_possible=True,
+        timeout=9,
+    )
+
+
+def test_an_unresolved_instance_insert_survives_a_failed_read_and_keeps_the_deny(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read that fails is no proof the insert will not still create the instance."""
+    log: list[str] = []
+    unknown = _api_error(api_exceptions.ServiceUnavailable, "unknown")
+
+    report = _rollback_with_unresolved_instance(log, [unknown])
+
+    assert report.instance is InstanceState.INDETERMINATE
+    assert report.may_appear.instance == _INSERT
+    assert "firewall:delete:vm-a-deny" not in log
+    assert _OPERATION in _warning_for_report(monkeypatch, report)
+
+
+def test_an_unresolved_instance_insert_whose_instance_was_seen_and_deleted_lets_the_deny_go() -> None:
+    log: list[str] = []
+
+    report = _rollback_with_unresolved_instance(log, [_instance(), None])
+
+    assert report.clean
+    assert "firewall:delete:vm-a-deny" in log
+
+
+def test_an_unresolved_allow_insert_survives_a_failed_read_of_the_rule() -> None:
+    log: list[str] = []
+    allow = _allow()
+    deny = _deny()
+    unknown = _api_error(api_exceptions.ServiceUnavailable, "unknown")
+
+    report = rollback_partial_create(
+        _target(UnresolvedInserts(allow=_INSERT)),
+        instances=_Instances(iter([]), log),
+        firewalls=_Firewalls({allow.name: iter([unknown]), deny.name: iter([deny, None])}, log),
+        expected_allow=allow,
+        expected_deny=deny,
+        instance_possible=False,
+        timeout=9,
+    )
+
+    assert report.allow is FirewallState.INDETERMINATE
+    assert report.may_appear.allow == _INSERT
+
+
 def _warning_for_report(monkeypatch: pytest.MonkeyPatch, report: RollbackReport) -> str:
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
     primary = RuntimeError("primary")
     with pytest.raises(RuntimeError) as caught:
         rollback_then_raise(
             primary,
             lambda: report,
-            _COORDINATES,
-            instance_ownership=_INSTANCE_OWNERSHIP,
-            allow_ownership=_ALLOW_OWNERSHIP,
-            deny_ownership=_DENY_OWNERSHIP,
-            unresolved=UnresolvedInserts(),
+            _target(),
         )
     assert caught.value is primary
     assert len(warnings) == 1

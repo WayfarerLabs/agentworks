@@ -287,14 +287,18 @@ auto-delete setting.
 If create rollback or delete cannot prove cleanup, Agentworks prints the project, zone, resource
 names, expected provider IDs, and safe next action. A create stopped while an insert's outcome was
 still unknown (its operation unfinished, or no answer to the insert received) cannot treat that
-resource's absence as final, since the insert may still create it: rollback keeps the owned deny
-while the instance may still appear and prints the insert's operation name when one is known. Wait
-for that operation to report `DONE` before checking the resource. Verify each provider ID before any
-manual name-based deletion:
+resource as gone, whether it read as not found or could not be read at all, until it sees the
+resource it owns: the insert may still create it. Rollback then keeps the owned deny while the
+instance may still appear and prints, for each such resource, the insert's operation to watch: by
+name when one is known, otherwise an operations listing filtered to inserts of that resource. Wait
+until that operation reports `DONE`, or until the listing shows none `PENDING` or `RUNNING`, before
+checking the resource. Verify each provider ID before any manual name-based deletion:
 
 ```bash
 gcloud compute operations describe OPERATION \
   --project PROJECT --zone ZONE   # --global for a firewall rule's operation
+gcloud compute operations list --project PROJECT --zones ZONE \
+  --filter='operationType=insert AND targetLink~/instances/INSTANCE$'
 gcloud compute instances describe INSTANCE \
   --project PROJECT --zone ZONE --format='value(id)'
 gcloud compute firewall-rules describe RULE \

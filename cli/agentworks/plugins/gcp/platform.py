@@ -34,14 +34,12 @@ from agentworks.plugins.gcp.bootstrap import (
 )
 from agentworks.plugins.gcp.cleanup import (
     CleanupCoordinates,
+    CleanupTarget,
     InstanceOwnership,
     InstanceState,
     RollbackReport,
     UnresolvedInserts,
-    manual_cleanup_guidance,
-    rollback_after_interrupt,
     rollback_partial_create,
-    rollback_then_raise,
 )
 from agentworks.plugins.gcp.compute import (
     EXTERNAL_ACCESS_CONFIG_NAME,
@@ -79,6 +77,13 @@ from agentworks.plugins.gcp.network import (
     require_classic_first,
     require_firewall_name_available,
     resolve_network,
+)
+from agentworks.plugins.gcp.recovery import (
+    GcloudResource,
+    manual_cleanup_guidance,
+    may_still_appear,
+    rollback_after_interrupt,
+    rollback_then_raise,
 )
 from agentworks.topics import TopicProse
 
@@ -178,6 +183,16 @@ class _VMIdentity:
             instance_name=self.instance_name,
             allow_rule=self.allow_rule,
             deny_rule=self.deny_rule,
+        )
+
+    @property
+    def cleanup_target(self) -> CleanupTarget:
+        """The recorded resources, each by its persisted provider ID, with no insert outstanding."""
+        return CleanupTarget(
+            self.coordinates,
+            InstanceOwnership(self.instance_id),
+            FirewallOwnership(self.allow_rule, self.allow_rule_id),
+            FirewallOwnership(self.deny_rule, self.deny_rule_id),
         )
 
 
@@ -350,22 +365,25 @@ class GCEPlatform(PublicAddressPlatform):
         ordinary_failure: Exception | None = None
         operator_interrupt: KeyboardInterrupt | None = None
 
-        def unresolved() -> UnresolvedInserts:
-            return UnresolvedInserts.from_attempts(instance=instance_attempt, allow=allow_attempt, deny=deny_attempt)
+        def cleanup_target() -> CleanupTarget:
+            """What the attempts know when cleanup starts."""
+            return CleanupTarget(
+                coordinates,
+                instance_attempt.ownership,
+                allow_attempt.ownership,
+                deny_attempt.ownership,
+                UnresolvedInserts.from_attempts(instance=instance_attempt, allow=allow_attempt, deny=deny_attempt),
+            )
 
         def rollback() -> RollbackReport:
             return rollback_partial_create(
+                cleanup_target(),
                 instances=instances,
                 firewalls=firewalls,
-                coordinates=coordinates,
                 expected_allow=allow,
                 expected_deny=deny,
-                allow_ownership=allow_attempt.ownership,
-                deny_ownership=deny_attempt.ownership,
-                instance_ownership=instance_attempt.ownership,
                 instance_possible=instance_possible,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
-                unresolved=unresolved(),
             )
 
         try:
@@ -430,26 +448,10 @@ class GCEPlatform(PublicAddressPlatform):
             ordinary_failure = primary
 
         if operator_interrupt is not None:
-            rollback_after_interrupt(
-                operator_interrupt,
-                rollback,
-                coordinates,
-                instance_ownership=instance_attempt.ownership,
-                allow_ownership=allow_attempt.ownership,
-                deny_ownership=deny_attempt.ownership,
-                unresolved=unresolved(),
-            )
+            rollback_after_interrupt(operator_interrupt, rollback, cleanup_target())
         if ordinary_failure is not None:
             request.progress.log_error("GCE create failed; attempting provider-ID-owned rollback")
-            rollback_then_raise(
-                ordinary_failure,
-                rollback,
-                coordinates,
-                instance_ownership=instance_attempt.ownership,
-                allow_ownership=allow_attempt.ownership,
-                deny_ownership=deny_attempt.ownership,
-                unresolved=unresolved(),
-            )
+            rollback_then_raise(ordinary_failure, rollback, cleanup_target())
 
         if tailnet_address is None:  # pragma: no cover - both failure arms re-raise
             raise AssertionError("successful GCE create has no tailnet address")
@@ -534,26 +536,17 @@ class GCEPlatform(PublicAddressPlatform):
             network_url=identity.network_url,
             network_tag=identity.network_tag,
         )
+        target = identity.cleanup_target
         report = rollback_partial_create(
+            target,
             instances=instances,
             firewalls=firewalls,
-            coordinates=identity.coordinates,
             expected_allow=expected_allow,
             expected_deny=expected_deny,
-            allow_ownership=FirewallOwnership(identity.allow_rule, identity.allow_rule_id),
-            deny_ownership=FirewallOwnership(identity.deny_rule, identity.deny_rule_id),
-            instance_ownership=InstanceOwnership(identity.instance_id),
             instance_possible=True,
             timeout=_OPERATION_TIMEOUT_SECONDS,
-            unresolved=UnresolvedInserts(),
         )
-        guidance = manual_cleanup_guidance(
-            identity.coordinates,
-            report,
-            instance_ownership=InstanceOwnership(identity.instance_id),
-            allow_ownership=FirewallOwnership(identity.allow_rule, identity.allow_rule_id),
-            deny_ownership=FirewallOwnership(identity.deny_rule, identity.deny_rule_id),
-        )
+        guidance = manual_cleanup_guidance(target, report)
         if report.instance is not InstanceState.ABSENT:
             raise GCEOperationError(
                 f"GCE instance '{identity.instance_name}' was not proven absent; its database row is retained",
@@ -660,26 +653,26 @@ class GCEPlatform(PublicAddressPlatform):
                     ownership=attempt.ownership,
                     timeout=_OPERATION_TIMEOUT_SECONDS,
                 )
-                if result.state is not FirewallState.ABSENT:
+                # The insert's own steps cover a failed read of the rule too.
+                may_appear = attempt.outcome_unknown and not result.seen_owned
+                if result.state is not FirewallState.ABSENT and not (
+                    may_appear and result.state is FirewallState.INDETERMINATE
+                ):
                     output.warn(
                         f"GCE transient SSH rule '{route_name}' was not proven absent in project "
                         f"'{identity.project_id}'; inspect provider ID "
                         f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
                     )
-                elif attempt.outcome_unknown and not result.removed:
-                    project = identity.project_id
+                if may_appear:
                     known = attempt.ownership.resource_id if attempt.ownership is not None else None
-                    then = (
-                        f"only while it reports provider ID '{known}', run "
-                        f"`gcloud compute firewall-rules delete {route_name} --project {project}`"
-                        if known
-                        else "its provider ID is unknown, so do not delete it by name; escalate ownership"
-                    )
                     output.warn(
-                        f"GCE transient SSH rule '{route_name}' in project '{project}' was not confirmed created, "
-                        f"so it may still appear after its removal, open to source(s) {', '.join(prefixes)}. "
-                        f"Inspect `gcloud compute firewall-rules describe {route_name} --project {project} "
-                        f"--format='value(id)'`; {then}."
+                        f"GCE transient SSH rule '{route_name}' in project '{identity.project_id}' was not confirmed "
+                        f"created, so it may still appear after its removal, open to source(s) {', '.join(prefixes)}. "
+                        + may_still_appear(
+                            GcloudResource("firewall rule", identity.project_id, route_name),
+                            operation_name=attempt.operation_name,
+                            expected_id=known,
+                        )
                     )
 
     def _route_client(self, kind: GcpClientKind, ctx: RunContext) -> Any:

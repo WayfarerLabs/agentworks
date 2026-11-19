@@ -105,13 +105,14 @@ class FirewallState(Enum):
 class FirewallReconciliation:
     """One firewall state plus the provider ID observed for that exact name.
 
-    ``removed`` is set only by :func:`delete_matching_firewall`, when it
-    found the rule and deleted it.
+    ``seen_owned`` is set only by :func:`delete_matching_firewall`, when it
+    saw the owned incarnation, before or after deleting it, so an insert
+    that created it has landed.
     """
 
     state: FirewallState
     observed_resource_id: str | None
-    removed: bool = False
+    seen_owned: bool = False
 
 
 @dataclass(frozen=True)
@@ -501,8 +502,7 @@ def delete_matching_firewall(
     the wall clock (a ``Deadline``), each taking what the ones before left,
     since its callers hold interrupts while it runs. A call with nothing
     left of the bound is not made and fails, so the result says the rule
-    was not proven absent; ``removed`` says it found the rule and deleted
-    it.
+    was not proven absent; ``seen_owned`` says it found the owned rule.
     """
     deadline = Deadline.after(timeout)
     client = BoundedClient(client, deadline)
@@ -559,8 +559,8 @@ def delete_matching_firewall(
             ownership=ownership,
         )
     except AgentworksError:
-        return FirewallReconciliation(FirewallState.INDETERMINATE, None)
-    return replace(final, removed=final.state is FirewallState.ABSENT)
+        return FirewallReconciliation(FirewallState.INDETERMINATE, None, seen_owned=True)
+    return replace(final, seen_owned=True)
 
 
 def _verify_firewall_operation(

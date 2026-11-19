@@ -212,7 +212,7 @@ def test_ordinary_failure_cleanup_interrupt_reenters_idempotent_platform_rollbac
     platform, cache = gce_platform(monkeypatch, guest)
     rollback_calls = 0
 
-    def partial_then_complete_rollback(**kwargs: object) -> RollbackReport:
+    def partial_then_complete_rollback(_target: object, **kwargs: object) -> RollbackReport:
         nonlocal rollback_calls
         rollback_calls += 1
         if rollback_calls == 1:
@@ -244,7 +244,7 @@ def test_second_interrupt_abandons_platform_rollback_without_mutating_survivors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
     platform, cache = gce_platform(
         monkeypatch, gce_guest(failures={GCE_READINESS_COMMAND: [KeyboardInterrupt("first")]})
     )

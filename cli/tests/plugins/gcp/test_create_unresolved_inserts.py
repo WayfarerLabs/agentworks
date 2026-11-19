@@ -8,6 +8,7 @@ from google.cloud import compute_v1
 
 from agentworks.capabilities.vm_platform import ssh_exposure
 from agentworks.errors import AgentworksError
+from agentworks.plugins.gcp.errors import GCECapacityError
 from tests._gcp_platform_fakes import FakeClients, api_error, gce_ctx, gce_guest, gce_platform, gce_request
 
 
@@ -20,7 +21,7 @@ def _egress(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     caught: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", caught.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", caught.append)
     return caught
 
 
@@ -66,7 +67,44 @@ def test_an_instance_insert_still_unresolved_keeps_the_deny_and_reports_it(
     assert deny in message
     if operation is not None:
         assert operation in message
-        assert "'201'" in message  # the operation's target, the instance's expected provider ID
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        api_error(api_exceptions.ResourceExhausted, "quota"),
+        api_error(api_exceptions.PermissionDenied, "denied"),
+        api_error(api_exceptions.AlreadyExists, "taken"),
+    ],
+    ids=("quota", "permission", "already-exists"),
+)
+def test_a_refusal_of_the_only_instance_insert_cleans_up_fully(
+    monkeypatch: pytest.MonkeyPatch, warnings: list[str], refusal: Exception
+) -> None:
+    platform, cache = gce_platform(monkeypatch, gce_guest())
+    cache.instances.insert_failures = [refusal]
+
+    with pytest.raises(AgentworksError):
+        platform.create(gce_request(), gce_ctx())
+
+    assert cache.firewalls.resources == {}
+    assert warnings == []
+
+
+def test_an_instance_insert_that_ran_out_of_capacity_cleans_up_fully(
+    monkeypatch: pytest.MonkeyPatch, warnings: list[str]
+) -> None:
+    platform, cache = gce_platform(monkeypatch, gce_guest())
+    cache.instances.insert_lands = False
+    cache.instances.insert_operation_errors = [
+        compute_v1.Error(errors=[compute_v1.Errors(code="ZONE_RESOURCE_POOL_EXHAUSTED")])
+    ]
+
+    with pytest.raises(GCECapacityError):
+        platform.create(gce_request(), gce_ctx())
+
+    assert cache.firewalls.resources == {}
+    assert warnings == []
 
 
 @pytest.mark.parametrize("landed", [False, True], ids=("never-created", "created-then-failed"))
