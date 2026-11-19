@@ -18,6 +18,8 @@ from azure.core.credentials import AccessToken
 from azure.core.pipeline.transport import RequestsTransport
 from requests.adapters import BaseAdapter
 
+from agentworks.plugins.azure import network as azure_network
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -95,13 +97,29 @@ class _HeldAdapter(_ScriptedAdapter):
                 sender.join(self._cap)
 
 
+# azure-core exports RequestsTransport through a lazy module __getattr__, so mypy sees it as Any.
+class _ClockedTransport(RequestsTransport):  # type: ignore[misc]
+    """Sleeps on the network helpers' clock, the fake one once ``_install_fakes`` has run.
+
+    So a wait azure-core asks for (a retry's backoff or Retry-After, a poll's
+    interval) takes no real time there and shows on that clock instead: a
+    request retried that should not be fails its test rather than stalling it.
+    """
+
+    def sleep(self, duration: float) -> None:
+        azure_network.time.sleep(duration)  # type: ignore[attr-defined]  # the module's own import, which the fakes patch
+
+
 def _scripted_client[C](client_type: Callable[..., C], adapter: BaseAdapter) -> C:
-    """A generated management client sending over ``adapter``, without azure-core's backoff between retries."""
+    """A generated management client sending over ``adapter``, without azure-core's backoff between retries.
+
+    It sleeps on the network helpers' clock (see :class:`_ClockedTransport`).
+    """
     session = requests.Session()
     session.mount("https://", adapter)
     return client_type(
         _Credential(),
         "sub-A",
-        transport=RequestsTransport(session=session, session_owner=False),
+        transport=_ClockedTransport(session=session, session_owner=False),
         retry_backoff_factor=0,
     )
