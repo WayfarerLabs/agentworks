@@ -49,6 +49,7 @@ class FakeOperation:
         status: object = None,
         error: object = None,
     ) -> None:
+        self.name = f"operation-{operation_type}-{target_id}"
         self.client_operation_id = request_id
         self.operation_type = operation_type
         self.target_link = target_link
@@ -131,6 +132,8 @@ class FakeInstances:
         self.insert_operation_errors: list[object] = []
         self.delete_failures: list[Exception] = []
         self.get_calls: list[dict[str, object]] = []
+        # False accepts each insert without the instance appearing, as while its operation still runs.
+        self.insert_lands = True
 
     def get(self, **kwargs: object) -> compute_v1.Instance:
         self.get_calls.append(kwargs)
@@ -146,10 +149,11 @@ class FakeInstances:
             failure = self.insert_failures.pop(0)
             if failure is not None:
                 raise failure
-        self.resource = compute_v1.Instance(compute_v1.Instance.to_dict(request.instance_resource))
-        self.resource.id = 201
-        self.resource.status = "RUNNING"
-        self.resource.network_interfaces[0].access_configs[0].nat_i_p = "203.0.113.19"
+        if self.insert_lands:
+            self.resource = compute_v1.Instance(compute_v1.Instance.to_dict(request.instance_resource))
+            self.resource.id = 201
+            self.resource.status = "RUNNING"
+            self.resource.network_interfaces[0].access_configs[0].nat_i_p = "203.0.113.19"
         return self._operation(
             request.request_id,
             "insert",

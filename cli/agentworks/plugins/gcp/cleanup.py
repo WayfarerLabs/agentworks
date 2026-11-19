@@ -5,13 +5,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, NamedTuple, NoReturn
 
 from agentworks import output
 from agentworks.errors import AgentworksError
 from agentworks.plugins.gcp.compute import provider_resource_id, verify_zonal_operation
 from agentworks.plugins.gcp.errors import call_google, call_google_optional, wait_for_extended_operation
 from agentworks.plugins.gcp.network import (
+    FirewallInsertAttempt,
     FirewallOwnership,
     FirewallReconciliation,
     FirewallState,
@@ -22,6 +23,8 @@ from agentworks.plugins.gcp.network import (
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
+
+    from agentworks.plugins.gcp.instance import InstanceInsertAttempt
 
 
 class InstanceState(Enum):
@@ -56,8 +59,50 @@ class CleanupCoordinates:
 
 
 @dataclass(frozen=True)
+class UnresolvedInsert:
+    """An insert sent whose outcome is unknown, so its resource may still appear.
+
+    ``operation_name`` is the insert's verified operation, or ``None`` when no
+    answer to the insert arrived.
+    """
+
+    operation_name: str | None
+
+
+@dataclass(frozen=True)
+class UnresolvedInserts:
+    """Which of a create's inserts may still create their resource."""
+
+    instance: UnresolvedInsert | None = None
+    allow: UnresolvedInsert | None = None
+    deny: UnresolvedInsert | None = None
+
+    @classmethod
+    def from_attempts(
+        cls,
+        *,
+        instance: InstanceInsertAttempt,
+        allow: FirewallInsertAttempt,
+        deny: FirewallInsertAttempt,
+    ) -> UnresolvedInserts:
+        return cls(_unresolved(instance), _unresolved(allow), _unresolved(deny))
+
+    @property
+    def any(self) -> bool:
+        return self != UnresolvedInserts()
+
+
+def _unresolved(attempt: InstanceInsertAttempt | FirewallInsertAttempt) -> UnresolvedInsert | None:
+    return UnresolvedInsert(attempt.operation_name) if attempt.outcome_unknown else None
+
+
+@dataclass(frozen=True)
 class RollbackReport:
-    """The provider state proven after one bounded rollback attempt."""
+    """The provider state proven after one bounded rollback attempt.
+
+    ``may_appear`` names each resource found absent that an unresolved
+    insert may still create: absent is not yet clean for it.
+    """
 
     instance: InstanceState
     allow: FirewallState
@@ -65,6 +110,7 @@ class RollbackReport:
     instance_resource_id: str | None = None
     allow_resource_id: str | None = None
     deny_resource_id: str | None = None
+    may_appear: UnresolvedInserts = UnresolvedInserts()
 
     @property
     def clean(self) -> bool:
@@ -72,7 +118,16 @@ class RollbackReport:
             self.instance is InstanceState.ABSENT
             and self.allow is FirewallState.ABSENT
             and self.deny is FirewallState.ABSENT
+            and not self.may_appear.any
         )
+
+
+class InstanceReconciliation(NamedTuple):
+    """An instance's state after cleanup, its observed provider ID, and whether cleanup deleted it."""
+
+    state: InstanceState
+    observed_resource_id: str | None
+    removed: bool = False
 
 
 def probe_instance_state(
@@ -139,7 +194,7 @@ def delete_instance_and_verify(
     coordinates: CleanupCoordinates,
     ownership: InstanceOwnership | None,
     timeout: float,
-) -> tuple[InstanceState, str | None]:
+) -> InstanceReconciliation:
     """Delete only the expected provider incarnation, then prove absence."""
     state, observed_id = _reconcile_instance(
         instances,
@@ -147,7 +202,7 @@ def delete_instance_and_verify(
         ownership=ownership,
     )
     if state is not InstanceState.SURVIVING:
-        return state, observed_id
+        return InstanceReconciliation(state, observed_id)
     try:
         from google.cloud import compute_v1
 
@@ -182,11 +237,12 @@ def delete_instance_and_verify(
         )
     except AgentworksError:
         pass
-    return _reconcile_instance(
+    state, observed_id = _reconcile_instance(
         instances,
         coordinates=coordinates,
         ownership=ownership,
     )
+    return InstanceReconciliation(state, observed_id, removed=state is InstanceState.ABSENT)
 
 
 def manual_cleanup_guidance(
@@ -204,6 +260,7 @@ def manual_cleanup_guidance(
         instance_ownership=instance_ownership,
         allow_ownership=allow_ownership,
         deny_ownership=deny_ownership,
+        unresolved=UnresolvedInserts(),
     )
 
 
@@ -219,8 +276,15 @@ def rollback_partial_create(
     instance_ownership: InstanceOwnership | None,
     instance_possible: bool,
     timeout: float,
+    unresolved: UnresolvedInserts,
 ) -> RollbackReport:
-    """Close allow, remove possible instance, then conditionally remove deny."""
+    """Close allow, remove possible instance, then conditionally remove deny.
+
+    The deny goes only once the instance is proven absent and no unresolved
+    insert can still create it. A resource found absent, though not deleted
+    here, that an ``unresolved`` insert may still create is reported in
+    ``may_appear``.
+    """
     allow_result = delete_matching_firewall(
         firewalls,
         project_id=coordinates.project_id,
@@ -228,7 +292,7 @@ def rollback_partial_create(
         ownership=allow_ownership,
         timeout=timeout,
     )
-    instance_state, instance_resource_id = (
+    instance_result = (
         delete_instance_and_verify(
             instances,
             coordinates=coordinates,
@@ -236,9 +300,14 @@ def rollback_partial_create(
             timeout=timeout,
         )
         if instance_possible
-        else (InstanceState.ABSENT, None)
+        else InstanceReconciliation(InstanceState.ABSENT, None)
     )
-    if instance_state is InstanceState.ABSENT:
+    instance_may_appear = _still_unresolved(
+        unresolved.instance,
+        absent=instance_result.state is InstanceState.ABSENT,
+        removed=instance_result.removed,
+    )
+    if instance_result.state is InstanceState.ABSENT and instance_may_appear is None:
         deny_result = delete_matching_firewall(
             firewalls,
             project_id=coordinates.project_id,
@@ -254,13 +323,34 @@ def rollback_partial_create(
             deny_ownership,
         )
     return RollbackReport(
-        instance_state,
+        instance_result.state,
         allow_result.state,
         deny_result.state,
-        instance_resource_id,
+        instance_result.observed_resource_id,
         allow_result.observed_resource_id,
         deny_result.observed_resource_id,
+        may_appear=UnresolvedInserts(
+            instance_may_appear,
+            _still_unresolved(
+                unresolved.allow,
+                absent=allow_result.state is FirewallState.ABSENT,
+                removed=allow_result.removed,
+            ),
+            _still_unresolved(
+                unresolved.deny,
+                absent=deny_result.state is FirewallState.ABSENT,
+                removed=deny_result.removed,
+            ),
+        ),
     )
+
+
+def _still_unresolved(insert: UnresolvedInsert | None, *, absent: bool, removed: bool) -> UnresolvedInsert | None:
+    """An unresolved insert whose resource was found absent without being deleted may still create it.
+
+    Deleting the resource the insert created settles the insert.
+    """
+    return insert if absent and not removed else None
 
 
 def rollback_then_raise(
@@ -271,6 +361,7 @@ def rollback_then_raise(
     instance_ownership: InstanceOwnership | None,
     allow_ownership: FirewallOwnership | None,
     deny_ownership: FirewallOwnership | None,
+    unresolved: UnresolvedInserts,
 ) -> NoReturn:
     """Run bounded cleanup without replacing an ordinary primary failure."""
     report: RollbackReport | None = None
@@ -292,6 +383,7 @@ def rollback_then_raise(
             instance_ownership=instance_ownership,
             allow_ownership=allow_ownership,
             deny_ownership=deny_ownership,
+            unresolved=unresolved,
         )
     if cleanup_failed:
         output.warn(
@@ -302,6 +394,7 @@ def rollback_then_raise(
                 instance_ownership=instance_ownership,
                 allow_ownership=allow_ownership,
                 deny_ownership=deny_ownership,
+                unresolved=unresolved,
             )
         )
     if report is not None and not report.clean:
@@ -312,6 +405,7 @@ def rollback_then_raise(
                 instance_ownership=instance_ownership,
                 allow_ownership=allow_ownership,
                 deny_ownership=deny_ownership,
+                unresolved=unresolved,
             )
         )
     primary.__cause__ = None
@@ -327,6 +421,7 @@ def rollback_after_interrupt(
     instance_ownership: InstanceOwnership | None,
     allow_ownership: FirewallOwnership | None,
     deny_ownership: FirewallOwnership | None,
+    unresolved: UnresolvedInserts,
 ) -> NoReturn:
     """Clean after the first interrupt; abandon promptly after the second."""
     output.warn(
@@ -350,6 +445,7 @@ def rollback_after_interrupt(
                 instance_ownership=instance_ownership,
                 allow_ownership=allow_ownership,
                 deny_ownership=deny_ownership,
+                unresolved=unresolved,
             )
         )
     elif report is None:
@@ -361,6 +457,7 @@ def rollback_after_interrupt(
                 instance_ownership=instance_ownership,
                 allow_ownership=allow_ownership,
                 deny_ownership=deny_ownership,
+                unresolved=unresolved,
             )
         )
     elif not report.clean:
@@ -371,6 +468,7 @@ def rollback_after_interrupt(
                 instance_ownership=instance_ownership,
                 allow_ownership=allow_ownership,
                 deny_ownership=deny_ownership,
+                unresolved=unresolved,
             )
         )
     primary.__cause__ = None
@@ -402,16 +500,43 @@ def _manual_guidance(
     instance_ownership: InstanceOwnership | None,
     allow_ownership: FirewallOwnership | None,
     deny_ownership: FirewallOwnership | None,
+    unresolved: UnresolvedInserts,
 ) -> str:
+    """Guidance for ``report``, or, with no report, for every resource as unknown.
+
+    ``unresolved`` names the inserts whose outcome was unknown when cleanup
+    began; a report says which of them may still create their resource.
+    """
+    may_appear = unresolved if report is None else report.may_appear
     instance_needs_action = report is None or report.instance is not InstanceState.ABSENT
     allow_needs_action = report is None or report.allow is not FirewallState.ABSENT
     deny_needs_action = report is None or report.deny is not FirewallState.ABSENT
+    pending = [
+        f"{role} '{insert.operation_name or 'unknown'}'"
+        for role, insert in (
+            ("instance", may_appear.instance),
+            ("allow", may_appear.allow),
+            ("deny", may_appear.deny),
+        )
+        if insert is not None
+    ]
     actions = [
         f"project '{coordinates.project_id}', zone '{coordinates.zone}', instance '{coordinates.instance_name}', "
         f"allow '{coordinates.allow_rule}', deny '{coordinates.deny_rule}'; expected provider IDs: "
         f"instance '{_expected_id(instance_ownership)}', allow '{_expected_id(allow_ownership)}', "
-        f"deny '{_expected_id(deny_ownership)}'."
+        f"deny '{_expected_id(deny_ownership)}'"
+        + (f"; unresolved insert operations: {', '.join(pending)}." if pending else ".")
     ]
+    if report is not None:
+        actions.extend(
+            _may_appear_guidance(coordinates, role=role, name=name, insert=insert, expected_id=expected_id)
+            for role, name, insert, expected_id in (
+                ("instance", coordinates.instance_name, may_appear.instance, _owned_id(instance_ownership)),
+                ("allow", coordinates.allow_rule, may_appear.allow, _owned_id(allow_ownership)),
+                ("deny", coordinates.deny_rule, may_appear.deny, _owned_id(deny_ownership)),
+            )
+            if insert is not None
+        )
     if instance_needs_action:
         instance_state = InstanceState.INDETERMINATE if report is None else report.instance
         observed_id = None if report is None else report.instance_resource_id
@@ -451,7 +576,9 @@ def _manual_guidance(
                 state=state,
                 expected_id=expected_id,
                 observed_id=observed_id,
-                instance_absent=report is not None and report.instance is InstanceState.ABSENT,
+                instance_absent=(
+                    report is not None and report.instance is InstanceState.ABSENT and may_appear.instance is None
+                ),
             )
         )
     return "Manual cleanup: " + " ".join(actions)
@@ -459,6 +586,43 @@ def _manual_guidance(
 
 def _expected_id(ownership: InstanceOwnership | FirewallOwnership | None) -> str:
     return "unknown" if ownership is None else ownership.resource_id
+
+
+def _owned_id(ownership: InstanceOwnership | FirewallOwnership | None) -> str | None:
+    return None if ownership is None else ownership.resource_id
+
+
+def _may_appear_guidance(
+    coordinates: CleanupCoordinates,
+    *,
+    role: str,
+    name: str,
+    insert: UnresolvedInsert,
+    expected_id: str | None,
+) -> str:
+    """Guidance for a resource found absent that an unresolved insert may still create."""
+    project = coordinates.project_id
+    if role == "instance":
+        scope = f"--zone {coordinates.zone}"
+        inspect = f"`gcloud compute instances describe {name} --project {project} {scope} --format='value(id)'`"
+        delete = f"`gcloud compute instances delete {name} --project {project} {scope}`"
+    else:
+        scope = "--global"
+        inspect = f"`gcloud compute firewall-rules describe {name} --project {project} --format='value(id)'`"
+        delete = f"`gcloud compute firewall-rules delete {name} --project {project}`"
+    identity = f"expected provider ID '{expected_id or 'unknown'}', operation '{insert.operation_name or 'unknown'}'"
+    check = (
+        f"Inspect `gcloud compute operations describe {insert.operation_name} --project {project} {scope}` "
+        f"until it reports DONE, then inspect {inspect}"
+        if insert.operation_name
+        else f"Inspect {inspect} again later"
+    )
+    then = (
+        f"if it appears, only while it reports provider ID '{expected_id}', run {delete}."
+        if expected_id is not None
+        else "if it appears, do not delete by name; escalate ownership."
+    )
+    return f"{role.capitalize()} insert outcome unknown, so it may still appear ({identity}). {check}; {then}"
 
 
 def _instance_guidance(

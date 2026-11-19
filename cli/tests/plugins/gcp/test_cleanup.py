@@ -15,6 +15,8 @@ from agentworks.plugins.gcp.cleanup import (
     InstanceOwnership,
     InstanceState,
     RollbackReport,
+    UnresolvedInsert,
+    UnresolvedInserts,
     rollback_after_interrupt,
     rollback_partial_create,
     rollback_then_raise,
@@ -191,6 +193,7 @@ def test_total_rollback_closes_allow_before_instance_and_deny_after_absence() ->
         instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
+        unresolved=UnresolvedInserts(),
     )
     assert report.clean
     assert log == [
@@ -236,6 +239,7 @@ def test_definitive_instance_delete_wait_failure_still_accepts_verified_absence(
         instance_ownership=_INSTANCE_OWNERSHIP,
         instance_possible=True,
         timeout=9,
+        unresolved=UnresolvedInserts(),
     )
 
     assert report.clean
@@ -264,6 +268,7 @@ def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
         instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
+        unresolved=UnresolvedInserts(),
     )
     assert report.instance is InstanceState.SURVIVING
     assert report.instance_resource_id == "201"
@@ -296,6 +301,7 @@ def test_indeterminate_instance_keeps_deny() -> None:
         instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
+        unresolved=UnresolvedInserts(),
     )
     assert report.instance is InstanceState.INDETERMINATE
     assert report.instance_resource_id is None
@@ -324,6 +330,7 @@ def test_mismatched_rule_is_retained_not_deleted() -> None:
         instance_ownership=None,
         instance_possible=False,
         timeout=9,
+        unresolved=UnresolvedInserts(),
     )
     assert report.allow is FirewallState.MISMATCHED
     assert "firewall:delete:vm-a-allow" not in log
@@ -369,6 +376,7 @@ def test_instance_without_matching_provider_ownership_is_retained(
         instance_ownership=ownership,
         instance_possible=True,
         timeout=9,
+        unresolved=UnresolvedInserts(),
     )
     assert report.instance is expected_state
     assert report.instance_resource_id == observed_id
@@ -390,6 +398,7 @@ def test_ordinary_cleanup_cannot_replace_primary_failure(monkeypatch: pytest.Mon
             instance_ownership=_INSTANCE_OWNERSHIP,
             allow_ownership=_ALLOW_OWNERSHIP,
             deny_ownership=_DENY_OWNERSHIP,
+            unresolved=UnresolvedInserts(),
         )
 
     assert caught.value is primary
@@ -441,6 +450,7 @@ def test_interrupt_after_partial_ordinary_rollback_converges_and_supersedes_prim
             instance_ownership=_INSTANCE_OWNERSHIP,
             instance_possible=True,
             timeout=9,
+            unresolved=UnresolvedInserts(),
         )
 
     with pytest.raises(KeyboardInterrupt) as caught:
@@ -451,6 +461,7 @@ def test_interrupt_after_partial_ordinary_rollback_converges_and_supersedes_prim
             instance_ownership=_INSTANCE_OWNERSHIP,
             allow_ownership=_ALLOW_OWNERSHIP,
             deny_ownership=_DENY_OWNERSHIP,
+            unresolved=UnresolvedInserts(),
         )
 
     assert caught.value is first
@@ -496,6 +507,7 @@ def test_second_interrupt_after_partial_ordinary_rollback_is_only_abandon_signal
             instance_ownership=_INSTANCE_OWNERSHIP,
             instance_possible=True,
             timeout=9,
+            unresolved=UnresolvedInserts(),
         )
 
     with pytest.raises(KeyboardInterrupt) as caught:
@@ -506,6 +518,7 @@ def test_second_interrupt_after_partial_ordinary_rollback_is_only_abandon_signal
             instance_ownership=_INSTANCE_OWNERSHIP,
             allow_ownership=_ALLOW_OWNERSHIP,
             deny_ownership=_DENY_OWNERSHIP,
+            unresolved=UnresolvedInserts(),
         )
 
     assert caught.value is first
@@ -532,6 +545,7 @@ def test_first_interrupt_rolls_back_and_reraises_original_identity(monkeypatch: 
             instance_ownership=_INSTANCE_OWNERSHIP,
             allow_ownership=_ALLOW_OWNERSHIP,
             deny_ownership=_DENY_OWNERSHIP,
+            unresolved=UnresolvedInserts(),
         )
 
     assert caught.value is primary
@@ -553,6 +567,7 @@ def test_second_interrupt_abandons_promptly_with_exact_safe_actions(monkeypatch:
             instance_ownership=_INSTANCE_OWNERSHIP,
             allow_ownership=_ALLOW_OWNERSHIP,
             deny_ownership=_DENY_OWNERSHIP,
+            unresolved=UnresolvedInserts(),
         )
 
     assert caught.value is primary
@@ -569,6 +584,24 @@ def test_second_interrupt_abandons_promptly_with_exact_safe_actions(monkeypatch:
     assert "firewall-rules delete" not in message
 
 
+def test_abandoned_cleanup_names_each_unresolved_insert_operation(monkeypatch: pytest.MonkeyPatch) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+
+    with pytest.raises(KeyboardInterrupt):
+        rollback_after_interrupt(
+            KeyboardInterrupt("first"),
+            lambda: (_ for _ in ()).throw(KeyboardInterrupt("second")),
+            _COORDINATES,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
+            unresolved=UnresolvedInserts(instance=UnresolvedInsert("operation-insert-201")),
+        )
+
+    assert "operation-insert-201" in "\n".join(warnings)
+
+
 def _warning_for_report(monkeypatch: pytest.MonkeyPatch, report: RollbackReport) -> str:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
@@ -581,6 +614,7 @@ def _warning_for_report(monkeypatch: pytest.MonkeyPatch, report: RollbackReport)
             instance_ownership=_INSTANCE_OWNERSHIP,
             allow_ownership=_ALLOW_OWNERSHIP,
             deny_ownership=_DENY_OWNERSHIP,
+            unresolved=UnresolvedInserts(),
         )
     assert caught.value is primary
     assert len(warnings) == 1

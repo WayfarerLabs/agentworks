@@ -19,7 +19,7 @@ from agentworks.errors import (
     NotFoundError,
     TokenRejectedError,
 )
-from agentworks.plugins.gcp.compute import canonical_resource_url, provider_resource_id
+from agentworks.plugins.gcp.compute import canonical_resource_url, provider_operation_name, provider_resource_id
 from agentworks.plugins.gcp.errors import (
     GCEError,
     GCEIndeterminateOperationError,
@@ -131,7 +131,8 @@ class FirewallInsertAttempt:
     :func:`insert_firewall_reconciled` sets it when it sends the insert and
     clears it once the outcome is known, so an insert cut short, or one
     whose first try went unanswered, leaves it set whatever ends the
-    attempt.
+    attempt. ``operation_name`` names the insert's verified operation, once
+    one arrives, for recovery guidance.
     """
 
     rule_name: str
@@ -139,6 +140,7 @@ class FirewallInsertAttempt:
     ownership: FirewallOwnership | None = None
     submitted: bool = False
     outcome_unknown: bool = False
+    operation_name: str | None = None
 
     @classmethod
     def create(cls, rule_name: str) -> FirewallInsertAttempt:
@@ -438,6 +440,7 @@ def insert_firewall_reconciled(
             expected_resource_id=None,
         ),
     )
+    attempt.operation_name = provider_operation_name(operation)
 
     wait_failure: AgentworksError | None = None
     try:

@@ -37,6 +37,7 @@ from agentworks.plugins.gcp.cleanup import (
     InstanceOwnership,
     InstanceState,
     RollbackReport,
+    UnresolvedInserts,
     manual_cleanup_guidance,
     rollback_after_interrupt,
     rollback_partial_create,
@@ -349,6 +350,9 @@ class GCEPlatform(PublicAddressPlatform):
         ordinary_failure: Exception | None = None
         operator_interrupt: KeyboardInterrupt | None = None
 
+        def unresolved() -> UnresolvedInserts:
+            return UnresolvedInserts.from_attempts(instance=instance_attempt, allow=allow_attempt, deny=deny_attempt)
+
         def rollback() -> RollbackReport:
             return rollback_partial_create(
                 instances=instances,
@@ -361,6 +365,7 @@ class GCEPlatform(PublicAddressPlatform):
                 instance_ownership=instance_attempt.ownership,
                 instance_possible=instance_possible,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
+                unresolved=unresolved(),
             )
 
         try:
@@ -432,6 +437,7 @@ class GCEPlatform(PublicAddressPlatform):
                 instance_ownership=instance_attempt.ownership,
                 allow_ownership=allow_attempt.ownership,
                 deny_ownership=deny_attempt.ownership,
+                unresolved=unresolved(),
             )
         if ordinary_failure is not None:
             request.progress.log_error("GCE create failed; attempting provider-ID-owned rollback")
@@ -442,6 +448,7 @@ class GCEPlatform(PublicAddressPlatform):
                 instance_ownership=instance_attempt.ownership,
                 allow_ownership=allow_attempt.ownership,
                 deny_ownership=deny_attempt.ownership,
+                unresolved=unresolved(),
             )
 
         if tailnet_address is None:  # pragma: no cover - both failure arms re-raise
@@ -538,6 +545,7 @@ class GCEPlatform(PublicAddressPlatform):
             instance_ownership=InstanceOwnership(identity.instance_id),
             instance_possible=True,
             timeout=_OPERATION_TIMEOUT_SECONDS,
+            unresolved=UnresolvedInserts(),
         )
         guidance = manual_cleanup_guidance(
             identity.coordinates,

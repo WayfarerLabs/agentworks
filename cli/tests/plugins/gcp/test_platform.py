@@ -148,7 +148,7 @@ def test_close_reconstructs_stable_allow_from_original_normalized_prefixes(
 
 @pytest.mark.parametrize(
     "failure_stage",
-    ("deny-insert", "allow-insert", "instance-insert", "readiness"),
+    ("deny-insert", "allow-insert", "readiness"),
 )
 def test_create_failures_clean_every_partial_resource_set(
     monkeypatch: pytest.MonkeyPatch,
@@ -162,8 +162,6 @@ def test_create_failures_clean_every_partial_resource_set(
         cache.firewalls.insert_failures = [provider_failure, provider_failure]
     elif failure_stage == "allow-insert":
         cache.firewalls.insert_failures = [None, provider_failure, provider_failure]
-    elif failure_stage == "instance-insert":
-        cache.instances.insert_failures = [provider_failure, provider_failure]
     else:
         transport_failures[GCE_READINESS_COMMAND] = [ConnectivityError("startup marker unavailable")]
 

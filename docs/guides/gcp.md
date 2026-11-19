@@ -285,10 +285,16 @@ the database row and deny for a retry. The boot disk is removed by the instance'
 auto-delete setting.
 
 If create rollback or delete cannot prove cleanup, Agentworks prints the project, zone, resource
-names, expected provider IDs, and safe next action. Verify each provider ID before any manual
-name-based deletion:
+names, expected provider IDs, and safe next action. A create stopped while an insert's outcome was
+still unknown (its operation unfinished, or no answer to the insert received) cannot treat that
+resource's absence as final, since the insert may still create it: rollback keeps the owned deny
+while the instance may still appear and prints the insert's operation name when one is known. Wait
+for that operation to report `DONE` before checking the resource. Verify each provider ID before any
+manual name-based deletion:
 
 ```bash
+gcloud compute operations describe OPERATION \
+  --project PROJECT --zone ZONE   # --global for a firewall rule's operation
 gcloud compute instances describe INSTANCE \
   --project PROJECT --zone ZONE --format='value(id)'
 gcloud compute firewall-rules describe RULE \
@@ -297,8 +303,8 @@ gcloud compute firewall-rules describe RULE \
 
 Only when the observed ID still equals the expected ID printed by Agentworks may you run the exact
 delete command it recommends. Close an owned allow first; delete an owned instance next; remove the
-owned deny only after `instances describe` reports not found. This ordering preserves fail-closed
-exposure around a possible survivor.
+owned deny only after `instances describe` reports not found and no instance insert operation is
+still running. This ordering preserves fail-closed exposure around a possible survivor.
 
 If the expected ID is unknown, the observed ID differs, or a same-name resource has a different
 shape, treat it as a collision: inspect ownership and escalate. Do not delete it by name. Matching
