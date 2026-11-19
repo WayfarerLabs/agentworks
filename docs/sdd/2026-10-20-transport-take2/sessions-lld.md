@@ -478,7 +478,7 @@ restart, torn the console down, so `start` and `restart` refuse first, with noth
 untouched and a running console intact (fix round 2 of PR #876); reconciliation applies the same
 check while it prepares. `create_console` checks every member the same way, `--all`'s included, and
 `add-sessions` each session it adds, before either resolves, starts the VM, probes tmux or records
-anything, so a bad binding refuses with nothing changed (fix round 3). `restore_session` probes the
+anything, so a bad binding refuses with nothing changed (fix round 2). `restore_session` probes the
 console's tmux and the window read-only first and checks only the agents of the panes it will open,
 so on a console that is not running it gives the not-running refusal, and an agent whose panes are
 all live is not asked. A window it will rebuild whole gets `validate_console_window` too, after that
