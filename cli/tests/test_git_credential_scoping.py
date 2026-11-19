@@ -17,6 +17,7 @@ if sys.platform == "win32":  # pragma: no cover - platform guard
         allow_module_level=True,
     )
 
+import contextlib
 import fcntl
 import os
 import shlex
@@ -1305,11 +1306,15 @@ def test_escaped_helper_descendant_cannot_hold_response_capture_open(tmp_path: P
         result = _query(tmp_path, _request("example.com"))
         elapsed = time.monotonic() - started
     finally:
+        # The escaped descendant is this test's own; it may not have written its whole pid yet, or exited already.
+        pid_text = ""
         deadline = time.monotonic() + 1
-        while not escaped_pid.exists() and time.monotonic() < deadline:
+        while not pid_text.endswith("\n") and time.monotonic() < deadline:
             time.sleep(0.01)
-        if escaped_pid.exists():
-            os.killpg(int(escaped_pid.read_text()), signal.SIGKILL)
+            pid_text = escaped_pid.read_text() if escaped_pid.exists() else ""
+        if pid_text.endswith("\n"):
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(int(pid_text), signal.SIGKILL)
     assert elapsed < 1
     assert result.returncode != 0
     assert result.stdout == ""
