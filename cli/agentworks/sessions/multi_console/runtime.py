@@ -80,8 +80,26 @@ class PreparedConsoleStop:
     action: ConsoleAction
 
 
+def validate_console_window(db: Database, member: ConsoleSessionRow, vm: VMRow) -> None:
+    """Refuse, from stored rows alone, a member whose window a build could not complete.
+
+    The window's bindings: its session on ``vm``, the agent that session names,
+    and the tmux server its attach pane reaches, which
+    ``resolve_session_tmux_server`` validates as the build does. A build that
+    met a bad binding would skip the window only once it had changed tmux, so
+    every path that builds a window checks it first, before anything resolves.
+    """
+    from agentworks.sessions.manager import resolve_session_tmux_server
+
+    _verify_session_on_vm(db, member.session_name, vm.name)
+    session = db.get_session(member.session_name)
+    assert session is not None
+    _mc._session_linux_user(db, session, vm)
+    resolve_session_tmux_server(db, session)
+
+
 def validate_console_definition(db: Database, console: ConsoleRow) -> tuple[ConsoleSessionRow, ...]:
-    """Validate stored relationships before accepting an explicit start."""
+    """Validate stored relationships, every window's bindings included, before accepting an explicit start."""
     members = tuple(db.list_console_sessions(console.name))
     if not members and not console.admin_shell:
         raise StateError(
@@ -89,14 +107,12 @@ def validate_console_definition(db: Database, console: ConsoleRow) -> tuple[Cons
             entity_kind="console",
             entity_name=console.name,
         )
-    for member in members:
-        _verify_session_on_vm(db, member.session_name, console.vm_name)
-        session = db.get_session(member.session_name)
-        assert session is not None
+    if members:
         vm = db.get_vm(console.vm_name)
         if vm is None:
             raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
-        _mc._session_linux_user(db, session, vm)
+        for member in members:
+            validate_console_window(db, member, vm)
     return members
 
 

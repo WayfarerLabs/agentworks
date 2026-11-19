@@ -32,6 +32,7 @@ from agentworks.sessions.tmux import ProbeStatus, access_run_command, exact_tmux
 
 from ._helpers import _require_console, tmux_session_name
 from .attach import _active_console_vm, _console_pane_access, _session_linux_user
+from .runtime import validate_console_window
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
@@ -281,10 +282,11 @@ def restore_session(
       the console's last window, and with it the whole tmux session).
 
     It observes the window read-only first and refuses those states before it
-    resolves anything. Then it checks the agents of only the panes it will
-    open and resolves only their secrets, in one pass, before its first tmux
-    change; a window with nothing missing prompts for nothing. Each pane it
-    opens parks a fresh handover.
+    resolves anything, and for a window it rebuilds, a member whose stored
+    bindings the build could not use (``validate_console_window``). Then it
+    checks the agents of only the panes it will open and resolves only their
+    secrets, in one pass, before its first tmux change; a window with nothing
+    missing prompts for nothing. Each pane it opens parks a fresh handover.
     """
     from ._helpers import guarded_console_selection
 
@@ -342,6 +344,9 @@ def restore_session(
                 return
 
             session, workspace_path = _restorable_session(db, session_name)
+            if observed.base_pidx is None:
+                # A rebuilt window binds its attach pane to the session's tmux server; refuse a bad one now.
+                validate_console_window(db, member, vm)
             # Exactly the panes this restore opens: their agents are checked and
             # their secrets resolve, and nothing else's.
             opening = replace(member, shells=[member.shells[cidx] for cidx in observed.missing])

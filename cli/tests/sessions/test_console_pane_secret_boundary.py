@@ -268,6 +268,75 @@ def test_start_and_restart_resolve_their_build_before_changing_tmux(
     assert model.has_session(CON)
 
 
+def _misbind_socket(db: Database, session_name: str) -> None:
+    """Give ``session_name`` a stored socket in the right directory under another session's name."""
+    db._conn.execute(
+        "UPDATE sessions SET socket_path = ? WHERE name = ?",
+        ("/run/agentworks/admin-tmux-sockets/admin/other.sock", session_name),
+    )
+    db._conn.commit()
+
+
+@pytest.mark.parametrize("operation", ["start", "restart"])
+def test_start_and_restart_refuse_a_member_socket_before_changing_anything(
+    db: Database,
+    console_guest_factory: Callable[..., _ScriptedGuest],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    """A build would skip the window only after tearing down or staging, so the stored socket is checked first."""
+    from agentworks.db import DesiredRuntimeState
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a+1", "b"])
+    _misbind_socket(db, "b")
+    model = TmuxModel()
+    if operation == "restart":
+        model.seed_session(CON, "a", pane_tags=(None, 0))
+        model.seed_window(CON, "b")
+    else:
+        db.set_console_desired_runtime_state("con", DesiredRuntimeState.STOPPED)
+    guest = console_guest_factory(model)
+    monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **k: pytest.fail("built pane targets"))
+    for step in ("prepare_vm_runtime", "activate_vm_runtime"):
+        monkeypatch.setattr(f"agentworks.vms.manager.runtime.{step}", lambda *a, **k: pytest.fail("started the VM"))
+    before = db._conn.total_changes
+    boundary = _Boundary(db, guest, monkeypatch)
+
+    run = mc.start_console if operation == "start" else mc.restart_console
+    with pytest.raises(StateError):
+        run(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert boundary.events == []
+    assert guest.commands == []
+    assert db._conn.total_changes == before
+    if operation == "restart":
+        assert model.window_names(CON) == ["a", "b"]
+        assert [tag for _pid, _pidx, tag in model.pane_rows(CON, "a") or []] == [None, 0]
+
+
+def test_restore_of_a_missing_window_refuses_its_member_socket_before_resolving_anything(
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _restorable(db, monkeypatch)
+    _misbind_socket(db, "b")
+    model = TmuxModel()
+    model.seed_session(CON, "a")
+    guest = console_guest_factory(model)
+    monkeypatch.setattr(mc, "_member_secret_targets", lambda *a, **k: pytest.fail("built pane targets"))
+    before = db._conn.total_changes
+    boundary = _Boundary(db, guest, monkeypatch)
+
+    with pytest.raises(StateError):
+        _restore(db)
+
+    assert [kind for kind, _ in boundary.events if kind != "tmux"] == []
+    assert all(any(read in str(command) for read in _READS) for _kind, command in boundary.events)
+    assert db._conn.total_changes == before
+    assert model.window_names(CON) == ["a"]
+
+
 def test_a_vm_without_an_address_resolves_nothing_and_dispatches_nothing(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
