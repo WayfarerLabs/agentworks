@@ -300,7 +300,7 @@ def inspect_artifacts(
                     owner.kind,
                     owner.name,
                     owner.facet,
-                    tuple(owner.artifacts.bundles),
+                    tuple(owner.artifacts.bundles or ()),
                     view.capture_status,
                     _artifact_metadata(registry, owner.artifacts, view),
                     tuple(integrations[owner.component]),
@@ -314,7 +314,7 @@ def _artifact_metadata(
     registry: Registry, config: ArtifactsConfig, view: ArtifactOwnerView
 ) -> tuple[ArtifactMetadata, ...]:
     entries: dict[tuple[str, str], list[str]] = {}
-    for bundle in config.bundles:
+    for bundle in config.bundles or ():
         try:
             declaration = resolve_bundle(registry, bundle).value
         except KeyError:

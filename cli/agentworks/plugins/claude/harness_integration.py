@@ -156,10 +156,11 @@ class ClaudeCodeConfig(AgwModel):
     later and replaces this generated setting. False (the default) adds no
     override. A child template's value replaces its parent's."""
 
-    enabled_workarounds: Annotated[
-        list[Literal["session-skill-plugin", "session-agent-definitions", "session-mcp-config"]], MergeStrategy.REPLACE
-    ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+    enabled_workarounds: (
+        list[Literal["session-skill-plugin", "session-agent-definitions", "session-mcp-config"]] | None
+    ) = Field(default_factory=list)
+    """Session artifact carriers append and deduplicate across layers.
+    Omission or an empty list inherits; null clears inherited opt-ins."""
 
     extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Appended after every generated CLI option, so it can carry
@@ -430,7 +431,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             render=lambda prepared: session_artifacts(
                 prepared,
                 extra_args=self._rendered_extra_args,
-                enabled_workarounds=self.config.enabled_workarounds,
+                enabled_workarounds=self.config.enabled_workarounds or (),
                 mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
                     "claude",
                     access,

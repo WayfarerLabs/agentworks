@@ -426,7 +426,7 @@ def local_remote_argv(remote_command: str, *, home: Path, shell: str, python: st
         "SSH_CLIENT=203.0.113.5 52000 22",
         "SSH_CONNECTION=203.0.113.5 52000 10.0.0.2 22",
     ]
-    command = remote_command.replace(ssh_process.DEFAULT_PYTHON, python, 1)
+    command = remote_command.replace(ssh_process.DEFAULT_PYTHON, shlex.quote(python), 1)
     return ["/usr/bin/env", "-i", *environment, shell, "-c", command]
 
 

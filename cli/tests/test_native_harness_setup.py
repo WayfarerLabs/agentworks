@@ -119,8 +119,9 @@ def test_settings_only_replace_repairs_invalid_document_and_retirement_retains_i
 
 
 @pytest.mark.parametrize("tool", ["codex", "claude"])
+@pytest.mark.parametrize("cleared", [None, NativeUserConfig(marketplaces=None, plugins=None)])
 def test_actual_native_lifecycle_and_checkpointed_idempotency(
-    account: LocalFixtureAccount, tool: NativeTool, monkeypatch
+    account: LocalFixtureAccount, tool: NativeTool, monkeypatch, cleared
 ) -> None:
     market = market_fixture(account, tool)
     reports: list[str] = []
@@ -138,7 +139,7 @@ def test_actual_native_lifecycle_and_checkpointed_idempotency(
     setup_fixture_user(tool, config, invocation(account, claims, prior=record(current, tool)))
     assert len(claims) == checkpoint_count
     assert len(reports) == 2
-    setup_fixture_user(tool, None, invocation(account, claims, prior=record(current, tool)))
+    setup_fixture_user(tool, cleared, invocation(account, claims, prior=record(current, tool)))
     assert claims[-1] == ()
     assert len(reports) == 4
     assert "one@fixture-market" in reports[2] and "fixture-market" in reports[3]

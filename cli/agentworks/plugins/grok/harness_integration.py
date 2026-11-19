@@ -116,10 +116,9 @@ class GrokBuildConfig(AgwModel):
     rules: str | None = None
     """Forwarded as ``--rules`` on every process launch, including resume."""
 
-    enabled_workarounds: Annotated[list[Literal["session-home-skills"]], MergeStrategy.REPLACE] = Field(
-        default_factory=list
-    )
-    """Explicitly enabled session artifact carriers; replaces inherited opt-ins."""
+    enabled_workarounds: list[Literal["session-home-skills"]] | None = Field(default_factory=list)
+    """Session artifact carriers append and deduplicate across layers.
+    Omission or an empty list inherits; null clears inherited opt-ins."""
 
     extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Argv tokens appended after every managed flag and before
@@ -333,7 +332,7 @@ class GrokBuildIntegration(HarnessIntegration):
             render=lambda prepared: session_artifacts(
                 prepared,
                 extra_args=self._rendered_extra_args,
-                enabled_workarounds=self.config.enabled_workarounds,
+                enabled_workarounds=self.config.enabled_workarounds or (),
                 resolve_home=resolve_home,
             ),
             workspace=self._workspace_path,

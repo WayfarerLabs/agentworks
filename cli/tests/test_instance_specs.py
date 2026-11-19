@@ -63,6 +63,10 @@ def test_spec_requires_a_nonempty_json_object(value: str) -> None:
         '{"env":{"A":null}}',
         '{"harness_integrations":null}',
         '{"harness_integrations":{"codex":{"settings":null}}}',
+        '{"artifacts":{"bundles":[null]}}',
+        '{"harness_integrations":{"codex":{"plugins":[null]}}}',
+        '{"harness_integration":{"name":"codex","enabled_workarounds":[null]}}',
+        '{"harness_integration":{"name":"codex","extra_args":null}}',
     ],
 )
 def test_spec_rejects_json_extensions_and_null_recursively(value: str) -> None:

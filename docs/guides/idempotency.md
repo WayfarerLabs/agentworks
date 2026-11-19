@@ -88,7 +88,11 @@ links as before. The same holds for agent reinit.
 | Tailscale DNS             | Startup-ordering drop-in rewritten, and systemd reloaded, only when content differs; a failed reload puts the prior drop-in back                                                                                                                                                                                                               |
 | sshd AcceptEnv            | Removed: `/etc/ssh/sshd_config.d/50-agentworks-accept-env.conf`, when present, is moved to `/etc/ssh/agentworks-accept-env.reload-pending`, which sshd does not read, and sshd is reloaded. While that file exists every reinit retries the reload, and it is removed once a reload succeeds; a no-op, with no reload, when neither is present |
 | Retired sudoers fragments | Removed: one `rm -f` of the retired `env_keep` and console `setenv` sudoers fragments, a no-op when they are absent                                                                                                                                                                                                                            |
+| Admin sudo grant          | Existing grant validated with `visudo -cf`, then mode repaired to 0440 in place                                                                                                                                                                                                                                                                |
 | Agent tmux sockets        | The socket root reset to `root:root` `0711` and each agent's directory to the agent's own `0700` when either differs; stale sockets removed; the retired `tmux-agent-access` group deleted once every directory is reset                                                                                                                       |
+
+If the admin grant is missing, is not a regular file, or fails validation, reinit warns and leaves
+it unchanged. Its contents and any symlink to a regular grant are preserved.
 
 ### Additive only
 
@@ -166,10 +170,11 @@ Every file Agentworks writes on a VM after provisioning it (initialization's fil
 publication and the tmux config among them), a local dotfiles upload and a fresh git dotfiles clone
 are staged beside the destination and renamed into place, so none of these destinations is left half
 written. Provisioning itself writes in place, the bootstrap of the admin account (its shell rc files
-and `authorized_keys`) and WSL2's sudoers entry, `/etc/wsl.conf` and fstab included. A git file
-source, such as a `mise.lock`, is fetched into a staging directory under `/var/tmp` and removed
-afterwards. A controller killed without a chance to clean up can leave any of these behind, and
-nothing collects them:
+and `authorized_keys`) and WSL2's `/etc/wsl.conf` and fstab included; the admin's sudo grant is the
+exception, staged, validated with `visudo -cf` and renamed into place. A git file source, such as a
+`mise.lock`, is fetched into a staging directory under `/var/tmp` and removed afterwards. A
+controller killed without a chance to clean up can leave any of these behind, and nothing collects
+them:
 
 | Leftover                                 | Where                                  | What it is                                                             |
 | ---------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |

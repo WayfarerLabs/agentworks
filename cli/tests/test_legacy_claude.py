@@ -10,7 +10,12 @@ import pytest
 from agentworks.db import DesiredOverlayRecord, VersionedPayload
 from agentworks.db.instance_state import JsonObject
 from agentworks.errors import StateError
-from agentworks.instance_specs import InstanceOverlay, UnsupportedStoredOverlayError, decode_stored_overlay
+from agentworks.instance_specs import (
+    InstanceOverlay,
+    UnsupportedStoredOverlayError,
+    VMInstanceOverlays,
+    decode_stored_overlay,
+)
 from agentworks.legacy_claude import LegacyClaudeContextRequired, checkpoint_conversion
 from agentworks.schema import CapabilityConfig
 
@@ -174,3 +179,32 @@ def test_competing_reinit_cannot_change_desired_state_before_guard(db, make_conf
         )
     assert db.get_agent("a").template == "old"
     assert db.instance_state.get_desired_overlay("agent", "a") == before
+
+
+@pytest.mark.parametrize("vm", [False, True])
+@pytest.mark.parametrize("entries", [[], ["legacy"]])
+def test_legacy_conversion_handles_cleared_native_lists_without_reviving_ancestors(vm, entries):
+    activations = {"claude-code": CapabilityConfig.model_validate({"marketplaces": None, "plugins": None})}
+    original = stored({"claude_marketplaces": entries, "claude_plugins": entries}, vm=vm)
+    decoded = decode_stored_overlay(original, legacy_user_base=activations)
+    component = cast("dict[str, Any]", decoded.payload.value["admin"] if vm else decoded.payload.value)
+    config = component["harness_integrations"]["claude-code"]
+    expected = {"marketplaces": entries or None, "plugins": entries or None}
+    assert config == expected
+    assert activations["claude-code"].config == {"marketplaces": None, "plugins": None}
+
+    from agentworks.agents.template import AgentTemplate
+    from agentworks.agents.templates import resolve_from_dict as resolve_agent
+    from agentworks.vms.admin import AdminConfig
+    from agentworks.vms.admin_templates import resolve_from_dict_with_provenance as resolve_admin
+
+    if vm:
+        assert isinstance(decoded, VMInstanceOverlays)
+        parent = AdminConfig(name="base", harness_integrations=activations)
+        assert decoded.admin is not None
+        effective = resolve_admin({"base": parent}, "base", overlay=decoded.admin).value.active_harness_integrations
+    else:
+        assert isinstance(decoded, InstanceOverlay)
+        parent_agent = AgentTemplate(name="base", harness_integrations=activations)
+        effective = resolve_agent({"base": parent_agent}, "base", overlay=decoded.declaration).harness_integrations
+    assert effective["claude-code"].config == expected

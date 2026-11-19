@@ -573,7 +573,9 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   and the apt source lists) are written by the file program, which refuses a symbolic link at the
   file or any parent. A refused file is a step warning, and the link's target is left as it is.
   Initialization no longer writes a sudoers fragment
-  ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)).
+  ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)); it only validates the
+  admin's existing grant, `/etc/sudoers.d/<admin>`, and sets its mode to 0440, through a link to it
+  as well.
 - **sshd is reloaded only when its fragment goes.** Initialization no longer writes an sshd fragment
   ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)); it reloads sshd only
   when it removes the old one, where every initialization used to reload sshd. Until that reload

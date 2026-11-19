@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
+from agentworks.capabilities.vm_platform.sudoers import repair_admin_sudoers_script
 from agentworks.errors import ExternalError
 from agentworks.execution.errors import PathRefusal, PathRefused
 from agentworks.execution.files import Absent
@@ -269,7 +270,8 @@ def _set_login_shell(files: Files, *, shell: str, admin_username: str, log: Init
 #     the one opening the shell. Also writes to /etc/zsh/zprofile because
 #     zsh skips /etc/profile.d by default.
 #
-# Init also removes three files earlier releases installed to carry
+# Init validates the admin's sudo grant, /etc/sudoers.d/<admin>, and repairs
+# its mode. It also removes three files earlier releases installed to carry
 # environment through sshd or across sudo, which nothing does now (ADR 0026):
 # /etc/ssh/sshd_config.d/50-agentworks-accept-env.conf (`AcceptEnv *`),
 # /etc/sudoers.d/50-agentworks-env-keep (`env_keep += "AGENTWORKS_* AW_*"`)
@@ -493,6 +495,25 @@ def _remove_retired_sudoers_fragments(files: Files, log: InitLog) -> None:
         )
     except STEP_FAILURES as error:
         warn_step(log, "removing the retired sudoers fragments failed; re-run 'agw vm reinit'", error)
+
+
+def _repair_admin_sudoers(files: Files, log: InitLog, admin_user: str) -> None:
+    """Validate the admin's sudo grant and repair its mode to 0440 in place, on reinit.
+
+    The grant is the one bootstrap installs (``admin_sudoers_script``), the
+    sudoers file elevation itself relies on, so it is never replaced here:
+    its contents, and a link to a regular file, stay as they are. A grant that
+    is missing, not a regular file, or rejected by ``visudo -cf`` fails the
+    script before the mode changes, and the step warns.
+    """
+    log.step("Admin sudo grant")
+    try:
+        files.access.run(
+            Script(repair_admin_sudoers_script(admin_user), Shell.SH, elevated=True, deadline=files.deadline),
+            check=True,
+        )
+    except STEP_FAILURES as error:
+        warn_step(log, "admin sudo grant repair failed; re-run 'agw vm reinit' to retry", error)
 
 
 def _write_agentworks_rc(files: Files, shell_snippets: list[str], log: InitLog, *, home: str, shell: str) -> None:

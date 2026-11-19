@@ -16,6 +16,7 @@ import pytest
 
 from agentworks.capabilities.vm_platform.bootstrap_script import SSH_PRESERVE_KEYS_PATH
 from agentworks.capabilities.vm_platform.cloud_init import INIT_SYSTEM_PACKAGES
+from agentworks.capabilities.vm_platform.sudoers import repair_admin_sudoers_script
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 from agentworks.execution.errors import (
@@ -30,7 +31,7 @@ from agentworks.execution.errors import (
     TrustMissing,
     VMNotReady,
 )
-from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
+from agentworks.execution.requests import Bytes, Command, PythonProgram, Script, Shell
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT, RETIRED_AGENT_SOCKET_GROUP
@@ -417,6 +418,25 @@ def test_a_failed_step_warns_and_every_later_step_still_runs(
 
     run_section(guest)
 
+    assert len(guest.log.warned) == 1
+    assert guest.access.requests() == steady.access.requests()
+
+
+ADMIN_GRANT_REPAIR = Script(repair_admin_sudoers_script("agentworks"), Shell.SH, elevated=True, deadline=60)
+
+
+@pytest.mark.parametrize("operation", list(driver.VMInitializationOperation))
+def test_the_admin_s_sudo_grant_is_repaired_and_a_failed_repair_only_warns(
+    run_section: Callable[..., None], operation: driver.VMInitializationOperation
+) -> None:
+    steady = Guest()
+    run_section(steady, operation=operation)
+    guest = Guest()
+    guest.fail(_is(ADMIN_GRANT_REPAIR), CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
+
+    run_section(guest, operation=operation)
+
+    assert steady.commands().count(ADMIN_GRANT_REPAIR) == 1
     assert len(guest.log.warned) == 1
     assert guest.access.requests() == steady.access.requests()
 

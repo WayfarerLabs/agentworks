@@ -60,3 +60,18 @@ retain their existing fingerprints and format; no declaration migration is requi
 Permanent artifact guidance and examples describe the authoring contract. Offline inspection
 distinguishes current direct selection from captured bundle provenance, including missing or stale
 captures. Direct content creates no synthetic bundle resource.
+
+## Amendment: additive selection inheritance, 2026-11-17
+
+The operator-requested correction in issue
+[#926](https://github.com/WayfarerLabs/agentworks/issues/926) aligns selection lists with the
+schema's ordinary append-dedupe behavior. `artifacts.bundles`, native user `marketplaces` and
+`plugins`, and session `enabled_workarounds` retain inherited entries and append new entries in
+order. Omission and `[]` inherit; explicit `null` clears the selected list. A later list after that
+clear starts fresh. `extra_args` keeps positional replacement semantics.
+
+This supersedes the earlier bundle-list replacement and empty-list clearing description. Operators
+must change authored or stored `[]` clearing selections to `null`; declarations are not
+automatically rewritten. Permanent guides and the direct-declaration example describe the current
+contract. The shared merge engine, normalized artifact format, owner identity, routing and native
+cleanup model remain unchanged.

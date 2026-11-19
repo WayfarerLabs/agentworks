@@ -78,16 +78,16 @@ Integration activation maps merge by key:
 - Omit `harness_integrations` or supply `{}` to inherit the effective map.
 - Adding a key activates that integration and preserves the parent's other integrations.
 - Restating a key merges its configuration according to the owning facet's schema. Claude and Codex
-  user facets replace an inherited `plugins` or `marketplaces` list when that field is supplied;
-  include every desired entry, or use `[]` to clear the list. Omitted fields inherit.
+  user facets append and deduplicate authored `plugins` and `marketplaces` lists. Omission and `[]`
+  preserve inherited entries; use `null` to clear a list.
 - An empty entry activates defaults when new and preserves inherited configuration when already
   selected.
 - A `null` entry disables that integration, including an inherited activation. For example,
   `harness_integrations: {codex: null}` leaves other integrations active. A later layer can
   reactivate Codex with `{}` or explicit config; the disabled config is not restored.
 
-For example, this child sets Claude's marketplace and plugin lists, replacing any inherited values
-for those fields. It retains the parent's Codex activation and Claude settings:
+For example, this child adds to Claude's inherited marketplace and plugin lists. It retains the
+parent's Codex activation and Claude settings:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -226,7 +226,8 @@ its actual user and workspace results with anything routed directly from the VM.
 that the session integration cannot handle produce warnings with their original source and reason.
 Native harness session delivery requires explicit `enabled_workarounds` in the selected
 integration's session config. The default empty list leaves all remaining inputs unhandled. Each
-named workaround enables only its documented delivery method; `[]` replaces inherited opt-ins. See
+named workaround enables only its documented delivery method. Lists append and deduplicate; omission
+and `[]` preserve inherited opt-ins, while `null` clears them. See
 `agw guide show concept-agent-artifacts` for the supported methods and their limitations. Shell
 publishes directly as files at every activated facet, including the private session directory.
 

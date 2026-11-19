@@ -4,10 +4,20 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import AfterValidator, Field, field_validator
 
 from agentworks.capabilities.harness_integration.settings import SettingsMapping
-from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.schema import AgwModel
+
+
+def _validate_native_entry(value: str) -> str:
+    """Validate one operator-supplied native setup entry at its list index."""
+    if not value.strip() or "\x00" in value:
+        raise ValueError("native setup entries must be nonblank and contain no NUL characters")
+    return value
+
+
+_NativeEntry = Annotated[str, AfterValidator(_validate_native_entry)]
 
 
 class NativeWorkspaceConfig(AgwModel):
@@ -18,27 +28,33 @@ class NativeWorkspaceConfig(AgwModel):
 
 
 class NativeUserConfig(NativeWorkspaceConfig):
-    """Native marketplaces, plugins, and settings for one actual user."""
+    """Native marketplaces, plugins, and settings for one actual user.
 
-    marketplaces: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
+    Selection lists append and deduplicate across layers. Omission or an empty
+    list inherits; null clears inherited entries.
+    """
+
+    marketplaces: list[_NativeEntry] | None = Field(default_factory=list)
     """Non-secret marketplace sources accepted by the installed native CLI."""
 
-    plugins: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
+    plugins: list[_NativeEntry] | None = Field(default_factory=list)
     """Plugin names or unambiguous plugin@marketplace identifiers to install."""
 
     @field_validator("marketplaces", "plugins")
     @classmethod
-    def _unique_nonblank(cls, values: list[str]) -> list[str]:
-        """Reject ambiguous operator-authored lists before native work."""
-        if any(not value.strip() or "\x00" in value for value in values) or len(values) != len(set(values)):
-            raise ValueError("native setup entries must be nonblank and unique")
+    def _unique_entries(cls, values: list[str] | None) -> list[str] | None:
+        """Reject repeated effective entries before native work."""
+        if values is None:
+            return None
+        if len(values) != len(set(values)):
+            raise ValueError("native setup entries must be unique")
         return values
 
     @field_validator("marketplaces")
     @classmethod
-    def _not_an_option(cls, values: list[str]) -> list[str]:
+    def _not_an_option(cls, values: list[str] | None) -> list[str] | None:
         """Reject a source the native CLI would read as an option; boundary: operator-authored config."""
-        if any(value.startswith("-") for value in values):
+        if values is not None and any(value.startswith("-") for value in values):
             raise ValueError(
                 "native marketplace sources must not begin with '-', which a native CLI reads as an option"
             )

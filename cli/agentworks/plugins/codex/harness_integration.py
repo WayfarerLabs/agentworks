@@ -241,10 +241,11 @@ class CodexConfig(AgwModel):
     """Turn OFF ``--strict-config``, for a target whose own
     ``config.toml`` a newer codex wrote."""
 
-    enabled_workarounds: Annotated[
-        list[Literal["session-home-skills", "session-agent-config", "session-mcp-overrides"]], MergeStrategy.REPLACE
-    ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+    enabled_workarounds: (
+        list[Literal["session-home-skills", "session-agent-config", "session-mcp-overrides"]] | None
+    ) = Field(default_factory=list)
+    """Session artifact carriers append and deduplicate across layers.
+    Omission or an empty list inherits; null clears inherited opt-ins."""
 
     extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Argv tokens appended after every generated CLI option,
@@ -711,7 +712,7 @@ class CodexIntegration(HarnessIntegration):
             render=lambda prepared: session_artifacts(
                 prepared,
                 extra_args=self._rendered_extra_args,
-                enabled_workarounds=self.config.enabled_workarounds,
+                enabled_workarounds=self.config.enabled_workarounds or (),
                 profile=self.config.profile,
                 mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
                     "codex",

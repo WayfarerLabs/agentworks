@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -221,9 +222,21 @@ def _rehome_vm(
         # The log closes exactly once, however the move ends.
         with operation_log(vm.name, "workspace-rehome") as log:
             admin = admin_access(vm, config, log)
+            # Reserve exclusively: a preflight check cannot rule out a raced-in
+            # target, and an unanswered mkdir does not establish ownership.
+            parent = str(PurePosixPath(new_path).parent)
+            admin.run(Command(("mkdir", "-p", "--", parent), elevated=True), check=True)
             try:
-                # Create target directory as root and chown to admin so rsync can write
-                admin.run(Command(("mkdir", "-p", "--", new_path), elevated=True), check=True)
+                admin.run(Command(("mkdir", "--", new_path), elevated=True), check=True)
+            except BaseException:
+                output.warn(
+                    f"Rehome target reservation at {new_path} was not confirmed. "
+                    "Any remaining path was left untouched; inspect and preserve its contents before retrying."
+                )
+                raise
+
+            try:
+                # Let the admin write into the confirmed new target.
                 admin.run(Command(("chown", vm.admin_username, new_path), elevated=True), check=True)
 
                 # Copy with rsync (fall back to cp -a). The trailing slash
@@ -360,7 +373,7 @@ def _resolved_paths(access: VMAccess, old_path: str, new_path: str) -> tuple[str
     """The source and the target as the guest resolves them, every link followed.
 
     The source exists (``realpath -e``); the target need not yet (``realpath
-    -m``). It runs as root, as the target's creation does (``mkdir -p``):
+    -m``). It runs as root, as the target's creation does (``mkdir``):
     ``realpath -m`` prints a component it cannot search unresolved, and still
     succeeds. Boundary: the paths are a guest process's output, so anything
     but two absolute paths is a ``StateError``.

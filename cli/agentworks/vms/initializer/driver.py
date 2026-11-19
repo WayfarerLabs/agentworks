@@ -56,6 +56,7 @@ from .shell_env import (
     _harden_admin_home,
     _remove_retired_sudoers_fragments,
     _remove_sshd_accept_env,
+    _repair_admin_sudoers,
     _set_login_shell,
     _write_agentworks_identity_profile,
     _write_agentworks_profile,
@@ -441,9 +442,11 @@ def _phase_b_setup(
         apply_tailscaled_dns_fix(files, logger)
 
         # Non-fatal: remove the sshd and sudoers fragments earlier releases
-        # installed to carry environment that now travels in each request.
+        # installed to carry environment that now travels in each request, and
+        # repair the mode of the admin's own sudo grant.
         _remove_sshd_accept_env(files, logger)
         _remove_retired_sudoers_fragments(files, logger)
+        _repair_admin_sudoers(files, logger, admin_username)
         vm_row = db.get_vm(vm_name)
         # Init runs against a VM that exists in the DB (bootstrap_vm fetches the
         # row up front). A None here is an internal invariant violation, not a

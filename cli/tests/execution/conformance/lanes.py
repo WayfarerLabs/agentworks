@@ -20,6 +20,7 @@ import contextlib
 import getpass
 import io
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -352,7 +353,7 @@ class LocalLane(LocalFilesystem):
         self.use_lane_shell_as_account_shell()
 
     def pane_command(self, command: str) -> str:
-        return command.replace(ssh_process.DEFAULT_PYTHON, self.python, 1)
+        return command.replace(ssh_process.DEFAULT_PYTHON, shlex.quote(self.python), 1)
 
     def _remote_argv(self, remote_command: str) -> list[str]:
         return local_remote_argv(remote_command, home=self.home, shell=self.shell, python=self.python)
@@ -418,9 +419,9 @@ def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServ
             [
                 "ListenAddress 127.0.0.1",
                 f"Port {port}",
-                f"HostKey {host_key}",
-                f"AuthorizedKeysFile {authorized}",
-                f"PidFile {directory / 'sshd.pid'}",
+                f'HostKey "{host_key}"',
+                f'AuthorizedKeysFile "{authorized}"',
+                f'PidFile "{directory / "sshd.pid"}"',
                 "UsePAM no",
                 "StrictModes no",
                 "PasswordAuthentication no",

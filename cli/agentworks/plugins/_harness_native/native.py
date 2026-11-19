@@ -321,8 +321,8 @@ def setup_user(
     joint_mapping = tool == "codex" and mcp_destination == destination and not skip_mcp
     if any(claim.destination != root for claim in native_claims):
         raise StateError("native config home differs from existing ownership claims; clean up the previous home first")
-    sources = [] if config is None else config.marketplaces
-    requested = [] if config is None else config.plugins
+    sources = [] if config is None else config.marketplaces or []
+    requested = [] if config is None else config.plugins or []
     if not native_claims and not sources and not requested:
         if prepared is not None and not joint_mapping:
             initial = invocation.files.read(destination)
