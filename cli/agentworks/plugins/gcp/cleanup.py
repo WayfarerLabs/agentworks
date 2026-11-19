@@ -153,21 +153,6 @@ class InstanceReconciliation:
     seen_owned: bool = False
 
 
-def probe_instance_state(
-    instances: Any,
-    *,
-    coordinates: CleanupCoordinates,
-    ownership: InstanceOwnership | None,
-) -> InstanceState:
-    """Prove absence, survival, or indeterminacy by exact-name get."""
-    state, _observed_id = _reconcile_instance(
-        instances,
-        coordinates=coordinates,
-        ownership=ownership,
-    )
-    return state
-
-
 def _read_instance(
     instances: Any,
     *,
