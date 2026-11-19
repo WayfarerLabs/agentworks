@@ -20,6 +20,7 @@ from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.interpolation import runtime_values
 from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
+from agentworks.remote_presence import GETENT_NOT_FOUND_STATUS, TEST_FALSE_STATUS, probe_presence
 from agentworks.vms.home_layout import MANAGED
 from agentworks.vms.initializer.dotfiles import sync_dotfiles
 from agentworks.vms.initializer.mise import MISE_ACTIVATE_LINES, _write_mise_config, install_mise
@@ -29,7 +30,7 @@ from agentworks.vms.initializer.shell_env import (
     _write_agentworks_profile,
     _write_agentworks_rc,
 )
-from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure, status
+from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -51,7 +52,8 @@ def create_new_agent_user(
 ) -> None:
     """Establish fresh ownership before the caller may arm user rollback.
 
-    Refuse an unowned account or home, including dangling symlinks. A competing
+    Refuse an unowned account or home, including dangling symlinks, and raise
+    without creating anything when either probe does not answer. A competing
     useradd fails exclusively; the caller must not delete anything on that failure.
     Existing DB-owned agents instead use create_agent_on_vm's convergence path.
     """
@@ -63,7 +65,10 @@ def create_new_agent_user(
     home = managed_home(linux_user)
     account = Command(("getent", "passwd", linux_user), elevated=True)
     home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
-    if status(admin, account) == 0 or status(admin, home_entry) == 0:
+    if (
+        probe_presence(admin, account, absent_status=GETENT_NOT_FOUND_STATUS) is not None
+        or probe_presence(admin, home_entry, absent_status=TEST_FALSE_STATUS) is not None
+    ):
         raise StateError(
             f"cannot create agent: unowned user or home already exists for '{linux_user}'",
             entity_kind="agent",
@@ -157,8 +162,10 @@ def create_agent_on_vm(
     # GID 100), a bare ``useradd`` plus 0750 would GRANT every other agent
     # group read+execute on this home, an inversion of the goal. We do
     # not assume a clean Debian image (see capabilities/vm_platform/README).
-    passwd_entry = admin.run(Command(("getent", "passwd", linux_user), elevated=True))
-    if passwd_entry.require_completed(vm.name) != 0:
+    passwd_entry = probe_presence(
+        admin, Command(("getent", "passwd", linux_user), elevated=True), absent_status=GETENT_NOT_FOUND_STATUS
+    )
+    if passwd_entry is None:
         admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
         output.info(f"Created agent user '{linux_user}' on VM '{vm.name}'")
     else:

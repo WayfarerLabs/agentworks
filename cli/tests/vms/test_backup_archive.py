@@ -265,3 +265,28 @@ def test_missing_paths_are_skipped_and_none_left_launches_nothing(tmp_path: Path
     with pytest.raises(BackupError):
         vm_backup._archive_workspaces(only_missing, workspaces("/srv/gone"), tmp_path / "two")  # noqa: SLF001
     assert operations(only_missing) == ["test"]
+
+
+@pytest.mark.parametrize(
+    ("outcome", "error"),
+    [
+        (LOST_CONNECTION, ExecutionIncomplete),  # the path check may never have run
+        (Result(Completed(2)), CommandFailed),  # test answered neither true (0) nor false (1)
+    ],
+)
+def test_an_unanswered_workspace_path_check_fails_the_backup_instead_of_skipping(
+    tmp_path: Path, outcome: Result, error: type[Exception]
+) -> None:
+    guest = Guest()
+
+    def answer(call: Call) -> Result | BaseException | None:
+        request = call.request
+        if isinstance(request, Command) and request.argv == ("test", "-d", "/srv/a"):
+            return outcome
+        return guest.answer(call)
+
+    access = RecordingVMAccess([], Admin())
+    access.answer = answer
+    with pytest.raises(error):
+        vm_backup._archive_workspaces(access, workspaces("/srv/a", "/srv/b"), tmp_path / "local")  # noqa: SLF001
+    assert operations(access) == ["test"]

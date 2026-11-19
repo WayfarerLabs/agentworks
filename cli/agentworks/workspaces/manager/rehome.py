@@ -18,8 +18,9 @@ from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
+from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
-from agentworks.vms.initializer.steps import describe_failure, status
+from agentworks.vms.initializer.steps import describe_failure
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.guest import (
     FIND_DEADLINE,
@@ -400,8 +401,9 @@ def _resolved_paths(access: VMAccess, old_path: str, new_path: str) -> tuple[str
 
 
 def _is_directory(access: VMAccess, path: str) -> bool:
-    """Whether a directory is at ``path``, as the admin sees it; an outcome that is not a completion raises."""
-    return status(access, Command(("test", "-d", path), deadline=PROBE_DEADLINE)) == 0
+    """Whether a directory is at ``path``, as the admin sees it; a probe that does not answer raises."""
+    probe = Command(("test", "-d", path), deadline=PROBE_DEADLINE)
+    return probe_presence(access, probe, absent_status=TEST_FALSE_STATUS) is not None
 
 
 def _target_directory(path: str, *, ws_name: str) -> str:

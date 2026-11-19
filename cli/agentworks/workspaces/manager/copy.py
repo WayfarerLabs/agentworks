@@ -12,7 +12,7 @@ from agentworks.execution.requests import Command, FromFile, ToFile
 from agentworks.linux_users import managed_home
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
-from agentworks.vms.initializer.steps import status
+from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied
@@ -203,7 +203,7 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
 
     # Refuse an occupied destination and reserve it exclusively, as create does,
     # so nothing is extracted into another directory's content.
-    if status(dest, path_occupied(workspace_path)) == 0:
+    if probe_presence(dest, path_occupied(workspace_path), absent_status=TEST_FALSE_STATUS) is not None:
         raise AlreadyExistsError(
             f"workspace path {workspace_path!r} already exists on VM '{dest_vm.name}'.",
             entity_kind="workspace",

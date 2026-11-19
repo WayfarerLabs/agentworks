@@ -17,8 +17,9 @@ import pytest
 from agentworks.agents import grants as agent_grants
 from agentworks.db import InitStatus
 from agentworks.errors import NotFoundError
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Command, FromFile, ToFile
-from agentworks.execution.results import Completed, Result
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces import manager as workspace_manager
@@ -197,6 +198,37 @@ def test_copy_same_vm_reuses_the_source_composition(
     row = db.get_workspace("ws2")
     assert row is not None and row.vm_name == "box"
     assert "Workspace 'ws1' copied to 'ws2'" in captured_output.info
+
+
+@pytest.mark.parametrize(
+    ("outcome", "error"),
+    [
+        (Result(Unknown(UnknownReason.CONNECTION)), ExecutionIncomplete),  # the check may never have run
+        (Result(Completed(2)), CommandFailed),  # test answered neither occupied (0) nor free (1)
+    ],
+)
+def test_copy_refuses_when_the_destination_check_did_not_answer(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+    outcome: Result,
+    error: type[Exception],
+) -> None:
+    """An unanswered occupancy check is not a free destination: copy raises
+    before reserving or extracting into a path that may hold other content."""
+    config = make_config()
+    seed(db)
+    reachable(monkeypatch, True)
+    fake = _wire_copy(monkeypatch, [])
+    free = fake.respond
+    monkeypatch.setattr(fake, "respond", lambda request: outcome if is_occupancy_probe(request) else free(request))
+
+    with pytest.raises(error):
+        _copy(db, config)
+
+    assert is_occupancy_probe(fake.requests[-1])
+    assert db.get_workspace("ws2") is None
 
 
 def test_copy_refusals_fail_with_zero_resolves_and_zero_gate(

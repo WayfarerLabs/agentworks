@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import StateError, UserAbort, ValidationError
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.requests import Command, Script
-from agentworks.execution.results import Completed, Result
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces import manager as workspace_manager
 from agentworks.workspaces.acls import workspace_acl_commands
@@ -25,6 +26,7 @@ from tests.workspaces._lifecycle_support import (
     Guest,
     RehomeGuest,
     arguments,
+    argv,
     no_gate,
     reachable,
     route,
@@ -265,6 +267,79 @@ def test_rehome_reads_a_target_with_a_trailing_slash_as_the_directory(
     assert ws is not None and ws.workspace_path == "/dst/ws1"
     assert ("test", "-d", "/dst/ws1") in fake.argvs()
     assert not any("/dst/ws1//" in argument for request in fake.requests for argument in arguments(request))
+
+
+_UNANSWERED = (
+    (Result(Unknown(UnknownReason.CONNECTION)), ExecutionIncomplete),  # the check may never have run
+    (Result(Completed(2)), CommandFailed),  # test answered neither true (0) nor false (1)
+)
+
+
+class _UnansweredCheck(RehomeGuest):
+    """A rehome guest whose ``unanswered`` directory check, once ``after_copy`` allows, gives ``outcome``."""
+
+    def __init__(self, unanswered: str, outcome: Result, *, after_copy: bool = False) -> None:
+        super().__init__()
+        self.unanswered = ("test", "-d", unanswered)
+        self.outcome = outcome
+        self.after_copy = after_copy
+
+    def respond(self, request: object) -> Result | None:
+        if argv(request) == self.unanswered and self._copied == self.after_copy:
+            return self.outcome
+        return super().respond(request)
+
+
+@pytest.mark.parametrize("unanswered", ["/srv/ws1", "/dst/ws1"])
+@pytest.mark.parametrize(("outcome", "error"), _UNANSWERED)
+def test_rehome_refuses_when_a_directory_check_did_not_answer(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    unanswered: str,
+    outcome: Result,
+    error: type[Exception],
+) -> None:
+    """A directory check that did not answer is never "target absent" (or
+    "source present"): rehome raises before reserving or copying into a
+    target that may exist."""
+    config = make_config()
+    seed(db)
+    reachable(monkeypatch, True)
+    fake = _UnansweredCheck(unanswered, outcome)
+    route(monkeypatch, fake)
+
+    with pytest.raises(error):
+        _rehome(db, config, yes=True)
+
+    assert fake.argvs()[-1] == ("test", "-d", unanswered)
+    assert not any(ran[0] in {"mkdir", "rsync", "cp"} for ran in fake.argvs())
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/srv/ws1"
+
+
+@pytest.mark.parametrize(("outcome", "error"), _UNANSWERED)
+def test_rehome_copy_verification_that_did_not_answer_raises_its_own_error(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: Result,
+    error: type[Exception],
+) -> None:
+    """The post-copy check reports its own failure, not a copy that went
+    missing, and the row stays at the old path."""
+    config = make_config()
+    seed(db)
+    reachable(monkeypatch, True)
+    fake = _UnansweredCheck("/dst/ws1", outcome, after_copy=True)
+    route(monkeypatch, fake)
+
+    with pytest.raises(error):
+        _rehome(db, config, yes=True)
+
+    assert fake.argvs()[-1] == ("test", "-d", "/dst/ws1")
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/srv/ws1"
 
 
 def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(

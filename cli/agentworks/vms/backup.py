@@ -19,6 +19,7 @@ from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.requests import Command, Script, Shell, ToFile
 from agentworks.execution.results import Completed
 from agentworks.path_rendering import format_host_path
+from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.terminal import sanitize_terminal_output
 from agentworks.vms.applied_state import canonicalize_vm_applied_slice
 from agentworks.vms.manager import _guard_incomplete_vm, gated_vm_boundary, operation_log
@@ -358,8 +359,9 @@ def _lookup(access: VMAccess, argv: tuple[str, ...]) -> tuple[bool | None, str]:
 
 
 def _directory_exists(access: VMAccess, path: str) -> bool:
-    """Whether ``path`` is a directory on the VM, tested as root; an outcome that is not a completion raises."""
-    return access.run(Command(("test", "-d", path), elevated=True)).require_completed(access.vm_name) == 0
+    """Whether ``path`` is a directory on the VM, tested as root; a probe that does not answer raises."""
+    probe = Command(("test", "-d", path), elevated=True)
+    return probe_presence(access, probe, absent_status=TEST_FALSE_STATUS) is not None
 
 
 def _total_size(access: VMAccess, paths: list[str]) -> int | None:

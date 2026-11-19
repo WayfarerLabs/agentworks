@@ -23,6 +23,7 @@ from agentworks.execution.errors import (
 )
 from agentworks.execution.requests import Command
 from agentworks.linux_users import managed_home
+from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.guest import (
     FIND_DEADLINE,
@@ -128,7 +129,7 @@ def create_vm_workspace(
     owner = f"{vm.admin_username}:{ws_group}"
 
     # Refuse to create if directory already exists
-    if admin.run(path_occupied(workspace_path)).require_completed(vm.name) == 0:
+    if probe_presence(admin, path_occupied(workspace_path), absent_status=TEST_FALSE_STATUS) is not None:
         raise AlreadyExistsError(
             f"workspace path {workspace_path!r} already exists on the VM.",
             entity_kind="workspace",

@@ -678,7 +678,7 @@ the S lane needs a real `sudo` and a passwordless user too, so the elevation vec
 | E1 An elevated `Command(("id", "-u"))` completes with `0`, and the payload's environment is the rebuilt one: root's `HOME` and `USER`, no `SUDO_*`, nothing from startup files | L V   |
 | E2 Exact stdin positioning through `sudo`: the elevated payload reads the caller's first byte                                                                                  | L V   |
 | E4 The stream check passes and the request completes under the distribution's default sudoers (`use_pty` as shipped), on a fresh VM; `sudo -V` is recorded                     | V     |
-| E6 An elevated request over a background child that holds both streams completes at once with the right status                                                                 | L V   |
+| E6 An elevated request over a background child that holds both streams completes while the child still runs, within a bound, with the right status                             | L V   |
 | A1 A wrong identity is `Unknown(AUTH_FAILED)` from the client log, on 8.5, 9.x and Win32-OpenSSH                                                                               | S V   |
 
 **Live evidence** (R11; cells per the plan: create and reinit on every platform from at least one

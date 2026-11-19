@@ -15,10 +15,10 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ExternalError, StateError
-from agentworks.execution.errors import CommandFailed
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
 from agentworks.execution.oplog import OperationLogFile as _RealOperationLogFile
 from agentworks.execution.requests import Command, Script
-from agentworks.execution.results import Completed, Result
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
@@ -306,6 +306,36 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, existing, vm_
     assert all(request.elevated for request in vm_access_recorder.requests("run"))
     assert not any(
         isinstance(request, Command) and request.argv[0] == "userdel" for request in vm_access_recorder.requests("run")
+    )
+
+
+_UNANSWERED = Unknown(UnknownReason.CONNECTION)
+
+
+@pytest.mark.parametrize(
+    ("user_probe", "home_probe", "error"),
+    [
+        (_UNANSWERED, Completed(1), ExecutionIncomplete),  # the user probe may never have run
+        (Completed(2), _UNANSWERED, ExecutionIncomplete),  # user absent, but the home probe may never have run
+        (Completed(1), Completed(1), CommandFailed),  # getent answered neither found (0) nor not-found (2)
+        (Completed(2), Completed(2), CommandFailed),  # test answered neither true (0) nor false (1)
+    ],
+)
+def test_exclusive_agent_user_refuses_an_unanswered_probe(vm, vm_access_recorder, user_probe, home_probe, error):
+    def answer(call):
+        request = call.request
+        if isinstance(request, Command) and request.argv[:2] == ("getent", "passwd"):
+            return Result(user_probe)
+        if isinstance(request, Script):
+            return Result(home_probe)
+        return None
+
+    vm_access_recorder.answer = answer
+    with pytest.raises(error):
+        create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
+    assert not any(
+        isinstance(request, Command) and request.argv[0] in {"useradd", "userdel"}
+        for request in vm_access_recorder.requests("run")
     )
 
 

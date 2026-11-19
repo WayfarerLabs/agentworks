@@ -312,7 +312,12 @@ class TmuxServerFingerprint:
 
 
 class ProbeStatus(Enum):
-    """Tri-state result for a remote runtime-presence probe."""
+    """Tri-state result for a remote runtime-presence probe.
+
+    ``UNKNOWN`` leaves the decision to the caller. Where an unknown answer must
+    stop the operation instead, :func:`agentworks.remote_presence.probe_presence`
+    raises on it.
+    """
 
     PRESENT = "present"
     ABSENT = "absent"
