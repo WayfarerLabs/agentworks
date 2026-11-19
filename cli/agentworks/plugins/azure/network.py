@@ -502,10 +502,11 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     priority uniqueness per direction, so losing a slot race to a
     concurrent allocation surfaces as a create error; the loser re-lists
     and takes the next free slot. After the attempts are exhausted the
-    last error raises wrapped. Each create's request is sent once, without
-    azure-core's retries, so an error Azure answered it with speaks for the
-    only try. An answer azure-core would have retried (a throttle, a
-    timeout, a server error) gets a wait on azure-core's backoff factor before the next
+    last error raises wrapped. A create is never retried (``retry_total=0``),
+    so no try whose delivery is unknown is replayed: azure-core resends it
+    only after an explicit answer, the 401 of an authentication challenge.
+    An answer azure-core would have retried (a throttle, a timeout, a server
+    error) gets a wait on azure-core's backoff factor before the next
     attempt (see :func:`_back_off_after`), so a throttled or briefly
     unavailable network provider does not burn every attempt at once.
 
@@ -609,10 +610,11 @@ def _remove_unfinished_allow(
     skip it.
 
     Before a poller, the outcome is known only when ``error`` is Azure's 4xx
-    answer to the create's request: that request was sent once, so the
-    answer refuses the only try and the rule never exists. A request with no
-    answer may have reached Azure, and a 5xx (a gateway timeout among them)
-    does not say the network provider never took it, so both warn.
+    answer to the create: the create is never retried, and azure-core's only
+    resend follows Azure's own 401 challenge, so every try was refused and
+    the rule never exists. A request with no answer may have reached Azure,
+    and a 5xx (a gateway timeout among them) does not say the network
+    provider never took it, so both warn.
 
     A create with a poller gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS``
     more first, so the delete does not race it, reading the state its

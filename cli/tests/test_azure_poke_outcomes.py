@@ -1,11 +1,11 @@
 """Which outcomes of an Azure poke's create let its cleanup delete stand without a warning.
 
 A create that did not return normally is removed, and its rule named for
-removal by hand, unless its outcome is known: Azure refused its only
-request, or reported that it succeeded. Most cases drive the real
+removal by hand, unless its outcome is known: Azure refused the create,
+or reported that it succeeded. Most cases drive the real
 azure-core poller and generated network client over an in-memory
 ``requests`` adapter, since what they pin is how azure-core sends the
-create and records what Azure answered: the request goes once, and a
+create and records what Azure answered: the create is never retried, and a
 failure to observe the operation becomes its own ``Failed``. Retries go
 to the fake rules, so the poke returns and the first attempt's cleanup is
 what each case inspects.
@@ -119,7 +119,7 @@ def test_a_create_azure_reported_succeeded_is_removed_without_a_warning(
 def test_a_create_azure_refused_is_removed_without_a_warning(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, status: int
 ) -> None:
-    """The create's request is sent once, so Azure's refusal of it says the rule never exists."""
+    """The create is never retried, so Azure's refusal of it says the rule never exists."""
     create, adapter = _through_sdk([_refused(status)])
     fakes, first, deleted_at = _poke_after(monkeypatch, create)
 
@@ -142,7 +142,7 @@ def test_a_create_azure_refused_is_removed_without_a_warning(
 def test_a_create_azure_did_not_refuse_before_its_poller_is_named(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, answers: list[_Answer]
 ) -> None:
-    """Without Azure's 4xx answer the only try may have reached the network provider; nothing is resent to find out."""
+    """Without Azure's 4xx answer the try may have reached the network provider; nothing is retried to find out."""
     create, adapter = _through_sdk(answers)
     fakes, first, deleted_at = _poke_after(monkeypatch, create)
 

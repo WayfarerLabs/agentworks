@@ -1103,20 +1103,22 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   (`polling_method().status()`, read case-insensitively, a failed read counting as not) makes that
   delete authoritative; any other outcome warns naming the rule for removal by hand, since
   azure-core records its own failure to observe the operation (a refused status read, or one without
-  a status) as `Failed`. The poke sends its create's request once (`retry_total=0`), so a create
-  that raised before returning a poller is removed at once, and its outcome is known only when the
-  error is Azure's 4xx answer to that request, which refuses the only try: that removal is silent. A
-  create with no answer, or with a 5xx one (a gateway timeout does not say the network provider
-  never took the request), warns. So a refusal, a slot race among them, costs no warning; the
-  warning is left to a create whose outcome nobody saw. Since no create's request is retried, an
-  answer azure-core would itself have retried (as its `RetryPolicy` decides: 408, 429, 500, 502,
-  503, 504, any status from 506, or an error carrying `Retry-After`) waits before the next attempt,
-  on azure-core's backoff factor: `Retry-After` capped at `_POKE_RETRY_AFTER_MAX_SECONDS` (30 s),
-  else a backoff doubling from 0.8 s (azure-core's own first retry waits 0 s; the poke always
-  waits). A `Retry-After` that cannot be parsed takes the backoff. The waits between the five
-  attempts come to at most two minutes, and hold no interrupts. GCP's firewall insert already had a
-  bound. Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the agent
-  wait's `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at spawn.
+  a status) as `Failed`. The poke never retries its create (`retry_total=0`), so no try whose
+  delivery is unknown is replayed; azure-core's only resend, its authentication policy answering a
+  401 challenge, follows an answer Azure gave. So a create that raised before returning a poller is
+  removed at once, and its outcome is known only when the error is Azure's 4xx answer, since every
+  try was then refused: that removal is silent. A create with no answer, or with a 5xx one (a
+  gateway timeout does not say the network provider never took the request), warns. So a refusal, a
+  slot race among them, costs no warning; the warning is left to a create whose outcome nobody saw.
+  Since no create's request is retried, an answer azure-core would itself have retried (as its
+  `RetryPolicy` decides: 408, 429, 500, 502, 503, 504, any status from 506, or an error carrying
+  `Retry-After`) waits before the next attempt, on azure-core's backoff factor: `Retry-After` capped
+  at `_POKE_RETRY_AFTER_MAX_SECONDS` (30 s), else a backoff doubling from 0.8 s (azure-core's own
+  first retry waits 0 s; the poke always waits). A `Retry-After` that cannot be parsed takes the
+  backoff. The waits between the five attempts come to at most two minutes, and hold no interrupts.
+  GCP's firewall insert already had a bound. Proxmox: the identity check's reads, each at most
+  `REQUEST_TIMEOUT_SECONDS`, and the agent wait's `AGENT_WAIT_SECONDS`. Local-process channels
+  (Lima, Remote Lima, WSL2) dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
   420-second budget, now counted with the agent waits outside each attempt's deadline, and retries
