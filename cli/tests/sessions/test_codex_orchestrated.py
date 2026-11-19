@@ -146,7 +146,7 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], ca
     def _capture(name: str, ws_path: str, command: str, linux_user: str, **kwargs: object) -> tuple[str, int]:
         events.append("tmux_create")
         captured["command"] = command
-        return ("/tmp/s1.sock", 4243)
+        return ("/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
     monkeypatch.setattr(
@@ -185,7 +185,7 @@ def _restart_stubs(
     db.insert_session("s1", "ws1", "codex", SessionMode.ADMIN, harness_integration_state=stored_state)
     db.update_session_runtime(
         "s1",
-        socket_path="/tmp/s1.sock",
+        socket_path="/run/agentworks/admin-tmux-sockets/admin/s1.sock",
         pid=4242,
         boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         tmux_server_start_ticks=77,

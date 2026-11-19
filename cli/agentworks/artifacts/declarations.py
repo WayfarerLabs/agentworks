@@ -153,12 +153,11 @@ class ArtifactDefinitions(AgwModel):
 class ArtifactsConfig(AgwModel):
     """Bundle selection and direct artifact definitions at one owning scope."""
 
-    bundles: Annotated[
-        list[Annotated[str, ResourceRef(kind="artifact-bundle", usage="an artifact bundle")]],
-        MergeStrategy.REPLACE,
-    ] = Field(default_factory=list)
-    """Ordered bundle references. An authored list replaces inherited references;
-    an empty list suppresses this owner's inherited selection."""
+    bundles: list[Annotated[str, ResourceRef(kind="artifact-bundle", usage="an artifact bundle")]] | None = Field(
+        default_factory=list
+    )
+    """Ordered bundle references append and deduplicate across layers.
+    Omission or an empty list inherits; null clears inherited references."""
 
     declare: ArtifactDefinitions | None = None
     """Direct definitions applied after selected bundles. Type maps merge by key,
@@ -170,8 +169,10 @@ class ArtifactsConfig(AgwModel):
 
     @field_validator("bundles")
     @classmethod
-    def _unique_bundles(cls, bundles: list[str]) -> list[str]:
+    def _unique_bundles(cls, bundles: list[str] | None) -> list[str] | None:
         """Reject repeated references in an operator-authored selection."""
+        if bundles is None:
+            return None
         if len(set(bundles)) != len(bundles):
             raise ValueError("artifact bundle references must be unique")
         if any(not name.strip() for name in bundles):
@@ -189,7 +190,7 @@ def artifact_references(
     from agentworks.value_provenance import longest_prefix_value
 
     refs: list[ResourceReference] = []
-    for index, name in enumerate(config.bundles):
+    for index, name in enumerate(config.bundles or ()):
         layers = longest_prefix_value(provenance, ("artifacts", "bundles", index)) or ()
         declared_by = (layers[-1].resource_kind, layers[-1].name) if layers else None
         refs.append(

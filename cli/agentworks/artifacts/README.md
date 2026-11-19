@@ -15,11 +15,12 @@ content and inheritance.
 ## Select an owner and a handler
 
 VM, admin, agent, workspace, and session declarations accept the same `artifacts` block. Omitted
-fields inherit from the selected templates. An authored `bundles` list replaces inherited bundle
-references; `bundles: []` clears those references. The `declare` object contains the same five type
-maps as a bundle. Its maps inherit by key, with complete-entry replacement on a matching type/key.
-Omission and `declare: {}` preserve inherited direct definitions; `declare: null` clears them.
-Clearing one form leaves the other intact. These choices do not suppress another scope's inputs.
+fields inherit from the selected templates. A `bundles` list appends to inherited references and
+deduplicates them, keeping their existing order. Omission and `bundles: []` preserve inherited
+references; `bundles: null` clears them. The `declare` object contains the same five type maps as a
+bundle. Its maps inherit by key, with complete-entry replacement on a matching type/key. Omission
+and `declare: {}` preserve inherited direct definitions; `declare: null` clears them. Clearing one
+form leaves the other intact. These choices do not suppress another scope's inputs.
 
 Scopes own resources and lifecycle. A facet is the scoped part of a capability: both the VM admin
 and an agent have a `user` facet, each running as its actual Linux user. An agent does not inherit
@@ -133,8 +134,8 @@ original-owner identity.
 Child templates and instance specs merge each direct type map by key. Adding one hint preserves
 other inherited hints, and overriding a rule replaces its entire definition. For example, a child
 `source` replaces inherited `text`; do not supply both. Empty maps preserve inherited entries. Use
-`declare: null` to clear inherited direct definitions. Use `bundles: []` separately to clear bundle
-references. Neither form clears another owner's content.
+`declare: null` to clear inherited direct definitions. Use `bundles: null` separately to clear
+bundle references. Neither form clears another owner's content.
 
 For a one-off Shell session, direct content can be supplied through the existing `--spec` option.
 The following creates and starts one session using an existing authorized workspace and agent; it
@@ -747,8 +748,8 @@ Claude, Codex and Grok start with `enabled_workarounds: []` in their session fac
 specific delivery methods you need. A workaround is permission to use that method, not a promise
 that the native harness supports every artifact or option. An incompatible native CLI can still
 reject the explicitly selected launch arguments. Unknown names are configuration errors. The list
-replaces the inherited list; an explicit `[]` disables inherited workarounds. Setup-facet
-activations do not enable session workarounds.
+appends to inherited opt-ins and deduplicates them. Omission and `[]` preserve inherited opt-ins;
+`null` disables them. Setup-facet activations do not enable session workarounds.
 
 | Integration | Workaround                  | Session inputs and behavior                                                                |
 | ----------- | --------------------------- | ------------------------------------------------------------------------------------------ |
@@ -806,6 +807,18 @@ invocation/reading is distinct from discovering the package, and updating files 
 previously loaded conversation text.
 
 ## Upgrade existing artifact setup
+
+Bundle references, native `marketplaces` and `plugins`, and session `enabled_workarounds` now
+accumulate through template and instance inheritance. Earlier declarations remain first, and a
+repeated value keeps its existing position. A child can add entries without repeating its parent's
+list. Positional `extra_args` still replaces the inherited argument vector.
+
+**Breaking change:** replace an authored `[]` with `null` wherever it was intended to clear one of
+these inherited selections, including stored instance overlays. An empty list now adds nothing and
+preserves inherited entries. To start a new list without the parent's entries, clear it with `null`
+in an intermediate template and declare the new list in its child. Review effective declarations
+before authorizing the owning setup operation; this upgrade does not automatically rewrite
+declarations or existing native files.
 
 Update selected session declarations when upgrading from the older prompt carriers:
 

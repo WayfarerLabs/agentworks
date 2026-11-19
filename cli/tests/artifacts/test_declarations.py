@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from pydantic import JsonValue, ValidationError
+from pydantic import ValidationError
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import resolve_from_dict_with_provenance as resolve_agent
@@ -88,70 +88,120 @@ KINDS = [
 ]
 
 
-@pytest.mark.parametrize(("kind", "model", "resolve"), KINDS, ids=[row[0] for row in KINDS])
-@pytest.mark.parametrize("selection", [None, {}, {"bundles": ["child"]}, {"bundles": []}])
-def test_bundle_selection_inherits_or_replaces_with_correct_reference_provenance(
-    kind: str,
-    model: type[Any],
-    resolve: Callable[..., Any],
-    selection: dict[str, object] | None,
-) -> None:
-    parent = model(name="base", artifacts=ArtifactsConfig(bundles=["parent", "second"]))
-    authored = {} if selection is None else {"artifacts": selection}
-    child = model.model_validate({"name": "child", "inherits": ["base"], **authored})
-    # No harness is necessary for core bundle references, including sessions.
-    context = FinalizeContext(rows={kind: {"base": parent, "child": child}})
-    refs = [ref for ref in child.dependencies(context) if ref.kind == "artifact-bundle"]
-    expected = ["parent", "second"] if not selection else selection["bundles"]
-    assert [ref.name for ref in refs] == expected
-    expected_owner = (kind, "base" if not selection else "child")
-    assert all(ref.declared_by == expected_owner for ref in refs)
-    if kind == "session-template":
-        from agentworks.schema import CapabilityBlock
-
-        parent = parent.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
-    layered = resolve({"base": parent, "child": child}, "child")
-    assert layered.value.artifacts.bundles == expected
-    assert artifact_references(layered.value.artifacts, (kind, "child"), layered.provenance) == tuple(refs)
-
-
-@pytest.mark.parametrize("selection", [None, {}, {"bundles": []}, {"bundles": ["instance"]}])
-def test_admin_instance_layer_preserves_or_replaces_template_selection(selection: dict[str, object] | None) -> None:
-    template = AdminConfig(name="admin", artifacts=ArtifactsConfig(bundles=["base"]))
-    authored = {} if selection is None else {"artifacts": selection}
-    overlay = AdminConfig.model_validate({"name": "machine", **authored})
-    layered = resolve_admin({"admin": template}, "admin", overlay=overlay, instance_name="machine")
-    expected = ["base"] if not selection else selection["bundles"]
-    assert layered.value.artifacts.bundles == expected
-    refs = artifact_references(layered.value.artifacts, ("vm", "machine"), layered.provenance)
-    expected_owner = ("admin-template", "admin") if not selection else ("vm", "machine")
-    assert all(ref.declared_by == expected_owner for ref in refs)
+SELECTIONS: list[tuple[dict[str, object] | None, list[str] | None, list[str]]] = [
+    (None, ["parent", "shared"], ["base", "base"]),
+    ({}, ["parent", "shared"], ["base", "base"]),
+    ({"bundles": []}, ["parent", "shared"], ["base", "base"]),
+    ({"bundles": ["shared", "child"]}, ["parent", "shared", "child"], ["base", "child", "child"]),
+    ({"bundles": None}, None, []),
+]
 
 
 @pytest.mark.parametrize(("kind", "model", "resolve"), KINDS, ids=[row[0] for row in KINDS])
-@pytest.mark.parametrize("selection", [{}, {"bundles": []}, {"bundles": ["instance"]}])
-def test_instance_overlays_replace_bundle_selection_and_publish_instance_provenance(
-    kind: str,
-    model: type[Any],
-    resolve: Callable[..., Any],
-    selection: dict[str, JsonValue],
+@pytest.mark.parametrize("selection,expected,owners", SELECTIONS)
+@pytest.mark.parametrize("instance", [False, True])
+def test_bundle_selections_append_in_order_and_preserve_reference_provenance(
+    kind: str, model: type[Any], resolve: Callable[..., Any], selection, expected, owners, instance: bool
 ) -> None:
-    from agentworks.instance_overlay_codec import decode_overlay_model, encode_overlay_model
+    import json
+
+    from agentworks.instance_specs import parse_instance_spec
     from agentworks.schema import CapabilityBlock
 
-    instance_kind = kind.removesuffix("-template")
-    template = model(name="base", artifacts=ArtifactsConfig(bundles=["team"]))
+    parent = model(name="base", artifacts=ArtifactsConfig(bundles=["parent", "shared"]))
     if kind == "session-template":
-        template = template.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
-    overlay = decode_overlay_model(model, instance_kind, {"artifacts": selection})
-    assert encode_overlay_model(overlay, instance_kind) == {"artifacts": selection}
-    layered = resolve({"base": template}, "base", overlay=overlay, instance_name="running")
-    expected = ["team"] if not selection else selection["bundles"]
+        parent = parent.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
+    authored = {} if selection is None else {"artifacts": selection}
+    instance_kind = kind.removesuffix("-template")
+    child = model.model_validate({"name": "child", "inherits": ["base"], **authored})
+    if instance:
+        overlay = parse_instance_spec(instance_kind, json.dumps(authored))
+        assert overlay.payload.value == authored
+        layered = resolve({"base": parent}, "base", overlay=overlay.declaration, instance_name="child")
+        source = (instance_kind, "child")
+    else:
+        context = FinalizeContext(rows={kind: {"base": parent, "child": child}})
+        dependencies = tuple(ref for ref in child.dependencies(context) if ref.kind == "artifact-bundle")
+        layered = resolve({"base": parent, "child": child}, "child")
+        source = (kind, "child")
     assert layered.value.artifacts.bundles == expected
-    refs = artifact_references(layered.value.artifacts, (instance_kind, "running"), layered.provenance)
-    assert [ref.name for ref in refs] == expected
-    owner = (kind, "base") if not selection else (instance_kind, "running")
-    assert all(ref.source == (instance_kind, "running") and ref.declared_by == owner for ref in refs)
+    refs = artifact_references(layered.value.artifacts, source, layered.provenance)
+    assert [ref.name for ref in refs] == (expected or [])
+    assert [ref.declared_by for ref in refs] == [(source[0] if owner == "child" else kind, owner) for owner in owners]
+    assert all(ref.source == source for ref in refs)
+    if not instance:
+        assert refs == dependencies
+    if expected is None:
+        assert not any(path[:2] == ("artifacts", "bundles") and len(path) > 2 for path in layered.provenance)
+
+
+@pytest.mark.parametrize("selection,expected,owners", SELECTIONS)
+def test_admin_instance_bundle_selections_share_additive_and_null_semantics(selection, expected, owners):
+    import json
+
+    from agentworks.instance_specs import parse_vm_instance_specs
+
+    template = AdminConfig(name="base", artifacts=ArtifactsConfig(bundles=["parent", "shared"]))
+    authored = {} if selection is None else {"artifacts": selection}
+    overlay = parse_vm_instance_specs(None, json.dumps(authored))
+    if authored:
+        assert overlay is not None and overlay.payload.value["admin"] == authored
+    else:
+        assert overlay is None
+    layered = resolve_admin(
+        {"base": template}, "base", overlay=None if overlay is None else overlay.admin, instance_name="child"
+    )
+    assert layered.value.artifacts.bundles == expected
+    refs = artifact_references(layered.value.artifacts, ("vm", "child"), layered.provenance)
+    assert [ref.name for ref in refs] == (expected or [])
+    assert [ref.declared_by for ref in refs] == [
+        ("admin-template" if owner == "base" else "vm", owner) for owner in owners
+    ]
+
+
+@pytest.mark.parametrize(("kind", "model", "resolve"), KINDS, ids=[row[0] for row in KINDS])
+@pytest.mark.parametrize("instance", [False, True])
+def test_bundle_null_then_selection_never_revives_ancestor_references(kind, model, resolve, instance):
+    from agentworks.schema import CapabilityBlock
+
+    base = model(name="base", artifacts=ArtifactsConfig(bundles=["old"]))
+    if kind == "session-template":
+        base = base.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
+    clear = model.model_validate({"name": "clear", "inherits": ["base"], "artifacts": {"bundles": None}})
+    child = model.model_validate({"name": "child", "inherits": ["clear"], "artifacts": {"bundles": ["new"]}})
+    rows = {row.name: row for row in (base, clear, child)}
+    cleared = resolve(rows, "clear")
+    assert cleared.value.artifacts.bundles is None
+    assert artifact_references(cleared.value.artifacts, (kind, "clear"), cleared.provenance) == ()
+    if instance:
+        overlay = model.model_validate({"name": "overlay", "artifacts": {"bundles": ["new"]}})
+        result = resolve(rows, "clear", overlay=overlay, instance_name="running")
+        source = (kind.removesuffix("-template"), "running")
+    else:
+        result = resolve(rows, "child")
+        source = (kind, "child")
+    assert result.value.artifacts.bundles == ["new"]
+    refs = artifact_references(result.value.artifacts, source, result.provenance)
+    assert [(ref.name, ref.declared_by) for ref in refs] == [("new", source)]
+    from agentworks.value_provenance import longest_prefix_value
+
+    layers = longest_prefix_value(result.provenance, ("artifacts", "bundles", 0))
+    assert layers is not None and [layer.name for layer in layers] == [source[1]]
+
+
+@pytest.mark.parametrize(("kind", "model", "resolve"), KINDS, ids=[row[0] for row in KINDS])
+@pytest.mark.parametrize("authored,expected", [({}, None), ({"bundles": []}, []), ({"bundles": None}, None)])
+def test_bundle_layers_after_null_stay_empty(kind, model, resolve, authored, expected):
+    from agentworks.schema import CapabilityBlock
+
+    base = model(name="base", artifacts=ArtifactsConfig(bundles=["old"]))
+    if kind == "session-template":
+        base = base.model_copy(update={"harness_integration": CapabilityBlock.of("shell")})
+    clear = model.model_validate({"name": "clear", "inherits": ["base"], "artifacts": {"bundles": None}})
+    child = model.model_validate({"name": "child", "inherits": ["clear"], "artifacts": authored})
+    result = resolve({row.name: row for row in (base, clear, child)}, "child")
+    assert result.value.artifacts.bundles == expected
+    assert artifact_references(result.value.artifacts, (kind, "child"), result.provenance) == ()
 
 
 @pytest.mark.parametrize("declared", [False, True])

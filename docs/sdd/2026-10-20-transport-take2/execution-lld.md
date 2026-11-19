@@ -724,15 +724,16 @@ the package attribute so one patch reaches every manager.
 
 One list of vectors, three lanes. **L** runs `$SHELL -c <remote command>` locally through the same
 pump and envelope, with the account's startup files set per vector and `SSH_CLIENT` exported as sshd
-does; its interpreter path is a parameter. It covers the shells and runs on every Linux CI host,
-once with `/usr/bin/python3` and once with a 3.11 interpreter from `uv python install 3.11`, since
-`ast.parse` cannot catch 3.12-only standard library calls. **S** runs the real client against a
-rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host key and `AuthorizedKeysFile`,
-`UsePAM no`, `StrictModes no`) and `trust.write_records` for the test host key; it skips locally
-when `sshd` is missing or cannot start, fails on CI in either case, and the CI job installs
-`openssh-server` if the runner image lacks it. **V** is the live lane, `-m integration` with
-`AGW_CONFORMANCE_VM`, run by the tester from each workstation. `zsh` and `dash` are required on CI
-(a missing shell fails there, skips locally).
+does; its interpreter path is a parameter. L runs the account shell behind a stand-in for ssh and
+sshd, so ending the client never kills the guest directly. It covers the shells and runs on every
+Linux CI host, once with `/usr/bin/python3` and once with a 3.11 interpreter from
+`uv python install 3.11`, since `ast.parse` cannot catch 3.12-only standard library calls. **S**
+runs the real client against a rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host
+key and `AuthorizedKeysFile`, `UsePAM no`, `StrictModes no`) and `trust.write_records` for the test
+host key; it skips locally when `sshd` is missing or cannot start, fails on CI in either case, and
+the CI job installs `openssh-server` if the runner image lacks it. **V** is the live lane,
+`-m integration` with `AGW_CONFORMANCE_VM`, run by the tester from each workstation. `zsh` and
+`dash` are required on CI (a missing shell fails there, skips locally).
 
 | Vector                                                                                                                                                                                          | Lanes  |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
@@ -751,11 +752,11 @@ when `sshd` is missing or cannot start, fails on CI in either case, and the CI j
 | Signal dispositions and descriptors reset; a startup `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values; in the shell of a handover, `SigIgn` and `SigBlk` in `/proc/self/status` are zero | L      |
 | Exact stdin positioning through `stream(stdin=...)`: the payload reads the caller's first byte                                                                                                  | L S V  |
 | A bash child of the payload reads no account startup file; stdin a pipe, and in L a socket (I11)                                                                                                | L S V  |
-| Background child holding both streams: prompt completion, status correct                                                                                                                        | L S V  |
+| Background child holding both streams: completion while the child still runs, within a bound, status correct                                                                                    | L S V  |
 | Payload stdout with no trailing newline; a `refused` trailer                                                                                                                                    | L S    |
-| Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                                                                                    | L S    |
+| Deadline: `Unknown(DEADLINE)` at the deadline and the client killed; its reap is covered by the pump unit tests (`test_pump.py`)                                                                | L S    |
 | Handover: success, the 30 s timeout, an existing directory name, a missing `cwd`, second connection never arrives, nothing left behind                                                          | L S V  |
-| The payload leaves stdout and stderr non-blocking and full, then exits 0: `Completed(0)` with both closing markers (L is the regression guard; S and V drain too fast to catch it)              | L S V  |
+| The payload leaves stdout and stderr non-blocking and full, then exits 0: `Completed(0)` with both closing markers (the operator's streams take nothing until every pipe and buffer is full)    | L S V  |
 | A startup file that reads stdin under an attach: the parking wait expires with the terminal untouched, bounded by the vector itself                                                             | L      |
 | `memfd_create` refusing `MFD_NOEXEC_SEAL` (`EINVAL`) runs the script; `EMFILE` is `NotDelivered(LAUNCHER_FAILED)` with the payload not run                                                      | L      |
 | Host key mismatch is `TrustMismatch`, read from the client log                                                                                                                                  | S      |

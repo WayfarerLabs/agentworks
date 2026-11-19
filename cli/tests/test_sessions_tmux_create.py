@@ -34,7 +34,7 @@ from agentworks.sessions.tmux import (
     finalize_session_start,
     parse_process_start_ticks,
 )
-from tests._runtime_probes import framed_runtime_result
+from tests._runtime_probes import framed_runtime_result, server_owner_parts
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -174,7 +174,7 @@ def test_fingerprint_capture_requires_two_matching_pid_and_stat_reads() -> None:
     assert changed_ticks.status is ProbeStatus.UNKNOWN
 
 
-def test_fingerprint_capture_elevates_agent_tmux_and_process_reads() -> None:
+def test_fingerprint_capture_runs_tmux_as_owner_and_process_reads_as_root() -> None:
     class _ElevatedTarget(_FingerprintTarget):
         def __init__(self) -> None:
             super().__init__()
@@ -183,23 +183,29 @@ def test_fingerprint_capture_elevates_agent_tmux_and_process_reads() -> None:
         def run(self, command: str, **kwargs: object) -> _SpyResult:
             elevated = kwargs.get("sudo") is True
             self.calls.append((command, elevated))
-            if ("display-message" in command or "/proc/42/stat" in command) and not elevated:
+            # The tmux reads succeed only as the owner, the process reads only as root.
+            if "display-message" in command and server_owner_parts(command) is None:
+                return _SpyResult(returncode=1)
+            if "/proc/42/stat" in command and not elevated:
                 return _SpyResult(returncode=1)
             return super().run(command, **kwargs)
 
     target = _ElevatedTarget()
     result = capture_tmux_server_fingerprint(  # type: ignore[arg-type]
         target=target,
-        socket_path="/run/s1.sock",
-        sudo=True,
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-owner/s1.sock",
+        owner="agt-owner",
     )
 
     from agentworks.sessions.tmux import ProbeStatus
 
     assert result.status is ProbeStatus.PRESENT
-    assert all(
-        elevated for command, elevated in target.calls if "display-message" in command or "/proc/42/stat" in command
-    )
+    tmux_calls = [(command, elevated) for command, elevated in target.calls if "display-message" in command]
+    stat_calls = [(command, elevated) for command, elevated in target.calls if "/proc/42/stat" in command]
+    assert len(tmux_calls) == 2 and len(stat_calls) == 2
+    # Every tmux client runs as the server's owner; root only reads the process.
+    assert all((server_owner_parts(command) or ("", ""))[0] == "agt-owner" for command, _elevated in tmux_calls)
+    assert all(elevated and server_owner_parts(command) is None for command, elevated in stat_calls)
 
 
 @pytest.mark.parametrize(
@@ -321,12 +327,16 @@ def test_stale_socket_cleanup_removes_only_a_canonically_absent_server() -> None
             return _SpyResult()
 
     unknown = _CleanupTarget("error connecting to /run/agentworks/s.sock (Permission denied)")
-    assert _cleanup_stale_sockets_under(unknown, "/run/agentworks") == 0  # type: ignore[arg-type]
+    assert _cleanup_stale_sockets_under(unknown, "/run/agentworks", owner="agt-owner") == 0  # type: ignore[arg-type]
     assert not any("rm -f -- " in command for command in unknown.commands)
 
     absent = _CleanupTarget("no server running on /run/agentworks/s.sock")
-    assert _cleanup_stale_sockets_under(absent, "/run/agentworks") == 1  # type: ignore[arg-type]
+    assert _cleanup_stale_sockets_under(absent, "/run/agentworks", owner="agt-owner") == 1  # type: ignore[arg-type]
     assert sum("rm -f -- " in command for command in absent.commands) == 1
+    # The server probe runs as the directory's owner; listing and removal do not.
+    probes = [command for command in absent.commands if "list-sessions" in command]
+    assert len(probes) == 1 and (server_owner_parts(probes[0]) or ("", ""))[0] == "agt-owner"
+    assert all(server_owner_parts(command) is None for command in absent.commands if "list-sessions" not in command)
 
 
 def test_post_teardown_probe_retries_one_indeterminate_transition() -> None:
@@ -885,3 +895,89 @@ def test_confirmed_death_outweighs_expected_sharing_capture_and_cleanup_failures
     assert "37" in str(caught.value)
     assert sum("capture-pane" in command for command in calls) == 2
     assert any("kill-server" in command for command in calls)
+
+
+# ---------------------------------------------------------------------------
+# Tmux clients against a server another account owns
+# ---------------------------------------------------------------------------
+
+_AGENT_SOCKET = "/run/agentworks/agent-tmux-sockets/agt-owner/s1.sock"
+
+
+_ADMIN = "agentworks"
+
+
+@pytest.mark.parametrize(
+    ("socket_path", "owner"),
+    [
+        (_AGENT_SOCKET, "agt-owner"),
+        ("/run/agentworks/admin-tmux-sockets/agentworks/s1.sock", None),
+    ],
+)
+def test_socket_owner_names_the_account_whose_directory_holds_the_socket(socket_path: str, owner: str | None) -> None:
+    from agentworks.sessions.tmux import socket_owner
+
+    assert socket_owner(socket_path, admin_username=_ADMIN) == owner
+
+
+@pytest.mark.parametrize(
+    "socket_path",
+    [
+        "/tmp/s1.sock",
+        "relative/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt-owner/nested/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/../agt-owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt-owner/..",
+        "/run/agentworks/agent-tmux-sockets/agt-owner//s1.sock",
+        "/run/agentworks/agent-tmux-sockets/root/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agentworks/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/Agt-Owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/-owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/agt owner/s1.sock",
+        "/run/agentworks/agent-tmux-sockets/" + "a" * 33 + "/s1.sock",
+        "/run/agentworks/admin-tmux-sockets/other-admin/s1.sock",
+        "/run/agentworks/admin-tmux-sockets/agentworks/nested/s1.sock",
+    ],
+)
+def test_socket_owner_refuses_every_other_path(socket_path: str) -> None:
+    from agentworks.sessions.tmux import socket_owner
+
+    with pytest.raises(StateError):
+        socket_owner(socket_path, admin_username=_ADMIN)
+
+
+def test_owner_scoped_client_without_a_socket_is_refused() -> None:
+    from agentworks.sessions.tmux import tmux_attach_cmd, tmux_cmd
+
+    with pytest.raises(ValueError):
+        tmux_cmd("has-session", None, owner="agt-owner")
+    with pytest.raises(ValueError):
+        tmux_attach_cmd("s1", None, owner="agt-owner")
+
+
+def test_launch_attempt_match_runs_its_tmux_reads_as_the_owner() -> None:
+    from agentworks.sessions.tmux import TmuxServerFingerprint, _matches_launch_attempt
+
+    calls: list[tuple[str, bool]] = []
+
+    class _Target:
+        def run(self, command: str, **kwargs: object) -> _SpyResult:
+            calls.append((command, kwargs.get("sudo") is True))
+            return _SpyResult(returncode=1)
+
+    fingerprint = TmuxServerFingerprint(42, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", 98765)
+    assert not _matches_launch_attempt(
+        target=_Target(),  # type: ignore[arg-type]
+        socket_path=_AGENT_SOCKET,
+        session_name="s1",
+        session_uuid="11111111-1111-4111-8111-111111111111",
+        run_id="22222222-2222-4222-8222-222222222222",
+        fingerprint=fingerprint,
+        owner="agt-owner",
+    )
+    assert len(calls) == 1
+    command, elevated = calls[0]
+    owned = server_owner_parts(command)
+    assert owned is not None and owned[0] == "agt-owner"
+    assert "show-environment" in owned[1]

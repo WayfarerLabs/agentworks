@@ -19,9 +19,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.db import AppliedStateKey, ProvisioningStatus, VersionedPayload
-from agentworks.errors import BackupError, StateError
+from agentworks.errors import BackupError, ExternalError, StateError
 from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.ssh import SSHError
 from agentworks.vms import backup as vm_backup
 from agentworks.vms.manager import boundary
 from tests.conftest import seed_vm_trust
@@ -121,13 +122,55 @@ def test_workspace_path_staging_is_cleaned_when_upload_fails(tmp_path: Path) -> 
     with pytest.raises(OSError):
         vm_backup._archive_workspaces(  # noqa: SLF001
             target,
-            [cast("WorkspaceRow", SimpleNamespace(workspace_path="/srv/workspace"))],
+            [cast("WorkspaceRow", SimpleNamespace(name="ws", workspace_path="/srv/workspace"))],
             tmp_path / "workspaces.tar.zst",
             "operator",
+            vm_name="bvm",
         )
 
     commands = [call.args[0] for call in target.run.call_args_list]
     assert "rm -f /var/tmp/_aw_paths_safe.txt" in commands
+
+
+@pytest.mark.parametrize(
+    ("probe_exit", "error"),
+    [
+        (255, SSHError),  # ssh never ran the path check
+        (1, ExternalError),  # a sudo -n refusal, not a missing path
+    ],
+)
+def test_an_unanswered_workspace_path_check_fails_the_backup_instead_of_skipping(
+    tmp_path: Path, probe_exit: int, error: type[Exception]
+) -> None:
+    target = MagicMock()
+
+    def _run(command: str, **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        if command == "mktemp -d /var/tmp/agentworks-backup-XXXXXX":
+            return SimpleNamespace(stdout="/var/tmp/agentworks-backup-safe\n", stderr="", ok=True, returncode=0)
+        if "test -d /srv/workspace" in command:
+            return SimpleNamespace(stdout="", stderr="", ok=False, returncode=probe_exit)
+        return SimpleNamespace(stdout="", stderr="", ok=True, returncode=0)
+
+    target.run.side_effect = _run
+    # Past the path checks the archive would start with this upload; stop there.
+    target.write_file.side_effect = OSError("archive must not start")
+
+    with pytest.raises(error):
+        vm_backup._archive_workspaces(  # noqa: SLF001
+            target,
+            [
+                cast("WorkspaceRow", SimpleNamespace(name="ws", workspace_path="/srv/workspace")),
+                cast("WorkspaceRow", SimpleNamespace(name="other", workspace_path="/srv/other")),
+            ],
+            tmp_path / "workspaces.tar.zst",
+            "operator",
+            vm_name="bvm",
+        )
+
+    commands = [call.args[0] for call in target.run.call_args_list]
+    assert not any("tar" in command for command in commands)
+    assert "rm -rf /var/tmp/agentworks-backup-safe" in commands
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink protection")
@@ -553,7 +596,7 @@ def test_native_setup_export_and_database_restore_preserve_owner_tree(db, tmp_pa
     target = MetadataTarget()
     monkeypatch.setattr("agentworks.transports.SSHTransport", MetadataTarget)
     monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
-    monkeypatch.setattr(vm_backup, "_archive_workspaces", lambda *a: ([], []))
+    monkeypatch.setattr(vm_backup, "_archive_workspaces", lambda *a, **k: ([], []))
     destination = vm_backup.backup_vm(
         db,
         SimpleNamespace(paths=SimpleNamespace(backups=tmp_path / "exports")),

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.sources import SourceRef, SourceRefError, fetch_file, parse_source_ref
+from agentworks.sources import SourceRef, SourceRefError, fetch_dir, fetch_file, parse_source_ref
 from agentworks.ssh import SSHError
 
 
@@ -89,6 +89,53 @@ def test_fetch_file_clones_copies_and_cleans_git_source() -> None:
         "cp /var/tmp/agentworks-source-ref-abcd12/locks/mise.lock /remote/mise.lock" in command for command in commands
     )
     assert commands[-1] == "rm -rf /var/tmp/agentworks-source-ref-abcd12"
+
+
+def _dir_target(probe_exit: int, *, removal_fails: bool = False) -> MagicMock:
+    """A target whose ``check`` behaves like the SSH transport's: a failing
+    command raises only under ``check=True``."""
+    target = MagicMock()
+
+    def _run(command: str, **kwargs: object) -> SimpleNamespace:
+        returncode = 0
+        if command.startswith("test -d"):
+            returncode = probe_exit
+        elif command.startswith("rm -rf") and removal_fails:
+            returncode = 1
+        if returncode and kwargs.get("check", True):
+            raise SSHError(f"command failed: {command}")
+        return SimpleNamespace(ok=returncode == 0, returncode=returncode, stdout="", stderr="")
+
+    target.run.side_effect = _run
+    return target
+
+
+def test_fetch_dir_copies_into_an_absent_destination(tmp_path) -> None:  # noqa: ANN001
+    target = _dir_target(probe_exit=1)
+    fetch_dir(parse_source_ref(str(tmp_path)), target, "/remote/dotfiles")
+    assert not any(call.args[0].startswith("rm -rf") for call in target.run.call_args_list)
+    target.copy_dir_to.assert_called_once()
+
+
+def test_fetch_dir_replaces_an_existing_destination(tmp_path) -> None:  # noqa: ANN001
+    target = _dir_target(probe_exit=0)
+    fetch_dir(parse_source_ref(str(tmp_path)), target, "/remote/dotfiles")
+    assert any(call.args[0] == "rm -rf /remote/dotfiles" for call in target.run.call_args_list)
+    target.copy_dir_to.assert_called_once()
+
+
+@pytest.mark.parametrize(("probe_exit", "removal_fails"), [(255, False), (0, True)])
+def test_fetch_dir_never_copies_over_a_destination_it_could_not_clear(
+    tmp_path,  # noqa: ANN001
+    probe_exit: int,
+    removal_fails: bool,
+) -> None:
+    """An unanswered destination check, or a removal that failed, raises
+    before the copy, so the copy never merges into the old tree."""
+    target = _dir_target(probe_exit, removal_fails=removal_fails)
+    with pytest.raises(SSHError):
+        fetch_dir(parse_source_ref(str(tmp_path)), target, "/remote/dotfiles")
+    target.copy_dir_to.assert_not_called()
 
 
 def test_fetch_file_cleanup_failure_preserves_fetch_error(captured_output) -> None:  # noqa: ANN001

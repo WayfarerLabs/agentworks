@@ -47,16 +47,27 @@ def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox"
 
 
 def _seed_session(db: Database, name: str, ws: str, *, agent: str | None = None) -> None:
+    from agentworks.sessions.tmux import admin_socket_path, agent_socket_path
+
+    workspace = db.get_workspace(ws)
+    vm = db.get_vm(workspace.vm_name) if workspace is not None else None
+    assert vm is not None
+    agent_row = db.get_agent(agent) if agent is not None else None
+    socket_path = (
+        agent_socket_path(agent_row.linux_user, name)
+        if agent_row is not None
+        else admin_socket_path(vm.admin_username, name)
+    )
     db.insert_session(
         name,
         ws,
         "default",
         SessionMode.AGENT if agent else SessionMode.ADMIN,
         agent_name=agent,
-        socket_path=f"/tmp/{name}.sock",
+        socket_path=socket_path,
     )
     db.update_session_runtime(
-        name, socket_path=f"/tmp/{name}.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        name, socket_path=socket_path, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
     )
 
 
@@ -678,7 +689,7 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, target, server: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -742,7 +753,7 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, target, server: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -770,7 +781,7 @@ def test_describe_session_observes_without_a_vm_hold(
     events: list[str] = []
     _record_holds(monkeypatch, events)
 
-    def _probe(session: object, *, target: object) -> object:
+    def _probe(session: object, *, target: object, server: object) -> object:
         del session, target
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
@@ -900,7 +911,7 @@ def test_describe_session_preserves_malformed_stored_boot_error(
     _reachable(monkeypatch, True)
     db.update_session_runtime(
         "s1",
-        socket_path="/tmp/s1.sock",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
         pid=42,
         boot_id="malformed",
         tmux_server_start_ticks=100,
@@ -918,7 +929,7 @@ def test_describe_session_preserves_malformed_stored_boot_error(
                     ok=False,
                     returncode=1,
                     stdout="AGW_RUNTIME_SERVER=",
-                    stderr="no server running on /tmp/s1.sock",
+                    stderr="no server running on /run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
                 )
             if "/proc/sys/kernel/random/boot_id" in cmd:
                 return SimpleNamespace(ok=True, returncode=0, stdout=f"AGW_RUNTIME_BOOT={BOOT_ID}\n", stderr="")

@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
+from agentworks.capabilities.vm_platform.sudoers import admin_sudoers_script
 from agentworks.errors import ProvisioningError
 from agentworks.execution import root_script
 
@@ -108,7 +109,6 @@ else
     echo "##SUCCESS## user $VM_USER created"
 fi
 usermod -aG sudo "$VM_USER"
-echo "$VM_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$VM_USER"
 HOME_DIR="/home/$VM_USER"
 
 # -- Step 1b: Default shell rc seeds for admin's home --
@@ -134,6 +134,12 @@ timeout 600 apt-get dist-upgrade -y -qq -o Dpkg::Options::="--force-confnew"
 # shellcheck disable=SC2086
 apt-get install -y -qq -o Dpkg::Options::="--force-confnew" $PROVISIONING_PACKAGES
 echo "##SUCCESS## provisioning packages installed"
+
+# sudo and visudo are supplied by the provisioning packages above.
+echo "##STEP## Admin sudo grant"
+(
+{admin_sudoers_script})
+echo "##SUCCESS## admin sudo grant installed"
 
 # -- Step 2b: Preserve SSH host keys across reboots --
 # By default, cloud-init may delete and regenerate SSH host keys on certain
@@ -277,6 +283,7 @@ def generate_bootstrap_script(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
+        admin_sudoers_script=admin_sudoers_script(admin_username),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
