@@ -2,168 +2,30 @@
 
 Each operation runs the program's ``main`` in its own interpreter, under each
 interpreter the L lane uses, with its lock in a sticky, world-writable directory
-of the test's own, so operations and the test can contend. Linux only: the
-program walks with ``O_PATH``.
+of the test's own, so operations and the test can contend
+(``_file_program_support``). Linux only: the program walks with ``O_PATH``.
+Metadata, the temporary file's privacy included, is
+``test_file_program_metadata.py``'s.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import shutil
 import signal
 import stat
-import struct
-import subprocess
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.execution import file_program, files
-from tests.execution.conformance.lanes import python_interpreters, sudo_granted, unavailable
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
+from agentworks.execution import file_program
+from tests.execution._file_program_support import Guest, digest, temporaries
+from tests.execution._file_program_support import as_root as as_root
+from tests.execution._file_program_support import guest as guest
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file program walks paths with Linux's O_PATH")
-
-_MAIN = (
-    "import sys; sys.path.insert(0, sys.argv[1]); import file_program\n"
-    "{patch}\n"
-    "sys.exit(file_program.main(sys.argv[4:], lock_path=sys.argv[2], lock_wait=float(sys.argv[3])))"
-)
-
-
-@dataclass
-class Guest:
-    """The program, its lock and a working tree under one test's directory."""
-
-    root: Path
-    python: str
-    lock_wait: float = 5.0
-
-    @property
-    def lock(self) -> Path:
-        return self.root / "lock" / "agentworks-files.lock"
-
-    @property
-    def tree(self) -> Path:
-        return self.root / "tree"
-
-    def start(
-        self,
-        operation: str,
-        params: dict,
-        *,
-        stdin: bytes = b"",
-        patch: str = "",
-        sudo: bool = False,
-        umask: int | None = None,
-    ) -> subprocess.Popen[bytes]:
-        """Start ``operation``, its ``SEALED`` parameters sent ahead of ``stdin`` as ``Files`` sends them."""
-        sealed = file_program.SEALED.get(operation, ())
-        if sealed:
-            stdin = json.dumps({name: params[name] for name in sealed}).encode() + b"\n" + stdin
-            params = {name: value for name, value in params.items() if name not in sealed}
-        argv = [
-            self.python,
-            "-I",
-            "-S",
-            "-c",
-            _MAIN.format(patch=patch),
-            str(self.root / "program"),
-            str(self.lock),
-            str(self.lock_wait),
-            operation,
-            json.dumps(params),
-        ]
-        process = subprocess.Popen(
-            ["sudo", "-n", "--", *argv] if sudo else argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            preexec_fn=None if umask is None else (lambda: os.umask(umask)),  # noqa: PLW1509
-        )
-        assert process.stdin is not None
-        process.stdin.write(stdin)
-        process.stdin.close()
-        return process
-
-    def run(self, operation: str, params: dict, **options: object) -> subprocess.CompletedProcess[bytes]:
-        process = self.start(operation, params, **options)  # type: ignore[arg-type]
-        assert process.stdout is not None and process.stderr is not None
-        # The program's streams are small, so reading one and then the other cannot stall it.
-        stdout, stderr = process.stdout.read(), process.stderr.read()
-        process.wait(timeout=30)
-        return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
-
-    def write_if(
-        self, path: Path, data: bytes, *, expected: str | None = None, **overrides: object
-    ) -> subprocess.CompletedProcess[bytes]:
-        params = {
-            "path": str(path),
-            "expected": expected,
-            "mode": 0o600,
-            "group": None,
-            "parent_mode": 0o700,
-            "preserve": False,
-            "size": len(data),
-            "sha256": digest(data),
-        }
-        options = {key: overrides.pop(key) for key in ("patch", "sudo", "umask") if key in overrides}
-        return self.run("write_if", {**params, **overrides}, stdin=data, **options)
-
-    def write(self, path: Path, data: bytes, **overrides: object) -> subprocess.CompletedProcess[bytes]:
-        params = {
-            "path": str(path),
-            "mode": 0o600,
-            "owner": None,
-            "group": None,
-            "parent_mode": 0o700,
-            "size": len(data),
-            "sha256": digest(data),
-        }
-        options = {key: overrides.pop(key) for key in ("patch", "sudo", "umask") if key in overrides}
-        return self.run("write", {**params, **overrides}, stdin=data, **options)
-
-    def ensure_directory(
-        self, path: Path, *, mode: int, owner: str | None = None, group: str | None = None, **options: object
-    ) -> subprocess.CompletedProcess[bytes]:
-        params = {"path": str(path), "mode": mode, "owner": owner, "group": group}
-        return self.run("ensure_directory", params, **options)
-
-
-def digest(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def temporaries(directory: Path) -> list[str]:
-    return sorted(name for name in os.listdir(directory) if name.startswith(".agentworks-tmp-"))
-
-
-@pytest.fixture(params=sorted(python_interpreters()))
-def guest(request: pytest.FixtureRequest, tmp_path: Path) -> Guest:
-    program = tmp_path / "program"
-    program.mkdir()
-    (program / "file_program.py").write_text(files.program_source())
-    (tmp_path / "lock").mkdir()
-    (tmp_path / "lock").chmod(0o1777)
-    (tmp_path / "tree").mkdir()
-    return Guest(tmp_path, python_interpreters()[request.param])
-
-
-@pytest.fixture
-def as_root(guest: Guest) -> Iterator[None]:
-    """The sudo lane: required where passwordless sudo is granted (CI), skipped elsewhere; root's files go after."""
-    if not sudo_granted():
-        unavailable("the sudo lane needs passwordless sudo")
-    yield
-    subprocess.run(["sudo", "-n", "rm", "-rf", "--", str(guest.root)], check=False)
 
 
 # -- Conditional writes ------------------------------------------------------------------
@@ -672,176 +534,6 @@ def test_a_lock_another_identity_created_is_opened_not_recreated(guest: Guest, a
 
     assert result.returncode == 0, result.stderr
     assert guest.lock.stat().st_uid == 0
-
-
-# -- Metadata -----------------------------------------------------------------------------------
-
-
-def test_preserve_keeps_the_existing_mode_and_extended_attributes(guest: Guest) -> None:
-    destination = guest.tree / "file"
-    destination.write_bytes(b"before")
-    destination.chmod(0o640)
-    try:
-        os.setxattr(destination, "user.agentworks-test", b"kept")
-    except OSError:
-        pytest.skip("this filesystem keeps no user extended attributes")
-
-    result = guest.write_if(destination, b"after", expected=digest(b"before"), mode=0o600, preserve=True)
-
-    assert result.returncode == 0, result.stderr
-    assert destination.read_bytes() == b"after"
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
-    assert os.getxattr(destination, "user.agentworks-test") == b"kept"
-
-
-def test_preserve_tolerates_an_attribute_that_vanishes_while_copied(guest: Guest) -> None:
-    destination = guest.tree / "file"
-    destination.write_bytes(b"before")
-    try:
-        os.setxattr(destination, "user.agentworks-test", b"kept")
-        os.setxattr(destination, "user.agentworks-vanishing", b"removed while read")
-    except OSError:
-        pytest.skip("this filesystem keeps no user extended attributes")
-    patch = (
-        "import os, errno\n"
-        "real = os.getxattr\n"
-        "def getxattr(target, key, *a, **k):\n"
-        "    if key == 'user.agentworks-vanishing':\n"
-        "        raise OSError(errno.ENODATA, 'no data')\n"
-        "    return real(target, key, *a, **k)\n"
-        "os.getxattr = getxattr"
-    )
-
-    result = guest.write_if(destination, b"after", expected=digest(b"before"), preserve=True, patch=patch)
-
-    assert result.returncode == 0, result.stderr
-    assert os.getxattr(destination, "user.agentworks-test") == b"kept"
-    assert "user.agentworks-vanishing" not in os.listxattr(destination)
-
-
-def test_preserve_on_a_filesystem_without_extended_attributes_keeps_the_mode(guest: Guest) -> None:
-    destination = guest.tree / "file"
-    destination.write_bytes(b"before")
-    destination.chmod(0o640)
-    patch = (
-        "import os, errno\n"
-        "def listxattr(*a, **k): raise OSError(errno.ENOTSUP, 'unsupported')\n"
-        "os.listxattr = listxattr"
-    )
-
-    result = guest.write_if(destination, b"after", expected=digest(b"before"), mode=0o600, preserve=True, patch=patch)
-
-    assert result.returncode == 0, result.stderr
-    assert destination.read_bytes() == b"after"
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o640
-
-
-_RECORD_STAGING = (
-    "import json, os\n"
-    "def snapshot(label):\n"
-    "    for name in os.listdir({directory!r}):\n"
-    "        if name.startswith('.agentworks-tmp-'):\n"
-    "            path = os.path.join({directory!r}, name)\n"
-    "            seen = os.stat(path, follow_symlinks=False)\n"
-    "            try:\n"
-    "                acl = os.getxattr(path, 'system.posix_acl_access', follow_symlinks=False).hex()\n"
-    "            except OSError:\n"
-    "                acl = None\n"
-    "            with open({record!r}, 'a') as handle:\n"
-    "                handle.write(json.dumps([label, seen.st_mode, seen.st_gid, acl]) + '\\n')\n"
-    "def observed(function, label, after):\n"
-    "    def wrapper(*args, **kwargs):\n"
-    "        if not after:\n"
-    "            snapshot(label)\n"
-    "        result = function(*args, **kwargs)\n"
-    "        if after:\n"
-    "            snapshot(label)\n"
-    "        return result\n"
-    "    return wrapper\n"
-    "for name in ('fchown', 'fchmod', 'setxattr', 'removexattr'):\n"
-    "    setattr(os, name, observed(getattr(os, name), 'metadata', True))\n"
-    "os.rename = observed(os.rename, 'metadata', False)\n"
-    "file_program._open_regular = observed(file_program._open_regular, 'check', False)\n"
-    "file_program._digest = observed(file_program._digest, 'check', False)"
-)
-
-
-def _grants(mode: int, gid: int, acl: str | None) -> dict[tuple[str, int], int]:
-    """The access a file's mode and access ACL give anyone but its owner, by owning or named group, user or other."""
-    if acl is None:
-        return {("group", gid): mode >> 3 & 7, ("other", 0): mode & 7}
-    raw = bytes.fromhex(acl)
-    entries = [struct.unpack_from("<HHI", raw, offset) for offset in range(4, len(raw), 8)]
-    mask = next((perm for tag, perm, _ in entries if tag == 0x10), 7)
-    keys = {2: "user", 4: "group", 8: "group", 0x20: "other"}
-    grants: dict[tuple[str, int], int] = {}
-    for tag, perm, ident in entries:
-        if tag in keys:
-            key = (keys[tag], gid if tag == 4 else 0 if tag == 0x20 else ident)
-            grants[key] = grants.get(key, 0) | (perm if tag == 0x20 else perm & mask)
-    return grants
-
-
-@pytest.mark.parametrize("case", ["write_if preserving", "write_if preserving an ACL", "write_if", "write"])
-def test_staging_is_private_through_every_check_and_never_wider_than_the_published_file(
-    guest: Guest, case: str
-) -> None:
-    destination = guest.tree / "file"
-    destination.write_bytes(b"before")
-    destination.chmod(0o600)
-    if case == "write_if preserving an ACL":
-        destination.chmod(0o640)
-        setfacl = shutil.which("setfacl")
-        if setfacl is None or subprocess.run([setfacl, "-m", f"g::-,u:{os.getuid()}:r", str(destination)]).returncode:
-            pytest.skip("setfacl, and a filesystem that keeps ACLs, provision the ACL fixture")
-    record = guest.root / "staging.jsonl"
-    patch = _RECORD_STAGING.format(directory=str(guest.tree), record=str(record))
-    if case == "write":
-        result = guest.write(destination, b"after", mode=0o644, patch=patch)
-    else:
-        preserve = case != "write_if"
-        result = guest.write_if(
-            destination, b"after", expected=digest(b"before"), mode=0o644, preserve=preserve, patch=patch
-        )
-
-    assert result.returncode == 0, result.stderr
-    published = destination.stat()
-    try:
-        acl: str | None = os.getxattr(destination, "system.posix_acl_access").hex()
-    except OSError:
-        acl = None
-    final = _grants(published.st_mode, published.st_gid, acl)
-    snapshots = [json.loads(line) for line in record.read_text().splitlines()]
-    assert {label for label, *_ in snapshots} == {"check", "metadata"}
-    for label, mode, gid, staged_acl in snapshots:
-        staged = _grants(mode, gid, staged_acl)
-        if label == "check":
-            assert (stat.S_IMODE(mode), any(staged.values())) == (0o600, False)
-        assert all(perm & ~final.get(key, 0) == 0 for key, perm in staged.items()), (label, staged, final)
-    assert stat.S_IMODE(published.st_mode) == {"write_if preserving": 0o600, "write_if preserving an ACL": 0o640}.get(
-        case, 0o644
-    )
-
-
-def test_preserve_keeps_the_existing_owner_and_group(guest: Guest, as_root: None) -> None:
-    destination = guest.tree / "file"
-    destination.write_bytes(b"before")
-    owner = destination.stat()
-
-    result = guest.write_if(destination, b"after", expected=digest(b"before"), preserve=True, sudo=True)
-
-    assert result.returncode == 0, result.stderr
-    replaced = destination.stat()
-    assert (replaced.st_uid, replaced.st_gid) == (owner.st_uid, owner.st_gid)
-
-
-def test_an_elevated_write_without_preserve_creates_a_root_owned_file(guest: Guest, as_root: None) -> None:
-
-    result = guest.write_if(guest.tree / "root" / "file", b"content", mode=0o644, parent_mode=0o755, sudo=True)
-
-    assert result.returncode == 0, result.stderr
-    assert (guest.tree / "root" / "file").stat().st_uid == 0
-    assert (guest.tree / "root").stat().st_uid == 0
 
 
 # -- Cleanup --------------------------------------------------------------------------------------

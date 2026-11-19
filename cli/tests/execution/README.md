@@ -125,11 +125,13 @@ directory (the suite conftest's `file_lock_path`), so the L and S lanes and
 `test_file_program.py` runs the guest file program's `main` in its own interpreter, under each
 interpreter the L lane uses, on a temporary tree with its lock in a sticky directory of its own:
 conflicts, truncated input, links at the destination, a parent and the lock path, the lock's mode,
-wait and sharing, metadata preservation, cleanup after a failure or `SIGTERM`, and pruning. Its sudo
-lane (a lock root created first, owner preservation, a root-owned write) needs the runner's
-passwordless `sudo -n` and follows the elevation vectors' rule. `test_files.py` covers `Files`: the
-status-to-error mapping and refusals before dispatch over the recording access, and a round trip, a
-link refusal and the private lock over the L lane.
+wait and sharing, cleanup after a failure or `SIGTERM`, and pruning. `test_file_program_metadata.py`
+runs it the same way (`_file_program_support.py` holds the shared harness) for metadata preservation
+and the temporary file's privacy until publication. Their sudo lane (a lock root created first,
+owner preservation, a root-owned write) needs the runner's passwordless `sudo -n` and follows the
+elevation vectors' rule. `test_files.py` covers `Files`: the status-to-error mapping and refusals
+before dispatch over the recording access, and a round trip, a link refusal and the private lock
+over the L lane.
 
 The terminal vectors join the same list:
 
