@@ -90,9 +90,10 @@ native-home workaround can also publish narrowly validated, session-owned skill 
 user's native discovery directory; the publication boundary covers exact packages, not all of HOME.
 Catalog visibility is shared with other sessions of that user, and applicability is best effort.
 First-party native session facets default to no artifact delivery. Their typed `enabled_workarounds`
-config lists specific delivery opt-ins, with an empty default and replacement inheritance. Grok
-accepts `session-home-skills`; session personas remain unhandled. Return an explicit deferral for
-each disabled or unsupported input, including its relevant workaround in the reason when one exists.
+config lists specific delivery opt-ins, with an empty default and append-dedupe inheritance.
+Omission and `[]` preserve inherited opt-ins; `null` clears them. Grok accepts
+`session-home-skills`; session personas remain unhandled. Return an explicit deferral for each
+disabled or unsupported input, including its relevant workaround in the reason when one exists.
 Filter disabled inputs before applying delivery-specific validation or compatibility probes. Keep
 unsafe paths, conflicting ownership, malformed results and invalid configuration as errors. Do not
 turn an optional artifact into a blanket version requirement.

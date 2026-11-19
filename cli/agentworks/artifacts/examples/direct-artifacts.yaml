@@ -34,7 +34,7 @@ spec:
   inherits: [direct-base]
   artifacts:
     # Clear bundle references; keep the inherited direct hint and rule.
-    bundles: []
+    bundles: null
     declare:
       hints:
         project:
