@@ -18,9 +18,9 @@ import pytest
 from pydantic import ValidationError
 
 from agentworks.agents.template import AgentTemplate
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PathRefused
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PathRefusal, PathRefused, RequestRefused
 from agentworks.execution.requests import Bytes, Command, Script
-from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.sources import (
     UPLOAD_TREE_SCRIPT,
     DestinationError,
@@ -948,6 +948,34 @@ def _sync_dotfiles(destination: str, managed: tuple[str, ...], *, home: str = "/
         log=guest.log,
     )
     return guest
+
+
+@pytest.mark.parametrize(
+    ("error", "definite"),
+    [
+        (CommandFailed("box", 1, Result(Completed(1)), streams_logged=True), True),
+        (PathRefused("box", "upload_tree", "/home/a/.dotfiles", PathRefusal.UNSUITABLE), True),
+        (RequestRefused("box", "cwd", Result(NotDelivered(NotDeliveredReason.REFUSED, "cwd"))), True),
+        (SourceRefError("not a clone of this repository"), True),
+        (ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))), False),
+    ],
+    ids=["command-failed", "path-refused", "request-refused", "source-ref", "incomplete"],
+)
+def test_a_failed_sync_says_the_checkout_is_unchanged_only_when_the_failure_answered(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, definite: bool
+) -> None:
+    """A sync that did not answer may have uploaded the tree or checked out in place before it was lost."""
+    from agentworks.vms.initializer import dotfiles
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise error
+
+    monkeypatch.setattr(dotfiles, "fetch_dir", fail)
+    guest = _sync_dotfiles("~/.dotfiles", MANAGED)
+
+    (warning,) = guest.log.warned
+    assert (dotfiles.LEFT_AS_IT_WAS in warning, dotfiles.LEFT_UNKNOWN in warning) == (definite, not definite)
+    assert guest.access.requests() == []  # the install did not run
 
 
 def test_each_account_s_sync_applies_its_set() -> None:
