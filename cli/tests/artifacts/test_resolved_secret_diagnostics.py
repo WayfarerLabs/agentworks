@@ -14,6 +14,7 @@ from agentworks.artifacts.native.probe import probe_native
 from agentworks.errors import ExternalError
 from agentworks.execution.oplog import OperationLogFile
 from agentworks.execution.results import Completed, Result
+from tests.reachable_data_support import reachable_data
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 
@@ -158,3 +159,51 @@ def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
         setup.user_init(replace(invocation, access=access, artifacts=received(artifact(ArtifactType.SKILL))))
     assert marker not in str(caught.value) and marker not in (caught.value.hint or "")
     assert path in str(caught.value)
+
+
+def test_a_session_start_context_holds_no_secret_outside_its_owner_s_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The session start's other secrets are redacted for the integration without being handed to it.
+
+    ``environment`` is the session's composed environment, which carries any secret it references by
+    design, so its value is reachable; every other value the start resolved or logged is not.
+    """
+    from agentworks.artifacts.model import ArtifactGroup, ArtifactInputs, ArtifactOwner
+    from agentworks.artifacts.routing import RoutingResult
+    from agentworks.artifacts.session import prepare_session_artifacts
+    from agentworks.artifacts.state import CapturedArtifacts
+    from agentworks.secrets.orchestration import SecretTarget
+    from agentworks.sessions.templates import ResolvedSessionTemplate
+
+    environment, undeclared, logged = (f"{label}-{uuid4().hex}" for label in ("environment", "undeclared", "logged"))
+    monkeypatch.setattr(
+        "agentworks.artifacts.session.capture_owner",
+        lambda *a, **k: CapturedArtifacts("c" * 64, ArtifactGroup(ArtifactOwner("session", "session", "fixture"))),
+    )
+    monkeypatch.setattr(
+        "agentworks.artifacts.routing.session_artifacts", lambda *a, **k: RoutingResult(ArtifactInputs())
+    )
+    monkeypatch.setattr("agentworks.artifacts.session.read_native_setup", lambda *a: Mock(records=()))
+    prepared = prepare_session_artifacts(
+        Mock(),
+        Mock(),
+        name="fixture",
+        template=ResolvedSessionTemplate("fixture"),
+        vm=Mock(),
+        workspace=Mock(),
+        agent_name="worker",
+        access=RecordingVMAccess([], Admin()),
+        environment={"OWNER_VALUE": environment},
+        secret_target=SecretTarget(vm={}),
+        linux_user="worker",
+        redactions=(environment, undeclared, logged),
+    )
+
+    context = prepared.context
+    assert context.environment == {"OWNER_VALUE": environment}
+    exposed = set(reachable_data(context))
+    assert environment in exposed
+    assert undeclared not in exposed and logged not in exposed
+    sanitized = context.redactor.sanitize(f"{environment} {undeclared} {logged}")
+    assert not any(value in sanitized for value in (environment, undeclared, logged))
