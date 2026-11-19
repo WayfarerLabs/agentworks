@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import requests
@@ -68,16 +69,18 @@ class _ScriptedAdapter(BaseAdapter):
 class _HeldAdapter(_ScriptedAdapter):
     """Holds every request until ``release`` is set, then answers it with a 404.
 
-    ``on_hold`` runs on the sending thread as each request is held. ``cap``
-    ends a hold nobody released, so code that waits for the request itself
-    fails its test instead of hanging. ``senders`` records each sending
-    thread, for :meth:`finish` to join.
+    ``on_hold`` runs on the sending thread as each request is held, and
+    ``held_at`` then records when the first was. ``cap`` ends a hold nobody
+    released, so code that waits for the request itself fails its test
+    instead of hanging. ``senders`` records each sending thread, for
+    :meth:`finish` to join.
     """
 
     def __init__(self, *, cap: float, on_hold: Callable[[], None] | None = None) -> None:
         super().__init__([_refused(404)])
         self.release = threading.Event()
         self.senders: list[threading.Thread] = []
+        self.held_at: float | None = None
         self._cap = cap
         self._on_hold = on_hold
 
@@ -86,6 +89,8 @@ class _HeldAdapter(_ScriptedAdapter):
         self.senders.append(threading.current_thread())
         if self._on_hold is not None:
             self._on_hold()
+        if self.held_at is None:
+            self.held_at = time.monotonic()
         self.release.wait(self._cap)
         return self._answer(request)
 
@@ -95,6 +100,22 @@ class _HeldAdapter(_ScriptedAdapter):
         for sender in self.senders:
             if sender is not threading.current_thread():
                 sender.join(self._cap)
+
+
+class _HeldClock:
+    """Reads 0 until ``adapter`` holds a request, then the real seconds since.
+
+    Patched in for the clock a bound counts on, it starts that bound at the
+    hold rather than at the call, so a loaded host that is slow to send the
+    request cannot spend the bound first.
+    """
+
+    def __init__(self, adapter: _HeldAdapter) -> None:
+        self._adapter = adapter
+
+    def monotonic(self) -> float:
+        held_at = self._adapter.held_at
+        return 0.0 if held_at is None else time.monotonic() - held_at
 
 
 # azure-core exports RequestsTransport through a lazy module __getattr__, so mypy sees it as Any.
@@ -111,9 +132,9 @@ class _ClockedTransport(RequestsTransport):  # type: ignore[misc]
 
 
 def _scripted_client[C](client_type: Callable[..., C], adapter: BaseAdapter) -> C:
-    """A generated management client sending over ``adapter``, without azure-core's backoff between retries.
+    """A generated management client sending over ``adapter``, sleeping on the network helpers' clock.
 
-    It sleeps on the network helpers' clock (see :class:`_ClockedTransport`).
+    See :class:`_ClockedTransport`.
     """
     session = requests.Session()
     session.mount("https://", adapter)
@@ -121,5 +142,4 @@ def _scripted_client[C](client_type: Callable[..., C], adapter: BaseAdapter) -> 
         _Credential(),
         "sub-A",
         transport=_ClockedTransport(session=session, session_owner=False),
-        retry_backoff_factor=0,
     )

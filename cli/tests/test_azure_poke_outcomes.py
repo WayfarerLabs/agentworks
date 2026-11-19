@@ -25,7 +25,7 @@ from azure.mgmt.network import NetworkManagementClient
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX, poke_ssh_allow
-from agentworks.plugins.azure.route_calls import _RouteOperationTimeout
+from agentworks.plugins.azure.route_calls import _RouteCallTimeout
 from tests._azure_platform_support import _FakeAzure, _install_fakes, _Poller
 from tests._azure_scripted_transport import _Answer, _refused, _scripted_client, _ScriptedAdapter
 
@@ -253,7 +253,7 @@ def _time_out_with(monkeypatch: pytest.MonkeyPatch, polling: object) -> tuple[_F
         return _TimedOut(polling)
 
     monkeypatch.setattr(rules, "begin_create_or_update", _create)
-    with pytest.raises(_RouteOperationTimeout):
+    with pytest.raises(_RouteCallTimeout):
         poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
     (attempted,) = rules.transient_names()
     assert attempted.startswith(TRANSIENT_ALLOW_RULE_PREFIX)

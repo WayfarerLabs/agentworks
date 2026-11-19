@@ -784,14 +784,9 @@ class AzureVMPlatform(PublicAddressPlatform):
         compute = self._compute_client(az_cfg, ctx)
         network = self._network_client(az_cfg, ctx)
         try:
-            vm_info = compute.virtual_machines.get(
-                rg,
-                name,
-                expand="instanceView",
-            )
+            return get_vm_public_ip(compute, network, rg, name)
         except Exception as exc:
             raise wrap_azure_error(exc) from exc
-        return get_vm_public_ip(network, vm_info)
 
     def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
         """Delete the bootstrap allow rule by its fixed name (no in-process state needed).

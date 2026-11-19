@@ -61,12 +61,11 @@ from agentworks.errors import AuthorizationError
 from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.azure.errors import AzureError, wrap_azure_error
 from agentworks.plugins.azure.route_calls import (
-    _OPERATION_TIMEOUT_SECONDS,
     _bounded_route_call,
     _finish_route_operation,
     _route_call_options,
     _route_operation_options,
-    _RouteOperationTimeout,
+    _RouteCallTimeout,
     _run_route_operation,
     _start_route_operation,
 )
@@ -332,7 +331,7 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     and takes the next free slot. After the attempts are exhausted the
     last error raises wrapped. A create is never retried (``retry_total=0``),
     so no try whose delivery is unknown is replayed: azure-core resends it
-    only after an explicit answer, the 401 of an authentication challenge.
+    only after an explicit answer (a redirect, or a 401 challenge).
     An answer azure-core would have retried (a throttle, a timeout, a server
     error) gets a wait on azure-core's backoff factor before the next
     attempt (see :func:`_back_off_after`), so a throttled or briefly
@@ -371,7 +370,7 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
         except BaseException as exc:
             # The create did not return, so the rule may exist or still land, and only this name finds it.
             _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller, exc)
-            if not isinstance(exc, Exception) or isinstance(exc, _RouteOperationTimeout):
+            if not isinstance(exc, Exception) or isinstance(exc, _RouteCallTimeout):
                 raise  # an interrupt, or a timeout that another attempt would wait out as long again
             last_exc = exc
             continue
@@ -436,9 +435,9 @@ def _remove_unfinished_allow(
     skip it.
 
     Before a poller, the outcome is known only when ``error`` is Azure's 4xx
-    answer to the create: the create is never retried, and azure-core's only
-    resend follows Azure's own 401 challenge, so every try was refused and
-    the rule never exists. A request with no answer may have reached Azure,
+    answer to the create: the create is never retried, and azure-core
+    resends it only after an explicit answer (a redirect, or a 401
+    challenge), so every try was turned away and the rule never exists. A request with no answer may have reached Azure,
     and a 5xx (a gateway timeout among them) does not say the network
     provider never took it, so both warn.
 
@@ -548,10 +547,10 @@ def _delete_ssh_allow(
         )
     except ResourceNotFoundError:
         return
-    except _RouteOperationTimeout:
+    except _RouteCallTimeout as timeout:
         output.warn(
             f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
-            f"{_OPERATION_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
+            f"{timeout.seconds:.0f}s, so the VM's SSH port may remain open to {scope}; check "
             "the rule and delete it manually if it is still there."
         )
         return
@@ -626,9 +625,16 @@ def ensure_public_ip(
         raise wrap_azure_error(exc) from exc
 
 
-def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
-    """Resolve the public IP address for a VM from its NIC, using the
-    caller's (cached) network client."""
+def get_vm_public_ip(compute: ComputeManagementClient, network: NetworkManagementClient, rg: str, name: str) -> str:
+    """The VM's public IP address, read live through its NIC, or ``""`` when it has none.
+
+    It is the route's address read, so each of its reads (the VM, its NIC,
+    the public IP) is bounded as a route call.
+    """
+    vm_info = _bounded_route_call(
+        partial(compute.virtual_machines.get, rg, name, expand="instanceView", **_route_call_options()),
+        f"reading the VM '{name}'",
+    )
     nic_refs = (
         getattr(
             getattr(vm_info, "network_profile", None),
@@ -647,7 +653,10 @@ def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
         nic_rg = parts[rg_idx + 1]
         nic_name = parts[-1]
 
-        nic = network.network_interfaces.get(nic_rg, nic_name)
+        nic = _bounded_route_call(
+            partial(network.network_interfaces.get, nic_rg, nic_name, **_route_call_options()),
+            f"reading the NIC '{nic_name}'",
+        )
         for ip_config in nic.ip_configurations or []:
             pip_ref = ip_config.public_ip_address
             if pip_ref and pip_ref.id:
@@ -655,7 +664,10 @@ def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
                 pip_rg_idx = next(i for i, p in enumerate(pip_parts) if p.lower() == "resourcegroups")
                 pip_rg = pip_parts[pip_rg_idx + 1]
                 pip_name = pip_parts[-1]
-                pip = network.public_ip_addresses.get(pip_rg, pip_name)
+                pip = _bounded_route_call(
+                    partial(network.public_ip_addresses.get, pip_rg, pip_name, **_route_call_options()),
+                    f"reading the public IP '{pip_name}'",
+                )
                 if pip.properties and pip.properties.ip_address:
                     return pip.properties.ip_address
     return ""

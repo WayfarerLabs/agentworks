@@ -10,20 +10,33 @@ so no test touches Azure.
 
 Error injection is typed ``BaseException`` (not ``Exception``) because
 the interrupt tests inject ``KeyboardInterrupt`` mid-call.
+
+The route tests' shared setup lives here too: the egress-detection stub a
+test module applies by importing ``_stub_egress_detection``, the
+platform and VM stand-ins, and the NSG rule-shape checks.
 """
 
 from __future__ import annotations
 
 import builtins
+import threading
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import Any, NamedTuple
 
+import pytest
+
+from agentworks.capabilities.vm_platform import ssh_exposure
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure import route_calls
-from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX
-
-if TYPE_CHECKING:
-    import pytest
+from agentworks.plugins.azure.network import (
+    ALLOW_PRIORITY_BAND_END,
+    ALLOW_PRIORITY_BAND_START,
+    ALLOW_RULE_DESCRIPTION_MARKER,
+    DENY_ALL_INBOUND_RULE_NAME,
+    DENY_ALL_INBOUND_RULE_PRIORITY,
+    TRANSIENT_ALLOW_RULE_PREFIX,
+)
+from agentworks.plugins.azure.platform import AzureVMPlatform
 
 # The resource ID the fake VM create returns; shared with the test
 # files' VMRow stand-ins so route ops parse back to the same rg/name.
@@ -44,6 +57,19 @@ def _authorization_denied() -> Exception:
         details=None,
     )
     return exc
+
+
+class _Call(NamedTuple):
+    """One recorded SDK call: its method, its azure-core per-call options, and the thread it ran on."""
+
+    method: str
+    options: dict[str, Any]
+    thread: str
+
+
+def _called(method: str, options: dict[str, Any]) -> _Call:
+    """``method``'s call with ``options``, on the thread that is making it."""
+    return _Call(method, options, threading.current_thread().name)
 
 
 class _Poller:
@@ -92,12 +118,12 @@ class _FakeSecurityRules:
     injection drives the 404-tolerance and removal-failure paths. The
     shared ``events`` list records creations and deletions in call
     order so ordering contracts (deny re-pin before allow poke) can be
-    asserted. ``options`` records each call's azure-core per-call options
-    by method name, in call order."""
+    asserted. ``calls`` records each call's method, azure-core per-call
+    options and thread, in call order."""
 
     def __init__(self) -> None:
         self.events: list[tuple[str, str, str, str, Any]] = []
-        self.options: list[tuple[str, dict[str, Any]]] = []
+        self.calls: list[_Call] = []
         self.create_error: BaseException | None = None
         self.delete_error: BaseException | None = None
         # Live rules by name: what list() serves the poke's slot
@@ -106,7 +132,7 @@ class _FakeSecurityRules:
         self.rules: dict[str, Any] = {}
 
     def begin_create_or_update(self, rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
-        self.options.append(("begin_create_or_update", options))
+        self.calls.append(_called("begin_create_or_update", options))
         if self.create_error is not None:
             raise self.create_error
         self.events.append(("create", rg, nsg, rule_name, rule))
@@ -114,7 +140,7 @@ class _FakeSecurityRules:
         return _Poller(rule)
 
     def begin_delete(self, rg: str, nsg: str, rule_name: str, **options: Any) -> _Poller:
-        self.options.append(("begin_delete", options))
+        self.calls.append(_called("begin_delete", options))
         if self.delete_error is not None:
             raise self.delete_error
         self.events.append(("delete", rg, nsg, rule_name, None))
@@ -135,7 +161,7 @@ class _FakeSecurityRules:
     # so the method does not shadow the builtin in this class's other
     # annotations (mypy resolves them in class scope).
     def list(self, rg: str, nsg: str, **options: Any) -> builtins.list[Any]:
-        self.options.append(("list", options))
+        self.calls.append(_called("list", options))
         return [rule for rule in self.rules.values()]
 
 
@@ -143,11 +169,11 @@ class _FakePublicIps:
     def __init__(self, events: list[tuple[str, str, str, str]] | None = None) -> None:
         self.created: list[tuple[str, str]] = []
         self.deleted: list[tuple[str, str]] = []
-        self.options: list[tuple[str, dict[str, Any]]] = []
+        self.calls: list[_Call] = []
         self._events = events if events is not None else []
 
     def begin_create_or_update(self, rg: str, name: str, params: object, **options: Any) -> _Poller:
-        self.options.append(("begin_create_or_update", options))
+        self.calls.append(_called("begin_create_or_update", options))
         self.created.append((rg, name))
         return _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"))
 
@@ -167,17 +193,17 @@ class _FakeNics:
         self.deleted: list[tuple[str, str]] = []
         self.create_error: BaseException | None = None
         self.delete_error: BaseException | None = None
-        self.options: list[tuple[str, dict[str, Any]]] = []
+        self.calls: list[_Call] = []
         self._events = events if events is not None else []
         pip = SimpleNamespace(id="/pip/id") if public_ip_attached else None
         self.nic = SimpleNamespace(ip_configurations=[SimpleNamespace(public_ip_address=pip)])
 
     def get(self, rg: str, name: str, **options: Any) -> Any:
-        self.options.append(("get", options))
+        self.calls.append(_called("get", options))
         return self.nic
 
     def begin_create_or_update(self, rg: str, name: str, nic: object, **options: Any) -> _Poller:
-        self.options.append(("begin_create_or_update", options))
+        self.calls.append(_called("begin_create_or_update", options))
         if self.create_error is not None:
             raise self.create_error
         self.updated.append((rg, name, nic))
@@ -257,10 +283,10 @@ class _FakeVMsWithLocation(_FakeVMs):
 
     def __init__(self, events: list[tuple[str, str, str, str]] | None = None) -> None:
         super().__init__(events)
-        self.options: list[tuple[str, dict[str, Any]]] = []
+        self.calls: list[_Call] = []
 
     def get(self, rg: str, name: str, **options: Any) -> Any:
-        self.options.append(("get", options))
+        self.calls.append(_called("get", options))
         return SimpleNamespace(location="eastus")
 
 
@@ -357,3 +383,70 @@ def _install_fakes(
     monkeypatch.setattr(azure_network, "time", clock)
     monkeypatch.setattr(route_calls, "time", clock)
     return _FakeAzure(network=network, compute=compute, events=events, clock=clock)
+
+
+_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
+_DETECTED = "198.18.0.7"
+_DETECTED_PREFIX = f"{_DETECTED}/32"
+
+
+@pytest.fixture(autouse=True)
+def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test runs with detection stubbed (never a live probe) and a
+    clean per-process cache; individual tests override the stub to drive
+    the failure branches."""
+    monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
+    monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: _DETECTED)
+    monkeypatch.setattr(
+        "agentworks.plugins.azure.platform.complete_cloud_bootstrap",
+        lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+    )
+
+
+def _fail_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom() -> str:
+        raise OSError("no route to checkip")
+
+    monkeypatch.setattr(ssh_exposure, "detect_egress_ip", _boom)
+
+
+def _fake_vm() -> Any:
+    """A stand-in for a VMRow carrying just what the network ops read."""
+    return SimpleNamespace(
+        name="vm1",
+        admin_username="agentworks",
+        platform_metadata={"resource_id": _RESOURCE_ID},
+    )
+
+
+def _operator_config(allow_cidrs: list[str] | None = None) -> Any:
+    """A config stand-in carrying just ``operator.ssh_allow_cidrs``, the
+    only operator field the route path reads."""
+    return SimpleNamespace(operator=SimpleNamespace(ssh_allow_cidrs=allow_cidrs or []))
+
+
+def _platform() -> AzureVMPlatform:
+    return AzureVMPlatform("az-site", dict(_CONFIG))
+
+
+def _assert_deny_shape(rule: Any) -> None:
+    assert rule.name == DENY_ALL_INBOUND_RULE_NAME
+    assert rule.priority == DENY_ALL_INBOUND_RULE_PRIORITY == 200
+    assert rule.access == "Deny"
+    assert rule.direction == "Inbound"
+    assert rule.protocol == "*"
+    assert rule.source_address_prefix == "*"
+    assert rule.destination_address_prefix == "*"
+
+
+def _assert_allow_shape(rule: Any, prefixes: list[str], *, name: str, priority: int) -> None:
+    assert rule.name == name
+    assert rule.priority == priority
+    assert ALLOW_PRIORITY_BAND_START <= rule.priority <= ALLOW_PRIORITY_BAND_END
+    assert rule.access == "Allow"
+    assert rule.direction == "Inbound"
+    assert rule.protocol == "Tcp"
+    assert rule.destination_port_range == "22"
+    assert rule.source_address_prefixes == prefixes
+    assert rule.source_address_prefix is None
+    assert rule.description.startswith(ALLOW_RULE_DESCRIPTION_MARKER)
