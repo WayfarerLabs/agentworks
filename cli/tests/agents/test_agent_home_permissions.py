@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
+from agentworks.errors import ExternalError
+from agentworks.ssh import SSHError
 from tests.orchestrated_fixtures import proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
@@ -47,6 +49,7 @@ class _Result:
         self.ok = ok
         self.returncode = returncode
         self.stdout = stdout
+        self.stderr = ""
 
 
 class _RecordingTransport:
@@ -60,6 +63,8 @@ class _RecordingTransport:
     ``usermod`` shell-correction branch, matching the pre-#252 behavior
     where reinit always ran ``usermod``. A test that wants the converged
     no-op path passes ``shell="/bin/bash"``.
+    ``getent_exit`` overrides the probe with a status that is neither
+    found nor not-found (ssh's 255, getent's own errors).
     ``primary_group`` is what ``id -gn <user>`` reports; it defaults to
     the username (a private per-user group, the healthy case), and a test
     overrides it to a shared group to exercise the post-condition guard.
@@ -71,12 +76,14 @@ class _RecordingTransport:
         user_exists: bool = False,
         primary_group: str | None = None,
         shell: str = "/bin/sh",
+        getent_exit: int | None = None,
     ) -> None:
         self.runs: list[tuple[str, bool]] = []
         self.writes: list[tuple[str, str, str | None]] = []
         self._user_exists = user_exists
         self._primary_group = primary_group or LINUX_USER
         self._shell = shell
+        self._getent_exit = getent_exit
 
     def run(
         self,
@@ -91,6 +98,8 @@ class _RecordingTransport:
         if cmd.startswith(f"id -gn {LINUX_USER}"):
             return _Result(stdout=self._primary_group)
         if cmd.startswith(f"getent passwd {LINUX_USER}"):
+            if self._getent_exit is not None:
+                return _Result(ok=False, returncode=self._getent_exit)
             if not self._user_exists:
                 return _Result(ok=False, returncode=2)
             return _Result(stdout=f"{LINUX_USER}:x:1001:1001::{HOME}:{self._shell}")
@@ -113,9 +122,11 @@ def _run_create_on_vm(
     user_exists: bool,
     primary_group: str | None = None,
     shell: str = "/bin/sh",
+    admin: _RecordingTransport | None = None,
 ) -> tuple[_RecordingTransport, _RecordingTransport]:
     """Drive ``create_agent_on_vm`` with recording transports and return
-    them (admin, agent)."""
+    them (admin, agent). A caller expecting a raise passes its own
+    ``admin`` to inspect afterwards."""
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
@@ -127,7 +138,8 @@ def _run_create_on_vm(
     registry = build_registry(config)
     template = resolve_template(registry, None)
 
-    admin = _RecordingTransport(user_exists=user_exists, primary_group=primary_group, shell=shell)
+    if admin is None:
+        admin = _RecordingTransport(user_exists=user_exists, primary_group=primary_group, shell=shell)
     agent = _RecordingTransport(user_exists=user_exists)
     monkeypatch.setattr(agent_initializer, "transport", lambda *a, **k: admin)
     monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: agent)
@@ -320,3 +332,25 @@ def test_reinit_diverged_shell_reports_fixed_and_runs_usermod(
     assert any(f"Fixed agent user '{LINUX_USER}'" in m and "/bin/zsh -> /bin/bash" in m for m in captured_output.info)
     assert not any("Creating user" in m for m in captured_output.info)
     assert not any("already exists" in m for m in captured_output.info)
+
+
+@pytest.mark.parametrize(("getent_exit", "error"), [(255, SSHError), (1, ExternalError)])
+def test_unanswered_user_probe_raises_before_any_user_mutation(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, getent_exit: int, error: type[Exception]
+) -> None:
+    """A ``getent passwd`` that did not answer (ssh's transport failure, or
+    a getent status that is neither found nor not-found) is not a gone
+    user: the step raises, and neither ``useradd`` nor any later bootstrap
+    command runs on the guess."""
+    admin = _RecordingTransport(getent_exit=getent_exit)
+    with pytest.raises(error):
+        _run_create_on_vm(db, config, monkeypatch, user_exists=False, admin=admin)
+
+    assert [cmd for cmd, _ in admin.runs] == [f"getent passwd {LINUX_USER}"]
+
+
+def test_user_probe_runs_without_root(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``getent passwd`` needs no root, so the convergence probe runs without
+    sudo and no sudo refusal can stand in for its answer."""
+    admin, _agent = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/bash")
+    assert (f"getent passwd {LINUX_USER}", False) in admin.runs
