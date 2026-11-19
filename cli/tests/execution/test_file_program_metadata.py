@@ -10,7 +10,6 @@ import json
 import os
 import shutil
 import stat
-import struct
 import subprocess
 import sys
 
@@ -112,22 +111,6 @@ _RECORD_STAGING = (
 )
 
 
-def _grants(mode: int, gid: int, acl: str | None) -> dict[tuple[str, int], int]:
-    """The access a file's mode and access ACL give anyone but its owner, by owning or named group, user or other."""
-    if acl is None:
-        return {("group", gid): mode >> 3 & 7, ("other", 0): mode & 7}
-    raw = bytes.fromhex(acl)
-    entries = [struct.unpack_from("<HHI", raw, offset) for offset in range(4, len(raw), 8)]
-    mask = next((perm for tag, perm, _ in entries if tag == 0x10), 7)
-    keys = {2: "user", 4: "group", 8: "group", 0x20: "other"}
-    grants: dict[tuple[str, int], int] = {}
-    for tag, perm, ident in entries:
-        if tag in keys:
-            key = (keys[tag], gid if tag == 4 else 0 if tag == 0x20 else ident)
-            grants[key] = grants.get(key, 0) | (perm if tag == 0x20 else perm & mask)
-    return grants
-
-
 @pytest.mark.parametrize("case", ["write_if preserving", "write_if preserving an ACL", "write_if", "write"])
 def test_staging_is_private_through_every_check_and_never_wider_than_the_published_file(
     guest: Guest, case: str
@@ -156,14 +139,14 @@ def test_staging_is_private_through_every_check_and_never_wider_than_the_publish
         acl: str | None = os.getxattr(destination, "system.posix_acl_access").hex()
     except OSError:
         acl = None
-    final = _grants(published.st_mode, published.st_gid, acl)
+    final = [stat.S_IMODE(published.st_mode), published.st_gid, acl]
     snapshots = [json.loads(line) for line in record.read_text().splitlines()]
     assert {label for label, *_ in snapshots} == {"check", "metadata"}
     for label, mode, gid, staged_acl in snapshots:
-        staged = _grants(mode, gid, staged_acl)
+        private = stat.S_IMODE(mode) == 0o600 and staged_acl is None
+        assert private or [stat.S_IMODE(mode), gid, staged_acl] == final, (label, oct(mode), staged_acl, final)
         if label == "check":
-            assert (stat.S_IMODE(mode), any(staged.values())) == (0o600, False)
-        assert all(perm & ~final.get(key, 0) == 0 for key, perm in staged.items()), (label, staged, final)
+            assert private
     assert stat.S_IMODE(published.st_mode) == {"write_if preserving": 0o600, "write_if preserving an ACL": 0o640}.get(
         case, 0o644
     )
