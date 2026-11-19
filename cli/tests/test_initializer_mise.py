@@ -76,15 +76,32 @@ def _guest(*, lockfile: bool | BaseException) -> StepGuest:
     return guest
 
 
-@pytest.mark.parametrize("lockfile", [False, ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION)))])
-def test_without_a_lockfile_or_a_probe_that_cannot_run_mise_installs_unlocked_then_prunes(
-    lockfile: bool | BaseException,
-) -> None:
-    guest = _guest(lockfile=lockfile)
+def test_without_a_lockfile_mise_installs_unlocked_then_prunes() -> None:
+    guest = _guest(lockfile=False)
 
     _run_mise_install(guest.files, "bash", HOME, False, guest.log)
 
     assert guest.commands() == [LOCKFILE_PROBE, UNLOCKED, PRUNE]
+
+
+@pytest.mark.parametrize("allow_unlocked", [False, True])
+@pytest.mark.parametrize(
+    "probe",
+    [ExecutionIncomplete("box", Result(Unknown(UnknownReason.CONNECTION))), Result(Completed(2))],
+    ids=["incomplete", "test-2"],
+)
+def test_a_lockfile_probe_that_does_not_answer_installs_nothing(
+    probe: Result | BaseException,
+    allow_unlocked: bool,
+    captured_output,  # noqa: ANN001
+) -> None:
+    guest = StepGuest(local_files=False)
+    guest.respond(LOCKFILE_PROBE, probe)
+
+    _run_mise_install(guest.files, "bash", HOME, allow_unlocked, guest.log)
+
+    assert guest.commands() == [LOCKFILE_PROBE]
+    assert captured_output.warnings
 
 
 def test_a_locked_failure_does_not_fall_back_by_default_and_names_the_failed_tools(captured_output) -> None:  # noqa: ANN001

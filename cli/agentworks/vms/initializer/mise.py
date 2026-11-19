@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.requests import Command
+from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.vms.home_layout import MISE_CONFIG_DIR
 
 from .steps import STEP_FAILURES, describe_failure, status, warn, warn_step
@@ -189,7 +190,8 @@ def _run_mise_install(
 
     If a lockfile is present, tries --locked first. If that fails due to
     unlocked packages and allow_unlocked is true, retries without --locked.
-    A lockfile probe that cannot run counts as no lockfile, and a prune that
+    A lockfile probe that does not answer skips the install with a warning,
+    since installing unlocked could defeat the lockfile, and a prune that
     fails is ignored.
 
     Runs without env injection: provisioning is hermetic. mise hooks see
@@ -200,12 +202,12 @@ def _run_mise_install(
     log.step("Mise install")
     access = files.access
 
-    has_lockfile = False
+    lockfile = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/mise.lock"), deadline=files.deadline)
     try:
-        lockfile = Command(("test", "-f", f"{home}/{MISE_CONFIG_DIR}/mise.lock"), deadline=files.deadline)
-        has_lockfile = status(files.access, lockfile) == 0
-    except STEP_FAILURES:
-        pass
+        has_lockfile = probe_presence(access, lockfile, absent_status=TEST_FALSE_STATUS) is not None
+    except STEP_FAILURES as error:
+        warn_step(log, "mise lockfile check did not answer, so mise install did not run", error)
+        return
 
     installed = False
 
