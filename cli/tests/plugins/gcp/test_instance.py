@@ -10,7 +10,7 @@ from google.api_core import exceptions as api_exceptions
 from google.cloud import compute_v1
 
 from agentworks.errors import AlreadyExistsError
-from agentworks.plugins.gcp.errors import GCECapacityError, GCEOperationError
+from agentworks.plugins.gcp.errors import GCECapacityError, GCEIndeterminateOperationError, GCEOperationError
 from agentworks.plugins.gcp.instance import (
     InstanceInsertAttempt,
     build_instance_resource,
@@ -304,3 +304,41 @@ def test_definite_already_exists_never_shape_reconciles() -> None:
             timeout=17,
         )
     assert [name for name, _kwargs in client.calls] == ["insert"]
+
+
+@pytest.mark.parametrize(
+    ("wait_failure", "realized_id", "raised", "unknown"),
+    [
+        (None, None, GCEOperationError, False),
+        (TimeoutError("still running"), 201, None, False),
+        (TimeoutError("still running"), None, GCEIndeterminateOperationError, True),
+    ],
+    ids=("completed-without-the-instance", "wait-ran-out-but-instance-seen", "wait-ran-out-and-nothing-seen"),
+)
+def test_an_insert_s_outcome_is_known_once_its_operation_completed_or_its_instance_was_seen(
+    wait_failure: BaseException | None, realized_id: int | None, raised: type[BaseException] | None, unknown: bool
+) -> None:
+    realized = None
+    if realized_id is not None:
+        realized = _resource()
+        realized.id = realized_id
+    attempt = InstanceInsertAttempt("vm-a", _REQUEST_ID)
+
+    def _insert() -> None:
+        insert_instance_reconciled(
+            _Instances(iter([realized]), operation=_Operation(failure=wait_failure)),
+            project_id="project-a",
+            zone="us-central1-a",
+            instance=_resource(),
+            selected_machine_type="e2-standard-2",
+            attempt=attempt,
+            timeout=17,
+        )
+
+    if raised is None:
+        _insert()
+    else:
+        with pytest.raises(raised):
+            _insert()
+
+    assert attempt.outcome_unknown is unknown

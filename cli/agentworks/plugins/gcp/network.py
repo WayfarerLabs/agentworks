@@ -106,8 +106,8 @@ class FirewallReconciliation:
     """One firewall state plus the provider ID observed for that exact name.
 
     ``seen_owned`` is set only by :func:`delete_matching_firewall`, when it
-    saw the owned incarnation, before or after deleting it, so an insert
-    that created it has landed.
+    saw a rule carrying the owned provider ID, before or after deleting it
+    and whatever its shape now, so an insert that created it has landed.
     """
 
     state: FirewallState
@@ -516,7 +516,8 @@ def delete_matching_firewall(
     except AgentworksError:
         return FirewallReconciliation(FirewallState.INDETERMINATE, None)
     if result.state is not FirewallState.REALIZED:
-        return result
+        owned = ownership is not None and result.observed_resource_id == ownership.resource_id
+        return replace(result, seen_owned=owned)
 
     try:
         from google.cloud import compute_v1

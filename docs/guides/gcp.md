@@ -299,6 +299,8 @@ gcloud compute operations describe OPERATION \
   --project PROJECT --zone ZONE   # --global for a firewall rule's operation
 gcloud compute operations list --project PROJECT --zones ZONE \
   --filter='operationType=insert AND targetLink~/instances/INSTANCE$'
+gcloud compute operations list --project PROJECT --global \
+  --filter='operationType=insert AND targetLink~/firewalls/RULE$'
 gcloud compute instances describe INSTANCE \
   --project PROJECT --zone ZONE --format='value(id)'
 gcloud compute firewall-rules describe RULE \

@@ -632,6 +632,61 @@ def test_an_unresolved_allow_insert_survives_a_failed_read_of_the_rule() -> None
     assert report.may_appear.allow == _INSERT
 
 
+def _rollback_rules_only(
+    unresolved: UnresolvedInserts, allow_reads: list[object], deny_reads: list[object]
+) -> RollbackReport:
+    log: list[str] = []
+    allow = _allow()
+    deny = _deny()
+    return rollback_partial_create(
+        _target(unresolved),
+        instances=_Instances(iter([]), log),
+        firewalls=_Firewalls({allow.name: iter(allow_reads), deny.name: iter(deny_reads)}, log),
+        expected_allow=allow,
+        expected_deny=deny,
+        instance_possible=False,
+        timeout=9,
+    )
+
+
+def test_an_unresolved_deny_insert_whose_rule_is_absent_may_still_appear() -> None:
+    report = _rollback_rules_only(UnresolvedInserts(deny=_INSERT), [None], [None])
+
+    assert report.may_appear.deny == _INSERT
+
+
+def test_a_rule_seen_and_deleted_settles_its_insert_though_the_final_read_fails() -> None:
+    unknown = _api_error(api_exceptions.ServiceUnavailable, "unknown")
+
+    report = _rollback_rules_only(UnresolvedInserts(allow=_INSERT), [_allow(), unknown], [None])
+
+    assert report.allow is FirewallState.INDETERMINATE
+    assert report.may_appear.allow is None
+
+
+def test_a_rule_carrying_the_owned_id_in_another_shape_settles_its_insert() -> None:
+    """The insert created it, and its shape changed after; it cannot create another."""
+    report = _rollback_rules_only(UnresolvedInserts(allow=_INSERT), [_allow(priority=1)], [None])
+
+    assert report.allow is FirewallState.MISMATCHED
+    assert report.may_appear.allow is None
+
+
+def test_abandoned_cleanup_gives_each_unresolved_insert_its_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no report, the deny's insert gets the same steps a report would give it."""
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
+
+    with pytest.raises(KeyboardInterrupt):
+        rollback_after_interrupt(
+            KeyboardInterrupt("first"),
+            lambda: (_ for _ in ()).throw(KeyboardInterrupt("second")),
+            _target(UnresolvedInserts(deny=UnresolvedInsert(None))),
+        )
+
+    assert "gcloud compute operations list" in warnings[-1]
+
+
 def _warning_for_report(monkeypatch: pytest.MonkeyPatch, report: RollbackReport) -> str:
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)

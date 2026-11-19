@@ -83,9 +83,8 @@ def may_still_appear(resource: GcloudResource, *, operation_name: str | None, ex
 def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None) -> str:
     """Provider-ID-gated recovery guidance for ``report``, or, with no report, for every resource as unknown.
 
-    With no report the unresolved inserts' operations are listed with the
-    identities; a report gives each resource that may still appear its own
-    steps.
+    Each resource that may still appear gets the steps for its insert: with
+    no report, each whose insert was unresolved when cleanup began.
     """
     coordinates = target.coordinates
     header = (
@@ -96,18 +95,12 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
         f"deny '{_owned_id(target.deny_ownership) or 'unknown'}'"
     )
     if report is None:
-        pending = [
-            f"{role} '{insert.operation_name or 'unknown'}'"
-            for role, insert in (
-                ("instance", target.unresolved.instance),
-                ("allow", target.unresolved.allow),
-                ("deny", target.unresolved.deny),
-            )
-            if insert is not None
-        ]
-        if pending:
-            header += f"; unresolved insert operations: {', '.join(pending)}"
-        report = RollbackReport(InstanceState.INDETERMINATE, FirewallState.INDETERMINATE, FirewallState.INDETERMINATE)
+        report = RollbackReport(
+            InstanceState.INDETERMINATE,
+            FirewallState.INDETERMINATE,
+            FirewallState.INDETERMINATE,
+            may_appear=target.unresolved,
+        )
     actions = [header + "."]
     may_appear = report.may_appear
     instance = GcloudResource("instance", coordinates.project_id, coordinates.instance_name, coordinates.zone)
@@ -122,6 +115,7 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
                 observed_id=report.instance_resource_id,
             ),
             uncertain=report.instance is InstanceState.INDETERMINATE,
+            observed_id=report.instance_resource_id,
             insert=may_appear.instance,
             expected_id=_owned_id(target.instance_ownership),
         )
@@ -152,6 +146,7 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
                     instance_gone=instance_gone,
                 ),
                 uncertain=state is FirewallState.INDETERMINATE,
+                observed_id=observed_id,
                 insert=insert,
                 expected_id=_owned_id(ownership),
             )
@@ -220,24 +215,33 @@ def _resource_guidance(
     resource: GcloudResource,
     state: str | None,
     uncertain: bool,
+    observed_id: str | None,
     insert: UnresolvedInsert | None,
     expected_id: str | None,
 ) -> list[str]:
     """The sentences one resource needs: its state's, and its unresolved insert's.
 
-    Steps for an insert that may still create the resource cover a failed
-    read of it too, so those replace that read's sentence.
+    Steps for an insert that may still create the resource cover a read of
+    it whose ownership is unknown too, so those replace that read's
+    sentence and carry the provider ID it observed.
     """
-    sentences = [] if state is None or (insert is not None and uncertain) else [state]
-    if insert is not None:
-        identity = (
-            f"expected provider ID '{expected_id or 'unknown'}', operation '{insert.operation_name or 'unknown'}'"
-        )
-        sentences.append(
-            f"{role.capitalize()} insert outcome unknown, so it may still appear ({identity}). "
-            + may_still_appear(resource, operation_name=insert.operation_name, expected_id=expected_id)
-        )
+    if insert is None:
+        return [] if state is None else [state]
+    sentences = [] if state is None or uncertain else [state]
+    sentences.append(
+        f"{role.capitalize()} insert outcome unknown, so it may still appear "
+        f"({insert_identity(insert, expected_id=expected_id, observed_id=observed_id if uncertain else None)}). "
+        + may_still_appear(resource, operation_name=insert.operation_name, expected_id=expected_id)
+    )
     return sentences
+
+
+def insert_identity(insert: UnresolvedInsert, *, expected_id: str | None, observed_id: str | None) -> str:
+    """What an unresolved insert's steps name: the expected and any observed provider ID, and its operation."""
+    observed = f", observed '{observed_id}'" if observed_id is not None else ""
+    return (
+        f"expected provider ID '{expected_id or 'unknown'}'{observed}, operation '{insert.operation_name or 'unknown'}'"
+    )
 
 
 def _instance_state_guidance(

@@ -171,7 +171,8 @@ def test_an_unresolved_insert_whose_removal_could_not_read_the_rule_gets_the_ins
     _open(platform, vm, ConnectivityError)
 
     (accepted,) = answered
-    assert any(accepted.name in warning for warning in captured_output.warnings)
+    (warning,) = captured_output.warnings
+    assert accepted.name in warning
 
 
 def test_an_insert_whose_operation_completed_without_the_rule_is_not_named(

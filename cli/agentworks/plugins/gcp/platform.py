@@ -38,6 +38,7 @@ from agentworks.plugins.gcp.cleanup import (
     InstanceOwnership,
     InstanceState,
     RollbackReport,
+    UnresolvedInsert,
     UnresolvedInserts,
     rollback_partial_create,
 )
@@ -80,6 +81,7 @@ from agentworks.plugins.gcp.network import (
 )
 from agentworks.plugins.gcp.recovery import (
     GcloudResource,
+    insert_identity,
     manual_cleanup_guidance,
     may_still_appear,
     rollback_after_interrupt,
@@ -653,11 +655,10 @@ class GCEPlatform(PublicAddressPlatform):
                     ownership=attempt.ownership,
                     timeout=_OPERATION_TIMEOUT_SECONDS,
                 )
-                # The insert's own steps cover a failed read of the rule too.
+                # The insert's own steps cover a read of unknown ownership too, carrying its observed ID.
                 may_appear = attempt.outcome_unknown and not result.seen_owned
-                if result.state is not FirewallState.ABSENT and not (
-                    may_appear and result.state is FirewallState.INDETERMINATE
-                ):
+                uncertain = result.state is FirewallState.INDETERMINATE
+                if result.state is not FirewallState.ABSENT and not (may_appear and uncertain):
                     output.warn(
                         f"GCE transient SSH rule '{route_name}' was not proven absent in project "
                         f"'{identity.project_id}'; inspect provider ID "
@@ -665,9 +666,15 @@ class GCEPlatform(PublicAddressPlatform):
                     )
                 if may_appear:
                     known = attempt.ownership.resource_id if attempt.ownership is not None else None
+                    names = insert_identity(
+                        UnresolvedInsert(attempt.operation_name),
+                        expected_id=known,
+                        observed_id=result.observed_resource_id if uncertain else None,
+                    )
                     output.warn(
                         f"GCE transient SSH rule '{route_name}' in project '{identity.project_id}' was not confirmed "
-                        f"created, so it may still appear after its removal, open to source(s) {', '.join(prefixes)}. "
+                        f"created, so it may still appear after its removal ({names}), open to source(s) "
+                        f"{', '.join(prefixes)}. "
                         + may_still_appear(
                             GcloudResource("firewall rule", identity.project_id, route_name),
                             operation_name=attempt.operation_name,
