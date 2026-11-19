@@ -483,8 +483,8 @@ def _remove_retired_sudoers_fragments(files: Files, log: InitLog) -> None:
     with a plain ``sudo -n -u`` (ADR 0026), so neither has a user.
     Agentworks owns these paths outright, so the removal is right on create
     (nothing there) and on reinit (any release's fragments); sudo reads
-    sudoers.d/ on every invocation, so it takes effect at once. Like the sshd
-    removal it prints nothing: on most runs there is nothing to remove.
+    sudoers.d/ on every invocation, so it takes effect at once. It prints
+    nothing: on most runs there is nothing to remove.
     """
     log.step("Retired sudoers fragments")
     try:
