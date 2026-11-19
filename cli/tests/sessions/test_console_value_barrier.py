@@ -110,7 +110,7 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
         "default",
         SessionMode.AGENT,
         agent_name="bot",
-        socket_path="/tmp/agent.sock",
+        socket_path="/run/agentworks/agent-tmux-sockets/bot-user/agent-session.sock",
     )
     create_console_record(
         db,
