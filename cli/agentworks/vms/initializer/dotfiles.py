@@ -5,12 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.execution.errors import CommandFailed, PathRefused, RequestRefused
 from agentworks.execution.requests import Command
 from agentworks.sources import (
     DOTFILES_DEADLINE,
     DestinationError,
-    SourceRefError,
     expand_destination,
     fetch_dir,
     normalize_destination,
@@ -23,12 +21,6 @@ if TYPE_CHECKING:
     from agentworks.execution.files import Files
 
     from .steps import InitLog
-
-DEFINITE_SYNC_FAILURES = (CommandFailed, PathRefused, RequestRefused, SourceRefError)
-"""Sync failures that answered: the failing request ran and failed, or was refused, so the checkout is as it was."""
-LEFT_AS_IT_WAS = "still holds its previous contents"
-LEFT_UNKNOWN = "may hold its previous contents, the new ones, or a partial checkout"
-"""What a sync that did not answer may have left: an upload may have completed, and a checkout writes in place."""
 
 
 def sync_dotfiles(
@@ -69,8 +61,11 @@ def sync_dotfiles(
         output.info(f"Syncing dotfiles from {source}...")
         fetch_dir(ref, files, dest, log=log)
     except STEP_FAILURES as error:
-        left = LEFT_AS_IT_WAS if isinstance(error, DEFINITE_SYNC_FAILURES) else LEFT_UNKNOWN
-        warn_step(log, f"dotfiles sync failed, so '{install_cmd}' did not run and {dest} {left}", error)
+        summary = (
+            f"dotfiles sync failed, so '{install_cmd}' did not run and {dest} "
+            "may hold its previous contents, the new ones, or a partial checkout"
+        )
+        warn_step(log, summary, error)
         return
     output.info(f"Running dotfiles install: {install_cmd}")
     try:
