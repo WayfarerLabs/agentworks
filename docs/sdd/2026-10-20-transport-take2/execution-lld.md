@@ -647,6 +647,13 @@ the package attribute so one patch reaches every manager.
   existing `ConnectivityError`). Every other outcome raises as it is: `VMNotReady`, `TrustMismatch`,
   `RequestRefused` or `ExecutionIncomplete`. This keeps incident row I19, so I19 is re-proved in
   slice 2 as well as 6.
+- **Presence probes.** A guard that creates, deletes or overwrites on a "does it exist" probe calls
+  `remote_presence.probe_presence`, which returns the result on 0, `None` on the probe's own
+  definite absent status (`test`'s 1, `getent`'s 2) and raises `CommandFailed` on any other status.
+  An outcome that is not a completion already raises, and `sudo -n` runs before the launcher, so
+  neither ssh's nor sudo's status can be read as an answer. This carries #899's fix (PR #915) onto
+  `VMAccess`: the agent account, home and getent probes, the backup path check, the create, copy and
+  rehome path checks.
 - **Behavior changes** for release notes and the 0.20 guide:
   - OpenSSH 8.5 or newer is required for these six commands, and Windows needs the native build.
   - A VM without `python3` is `VMNotReady`, not a shell error.
