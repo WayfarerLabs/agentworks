@@ -26,9 +26,8 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import ssh_process
-from agentworks.execution.agw_launch import DEFAULT_TERM
 from agentworks.execution.errors import ExecutionIncomplete, RequestRefused, TrustMismatch
-from agentworks.execution.requests import Command, LoginShell, Script, Shell, TerminalCommand, shell_command_line
+from agentworks.execution.requests import Command, LoginShell, Script, Shell, shell_command_line
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -36,7 +35,7 @@ from agentworks.execution.results import (
     Unknown,
     UnknownReason,
 )
-from tests.execution.conformance import detached_vectors, file_vectors, program_vectors
+from tests.execution.conformance import detached_vectors, file_vectors, program_vectors, terminal_vectors
 from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, TerminalHalf, needs_sudo
 
 if TYPE_CHECKING:
@@ -502,119 +501,6 @@ def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: La
     assert terminal.calls == 0
 
 
-# -- T1: a terminal command --------------------------------------------------------------
-
-
-def terminal_command_runs_its_argv_from_path_with_the_requested_environment(lane: Lane) -> None:
-    secret = "sekrit-env-value-5e"
-    command = TerminalCommand(("sh", "-c", 'echo "token=$TOKEN"; pwd'), cwd=lane.workdir, env={"TOKEN": secret})
-    with lane.terminal() as terminal:
-        code = lane.access.attach(command)
-
-    assert code == 0
-    assert terminal.stdout.splitlines()[:2] == [f"token={secret}".encode(), lane.workdir.encode()]
-    assert not any(secret in argument for argument in terminal.argv)
-
-
-def terminal_command_that_cannot_run_exits_with_the_shell_status(lane: Lane) -> None:
-    for argv, status, code in [(("agw-no-such-command-5e",), 127, "exec ENOENT"), (("/dev/null",), 126, "exec EACCES")]:
-        with lane.terminal() as terminal:
-            assert lane.access.attach(TerminalCommand(argv, cwd=lane.workdir)) == status, argv
-
-        assert f"agw: refused: {code}".encode() in terminal.stderr, argv
-
-
-def terminal_command_whose_directory_is_missing_is_refused_before_the_terminal(lane: Lane) -> None:
-    with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
-        lane.access.attach(TerminalCommand(("true",), cwd=f"{lane.workdir}/no-such-directory-agw"))
-
-    assert raised.value.code == "cwd"
-    assert terminal.calls == 0
-
-
-# -- T2: a pane's handover ---------------------------------------------------------------
-
-# A pane's environment value with line breaks, which the parked request carries whole.
-PANE_LINES = "first 100%\r\nsecond\n"
-
-# Typed into the pane's shell. Each probe prints a marker its own echoed line does not hold.
-PANE_KEYS = (
-    b'printf \'%s2:%s:%s\\n\' T "$TERM" "$TOKEN"\n'
-    b'printf \'%sX:%s|%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$TERM_PROGRAM_VERSION" "$SSH_TTY"\n'
-    b'python3 -c \'import os; print("T" "L:" + repr(os.environb[b"LINES_VALUE"]))\'\n'
-    b"case $- in *i*) echo I''NTERACTIVE ;; esac\n"
-    b"exit 0\n"
-)
-PANE_TERM = "screen-256color"
-# What tmux sets for a pane besides TERM, as a pane's owner would.
-TMUX_VARIABLES = {
-    "TMUX": "/tmp/tmux-1000/default,4242,0",
-    "TMUX_PANE": "%7",
-    "TERM_PROGRAM": "tmux",
-    "TERM_PROGRAM_VERSION": "3.5a",
-}
-
-
-def pane_handover(lane: Lane, *, term: str | None, switch_user: bool = False) -> bytes:
-    """Park a login shell, run its handover command on a fresh terminal, check it, and return what it showed."""
-    secret = "sekrit-pane-value-5e"
-    lane.quiet_interactive_startup()
-    token = lane.handover_token()
-    owner_env = TMUX_VARIABLES | ({} if term is None else {"TERM": term})
-
-    with lane.access.park(LoginShell(cwd=lane.workdir, env={"TOKEN": secret, "LINES_VALUE": PANE_LINES})) as handover:
-        command = handover.command(switch_user=switch_user)
-        shown = lane.pane(command, owner_env=owner_env, keys=PANE_KEYS)
-
-    assert shown.completion == Completed(0), shown
-    assert handover.collected
-    assert secret not in command  # the environment is in the parked request, not on the pane's command line
-    assert f"T2:{term or DEFAULT_TERM}:{secret}".encode() in shown.stdout, shown.stdout
-    assert b"TL:" + repr(PANE_LINES.encode()).encode() in shown.stdout, shown.stdout
-    assert b"INTERACTIVE" in shown.stdout, shown.stdout
-    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
-    return shown.stdout
-
-
-def pane_takes_its_terminal_from_its_owner(lane: Lane) -> None:
-    shown = pane_handover(lane, term=PANE_TERM)
-
-    # tmux's variables arrive as tmux set them, and a tmux pty gets no SSH_TTY: it is no SSH terminal.
-    keys = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
-    expected = ("TX:" + "|".join(TMUX_VARIABLES[key] for key in keys) + "|").encode()
-    assert re.search(re.escape(expected) + rb"\r?\n", shown), shown
-
-
-def pane_without_term_gets_the_default(lane: Lane) -> None:
-    pane_handover(lane, term=None)
-
-
-# What a pane behind sudo shows of tmux's variables: sudo's env_reset passes TERM and drops the rest.
-NO_TMUX_VARIABLES = re.compile(rb"TX:\|\|\|\|\r?\n")
-
-
-def pane_through_sudo_takes_only_term(lane: Lane) -> None:
-    """An agent's pane in the admin's tmux server switches to the parking account with ``sudo -n -u``."""
-    needs_sudo(lane)
-    shown = pane_handover(lane, term=PANE_TERM, switch_user=True)
-
-    assert NO_TMUX_VARIABLES.search(shown), shown
-
-
-def pane_through_sudo_with_an_empty_term_gets_the_default(lane: Lane) -> None:
-    """A pane through sudo whose ``TERM`` is empty gets ``DEFAULT_TERM``.
-
-    tmux gives every pane a ``TERM``, its ``default-terminal``, so a pane
-    without one is not a case sudo meets; sudo's ``env_reset`` would set
-    ``TERM=unknown`` for it. An empty ``default-terminal`` is: sudo keeps the
-    empty ``TERM``, and the launcher stands ``DEFAULT_TERM`` in for it.
-    """
-    needs_sudo(lane)
-    shown = pane_handover(lane, term="", switch_user=True)
-
-    assert NO_TMUX_VARIABLES.search(shown), shown
-
-
 # What a startup file the attach's terminal half runs exports; none of it is the attach terminal's.
 PLANTED_TERMINAL_VARIABLES = "export TMUX=/tmp/agw-planted,1,0 TMUX_PANE=%9 TERM_PROGRAM=planted\n"
 ATTACH_KEYS = b'printf \'%sA:%s|%s|%s|%s\\n\' T "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM" "$SSH_TTY"\nexit 0\n'
@@ -951,17 +837,6 @@ def build() -> list[Vector]:
             handover_whose_second_connection_never_arrives_leaves_nothing,
         ),
         Vector("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
-        Vector("T1-terminal-command", "LSV", terminal_command_runs_its_argv_from_path_with_the_requested_environment),
-        Vector("T1-terminal-command-cannot-run", "LSV", terminal_command_that_cannot_run_exits_with_the_shell_status),
-        Vector(
-            "T1-terminal-command-missing-directory",
-            "LSV",
-            terminal_command_whose_directory_is_missing_is_refused_before_the_terminal,
-        ),
-        Vector("T2-pane-terminal-from-owner", "LSV", pane_takes_its_terminal_from_its_owner),
-        Vector("T2-pane-default-term", "LSV", pane_without_term_gets_the_default),
-        Vector("T2-pane-through-sudo", "LV", pane_through_sudo_takes_only_term),
-        Vector("T2-pane-through-sudo-empty-term", "LV", pane_through_sudo_with_an_empty_term_gets_the_default),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
         Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),
@@ -1007,8 +882,9 @@ def build() -> list[Vector]:
         Vector("memfd-noexec-seal-refused", "L", memfd_refusing_the_noexec_seal_still_runs_the_script),
         Vector("memfd-cannot-be-created", "L", memfd_that_cannot_be_created_is_not_delivered),
     ]
-    program = [Vector(*entry) for entry in (*program_vectors.ENTRIES, *file_vectors.ENTRIES, *detached_vectors.ENTRIES)]
-    return [*shared, *startup_exits, *startup_redirects, *local_only, *program]
+    modules = (terminal_vectors, program_vectors, file_vectors, detached_vectors)
+    others = [Vector(*entry) for module in modules for entry in module.ENTRIES]
+    return [*shared, *startup_exits, *startup_redirects, *local_only, *others]
 
 
 VECTORS = build()
