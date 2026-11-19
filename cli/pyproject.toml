@@ -176,6 +176,10 @@ dev = [
     "pytest>=9.0.0",
     "pytest-xdist>=3.8.0",
     "types-pyyaml>=6.0.12.20260518",
+    # Tests import requests directly to drive azure-core's requests transport
+    # over an in-memory adapter; at runtime it is only azure-core's dependency.
+    "requests>=2.34.2",
+    "types-requests>=2.33.0.20261030",
     # The reference JSON Schema implementation, for the emission tests only:
     # agentworks/manifests/emit.py has no runtime dependency on it, and
     # nothing under agentworks/ imports it. Emission's failure mode is a
@@ -186,5 +190,4 @@ dev = [
     # 2020-12 metaschema, and validates real sample documents against it.
     "jsonschema>=4.26.0",
     "types-jsonschema>=4.26.0.20260518",
-    "types-requests>=2.33.0.20261030",
 ]
