@@ -36,7 +36,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.debian import DebianRelease
-from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from tests._azure_platform_support import _install_fakes
 from tests._root_channel_fakes import Answer, FakeGuest, answer_by_payload, install_at_run_process

@@ -25,7 +25,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import AuthorizationError, NotFoundError, TokenRejectedError, ValidationError
 from agentworks.plugins.aws.network import EC2Error
-from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.proxmox.api import (
     ProxmoxAPI,
@@ -265,7 +265,7 @@ def test_azure_runup_rejects_a_bad_service_principal_before_create(
     probe, not from the existence check (which never runs)."""
     from azure.core.exceptions import ClientAuthenticationError
 
-    from agentworks.plugins.azure.network import AzureError as _AzureError
+    from agentworks.plugins.azure.errors import AzureError as _AzureError
 
     class _RejectingCred:
         def __init__(self, tenant_id: str, client_id: str, client_secret: str) -> None: ...

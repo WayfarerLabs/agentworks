@@ -37,6 +37,8 @@ from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError
 from agentworks.plugins.azure import network as azure_network
+from agentworks.plugins.azure import route_calls
+from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.network import (
     ALLOW_PRIORITY_BAND_END,
     ALLOW_PRIORITY_BAND_START,
@@ -46,10 +48,9 @@ from agentworks.plugins.azure.network import (
     DENY_ALL_INBOUND_RULE_PRIORITY,
     LEGACY_SSH_RULE_NAME,
     TRANSIENT_ALLOW_RULE_PREFIX,
-    AzureError,
-    _RouteOperationTimeout,
 )
 from agentworks.plugins.azure.platform import AzureVMPlatform
+from agentworks.plugins.azure.route_calls import _RouteOperationTimeout
 from tests._azure_platform_support import (
     _RESOURCE_ID,
     _FakeClock,
@@ -518,7 +519,7 @@ class TestTransientRoute:
         ephemeral allow standing: each failed attempt best-effort
         deletes its own nonce name (only the poke knows it), and the
         wrapped error propagates after the attempts are exhausted."""
-        from agentworks.plugins.azure.network import AzureError
+        from agentworks.plugins.azure.errors import AzureError
 
         network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
@@ -708,7 +709,7 @@ class TestTransientRoute:
         server-side-created rule may be left standing, and that must not
         be silent: the removal path warns naming the rule, the NSG, and
         the prefixes that remain allowed."""
-        from agentworks.plugins.azure.network import AzureError
+        from agentworks.plugins.azure.errors import AzureError
 
         network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
@@ -992,7 +993,7 @@ class TestEnsureDenyRaises:
         """If the deny baseline cannot be ensured, the enter fails loudly
         (a route without the baseline would be the old standing-exposure
         model by accident)."""
-        from agentworks.plugins.azure.network import AzureError
+        from agentworks.plugins.azure.errors import AzureError
 
         network = _install_fakes(monkeypatch).network
         network.security_rules.create_error = RuntimeError("boom")
@@ -1030,10 +1031,10 @@ class TestRouteOperationsAreBounded:
         )
         assert poke_create["retry_total"] == 0
         for method, options in calls:
-            assert options["connection_timeout"] == azure_network._ROUTE_CONNECTION_TIMEOUT_SECONDS
-            assert options["read_timeout"] == azure_network._ROUTE_READ_TIMEOUT_SECONDS
+            assert options["connection_timeout"] == route_calls._ROUTE_CONNECTION_TIMEOUT_SECONDS
+            assert options["read_timeout"] == route_calls._ROUTE_READ_TIMEOUT_SECONDS
             if options is not poke_create:
-                assert options["retry_total"] == azure_network._ROUTE_REQUEST_RETRIES
+                assert options["retry_total"] == route_calls._ROUTE_REQUEST_RETRIES
             # A begin_* call hands its options on to the polling it builds unless it is given one.
             assert isinstance(options.get("polling"), ARMPolling) == method.startswith("begin_")
 
@@ -1055,22 +1056,22 @@ class TestRouteOperationsAreBounded:
         monkeypatch.setattr(fakes.network.security_rules, "begin_delete", _delete)
         azure_network.remove_ssh_allow(fakes.network, "rg1", "vm1", f"{TRANSIENT_ALLOW_RULE_PREFIX}x")  # type: ignore[arg-type]
 
-        assert waits == [azure_network._OPERATION_TIMEOUT_SECONDS - 250.0]
+        assert waits == [route_calls._OPERATION_TIMEOUT_SECONDS - 250.0]
 
     def test_a_route_requests_retries_fit_inside_the_operation_bound(self) -> None:
         """A first request's tries at their connection and read bounds, with azure-core's backoff, end inside it."""
         from azure.core.pipeline.policies import RetryPolicy
 
         policy = RetryPolicy()
-        per_try = azure_network._ROUTE_CONNECTION_TIMEOUT_SECONDS + azure_network._ROUTE_READ_TIMEOUT_SECONDS
+        per_try = route_calls._ROUTE_CONNECTION_TIMEOUT_SECONDS + route_calls._ROUTE_READ_TIMEOUT_SECONDS
         backoff = sum(
             policy.get_backoff_time(
                 {"history": [None] * failed, "backoff": policy.backoff_factor, "max_backoff": policy.backoff_max}
             )
-            for failed in range(1, azure_network._ROUTE_REQUEST_RETRIES + 1)
+            for failed in range(1, route_calls._ROUTE_REQUEST_RETRIES + 1)
         )
-        tries = azure_network._ROUTE_REQUEST_RETRIES + 1
-        assert tries * per_try + backoff < azure_network._OPERATION_TIMEOUT_SECONDS
+        tries = route_calls._ROUTE_REQUEST_RETRIES + 1
+        assert tries * per_try + backoff < route_calls._OPERATION_TIMEOUT_SECONDS
 
     @staticmethod
     def _poke_with(

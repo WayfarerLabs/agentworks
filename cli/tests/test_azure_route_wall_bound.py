@@ -20,7 +20,10 @@ from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 
 from agentworks.plugins.azure import network as azure_network
-from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX, AzureError, _RouteOperationTimeout
+from agentworks.plugins.azure import route_calls
+from agentworks.plugins.azure.errors import AzureError
+from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX
+from agentworks.plugins.azure.route_calls import _RouteOperationTimeout
 from tests._azure_platform_support import _install_fakes, _Poller
 from tests._azure_scripted_transport import _HeldAdapter, _scripted_client
 
@@ -55,7 +58,7 @@ def held() -> Iterator[Callable[..., _HeldAdapter]]:
 
 @pytest.fixture
 def bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(azure_network, "_OPERATION_TIMEOUT_SECONDS", _BOUND)
+    monkeypatch.setattr(route_calls, "_OPERATION_TIMEOUT_SECONDS", _BOUND)
 
 
 def _ctrl_c() -> None:
@@ -91,7 +94,9 @@ def test_a_poke_whose_create_outlives_the_bound_removes_and_names_its_rule_witho
     """With no poller there is nothing to settle; the create may still land, so the rule goes and is named."""
     adapter = held()
     fakes = _install_fakes(monkeypatch)
-    monkeypatch.setattr(azure_network, "time", time)  # the held request ends the bound on the wall clock
+    # The held request ends the bound on the wall clock.
+    monkeypatch.setattr(azure_network, "time", time)
+    monkeypatch.setattr(route_calls, "time", time)
     rules = fakes.network.security_rules
     monkeypatch.setattr(
         rules,

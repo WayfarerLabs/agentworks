@@ -29,10 +29,11 @@ from agentworks.plugins.azure.config import (
     _select_vm_size,
     _size_catalog,
 )
+from agentworks.plugins.azure.errors import wrap_azure_error
 
 # The network-resource plumbing (public IP, the NSG exposure rules,
-# egress-IP discovery, cleanup) and the shared SDK-error wrapper live in
-# the sibling network module; this module keeps the VMPlatform
+# egress-IP discovery, cleanup) lives in the sibling network module, and
+# the shared SDK-error wrapper in errors; this module keeps the VMPlatform
 # capability surface.
 from agentworks.plugins.azure.network import (
     BOOTSTRAP_ALLOW_RULE_NAME,
@@ -49,7 +50,6 @@ from agentworks.plugins.azure.network import (
     remove_ssh_allow,
     rollback_create_on_interrupt,
     verify_vm_deleted,
-    wrap_azure_error,
 )
 from agentworks.topics import TopicProse
 
@@ -272,7 +272,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         existence probe (``resource_groups.check_existence``) is
         read-only and mutates nothing. A credential or reachability
         failure is NOT a "group missing" verdict: those surface through
-        :func:`agentworks.plugins.azure.network.wrap_azure_error` exactly
+        :func:`agentworks.plugins.azure.errors.wrap_azure_error` exactly
         as the ops report them, so a bad or absent credential never
         masquerades as an absent resource group.
 
@@ -838,7 +838,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         the full contracts).
 
         Each Azure call enter makes is bounded on its own (the
-        network module's ``_OPERATION_TIMEOUT_SECONDS``), not the whole
+        route_calls module's ``_OPERATION_TIMEOUT_SECONDS``), not the whole
         enter, so opening the route can take more than one bound; it comes
         before the script's deadline, which starts at dispatch.
 

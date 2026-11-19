@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from agentworks.plugins.azure import network as azure_network
+from agentworks.plugins.azure import route_calls
 from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX
 
 if TYPE_CHECKING:
@@ -354,4 +355,5 @@ def _install_fakes(
     monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetworkClient)
     clock = _FakeClock()
     monkeypatch.setattr(azure_network, "time", clock)
+    monkeypatch.setattr(route_calls, "time", clock)
     return _FakeAzure(network=network, compute=compute, events=events, clock=clock)

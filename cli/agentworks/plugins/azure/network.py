@@ -1,6 +1,8 @@
-"""Azure SDK plumbing shared by the platform's ops: the typed error
-wrapper, operator egress-IP discovery, and the per-VM network-resource
-helpers (public IP, NSG exposure rules, resource cleanup).
+"""Azure SDK plumbing shared by the platform's ops: operator egress-IP
+discovery and the per-VM network-resource helpers (public IP, NSG exposure
+rules, resource cleanup). The typed error and its wrapper live in
+``errors.py``, and the bound on each Azure call a route makes in
+``route_calls.py``.
 
 Split out of ``platform.py`` (issue #331): ``platform.py`` keeps the
 ``VMPlatform`` capability surface (lifecycle ops, SDK clients, sizing);
@@ -38,8 +40,6 @@ priority band [100, 199] under the deny:
 from __future__ import annotations
 
 import contextlib
-import contextvars
-import threading
 import time
 from collections.abc import Sequence
 from functools import partial
@@ -57,8 +57,19 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     normalize_allow_cidrs,
     operator_ssh_prefixes,
 )
-from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError
+from agentworks.errors import AuthorizationError
 from agentworks.interrupts import interrupts_deferred
+from agentworks.plugins.azure.errors import AzureError, wrap_azure_error
+from agentworks.plugins.azure.route_calls import (
+    _OPERATION_TIMEOUT_SECONDS,
+    _bounded_route_call,
+    _finish_route_operation,
+    _route_call_options,
+    _route_operation_options,
+    _RouteOperationTimeout,
+    _run_route_operation,
+    _start_route_operation,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -130,38 +141,11 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 # poke's five attempts to two minutes in all.
 _POKE_RETRY_AFTER_MAX_SECONDS = 30.0
 
-# How long one Azure call on a route may take, each on its own and on the wall
-# clock (see _bounded_route_call): the reads and long-running operations of the
-# public-IP heal, the NSG convergence and the poke that open it, and the removal
-# that closes it. The route opens before the script's deadline starts, so the
-# run_as_root contract needs that bounded by itself. The removal runs with
-# interrupts deferred, so a Ctrl-C can wait this long for it, and when a poke's
-# accepted create had not finished, up to _UNFINISHED_CREATE_SETTLE_SECONDS
-# longer before it: 360s in all. GCP bounds its firewall operations the same way.
-_OPERATION_TIMEOUT_SECONDS = 300.0
-
-# The azure-core per-call bounds on every read a route call sends, and every
-# operation's first request. The client's own (300s to read, several retries
-# with backoff) would spend a call's whole bound on one silent try, so a try
-# gives up after 10s without a connection or 60s without data, and is retried at
-# most twice: three silent tries and azure-core's backoff of a few seconds
-# between them end well inside the bound, and a long-running operation's wait
-# takes what remains of it. These bound silence only; the bound itself is
-# _bounded_route_call's.
-_ROUTE_CONNECTION_TIMEOUT_SECONDS = 10.0
-_ROUTE_READ_TIMEOUT_SECONDS = 60.0
-_ROUTE_REQUEST_RETRIES = 2
-
-# How often _bounded_route_call's wait wakes. Only the main thread runs
-# Python's signal handlers, and a signal delivered to the call's thread instead,
-# or one a platform cannot interrupt a blocked wait with, is handled only once
-# the main thread wakes, so it wakes this often to keep Ctrl-C prompt.
-_ROUTE_CALL_WAKE_SECONDS = 0.25
-
 # How much longer a poke whose create did not finish waits for that create
 # before it removes the rule, with interrupts deferred: a delete while the
 # create is in flight can fail (AnotherOperationInProgress) or find nothing,
-# and the rule then lands after.
+# and the rule then lands after. With the removal's own
+# _OPERATION_TIMEOUT_SECONDS, a Ctrl-C can be held 360s in all.
 _UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
 
 # How often that wait reads the state the create's polling method holds. It
@@ -174,162 +158,6 @@ _UNFINISHED_CREATE_POLL_SECONDS = 1.0
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
-
-
-class AzureError(ProvisioningError):
-    """An Azure API operation failed.
-
-    Attributes:
-        summary: A concise, user-facing error message.
-        detail: The full error details (for logs).
-
-    The optional entity / hint keywords are the base ``AgentworksError``
-    ones, forwarded so a failure that KNOWS which resource it is about
-    can say so (the service-principal credential build names its site and
-    its secret). :func:`wrap_azure_error`, which converts an arbitrary
-    exception, has no such knowledge and passes only the hint of an
-    Agentworks error it wraps.
-    """
-
-    def __init__(
-        self,
-        summary: str,
-        detail: str,
-        *,
-        entity_kind: str | None = None,
-        entity_name: str | None = None,
-        hint: str | None = None,
-    ) -> None:
-        super().__init__(summary, entity_kind=entity_kind, entity_name=entity_name, hint=hint)
-        self.summary = summary
-        self.detail = detail
-
-
-def wrap_azure_error(exc: Exception) -> AzureError:
-    """Convert an Azure SDK exception into an AzureError, keeping a wrapped Agentworks error's hint."""
-    from azure.core.exceptions import HttpResponseError
-
-    if isinstance(exc, HttpResponseError):
-        # Walk inner errors to find the most specific message
-        code = exc.error.code if exc.error else None
-        message = exc.error.message if exc.error else str(exc)
-
-        if exc.error and exc.error.details:
-            inner = exc.error.details[0]
-            code = inner.code or code
-            message = inner.message or message
-
-        summary = f"{code}: {_trim_message(str(message))}" if code else _trim_message(str(message))
-        return AzureError(summary, detail=str(exc))
-
-    return AzureError(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
-
-
-class _RouteOperationTimeout(AzureError):
-    """An Azure call on a route did not finish within ``_OPERATION_TIMEOUT_SECONDS``."""
-
-    def __init__(self, what: str) -> None:
-        summary = f"Azure did not finish {what} within {_OPERATION_TIMEOUT_SECONDS:.0f}s"
-        super().__init__(summary, detail=summary)
-
-
-def _route_call_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[str, Any]:
-    """The azure-core per-call options that bound a route call's requests (see ``_ROUTE_REQUEST_RETRIES``)."""
-    return {
-        "connection_timeout": _ROUTE_CONNECTION_TIMEOUT_SECONDS,
-        "read_timeout": _ROUTE_READ_TIMEOUT_SECONDS,
-        "retry_total": retries,
-    }
-
-
-def _route_operation_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[str, Any]:
-    """:func:`_route_call_options` for a long-running operation's first request only.
-
-    The generated ``begin_*`` methods pass their per-call options on to the
-    status polling they build, so the polling is given explicitly, and its
-    status reads keep the client's own timeouts and retries: azure-mgmt-core's
-    ``ARMPolling`` with its defaults, which are the ones the client builds
-    with (its 30s polling interval among them), short of the endpoint that
-    resolves a relative status URL. ARM sends absolute ones, and a status read
-    that failed would count as the operation failing, not as its success.
-    The interval matches only because ``ARMPolling`` and the clients both
-    default to 30s: a ``polling_interval`` passed to the client constructors
-    (``AzureVMPlatform._compute_client`` and ``_network_client``) would not
-    apply to route operations.
-    """
-    from azure.mgmt.core.polling.arm_polling import ARMPolling
-
-    return {**_route_call_options(retries=retries), "polling": ARMPolling()}
-
-
-def _bounded_route_call[T](call: Callable[[], T], what: str, deadline: float | None = None) -> T:
-    """``call()``'s result, waiting until ``deadline`` on the monotonic clock, or :class:`_RouteOperationTimeout`.
-
-    azure-core's per-try timeouts bound only silence: a response whose body
-    keeps arriving, however slowly, resets ``read_timeout`` with every chunk,
-    and neither requests nor azure-core bounds a request's whole time. So
-    ``call`` runs on a daemon thread, in a copy of the caller's context, and
-    the wait for it is what ends at ``deadline``: by default
-    ``_OPERATION_TIMEOUT_SECONDS`` from now, or for an operation's first
-    request the deadline its :func:`_finish_route_operation` wait shares. What
-    ``call`` raised is raised here. The wait holds no interrupts, so Ctrl-C
-    outside :func:`~agentworks.interrupts.interrupts_deferred` ends it at
-    once, or within ``_ROUTE_CALL_WAKE_SECONDS`` when the signal reached
-    another thread. A call given up on keeps running, and what it sent may
-    still take effect, so a caller that creates something removes it.
-    """
-    if deadline is None:
-        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-    context = contextvars.copy_context()
-    outcome: list[tuple[T, None] | tuple[None, BaseException]] = []
-    finished = threading.Event()
-
-    def _run() -> None:
-        try:
-            outcome.append((context.run(call), None))
-        except BaseException as exc:  # handed to the waiting caller, which raises it
-            outcome.append((None, exc))
-        finally:
-            finished.set()
-
-    threading.Thread(target=_run, name="azure-route-call", daemon=True).start()
-    while not finished.wait(min(_ROUTE_CALL_WAKE_SECONDS, max(0.0, deadline - time.monotonic()))):
-        if time.monotonic() >= deadline:
-            raise _RouteOperationTimeout(what)
-    ((result, error),) = outcome
-    if error is not None:
-        raise error
-    return cast("T", result)
-
-
-def _finish_route_operation(poller: Any, what: str, deadline: float) -> Any:
-    """``poller``'s result, waiting until ``deadline`` on the monotonic clock, or :class:`_RouteOperationTimeout`.
-
-    ``deadline`` is the one the operation's first request was given (see
-    :func:`_bounded_route_call`), so the wait takes what that request left.
-    The operation may still finish after the wait ends, so a caller that
-    created something removes it.
-    """
-    result = poller.result(timeout=max(0.0, deadline - time.monotonic()))
-    if not poller.done():
-        raise _RouteOperationTimeout(what)
-    return result
-
-
-def _run_route_operation(start: Callable[[], Any], what: str) -> Any:
-    """The result of the long-running operation ``start`` begins, its first request and wait sharing one bound."""
-    deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-    return _finish_route_operation(_bounded_route_call(start, what, deadline), what, deadline)
-
-
-def _trim_message(message: str) -> str:
-    """Trim an Azure error message to the first meaningful sentence."""
-    # Cut at first URL or "Learn more" / "Submit a request" noise
-    for marker in [". Setup Alerts", ". Learn more", ". Submit a request", " https://"]:
-        idx = message.find(marker)
-        if idx != -1:
-            return message[: idx + 1] if marker.startswith(".") else message[:idx]
-    return message
 
 
 def _deny_all_inbound_rule() -> SecurityRule:
@@ -528,8 +356,7 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
         what = f"creating the '{rule_name}' rule on NSG '{name}-nsg'"
         poller: Any = None
         try:
-            deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-            poller = _bounded_route_call(
+            poller, deadline = _start_route_operation(
                 partial(
                     network.security_rules.begin_create_or_update,
                     rg,
@@ -539,7 +366,6 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
                     **_route_operation_options(retries=0),
                 ),
                 what,
-                deadline,
             )
             _finish_route_operation(poller, what, deadline)
         except BaseException as exc:

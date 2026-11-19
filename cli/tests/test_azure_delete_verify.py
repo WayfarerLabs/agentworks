@@ -27,7 +27,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import AuthorizationError, StateError
-from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
 

@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 
 

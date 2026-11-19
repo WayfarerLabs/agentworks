@@ -27,7 +27,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError
-from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 
 #: The well-known default the model's SecretRef template names.

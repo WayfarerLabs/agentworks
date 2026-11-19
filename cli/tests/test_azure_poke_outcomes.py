@@ -23,7 +23,9 @@ from azure.core.polling.base_polling import LROBasePolling
 from azure.mgmt.network import NetworkManagementClient
 
 from agentworks.plugins.azure import network as azure_network
-from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX, _RouteOperationTimeout, poke_ssh_allow
+from agentworks.plugins.azure.errors import AzureError
+from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX, poke_ssh_allow
+from agentworks.plugins.azure.route_calls import _RouteOperationTimeout
 from tests._azure_platform_support import _FakeAzure, _install_fakes, _Poller
 from tests._azure_scripted_transport import _Answer, _refused, _scripted_client, _ScriptedAdapter
 
@@ -183,7 +185,7 @@ def test_the_backoff_grows_between_attempts_and_ends_with_the_last(monkeypatch: 
     fakes = _install_fakes(monkeypatch)
     monkeypatch.setattr(fakes.network.security_rules, "begin_create_or_update", create)
 
-    with pytest.raises(azure_network.AzureError):
+    with pytest.raises(AzureError):
         poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
 
     assert adapter.methods == ["PUT"] * azure_network._POKE_ALLOCATION_ATTEMPTS

@@ -7,7 +7,7 @@ import os
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.errors import AzureError
 
 if TYPE_CHECKING:
     from agentworks.plugins.azure.config import AzureServicePrincipalAuth
