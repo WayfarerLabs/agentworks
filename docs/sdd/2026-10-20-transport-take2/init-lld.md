@@ -1049,8 +1049,8 @@ no longer use them. The departures from the tables above, each recorded where it
   only its directories writable and searchable (`find` follows no link), never a file, since a
   file's mode lives on an inode a hard link outside the tree may share. Every removal is best
   effort, so a tree with read-only directories is replaced on every upload and `restore` always
-  reaches its rename. The git file source requires `mktemp`'s output to be a guest path under its
-  staging prefix before using it, and reads its staging removal's completion and status, warning
+  reaches its rename. Both git staging paths require `mktemp`'s output to be a guest path under its
+  staging prefix before using it, and read their staging removal's completion and status, warning
   when it fails.
 - Both accounts take one order: the profile and rc fragments, the mise config (when `mise_packages`
   is set), git credentials, dotfiles, the mise lockfile and install (`mise.install_mise`, which runs

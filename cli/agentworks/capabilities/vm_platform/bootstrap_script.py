@@ -178,7 +178,8 @@ fi
 # /swapfile appears only once it is a complete swap area: it is built under
 # /swapfile.agentworks-partial, flushed and renamed into place, and a partial
 # one from an earlier run is removed and started again. That name is
-# Agentworks' own in a root-only directory, so whatever holds it is a build's.
+# Agentworks' own in a root-only directory, so a file or link there is an
+# earlier build's; a directory there fails the removal and stops the bootstrap.
 # An existing /swapfile that is not a swap area, or a link to nothing, stops
 # the bootstrap rather than being overwritten. Activation and the fstab line
 # are each checked before they are done, so neither repeats.

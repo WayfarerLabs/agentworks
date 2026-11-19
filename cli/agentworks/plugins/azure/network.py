@@ -405,11 +405,6 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
             continue
         except BaseException:
             # An interrupt mid-create: the rule may exist or still land, and only this name finds it.
-            if poller is not None:
-                output.info(
-                    f"Interrupted; waiting up to {_UNFINISHED_CREATE_SETTLE_SECONDS:.0f}s for Azure to settle "
-                    f"the '{rule_name}' rule before removing it..."
-                )
             _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
             raise
         return rule_name
@@ -431,6 +426,10 @@ def _remove_unfinished_allow(
     """
     with interrupts_deferred():
         if create is not None:
+            output.info(
+                f"Waiting up to {_UNFINISHED_CREATE_SETTLE_SECONDS:.0f}s for Azure to settle "
+                f"the '{rule_name}' rule before removing it..."
+            )
             with contextlib.suppress(Exception):
                 create.result(timeout=_UNFINISHED_CREATE_SETTLE_SECONDS)
         settled = create is not None and create.done()
