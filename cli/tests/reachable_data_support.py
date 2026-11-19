@@ -19,10 +19,11 @@ def reachable_data(value: object, seen: set[int] | None = None, depth: int = 0) 
     elif isinstance(value, (tuple, list, set, frozenset)):
         for item in value:
             yield from reachable_data(item, seen, depth + 1)
-    elif is_dataclass(value):
-        for field in fields(value):
-            yield from reachable_data(getattr(value, field.name), seen, depth + 1)
     elif not isinstance(value, (int, float, bool, bytes, type(None))):
+        # A dataclass's fields, private ones included, then any object's public attributes, properties among them.
+        if is_dataclass(value):
+            for field in fields(value):
+                yield from reachable_data(getattr(value, field.name), seen, depth + 1)
         for name in dir(value):
             if not name.startswith("_"):
                 yield from reachable_data(getattr(value, name, None), seen, depth + 1)
