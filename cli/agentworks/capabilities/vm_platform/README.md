@@ -749,13 +749,15 @@ VNet / disk creation and calls `cleanup_vm_resources` on any exception). The sam
 an operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
 readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
 create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
-naming the exact manual removal (Azure's `rollback_create_on_interrupt`). A platform that implements
-the retained-cleanup handoff (EC2, Proxmox, Lima and WSL2) raises `RetainedProvisioningError`
-instead whenever its cleanup, after a failure or an interrupt, is abandoned or cannot show the
-backend clean, so core keeps the row for `vm delete` to finish. That is distinct from, and composes
-under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls
-back the persisted VM row. The platform's sweep undoes backend-side resources created inside
-`create()`; the orchestrator undoes the Agentworks-side record on top of it.
+naming the exact manual removal (Azure's `rollback_create_on_interrupt`). On Windows that second
+Ctrl-C reaches Python only once a blocked native call returns, so the abandonment can lag it by
+seconds. A platform that implements the retained-cleanup handoff (EC2, Proxmox, Lima and WSL2)
+raises `RetainedProvisioningError` instead whenever its cleanup, after a failure or an interrupt, is
+abandoned or cannot show the backend clean, so core keeps the row for `vm delete` to finish. That is
+distinct from, and composes under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` /
+node `teardown`), which rolls back the persisted VM row. The platform's sweep undoes backend-side
+resources created inside `create()`; the orchestrator undoes the Agentworks-side record on top of
+it.
 
 #### Quoting and Escaping in Embedded Scripts
 

@@ -610,9 +610,10 @@ arrived to the handler it would have reached, so an interrupt that lands mid-rem
 AWS's and Azure's `remove_ssh_allow` hold interrupts themselves (slice 8), so every caller gets the
 hold without restating it: the poke's own cleanup, the route's exit and the provisioning close. Only
 AWS create's rollback calls the holding-free `remove_ssh_allow_interruptibly` instead, since a
-second Ctrl-C is how the operator abandons that cleanup, and the create then retains what it could
-not confirm; Azure's rollback deletes the NSG instead and never calls it. GCP has no such function:
-its route's one exit holds the shared `delete_matching_firewall`, and
+second Ctrl-C is how the operator abandons that cleanup (on Windows it reaches Python only once a
+blocked native call returns, so the abandonment can lag it by seconds), and the create then retains
+what it could not confirm; Azure's rollback deletes the NSG instead and never calls it. GCP has no
+such function: its route's one exit holds the shared `delete_matching_firewall`, and
 `close_provisioning_access_or_warn` holds every platform's provisioning close. Only what was
 actually removed is reported closed: AWS counts a revoke that EC2 answers with the rule listed under
 `UnknownIpPermissions`, like `InvalidPermission.NotFound`, as nothing revoked, and Azure reports a
@@ -1143,11 +1144,19 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     without anything having shown it will (`outcome_unknown`): set when it sends, cleared by Google
     Cloud's refusal of the only try sent, by the operation completing, or by the rule being seen. A
     refusal of the same-`requestId` retry answers the retry alone and leaves it set. When it is set
-    and the removal found nothing, the removal warns, naming the rule's provider ID when known and
-    otherwise its UUID-suffixed name, and its sources. EC2's opening calls (the dry-run revokes and
-    the authorizes) and its address read go through a `BoundedClient` of
-    `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each; a poke whose authorize ran out of time, or was
-    interrupted, revokes what it planned and warns that the allow may still be added after.
+    and the removal found nothing, the removal warns, naming the rule, its sources and the command
+    to inspect it, and allows a delete by name only while the rule reports the provider ID its
+    insert's operation named; without that ID it says to escalate. Create's instance insert keeps
+    the same record on its `InstanceInsertAttempt`, and each insert attempt also keeps its verified
+    operation's name, so create's rollback (`rollback_partial_create`) keeps the lifetime deny while
+    an unresolved instance insert may still create the instance, and reports every resource it found
+    absent that an unresolved insert may still create, with the operation to wait on. EC2's opening
+    calls (the dry-run revokes and the authorizes) and its address read go through a `BoundedClient`
+    of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke whose authorize did not return revokes
+    what it planned, and warns, naming that authorize's prefix, unless EC2 answered the one request
+    sent with a client error: botocore retries a lost or failed send on its own, so a refusal after
+    a retry (`RetryAttempts` above zero) may follow a send that landed, and a server error, a
+    transport failure, a bound running out or an interrupt leaves the outcome unknown.
   - **The held removals.** Each cloud's route removal, and its close of the provisioning access,
     runs with interrupts held and shares one 300 s bound across its calls: Azure's delete and its
     wait (`_run_route_operation`); GCE's reads, delete and operation wait
