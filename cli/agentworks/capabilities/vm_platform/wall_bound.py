@@ -40,20 +40,14 @@ THREAD_NAME = "agw-bounded-call"
 
 
 class CallTimedOut(TimeoutError):
-    """A bounded call, ``what``, ran out of its bound: its own ``seconds``, or a shared deadline's.
+    """A bounded call, ``what``, ran out of its bound: its own ``seconds``, or a shared deadline's."""
 
-    ``seconds`` is ``None`` for a shared deadline made without a stated budget.
-    """
-
-    def __init__(self, what: str, seconds: float | None, *, shared: bool) -> None:
-        if not shared:
-            message = f"{what} did not finish within {seconds:.0f}s"
-        elif seconds is None:
-            message = f"{what} did not finish before the deadline it shares with other calls"
-        else:
+    def __init__(self, what: str, seconds: float, *, shared: bool) -> None:
+        if shared:
             message = f"{what} did not finish within the {seconds:.0f}s bound it shares with other calls"
+        else:
+            message = f"{what} did not finish within {seconds:.0f}s"
         super().__init__(message)
-        self.what = what
         self.seconds = seconds
 
 
@@ -71,12 +65,12 @@ def call_within[T](call: Callable[[], T], bound: float | Deadline, *, what: str 
     A call that finishes as its bound runs out counts as finished.
     """
     shared = isinstance(bound, Deadline)
-    if isinstance(bound, Deadline):
-        left = bound.remaining()
-        seconds_left = math.inf if left is None else left
-        stated = bound.seconds
-    else:
+    if not isinstance(bound, Deadline):
         seconds_left = stated = bound
+    elif bound.seconds is None:  # an unbounded deadline, the only kind without a stated budget
+        seconds_left = stated = math.inf
+    else:
+        seconds_left, stated = bound.remaining() or 0.0, bound.seconds
     if seconds_left <= 0:
         raise CallTimedOut(what, stated, shared=shared)
     deadline = time.monotonic() + seconds_left

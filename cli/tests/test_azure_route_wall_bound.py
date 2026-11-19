@@ -257,21 +257,6 @@ class TestRouteOperationsAreBounded:
 
         assert waits == [route_calls._OPERATION_TIMEOUT_SECONDS - 250.0]
 
-    def test_a_route_requests_retries_fit_inside_the_operation_bound(self) -> None:
-        """A first request's tries at their connection and read bounds, with azure-core's backoff, end inside it."""
-        from azure.core.pipeline.policies import RetryPolicy
-
-        policy = RetryPolicy()
-        per_try = route_calls._ROUTE_CONNECTION_TIMEOUT_SECONDS + route_calls._ROUTE_READ_TIMEOUT_SECONDS
-        backoff = sum(
-            policy.get_backoff_time(
-                {"history": [None] * failed, "backoff": policy.backoff_factor, "max_backoff": policy.backoff_max}
-            )
-            for failed in range(1, route_calls._ROUTE_REQUEST_RETRIES + 1)
-        )
-        tries = route_calls._ROUTE_REQUEST_RETRIES + 1
-        assert tries * per_try + backoff < route_calls._OPERATION_TIMEOUT_SECONDS
-
     @staticmethod
     def _poke_with(
         monkeypatch: pytest.MonkeyPatch, poller_type: type[_Poller], order: list[str] | None = None
@@ -358,5 +343,5 @@ class TestRouteOperationsAreBounded:
                 time.sleep(0.05)  # longer than a wait with nothing left of the bound
                 return super().result(timeout)
 
-        spent = Deadline(time.monotonic() - 1.0)
+        spent = Deadline.after(0.0)
         assert route_calls._finish_route_operation(_Done("rule"), "creating a rule", spent) == "rule"

@@ -57,6 +57,7 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     normalize_allow_cidrs,
     operator_ssh_prefixes,
 )
+from agentworks.deadline import Deadline
 from agentworks.errors import AuthorizationError
 from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.azure.errors import AzureError, wrap_azure_error
@@ -461,9 +462,9 @@ def _remove_unfinished_allow(
                 f"Waiting up to {_UNFINISHED_CREATE_SETTLE_SECONDS:.0f}s for Azure to settle "
                 f"the '{rule_name}' rule before removing it..."
             )
-            deadline = time.monotonic() + _UNFINISHED_CREATE_SETTLE_SECONDS
-            while not settled and (remaining := deadline - time.monotonic()) > 0:
-                time.sleep(min(_UNFINISHED_CREATE_POLL_SECONDS, remaining))
+            settle = Deadline.after(_UNFINISHED_CREATE_SETTLE_SECONDS)
+            while not settled and not settle.expired:
+                time.sleep(min(_UNFINISHED_CREATE_POLL_SECONDS, settle.remaining() or 0.0))
                 settled = _create_settled(create)
         known = _create_succeeded(create) if create is not None else _refused_by_azure(error)
         remove_ssh_allow(network, rg, name, rule_name, prefixes)

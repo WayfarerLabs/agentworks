@@ -13,11 +13,16 @@ class Deadline:
     It bounds how long the caller waits, never what it waited on: running
     out does not stop a guest command or a provider call. Every wait that
     takes it gets what the ones before it left. ``seconds`` is the budget it
-    was made with by :meth:`after`, for messages that name it.
+    was made with, for messages that name it: ``None`` exactly when it is
+    unbounded.
     """
 
     expires_at: float | None
     seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        if (self.expires_at is None) != (self.seconds is None):
+            raise ValueError("a Deadline states its budget exactly when it has an expiry")
 
     @classmethod
     def after(cls, seconds: float | None) -> Deadline:
