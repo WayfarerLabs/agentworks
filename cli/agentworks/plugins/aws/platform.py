@@ -99,10 +99,8 @@ _DEBIAN_SSM_RELEASES: dict[DebianRelease, str] = {
 # COMPRESSED bytes; a pre-launch guard raises typed if even that is over.
 _MAX_USER_DATA_BYTES = 16384
 
-# How long one EC2 call on a route may take on the wall clock, each on its own:
-# the dry-run revokes and authorizes that open it, the address read, and the
-# revokes that close it and the provisioning access. botocore's read_timeout
-# bounds only each socket read, so the bound comes from the shared wall bound.
+# How long one EC2 call on a route (opening, address read, closing) may take on
+# the wall clock; botocore's read_timeout bounds only each socket read.
 _ROUTE_CALL_TIMEOUT_SECONDS = 300.0
 
 
@@ -819,14 +817,7 @@ class EC2Platform(PublicAddressPlatform):
         return self._public_ip(self._route_client(vm, ctx), self._instance_id(vm))
 
     def _route_client(self, vm: VMRow, ctx: RunContext) -> Any:
-        """The VM's EC2 client, each call through it bounded by ``_ROUTE_CALL_TIMEOUT_SECONDS`` on the wall clock.
-
-        A call that runs out raises ``CallTimedOut``, which the route's
-        callers handle as they handle any failed call: a poke revokes
-        everything it planned, and a revoke warns that the allow may stay
-        open. A call given up on may still take effect, botocore's retries
-        included (see :mod:`~agentworks.capabilities.vm_platform.wall_bound`).
-        """
+        """The VM's EC2 client, each call through it bounded by ``_ROUTE_CALL_TIMEOUT_SECONDS`` on the wall clock."""
         return BoundedClient(self._client("ec2", self._region_of(vm), ctx), _ROUTE_CALL_TIMEOUT_SECONDS)
 
     def _public_ip(self, ec2: Any, instance_id: str) -> str:
