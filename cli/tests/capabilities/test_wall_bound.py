@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import signal
+import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -124,6 +126,23 @@ def test_calls_sharing_a_deadline_each_get_what_the_ones_before_left(release: th
 
     assert elapsed < 0.3
     assert caught.value.seconds == 0.4
+
+
+_STUCK_THEN_EXIT = """
+import threading
+from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut, call_within
+try:
+    call_within(threading.Event().wait, 0.1)
+except CallTimedOut:
+    pass
+"""
+
+
+def test_a_call_given_up_on_does_not_keep_the_process_alive() -> None:
+    """The call's thread never finishes; the interpreter must still exit when the caller is done."""
+    finished = subprocess.run([sys.executable, "-c", _STUCK_THEN_EXIT], timeout=30, check=False)
+
+    assert finished.returncode == 0
 
 
 def test_a_bounded_client_bounds_each_method_and_refuses_other_attributes() -> None:

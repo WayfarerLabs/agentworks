@@ -202,8 +202,8 @@ def test_a_session_start_context_holds_no_secret_outside_its_owner_s_environment
 
     context = prepared.context
     assert context.environment == {"OWNER_VALUE": environment}
-    exposed = set(reachable_data(context))
+    exposed = list(reachable_data(context))
     assert environment in exposed
-    assert undeclared not in exposed and logged not in exposed
+    assert not any(hidden in text for text in exposed for hidden in (undeclared, logged))
     sanitized = context.redactor.sanitize(f"{environment} {undeclared} {logged}")
     assert not any(value in sanitized for value in (environment, undeclared, logged))

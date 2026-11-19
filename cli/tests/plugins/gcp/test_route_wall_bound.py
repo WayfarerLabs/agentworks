@@ -6,6 +6,7 @@ access's close) shares one bound across its calls.
 
 from __future__ import annotations
 
+import signal
 import threading
 import time
 from typing import TYPE_CHECKING, Any
@@ -100,6 +101,52 @@ def test_a_route_removal_shares_one_bound_across_its_reads_delete_and_wait(
 
     assert elapsed < 0.9  # one 0.5s bound, where per-call bounds would take 0.4 + 0.5 + 0.4
     assert captured_output.warnings
+
+
+def test_a_ctrl_c_during_the_held_removal_waits_for_the_removals_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    created: tuple[GCEPlatform, FakeClients, VMRow],
+    hold: Callable[..., None],
+    captured_output: CapturedOutput,
+) -> None:
+    """The interrupt is held until the removal is done, its warning included, and only then delivered."""
+    platform, cache, vm = created
+    with pytest.raises(KeyboardInterrupt), platform._transient_route(vm, gce_ctx()):
+        route = _route_name(cache, vm)
+        hold(cache.firewalls, "delete")
+        held = cache.firewalls.delete
+
+        def _ctrl_c_then_held(**kwargs: Any) -> Any:
+            signal.raise_signal(signal.SIGINT)
+            return held(**kwargs)
+
+        monkeypatch.setattr(cache.firewalls, "delete", _ctrl_c_then_held)
+
+    assert any(route in warning for warning in captured_output.warnings)
+
+
+def test_a_removals_operation_wait_gets_only_what_its_reads_and_delete_left(
+    monkeypatch: pytest.MonkeyPatch, created: tuple[GCEPlatform, FakeClients, VMRow], hold: Callable[..., None]
+) -> None:
+    """A wait that blocks for all it is given ends with the removal's one bound, not a fresh one of its own."""
+    platform, cache, vm = created
+    real_delete = cache.firewalls.delete
+
+    def _blocks_for_its_timeout(*, timeout: float) -> None:
+        threading.Event().wait(timeout)
+
+    def _delete_whose_wait_blocks(**kwargs: Any) -> FakeOperation:
+        operation = real_delete(**kwargs)
+        operation.result = _blocks_for_its_timeout  # type: ignore[method-assign]
+        return operation
+
+    with platform._transient_route(vm, gce_ctx()):
+        hold(cache.firewalls, "get", times=1, seconds=0.3)
+        monkeypatch.setattr(cache.firewalls, "delete", _delete_whose_wait_blocks)
+        started = time.monotonic()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.7  # one 0.5s bound, where a wait given the whole bound again would take 0.3 + 0.5
 
 
 def test_the_provisioning_access_close_is_bounded(

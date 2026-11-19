@@ -227,9 +227,9 @@ def test_an_integration_s_invocation_holds_no_secret_outside_its_declared_ones_a
     for call in received:
         assert call.secrets == {"declared": declared}
         assert call.environment == {"OWNER_VALUE": environment}
-        exposed = set(reachable_data(call))
+        exposed = list(reachable_data(call))
         assert declared in exposed and environment in exposed
-        assert undeclared not in exposed and logged not in exposed
+        assert not any(hidden in text for text in exposed for hidden in (undeclared, logged))
         sanitized = call.redactor.sanitize(f"{declared} {undeclared} {logged}")
         assert not any(value in sanitized for value in (declared, undeclared, logged))
 
