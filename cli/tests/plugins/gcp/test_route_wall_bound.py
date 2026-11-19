@@ -141,12 +141,13 @@ def test_a_removals_operation_wait_gets_only_what_its_reads_and_delete_left(
         return operation
 
     with platform._transient_route(vm, gce_ctx()):
-        hold(cache.firewalls, "get", times=1, seconds=0.3)
+        monkeypatch.setattr(gcp_platform, "_OPERATION_TIMEOUT_SECONDS", 2.0)
+        hold(cache.firewalls, "get", times=1, seconds=1.2)
         monkeypatch.setattr(cache.firewalls, "delete", _delete_whose_wait_blocks)
         started = time.monotonic()
     elapsed = time.monotonic() - started
 
-    assert elapsed < 0.7  # one 0.5s bound, where a wait given the whole bound again would take 0.3 + 0.5
+    assert 1.9 < elapsed < 2.6  # one 2s bound, where a wait given the whole bound again would take 1.2 + 2
 
 
 def test_the_provisioning_access_close_is_bounded(
