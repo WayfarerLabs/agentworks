@@ -124,11 +124,11 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 # How long the poke waits before its next allocation when Azure answered a
 # create with a status azure-core would itself have retried, since the create
 # goes unretried: the Retry-After Azure sent, at most
-# _POKE_RETRY_AFTER_MAX_SECONDS, or else an exponential backoff on azure-core's
-# own 0.8s factor (0.8s, 1.6s, 3.2s, 6.4s). The cap keeps the waits between a
+# _POKE_RETRY_AFTER_MAX_SECONDS, or else an exponential backoff on the factor of
+# azure-core's own RetryPolicy (its default 0.8s gives 0.8s, 1.6s, 3.2s, 6.4s).
+# The cap, and a backoff that stays far below it, keep the waits between a
 # poke's five attempts to two minutes in all.
 _POKE_RETRY_AFTER_MAX_SECONDS = 30.0
-_POKE_RETRY_BACKOFF_SECONDS = 0.8
 
 # How long one Azure call on a route may take, each on its own and on the wall
 # clock (see _bounded_route_call): the reads and long-running operations of the
@@ -560,8 +560,8 @@ def _back_off_after(error: Exception, attempts: int) -> None:
     azure-core's own ``RetryPolicy`` decides, so the answers are the ones it
     retries: 408, 429, 500, 502, 503, 504 and every status from 506, and any
     error status carrying Retry-After. The wait honors Retry-After, capped at
-    ``_POKE_RETRY_AFTER_MAX_SECONDS``, and otherwise doubles from
-    ``_POKE_RETRY_BACKOFF_SECONDS`` with each of the ``attempts`` made. It
+    ``_POKE_RETRY_AFTER_MAX_SECONDS``, and otherwise doubles from the
+    policy's ``backoff_factor`` with each of the ``attempts`` made. It
     holds no interrupts, so Ctrl-C ends it; the failed attempt's cleanup is
     already done.
     """
@@ -583,7 +583,7 @@ def _back_off_after(error: Exception, attempts: int) -> None:
     if retry_after is not None:
         wait = min(retry_after, _POKE_RETRY_AFTER_MAX_SECONDS)
     else:
-        wait = _POKE_RETRY_BACKOFF_SECONDS * 2 ** (attempts - 1)
+        wait = policy.backoff_factor * 2 ** (attempts - 1)
     output.info(f"Azure answered the create with {error.status_code}; trying again in {wait:.1f}s...")
     time.sleep(wait)
 

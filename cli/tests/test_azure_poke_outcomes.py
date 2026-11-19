@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 import requests
+from azure.core.pipeline.policies import RetryPolicy
 from azure.core.polling.base_polling import LROBasePolling
 from azure.mgmt.network import NetworkManagementClient
 
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
 
 _PREFIX = "198.18.0.7/32"
 _MONITOR = "https://management.azure.com/subscriptions/sub-A/providers/Microsoft.Network/operations/1?api-version=1"
+
+# The first wait of the poke's backoff: azure-core's own factor.
+_BACKOFF = RetryPolicy().backoff_factor
 
 _ACCEPTED: _Answer = (201, {"Azure-AsyncOperation": _MONITOR}, {"properties": {"provisioningState": "Updating"}})
 
@@ -157,11 +161,8 @@ def test_a_create_azure_did_not_refuse_before_its_poller_is_named(
     [
         ((429, {"Retry-After": "7"}, {"error": {"code": "Throttled"}}), 7.0),
         ((429, {"Retry-After": "600"}, {"error": {"code": "Throttled"}}), azure_network._POKE_RETRY_AFTER_MAX_SECONDS),
-        (_refused(503), azure_network._POKE_RETRY_BACKOFF_SECONDS),
-        (
-            (429, {"Retry-After": "soon"}, {"error": {"code": "Throttled"}}),
-            azure_network._POKE_RETRY_BACKOFF_SECONDS,
-        ),
+        (_refused(503), _BACKOFF),
+        ((429, {"Retry-After": "soon"}, {"error": {"code": "Throttled"}}), _BACKOFF),
     ],
     ids=["retry-after", "retry-after-capped", "backoff", "retry-after-unparsable"],
 )
@@ -186,9 +187,7 @@ def test_the_backoff_grows_between_attempts_and_ends_with_the_last(monkeypatch: 
         poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
 
     assert adapter.methods == ["PUT"] * azure_network._POKE_ALLOCATION_ATTEMPTS
-    waits = [
-        azure_network._POKE_RETRY_BACKOFF_SECONDS * 2**n for n in range(azure_network._POKE_ALLOCATION_ATTEMPTS - 1)
-    ]
+    waits = [_BACKOFF * 2**n for n in range(azure_network._POKE_ALLOCATION_ATTEMPTS - 1)]
     assert fakes.clock.now == sum(waits)
 
 
