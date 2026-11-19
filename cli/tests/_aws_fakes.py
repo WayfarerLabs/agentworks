@@ -26,8 +26,12 @@ if TYPE_CHECKING:
 
 def client_error(code: str, message: str = "boom", operation: str = "Op") -> ClientError:
     """A botocore ``ClientError`` carrying ``code`` in the structured
-    ``response['Error']['Code']`` slot the platform classifies on."""
-    return ClientError({"Error": {"Code": code, "Message": message}}, operation)
+    ``response['Error']['Code']`` slot the platform classifies on, answering
+    the one request sent (``ResponseMetadata``, as botocore records it)."""
+    return ClientError(
+        {"Error": {"Code": code, "Message": message}, "ResponseMetadata": {"HTTPStatusCode": 400, "RetryAttempts": 0}},
+        operation,
+    )
 
 
 def unreachable() -> EndpointConnectionError:

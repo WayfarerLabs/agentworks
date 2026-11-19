@@ -249,39 +249,61 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     If an actual authorize fails partway through, or is interrupted, all
     planned tuples are revoked best-effort before the failure propagates,
     holding interrupts until that is done (within one bound, as
-    :func:`remove_ssh_allow` does). An authorize cut short, by an interrupt
-    or by running out of time (a bounded client's
-    :class:`~agentworks.capabilities.vm_platform.wall_bound.CallTimedOut`),
-    may still land after that revoke, so it also warns naming the prefixes;
-    the warning goes out before the held interrupt is delivered, which would
-    otherwise skip it.
+    :func:`remove_ssh_allow` does). An authorize whose outcome is unknown
+    (see :func:`_authorize_outcome_unknown`) may still land after that
+    revoke, so it also warns naming its prefix; the warning goes out before
+    the held interrupt is delivered, which would otherwise skip it.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
+    in_flight: str | None = None  # the prefix whose authorize has not answered
     try:
         for prefix in prefixes:
+            in_flight = prefix
             try:
                 ec2.authorize_security_group_ingress(
                     GroupId=security_group_id,
                     IpPermissions=[_ssh_permission(prefix)],
                 )
             except Exception as exc:
-                if error_code(exc) == _DUPLICATE_PERMISSION_CODE:
-                    continue
-                raise
+                if error_code(exc) != _DUPLICATE_PERMISSION_CODE:
+                    raise
+            in_flight = None
     except BaseException as exc:
         # The route's own finally never runs for a poke that did not return, so this revoke cleans up.
         with interrupts_deferred():
             remove_ssh_allow_interruptibly(_removal_client(ec2), security_group_id, prefixes)
-            if not isinstance(exc, Exception) or isinstance(exc, CallTimedOut):
+            if in_flight is not None and _authorize_outcome_unknown(exc):
                 output.warn(
-                    f"An SSH allow for {', '.join(prefixes)} on security group '{security_group_id}' was cut "
-                    "short, so AWS may still add it after its revoke; check the group and revoke any TCP/22 rule "
-                    "for those sources."
+                    f"The SSH allow for {in_flight} on security group '{security_group_id}' was not confirmed, so "
+                    "AWS may still add it after its revoke; check the group for a TCP/22 rule from that source, and "
+                    "revoke it only once you have confirmed nothing else added it or relies on it, escalating "
+                    "otherwise."
                 )
         if isinstance(exc, Exception):
             raise wrap_ec2_error(exc) from exc
         raise
+
+
+def _authorize_outcome_unknown(exc: BaseException) -> bool:
+    """Whether an authorize that raised ``exc`` may still have added its rule.
+
+    Only a client error (4xx) answering the one request sent settles it.
+    botocore retries a lost or failed send on its own, so an answer after a
+    retry (``RetryAttempts`` above zero) may follow a send that landed; a
+    server error says nothing either way; and an interrupt, a bound running
+    out, or a transport failure leaves no answer at all.
+    """
+    from botocore.exceptions import ClientError
+
+    if not isinstance(exc, ClientError):
+        return True
+    metadata = exc.response.get("ResponseMetadata") if isinstance(exc.response, dict) else None
+    if not isinstance(metadata, dict):
+        return True
+    retries = metadata.get("RetryAttempts")
+    status = metadata.get("HTTPStatusCode")
+    return not (retries == 0 and isinstance(status, int) and 400 <= status < 500)
 
 
 def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
