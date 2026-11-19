@@ -234,6 +234,13 @@ def test_an_integration_s_invocation_holds_no_secret_outside_its_declared_ones_a
         assert not any(value in sanitized for value in (declared, undeclared, logged))
 
 
+@pytest.mark.parametrize("render", [repr, str])
+def test_a_redactor_s_text_form_shows_none_of_its_values(render):
+    held, added = f"held-{uuid4().hex}", f"added-{uuid4().hex}"
+    text = render(Redactor((held,)).including((added,)))
+    assert held not in text and added not in text
+
+
 def test_retirement_follows_desired_order_and_preserves_other_records(setup_case):
     db, inputs, invocation, events, _ = setup_case
     run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
