@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import signal
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -175,6 +176,7 @@ def test_a_create_azure_refused_is_removed_without_a_warning(
     assert adapter.methods == ["PUT"]
     assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
     assert deleted_at == [0.0]  # no poller to wait on
+    assert fakes.clock.now == 0.0  # nor a refusal to back off from
     assert captured_output.warnings == []
 
 
@@ -198,6 +200,65 @@ def test_a_create_azure_did_not_refuse_before_its_poller_is_named(
     assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
     assert deleted_at == [0.0]  # no poller to wait on
     _assert_named(captured_output, first)
+
+
+@pytest.mark.parametrize(
+    ("answer", "wait"),
+    [
+        ((429, {"Retry-After": "7"}, {"error": {"code": "Throttled"}}), 7.0),
+        ((429, {"Retry-After": "600"}, {"error": {"code": "Throttled"}}), azure_network._POKE_RETRY_AFTER_MAX_SECONDS),
+        (_refused(503), azure_network._POKE_RETRY_BACKOFF_SECONDS),
+    ],
+    ids=["retry-after", "retry-after-capped", "backoff"],
+)
+def test_an_answer_azure_core_would_retry_waits_before_the_next_attempt(
+    monkeypatch: pytest.MonkeyPatch, answer: _Answer, wait: float
+) -> None:
+    """The create goes unretried, so the poke gives its next attempt the wait azure-core would have."""
+    create, adapter = _through_sdk([answer])
+    fakes, _first, deleted_at = _poke_after(monkeypatch, create)
+
+    assert adapter.methods == ["PUT"]
+    assert deleted_at == [0.0]  # the cleanup comes first
+    assert fakes.clock.now == wait
+
+
+def test_the_backoff_grows_between_attempts_and_ends_with_the_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    create, adapter = _through_sdk([_refused(503)])
+    fakes = _install_fakes(monkeypatch)
+    monkeypatch.setattr(fakes.network.security_rules, "begin_create_or_update", create)
+
+    with pytest.raises(azure_network.AzureError):
+        poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+
+    assert adapter.methods == ["PUT"] * azure_network._POKE_ALLOCATION_ATTEMPTS
+    waits = [
+        azure_network._POKE_RETRY_BACKOFF_SECONDS * 2**n for n in range(azure_network._POKE_ALLOCATION_ATTEMPTS - 1)
+    ]
+    assert fakes.clock.now == sum(waits)
+
+
+def test_ctrl_c_ends_the_wait_before_the_next_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wait holds no interrupts: the failed attempt is already cleaned up, and nothing else is sent."""
+    create, adapter = _through_sdk([_refused(503)])
+    fakes = _install_fakes(monkeypatch)
+    rules = fakes.network.security_rules
+    monkeypatch.setattr(rules, "begin_create_or_update", create)
+    slept: list[float] = []
+
+    def _interrupted_sleep(seconds: float) -> None:
+        signal.raise_signal(signal.SIGINT)
+        slept.append(seconds)  # reached only if the interrupt was held
+
+    monkeypatch.setattr(fakes.clock, "sleep", _interrupted_sleep)
+
+    with pytest.raises(KeyboardInterrupt):
+        poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+
+    assert slept == []
+    assert adapter.methods == ["PUT"]
+    (deleted,) = rules.deletes()
+    assert deleted[2].startswith(TRANSIENT_ALLOW_RULE_PREFIX)
 
 
 def test_the_creates_status_reads_keep_azure_cores_retries(

@@ -40,7 +40,7 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agentworks import output
 
@@ -60,6 +60,7 @@ from agentworks.interrupts import interrupts_deferred
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from azure.core.rest import HttpResponse
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.network.models import SecurityRule
@@ -116,6 +117,15 @@ ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
 # the same slot surface as a create error; the loser re-lists and takes
 # the next free slot.
 _POKE_ALLOCATION_ATTEMPTS = 5
+
+# How long the poke waits before its next allocation when Azure answered a
+# create with a status azure-core would itself have retried, since the create
+# goes unretried: the Retry-After Azure sent, at most
+# _POKE_RETRY_AFTER_MAX_SECONDS, or else an exponential backoff on azure-core's
+# own 0.8s factor (0.8s, 1.6s, 3.2s, 6.4s). The cap keeps the waits between a
+# poke's five attempts to two minutes in all.
+_POKE_RETRY_AFTER_MAX_SECONDS = 30.0
+_POKE_RETRY_BACKOFF_SECONDS = 0.8
 
 # How long one Azure call on a route may take, each on its own: the reads and
 # long-running operations of the public-IP heal, the NSG convergence and the
@@ -422,18 +432,24 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     and takes the next free slot. After the attempts are exhausted the
     last error raises wrapped. Each create's request is sent once, without
     azure-core's retries, so an error Azure answered it with speaks for the
-    only try. Every create that did not return normally, whatever stopped
-    it, goes through :func:`_remove_unfinished_allow` before anything else
-    happens: only this function knows the nonce name, so that cleanup
-    cannot be left to the caller's exit path. A timeout or interrupt then
-    propagates; the route's own exit never runs for a poke that did not
-    return.
+    only try. An answer azure-core would have retried (a throttle, a
+    timeout, a server error) gets the wait it would have had before the next
+    attempt (see :func:`_back_off_after`), so a throttled or briefly
+    unavailable network provider does not burn every attempt at once.
+
+    Every create that did not return normally, whatever stopped it, goes
+    through :func:`_remove_unfinished_allow` before anything else happens:
+    only this function knows the nonce name, so that cleanup cannot be left
+    to the caller's exit path. A timeout or interrupt then propagates; the
+    route's own exit never runs for a poke that did not return.
     """
     from uuid import uuid4
 
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
     last_exc: Exception | None = None
-    for _attempt in range(_POKE_ALLOCATION_ATTEMPTS):
+    for attempt in range(_POKE_ALLOCATION_ATTEMPTS):
+        if last_exc is not None:
+            _back_off_after(last_exc, attempt)
         priority = _lowest_free_allow_priority(network, rg, name)
         rule_name = f"{TRANSIENT_ALLOW_RULE_PREFIX}{uuid4().hex[:8]}"
         poller: Any = None
@@ -457,6 +473,37 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
     raise wrap_azure_error(last_exc) from last_exc
+
+
+def _back_off_after(error: Exception, attempts: int) -> None:
+    """Wait before the poke's next allocation if azure-core would have retried the create ``error`` answered.
+
+    azure-core's own ``RetryPolicy`` decides, so the answers are the ones it
+    retries: 408, 429, 500, 502, 503, 504 and every status from 506, and any
+    error status carrying Retry-After. The wait honors Retry-After, capped at
+    ``_POKE_RETRY_AFTER_MAX_SECONDS``, and otherwise doubles from
+    ``_POKE_RETRY_BACKOFF_SECONDS`` with each of the ``attempts`` made. It
+    holds no interrupts, so Ctrl-C ends it; the failed attempt's cleanup is
+    already done.
+    """
+    from azure.core.exceptions import HttpResponseError
+    from azure.core.pipeline import PipelineContext, PipelineResponse
+    from azure.core.pipeline.policies import RetryPolicy
+
+    if not isinstance(error, HttpResponseError) or error.response is None:
+        return
+    policy = RetryPolicy()
+    response = cast("HttpResponse", error.response)  # what the generated clients raise with
+    answer = PipelineResponse(response.request, response, PipelineContext(None))
+    if not policy.is_retry(policy.configure_retries({}), answer):
+        return
+    retry_after = policy.get_retry_after(answer)
+    if retry_after is not None:
+        wait = min(retry_after, _POKE_RETRY_AFTER_MAX_SECONDS)
+    else:
+        wait = _POKE_RETRY_BACKOFF_SECONDS * 2 ** (attempts - 1)
+    output.info(f"Azure answered the create with {error.status_code}; trying again in {wait:.1f}s...")
+    time.sleep(wait)
 
 
 def _remove_unfinished_allow(
