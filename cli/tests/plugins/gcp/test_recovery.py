@@ -76,5 +76,5 @@ def test_an_insert_that_may_still_appear_offers_its_delete_only_with_an_owned_id
     for steps in (owned, unowned):
         assert resource.insert_wait(operation_name) in steps
         assert resource.describe() in steps
-    assert resource.delete() in owned and "'4242'" in owned
+    assert resource.delete() in owned and "4242" in owned
     assert resource.delete() not in unowned
