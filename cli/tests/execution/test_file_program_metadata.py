@@ -114,8 +114,9 @@ _RECORD_STAGING = (
 def _private(mode: int) -> bool:
     """Whether only the owner can open a file: no group or other mode bits.
 
-    That covers an access ACL too, such as a file created under a directory's default ACL carries even at mode 0600:
-    Linux reports the ACL's mask, which bounds every entry but the owner's, as the group bits.
+    That covers an access ACL too, such as the one a file created under a directory's default ACL
+    carries: Linux reports its mask, which bounds the owning group and every named entry, as the
+    group bits, and the other bits are the ACL's other entry.
     """
     return not stat.S_IMODE(mode) & 0o077
 
