@@ -16,7 +16,7 @@ import boto3
 import pytest
 from botocore.awsrequest import AWSResponse
 from botocore.config import Config
-from botocore.exceptions import ConnectionClosedError, ReadTimeoutError
+from botocore.exceptions import ClientError, ConnectionClosedError, ReadTimeoutError
 
 from agentworks.errors import AgentworksError
 from agentworks.plugins.aws.network import poke_ssh_allow
@@ -52,13 +52,13 @@ def _response(status: int, code: str | None) -> AWSResponse:
     return AWSResponse(_ENDPOINT, status, {}, _Body(body))
 
 
-def _ec2(authorize: list[_Answer]) -> Any:
-    """A real EC2 client allowing one retry, its authorize sends answered by ``authorize`` in order.
+def _ec2(authorize: list[_Answer], *, attempts: int = 2) -> Any:
+    """A real EC2 client making up to ``attempts`` sends, its authorize sends answered by ``authorize`` in order.
 
     Every revoke succeeds (its dry run answering ``DryRunOperation``).
     """
     session = boto3.session.Session(aws_access_key_id="AKIDEXAMPLE", aws_secret_access_key="x", region_name="us-east-1")
-    client = session.client("ec2", config=Config(retries={"mode": "standard", "total_max_attempts": 2}))
+    client = session.client("ec2", config=Config(retries={"mode": "standard", "total_max_attempts": attempts}))
     answers = list(authorize)
 
     def _answer(request: Any, **_kwargs: Any) -> AWSResponse:
@@ -127,6 +127,55 @@ def test_the_warning_names_only_the_prefix_whose_authorize_went_unanswered(
 
     with pytest.raises(AgentworksError):
         poke_ssh_allow(_ec2([(200, None), _timeout(), _timeout()]), _GROUP, [_FIRST, _SECOND])
+
+    (warning,) = warnings
+    assert _SECOND in warning
+    assert _FIRST not in warning
+
+
+def test_a_server_error_answering_the_only_send_warns(monkeypatch: pytest.MonkeyPatch, warnings: list[str]) -> None:
+    """A 5xx does not say EC2 never applied the request."""
+    _no_backoff(monkeypatch)
+
+    with pytest.raises(AgentworksError):
+        poke_ssh_allow(_ec2([(500, "InternalError")], attempts=1), _GROUP, [_FIRST])
+
+    (warning,) = warnings
+    assert _FIRST in warning
+
+
+class _Authorizes:
+    """An EC2 client whose dry runs and revokes succeed, and whose authorizes answer from ``answers`` in order."""
+
+    def __init__(self, answers: list[BaseException | None]) -> None:
+        self.answers = answers
+
+    def revoke_security_group_ingress(self, **kwargs: Any) -> dict[str, Any]:
+        if kwargs.get("DryRun"):
+            raise ClientError({"Error": {"Code": "DryRunOperation"}}, "RevokeSecurityGroupIngress")
+        return {}
+
+    def authorize_security_group_ingress(self, **_kwargs: Any) -> dict[str, Any]:
+        answer = self.answers.pop(0)
+        if answer is not None:
+            raise answer
+        return {}
+
+
+def test_an_error_without_botocore_s_retry_record_warns(warnings: list[str]) -> None:
+    """Without ``RetryAttempts`` nothing shows the refusal answered the only send."""
+    refused = ClientError({"Error": {"Code": "UnauthorizedOperation"}}, "AuthorizeSecurityGroupIngress")
+
+    with pytest.raises(AgentworksError):
+        poke_ssh_allow(_Authorizes([refused]), _GROUP, [_FIRST])
+
+    (warning,) = warnings
+    assert _FIRST in warning
+
+
+def test_an_interrupt_names_only_the_prefix_whose_authorize_it_cut_short(warnings: list[str]) -> None:
+    with pytest.raises(KeyboardInterrupt):
+        poke_ssh_allow(_Authorizes([None, KeyboardInterrupt()]), _GROUP, [_FIRST, _SECOND])
 
     (warning,) = warnings
     assert _SECOND in warning

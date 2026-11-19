@@ -292,7 +292,11 @@ def _authorize_outcome_unknown(exc: BaseException) -> bool:
     botocore retries a lost or failed send on its own, so an answer after a
     retry (``RetryAttempts`` above zero) may follow a send that landed; a
     server error says nothing either way; and an interrupt, a bound running
-    out, or a transport failure leaves no answer at all.
+    out, or a transport failure leaves no answer at all. An error botocore
+    raises before sending anything (``ParamValidationError``,
+    ``NoCredentialsError``) counts as unknown too, so it over-warns; the dry
+    runs before the first authorize have already sent the same permission
+    shape with the same credential.
     """
     from botocore.exceptions import ClientError
 
