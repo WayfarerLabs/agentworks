@@ -382,9 +382,9 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     swallowed) before moving on: the create may have succeeded
     server-side even though the client-side wait failed, and only this
     function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path. A create Azure refused outright
-    (``HttpResponseError`` before any poller) cannot land, so its rule
-    goes at once. Any other unfinished create (its wait failed, ran out
+    caller's exit path. A create Azure refused outright (a client error
+    before any poller, see :func:`_refused_outright`) cannot land, so its
+    rule goes at once. Any other unfinished create (its wait failed, ran out
     or was interrupted, or its request got no answer) may still land, so
     it is given time to settle before its rule is removed, with a warning
     naming the rule when it has not. A timeout or interrupt then
@@ -392,8 +392,6 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     return.
     """
     from uuid import uuid4
-
-    from azure.core.exceptions import HttpResponseError
 
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
     last_exc: Exception | None = None
@@ -414,7 +412,7 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
             _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller)
             raise
         except Exception as exc:
-            if poller is None and isinstance(exc, HttpResponseError):
+            if poller is None and _refused_outright(exc):
                 # Azure refused the request, so nothing it asked for can land.
                 remove_ssh_allow(network, rg, name, rule_name, prefixes)
             else:
@@ -429,6 +427,22 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
     raise wrap_azure_error(last_exc) from last_exc
+
+
+def _refused_outright(exc: Exception) -> bool:
+    """Whether ``exc`` is Azure refusing a request, so nothing it asked for can land.
+
+    Only a client error counts. azure-core retries a timeout, a throttle
+    and most server errors before raising, so a final 5xx (or 408, 429)
+    can follow an earlier try Azure is still carrying out, and a 409 can
+    mean another operation on the same resource is in progress.
+    """
+    from azure.core.exceptions import HttpResponseError
+
+    if not isinstance(exc, HttpResponseError):
+        return False
+    status = exc.status_code
+    return isinstance(status, int) and 400 <= status < 500 and status not in (408, 409, 429)
 
 
 def _remove_unfinished_allow(

@@ -77,6 +77,12 @@ _DETECTED_PREFIX = f"{_DETECTED}/32"
 _REAL_DETECT_EGRESS_IP = ssh_exposure.detect_egress_ip
 
 
+def _http_error(status: int) -> HttpResponseError:
+    error = HttpResponseError(f"status {status}")
+    error.status_code = status
+    return error
+
+
 @pytest.fixture(autouse=True)
 def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test runs with detection stubbed (never a live probe) and a
@@ -801,16 +807,27 @@ class TestTransientRoute:
     @pytest.mark.parametrize(
         ("failure", "warns"),
         [
-            (HttpResponseError("Conflict: priority in use"), False),
+            (_http_error(400), False),
+            (_http_error(409), True),
+            (_http_error(504), True),
+            (HttpResponseError("no status"), True),
+            # azure-core raises this when its last try sent nothing, but an earlier retried try may have.
             (ServiceRequestError("connection reset"), True),
             (ServiceResponseError("read timed out"), True),
         ],
-        ids=["service-refused", "request-unanswered", "response-unread"],
+        ids=[
+            "client-refused",
+            "conflict",
+            "gateway-timeout",
+            "no-status",
+            "request-unanswered",
+            "response-unread",
+        ],
     )
     def test_a_poke_whose_create_returns_no_poller_warns_only_when_azure_did_not_answer(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, failure: Exception, warns: bool
     ) -> None:
-        """A refused create cannot land; one whose request went unanswered may have reached Azure."""
+        """Only a client error is a refusal that cannot land; anything else may have reached Azure."""
 
         def _raises(_name: str, _rule: object) -> _Poller:
             raise failure
@@ -1125,6 +1142,8 @@ class TestRouteOperationsAreBounded:
     def test_a_state_that_cannot_be_read_counts_as_unsettled_and_the_rule_still_goes(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
+        """A failed read of the reported state never skips the removal; it warns instead."""
+
         class _UnreadablePoller(_Poller):
             def __init__(self, value: object) -> None:
                 super().__init__(value, finishes=False)

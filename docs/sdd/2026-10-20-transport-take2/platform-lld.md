@@ -1088,10 +1088,12 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   since polling also ends on a transport error while the create runs, and on CPython 3.12 a join
   that Ctrl-C cut short makes every later join return at once. Unless Azure reported a final state,
   a warning names the rule for removal by hand. A create that raised before returning a poller is
-  removed at once: silently when Azure answered with an error, since nothing can land, and with that
-  warning when the request got no answer. GCP's firewall insert already had a bound. Proxmox: the
-  identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the agent wait's
-  `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at spawn.
+  removed at once: silently when Azure refused it with a client error, since nothing can land, and
+  with that warning otherwise, since azure-core retries a timeout, a throttle and a server error
+  before raising, and a 409 can mean another operation is in progress. GCP's firewall insert already
+  had a bound. Proxmox: the identity check's reads, each at most `REQUEST_TIMEOUT_SECONDS`, and the
+  agent wait's `AGENT_WAIT_SECONDS`. Local-process channels (Lima, Remote Lima, WSL2) dispatch at
+  spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
   420-second budget, now counted with the agent waits outside each attempt's deadline, and retries

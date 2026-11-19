@@ -348,13 +348,13 @@ def add_sessions(
         )
 
         for member in new_members:
-            validate_console_window(db, member, vm_row)
             if db.get_console_session(console_name, member.session_name) is not None:
                 raise AlreadyExistsError(
                     f"session '{member.session_name}' is already a member of console '{console_name}'",
                     entity_kind="console-member",
                     entity_name=member.session_name,
                 )
+            validate_console_window(db, member, vm_row)
 
         registry = load_request_registry(config, live_database=db)
         sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
