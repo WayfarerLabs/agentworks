@@ -17,6 +17,7 @@ if sys.platform == "win32":  # pragma: no cover - platform guard
         allow_module_level=True,
     )
 
+import contextlib
 import fcntl
 import os
 import shlex
@@ -25,6 +26,7 @@ import signal
 import stat
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from agentworks.capabilities.base import RunContext
@@ -60,6 +62,24 @@ from agentworks.ssh import SSHError, SSHResult
 
 def _ctx(values: dict[str, str], allowed: tuple[str, ...]) -> RunContext:
     return RunContext(secrets=ScopedSecrets(values, allowed))
+
+
+# Bounds the test's own waits on helpers, launchers and reconcilers only so a broken run fails
+# instead of hanging. Healthy runs end them in milliseconds; a loaded host can delay a process by
+# seconds.
+HANG_GUARD_SECONDS = 30
+# Bounds a runtime path whose waits the test shortened to 0.1 s, or that should not wait at all: room
+# for process startup on a loaded host, yet under every production wait it stands in for (the 10 s
+# helper timeout, the launcher's 10 s lock wait and the reconciler's 30 s lock wait), so a path that
+# fell back to one of those still fails.
+SHORTENED_WAIT_BOUND_SECONDS = 5
+
+
+def _wait_until(condition: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + HANG_GUARD_SECONDS
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert condition()
 
 
 def _install(home: Path, state: UserCredentialState) -> subprocess.CompletedProcess[str]:
@@ -382,7 +402,7 @@ def test_runtime_bounds_managed_helper_execution(tmp_path: Path) -> None:
     elapsed = time.monotonic() - started
     assert response.returncode != 0
     assert response.stderr == "bounded failure\n"
-    assert elapsed < 1
+    assert elapsed < SHORTENED_WAIT_BOUND_SECONDS
 
 
 def test_dispatcher_has_two_production_managed_helper_timeouts() -> None:
@@ -440,7 +460,7 @@ def test_runtime_no_match_and_non_get_operations_serve_no_value(tmp_path: Path) 
     assert "secret" not in erase.stderr
     started = time.monotonic()
     unknown = _query(tmp_path, "x" * 100_000, operation="unknown")
-    assert time.monotonic() - started < 1
+    assert time.monotonic() - started < SHORTENED_WAIT_BOUND_SECONDS
     assert unknown.returncode == 0
     assert unknown.stdout == ""
     assert unknown.stderr == ""
@@ -720,13 +740,10 @@ def test_helper_and_reconciler_share_repaired_lock_identity(tmp_path: Path) -> N
     assert reconcile.stdin is not None
     reconcile.stdin.write(_state_archive(new))
     reconcile.stdin.close()
-    deadline = time.monotonic() + 2
-    while not critical.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert critical.exists()
+    _wait_until(critical.exists)
 
     helper = _query(tmp_path, _request("example.com"))
-    assert reconcile.wait(timeout=2) == 0
+    assert reconcile.wait(timeout=HANG_GUARD_SECONDS) == 0
     assert helper.returncode == 0
     assert helper.stdout == "username=user\npassword=new\n\n"
     assert not overlap.exists()
@@ -774,10 +791,7 @@ def test_concurrent_reconcilers_share_repaired_lock_identity(tmp_path: Path) -> 
     assert first.stdin is not None
     first.stdin.write(_state_archive(first_state))
     first.stdin.close()
-    deadline = time.monotonic() + 2
-    while not critical.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert critical.exists()
+    _wait_until(critical.exists)
     second = subprocess.run(
         ["bash", "-c", instrument(_RECONCILE_SCRIPT, delay=False).replace("@DESIRED@", "present")],
         input=_state_archive(second_state),
@@ -786,7 +800,7 @@ def test_concurrent_reconcilers_share_repaired_lock_identity(tmp_path: Path) -> 
         capture_output=True,
         check=False,
     )
-    assert first.wait(timeout=2) == 0
+    assert first.wait(timeout=HANG_GUARD_SECONDS) == 0
     assert second.returncode == 0, second.stderr
     assert not overlap.exists()
     assert external_lock.read_text() == "outside"
@@ -865,7 +879,7 @@ def test_helper_and_reconciler_lock_waits_are_bounded(tmp_path: Path) -> None:
         blocked_helper = _query(tmp_path, _request("example.com"))
         elapsed = time.monotonic() - started
         assert blocked_helper.returncode != 0
-        assert elapsed < 1
+        assert elapsed < SHORTENED_WAIT_BOUND_SECONDS
 
     with lock_path.open("r+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
@@ -881,7 +895,7 @@ def test_helper_and_reconciler_lock_waits_are_bounded(tmp_path: Path) -> None:
         )
         elapsed = time.monotonic() - started
         assert blocked_reconcile.returncode != 0
-        assert elapsed < 1
+        assert elapsed < SHORTENED_WAIT_BOUND_SECONDS
 
 
 def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_path: Path) -> None:
@@ -918,14 +932,11 @@ def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_pat
             launcher.stdin.close()
             launchers.append(launcher)
 
-        deadline = time.monotonic() + 2
-        while not all(reached_stable_lock(launcher) for launcher in launchers) and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert all(reached_stable_lock(launcher) for launcher in launchers)
+        _wait_until(lambda: all(reached_stable_lock(launcher) for launcher in launchers))
 
         for launcher in launchers:
             os.killpg(launcher.pid, signal.SIGTERM)
-            assert launcher.wait(timeout=2) < 0
+            assert launcher.wait(timeout=HANG_GUARD_SECONDS) < 0
             assert launcher.stdout is not None and launcher.stderr is not None
             launcher.stdout.close()
             launcher.stderr.close()
@@ -938,10 +949,7 @@ def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_pat
             text=True,
             env=os.environ | {"HOME": str(tmp_path)},
         )
-        deadline = time.monotonic() + 2
-        while not reached_stable_lock(reconcile) and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert reached_stable_lock(reconcile)
+        _wait_until(lambda: reached_stable_lock(reconcile))
 
         parent_fd = os.open(tmp_path / ".agentworks", os.O_RDONLY)
         try:
@@ -950,7 +958,7 @@ def test_launchers_share_parent_handoff_while_reconciliation_is_excluded(tmp_pat
         finally:
             os.close(parent_fd)
 
-    assert reconcile.wait(timeout=2) == 0
+    assert reconcile.wait(timeout=HANG_GUARD_SECONDS) == 0
 
 
 def test_desired_state_representations_and_scripts_do_not_contain_stored_values() -> None:
@@ -1255,12 +1263,9 @@ def test_killed_managed_helper_leaves_no_credential_bearing_runtime_file(tmp_pat
     assert process.stdin is not None
     process.stdin.write(_request("example.com"))
     process.stdin.close()
-    deadline = time.monotonic() + 2
-    while not marker.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert marker.exists()
+    _wait_until(marker.exists)
     os.killpg(process.pid, signal.SIGKILL)
-    assert process.wait(timeout=2) < 0
+    assert process.wait(timeout=HANG_GUARD_SECONDS) < 0
     assert list(runtime_tmp.iterdir()) == []
     managed_root = tmp_path / ".agentworks/git-credentials"
     assert all(b"abnormal-token" not in path.read_bytes() for path in managed_root.rglob("*") if path.is_file())
@@ -1286,12 +1291,18 @@ def test_escaped_helper_descendant_cannot_hold_response_capture_open(tmp_path: P
         result = _query(tmp_path, _request("example.com"))
         elapsed = time.monotonic() - started
     finally:
+        # On a loaded host the descendant can start late or not at all under the shortened timeout,
+        # or take SIGPIPE writing to the closed capture and be gone already; clean up what is left.
+        pid = ""
         deadline = time.monotonic() + 1
-        while not escaped_pid.exists() and time.monotonic() < deadline:
+        while not pid and time.monotonic() < deadline:
+            with contextlib.suppress(FileNotFoundError):
+                pid = escaped_pid.read_text().strip()
             time.sleep(0.01)
-        if escaped_pid.exists():
-            os.killpg(int(escaped_pid.read_text()), signal.SIGKILL)
-    assert elapsed < 1
+        if pid:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(int(pid), signal.SIGKILL)
+    assert elapsed < SHORTENED_WAIT_BOUND_SECONDS
     assert result.returncode != 0
     assert result.stdout == ""
     assert result.stderr == "fixed bounded failure\n"
@@ -1302,8 +1313,17 @@ def test_escaped_helper_descendant_cannot_hold_response_capture_open(tmp_path: P
 @pytest.mark.parametrize("replacement", ["stored", "empty"])
 def test_managed_helper_open_descriptor_survives_reconciliation(tmp_path: Path, replacement: str) -> None:
     marker = tmp_path / "started"
+    release = tmp_path / "release"
+    # The helper keeps its generation open until the test releases it, after reconciliation. Its loop
+    # gives up after 30 s so a broken run cannot leave it behind; the dispatcher's 10 s timeout ends it
+    # sooner.
     helper = ManagedHelper(
-        f"#!/bin/sh\ntouch {marker}\nsleep 1\nprintf 'username=user\\npassword=old\\n\\n'\n".encode(),
+        (
+            "#!/bin/sh\n"
+            f"touch {marker}\n"
+            f"i=0; while [ ! -e {release} ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n"
+            "printf 'username=user\\npassword=old\\n\\n'\n"
+        ).encode(),
         "fixed failure",
     )
     old_state = build_user_credential_state([("runtime", (HttpsCredentialScope("example.com"),), helper)])
@@ -1324,16 +1344,16 @@ def test_managed_helper_open_descriptor_survives_reconciliation(tmp_path: Path, 
     assert process.stdin is not None
     process.stdin.write(_request("example.com"))
     process.stdin.close()
-    deadline = time.monotonic() + 2
-    while not marker.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert marker.exists()
-    started = time.monotonic()
-    assert _install(tmp_path, new_state).returncode == 0
-    assert time.monotonic() - started < 0.8
+    _wait_until(marker.exists)
+    try:
+        assert _install(tmp_path, new_state).returncode == 0
+        # Reconciliation completed without waiting for the helper, which still holds the old generation.
+        assert process.poll() is None
+    finally:
+        release.touch()
     assert process.stdout is not None
     assert process.stdout.read() == "username=user\npassword=old\n\n"
-    assert process.wait(timeout=2) == 0
+    assert process.wait(timeout=HANG_GUARD_SECONDS) == 0
     if replacement == "stored":
         assert _query(tmp_path, _request("example.com")).stdout == "username=user\npassword=new\n\n"
     else:

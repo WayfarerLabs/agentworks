@@ -11,6 +11,7 @@ import ast
 import io
 import os
 import shlex
+import signal
 import subprocess
 import tempfile
 import threading
@@ -36,6 +37,8 @@ from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from agentworks.execution.results import Result
 
 KERNEL_STRING_LIMIT = 131_071
 REQUEST_DEADLINE = 60
@@ -293,12 +296,30 @@ def bash_child_reads_no_startup_file(lane: Lane) -> None:
     assert lane.run(with_socket).stdout == b"none\n"
 
 
-def background_child_holds_both_streams(lane: Lane) -> None:
+def run_over_a_held_streams_child(lane: Lane, *, elevated: bool = False) -> Result:
+    """Run ``echo done`` with a background child that holds both streams open past the run's return.
+
+    The child runs while its hold file exists, for up to two minutes, past the request deadline, so a
+    launcher that waited for the streams to close would run into the deadline instead of completing.
+    The vector releases it by removing the hold file's directory, so whatever removes that directory
+    first, this vector or the lane's cleanup, ends the child.
+    """
+    directory = lane.make_dir({"hold": ""})
+    hold = shlex.quote(f"{directory}/hold")
+    child = f"(i=0; while [ -e {hold} ] && [ $i -lt 1200 ]; do sleep 0.1; i=$((i+1)); done) &\n"
     started = time.monotonic()
+    try:
+        result = lane.run(script(f"{child}echo done", elevated=elevated))
+    finally:
+        lane.remove_dir(directory)
+    # Generous for a loaded host, and still short of a launcher that lingers on the child's streams.
+    assert time.monotonic() - started < 15
+    return result
 
-    result = lane.run(script("sleep 5 &\necho done"))
 
-    assert time.monotonic() - started < 4
+def background_child_holds_both_streams(lane: Lane) -> None:
+    result = run_over_a_held_streams_child(lane)
+
     assert result.completion == Completed(0)
     assert result.stdout == b"done\n"
 
@@ -320,41 +341,64 @@ def deadline(lane: Lane) -> None:
             spawned.append(self)  # type: ignore[arg-type]
 
     lane.monkeypatch.setattr(subprocess, "Popen", Recording)
-    started = time.monotonic()
 
     result = lane.run(cmd("sleep", "3", deadline=0.5))
 
-    assert time.monotonic() - started < 3
     assert result.completion == Unknown(UnknownReason.DEADLINE)
     assert spawned
-    assert all(process.poll() is not None for process in spawned)
+    # Killed at the deadline rather than left to finish its sleep. The reap after the kill is bounded,
+    # so on a loaded host the client can still be exiting when the request returns.
+    assert all(process.wait(timeout=30) == -signal.SIGKILL for process in spawned)
 
 
-class SlowSink(io.BytesIO):
-    """An operator stream that is slow to take output, so a pipe stays full while the guest finishes."""
+class GatedSink(io.BytesIO):
+    """An operator stream that takes nothing until ``gate`` opens, so every buffer behind it fills."""
+
+    def __init__(self, gate: Callable[[], None]) -> None:
+        super().__init__()
+        self._gate = gate
 
     def write(self, data: object, /) -> int:  # type: ignore[override]
-        time.sleep(0.2)
+        self._gate()
         return super().write(data)  # type: ignore[arg-type]
 
 
 def payload_leaves_the_shared_streams_non_blocking_and_full(lane: Lane) -> None:
-    # L is the regression guard: its pump is in this process and the slow sink keeps the pipes full.
-    # S and V drain too fast through sshd and the network to catch a lost closing marker.
     # The payload shares descriptors 1 and 2 with the launcher, so what it does to them applies to the
-    # launcher's closing markers. Both pipes are full when it exits, and the reader is slow.
+    # launcher's closing markers. It leaves both non-blocking and full: the operator's streams take
+    # nothing until it has filled them and said so, which on S and V also fills sshd's channel window
+    # and the socket buffers behind the guest's pipes. The streams then wait while the payload exits
+    # and the launcher writes its markers into the full pipes, and only then drain.
+    done = f"{lane.make_dir()}/done"
+    # sshd keeps reading the guest's pipes while its own buffers have room, so a full pipe can drain
+    # again; the payload refills both until a pause lets nothing more in.
     program = (
-        "import os\n"
-        "for fd in (1, 2):\n"
-        "    os.set_blocking(fd, False)\n"
+        "import os, time\n"
+        "def fill(fd):\n"
+        "    written = 0\n"
         "    for chunk in (b'x' * 4096, b'x'):\n"
         "        try:\n"
         "            while True:\n"
-        "                os.write(fd, chunk)\n"
+        "                written += os.write(fd, chunk)\n"
         "        except BlockingIOError:\n"
         "            pass\n"
+        "    return written\n"
+        "for fd in (1, 2):\n"
+        "    os.set_blocking(fd, False)\n"
+        "while fill(1) + fill(2):\n"
+        "    time.sleep(0.3)\n"
+        f"open({done!r}, 'w').close()\n"
     )
-    out, err = SlowSink(), SlowSink()
+    opened = False
+
+    def gate() -> None:
+        nonlocal opened
+        if not opened:
+            assert lane.wait_present(done, seconds=30)
+            time.sleep(0.5)
+            opened = True
+
+    out, err = GatedSink(gate), GatedSink(gate)
 
     status = lane.access.stream(cmd("python3", "-c", program), stdin=None, stdout=out, stderr=err)
 
@@ -411,18 +455,16 @@ def handover_whose_second_connection_never_arrives_leaves_nothing(lane: Lane) ->
 
 def handover_gives_up_after_its_wait(lane: Lane) -> None:
     lane.shorten_handover_wait(1)
-    token = lane.handover_token()
+    directory = f"/tmp/agw-handover-{lane.handover_token()}"
 
     def never_connects(argv: list[str], half: object) -> int:
-        time.sleep(2.5)  # past the launcher's wait, with the parking connection still open
+        # The parking connection stays open meanwhile, so only the launcher's own wait can remove its
+        # directory. 15 s leaves a loaded host room past the 1 s wait, and is half the default 30 s.
+        assert lane.wait_gone(directory, seconds=15)
         return 0
 
     with lane.terminal(behavior=never_connects):
-        started = time.monotonic()
         assert lane.access.attach(LoginShell()) == 0
-
-    assert time.monotonic() - started < 15
-    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
 
 
 def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: Lane) -> None:
@@ -713,11 +755,9 @@ def elevated_under_the_default_sudoers(lane: Lane) -> None:
 
 def elevated_background_child_holds_both_streams(lane: Lane) -> None:
     needs_sudo(lane)
-    started = time.monotonic()
 
-    result = lane.run(script("sleep 5 &\necho done", elevated=True))
+    result = run_over_a_held_streams_child(lane, elevated=True)
 
-    assert time.monotonic() - started < 4
     assert result.completion == Completed(0)
     assert result.stdout == b"done\n"
 
