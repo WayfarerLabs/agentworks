@@ -36,7 +36,6 @@ from ._helpers import (
     SessionSpec,
     _dedupe_specs,
     _require_console,
-    _verify_session_on_vm,
     _vm_sessions,
     default_shells,
     parse_session_spec,
@@ -49,6 +48,7 @@ from .attach import (
     _pane_runs_as_admin,
     _session_linux_user,
 )
+from .runtime import validate_console_window
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
@@ -169,7 +169,8 @@ def create_console(
                 entity_kind="console",
                 entity_name=name,
             )
-        if db.get_vm(vm_name) is None:
+        vm_row = db.get_vm(vm_name)
+        if vm_row is None:
             raise NotFoundError(
                 f"VM '{vm_name}' not found",
                 entity_kind="vm",
@@ -178,8 +179,6 @@ def create_console(
 
         specs = [parse_session_spec(s) for s in session_specs]
         _dedupe_specs(specs)
-        for spec in specs:
-            _verify_session_on_vm(db, spec.name, vm_name)
 
         if fill_all:
             explicit_names = {s.name for s in specs}
@@ -221,6 +220,8 @@ def create_console(
                 for position, spec in enumerate(specs)
             ),
         )
+        for member in definition.members:
+            validate_console_window(db, member, vm_row)
         registry = load_request_registry(config, live_database=db)
         output.info(f"Checking console '{name}' runtime...")
         from contextlib import closing
@@ -337,22 +338,25 @@ def add_sessions(
 
         specs = [parse_session_spec(s) for s in session_specs]
         _dedupe_specs(specs)
-
-        for spec in specs:
-            _verify_session_on_vm(db, spec.name, console.vm_name)
-            if db.get_console_session(console_name, spec.name) is not None:
-                raise AlreadyExistsError(
-                    f"session '{spec.name}' is already a member of console '{console_name}'",
-                    entity_kind="console-member",
-                    entity_name=spec.name,
-                )
-
-        registry = load_request_registry(config, live_database=db)
+        vm_row = db.get_vm(console.vm_name)
+        if vm_row is None:
+            raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
         # The members to record; the transaction below settles their positions.
         new_members = tuple(
             ConsoleSessionRow(console_name, spec.name, position, default_shells(spec.shells))
             for position, spec in enumerate(specs)
         )
+
+        for member in new_members:
+            validate_console_window(db, member, vm_row)
+            if db.get_console_session(console_name, member.session_name) is not None:
+                raise AlreadyExistsError(
+                    f"session '{member.session_name}' is already a member of console '{console_name}'",
+                    entity_kind="console-member",
+                    entity_name=member.session_name,
+                )
+
+        registry = load_request_registry(config, live_database=db)
         sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
 
         # Eager-prompting orchestration: when any spec carries shells > 0 the
@@ -366,11 +370,9 @@ def add_sessions(
         # values dict below still feeds the live-attach path, whose windows
         # then have no panes to compose env for.
         secret_values: dict[str, str] = {}
-        vm_row = db.get_vm(console.vm_name)
         new_shell_targets: list[SecretTarget] = []
-        if vm_row is not None:
-            for member in new_members:
-                new_shell_targets.extend(_mc._member_secret_targets(db, registry, vm=vm_row, member=member))
+        for member in new_members:
+            new_shell_targets.extend(_mc._member_secret_targets(db, registry, vm=vm_row, member=member))
         if new_shell_targets:
             from agentworks.secrets import resolve_for_command
 

@@ -337,6 +337,67 @@ def test_restore_of_a_missing_window_refuses_its_member_socket_before_resolving_
     assert model.window_names(CON) == ["a"]
 
 
+@pytest.mark.parametrize("fill_all", [False, True], ids=["named", "all"])
+def test_create_refuses_a_member_socket_before_changing_anything(
+    db: Database,
+    console_guest_factory: Callable[..., _ScriptedGuest],
+    monkeypatch: pytest.MonkeyPatch,
+    fill_all: bool,
+) -> None:
+    """A build would skip the window only after staging, so each member's binding, ``--all``'s too, is checked first."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    _misbind_socket(db, "b")
+    guest = console_guest_factory(TmuxModel())
+    monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **k: pytest.fail("built pane targets"))
+    for step in ("prepare_vm_runtime", "activate_vm_runtime"):
+        monkeypatch.setattr(f"agentworks.vms.manager.runtime.{step}", lambda *a, **k: pytest.fail("started the VM"))
+    before = db._conn.total_changes
+    boundary = _Boundary(db, guest, monkeypatch)
+
+    with pytest.raises(StateError):
+        mc.create_console(
+            db,
+            _StubConfig(),
+            name="con",
+            vm_name="vm1",
+            session_specs=["a+1"] if fill_all else ["a+1", "b"],
+            fill_all=fill_all,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert boundary.events == []
+    assert guest.commands == []
+    assert db._conn.total_changes == before
+    assert db.get_console("con") is None
+
+
+def test_add_sessions_refuses_a_member_socket_before_changing_anything(
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A running console would get the new window live, so its binding is checked before anything is recorded."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b", "c"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    _misbind_socket(db, "c")
+    model = TmuxModel()
+    model.seed_session(CON, "a")
+    guest = console_guest_factory(model)
+    monkeypatch.setattr(mc, "_member_secret_targets", lambda *a, **k: pytest.fail("built pane targets"))
+    before = db._conn.total_changes
+    boundary = _Boundary(db, guest, monkeypatch)
+
+    with pytest.raises(StateError):
+        mc.add_sessions(
+            db, _StubConfig(), console_name="con", session_specs=["b+1", "c"], interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert boundary.events == []
+    assert guest.commands == []
+    assert db._conn.total_changes == before
+    assert [member.session_name for member in db.list_console_sessions("con")] == ["a"]
+
+
 def test_a_vm_without_an_address_resolves_nothing_and_dispatches_nothing(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
