@@ -38,8 +38,11 @@ priority band [100, 199] under the deny:
 from __future__ import annotations
 
 import contextlib
+import contextvars
+import threading
 import time
 from collections.abc import Sequence
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from agentworks import output
@@ -127,26 +130,33 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 _POKE_RETRY_AFTER_MAX_SECONDS = 30.0
 _POKE_RETRY_BACKOFF_SECONDS = 0.8
 
-# How long one Azure call on a route may take, each on its own: the reads and
-# long-running operations of the public-IP heal, the NSG convergence and the
-# poke that open it, and the removal that closes it. The route opens before the
-# script's deadline starts, so the run_as_root contract needs that bounded by
-# itself. The removal runs with interrupts deferred, so a Ctrl-C can wait this
-# long for it, and up to _UNFINISHED_CREATE_SETTLE_SECONDS longer when a poke's
-# create had not finished. GCP bounds its firewall operations the same way.
+# How long one Azure call on a route may take, each on its own and on the wall
+# clock (see _bounded_route_call): the reads and long-running operations of the
+# public-IP heal, the NSG convergence and the poke that open it, and the removal
+# that closes it. The route opens before the script's deadline starts, so the
+# run_as_root contract needs that bounded by itself. The removal runs with
+# interrupts deferred, so a Ctrl-C can wait this long for it, and when a poke's
+# accepted create had not finished, up to _UNFINISHED_CREATE_SETTLE_SECONDS
+# longer before it: 360s in all. GCP bounds its firewall operations the same way.
 _OPERATION_TIMEOUT_SECONDS = 300.0
 
 # The azure-core per-call bounds on every read a route call sends, and every
-# operation's first request, since the client's own (300s to read, several
-# retries with backoff) would let one request outlast _OPERATION_TIMEOUT_SECONDS
-# many times over: a try gives up after 10s without a connection or 60s without
-# data, and is retried at most twice, so three tries and azure-core's backoff of
-# a few seconds between them end well inside the bound, and a long-running
-# operation's wait takes what remains of it. A wait Azure asks for between tries
-# (Retry-After) is the one azure-core adds on top.
+# operation's first request. The client's own (300s to read, several retries
+# with backoff) would spend a call's whole bound on one silent try, so a try
+# gives up after 10s without a connection or 60s without data, and is retried at
+# most twice: three silent tries and azure-core's backoff of a few seconds
+# between them end well inside the bound, and a long-running operation's wait
+# takes what remains of it. These bound silence only; the bound itself is
+# _bounded_route_call's.
 _ROUTE_CONNECTION_TIMEOUT_SECONDS = 10.0
 _ROUTE_READ_TIMEOUT_SECONDS = 60.0
 _ROUTE_REQUEST_RETRIES = 2
+
+# How often _bounded_route_call's wait wakes. Only the main thread runs
+# Python's signal handlers, and a signal delivered to the call's thread instead,
+# or one a platform cannot interrupt a blocked wait with, is handled only once
+# the main thread wakes, so it wakes this often to keep Ctrl-C prompt.
+_ROUTE_CALL_WAKE_SECONDS = 0.25
 
 # How much longer a poke whose create did not finish waits for that create
 # before it removes the rule, with interrupts deferred: a delete while the
@@ -216,7 +226,11 @@ def wrap_azure_error(exc: Exception) -> AzureError:
 
 
 class _RouteOperationTimeout(AzureError):
-    """An operation opening a route did not finish within ``_OPERATION_TIMEOUT_SECONDS``."""
+    """An Azure call on a route did not finish within ``_OPERATION_TIMEOUT_SECONDS``."""
+
+    def __init__(self, what: str) -> None:
+        summary = f"Azure did not finish {what} within {_OPERATION_TIMEOUT_SECONDS:.0f}s"
+        super().__init__(summary, detail=summary)
 
 
 def _route_call_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[str, Any]:
@@ -248,19 +262,64 @@ def _route_operation_options(*, retries: int = _ROUTE_REQUEST_RETRIES) -> dict[s
     return {**_route_call_options(retries=retries), "polling": ARMPolling()}
 
 
+def _bounded_route_call[T](call: Callable[[], T], what: str, deadline: float | None = None) -> T:
+    """``call()``'s result, waiting until ``deadline`` on the monotonic clock, or :class:`_RouteOperationTimeout`.
+
+    azure-core's per-try timeouts bound only silence: a response whose body
+    keeps arriving, however slowly, resets ``read_timeout`` with every chunk,
+    and neither requests nor azure-core bounds a request's whole time. So
+    ``call`` runs on a daemon thread, in a copy of the caller's context, and
+    the wait for it is what ends at ``deadline``: by default
+    ``_OPERATION_TIMEOUT_SECONDS`` from now, or for an operation's first
+    request the deadline its :func:`_finish_route_operation` wait shares. What
+    ``call`` raised is raised here. The wait holds no interrupts, so Ctrl-C
+    outside :func:`~agentworks.interrupts.interrupts_deferred` ends it at
+    once, or within ``_ROUTE_CALL_WAKE_SECONDS`` when the signal reached
+    another thread. A call given up on keeps running, and what it sent may
+    still take effect, so a caller that creates something removes it.
+    """
+    if deadline is None:
+        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
+    context = contextvars.copy_context()
+    outcome: list[tuple[T, None] | tuple[None, BaseException]] = []
+    finished = threading.Event()
+
+    def _run() -> None:
+        try:
+            outcome.append((context.run(call), None))
+        except BaseException as exc:  # handed to the waiting caller, which raises it
+            outcome.append((None, exc))
+        finally:
+            finished.set()
+
+    threading.Thread(target=_run, name="azure-route-call", daemon=True).start()
+    while not finished.wait(min(_ROUTE_CALL_WAKE_SECONDS, max(0.0, deadline - time.monotonic()))):
+        if time.monotonic() >= deadline:
+            raise _RouteOperationTimeout(what)
+    ((result, error),) = outcome
+    if error is not None:
+        raise error
+    return cast("T", result)
+
+
 def _finish_route_operation(poller: Any, what: str, deadline: float) -> Any:
     """``poller``'s result, waiting until ``deadline`` on the monotonic clock, or :class:`_RouteOperationTimeout`.
 
-    ``deadline`` is ``_OPERATION_TIMEOUT_SECONDS`` after the operation's
-    first request was sent, so the wait takes what that request left. The
-    operation may still finish after the wait ends, so a caller that created
-    something removes it.
+    ``deadline`` is the one the operation's first request was given (see
+    :func:`_bounded_route_call`), so the wait takes what that request left.
+    The operation may still finish after the wait ends, so a caller that
+    created something removes it.
     """
     result = poller.result(timeout=max(0.0, deadline - time.monotonic()))
     if not poller.done():
-        summary = f"Azure did not finish {what} within {_OPERATION_TIMEOUT_SECONDS:.0f}s"
-        raise _RouteOperationTimeout(summary, detail=summary)
+        raise _RouteOperationTimeout(what)
     return result
+
+
+def _run_route_operation(start: Callable[[], Any], what: str) -> Any:
+    """The result of the long-running operation ``start`` begins, its first request and wait sharing one bound."""
+    deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
+    return _finish_route_operation(_bounded_route_call(start, what, deadline), what, deadline)
 
 
 def _trim_message(message: str) -> str:
@@ -352,9 +411,9 @@ def converge_nsg(network: NetworkManagementClient, rg: str, name: str) -> None:
     from azure.core.exceptions import ResourceNotFoundError
 
     try:
-        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-        _finish_route_operation(
-            network.security_rules.begin_create_or_update(
+        _run_route_operation(
+            partial(
+                network.security_rules.begin_create_or_update,
                 rg,
                 f"{name}-nsg",
                 DENY_ALL_INBOUND_RULE_NAME,
@@ -362,17 +421,20 @@ def converge_nsg(network: NetworkManagementClient, rg: str, name: str) -> None:
                 **_route_operation_options(),
             ),
             f"ensuring the '{DENY_ALL_INBOUND_RULE_NAME}' rule on NSG '{name}-nsg'",
-            deadline,
         )
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 
     try:
-        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-        _finish_route_operation(
-            network.security_rules.begin_delete(rg, f"{name}-nsg", LEGACY_SSH_RULE_NAME, **_route_operation_options()),
+        _run_route_operation(
+            partial(
+                network.security_rules.begin_delete,
+                rg,
+                f"{name}-nsg",
+                LEGACY_SSH_RULE_NAME,
+                **_route_operation_options(),
+            ),
             f"deleting the legacy '{LEGACY_SSH_RULE_NAME}' rule on NSG '{name}-nsg'",
-            deadline,
         )
     except ResourceNotFoundError:
         pass
@@ -397,11 +459,17 @@ def _lowest_free_allow_priority(network: NetworkManagementClient, rg: str, name:
     from agentworks.errors import StateError
 
     try:
-        rules = network.security_rules.list(rg, f"{name}-nsg", **_route_call_options())
-        # list() returns a lazy ItemPaged: the HTTP requests happen
-        # during iteration, so the wrap must cover the comprehension,
-        # not just the call.
-        used = {rule.priority for rule in rules if rule.direction == "Inbound"}
+        # list() returns a lazy ItemPaged: the HTTP requests happen during
+        # iteration, so the bounded call and the wrap must cover the
+        # comprehension, not just the call.
+        used = _bounded_route_call(
+            lambda: {
+                rule.priority
+                for rule in network.security_rules.list(rg, f"{name}-nsg", **_route_call_options())
+                if rule.direction == "Inbound"
+            },
+            f"listing the rules on NSG '{name}-nsg'",
+        )
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
     for priority in range(ALLOW_PRIORITY_BAND_START, ALLOW_PRIORITY_BAND_END + 1):
@@ -456,17 +524,23 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
             _back_off_after(last_exc, attempt)
         priority = _lowest_free_allow_priority(network, rg, name)
         rule_name = f"{TRANSIENT_ALLOW_RULE_PREFIX}{uuid4().hex[:8]}"
+        what = f"creating the '{rule_name}' rule on NSG '{name}-nsg'"
         poller: Any = None
         try:
             deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-            poller = network.security_rules.begin_create_or_update(
-                rg,
-                f"{name}-nsg",
-                rule_name,
-                _allow_ssh_rule(rule_name, prefixes, priority),
-                **_route_operation_options(retries=0),
+            poller = _bounded_route_call(
+                partial(
+                    network.security_rules.begin_create_or_update,
+                    rg,
+                    f"{name}-nsg",
+                    rule_name,
+                    _allow_ssh_rule(rule_name, prefixes, priority),
+                    **_route_operation_options(retries=0),
+                ),
+                what,
+                deadline,
             )
-            _finish_route_operation(poller, f"creating the '{rule_name}' rule on NSG '{name}-nsg'", deadline)
+            _finish_route_operation(poller, what, deadline)
         except BaseException as exc:
             # The create did not return, so the rule may exist or still land, and only this name finds it.
             _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller, exc)
@@ -526,7 +600,10 @@ def _remove_unfinished_allow(
 
     That is a create that raised ``error``, ran out of time or was
     interrupted, whether or not it had returned a poller (``create`` is
-    ``None`` when it had not). The removal is silent only when the outcome
+    ``None`` when it had not, as when its first request ran out of time).
+    Interrupts are held for the settle below, when there is a
+    poller, and the removal's own ``_OPERATION_TIMEOUT_SECONDS``: at most
+    360s in all. The removal is silent only when the outcome
     is known; otherwise the warning names the rule for removal by hand, and
     goes out before the held interrupt is delivered, which would otherwise
     skip it.
@@ -621,10 +698,10 @@ def remove_ssh_allow(
     Ctrl-C and the terminations wait for the removal to finish
     (:func:`~agentworks.interrupts.interrupts_deferred`), since a removal cut
     short leaves the rule open. So it waits at most
-    ``_OPERATION_TIMEOUT_SECONDS`` for Azure, its delete request's tries
-    included (see ``_ROUTE_REQUEST_RETRIES``), and that is as long as the
-    operator waits; an operation still running then is an outcome nobody
-    saw, so it warns that the rule may remain.
+    ``_OPERATION_TIMEOUT_SECONDS`` for Azure on the wall clock, however
+    slowly the delete request is answered (see :func:`_bounded_route_call`),
+    and that is as long as the operator waits; an operation still running
+    then is an outcome nobody saw, so it warns that the rule may remain.
     """
     with interrupts_deferred():
         _delete_ssh_allow(network, rg, name, rule_name, prefixes)
@@ -637,10 +714,18 @@ def _delete_ssh_allow(
 
     scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
     try:
-        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-        poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name, **_route_operation_options())
-        poller.result(timeout=max(0.0, deadline - time.monotonic()))
+        _run_route_operation(
+            partial(network.security_rules.begin_delete, rg, f"{name}-nsg", rule_name, **_route_operation_options()),
+            f"removing the '{rule_name}' rule on NSG '{name}-nsg'",
+        )
     except ResourceNotFoundError:
+        return
+    except _RouteOperationTimeout:
+        output.warn(
+            f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
+            f"{_OPERATION_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
+            "the rule and delete it manually if it is still there."
+        )
         return
     except Exception as exc:
         err = wrap_azure_error(exc)
@@ -648,13 +733,6 @@ def _delete_ssh_allow(
             f"could not remove the '{rule_name}' rule on NSG "
             f"'{name}-nsg': {err.summary}. The VM's SSH port stays open to "
             f"{scope}; delete the rule manually to restore zero inbound exposure."
-        )
-        return
-    if not poller.done():
-        output.warn(
-            f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
-            f"{_OPERATION_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
-            "the rule and delete it manually if it is still there."
         )
         return
     output.info(f"Closed SSH route (removed allow rule '{rule_name}')")
@@ -682,33 +760,38 @@ def ensure_public_ip(
     )
 
     try:
-        nic = network.network_interfaces.get(rg, f"{name}-nic", **_route_call_options())
+        nic = _bounded_route_call(
+            partial(network.network_interfaces.get, rg, f"{name}-nic", **_route_call_options()),
+            f"reading the NIC '{name}-nic'",
+        )
         if nic.ip_configurations and nic.ip_configurations[0].public_ip_address is not None:
             return
 
         output.info("Restoring missing public IP...")
         location = _get_vm_location(compute, rg, name)
-        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-        ip_poller = network.public_ip_addresses.begin_create_or_update(
-            rg,
-            f"{name}-ip",
-            PublicIPAddress(
-                location=location,
-                sku=PublicIPAddressSku(name="Standard"),
-                properties=PublicIPAddressPropertiesFormat(public_ip_allocation_method="Static"),
-                tags={"owner": "agentworks"},
+        ip_result = _run_route_operation(
+            partial(
+                network.public_ip_addresses.begin_create_or_update,
+                rg,
+                f"{name}-ip",
+                PublicIPAddress(
+                    location=location,
+                    sku=PublicIPAddressSku(name="Standard"),
+                    properties=PublicIPAddressPropertiesFormat(public_ip_allocation_method="Static"),
+                    tags={"owner": "agentworks"},
+                ),
+                **_route_operation_options(),
             ),
-            **_route_operation_options(),
+            f"creating the public IP '{name}-ip'",
         )
-        ip_result = _finish_route_operation(ip_poller, f"creating the public IP '{name}-ip'", deadline)
 
         if nic.ip_configurations:
             nic.ip_configurations[0].public_ip_address = PublicIPAddress(id=ip_result.id)
-        deadline = time.monotonic() + _OPERATION_TIMEOUT_SECONDS
-        _finish_route_operation(
-            network.network_interfaces.begin_create_or_update(rg, f"{name}-nic", nic, **_route_operation_options()),
+        _run_route_operation(
+            partial(
+                network.network_interfaces.begin_create_or_update, rg, f"{name}-nic", nic, **_route_operation_options()
+            ),
             f"attaching the public IP to '{name}-nic'",
-            deadline,
         )
 
     except Exception as exc:
@@ -1013,5 +1096,7 @@ def rollback_create_on_interrupt(
 def _get_vm_location(compute: ComputeManagementClient, rg: str, name: str) -> str:
     """Get the Azure region for a VM by querying the compute API, using
     the caller's (cached) compute client, bounded as a route call."""
-    vm_info = compute.virtual_machines.get(rg, name, **_route_call_options())
+    vm_info = _bounded_route_call(
+        partial(compute.virtual_machines.get, rg, name, **_route_call_options()), f"reading the VM '{name}'"
+    )
     return vm_info.location or "eastus"

@@ -13,22 +13,18 @@ what each case inspects.
 
 from __future__ import annotations
 
-import io
-import json
 import signal
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import requests
-from azure.core.credentials import AccessToken
-from azure.core.pipeline.transport import RequestsTransport
 from azure.core.polling.base_polling import LROBasePolling
 from azure.mgmt.network import NetworkManagementClient
-from requests.adapters import BaseAdapter
 
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX, _RouteOperationTimeout, poke_ssh_allow
 from tests._azure_platform_support import _FakeAzure, _install_fakes, _Poller
+from tests._azure_scripted_transport import _Answer, _refused, _scripted_client, _ScriptedAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,49 +34,11 @@ if TYPE_CHECKING:
 _PREFIX = "198.18.0.7/32"
 _MONITOR = "https://management.azure.com/subscriptions/sub-A/providers/Microsoft.Network/operations/1?api-version=1"
 
-# An answer is a status, headers and a JSON body (raw bytes when not JSON), or an error the adapter raises.
-_Answer = tuple[int, dict[str, str], object] | Exception
-
 _ACCEPTED: _Answer = (201, {"Azure-AsyncOperation": _MONITOR}, {"properties": {"provisioningState": "Updating"}})
-
-
-def _refused(status: int) -> _Answer:
-    return (status, {}, {"error": {"code": "Refused", "message": f"status {status}"}})
 
 
 def _reported(status: str) -> _Answer:
     return (200, {}, {"status": status})
-
-
-class _Credential:
-    def get_token(self, *_scopes: str, **_kwargs: object) -> AccessToken:
-        return AccessToken("token", 2**31)
-
-
-class _ScriptedAdapter(BaseAdapter):
-    """Answers each request with the next scripted answer, repeating the last, and records its method."""
-
-    def __init__(self, answers: list[_Answer]) -> None:
-        super().__init__()
-        self._answers = answers
-        self.methods: list[str] = []
-
-    def send(self, request: requests.PreparedRequest, *_args: object, **_kwargs: object) -> requests.Response:
-        self.methods.append(str(request.method))
-        answer = self._answers.pop(0) if len(self._answers) > 1 else self._answers[0]
-        if isinstance(answer, Exception):
-            raise answer
-        status, headers, body = answer
-        response = requests.Response()
-        response.status_code = status
-        response.headers.update(headers)
-        response.raw = io.BytesIO(body if isinstance(body, bytes) else json.dumps(body).encode())
-        response.request = request
-        response.url = str(request.url)
-        return response
-
-    def close(self) -> None:
-        return None
 
 
 def _poke_after(monkeypatch: pytest.MonkeyPatch, first: Callable[..., Any]) -> tuple[_FakeAzure, str, list[float]]:
@@ -115,15 +73,7 @@ def _poke_after(monkeypatch: pytest.MonkeyPatch, first: Callable[..., Any]) -> t
 def _through_sdk(answers: list[_Answer]) -> tuple[Callable[..., Any], _ScriptedAdapter]:
     """A create sent by the generated client over an adapter giving ``answers``, and that adapter."""
     adapter = _ScriptedAdapter(answers)
-    session = requests.Session()
-    session.mount("https://", adapter)
-    sdk = NetworkManagementClient(
-        _Credential(),  # type: ignore[arg-type]
-        "sub-A",
-        transport=RequestsTransport(session=session, session_owner=False),
-        retry_backoff_factor=0,
-    )
-    return sdk.security_rules.begin_create_or_update, adapter
+    return _scripted_client(NetworkManagementClient, adapter).security_rules.begin_create_or_update, adapter
 
 
 def _assert_named(captured_output: CapturedOutput, rule_name: str) -> None:
