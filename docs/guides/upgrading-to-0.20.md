@@ -780,7 +780,7 @@ new connection layer, so they need what [What these commands need](#what-these-c
   Once a signal has started that cleanup, Ctrl-C included, a `SIGTERM`, `SIGHUP` or Ctrl-Break is
   ignored, so a closed terminal cannot cut the removal short; a second Ctrl-C still abandons the
   cleanup, as its message says, though one that lands while a firewall rule's removal is in flight
-  waits for that removal to finish first (Azure and GCP bound that wait, then warn that the rule may
+  waits for that removal to finish first (each cloud bounds that wait, then warns that the rule may
   remain). Closing the console window on Windows may start that cleanup, but Windows ends the
   process within seconds, so it cannot be relied on to finish: end the command with Ctrl-C or
   Ctrl-Break instead, and delete a rule a closed window left behind from the VM's firewall in the

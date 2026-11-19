@@ -81,8 +81,9 @@ follows, in full:
   arriving can carry one request past the deadline.
 - The deadline starts at dispatch and bounds the script alone (settled in slice 8, below). What a
   channel does before dispatch, opening a route, reading an address, confirming the guest and
-  waiting for the VM to answer, has bounds of its own: each provider call its client's timeout, and
-  the wait for the VM about two minutes, raising `ChannelUnreachable` when it runs out.
+  waiting for the VM to answer, has bounds of its own: each cloud provider call a bound on the wall
+  clock, each Proxmox request its socket timeout, and the wait for the VM about two minutes, raising
+  `ChannelUnreachable` when it runs out.
 - Run it once. Never retry, never parse the output, never report an exit code: `RawRun` has no field
   for one, because no channel's status is trusted (WSL passes raw wait statuses through, per the
   salvage message, and an ssh 255 cannot be told from a guest 255).
@@ -1075,50 +1076,72 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
   minutes for SSH. Under the settled reading both wait for the VM, then give the script its whole
   deadline. Counting the clouds from the call instead would need every deadline resized to cover a
   firewall rule, an address read and a boot, and would still not bound the provider calls.
-- **The bounds before dispatch.** The clouds: `PublicSSH.wait_until_answering` (120 s); each
-  provider call its client's timeout; Azure's calls on the route (the public-IP heal's reads and
-  operations, the deny re-pin, the legacy-rule delete, the poke's slot read and create, and the
-  removal) each take at most `_OPERATION_TIMEOUT_SECONDS` (300 s) on the wall clock, where they had
-  no bound. Every read, and every operation's first request, carries azure-core per-call bounds (10
-  s to connect, 60 s without data, at most two retries), so its silent tries end inside the bound,
-  and a long-running operation's wait takes what its first request left. Those bound only silence: a
-  body that keeps arriving resets the read timeout with every chunk, and neither requests nor
-  azure-core bounds a request's whole time. So each read and first request runs on a daemon thread
-  that the caller stops waiting for at the deadline (`_bounded_route_call`), whatever Azure sends, a
-  `Retry-After` included; the wait wakes every `_ROUTE_CALL_WAKE_SECONDS` (0.25 s) so a Ctrl-C that
-  reached another thread still ends it within that. A call given up on may still finish, so a create
-  given up on is removed like one whose wait ran out. The generated `begin_*` methods hand per-call
-  options on to the status polling they build, so each is given its polling explicitly (`ARMPolling`
-  with the defaults the client builds it with) and its status reads keep the client's own timeouts
-  and retries. A poke whose create does not finish in time raises without another attempt, after
-  giving an accepted create up to `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more and then removing
-  the rule, since a delete racing the create can fail or find nothing and let the rule land after
-  it; one whose first request ran out of time has no poller to settle, so its rule is removed at
-  once and named. An interrupted create gets the same settle before the interrupt propagates, and so
-  does one whose wait failed, before the poke retries; interrupts are held through that settle and
-  the removal's own bound, at most 360 s in all. The settle reads the state the create's poller
-  holds (`polling_method().finished()`) about once a second rather than joining the poller, since
-  polling also ends on a transport error while the create runs, and on CPython 3.12 a join that
-  Ctrl-C cut short makes every later join return at once. Only the `Succeeded` Azure reported
-  (`polling_method().status()`, read case-insensitively, a failed read counting as not) makes that
-  delete authoritative; any other outcome warns naming the rule for removal by hand, since
-  azure-core records its own failure to observe the operation (a refused status read, or one without
-  a status) as `Failed`. The poke never retries its create (`retry_total=0`), so no try whose
-  delivery is unknown is replayed; azure-core's only resend, its authentication policy answering a
-  401 challenge, follows an answer Azure gave. So a create that raised before returning a poller is
-  removed at once, and its outcome is known only when the error is Azure's 4xx answer, since every
-  try was then refused: that removal is silent. A create with no answer, or with a 5xx one (a
-  gateway timeout does not say the network provider never took the request), warns. So a refusal, a
-  slot race among them, costs no warning; the warning is left to a create whose outcome nobody saw.
-  Since no create's request is retried, an answer azure-core would itself have retried (as its
-  `RetryPolicy` decides: 408, 429, 500, 502, 503, 504, any status from 506, or an error carrying
-  `Retry-After`) waits before the next attempt, on azure-core's backoff factor: `Retry-After` capped
-  at `_POKE_RETRY_AFTER_MAX_SECONDS` (30 s), else a backoff doubling from 0.8 s (azure-core's own
-  first retry waits 0 s; the poke always waits). A `Retry-After` that cannot be parsed takes the
-  backoff. The waits between the five attempts come to at most two minutes, and hold no interrupts.
-  GCP's firewall insert already had a bound. Proxmox: the identity check's reads, each at most
-  `REQUEST_TIMEOUT_SECONDS`, and the agent wait's `AGENT_WAIT_SECONDS`. Local-process channels
-  (Lima, Remote Lima, WSL2) dispatch at spawn.
+- **The bounds before dispatch.** Every cloud waits for SSH with `PublicSSH.wait_until_answering`
+  (120 s) and bounds each provider call on its route on the wall clock, its address read and its
+  held removal included.
+  - **The wall bound.** The cloud SDKs bound only silence: azure-core and google-cloud-compute hand
+    their timeout to requests, and botocore its `read_timeout` to urllib3, as a limit on each socket
+    read, so a body that keeps arriving resets it with every chunk and nothing bounds a request's
+    whole time. `capabilities/vm_platform/wall_bound.py` runs a call on a daemon thread
+    (`call_within`, or each method of a `BoundedClient`) and stops waiting when its bound runs out,
+    raising `CallTimedOut` whatever the provider sends, a `Retry-After` included. The wait wakes
+    every `WAKE_SECONDS` (0.25 s), so a Ctrl-C that reached another thread still ends it promptly,
+    and a call that finishes as its bound runs out counts as finished. A call given up on keeps
+    running, its SDK's own retries included, so it may still take effect after the caller has moved
+    on; each cloud says below what its callers do about that.
+  - **Azure's route calls.** The public-IP heal's reads and operations, the deny re-pin, the
+    legacy-rule delete, the poke's slot read and create, the address read (the VM, its NIC, the
+    public IP) and the removal each take at most `_OPERATION_TIMEOUT_SECONDS` (300 s), raising
+    `_RouteCallTimeout`. A long-running operation's first request and its wait share one bound, and
+    the wait is a bounded call too. Every read and every first request also carries azure-core
+    per-call bounds (10 s to connect, 60 s without data, at most two retries), so one silent try
+    cannot spend the bound. The generated `begin_*` methods hand per-call options on to the status
+    polling they build, so each is given its polling explicitly (`ARMPolling` with the defaults the
+    client builds it with) and its status reads keep the client's own timeouts and retries. The
+    heal's and the convergence's writes are the desired state, so one given up on that lands late
+    does no harm.
+  - **The Azure poke's create.** A create that does not finish in time raises without another
+    attempt. One Azure accepted gets up to `_UNFINISHED_CREATE_SETTLE_SECONDS` (60 s) more before
+    the rule is removed, since a delete racing the create can fail or find nothing and let the rule
+    land after it; one whose first request ran out of time has no poller to settle, so its rule is
+    removed at once and named. An interrupted create gets the same settle before the interrupt
+    propagates, and so does one whose wait failed, before the poke retries; interrupts are held
+    through that settle and the removal's own bound, at most 360 s in all. The settle reads the
+    state the create's poller holds (`polling_method().finished()`) about once a second rather than
+    joining the poller, since polling also ends on a transport error while the create runs, and on
+    CPython 3.12 a join that Ctrl-C cut short makes every later join return at once. Only the
+    `Succeeded` Azure reported (`polling_method().status()`, read case-insensitively, a failed read
+    counting as not) makes that delete authoritative; any other outcome warns naming the rule for
+    removal by hand, since azure-core records its own failure to observe the operation (a refused
+    status read, or one without a status) as `Failed`. The poke never retries its create
+    (`retry_total=0`), so no try whose delivery is unknown is replayed: azure-core sends it again
+    only after an explicit answer (a redirect, or a 401 challenge). So a create that raised before
+    returning a poller is removed at once, and its outcome is known only when the error is Azure's
+    4xx answer, since every try was then turned away: that removal is silent. A create with no
+    answer, or with a 5xx one (a gateway timeout does not say the network provider never took the
+    request), warns. So a refusal, a slot race among them, costs no warning; the warning is left to
+    a create whose outcome nobody saw.
+  - **The Azure poke's backoff.** Since no create is retried, an answer azure-core would itself have
+    retried (as its `RetryPolicy` decides: 408, 429, 500, 502, 503, 504, any status from 506, or an
+    error carrying `Retry-After`) waits before the next attempt, on azure-core's backoff factor:
+    `Retry-After` capped at `_POKE_RETRY_AFTER_MAX_SECONDS` (30 s), else a backoff doubling from 0.8
+    s (azure-core's own first retry waits 0 s; the poke always waits). A `Retry-After` that cannot
+    be parsed takes the backoff. The waits between the five attempts come to at most two minutes,
+    and hold no interrupts.
+  - **GCE and EC2.** GCE's route calls (the instance and network reads, the name check, the insert
+    and its same-`requestId` retry, the removal's reads and delete) go through a `BoundedClient` of
+    `_OPERATION_TIMEOUT_SECONDS` (300 s) each, and every extended-operation wait is a bounded call
+    of its own timeout (`wait_for_extended_operation`), since the operation checks that timeout only
+    between its status reads. A call that runs out is a `ConnectivityError`, so an insert given up
+    on is treated as one whose answer was lost. EC2's route calls (the dry-run revokes, the
+    authorizes, the address read, and the revokes that close the route and the provisioning access)
+    go through a `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each; a poke whose
+    authorize ran out of time revokes what it planned and warns that the allow may still be added
+    after.
+  - **Proxmox and the local channels.** Proxmox: the identity check's reads and the agent wait's
+    `AGENT_WAIT_SECONDS`, each request with a socket timeout of at most `REQUEST_TIMEOUT_SECONDS`,
+    which, as above, bounds its silence rather than its whole time. Local-process channels (Lima,
+    Remote Lima, WSL2) dispatch at spawn.
 - **Shape.** The signature is unchanged; the contract (`base.py`, the platform README) states when
   the deadline starts. `guest_agent.run_as_root_until` goes. Proxmox's cloud-init wait keeps its
   420-second budget, now counted with the agent waits outside each attempt's deadline, and retries
