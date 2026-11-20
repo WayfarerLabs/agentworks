@@ -17,8 +17,9 @@ parses them, and both always run. A discovery directory that cannot be read or
 searched, a project file that cannot be read and anything an unsearchable directory
 hides stay in place and count as failures, as does a failed removal. The caller
 warns once, naming the workspaces the project command reports it could not finish.
-When that command cannot run, stops before reading every path or fails without
-naming any, the warning also says the projects could not all be checked.
+When that command cannot run over SSH, the warning says so. When it runs but does
+not report reading every path it was sent, or fails without naming any workspace,
+the warning also says the projects could not all be checked.
 """
 
 from __future__ import annotations
