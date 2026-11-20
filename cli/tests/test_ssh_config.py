@@ -227,14 +227,31 @@ def test_any_other_comment_naming_the_include_does_not_count(newline: str, tmp_p
     assert ssh_config.read_bytes() == (added + original).encode()
 
 
+def _given_another_group(path: Path) -> bool:
+    """Whether ``path`` could be given a group of this process other than its own.
+
+    A listed group may still be one the kernel will not assign, such as the
+    overflow group of a user namespace, so each is tried in turn.
+    """
+    current = path.stat().st_gid
+    for gid in os.getgroups():
+        if gid == current:
+            continue
+        try:
+            os.chown(path, -1, gid)
+        except OSError:
+            continue
+        return True
+    return False
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
 def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     ssh_config.write_text("Host *\n    Foo bar\n")
     ssh_config.chmod(0o640)
-    other_groups = [gid for gid in os.getgroups() if gid != ssh_config.stat().st_gid]
-    if other_groups:
-        os.chown(ssh_config, -1, other_groups[0])
+    if not _given_another_group(ssh_config):
+        pytest.skip("no other group this process can assign")
     before = ssh_config.stat()
 
     _ensure_include(ssh_config, _include_directive(ssh_config))
