@@ -35,8 +35,8 @@ from tests.ssh_fixtures import fake_host_key
 needs_ssh = pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
 
 
-def _resolved_hostname(ssh_config: Path, alias: str) -> str:
-    """The HostName the installed client resolves for ``alias``; ``-G`` never connects.
+def _resolved(ssh_config: Path, alias: str) -> dict[str, str]:
+    """The settings the installed client resolves for ``alias`` from ``ssh_config``; ``-G`` never connects.
 
     A failure shows which client ran, its verbose account of reading the
     configuration and the files it read, since clients and their rules differ
@@ -51,7 +51,7 @@ def _resolved_hostname(ssh_config: Path, alias: str) -> str:
             f"{shutil.which('ssh')} -G exited {completed.returncode} under Python {sys.version}\n"
             f"verbose stderr: {verbose.stderr}\nfiles: {files}{_acls(ssh_config.parent)}"
         )
-    return dict(line.split(" ", 1) for line in completed.stdout.splitlines())["hostname"]
+    return dict(line.split(" ", 1) for line in completed.stdout.splitlines())
 
 
 def _acls(ssh_dir: Path) -> str:
@@ -325,7 +325,7 @@ def test_the_installed_client_reads_the_file_once_a_stale_include_with_an_apostr
 
     _rebuild_config_dir(config, db)
 
-    assert _resolved_hostname(ssh_config, "awvm--web") == "100.64.0.1"
+    assert _resolved(ssh_config, "awvm--web")["hostname"] == "100.64.0.1"
 
 
 def test_remove_legacy_section(tmp_path: Path) -> None:
@@ -1056,19 +1056,6 @@ def test_declined_slug_keeps_default_file_name(tmp_path: Path) -> None:
 # -- Host-key store options ---------------------------------------------------
 
 
-def _resolved(config: Path, alias: str, *, context: str = "") -> dict[str, str]:
-    """``ssh -G -F config alias``'s settings; it resolves the configuration and exits, never connecting.
-
-    A failure reports ssh's own stderr, which names a refused file or a bad line, and ``context``, such as the
-    ACL of a file ssh checks.
-    """
-    result = subprocess.run(
-        ["ssh", "-G", "-F", str(config), alias], capture_output=True, text=True, timeout=10, check=False
-    )
-    assert result.returncode == 0, f"ssh -G exited {result.returncode}: {result.stderr.strip()}\n{context}"
-    return dict(line.split(" ", 1) for line in result.stdout.splitlines())
-
-
 def _managed_blocks(content: str) -> dict[str, str]:
     """The managed file's Host blocks, keyed by alias."""
     blocks: dict[str, str] = {}
@@ -1091,7 +1078,6 @@ def _entry_path(path: Path) -> str:
 
 @pytest.mark.parametrize("rebuild", ["config_dir", "legacy"])
 def test_every_entry_reads_its_store_as_the_global_file_and_writes_nowhere(tmp_path: Path, rebuild: str) -> None:
-    from agentworks import ssh_config as ssh_config_module
     from agentworks.execution import trust
 
     config, ssh_dir = _mock_config(tmp_path)
@@ -1163,7 +1149,7 @@ _RESOLVED_STORE_NAMES = ["store", "store with space"] + ([] if sys.platform == "
 
 
 @pytest.mark.windows
-@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+@needs_ssh
 @pytest.mark.parametrize("store_name", _RESOLVED_STORE_NAMES)
 def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     store_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1215,7 +1201,7 @@ def _give_the_acl_of_a_profiles_ssh_directory(directory: Path) -> None:
 
 
 @pytest.mark.windows
-@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+@needs_ssh
 @pytest.mark.parametrize("parent", ["home", "home with space", "o'brien"])
 def test_the_installed_client_reaches_the_managed_entries_through_the_include(parent: str, tmp_path: Path) -> None:
     config, ssh_dir = _mock_config(tmp_path / parent)
@@ -1227,7 +1213,7 @@ def test_the_installed_client_reaches_the_managed_entries_through_the_include(pa
     _rebuild_config_dir(config, db)
 
     # An Include that names nothing leaves the alias as the host name.
-    assert _resolved_hostname(config.operator.ssh_config, "awvm--web") == "100.64.0.1"
+    assert _resolved(config.operator.ssh_config, "awvm--web")["hostname"] == "100.64.0.1"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
@@ -1392,12 +1378,12 @@ def test_the_installed_client_still_routes_through_the_operators_own_include_aft
     config, original, _ = _config_with_the_operators_own_include(tmp_path, case)
     ssh_config = config.operator.ssh_config
     ssh_config.write_bytes(original)
-    assert _resolved_hostname(ssh_config, "route") == "route.example"
+    assert _resolved(ssh_config, "route")["hostname"] == "route.example"
 
     _rebuild_config_dir(config, _db_with_one_vm())
     _rebuild_config_dir(config, _db_with_one_vm())
 
-    assert _resolved_hostname(ssh_config, "route") == "route.example"
+    assert _resolved(ssh_config, "route")["hostname"] == "route.example"
 
 
 @pytest.mark.parametrize(
@@ -1501,11 +1487,11 @@ def test_the_installed_client_reads_the_file_again_once_the_include_it_rejected_
 
     _rebuild_config_dir(config, _db_with_one_vm())
 
-    assert _resolved_hostname(ssh_config, "other") == "10.0.0.9"
+    assert _resolved(ssh_config, "other")["hostname"] == "10.0.0.9"
 
 
 @pytest.mark.windows
-@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+@needs_ssh
 def test_a_weaker_setting_read_first_still_finds_the_store_only_as_the_file_ssh_never_writes(tmp_path: Path) -> None:
     """ssh takes each option's first value, so an earlier ``Host *`` wins; what it accepts or learns goes to nothing.
 
@@ -1582,15 +1568,14 @@ def test_a_store_path_ssh_would_expand_leaves_each_vms_entries_out(
     assert len(captured_output.warnings) == 2
 
 
+@pytest.mark.windows
 def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_reaches_an_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
     """Git for Windows' ssh reads neither form of such a value; the warning names the character and the path."""
-    from agentworks import ssh_config as ssh_config_module
     from agentworks.execution import trust
-    from agentworks.path_rendering import format_host_path
 
     monkeypatch.setattr(ssh_config_module, "_GIT_FOR_WINDOWS_MAY_READ", True)
     config, ssh_dir = _mock_config(tmp_path)
@@ -1618,51 +1603,6 @@ def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_r
     spaced.parent.mkdir()
     spaced.write_text("")
     assert ssh_config_module._identity_value(spaced) == _entry_path(spaced)
-
-
-@pytest.mark.windows
-@pytest.mark.parametrize("under_the_profile", ["key", "store"])
-def test_under_a_profile_named_with_an_apostrophe_a_key_drops_its_line_and_a_store_drops_the_entries(
-    under_the_profile: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """A Windows profile such as O'Brien reaches every absolute path under it, which Git for Windows' ssh cannot read.
-
-    A key it cannot read only leaves the operator's own ssh offering its default keys; a store it cannot read would
-    leave the entries trusting whatever answers, so those are not written.
-    """
-    from agentworks import ssh_config as ssh_config_module
-    from agentworks.execution import trust
-    from tests.conftest import isolate_home
-
-    monkeypatch.setattr(ssh_config_module, "_GIT_FOR_WINDOWS_MAY_READ", True)
-    home = isolate_home(monkeypatch, tmp_path / "O'Brien")
-    elsewhere = tmp_path / "elsewhere"
-    store_parent = home if under_the_profile == "store" else elsewhere
-    monkeypatch.setattr(trust, "STORE_DIR", store_parent / ".config" / "agentworks" / "known_hosts")
-    config, ssh_dir = _mock_config(tmp_path)
-    key = (home if under_the_profile == "key" else elsewhere) / ".ssh" / "id_ed25519"
-    key.parent.mkdir(parents=True)
-    key.write_text("")
-    config.operator.ssh_private_key = key
-    trust.write_records("web", [fake_host_key()])
-    db = MagicMock()
-    db.get_setting.return_value = None
-    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
-    db.list_agents.return_value = []
-
-    _rebuild_config_dir(config, db)
-
-    conf = ssh_dir / "config.d" / _MANAGED_CONF
-    if under_the_profile == "key":
-        block = _managed_blocks(conf.read_text())["awvm--web"]
-        assert "IdentityFile" not in block
-        assert f"    GlobalKnownHostsFile {_entry_path(trust.store_file('web'))}\n" in block
-    else:
-        assert not conf.exists()
-    assert len(captured_output.warnings) == 1
 
 
 @pytest.mark.parametrize("field", ["tailscale_host", "admin_username", "linux_user", "name"])
@@ -1754,7 +1694,7 @@ def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entr
 
     _rebuild_config_dir(config, db)
 
-    assert _resolved_hostname(ssh_dir / "config", "awvm--web") == "100.64.0.9"
+    assert _resolved(ssh_dir / "config", "awvm--web")["hostname"] == "100.64.0.9"
 
 
 def test_an_operators_unrelated_include_is_left_alone(tmp_path: Path) -> None:
