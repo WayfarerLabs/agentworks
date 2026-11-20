@@ -417,13 +417,16 @@ def _batch_probe_command() -> str:
 
     Each row is a root ``timeout`` around its own ``/bin/sh``, in the
     background, printing one line prefixed with its position; the program
-    waits for every row. At ``_BATCH_ROW_SECONDS`` root kills the row's
-    process group, so a server that does not answer, or an owner client that
-    hangs or leaves, costs only its own row, which prints nothing and reads
-    unknown. A client's stderr is read only up to one more byte than its
-    field holds, and its own processes get no descriptor of root's but their
-    read's pipe and ``/dev/null``. Rows take no stdin, and nothing is written
-    on the guest.
+    waits for every row. ``timeout`` leads a process group of its own, and at
+    ``_BATCH_ROW_SECONDS`` it signals the row's shell, which kills that whole
+    group as root: a ``timeout`` that signals only its child (uutils
+    coreutils) would otherwise leave the row's other processes holding the
+    request's output open. So a server that does not answer, or an owner
+    client that hangs or leaves, costs only its own row, which prints nothing
+    and reads unknown. A client's stderr is read only up to one more byte
+    than its field holds, and its own processes get no descriptor of root's
+    but their read's pipe and ``/dev/null``. Rows take no stdin, and nothing
+    is written on the guest.
     """
     from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, owner_client_command, socket_guard_condition
 
@@ -431,7 +434,7 @@ def _batch_probe_command() -> str:
     usable = socket_guard_condition('"$SOCK"', '"$O"')
     refused = SOCKET_GUARD_REFUSED
     stderr_bytes = _BATCH_FIELD_HEX_LIMIT // 2 + 1
-    row = (
+    probe = (
         # -v: od otherwise abbreviates repeated 16-byte lines as "*".
         "hex() { od -An -v -tx1 | tr -d ' \\n'; }; "
         f'cap() {{ if [ ${{#1}} -le {_BATCH_FIELD_HEX_LIMIT} ]; then printf %s "$1"; else printf 0a; fi; }}; '
@@ -456,11 +459,13 @@ def _batch_probe_command() -> str:
         'printf "S:%s:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
         '"$I" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"'
     )
+    # The probe runs in the background so the row's shell is in wait, which a trapped signal
+    # interrupts at once; the trap then kills the row's process group, the shell included.
+    row = f"trap 'kill -s KILL 0' TERM; {{ {probe}; }} & wait"
     return (
         f"ROW={shlex.quote(row)}; "
         "I=0; while read -r N64 S64 O64 PID; do I=$((I + 1)); "
-        # timeout leads a process group of its own and signals all of it.
-        f'timeout -s KILL {_BATCH_ROW_SECONDS} /bin/sh -c "$ROW" row "$I" "$N64" "$S64" "$O64" "$PID" '
+        f'timeout {_BATCH_ROW_SECONDS} /bin/sh -c "$ROW" row "$I" "$N64" "$S64" "$O64" "$PID" '
         # bash reports a killed job on its own stderr, which is no row's diagnostic.
         "</dev/null & done; wait 2>/dev/null"
     )

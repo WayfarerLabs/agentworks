@@ -3,7 +3,8 @@
 The real batch program runs in a local shell under the request deadline that
 ``batch_check_status`` asks for, with a fake ``tmux`` on its PATH
 and a fake ``runuser`` in place of ``tmux.RUNUSER_PATH``. The row bound is
-shortened so the test stays quick.
+shortened so the test stays quick, and a request that outlives its deadline
+fails the test rather than holding it.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -74,14 +76,32 @@ def _local_guest(shell: list[str], env: dict[str, str], *, sessions: list[int] |
         try:
             stdout, stderr = process.communicate(request.stdin.data, timeout=request.deadline)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.communicate()
+            # Ends what the request's session still runs; output something else holds open fails here.
+            for pid in _live_session_members(process.pid):
+                with contextlib.suppress(OSError):
+                    os.kill(pid, signal.SIGKILL)
+            process.communicate(timeout=5)
             return Result(Unknown(UnknownReason.DEADLINE))
         return Result(Completed(process.returncode), stdout, stderr)
 
     access = RecordingVMAccess([], Admin())
     access.answer = run
     return access
+
+
+# A timeout that, like uutils coreutils', leads a process group of its own but signals only its child.
+_CHILD_ONLY_TIMEOUT = f"""#!{sys.executable}
+import os, signal, subprocess, sys
+
+os.setpgid(0, 0)
+child = subprocess.Popen(sys.argv[2:])
+try:
+    sys.exit(child.wait(timeout=float(sys.argv[1])))
+except subprocess.TimeoutExpired:
+    child.send_signal(signal.SIGTERM)
+    child.wait()
+    sys.exit(124)
+"""
 
 
 def _switch_stand_ins(bin_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,10 +163,14 @@ def _kill_if_mentions(pid: int, marker: str) -> None:
 
 @requires_symlinks
 @requires_posix_shell
+@pytest.mark.parametrize("timeout", ["system", "child-only"])
 def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str], timeout: str
 ) -> None:
-    """Root's kill of each row is the one bound: no owner client holds the request open or outlives it as root's."""
+    """Root's kill of each row is the one bound: no owner client holds the request open or outlives it as root's.
+
+    It holds whether the guest's ``timeout`` signals the row's whole process group or only its child.
+    """
     row_seconds = 2
     monkeypatch.setattr(_status, "_BATCH_ROW_SECONDS", row_seconds)
     guest_timeout = 1
@@ -154,6 +178,10 @@ def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in ("base64", "cat", "head", "od", "setsid", "sleep", "stat", "timeout", "tr"):
+        if name == "timeout" and timeout == "child-only":
+            (bin_dir / name).write_text(_CHILD_ONLY_TIMEOUT)
+            (bin_dir / name).chmod(0o755)
+            continue
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)
