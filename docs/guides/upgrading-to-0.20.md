@@ -429,8 +429,8 @@ the VM once no backup is running.
   `paths.vm_workspaces`. Its harness setup was recorded against the relative spelling, so its setup
   record is stale until the workspace is rehomed; rehome records the setup at the new path. One
   created under a value starting with `~` keeps its stored path, since which home it named is not
-  recorded. `workspace rehome` and `workspace repair` refuse such a path before anything runs,
-  repair with a hint to delete and recreate the workspace, and the session commands warn instead of
+  recorded. `workspace rehome` and `workspace repair` both refuse such a path before anything runs,
+  with a hint to delete and recreate the workspace, and the session commands warn instead of
   updating its tmuxinator config and defer delivering MCP servers to its sessions.
   `workspace delete` removes its row, sessions, grants, group and tmuxinator link, but nothing the
   path names, warning that its directory and tmuxinator config are left on the VM to check by hand;

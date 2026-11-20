@@ -273,8 +273,8 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str], *,
     ``authorize`` is the client the authorizes go through, one that sends
     each request once (:func:`single_send_config`), so no resend can follow
     an earlier send that still lands; the dry runs and revokes go through
-    ``ec2``. An authorize EC2 throttled was refused, so it alone is sent
-    again, after each of ``_THROTTLED_AUTHORIZE_WAITS_SECONDS``. If an
+    ``ec2``. An authorize that EC2 throttled was refused, so it alone is
+    sent again, after each of ``_THROTTLED_AUTHORIZE_WAITS_SECONDS``. If an
     actual authorize fails partway through, or is interrupted, all planned
     tuples are revoked best-effort before the failure propagates, holding
     interrupts until that is done (within one bound, as

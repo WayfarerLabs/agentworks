@@ -737,9 +737,9 @@ module, and `remote_exec.py` is deleted.
       only its own row unknown, and a client's stderr is read only as far as its field holds; the
       workspace traversal collapses leading slashes and refuses a `..` component, and repair reads
       the stored path through the same check as delete and rehome, and the upgrade guide says how
-      repair treats such rows; an EC2 authorize EC2 answers by throttling is sent again a few times,
-      each a single send, and a throttle to the end is a refusal; a GCE 403 naming a quota or rate
-      limit is a quota refusal.
+      repair treats such rows; an EC2 authorize that EC2 throttled is sent again a few times, each a
+      single send, and a throttle to the end is a refusal; a GCE 403 naming a quota or rate limit is
+      a quota refusal.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
