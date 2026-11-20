@@ -416,6 +416,30 @@ def test_a_workspace_directory_that_is_gone_is_a_quiet_success(
 
 @requires_guest_shell
 @skip_as_root
+def test_a_missing_top_level_workspace_is_judged_at_the_root_not_the_working_directory(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, _workspace, _entries = guest
+    top = "/agw-no-such-top"
+    if os.path.lexists(top):
+        pytest.skip(f"{top} exists on this host")
+    db.insert_workspace("top", vm_name="box", workspace_path=top, template="default", linux_group="g")
+    # Run each command from a directory the admin cannot search, which an empty or
+    # relative step up from the top level would consult instead of the root.
+    adrift = tmp_path / "guest" / "adrift"
+    adrift.mkdir()
+    quoted = shlex.quote(str(adrift))
+    _prefixed(target, f"chmod 700 {quoted} && cd {quoted} && chmod 0 .")
+    try:
+        _reinit(db, target)
+    finally:
+        adrift.chmod(0o755)
+
+    assert captured_output.warnings == []
+
+
+@requires_guest_shell
+@skip_as_root
 @pytest.mark.parametrize("mode", [0o600, 0o300, 0o500], ids=["unsearchable", "unreadable", "read-only"])
 def test_a_discovery_directory_that_cannot_be_fully_handled_is_warned(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, mode: int
