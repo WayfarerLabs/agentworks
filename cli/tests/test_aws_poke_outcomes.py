@@ -12,6 +12,7 @@ pin is how botocore sends and classifies.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import boto3
@@ -190,10 +191,12 @@ class _Authorizes:
 
     def __init__(self, answers: list[BaseException | None]) -> None:
         self.answers = answers
+        self.revoked: list[str] = []
 
     def revoke_security_group_ingress(self, **kwargs: Any) -> dict[str, Any]:
         if kwargs.get("DryRun"):
             raise ClientError({"Error": {"Code": "DryRunOperation"}}, "RevokeSecurityGroupIngress")
+        self.revoked.append(kwargs["IpPermissions"][0]["IpRanges"][0]["CidrIp"])
         return {}
 
     def authorize_security_group_ingress(self, **_kwargs: Any) -> dict[str, Any]:
@@ -224,3 +227,25 @@ def test_an_interrupt_names_only_the_prefix_whose_authorize_it_cut_short(warning
     (warning,) = warnings
     assert _SECOND in warning
     assert _FIRST not in warning
+
+
+def test_a_ctrl_c_while_a_throttled_authorize_waits_revokes_without_a_warning(
+    monkeypatch: pytest.MonkeyPatch, warnings: list[str]
+) -> None:
+    """A throttled send was refused, so while the poke waits to resend it nothing is pending."""
+    throttled = ClientError(
+        {"Error": {"Code": "RequestLimitExceeded"}, "ResponseMetadata": {"HTTPStatusCode": 503}},
+        "AuthorizeSecurityGroupIngress",
+    )
+    ec2 = _Authorizes([None, throttled])
+
+    def _interrupted(_seconds: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(aws_network, "time", SimpleNamespace(sleep=_interrupted))
+
+    with pytest.raises(KeyboardInterrupt):
+        poke_ssh_allow(ec2, _GROUP, [_FIRST, _SECOND], authorize=ec2)
+
+    assert ec2.revoked == [_FIRST, _SECOND]
+    assert warnings == []
