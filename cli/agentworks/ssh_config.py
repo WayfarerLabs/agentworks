@@ -445,7 +445,8 @@ def _make_directory(directory: Path) -> None:
     except OSError as error:
         if not _refused(error):
             raise
-        refused = Path(error.filename) if error.filename else directory
+        # os.mkdir names the directory it failed on, at every level.
+        refused = Path(error.filename)
         fix = "its parent directory writable and every directory above it searchable"
         raise _refusal("create", refused.resolve(), error, fix) from error
 
