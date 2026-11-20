@@ -6,8 +6,8 @@ configuration does not belong in workspace content, so the feature is removed an
 ``vm reinit`` retires what it left behind:
 
 - Every ``ws-*-console.yml`` entry in the admin's ``~/.config/tmuxinator/`` that is a
-  symlink to a ``.tmuxinator.yml`` is removed, dangling or not. Only the link goes;
-  its target is never followed.
+  symlink whose target ends in ``/.tmuxinator.yml``, as every generated one did, is
+  removed, dangling or not. Only the link goes; its target is never followed.
 - A workspace's ``.tmuxinator.yml`` is removed when it is a regular file that starts
   with the header those releases wrote. Only that many bytes are compared. Anything
   else stays.
@@ -59,6 +59,9 @@ hidden() {
 }
 """
 
+# ``$(...)`` strips every trailing newline, and a link's target may end in one, so
+# ``x`` guards the output and ``%??`` drops it with the one newline readlink adds,
+# leaving the exact target. A failed readlink leaves it empty.
 _LINKS_SCRIPT = (
     _HIDDEN_FUNCTION
     + """\
@@ -70,7 +73,8 @@ fi
 [ -x "$dir" ] && [ -r "$dir" ] || exit 1
 rc=0
 for link in "$dir"/ws-*-console.yml; do
-  case "$(readlink -- "$link" 2>/dev/null)" in
+  target=$(readlink -- "$link" 2>/dev/null && printf x)
+  case ${target%??} in
     */.tmuxinator.yml) rm -f -- "$link" || rc=1 ;;
   esac
 done

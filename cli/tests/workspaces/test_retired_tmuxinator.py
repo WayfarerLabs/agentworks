@@ -89,6 +89,27 @@ def test_reinit_removes_discovery_links_into_workspaces_and_dangling_ones(
 
 
 @requires_guest_shell
+@pytest.mark.parametrize("newlines", [1, 2])
+def test_a_link_to_tmuxinator_yml_followed_by_newlines_stays(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], newlines: int
+) -> None:
+    target, workspace, entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    other = workspace / (".tmuxinator.yml" + "\n" * newlines)
+    other.write_text("name: other\n")
+    kept = entries / "ws-other-console.yml"
+    kept.symlink_to(other)
+    generated = entries / "ws-proj-console.yml"
+    generated.symlink_to(workspace / ".tmuxinator.yml")
+
+    _reinit(db, target)
+
+    assert kept.is_symlink() and os.readlink(kept) == str(other)
+    assert other.read_text() == "name: other\n"
+    assert not generated.is_symlink()
+
+
+@requires_guest_shell
 def test_reinit_removes_a_header_bearing_project_and_leaves_any_other(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path
 ) -> None:
