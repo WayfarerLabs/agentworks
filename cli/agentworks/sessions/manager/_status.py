@@ -444,7 +444,7 @@ def _batch_probe_command() -> str:
         # status goes through fd 3 to a reader that prints it once every other write has ended.
         f'read_tmux() {{ {{ {{ {{ run_tmux "$@" 2>&1 >/dev/null 3>&- 4>&-; echo "$?" >&3; }} '
         f"| head -c {stderr_bytes} | hex >&4; }} 3>&1 "
-        "| { read -r ST; cat >/dev/null; printf ' %s' \"$ST\"; }; } 4>&1; }; "
+        "| { ST=$(cat); printf ' %s' \"$ST\"; }; } 4>&1; }; "
         f"if {{ {usable}; }} 2>/dev/null; then "
         'R=$(read_tmux has-session -t "=$N"); H=${R##* }; HHEX=$(cap "${R% *}"); '
         'R=$(read_tmux list-sessions); S=${R##* }; SHEX=$(cap "${R% *}"); '
