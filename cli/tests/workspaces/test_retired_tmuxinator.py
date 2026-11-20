@@ -442,6 +442,35 @@ def test_a_discovery_directory_hidden_by_an_unsearchable_directory_is_warned(
 
 
 @requires_guest_shell
+def test_a_workspace_missing_thousands_of_directories_deep_is_a_quiet_success(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    deep = str(tmp_path / "guest" / "workspaces" / "missing") + "/x" * 3000
+    db.insert_workspace("deep", vm_name="box", workspace_path=deep, template="default", linux_group="g")
+
+    _reinit(db, target)
+
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert captured_output.warnings == []
+
+
+@requires_guest_shell
+def test_a_relative_home_is_warned_rather_than_walked(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    target.environment["HOME"] = "relative/home"
+
+    _reinit(db, target)
+
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
 @pytest.mark.parametrize("shape", ["missing", "config-missing", "config-file", "a-file"])
 def test_a_missing_discovery_directory_is_a_quiet_success(
     db: Database,

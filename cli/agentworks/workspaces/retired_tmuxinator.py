@@ -53,14 +53,20 @@ _UNFINISHED_LINE = re.compile(f"{_UNFINISHED_MARKER}([1-9][0-9]{{0,8}})")
 # ``vacant`` says whether the kernel shows nothing can be there: the path exists as
 # something other than a directory, or it does not exist (and is not a link) and the
 # nearest existing ancestor can be entered or is not a directory. Anything else, such
-# as a directory the admin cannot search or a link that leads nowhere or through one,
-# cannot be judged.
+# as a directory the admin cannot search, a link that leads nowhere or through one, or
+# a relative path, cannot be judged. It walks up in a loop, since a shell's function
+# recursion is too shallow for a deep path.
 _VACANT_FUNCTION = """\
 vacant() {
-  if [ -e "$1" ]; then [ ! -d "$1" ]; return; fi
-  [ ! -L "$1" ] || return 1
-  parent=${1%/*}
-  (cd -P -- "${parent:-/}") 2>/dev/null || vacant "${parent:-/}"
+  path=$1
+  while :; do
+    if [ -e "$path" ]; then [ ! -d "$path" ]; return; fi
+    [ ! -L "$path" ] || return 1
+    case $path in /*) ;; *) return 1 ;; esac
+    path=${path%/*}
+    path=${path:-/}
+    (cd -P -- "$path") 2>/dev/null && return 0
+  done
 }
 """
 
