@@ -463,19 +463,40 @@ def test_a_discovery_directory_hidden_by_an_unsearchable_directory_is_warned(
     assert len(captured_output.warnings) == 1
 
 
+def _deep_missing(root: Path, project_bytes: int) -> str:
+    """A workspace path under ``root``, more than a thousand directories deep, whose
+    project path encodes to exactly ``project_bytes`` bytes. Its last component is
+    two-byte characters, so it is shorter in characters than in bytes."""
+    base = f"{root}/missing"
+    pad = "\u00e9" * 100
+    depth, odd = divmod(project_bytes - len(os.fsencode(f"{base}/{pad}/.tmuxinator.yml")), 2)
+    path = base + "/x" * depth + "/" + "y" * odd + pad
+    assert depth > 1000 and len(os.fsencode(path + "/.tmuxinator.yml")) == project_bytes
+    return path
+
+
 @requires_guest_shell
-def test_a_workspace_missing_thousands_of_directories_deep_is_a_quiet_success(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+@pytest.mark.parametrize(
+    ("project_bytes", "warned"), [(4095, False), (4096, True)], ids=["under-the-limit", "at-the-limit"]
+)
+def test_a_workspace_missing_deep_is_judged_unless_too_long_to_look_up(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    project_bytes: int,
+    warned: bool,
 ) -> None:
     target, workspace, _entries = guest
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    deep = str(tmp_path / "guest" / "workspaces" / "missing") + "/x" * 3000
+    deep = _deep_missing(tmp_path / "guest" / "workspaces", project_bytes)
     db.insert_workspace("deep", vm_name="box", workspace_path=deep, template="default", linux_group="g")
 
     _reinit(db, target)
 
+    assert (deep in shlex.split(target.commands[1])) is not warned
     assert not (workspace / ".tmuxinator.yml").exists()
-    assert captured_output.warnings == []
+    assert len(captured_output.warnings) == warned
 
 
 @requires_guest_shell
