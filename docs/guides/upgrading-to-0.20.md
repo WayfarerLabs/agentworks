@@ -343,7 +343,8 @@ first request to the VM, which comes after any VM start and secret prompt.
   whitespace is left out of the entries the same way, because the `ssh` shipped with Git for Windows
   reads no form of it. For the same reason, under a profile named with an apostrophe and no space,
   such as `C:/Users/O'Brien`, no managed entries are written at all, with a warning, since the
-  host-key store they name lives under it.
+  host-key store they name lives under it. Agentworks' own connections are unaffected; only your own
+  `ssh` through the managed aliases loses the entries.
 - **Managed SSH config lines are written for your own `ssh` to read exactly.** Each managed
   `IdentityFile` line holds the configured key path, absolute. The `Include` line added to
   `~/.ssh/config` is quoted when its directory holds a space or an apostrophe. An earlier release

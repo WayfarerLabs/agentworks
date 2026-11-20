@@ -1186,12 +1186,13 @@ under `no`, past a key the store does not hold. Neither that nor an update setti
 keys then go into your file rather than nowhere, and later connections trust them, or the store is
 skipped and the VM fails closed. See [Host keys](#host-keys).
 
-Paths in the entries are written relative to `~` when they are under your home directory. A VM whose
-store path cannot be written into an entry gets no entries, with a warning, rather than entries that
-would trust whatever answers; a key path that cannot be written is left out with a warning, so your
-own `ssh` offers its default keys. On Windows, where the `ssh` shipped with Git for Windows may read
-the entries and accepts no form of a path with an apostrophe and no whitespace, such a path is
-refused the same way.
+The entries name the key and the host-key store by the absolute paths Agentworks itself uses. A VM
+whose store path cannot be written into an entry gets no entries, with a warning, rather than
+entries that would trust whatever answers; a key path that cannot be written is left out with a
+warning, so your own `ssh` offers its default keys. On Windows, where the `ssh` shipped with Git for
+Windows may read the entries and accepts no form of a path with an apostrophe and no whitespace,
+such a path is refused the same way. The store is under your profile, so a profile named with an
+apostrophe and no whitespace gets no managed entries, with a warning.
 
 ### Sessions
 
