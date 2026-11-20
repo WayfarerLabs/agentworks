@@ -754,7 +754,9 @@ module, and `remote_exec.py` is deleted.
       pipe or its row's output; EC2 throttling is `RequestLimitExceeded` alone in the resend, the
       warning and the hint; the workspace traversal is handed only normalized paths, so its slash
       handling from round 7 is gone and its `..` refusal stays; GCE recovery steps with no operation
-      known offer none to watch.
+      known offer none to watch; the Include-with-a-space resolution test runs in Windows CI, the
+      test file's merge duplicates are folded, and SSH config warnings join an error and its hint
+      one way.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
