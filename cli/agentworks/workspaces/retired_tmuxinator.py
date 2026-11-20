@@ -77,10 +77,7 @@ _LINKS_SCRIPT = (
     _VACANT_FUNCTION
     + """\
 dir="$HOME/.config/tmuxinator"
-if ! (cd -P -- "$dir") 2>/dev/null; then
-  vacant "$dir" && exit 0
-  exit 1
-fi
+(cd -P -- "$dir") 2>/dev/null || { vacant "$dir"; exit; }
 [ -r "$dir" ] || exit 1
 rc=0
 for link in "$dir"/ws-*-console.yml; do
