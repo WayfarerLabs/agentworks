@@ -499,7 +499,7 @@ def test_a_config_d_the_user_may_not_create_is_refused_and_the_config_left_as_it
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """The error names the directory the system refused.
+    """The error names the directory the failing call was given.
 
     Above ``.ssh`` the user may not search, or, where ``.ssh`` is missing,
     write; ``.ssh`` itself it may read but not write.

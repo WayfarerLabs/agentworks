@@ -436,14 +436,15 @@ def _write_user_config(ssh_config: Path, content: str) -> None:
 def _make_directory(directory: Path) -> None:
     """Create ``directory`` and its parents as needed, refused as a write is when the system will not.
 
-    The error names the path the system refused, which may be a parent.
+    The error names the directory the failing call was given, which may be a parent.
     """
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as error:
         if not _refused(error):
             raise
-        # os.mkdir names the directory it failed on, at every level.
+        # The error Path.mkdir raises, from os.mkdir or from the os.stat in
+        # is_dir, names the directory it was raised for.
         refused = Path(error.filename)
         fix = "its parent directory writable and every directory above it searchable"
         raise _refusal("create", refused.resolve(), error, fix) from error
