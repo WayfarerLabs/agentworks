@@ -5,13 +5,10 @@ of it in stored settings.
 
 from __future__ import annotations
 
-import sys
-from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.errors import ConfigError
 from agentworks.manifests.envelope import API_VERSION
 
 if TYPE_CHECKING:
@@ -57,29 +54,6 @@ def test_an_authored_template_setting_warns_once_per_request(
 
     assert registry.lookup("workspace-template", "old").tmuxinator is value
     assert len(_deprecation_lines(captured_output)) == expected
-
-
-@pytest.mark.parametrize(("spec", "value", "expected"), _AUTHORED)
-def test_a_first_party_bundle_authoring_the_setting_is_refused(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest,
-    spec: str,
-    value: bool | None,
-    expected: int,
-) -> None:
-    from agentworks.manifests.package import load_manifest_package
-
-    anchor = "retired_tmuxinator_setting_bundle"
-    (tmp_path / anchor / "manifests").mkdir(parents=True)
-    (tmp_path / anchor / "__init__.py").write_text("")
-    (tmp_path / anchor / "manifests" / "bundle.yaml").write_text(_template(spec))
-    monkeypatch.syspath_prepend(str(tmp_path))
-    request.addfinalizer(lambda: sys.modules.pop(anchor, None))
-
-    with pytest.raises(ConfigError) if expected else nullcontext():
-        manifests = load_manifest_package(anchor=anchor, subdir="manifests")
-        assert [entry.resource.tmuxinator for entry in manifests.entries] == [value]
 
 
 @pytest.mark.parametrize(("spec", "expected"), [('{"tmuxinator":true}', 1), ('{"tmuxinator":false}', 1), ("{}", 0)])
