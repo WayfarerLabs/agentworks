@@ -756,7 +756,7 @@ removed its docstring's `Transport.run` half.
 | Start, restart                                | `_lifecycle.py:502-942`                                                                                                 | admin (logged from the start of the execution, where today the first requests are not logged, `:502-503`; the preflight reads that prepare it write no log by design, since a log takes its redactions before its first write and the secrets resolve after the preflight), owner for the launch | none, except the status reads                                                              | the log-free `transport(vm, config)` and `_build_session_target`                                                |
 | Status of one session                         | `check_session_status`, `_status.py:89-112`, and `_check_dedicated_session`, `:139-170`, unbounded                      | every read as the server's owner (`owner_run_command`) on the server its caller resolved (`resolve_session_tmux_server`): the agent through `runuser` for an agent session, the admin for an admin session                                                                                       | 10                                                                                         | `partial(target.run, sudo=agent)`                                                                               |
 | Status, bounded                               | `_BoundedStatusTarget`, `_status.py:50-56`, `:196-216`, `_queries.py:478-481`                                           | as above                                                                                                                                                                                                                                                                                         | 10                                                                                         | `_BoundedStatusTarget`, which goes                                                                              |
-| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one elevated `Script(Shell.SH)` per VM, its rows probed concurrently, each row's tmux reads as its socket owner, each row under root's `timeout -s KILL 6`, its only bound (decision 5, #923)                                                                                                    | `GUEST_OBSERVATION_TIMEOUT_SECONDS` plus one row's bound (16)                              | the script's own `sudo -n tmux` and `sudo -n sh -c`, and each row's mode field, which the owner's name replaces |
+| Batch status                                  | `batch_check_status`, `_status.py:240-247`, `input_data=` lines, an inner `sudo -n` per agent row                       | one elevated `Script(Shell.SH)` per VM, its rows probed concurrently, each row's tmux reads as its socket owner, each row under root's `timeout 6`, whose TERM the row's shell turns into a KILL of the row's process group, its only bound (decision 5, #923)                                   | `GUEST_OBSERVATION_TIMEOUT_SECONDS` plus one row's bound (16)                              | the script's own `sudo -n tmux` and `sudo -n sh -c`, and each row's mode field, which the owner's name replaces |
 | Legacy rows in a status fan-out               | `_status.py:476`, `:498-500`, an unbounded probe on the main thread                                                     | admin: the schema requires an agent session's socket (`CHECK`, `db/migrations.py:163`), so every legacy row is an admin's                                                                                                                                                                        | 10                                                                                         | `_build_session_target`'s `true`                                                                                |
 | Pid repair                                    | `_repair_session_pid`, `_pids.py:122-422`, unbounded                                                                    | admin; a dedicated server's reads as its owner (`owner_run_command`), through `runuser` for an agent session                                                                                                                                                                                     | 10 for every read                                                                          | `target.run`, `partial(target.run, sudo=agent)`                                                                 |
 | The agent probe in `_build_session_target`    | `_pids.py:86-87`                                                                                                        | `_assert_agent_access_works`                                                                                                                                                                                                                                                                     | its own                                                                                    | `_assert_agent_ssh_works`                                                                                       |
@@ -800,23 +800,26 @@ owned by another account than that owner, reporting status 126 for both reads, w
 unknown.
 
 The rows are probed concurrently, each in a background job the script waits for. Each job is root's
-`timeout -s KILL 6` (`_BATCH_ROW_SECONDS`) around the row's own `/bin/sh -c`, outside every owner
-switch: `timeout` leads a process group of its own, and at the row's bound kills it, every process
-root started for that row. That is the only bound. A bound around the owner's client would be the
-owner's to stop or kill (#923), and a GNU `timeout` there would lead a process group of its own,
-which root's kill of the row's group misses; a server that does not answer, or a client that hangs
-or leaves, holds only its row until root's kill, and the row reads unknown. Only root's processes
-hold the request's output (each owner client's streams are `/dev/null` and its read's pipe, and it
-gets none of root's other descriptors), so once they are gone nothing holds the request open,
-whatever the owner's processes do; the row prints no line and reads unknown, and nothing is written
-on the guest. A client's stderr is read through `head -c`, one byte more than its hex field holds,
-so an owner that writes without end costs root that much and is cut off by its broken pipe; the
-client's status reaches the row through a separate descriptor. bash reports a killed job on its own
-stderr, so the script's `wait` discards its stderr. The request's deadline is
-`GUEST_OBSERVATION_TIMEOUT_SECONDS` plus one row's bound, 16 seconds. Each row prints one line keyed
-by its position in the request, so lines may arrive in any order; a row without a line reads unknown
-for that row only. `runuser` opens a PAM session per read, which `pam_unix` logs on the guest; the
-elevated request itself is already logged by `sudo`. The real-tmux test
+`timeout 6` (`_BATCH_ROW_SECONDS`) around the row's own `/bin/sh -c`, outside every owner switch.
+`timeout` leads a process group of its own (GNU's and uutils' both do unless given `--foreground`;
+the supported Debian guests run GNU's). The row's shell runs its probe in the background and waits,
+so at the row's bound `timeout`'s TERM reaches it at once, and its trap kills the row's whole
+process group with KILL as root, every process root started for that row. The kill is the shell's
+because uutils' `timeout` sends KILL to its child alone. That is the only bound. A bound around the
+owner's client would be the owner's to stop or kill (#923), and a GNU `timeout` there would lead a
+process group of its own, which root's kill of the row's group misses; a server that does not
+answer, or a client that hangs or leaves, holds only its row until root's kill, and the row reads
+unknown. Only root's processes hold the request's output (each owner client's streams are
+`/dev/null` and its read's pipe, and it gets none of root's other descriptors), so once they are
+gone nothing holds the request open, whatever the owner's processes do; the row prints no line and
+reads unknown, and nothing is written on the guest. A client's stderr is read through `head -c`, one
+byte more than its hex field holds, so an owner that writes without end costs root that much and is
+cut off by its broken pipe; the client's status reaches the row through a separate descriptor. bash
+reports a killed job on its own stderr, so the script's `wait` discards its stderr. The request's
+deadline is `GUEST_OBSERVATION_TIMEOUT_SECONDS` plus one row's bound, 16 seconds. Each row prints
+one line keyed by its position in the request, so lines may arrive in any order; a row without a
+line reads unknown for that row only. `runuser` opens a PAM session per read, which `pam_unix` logs
+on the guest; the elevated request itself is already logged by `sudo`. The real-tmux test
 (`tests/sessions/test_native_batch_status.py`, the sudo lane) runs the script as root against a
 server its user owns; `test_batch_status_bounds.py` has clients hang, leave their row's process
 group, and write megabytes of stderr, and checks that only their rows read unknown within the

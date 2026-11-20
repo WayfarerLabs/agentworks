@@ -740,6 +740,11 @@ module, and `remote_exec.py` is deleted.
       repair treats such rows; an EC2 authorize that EC2 throttled is sent again a few times, each a
       single send, and a throttle to the end is a refusal; a GCE 403 naming a quota or rate limit is
       a quota refusal.
+- [x] Keep each batch status row's bound when `timeout` is uutils', as on CI's Ubuntu 26.04 runners,
+      where round 7's `timeout -s KILL` reached only the row's shell and the bounds test hung CI
+      (sessions-lld, Batch status): `timeout` sends TERM, and the row's shell, waiting on its probe,
+      kills the row's process group with KILL as root; the bounds test models uutils' `timeout`
+      beside the host's, and fails rather than hangs when a request outlives its deadline.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
