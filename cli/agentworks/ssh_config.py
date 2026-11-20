@@ -238,7 +238,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     """
     ssh_config = config.operator.ssh_config
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
-    config_d.mkdir(parents=True, exist_ok=True)
+    _make_directory(config_d)
     prefix = config.operator.ssh_host_prefix
     agent_prefix = config.operator.ssh_agent_host_prefix
 
@@ -329,7 +329,7 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     operator's opt-out: it counts as present and is left as it is. The file
     keeps its line endings.
     """
-    ssh_config.parent.mkdir(parents=True, exist_ok=True)
+    _make_directory(ssh_config.parent)
     content = _read_user_config(ssh_config)
     if content is None:
         _write_user_config(ssh_config, f"{_INCLUDE_COMMENT}\n{directive}\n")
@@ -431,6 +431,14 @@ def _write_user_config(ssh_config: Path, content: str) -> None:
         f.write(content)
 
 
+def _make_directory(directory: Path) -> None:
+    """Create ``directory`` and its parents as needed, refusing as a read does when this user may not reach them."""
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except PermissionError as error:
+        raise _refusal("create", directory, error, "readable and writable") from error
+
+
 def _refusal(action: str, target: Path, error: OSError, fix: str) -> AuthorizationError:
     """The error for an ``action`` on the operator's SSH config that the system refused, with how to lift it."""
     return AuthorizationError(
@@ -514,7 +522,7 @@ def _write_legacy(
     ``host_blocks`` are the per-alias Host blocks (VMs and agents). The
     managed section takes the line endings the operator's section uses.
     """
-    ssh_config.parent.mkdir(parents=True, exist_ok=True)
+    _make_directory(ssh_config.parent)
     newline = "\r\n" if "\r\n" in user_section else "\n"
 
     parts = [user_section.rstrip("\r\n")]

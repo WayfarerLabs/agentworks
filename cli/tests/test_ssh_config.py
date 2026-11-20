@@ -500,6 +500,34 @@ def test_a_config_linked_through_a_directory_the_user_may_not_search_is_refused_
     assert caught.value.hint in warning
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may search and write any directory")
+@pytest.mark.parametrize("locked", ["above .ssh", ".ssh"])
+def test_a_config_d_the_user_may_not_create_is_refused_and_the_config_left_as_it_was(
+    locked: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Above ``.ssh`` the user may not search; ``.ssh`` itself it may read but not write."""
+    config, ssh_dir = _mock_config(tmp_path / "home")
+    original = b"Host *\n    Foo bar\n"
+    config.operator.ssh_config.write_bytes(original)
+    directory, mode = (ssh_dir.parent, 0o600) if locked == "above .ssh" else (ssh_dir, 0o500)
+    directory.chmod(mode)
+    try:
+        with pytest.raises(AuthorizationError) as caught:
+            sync_ssh_config(config, _db_with_one_vm())
+        sync_ssh_config_or_warn(config, _db_with_one_vm())
+    finally:
+        directory.chmod(0o700)
+
+    assert config.operator.ssh_config.read_bytes() == original
+    assert not (ssh_dir / "config.d").exists()
+    assert caught.value.hint is not None
+    (warning,) = captured_output.warnings
+    assert caught.value.hint in warning
+
+
 @pytest.mark.parametrize(("error", "refused"), [(errno.EROFS, True), (errno.EIO, False)])
 def test_only_a_refused_open_is_reported_as_the_operators_to_fix(
     error: int,
