@@ -128,14 +128,14 @@ def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]
     """Remove the admin's generated discovery links and these workspaces' generated projects.
 
     Both commands always run, so one failure never leaves the rest of the VM
-    uncleaned. A path that cannot travel one per line is skipped and counted. Returns
-    a description of each failure, empty when everything finished; what succeeded
-    stays done, and a rerun is safe.
+    uncleaned. A path that is not absolute or cannot travel one per line is skipped
+    and counted. Returns a description of each failure, empty when everything
+    finished; what succeeded stays done, and a rerun is safe.
     """
-    sendable = [path for path in workspace_paths if "\n" not in path and "\0" not in path]
+    sendable = [path for path in workspace_paths if path.startswith("/") and "\n" not in path and "\0" not in path]
     failures: list[str] = []
     if unsendable := len(workspace_paths) - len(sendable):
-        failures.append(f"{output.count(unsendable, 'workspace path')} cannot be sent one per line")
+        failures.append(f"{output.count(unsendable, 'workspace path')} skipped as not absolute or not on one line")
     try:
         if not _run(target, _LINKS_SCRIPT)[0]:
             failures.append("the discovery links could not all be checked or removed")

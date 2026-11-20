@@ -525,18 +525,45 @@ def test_a_project_command_that_stopped_early_also_reports_the_rest(
     assert str(workspace) in reported[0] and not any("/srv/unreached" in failure for failure in reported)
 
 
+def _record_input(target: LocalFixtureTransport) -> list[str | None]:
+    """Record the input each command is sent; every command still runs for real."""
+    real_run = target.run
+    sent: list[str | None] = []
+
+    def recording(command: str, **kwargs: object) -> SSHResult:
+        sent.append(kwargs.get("input_data"))  # type: ignore[arg-type]
+        return real_run(command, **kwargs)
+
+    target.run = recording  # type: ignore[method-assign]
+    return sent
+
+
 @requires_guest_shell
+@skip_as_root
+@pytest.mark.parametrize("unsendable", ["/srv/odd\nname", "", "relative/proj"], ids=["two-lines", "empty", "relative"])
 def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    unsendable: str,
 ) -> None:
     target, workspace, _entries = guest
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    db.insert_workspace("odd", vm_name="box", workspace_path="/srv/odd\nname", template="default", linux_group="g")
+    # Listed by name, so the skipped path comes before the workspace that fails.
+    db.insert_workspace("a-odd", vm_name="box", workspace_path=unsendable, template="default", linux_group="g")
+    locked = _workspace(db, tmp_path / "guest" / "workspaces", "b-locked")
+    sent = _record_input(target)
+    locked.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        locked.chmod(0o755)
 
-    _reinit(db, target)
-
+    assert sent == [None, f"{locked}\n{workspace}\n"]
     assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
+    assert str(locked) in captured_output.warnings[0]
 
 
 @pytest.mark.parametrize(
