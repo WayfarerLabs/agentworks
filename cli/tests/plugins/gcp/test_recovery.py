@@ -72,6 +72,8 @@ def test_an_insert_that_may_still_appear_offers_its_delete_only_with_an_owned_id
     for steps in (owned, unowned):
         if operation_name is not None:
             assert resource.operation_describe(operation_name) in steps
+        else:
+            assert "operations describe" not in steps  # no operation to watch is offered
         assert resource.describe() in steps
     assert resource.delete() in owned and "4242" in owned
     assert resource.delete() not in unowned
