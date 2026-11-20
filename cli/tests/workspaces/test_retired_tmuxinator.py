@@ -287,6 +287,35 @@ def test_a_workspace_hidden_by_an_unsearchable_directory_is_warned(
 
 
 @requires_guest_shell
+@skip_as_root
+@pytest.mark.parametrize("newlines", [1, 2])
+def test_a_workspace_linked_to_an_unsearchable_directory_named_with_newlines_is_warned(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    newlines: int,
+) -> None:
+    target, _workspace, _entries = guest
+    real = tmp_path / "guest" / ("real" + "\n" * newlines)
+    real.mkdir()
+    (real / ".tmuxinator.yml").write_text(_GENERATED)
+    aliased = tmp_path / "guest" / "workspaces" / "aliased"
+    aliased.symlink_to(real)
+    db.insert_workspace("aliased", vm_name="box", workspace_path=str(aliased), template="default", linux_group="g")
+    logger = Mock()
+    real.chmod(0o600)
+    try:
+        _retire_workspace_tmuxinator_projects(db, "box", target, logger)  # type: ignore[arg-type]
+    finally:
+        real.chmod(0o755)
+
+    assert (real / ".tmuxinator.yml").read_text() == _GENERATED
+    assert logger.warning.call_count == 1, "a warning is what makes reinit record partial"
+    assert len(captured_output.warnings) == 1 and str(aliased) in captured_output.warnings[0]
+
+
+@requires_guest_shell
 @pytest.mark.parametrize("dangling", [False, True], ids=["deleted", "dangling-link"])
 def test_a_workspace_directory_that_is_gone_is_a_quiet_success(
     db: Database,

@@ -41,12 +41,18 @@ _UNFINISHED_MARKER = "AGW_TMUXINATOR_UNFINISHED="
 # another's failure or stop the rest. A test that is merely false never sets it;
 # being unable to search or read something does.
 #
-# ``hidden`` walks up from the path's parent to the nearest ancestor that exists, and
-# the path is hidden when that ancestor is a directory the admin cannot search.
-# Callers resolve links first with ``realpath -m``.
+# ``$(...)`` strips every trailing newline, and a path may end in one, so a
+# substitution that yields a path appends ``x`` and ``%??`` drops it with the one
+# newline the command adds, leaving the exact path. A failed command leaves it empty.
+#
+# ``hidden`` resolves links in its first argument with ``realpath -m`` and appends
+# its second, then walks up from that path's parent to the nearest ancestor that
+# exists. The path is hidden when that ancestor is a directory the admin cannot search.
 _HIDDEN_FUNCTION = """\
 hidden() {
-  up="${1%/*}"
+  up=$(realpath -m -- "$1" && printf x)
+  up="${up%??}$2"
+  up="${up%/*}"
   until [ -e "$up" ]; do
     case $up in */*) up="${up%/*}" ;; *) return 1 ;; esac
   done
@@ -54,15 +60,12 @@ hidden() {
 }
 """
 
-# ``$(...)`` strips every trailing newline, and a link's target may end in one, so
-# ``x`` guards the output and ``%??`` drops it with the one newline readlink adds,
-# leaving the exact target. A failed readlink leaves it empty.
 _LINKS_SCRIPT = (
     _HIDDEN_FUNCTION
     + """\
 dir="$HOME/.config/tmuxinator"
 if [ ! -d "$dir" ]; then
-  hidden "$(realpath -m -- "$dir")" && exit 1
+  hidden "$dir" && exit 1
   exit 0
 fi
 [ -x "$dir" ] && [ -r "$dir" ] || exit 1
@@ -97,7 +100,7 @@ while IFS= read -r workspace; do
       1) ;;
       *) unfinished ;;
     esac
-  elif hidden "$(realpath -m -- "$workspace")/.tmuxinator.yml"; then
+  elif hidden "$workspace" /.tmuxinator.yml; then
     unfinished
   fi
 done
