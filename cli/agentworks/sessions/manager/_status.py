@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import shlex
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -41,12 +42,14 @@ if TYPE_CHECKING:
 
     from ._tmux_server import SessionTmuxServer
 
-# Bounds each tmux client in the batch probe. A row runs at most two clients,
-# so its worst case is _batch_row_bound_seconds(); rows are probed
-# concurrently, so the batch request needs that bound only once on top of
-# the ordinary guest timeout.
+# Bounds each tmux client in the batch probe, as the row's owner. A row runs
+# at most two clients, so a row whose owner leaves those bounds alone ends
+# within two of them.
 _BATCH_CLIENT_TIMEOUT_SECONDS = 2
 _BATCH_CLIENT_KILL_SECONDS = 1
+# Root ends a row this long after its clients' worst case, whatever its owner
+# does, which leaves room for the row's own reads as root.
+_BATCH_ROW_SLACK_SECONDS = 1
 # Each row reports one line, written in one write. Capping every hex field
 # keeps that line well under PIPE_BUF (4096 bytes on Linux), so concurrent
 # rows' lines never interleave on the shared stdout pipe. An oversized field
@@ -55,8 +58,12 @@ _BATCH_FIELD_HEX_LIMIT = 512
 
 
 def _batch_row_bound_seconds() -> int:
-    """The longest one row's tmux clients can take in the batch probe."""
-    return 2 * (_BATCH_CLIENT_TIMEOUT_SECONDS + _BATCH_CLIENT_KILL_SECONDS)
+    """The longest one row can take in the batch probe, whatever its server or owner does.
+
+    Rows are probed concurrently, so the batch request needs this bound only
+    once on top of the ordinary guest timeout.
+    """
+    return 2 * (_BATCH_CLIENT_TIMEOUT_SECONDS + _BATCH_CLIENT_KILL_SECONDS) + _BATCH_ROW_SLACK_SECONDS
 
 
 _PID_PRESENT_FACT = "present"
@@ -267,7 +274,9 @@ def batch_check_status(
     rows are probed concurrently; it runs each row's tmux reads as the
     account that runs that row's server, never as root, and refuses a row
     whose socket is a link, is not a socket, or belongs to another account,
-    which reads as ``UNKNOWN``. A probe that does not complete raises its
+    which reads as ``UNKNOWN``. A row whose server or owner holds its reads
+    past one row's bound reads as ``UNKNOWN`` while the other rows still
+    report (``_batch_probe_command``). A probe that does not complete raises its
     typed error. Returns {session_name: SessionStatus}. An unrecorded
     present server remains ``UNKNOWN`` unless its exact native launch
     identity matches the pending attempt. Observation never adopts that
@@ -420,12 +429,19 @@ def _batch_probe_command() -> str:
     unknown.
 
     Each row is probed in a background job that prints one line, prefixed
-    with the row's position, and the program waits for every job, so nothing
-    it starts outlives it. Every tmux client is bounded, and a row whose
-    has-session times out skips list-sessions, so a row costs at most
-    ``_batch_row_bound_seconds`` whatever its server does, and a stuck server
-    delays no other row. Rows take no stdin, so the remaining rows stay out
-    of every server's reach. Nothing is written on the guest.
+    with the row's position, and the program waits for every job. Every tmux
+    client is bounded as the row's owner, and a row whose has-session times
+    out skips list-sessions, so a stuck server delays no other row. Those
+    bounds are the owner's processes, which the owner can stop or kill, so
+    each job is a root ``timeout`` around the row's own ``/bin/sh``: at
+    ``_batch_row_bound_seconds`` it kills that row's process group, every
+    process root started for the row, whatever its owner does. Only root's
+    processes hold the request's output; the owner's processes a row starts
+    hold only their read's pipe and ``/dev/null``. So a row whose owner defeats its
+    bounds prints no line and reads unknown, the other rows still report,
+    and nothing root starts outlives the program. Rows take no stdin, so
+    the remaining rows stay out of every server's reach. Nothing is written
+    on the guest.
     """
     from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, owner_client_command, socket_guard_condition
 
@@ -433,15 +449,14 @@ def _batch_probe_command() -> str:
     as_owner = owner_client_command(client, owner_word='"$O"')
     usable = socket_guard_condition('"$SOCK"', '"$O"')
     refused = SOCKET_GUARD_REFUSED
-    return (
+    row = (
         # -v: od otherwise abbreviates repeated 16-byte lines as "*".
         "hex() { od -An -v -tx1 | tr -d ' \\n'; }; "
         f'cap() {{ if [ ${{#1}} -le {_BATCH_FIELD_HEX_LIMIT} ]; then printf %s "$1"; else printf 0a; fi; }}; '
         'decode() { printf %s "$1" | base64 -d; }; '
+        'I=$1; PID=$5; N=$(decode "$2") || exit 90; SOCK=$(decode "$3") || exit 90; O=$(decode "$4") || exit 90; '
         "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
         'BOOT_HEX=$(cap "$(printf %s "$BOOT" | hex)"); '
-        "probe_row() { "
-        'I=$1; PID=$5; N=$(decode "$2") || exit 90; SOCK=$(decode "$3") || exit 90; O=$(decode "$4") || exit 90; '
         f"run_tmux() {{ {as_owner}; }}; "
         f"if {{ {usable}; }} 2>/dev/null; then "
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
@@ -455,9 +470,15 @@ def _batch_probe_command() -> str:
         'else printf absent; fi" 2>/dev/null); P=$?; fi; '
         'PHEX=$(cap "$(printf %s "$PFACT" | hex)"); '
         'printf "S:%s:%s:%s:%s:%s:%s:%s:%s:%s\\n" '
-        '"$I" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"; }; '
+        '"$I" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"'
+    )
+    return (
+        f"ROW={shlex.quote(row)}; "
         "I=0; while read -r N64 S64 O64 PID; do I=$((I + 1)); "
-        'probe_row "$I" "$N64" "$S64" "$O64" "$PID" </dev/null & done; wait'
+        # timeout leads a process group of its own and signals all of it.
+        f'timeout -s KILL {_batch_row_bound_seconds()} /bin/sh -c "$ROW" row "$I" "$N64" "$S64" "$O64" "$PID" '
+        # bash reports a killed job on its own stderr, which is no row's diagnostic.
+        "</dev/null & done; wait 2>/dev/null"
     )
 
 
