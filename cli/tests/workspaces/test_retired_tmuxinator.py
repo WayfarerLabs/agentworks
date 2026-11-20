@@ -552,8 +552,9 @@ def test_a_transport_error_on_one_command_still_runs_the_other(
         "",
         "AGW_TMUXINATOR_UNFINISHED=0\nAGW_TMUXINATOR_UNFINISHED=2\nAGW_TMUXINATOR_UNFINISHED=x\n",
         f"AGW_TMUXINATOR_UNFINISHED={'9' * 5000}\n",
+        "noise AGW_TMUXINATOR_UNFINISHED=1\nAGW_TMUXINATOR_UNFINISHED=1 noise\n",
     ],
-    ids=["none", "naming-no-line-sent", "too-long-to-convert"],
+    ids=["none", "naming-no-line-sent", "too-long-to-convert", "not-a-whole-line"],
 )
 def test_a_failed_project_command_without_usable_markers_still_warns(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, stdout: str
@@ -591,6 +592,24 @@ def test_a_startup_file_that_reads_stdin_changes_nothing(
 
     assert not project.exists() and not link.is_symlink()
     assert captured_output.warnings == []
+
+
+@requires_guest_shell
+@skip_as_root
+def test_a_marker_after_unended_output_still_names_its_workspace(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    _prefixed(target, "printf unended")
+    workspace.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        workspace.chmod(0o755)
+
+    assert len(captured_output.warnings) == 1
+    assert str(workspace) in captured_output.warnings[0]
 
 
 @requires_guest_shell
