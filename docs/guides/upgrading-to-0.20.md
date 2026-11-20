@@ -292,12 +292,18 @@ has started.
   `IdentityFile` line holds the configured key path, absolute. The `Include` line added to
   `~/.ssh/config` is quoted when its directory holds a space or an apostrophe, and such a line an
   earlier release wrote unquoted is rewritten as the quoted line where it stands. When the directory
-  holds `%`, `$`, a quote, a backslash, a control character, `*`, `?` or `[`, no `Include` line is
-  written and a warning says so. The line an earlier release wrote for that directory is removed,
-  with its `# Added by agentworks` comment, and the warning names it: a double quote in it made your
-  own `ssh` reject the whole file, for every host. Your own `ssh` then sees the managed entries only
-  through an `Include` of your own, so move `ssh_config` to a plain path. To stop Agentworks adding
-  the line, comment it out; the commented line is left as it is.
+  holds `%`, `$`, a double quote, a backslash, a control character, `*`, `?` or `[`, no `Include`
+  line is written and a warning says so. A line that, apart from surrounding whitespace, is exactly
+  the `Include` an earlier release wrote for that directory is removed, with the
+  `# Added by agentworks` comment directly above it, and the warning names it. Unquoted, that line
+  can name a different or wider directory than the config directory (`*`, `?` and `[` also match its
+  siblings, and from OpenSSH 9.9 `%` and `$` expand), and a double quote in it made your own `ssh`
+  reject the whole file, for every host. Until `ssh_config` is in a directory whose absolute path
+  holds none of those characters, the managed aliases (`awvm--` and `awagent--` by default) do not
+  resolve in your own `ssh` unless an `Include` of your own reaches them. Such an `Include` is left
+  alone unless it is spelled exactly as the removed line; quote it, for example, or the next sync
+  removes it again. To stop Agentworks adding the line, comment it out; the commented line is left
+  as it is.
 - **`~/.ssh/config` keeps its bytes and line endings.** Agentworks still edits the file in place, as
   before, and now keeps CRLF line endings and any bytes that are not UTF-8. A file you cannot read
   or write is reported and left as it was.

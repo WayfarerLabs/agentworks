@@ -264,13 +264,14 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
 
 def _sync_include(ssh_config: Path) -> None:
-    """Ensure the Include directive, or warn once that ssh would misread it and none is written.
+    """Ensure the Include directive, or, when ssh would misread the directory, warn once that none is written.
 
-    In that case the line an earlier release wrote for the same directory is
-    removed: it names the directory just as unreadably, and a stray double
-    quote in it makes ssh reject the whole file, every host with it. Only that
-    exact line goes, with the comment the release put above it; any other
-    Include is the operator's and is left alone.
+    In that case :func:`_remove_earlier_include` removes the line an earlier
+    release wrote for the same directory. Unquoted, that line can name a
+    different or wider directory than the config directory (a glob character
+    also matches its siblings, and from OpenSSH 9.9 ``%`` and ``$`` expand),
+    and a double quote in it makes ssh reject the whole file, every host with
+    it. Any other Include is the operator's and is left alone.
     """
     try:
         directive = _include_directive(ssh_config)
@@ -323,7 +324,7 @@ def _commented_out(line: str) -> str | None:
 
 
 def _remove_earlier_include(ssh_config: Path) -> str | None:
-    """Remove each :func:`_earlier_include` line with the comment written above it.
+    """Remove each line whose stripped text equals :func:`_earlier_include`, with the comment written directly above it.
 
     Returns the removed line, or ``None`` when there was none.
     """
