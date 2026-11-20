@@ -680,8 +680,8 @@ it takes `admin_files: Files` in its place; its two callers (`sessions/manager/_
 `apply_workspace_acls(files, path)` runs its three `find ... -exec setfacl` lines as literal argv
 `Command`s, elevated, each with today's 120 seconds (`workspaces/acls.py:32-51`), the clone-attempt
 prune included (`78011cce9`); `workspace_acl_commands(path)` builds them. Its four slice 7 callers
-(`workspaces/backends/vm.py:194`, `workspaces/manager/repair.py:217`, `rehome.py:259`,
-`copy.py:203`) build an admin access beside their target with `files()`, as slice 5 did for the
+(`workspaces/backends/vm.py:244`, `workspaces/manager/repair.py:256`, `rehome.py:292`,
+`copy.py:262`) build an admin access beside their target with `files()`, as slice 5 did for the
 clone cleanup (`workspaces/backends/vm.py:212`). Repair and rehome, which warn on an ACL failure and
 go on, catch `CommandFailed`, `ExecutionIncomplete` and `RequestRefused` beside the `SSHError` their
 legacy steps still raise.
