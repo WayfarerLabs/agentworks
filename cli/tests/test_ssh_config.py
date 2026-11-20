@@ -430,6 +430,36 @@ def test_a_config_the_user_may_not_read_is_refused_and_left_as_it_was(
     assert caught.value.hint in warning
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes and symlinks")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may search any directory")
+def test_a_config_linked_through_a_directory_the_user_may_not_search_is_refused_and_left_as_it_was(
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    target = locked / "config"
+    original = b"Host *\n    Foo bar\n"
+    target.write_bytes(original)
+    ssh_config.unlink()
+    ssh_config.symlink_to(target)
+    locked.chmod(0o600)
+    try:
+        with pytest.raises(AuthorizationError) as caught:
+            sync_ssh_config(config, _db_with_one_vm())
+        sync_ssh_config_or_warn(config, _db_with_one_vm())
+    finally:
+        locked.chmod(0o700)
+
+    assert ssh_config.is_symlink()
+    assert target.read_bytes() == original
+    assert caught.value.hint is not None
+    (warning,) = captured_output.warnings
+    assert caught.value.hint in warning
+
+
 @pytest.mark.parametrize(("error", "refused"), [(errno.EROFS, True), (errno.EIO, False)])
 def test_only_a_refused_open_is_reported_as_the_operators_to_fix(
     error: int,

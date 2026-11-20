@@ -296,11 +296,11 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     keeps its line endings.
     """
     ssh_config.parent.mkdir(parents=True, exist_ok=True)
-    if not ssh_config.exists():
+    content = _read_user_config(ssh_config)
+    if content is None:
         _write_user_config(ssh_config, f"{_INCLUDE_COMMENT}\n{directive}\n")
         return
 
-    content = _read_user_config(ssh_config)
     lines = content.splitlines(keepends=True)
     # Earlier releases wrote the pattern unquoted. With an apostrophe in it,
     # ssh rejects the whole file, so a correct line beside it would fix
@@ -328,10 +328,11 @@ def _remove_earlier_include(ssh_config: Path) -> str | None:
 
     Returns the removed line, or ``None`` when there was none.
     """
-    if not ssh_config.exists():
+    content = _read_user_config(ssh_config)
+    if content is None:
         return None
     earlier = _earlier_include(ssh_config)
-    lines = _read_user_config(ssh_config).splitlines(keepends=True)
+    lines = content.splitlines(keepends=True)
     kept: list[str] = []
     for line in lines:
         if line.strip() != earlier:
@@ -346,10 +347,9 @@ def _remove_earlier_include(ssh_config: Path) -> str | None:
 
 def _remove_legacy_section(ssh_config: Path) -> None:
     """Remove the legacy managed section from ssh_config if present."""
-    if not ssh_config.exists():
-        return
-
     content = _read_user_config(ssh_config)
+    if content is None:
+        return
     marker_idx = content.find(_LEGACY_MARKER)
     if marker_idx == -1:
         return
@@ -360,15 +360,19 @@ def _remove_legacy_section(ssh_config: Path) -> None:
     _write_user_config(ssh_config, user_section + newline if user_section else "")
 
 
-def _read_user_config(ssh_config: Path) -> str:
-    """The operator's SSH config with its line endings as written.
+def _read_user_config(ssh_config: Path) -> str | None:
+    """The operator's SSH config with its line endings as written, or ``None`` when there is no such file.
 
     Bytes that are not UTF-8 decode to surrogates, which
     :func:`_write_user_config` writes back unchanged. A file this user may not
-    read is refused with :class:`AuthorizationError`, as one it may not write is.
+    read, or may not reach through a directory it may not search, is refused
+    with :class:`AuthorizationError`, as one it may not write is. Opening it is
+    the only check, so no separate existence test can raise first.
     """
     try:
         f = open(ssh_config, encoding="utf-8", errors="surrogateescape", newline="")  # noqa: SIM115
+    except FileNotFoundError:
+        return None
     except PermissionError as error:
         raise _refusal("read", ssh_config.resolve(), error, "readable and writable") from error
     with f:
@@ -466,10 +470,9 @@ def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
     """Read the SSH config, splitting into operator-managed section and auto-managed entries."""
     entries: dict[str, str] = {}
 
-    if not ssh_config.exists():
-        return "", entries
-
     content = _read_user_config(ssh_config)
+    if content is None:
+        return "", entries
     marker_idx = content.find(_LEGACY_MARKER)
 
     if marker_idx == -1:
