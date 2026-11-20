@@ -98,8 +98,9 @@ exit "$rc"
 # position on a marker line of its own, so the caller names it from the path it sent
 # rather than from output that line-ending translation may have changed. A last
 # marker line says the loop reached the end of its arguments, so a run that died
-# partway is not taken to have failed only where it reported. The leading newline
-# keeps each marker off any line the admin's shell printed without ending it.
+# partway, or never ran because a startup file of the admin's shell exited first, is
+# not taken to have failed only where it reported. The leading newline keeps each
+# marker off any line the admin's shell printed without ending it.
 _PROJECTS_SCRIPT = (
     _VACANT_FUNCTION
     + f"""\
@@ -132,9 +133,11 @@ exit "$rc"
 # Both scripts run under ``sh -c`` as the admin, so the admin's login shell never
 # parses the scripts. The workspace paths travel as arguments with stdin closed, so
 # nothing a startup file of the admin's shell reads can change them. They share one
-# command line per VM, which holds roughly 670 paths from a Windows workstation and
-# 2700 from Linux or macOS, far above any real VM; beyond that the command fails and
-# reinit warns.
+# command line per VM. Windows caps a workstation's whole ssh command line at 32,767
+# characters, and Linux caps the command the admin's shell receives, as one argument,
+# below 128 KiB. That is hundreds of typical workspace paths from Windows and
+# thousands otherwise, far above any real VM; beyond it the command fails and reinit
+# warns.
 def _run(target: Transport, script: str, *arguments: str) -> tuple[bool, str]:
     """Run one script with these arguments and stdin closed; whether it succeeded, and its stdout."""
     command = shlex.join(["sh", "-c", script, "sh", *arguments])
