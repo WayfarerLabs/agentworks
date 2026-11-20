@@ -443,57 +443,38 @@ def test_a_config_the_user_may_not_write_is_refused_and_left_as_it_was(
     assert caught.value.hint in warning
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
-@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may read a mode 000 file")
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes and symlinks")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may read any file")
+@pytest.mark.parametrize("shape", ["mode 000 file", "link through an unsearchable directory"])
 def test_a_config_the_user_may_not_read_is_refused_and_left_as_it_was(
+    shape: str,
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
     config, _ = _mock_config(tmp_path)
     ssh_config = config.operator.ssh_config
     original = b"Host *\n    Foo bar\n"
-    ssh_config.write_bytes(original)
-    ssh_config.chmod(0o000)
-    before = ssh_config.stat()
-    try:
-        with pytest.raises(AuthorizationError) as caught:
-            sync_ssh_config(config, _db_with_one_vm())
-        sync_ssh_config_or_warn(config, _db_with_one_vm())
-        after = ssh_config.stat()
-    finally:
-        ssh_config.chmod(0o600)
-
-    assert (after.st_ino, after.st_mode) == (before.st_ino, before.st_mode)
-    assert ssh_config.read_bytes() == original
-    assert caught.value.hint is not None
-    (warning,) = captured_output.warnings
-    assert caught.value.hint in warning
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes and symlinks")
-@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may search any directory")
-def test_a_config_linked_through_a_directory_the_user_may_not_search_is_refused_and_left_as_it_was(
-    tmp_path: Path,
-    captured_output,  # noqa: ANN001
-) -> None:
-    config, _ = _mock_config(tmp_path)
-    ssh_config = config.operator.ssh_config
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    target = locked / "config"
-    original = b"Host *\n    Foo bar\n"
+    if shape == "mode 000 file":
+        target, locked, mode = ssh_config, ssh_config, 0o000
+    else:
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        target, mode = locked / "config", 0o600
+        ssh_config.unlink()
+        ssh_config.symlink_to(target)
     target.write_bytes(original)
-    ssh_config.unlink()
-    ssh_config.symlink_to(target)
-    locked.chmod(0o600)
+    before = target.stat()
+    locked.chmod(mode)
     try:
         with pytest.raises(AuthorizationError) as caught:
             sync_ssh_config(config, _db_with_one_vm())
         sync_ssh_config_or_warn(config, _db_with_one_vm())
     finally:
         locked.chmod(0o700)
+    after = target.stat()
 
-    assert ssh_config.is_symlink()
+    assert after.st_ino == before.st_ino
+    assert ssh_config.is_symlink() == (shape != "mode 000 file")
     assert target.read_bytes() == original
     assert caught.value.hint is not None
     (warning,) = captured_output.warnings
@@ -942,6 +923,17 @@ def test_the_legacy_rebuild_keeps_the_operators_bytes_line_endings_and_mode(tmp_
     assert stat.S_IMODE(ssh_config.stat().st_mode) == 0o640
 
 
+def test_a_legacy_sync_with_no_config_creates_one_holding_the_managed_section(tmp_path: Path) -> None:
+    config, _ = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    config.operator.ssh_config.unlink()
+
+    sync_ssh_config(config, _db_with_one_vm())
+
+    content = config.operator.ssh_config.read_text()
+    assert content.index(_LEGACY_MARKER) < content.index("Host awvm--web\n")
+
+
 def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
     from agentworks.ssh_config import _legacy_rebuild
 
@@ -1293,6 +1285,18 @@ def test_a_copy_left_once_the_marked_line_goes_is_the_operators_and_stays(
     _rebuild_config_dir(config, _db_with_one_vm())
 
     assert ssh_config.read_bytes() == left.format(line=line).encode()
+
+
+@pytest.mark.parametrize("prefix", ["# ", "  ", "Host x "])
+def test_the_marker_counts_only_at_the_start_of_a_line(prefix: str, tmp_path: Path) -> None:
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    ssh_config = config.operator.ssh_config
+    original = f"Host *\n{prefix}# Added by agentworks\n{_line_written_by_0_19(ssh_config)}\n".encode()
+    ssh_config.write_bytes(original)
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == original
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
