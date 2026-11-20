@@ -112,13 +112,18 @@ def open_parent_traversal(path: str) -> Script:
 
     The walk starts at the parent: the workspace's own mode is the canonical
     2770, which carries no world bits. It walks only absolute paths, so a
-    relative one stops it at once. Each ancestor is cut from the path by
-    parameter expansion, never captured from a command's output, which would
-    drop trailing newlines from its name and so name another directory.
+    relative one stops it at once, and it never reaches ``/``, however many
+    slashes lead the path. A path with a ``..`` component exits 2 before any
+    change, since its ancestors are known only once the VM resolves it. Each
+    ancestor is cut from the path by parameter expansion, never captured from
+    a command's output, which would drop trailing newlines from its name and
+    so name another directory.
     """
     return script(
+        'case /$1/ in */../*) echo "refusing a path with a .. component" >&2; exit 2 ;; esac\n'
         "p=$1\n"
         'while [ "${p%/}" != "$p" ]; do p=${p%/}; done\n'
+        'while [ "${p#//}" != "$p" ]; do p=${p#/}; done\n'
         "p=${p%/*}\n"
         'while [ -n "$p" ] && [ "${p#/}" != "$p" ]; do chmod -c a+x -- "$p"; p=${p%/*}; done',
         path,

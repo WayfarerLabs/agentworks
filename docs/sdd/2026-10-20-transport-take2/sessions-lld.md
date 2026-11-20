@@ -641,7 +641,10 @@ spellings one directory, so inside the held span, after the directory checks and
 one probe resolves both on the guest as root, as the target is created (`realpath -z -e` of the
 source, `realpath -z -m` of the target, which need not exist, and which prints a component it cannot
 search unresolved), and the overlap check runs again on the resolved paths, with the same refusal.
-The walk itself stops at any path that is not absolute and has a 30-second deadline.
+The walk itself stops at any path that is not absolute, never reaches `/` however many slashes lead
+the path, exits 2 before any change for a path with a `..` component, cuts each ancestor by
+parameter expansion so its exact bytes are kept, and has a 30-second deadline; repair hands it the
+stored path as `stored_workspace_path` normalizes it, as delete and rehome read theirs.
 `paths.vm_workspaces` is refused at load when it is not absolute, is `/`, or has a `..` component,
 which collapsing would move past a link, and is stored normalized.
 

@@ -16,7 +16,13 @@ from agentworks.execution.results import Completed
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
-from agentworks.workspaces.guest import FIND_DEADLINE, REQUEST_FAILURES, ensure_group, open_parent_traversal
+from agentworks.workspaces.guest import (
+    FIND_DEADLINE,
+    REQUEST_FAILURES,
+    ensure_group,
+    open_parent_traversal,
+    stored_workspace_path,
+)
 from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
@@ -120,6 +126,7 @@ def repair_workspace(
             entity_kind="vm",
             entity_name=ws.vm_name,
         )
+    ws_path = stored_workspace_path(ws.workspace_path)
 
     with (
         gated_vm_boundary(
@@ -134,7 +141,6 @@ def repair_workspace(
     ):
         admin = admin_access(vm, config, log)
         ws_group = ws.linux_group
-        ws_path = ws.workspace_path
         fixes = 0
         # Steps whose convergence ran but whose Fixed-vs-OK outcome could not
         # be verified (currently only the ACL step, when a getfacl snapshot

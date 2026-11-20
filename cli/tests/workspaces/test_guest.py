@@ -80,8 +80,22 @@ def test_parent_traversal_names_an_ancestor_ending_in_newlines_by_its_exact_byte
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize(
     ("path", "ancestors"),
-    [("/ws", []), ("/srv/ws/", ["/srv"]), ("/srv//ws", ["/srv/", "/srv"])],
-    ids=("under-root", "trailing-slash", "doubled-slash"),
+    [
+        ("/ws", []),
+        ("//ws", []),
+        ("///ws", []),
+        ("//srv/ws", ["/srv"]),
+        ("/srv/ws/", ["/srv"]),
+        ("/srv//ws", ["/srv/", "/srv"]),
+    ],
+    ids=(
+        "under-root",
+        "two-leading-slashes",
+        "three-leading-slashes",
+        "leading-slashes",
+        "trailing-slash",
+        "doubled-slash",
+    ),
 )
 def test_parent_traversal_stops_below_the_root(tmp_path: Path, shell: str, path: str, ancestors: list[str]) -> None:
     completed = run(open_parent_traversal(path), tmp_path, shell)
@@ -111,3 +125,14 @@ def test_path_occupied_sees_anything_at_a_path_with_spaces(tmp_path: Path, kind:
     completed = run(path_occupied(str(path)), tmp_path)
 
     assert completed.returncode == (1 if kind == "absent" else 0)
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("path", ["/a/../b", "/srv/ws/..", "/../ws"])
+def test_parent_traversal_of_a_path_with_a_dotdot_component_refuses_before_any_change(
+    tmp_path: Path, shell: str, path: str
+) -> None:
+    completed = run(open_parent_traversal(path), tmp_path, shell)
+
+    assert completed.returncode == 2
+    assert not (tmp_path / "chmod.log").exists()

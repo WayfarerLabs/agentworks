@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.errors import NotFoundError
+from agentworks.errors import NotFoundError, ValidationError
 from agentworks.execution.results import Completed, Result
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -144,6 +144,45 @@ def test_repair_unknown_workspace_fails_with_zero_resolves_and_zero_gate(
 
     assert resolve_counter == []
     assert guest.requests == []
+
+
+def test_repair_refuses_a_stored_path_that_is_not_absolute_with_zero_resolves_and_zero_gate(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A '~' row names no one directory on the VM, so repair runs nothing against it, as rehome does."""
+    config = make_config()
+    seed(db)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '~/ws/ws1' WHERE name = 'ws1'")
+    db._conn.commit()
+    no_gate(monkeypatch)
+
+    with pytest.raises(ValidationError):
+        workspace_manager.repair_workspace(db, config, "ws1", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolve_counter == []
+    assert guest.requests == []
+
+
+def test_repair_walks_the_stored_path_as_normalized(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The traversal gets the one spelling delete and rehome read, not the row's as typed."""
+    seed(db)
+    db._conn.execute("UPDATE workspaces SET workspace_path = '//srv/./ws1/' WHERE name = 'ws1'")
+    db._conn.commit()
+    fake = RepairProbeGuest(path="/srv/ws1")
+    route(monkeypatch, fake)
+    reachable(monkeypatch, True)
+
+    workspace_manager.repair_workspace(db, make_config(), "ws1", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert open_parent_traversal("/srv/ws1") in fake.requests
 
 
 def test_workspace_scope_reaches_node_readiness(
