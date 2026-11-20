@@ -508,20 +508,63 @@ def test_a_failed_project_command_without_usable_markers_still_warns(
 
 
 @requires_guest_shell
-@pytest.mark.parametrize(("finished", "failures"), [(True, 1), (False, 2)], ids=["finished", "stopped-early"])
-def test_a_project_command_that_stopped_early_also_reports_the_rest(
-    guest: tuple[LocalFixtureTransport, Path, Path], finished: bool, failures: int
+@pytest.mark.parametrize(
+    ("finished", "failures", "named"),
+    [
+        ("AGW_TMUXINATOR_FINISHED=2\n", 1, True),
+        ("", 2, True),
+        ("AGW_TMUXINATOR_FINISHED=1\n", 1, False),
+        ("AGW_TMUXINATOR_FINISHED=3\n", 1, False),
+    ],
+    ids=["read-every-path", "stopped-early", "read-too-few", "read-too-many"],
+)
+def test_the_projects_are_reported_whole_unless_the_command_read_every_path(
+    guest: tuple[LocalFixtureTransport, Path, Path], finished: str, failures: int, named: bool
 ) -> None:
     from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
 
     target, workspace, _entries = guest
-    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" + ("AGW_TMUXINATOR_FINISHED\n" if finished else "")
-    _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
+    _replace_call(target, 2, SSHResult(returncode=1, stdout="AGW_TMUXINATOR_UNFINISHED=1\n" + finished, stderr=""))
 
     reported = retire_tmuxinator_projects(target, [str(workspace), "/srv/unreached"])
 
     assert len(reported) == failures
-    assert str(workspace) in reported[0] and not any("/srv/unreached" in failure for failure in reported)
+    assert (str(workspace) in reported[0]) is named
+    assert not any("/srv/unreached" in failure for failure in reported)
+
+
+@requires_guest_shell
+@skip_as_root
+@pytest.mark.parametrize("consumer", ["cat >/dev/null", "IFS= read -r _"], ids=["all", "one-line"])
+def test_input_read_before_the_script_runs_leaves_reinit_partial(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    consumer: str,
+) -> None:
+    """A startup file of the admin's shell that reads stdin takes paths the script never
+    sees, and shifts the line numbers of the rest."""
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    later = _workspace(db, tmp_path / "guest" / "workspaces", "zlater")
+    later.chmod(0o600)
+    real_run = target.run
+
+    def consuming(command: str, **kwargs: object) -> SSHResult:
+        return real_run(f"{consumer}; {command}" if kwargs.get("input_data") else command, **kwargs)
+
+    target.run = consuming  # type: ignore[method-assign]
+    logger = Mock()
+    try:
+        _retire_workspace_tmuxinator_projects(db, "box", target, logger)
+    finally:
+        later.chmod(0o755)
+
+    assert (workspace / ".tmuxinator.yml").exists()
+    assert logger.warning.call_count == 1
+    assert len(captured_output.warnings) == 1
+    assert str(workspace) not in captured_output.warnings[0] and str(later) not in captured_output.warnings[0]
 
 
 @requires_guest_shell
@@ -529,7 +572,7 @@ def test_a_workspace_reported_twice_is_named_once(guest: tuple[LocalFixtureTrans
     from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
 
     target, workspace, _entries = guest
-    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" * 2 + "AGW_TMUXINATOR_FINISHED\n"
+    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" * 2 + "AGW_TMUXINATOR_FINISHED=1\n"
     _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
 
     reported = retire_tmuxinator_projects(target, [str(workspace)])
