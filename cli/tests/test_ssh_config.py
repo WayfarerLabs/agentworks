@@ -1306,11 +1306,14 @@ def test_the_installed_client_still_routes_through_the_operators_own_include_aft
     assert _resolved_hostname(ssh_config, "route") == "route.example"
 
 
-@pytest.mark.parametrize("prefix", ["# ", "  ", "Host x "])
-def test_the_marker_counts_only_at_the_start_of_a_line(prefix: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize(("prefix", "between"), [("# ", ""), ("  ", ""), ("Host x ", ""), ("", "\n")])
+def test_the_marker_counts_only_at_the_start_of_a_line_directly_above_the_line(
+    prefix: str, between: str, tmp_path: Path
+) -> None:
     config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
     ssh_config = config.operator.ssh_config
-    original = f"Host *\n{prefix}# Added by agentworks\n{_line_written_by_0_19(ssh_config)}\n".encode()
+    line = _line_written_by_0_19(ssh_config)
+    original = f"Host *\n{prefix}# Added by agentworks\n{between}{line}\n".encode()
     ssh_config.write_bytes(original)
 
     _rebuild_config_dir(config, _db_with_one_vm())
