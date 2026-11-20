@@ -77,9 +77,7 @@ def _local_guest(shell: list[str], env: dict[str, str], *, sessions: list[int] |
             stdout, stderr = process.communicate(request.stdin.data, timeout=request.deadline)
         except subprocess.TimeoutExpired:
             # Ends what the request's session still runs; output something else holds open fails here.
-            for pid in _live_session_members(process.pid):
-                with contextlib.suppress(OSError):
-                    os.kill(pid, signal.SIGKILL)
+            _kill_session(process.pid)
             process.communicate(timeout=5)
             return Result(Unknown(UnknownReason.DEADLINE))
         return Result(Completed(process.returncode), stdout, stderr)
@@ -89,16 +87,28 @@ def _local_guest(shell: list[str], env: dict[str, str], *, sessions: list[int] |
     return access
 
 
-# A timeout that, like uutils coreutils', leads a process group of its own but signals only its child.
-_CHILD_ONLY_TIMEOUT = f"""#!{sys.executable}
+# uutils coreutils' timeout, for the options the batch program could pass: it leads a process group of
+# its own and at its bound signals its child, then ignores the signal itself and sends it to its group.
+# KILL cannot be ignored, so uutils returns before that and KILL reaches the child alone.
+_UUTILS_TIMEOUT = f"""#!{sys.executable}
 import os, signal, subprocess, sys
 
+args = sys.argv[1:]
+sig = signal.SIGTERM
+if args[:1] == ["-s"]:
+    sig = signal.Signals["SIG" + args[1]]
+    args = args[2:]
+if len(args) < 2 or args[0].startswith("-"):
+    sys.exit(125)  # an option this stand-in does not model
 os.setpgid(0, 0)
-child = subprocess.Popen(sys.argv[2:])
+child = subprocess.Popen(args[1:])
 try:
-    sys.exit(child.wait(timeout=float(sys.argv[1])))
+    sys.exit(child.wait(timeout=float(args[0])))
 except subprocess.TimeoutExpired:
-    child.send_signal(signal.SIGTERM)
+    child.send_signal(sig)
+    if sig != signal.SIGKILL:
+        signal.signal(sig, signal.SIG_IGN)
+        os.kill(0, sig)
     child.wait()
     sys.exit(124)
 """
@@ -154,6 +164,13 @@ def _live_session_members(session_id: int) -> set[int]:
     return members
 
 
+def _kill_session(session_id: int) -> None:
+    """SIGKILL every live process in session ``session_id``, one a test's request started."""
+    for pid in _live_session_members(session_id):
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+
+
 def _kill_if_mentions(pid: int, marker: str) -> None:
     """SIGKILL ``pid`` if it is still a process whose command line mentions ``marker``."""
     with contextlib.suppress(OSError):
@@ -163,13 +180,13 @@ def _kill_if_mentions(pid: int, marker: str) -> None:
 
 @requires_symlinks
 @requires_posix_shell
-@pytest.mark.parametrize("timeout", ["system", "child-only"])
+@pytest.mark.parametrize("timeout", ["system", "uutils"])
 def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str], timeout: str
 ) -> None:
     """Root's kill of each row is the one bound: no owner client holds the request open or outlives it as root's.
 
-    It holds whether the guest's ``timeout`` signals the row's whole process group or only its child.
+    It holds for the host's own ``timeout`` and for uutils', which sends KILL to its child alone.
     """
     row_seconds = 2
     monkeypatch.setattr(_status, "_BATCH_ROW_SECONDS", row_seconds)
@@ -178,8 +195,8 @@ def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in ("base64", "cat", "head", "od", "setsid", "sleep", "stat", "timeout", "tr"):
-        if name == "timeout" and timeout == "child-only":
-            (bin_dir / name).write_text(_CHILD_ONLY_TIMEOUT)
+        if name == "timeout" and timeout == "uutils":
+            (bin_dir / name).write_text(_UUTILS_TIMEOUT)
             (bin_dir / name).chmod(0o755)
             continue
         executable = shutil.which(name)
@@ -188,11 +205,11 @@ def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
     owned = tmp_path / "owned"
     # One kind of client ignores SIGTERM and never answers; the other leaves the row's process group
     # and session, still holding its read's pipe, as a client its server took over could, and notes
-    # its pid.
+    # its pid. Each is chosen by its socket's name, since the test's own directory names "hangs".
     tmux = bin_dir / "tmux"
     tmux.write_text(
         "#!/bin/sh\n"
-        'case "$2" in\n'
+        'case "${2##*/}" in\n'
         "  *hangs*) trap '' TERM; while :; do sleep 0.2; done ;;\n"
         '  *escapes*) printf \'%s\\n\' "$$" >> "$AGW_OWNED_PIDS"; exec "${0%/*}/setsid" "${0%/*}/sleep" 307 ;;\n'
         "esac\n"
@@ -221,10 +238,15 @@ def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
         statuses = _status.batch_check_status(rows, admin=guest)
         elapsed = time.monotonic() - started
         (request,) = requests
-        left = _live_session_members(request)
+        # The request's processes may still be exiting just after it answers.
+        settled = time.monotonic() + 2
+        while (left := _live_session_members(request)) and time.monotonic() < settled:
+            time.sleep(0.05)
     finally:
         for pid in owned.read_text().split() if owned.exists() else ():
             _kill_if_mentions(int(pid), str(tmp_path))
+        for session_id in requests:
+            _kill_session(session_id)
 
     # However many rows hang, side by side they take one row's bound, inside the request's deadline.
     assert elapsed < guest_timeout + row_seconds

@@ -417,13 +417,15 @@ def _batch_probe_command() -> str:
 
     Each row is a root ``timeout`` around its own ``/bin/sh``, in the
     background, printing one line prefixed with its position; the program
-    waits for every row. ``timeout`` leads a process group of its own, and at
-    ``_BATCH_ROW_SECONDS`` it signals the row's shell, which kills that whole
-    group as root: a ``timeout`` that signals only its child (uutils
-    coreutils) would otherwise leave the row's other processes holding the
-    request's output open. So a server that does not answer, or an owner
-    client that hangs or leaves, costs only its own row, which prints nothing
-    and reads unknown. A client's stderr is read only up to one more byte
+    waits for every row. The row's process group is ``timeout``'s own: GNU's
+    and uutils' ``timeout`` each lead one unless given ``--foreground``, and
+    the supported guests (Debian) run GNU's. At ``_BATCH_ROW_SECONDS``
+    ``timeout`` sends TERM, and the row's own shell, taking it, kills that
+    whole group with KILL as root. The kill is the shell's because uutils'
+    ``timeout`` sends KILL to its child alone, which would leave the row's
+    other processes holding the request's output open. So a server that does
+    not answer, or an owner client that hangs or leaves, costs only its own
+    row, which prints nothing and reads unknown. A client's stderr is read only up to one more byte
     than its field holds, and its own processes get no descriptor of root's
     but their read's pipe and ``/dev/null``. Rows take no stdin, and nothing
     is written on the guest.
@@ -460,7 +462,8 @@ def _batch_probe_command() -> str:
         '"$I" "$H" "$HHEX" "$S" "$SHEX" "$B" "$BOOT_HEX" "$P" "$PHEX"'
     )
     # The probe runs in the background so the row's shell is in wait, which a trapped signal
-    # interrupts at once; the trap then kills the row's process group, the shell included.
+    # interrupts at once; on timeout's TERM the trap kills the row's process group with KILL,
+    # the shell and timeout included.
     row = f"trap 'kill -s KILL 0' TERM; {{ {probe}; }} & wait"
     return (
         f"ROW={shlex.quote(row)}; "
