@@ -80,7 +80,6 @@ _ROOT_SETUP_NEW_GROUP = [True, False, True, True, True, True, True]
 # Probe, then membership of the admin in the group: both need root.
 _ROOT_FAST_PATH = [True, True]
 _QUIET = {"warn_if_missing": False}
-_LOUD = {"warn_if_missing": True}
 # A directory no helper accepts.
 _WRONG = ("root", "root", "755")
 
@@ -88,12 +87,12 @@ _WRONG = ("root", "root", "755")
 @pytest.mark.parametrize(
     ("state", "options", "warned", "issued"),
     [
-        pytest.param({}, _LOUD, 1, _ROOT_SETUP, id="missing"),
+        pytest.param({}, {}, 1, _ROOT_SETUP, id="missing"),
         pytest.param({}, _QUIET, 0, _ROOT_SETUP, id="missing-expected"),
         pytest.param({"group_exists": False}, _QUIET, 0, _ROOT_SETUP_NEW_GROUP, id="group-missing"),
         pytest.param({"directory": _WRONG}, _QUIET, 1, _ROOT_SETUP, id="misconfigured"),
         pytest.param({"directory": _WRONG, "stat_fails": True}, _QUIET, 1, _ROOT_SETUP, id="probe-failed"),
-        pytest.param({"directory": ("root", AGENT_SOCKET_GROUP, "2771")}, _LOUD, 0, _ROOT_FAST_PATH, id="ready"),
+        pytest.param({"directory": ("root", AGENT_SOCKET_GROUP, "2771")}, {}, 0, _ROOT_FAST_PATH, id="ready"),
     ],
 )
 def test_socket_root_setup_follows_the_probe(
@@ -114,12 +113,12 @@ _DIR_SETUP = [True, True, True, True]
 @pytest.mark.parametrize(
     ("state", "options", "warned", "issued"),
     [
-        pytest.param({}, _LOUD, 1, _DIR_SETUP, id="missing"),
+        pytest.param({}, {}, 1, _DIR_SETUP, id="missing"),
         pytest.param({}, _QUIET, 0, _DIR_SETUP, id="missing-expected"),
         pytest.param({"directory": _WRONG}, _QUIET, 1, _DIR_SETUP, id="misconfigured"),
         pytest.param({"directory": ("agt--bob", AGENT_SOCKET_GROUP, "2770")}, _QUIET, 1, _DIR_SETUP, id="other-owner"),
         pytest.param({"directory": _WRONG, "stat_fails": True}, _QUIET, 1, _DIR_SETUP, id="probe-failed"),
-        pytest.param({"directory": (AGENT, AGENT_SOCKET_GROUP, "2770")}, _LOUD, 0, [True], id="ready"),
+        pytest.param({"directory": (AGENT, AGENT_SOCKET_GROUP, "2770")}, {}, 0, [True], id="ready"),
     ],
 )
 def test_socket_dir_setup_follows_the_probe(
@@ -137,12 +136,8 @@ def test_socket_dir_setup_follows_the_probe(
 @pytest.mark.parametrize(
     ("ensure", "fast_path"),
     [
-        pytest.param(
-            lambda target: ensure_agent_socket_root(target, "agentworks", warn_if_missing=True),
-            _ROOT_FAST_PATH,
-            id="root",
-        ),
-        pytest.param(lambda target: ensure_agent_socket_dir(target, AGENT, warn_if_missing=True), [True], id="dir"),
+        pytest.param(lambda target: ensure_agent_socket_root(target, "agentworks"), _ROOT_FAST_PATH, id="root"),
+        pytest.param(lambda target: ensure_agent_socket_dir(target, AGENT), [True], id="dir"),
     ],
 )
 def test_setup_leaves_what_the_next_probe_accepts(
