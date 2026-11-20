@@ -1,4 +1,4 @@
-"""Stuck tmux servers leave only their own rows unknown in batch status.
+"""Stuck tmux servers, and owners that defeat their own bounds, leave only their own rows unknown in batch status.
 
 The real batch program runs in a local shell under the request deadline that
 ``batch_check_status`` asks for, with a fake ``tmux`` on its PATH
@@ -52,8 +52,11 @@ def shell(request: pytest.FixtureRequest) -> list[str]:
     return [path, *_SHELLS[request.param]]
 
 
-def _local_guest(shell: list[str], env: dict[str, str]) -> RecordingVMAccess:
-    """The admin's access, each request run in a local shell and, like the guest, ended at its deadline."""
+def _local_guest(shell: list[str], env: dict[str, str], *, sessions: list[int] | None = None) -> RecordingVMAccess:
+    """The admin's access, each request run in a local shell and, like the guest, ended at its deadline.
+
+    Each request's shell leads a session of its own, whose id it appends to ``sessions``.
+    """
 
     def run(call: Call) -> Result:
         request = call.request
@@ -66,6 +69,8 @@ def _local_guest(shell: list[str], env: dict[str, str]) -> RecordingVMAccess:
             env=env,
             start_new_session=True,
         )
+        if sessions is not None:
+            sessions.append(process.pid)
         try:
             stdout, stderr = process.communicate(request.stdin.data, timeout=request.deadline)
         except subprocess.TimeoutExpired:
@@ -116,14 +121,105 @@ def _processes_mentioning(marker: str) -> list[str]:
     return found
 
 
+def _live_session_members(session_id: int) -> set[int]:
+    """The processes, zombies aside, still in session ``session_id``."""
+    members = set()
+    for entry in Path("/proc").iterdir():
+        if entry.name.isdigit():
+            with contextlib.suppress(OSError):
+                # The fields after the parenthesized command name: state, ppid, pgrp, session.
+                fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+                if fields[0] != "Z" and int(fields[3]) == session_id:
+                    members.add(int(entry.name))
+    return members
+
+
+def _kill_if_mentions(pid: int, marker: str) -> None:
+    """SIGKILL ``pid`` if it is still a process whose command line mentions ``marker``."""
+    with contextlib.suppress(OSError):
+        if marker in Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace"):
+            os.kill(pid, signal.SIGKILL)
+
+
+@requires_symlinks
+@requires_posix_shell
+def test_an_owner_that_defeats_its_own_bound_leaves_only_its_own_row_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str]
+) -> None:
+    """Each row's bound runs as root, outside its owner switch, so no owner can hold the request open."""
+    monkeypatch.setattr(_status, "_BATCH_CLIENT_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(_status, "_BATCH_CLIENT_KILL_SECONDS", 1)
+    guest_timeout = 1
+    monkeypatch.setattr(_status, "GUEST_OBSERVATION_TIMEOUT_SECONDS", guest_timeout)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("base64", "cat", "od", "setsid", "sleep", "stat", "timeout", "tr"):
+        executable = shutil.which(name)
+        assert executable is not None
+        os.symlink(executable, bin_dir / name)
+    owned = tmp_path / "owned"
+    # Each rogue client runs as its row's owner, under the client bound that owner can signal. One
+    # stops that bound and hangs; the other kills it and leaves its process group and session,
+    # still holding its read's pipe, as a client its server took over could. Both note their pids.
+    tmux = bin_dir / "tmux"
+    tmux.write_text(
+        "#!/bin/sh\n"
+        'case "$2" in\n'
+        '  *stopped*) printf \'%s\\n\' "$$" "$PPID" >> "$AGW_OWNED_PIDS"; kill -STOP "$PPID";'
+        ' exec "${0%/*}/sleep" 307 ;;\n'
+        '  *escaped*) printf \'%s\\n\' "$$" >> "$AGW_OWNED_PIDS"; kill -KILL "$PPID";'
+        ' exec "${0%/*}/setsid" "${0%/*}/sleep" 307 ;;\n'
+        "esac\n"
+        "exit 0\n"
+    )
+    tmux.chmod(0o755)
+    _switch_stand_ins(bin_dir, monkeypatch)
+    sockets = tmp_path / OWNER
+    sockets.mkdir()
+    rows = [
+        _row("fine-1"),
+        _row("stopped", agent=True, sockets=sockets),
+        _row("fine-2", agent=True),
+        _row("escaped", agent=True, sockets=sockets),
+    ]
+    requests: list[int] = []
+    guest = _local_guest(
+        shell,
+        {"PATH": f"{bin_dir}:/bin:/usr/bin", "HOME": str(tmp_path), "AGW_OWNED_PIDS": str(owned)},
+        sessions=requests,
+    )
+
+    try:
+        started = time.monotonic()
+        statuses = _status.batch_check_status(rows, admin=guest)
+        elapsed = time.monotonic() - started
+        owners = {int(pid) for pid in owned.read_text().split()}
+        (request,) = requests
+        left = _live_session_members(request)
+    finally:
+        for pid in owned.read_text().split() if owned.exists() else ():
+            _kill_if_mentions(int(pid), str(tmp_path))
+
+    assert elapsed < guest_timeout + _status._batch_row_bound_seconds()
+    assert statuses == {
+        "fine-1": SessionStatus.RUNNING,
+        "stopped": SessionStatus.UNKNOWN,
+        "fine-2": SessionStatus.RUNNING,
+        "escaped": SessionStatus.UNKNOWN,
+    }
+    # Only the owners' own processes outlive the request; every process root started for it is gone.
+    assert left <= owners
+
+
 @requires_symlinks
 @requires_posix_shell
 def test_stuck_servers_leave_only_their_own_rows_unknown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str]
 ) -> None:
-    # A row's worst case is then 2 * (1 + 1) = 4 seconds, and one row's bound on top of the guest
-    # timeout is 1 + 4. Each stuck client ignores SIGTERM and so lasts until timeout's SIGKILL, 2
-    # seconds: three stuck rows in turn would need 6, so only rows probed side by side fit.
+    # A row's clients then take at most 2 * (1 + 1) = 4 seconds, and the request's deadline is the
+    # guest timeout plus one row's bound, 1 + 5. Each stuck client ignores SIGTERM and so lasts until
+    # timeout's SIGKILL, 2 seconds: three stuck rows in turn would need 6, so only rows probed side
+    # by side fit.
     monkeypatch.setattr(_status, "_BATCH_CLIENT_TIMEOUT_SECONDS", 1)
     monkeypatch.setattr(_status, "_BATCH_CLIENT_KILL_SECONDS", 1)
     guest_timeout = 1
