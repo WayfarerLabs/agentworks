@@ -11,6 +11,7 @@ argv, so the operator's SSH configuration for the host applies.
 from __future__ import annotations
 
 import contextlib
+import posixpath
 import shlex
 import subprocess
 import time
@@ -44,6 +45,17 @@ echo $$ > {pid_file}
 {{ {command} ; }} > {output_file} 2>&1
 echo $? > {status_file}
 """
+
+
+# Writes stdin to "$2" through a private temporary file in its directory "$1".
+# ">|" because bash as /bin/sh (macOS) imports an exported SHELLOPTS, so a
+# login shell's noclobber can reach it, and mktemp has already created "$tmp".
+# "[ ! -d ]", which follows a link, because mv would move the file into a
+# directory at "$2", and BSD mv has no -T to refuse that.
+_UPLOAD_SCRIPT = (
+    'tmp=$(mktemp "$1/.agw-upload.XXXXXX") && '
+    '{ cat >| "$tmp" && [ ! -d "$2" ] && mv -f "$tmp" "$2" || { rm -f "$tmp"; false; }; }'
+)
 
 
 class LimaCommandFailed(ExternalError):
@@ -112,8 +124,23 @@ class LimaHost:
         return ssh_process.run_terminal(self._argv(command, mode=ssh_process.ArgvMode.TERMINAL))
 
     def upload(self, path: str, content: str) -> None:
-        """Write ``content`` to ``path``, mode 0600, through stdin, never an argument."""
-        self.run(f"umask 077 && cat > {shlex.quote(path)}", input=content)
+        """Write ``content`` to ``path``, mode 0600, through stdin, never an argument.
+
+        The content goes to a file ``mktemp`` creates beside ``path``, which
+        passes mode 0600 to the create itself, so neither the umask nor a POSIX
+        default ACL on the directory can widen it, and is then renamed over
+        ``path``. The rename replaces a symlink at ``path`` rather than
+        following it, and in a sticky directory such as ``/var/tmp`` is refused
+        over a file another user owns. A directory at ``path``, or a symlink to
+        one, is refused. The temporary file is removed if the write or the
+        rename fails or is refused. Inherited macOS ACL entries are not masked
+        by mode bits, so they still apply. The script runs under an explicit
+        ``/bin/sh``, with the paths as its arguments, so beyond the
+        ``$SHELL -lc`` layer every host command goes through, which needs a
+        Bourne-family shell or fish, it does not depend on the login shell's
+        syntax.
+        """
+        self.run(shlex.join(["/bin/sh", "-c", _UPLOAD_SCRIPT, "sh", posixpath.dirname(path), path]), input=content)
 
     # -- Detached commands, for work that must outlive the connection --------------------
 

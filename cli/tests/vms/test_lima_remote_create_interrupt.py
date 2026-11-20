@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import stat
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -24,7 +23,7 @@ from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaP
 from agentworks.capabilities.vm_platform.lima_host import DetachedResult, LimaCommandFailed, LimaHost, _Completed
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
-from tests.conftest import provisioning_trust_for_tests
+from tests.conftest import provisioning_trust_for_tests, requires_posix_shell
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -121,12 +120,14 @@ def _create_remote(platform: LimaPlatform | None = None, progress: object | None
 # -- Staging the template ------------------------------------------------------------------
 
 
-def test_remote_template_staging_is_mode_0600_stdin_and_verified_cleanup(host: _Host) -> None:
+def test_remote_template_goes_over_stdin_into_the_private_directory_with_verified_cleanup(host: _Host) -> None:
+    """The staged file's mode is the local-shell test's to check; this one checks what crosses the wire."""
     _create_remote()
 
-    staged = [call for call in host.calls if "template.yaml" in call[0] and "cat >" in call[0]]
+    (staged,) = [call for call in host.calls if call[1] is not None and "template.yaml" in call[0]]
     assert host.calls[0] == ("umask 077 && mktemp -d /tmp/agentworks-lima-template.XXXXXXXXXX", None)
-    assert staged == [(f"umask 077 && cat > {_REMOTE_TEMPLATE_DIR}/template.yaml", _PROVIDER_YAML)]
+    assert staged[1] == _PROVIDER_YAML
+    assert f"{_REMOTE_TEMPLATE_DIR}/template.yaml" in staged[0]
     assert host.calls[-1] == (f"rm -rf -- {_REMOTE_TEMPLATE_DIR} && test ! -e {_REMOTE_TEMPLATE_DIR}", None)
     assert not any(_PROVIDER_YAML in command for command in host.commands)
 
@@ -159,6 +160,7 @@ def test_remote_template_rejects_untrusted_allocation_path(monkeypatch: pytest.M
     assert "/tmp/other" not in repr(caught.value)
 
 
+@requires_posix_shell
 def test_remote_template_uses_private_random_directory_not_predictable_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -190,11 +192,7 @@ def test_remote_template_uses_private_random_directory_not_predictable_path(
 
     _create_remote()
 
-    if sys.platform == "win32":
-        # The local (git-bash) shell has no Unix mode bits for umask 077 to land on.
-        assert [content for _, _, content in staged_snapshots] == [_PROVIDER_YAML]
-    else:
-        assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
+    assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
     assert predictable_path.read_text() == "legacy provider data\n"
     assert list(remote_root.glob("agentworks-lima-template.*")) == []
 
@@ -207,8 +205,9 @@ def test_remote_template_cleanup_interrupt_preserves_active_failure_and_order(ho
         _create_remote()
 
     assert caught.value is primary
+    staged_at = next(i for i, (_, content) in enumerate(host.calls) if content == _PROVIDER_YAML)
     commands = host.commands
-    assert _index(commands, lambda c: "mktemp" in c) < _index(commands, lambda c: "template.yaml" in c and "cat >" in c)
+    assert _index(commands, lambda c: "mktemp -d" in c) < staged_at
     assert commands[-1].startswith("rm -rf")
 
 
@@ -234,7 +233,7 @@ def test_the_detached_create_runs_once_and_its_output_reaches_the_creates_log(ho
     launches = [command for command in host.commands if "nohup " in command]
     assert len(launches) == 1
     assert f"{_BASE}.sh" in launches[0]
-    wrapper = [content for command, content in host.calls if command.endswith(f"cat > {_BASE}.sh")]
+    wrapper = [content for command, content in host.calls if content is not None and f"{_BASE}.sh" in command]
     assert len(wrapper) == 1
     assert "limactl create --name myvm --tty=false" in (wrapper[0] or "")
     progress.output.assert_called_once_with("limactl says hello\n")
