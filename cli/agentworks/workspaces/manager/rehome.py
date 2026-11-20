@@ -27,6 +27,7 @@ from agentworks.workspaces.guest import (
     PROBE_DEADLINE,
     REQUEST_FAILURES,
     open_parent_traversal,
+    path_occupied,
     script,
     stored_workspace_path,
 )
@@ -199,9 +200,10 @@ def _rehome_vm(
                 entity_kind="workspace",
                 entity_name=ws_name,
             )
-        if _is_directory(probe, new_path):
+        # Anything at the target, a dangling link included, refuses it, as create and copy refuse theirs.
+        if probe_presence(probe, path_occupied(new_path), absent_status=TEST_FALSE_STATUS) is not None:
             raise StateError(
-                f"target directory {new_path} already exists on VM",
+                f"target path {new_path} is occupied on VM",
                 entity_kind="workspace",
                 entity_name=ws_name,
             )

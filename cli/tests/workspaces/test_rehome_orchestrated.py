@@ -19,14 +19,14 @@ from agentworks.execution.results import Completed, Result, Unknown, UnknownReas
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces import manager as workspace_manager
 from agentworks.workspaces.acls import workspace_acl_commands
-from agentworks.workspaces.guest import open_parent_traversal
+from agentworks.workspaces.guest import PROBE_DEADLINE, open_parent_traversal, path_occupied
 from tests.vm_access_support import Admin, RecordingVMAccess
 from tests.workspaces._lifecycle_support import (
     ConvergingGuest,
     Guest,
     RehomeGuest,
     arguments,
-    argv,
+    is_occupancy_probe,
     no_gate,
     reachable,
     route,
@@ -205,19 +205,19 @@ def test_rehome_refuses_a_target_inside_the_source_through_a_link(
     db._conn.execute("UPDATE workspaces SET workspace_path = '/data/ws/ws1' WHERE name = 'ws1'")
     db._conn.commit()
     reachable(monkeypatch, True)
-    fake = Guest(fails=(("test", "-d", "/mnt/x/ws/ws1/inner"),))
+    fake = Guest(fails=(is_occupancy_probe,))
     fake.links = {"/data/ws": "/mnt/x/ws"}
     route(monkeypatch, fake)
 
     with pytest.raises(ValidationError):
         _rehome(db, config, "/mnt/x/ws/ws1/inner", remove_old=True, yes=True)
 
-    # The two directory checks, then the resolution of both paths; nothing after.
-    assert [request.argv[:2] if isinstance(request, Command) else "script" for request in fake.requests] == [
-        ("test", "-d"),
-        ("test", "-d"),
-        "script",
+    # The source and target checks, then the resolution of both paths; nothing after.
+    assert fake.requests[:2] == [
+        Command(("test", "-d", "/data/ws/ws1"), deadline=PROBE_DEADLINE),
+        path_occupied("/mnt/x/ws/ws1/inner"),
     ]
+    assert len(fake.requests) == 3 and isinstance(fake.requests[2], Script)
     row = db.get_workspace("ws1")
     assert row is not None and row.workspace_path == "/data/ws/ws1"
 
@@ -265,7 +265,7 @@ def test_rehome_reads_a_target_with_a_trailing_slash_as_the_directory(
 
     ws = db.get_workspace("ws1")
     assert ws is not None and ws.workspace_path == "/dst/ws1"
-    assert ("test", "-d", "/dst/ws1") in fake.argvs()
+    assert path_occupied("/dst/ws1") in fake.requests
     assert not any("/dst/ws1//" in argument for request in fake.requests for argument in arguments(request))
 
 
@@ -275,34 +275,39 @@ _UNANSWERED = (
 )
 
 
-class _UnansweredCheck(RehomeGuest):
-    """A rehome guest whose ``unanswered`` directory check, once ``after_copy`` allows, gives ``outcome``."""
+_SOURCE_CHECK = Command(("test", "-d", "/srv/ws1"), deadline=PROBE_DEADLINE)
+_TARGET_CHECK = path_occupied("/dst/ws1")
+_COPY_CHECK = Command(("test", "-d", "/dst/ws1"), deadline=PROBE_DEADLINE)
 
-    def __init__(self, unanswered: str, outcome: Result, *, after_copy: bool = False) -> None:
+
+class _UnansweredCheck(RehomeGuest):
+    """A rehome guest whose ``unanswered`` check, once ``after_copy`` allows, gives ``outcome``."""
+
+    def __init__(self, unanswered: object, outcome: Result, *, after_copy: bool = False) -> None:
         super().__init__()
-        self.unanswered = ("test", "-d", unanswered)
+        self.unanswered = unanswered
         self.outcome = outcome
         self.after_copy = after_copy
 
     def respond(self, request: object) -> Result | None:
-        if argv(request) == self.unanswered and self._copied == self.after_copy:
+        if request == self.unanswered and self._copied == self.after_copy:
             return self.outcome
         return super().respond(request)
 
 
-@pytest.mark.parametrize("unanswered", ["/srv/ws1", "/dst/ws1"])
+@pytest.mark.parametrize("unanswered", [_SOURCE_CHECK, _TARGET_CHECK], ids=("source", "target"))
 @pytest.mark.parametrize(("outcome", "error"), _UNANSWERED)
 def test_rehome_refuses_when_a_directory_check_did_not_answer(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
-    unanswered: str,
+    unanswered: object,
     outcome: Result,
     error: type[Exception],
 ) -> None:
-    """A directory check that did not answer is never "target absent" (or
-    "source present"): rehome raises before reserving or copying into a
-    target that may exist."""
+    """A check that did not answer is never "target free" (or "source
+    present"): rehome raises before reserving or copying into a target that
+    may be occupied."""
     config = make_config()
     seed(db)
     reachable(monkeypatch, True)
@@ -312,7 +317,7 @@ def test_rehome_refuses_when_a_directory_check_did_not_answer(
     with pytest.raises(error):
         _rehome(db, config, yes=True)
 
-    assert fake.argvs()[-1] == ("test", "-d", unanswered)
+    assert fake.requests[-1] == unanswered
     assert not any(ran[0] in {"mkdir", "rsync", "cp"} for ran in fake.argvs())
     ws = db.get_workspace("ws1")
     assert ws is not None and ws.workspace_path == "/srv/ws1"
@@ -331,13 +336,13 @@ def test_rehome_copy_verification_that_did_not_answer_raises_its_own_error(
     config = make_config()
     seed(db)
     reachable(monkeypatch, True)
-    fake = _UnansweredCheck("/dst/ws1", outcome, after_copy=True)
+    fake = _UnansweredCheck(_COPY_CHECK, outcome, after_copy=True)
     route(monkeypatch, fake)
 
     with pytest.raises(error):
         _rehome(db, config, yes=True)
 
-    assert fake.argvs()[-1] == ("test", "-d", "/dst/ws1")
+    assert fake.requests[-1] == _COPY_CHECK
     ws = db.get_workspace("ws1")
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
@@ -363,7 +368,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     seed(db)
     events: list[str] = []
     stop_the_vm(monkeypatch, events)
-    fake = Guest(events=events, fails=(("test", "-d", "/dst/ws1"),))
+    fake = Guest(events=events, fails=(is_occupancy_probe,))
     route(monkeypatch, fake)
 
     def _decline(message: str, default: bool = False) -> bool:
@@ -381,7 +386,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
         "start",
         "tailscale",
         "run:test -d /srv/ws1",
-        "run:test -d /dst/ws1",
+        "run:script /dst/ws1",
         "run:script /srv/ws1 /dst/ws1",
         "confirm",
     ]

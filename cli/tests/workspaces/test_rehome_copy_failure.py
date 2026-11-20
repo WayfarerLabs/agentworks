@@ -175,6 +175,23 @@ def test_interrupted_copy_preserves_source_row_partial_target_and_error(
     assert target.copy_calls == 1
 
 
+def test_a_dangling_link_at_the_target_is_refused_as_occupied(
+    db: Database, rehome_case: RehomeCase, captured_output: CapturedOutput
+) -> None:
+    """The target check refuses anything at the path, as create's and copy's do, not only a directory."""
+    target = rehome_case.target
+    target.destination.parent.mkdir(parents=True)
+    target.destination.symlink_to(target.home / "absent")
+
+    with pytest.raises(StateError):
+        rehome(db, rehome_case)
+
+    assert target.destination.is_symlink() and not target.destination.exists()
+    assert target.copy_calls == 0
+    row = db.get_workspace("project")
+    assert row is not None and row.workspace_path == str(target.source)
+
+
 @pytest.mark.parametrize("reservation", ["present", "raced", "unconfirmed"])
 def test_unowned_or_unconfirmed_target_is_preserved_without_copy_hint(
     db: Database, rehome_case: RehomeCase, captured_output: CapturedOutput, reservation: str

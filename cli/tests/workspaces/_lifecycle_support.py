@@ -375,9 +375,9 @@ class ConvergingGuest(RepairProbeGuest):
 
 
 class RehomeGuest(Guest):
-    """A guest for a rehome to ``/dst/ws1``: the target is absent until the
-    copy has run, then present, so rehome's pre-copy 'target must not exist'
-    check and its post-copy verify both pass."""
+    """A guest for a rehome to ``/dst/ws1``: the target is free until the
+    copy has run, then a directory, so rehome's pre-copy occupancy check and
+    its post-copy verify both pass."""
 
     def __init__(self, *, fails: Sequence[Failing] = ()) -> None:
         super().__init__(fails=fails)
@@ -386,6 +386,8 @@ class RehomeGuest(Guest):
     def respond(self, request: object) -> Result | None:
         if starts("rsync")(request):
             self._copied = True
+        if request == path_occupied("/dst/ws1"):
+            return Result(Completed(0 if self._copied else 1))
         if argv(request) == ("test", "-d", "/dst/ws1"):
             return Result(Completed(0 if self._copied else 1))
         return super().respond(request)
