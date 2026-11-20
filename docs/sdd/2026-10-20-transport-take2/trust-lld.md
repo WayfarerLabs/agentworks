@@ -295,12 +295,9 @@ R8's end state does not depend on every operator importing (`ssh_config._vm_entr
     `-o UpdateHostKeys=yes` login grew the store from the one RSA line to RSA, ed25519 and ECDSA.
 
   `GlobalKnownHostsFile` takes the same value `_entry_value` writes: ssh parses its quoted arguments
-  as it does `UserKnownHostsFile`'s (the run above used a quoted path with a space), and expands `~`
-  in it at use, where `ssh -G` prints it unexpanded (`ssh.c`, in 8.5 as already in 7.9p1, calls
-  `tilde_expand_paths` on `options.system_hostfiles` under "Expand ~ in known host file names", and
-  9.2 opened `~/<dir with a space>/<file>` under the account's home). It gets no `%` or `${}`
-  expansion, which `literal_path` already refuses. The ssh shipped with Git for Windows and native
-  OpenSSH for Windows are builds of the same client, so they read the line the same way.
+  as it does `UserKnownHostsFile`'s (the run above used a quoted path with a space). It gets no `%`
+  or `${}` expansion, which `literal_path` already refuses. The ssh shipped with Git for Windows and
+  native OpenSSH for Windows are builds of the same client, so they read the line the same way.
 
 - **Persisted values are checked.** The tailnet address and the admin and agent account names each
   become a token of a line ssh parses, so they must pass the execution core's own rule for the same
@@ -311,19 +308,19 @@ R8's end state does not depend on every operator importing (`ssh_config._vm_entr
   trust whatever answers. It never aborts the rebuild for the other VMs. A key path that cannot be
   written still only drops `IdentityFile`, with a warning, since the operator's own `ssh` then
   offers its default keys and trust is unaffected.
-- **Paths are written `~`-relative** under the home directory (`ssh_config._entry_value`, the rule
-  `IdentityFile` already followed), so the home directory's own name never reaches a value. The
-  store directory is always under the home directory (`CONFIG_DIR`), so a Windows profile named with
-  an apostrophe or a space (`C:/Users/O'Brien`) yields a bare `~/.config/agentworks/...` value every
-  client reads. OpenSSH expands `~` from the account's home directory, which is also where it reads
-  the `~/.ssh/config` that includes these entries.
+- **Paths are written absolute**, as Agentworks itself uses them (`ssh_config._entry_value`): the
+  configured key path, not its symbolic link's target, exactly what the execution core passes, and
+  the store path as `trust.store_file` gives it. Never `~`-relative, because ssh expands `~` from
+  the account's home in the password database, which need not be the `$HOME` Agentworks reads, so
+  the entries and the execution core always name the same files.
 - **An apostrophe and no whitespace** is refused on Windows before it reaches an entry, with a
-  message naming the character and the path. The `ssh` shipped with Git for Windows may read the
-  entries there and rejects both the quoted and the bare form of such a value; the execution core
-  never runs that client, so `option_value` still double-quotes the value for the `-o` arguments. On
-  Linux and macOS every client reads the quoted form, so nothing is refused there. With the
-  `~`-relative rule, only a path the operator chose outside the home directory's own name, or one
-  that a symbolic link resolves out of it, can meet this refusal.
+  message naming the character and the path and a hint to rename it. The `ssh` shipped with Git for
+  Windows may read the entries there and rejects both the quoted and the bare form of such a value;
+  the execution core never runs that client, so `option_value` still double-quotes the value for the
+  `-o` arguments. On Linux and macOS every client reads the quoted form, so nothing is refused
+  there. The store directory is under the home directory (`CONFIG_DIR`), so a Windows profile named
+  with an apostrophe and no space (`C:/Users/O'Brien`) gets no managed entries at all, and a key
+  under it drops `IdentityFile`.
 
 ## Errors
 
@@ -377,8 +374,8 @@ Each test guards behavior, per the development principles and the no-prose-polic
   installed client resolves both, and a preceding `Host *` with `accept-new` still leaves the
   record-less entry's known-hosts file the null device; an unreadable record keeps the block; an
   unwritable store path leaves that VM's entries out without aborting the rebuild; on Windows an
-  apostrophe path without whitespace is refused, and a home directory named with an apostrophe still
-  yields entries (`tests/test_ssh_config.py`).
+  apostrophe path without whitespace is refused, a key under a profile named that way dropping only
+  `IdentityFile` and a store under it leaving the entries out (`tests/test_ssh_config.py`).
 - **ENROLL only from create** holds by construction: `enrollment_access` is a distinct factory whose
   only caller is Phase A (`vms/initializer/phase_a.py`), reached only from create, and every other
   factory binds `VM`. The enrollment tests cover both; nothing pins the call graph.

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -14,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost, _Completed
+from agentworks.capabilities.vm_platform.lima_host import _UPLOAD_SCRIPT, LimaCommandFailed, LimaHost, _Completed
 from agentworks.execution import root_script, ssh_process
 from agentworks.execution.client import SSHClient
 from agentworks.execution.root_script import RawRun
@@ -147,6 +149,145 @@ def test_a_command_given_input_exposes_no_output() -> None:
     with pytest.raises(LimaCommandFailed) as caught:
         LimaHost(None).run("sh -c 'cat; exit 3'", input="tskey-reflected")
     assert "tskey-reflected" not in str(caught.value)
+
+
+needs_posix_sh = pytest.mark.skipif(not Path("/bin/sh").exists(), reason="runs the host command in a POSIX shell")
+
+
+def _upload_in_a_local_shell(
+    monkeypatch: pytest.MonkeyPatch,
+    path: Path,
+    content: str,
+    *,
+    shell_setup: str = "",
+    env: dict[str, str] | None = None,
+) -> None:
+    """``LimaHost.upload`` with its host command run by a local ``sh``, after ``shell_setup``."""
+
+    def in_a_local_shell(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        completed = subprocess.run(
+            ["sh", "-c", shell_setup + command], input=input, capture_output=True, text=True, check=False, env=env
+        )
+        return _Completed(completed.returncode, completed.stdout, completed.stderr)
+
+    monkeypatch.setattr(LimaHost, "_execute", in_a_local_shell)
+    LimaHost("vm-host").upload(str(path), content)
+
+
+@needs_posix_sh
+def test_an_upload_is_mode_0600_under_an_inherited_default_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A default ACL on the directory, such as one on ``/var/tmp``, overrides the umask for new files."""
+    setfacl = shutil.which("setfacl")
+    if setfacl is None:
+        pytest.skip("setfacl is required to provision the ACL fixture")
+    if subprocess.run([setfacl, "-d", "-m", "g::rwx,o::rwx", str(tmp_path)], capture_output=True).returncode:
+        pytest.skip("the test file system does not support default ACLs")
+    target = tmp_path / "agentworks-lima-myvm.sh"
+
+    _upload_in_a_local_shell(monkeypatch, target, "echo hi\n")
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert target.read_text() == "echo hi\n"
+
+
+def test_an_upload_runs_under_an_explicit_sh_whatever_the_login_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The host command runs under the user's login shell, whose syntax the script must not rely on."""
+    commands: list[str] = []
+
+    def record(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        commands.append(command)
+        return _Completed(0, "", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", record)
+
+    LimaHost("vm-host").upload("/var/tmp/my dir/agentworks-lima-myvm.sh", "echo hi\n")
+
+    (command,) = commands
+    argv = shlex.split(command)
+    assert argv[:2] == ["/bin/sh", "-c"]
+    assert argv[3:] == ["sh", "/var/tmp/my dir", "/var/tmp/my dir/agentworks-lima-myvm.sh"]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_the_upload_script_writes_under_noclobber_imported_by_bash(tmp_path: Path) -> None:
+    """bash as /bin/sh imports an exported SHELLOPTS, and mktemp has already created the file it writes."""
+    target = tmp_path / "agentworks-lima-myvm.sh"
+
+    subprocess.run(
+        ["bash", "-c", _UPLOAD_SCRIPT, "sh", str(tmp_path), str(target)],
+        input="echo hi\n",
+        text=True,
+        check=True,
+        env={**os.environ, "SHELLOPTS": "noclobber"},
+    )
+
+    assert target.read_text() == "echo hi\n"
+
+
+@needs_posix_sh
+def test_an_upload_replaces_an_existing_file_when_the_login_shell_sets_noclobber(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wrapper is rewritten on every create, and a host user's startup files may ``set -C``."""
+    target = tmp_path / "agentworks-lima-myvm.sh"
+    target.write_text("old\n")
+
+    _upload_in_a_local_shell(monkeypatch, target, "new\n", shell_setup="set -C; ")
+
+    assert target.read_text() == "new\n"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+@needs_posix_sh
+def test_an_upload_replaces_a_symlink_instead_of_writing_through_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_text("not yours\n")
+    target = tmp_path / "agentworks-lima-myvm.sh"
+    target.symlink_to(elsewhere)
+
+    _upload_in_a_local_shell(monkeypatch, target, "echo hi\n")
+
+    assert not target.is_symlink()
+    assert target.read_text() == "echo hi\n"
+    assert elsewhere.read_text() == "not yours\n"
+
+
+@needs_posix_sh
+@pytest.mark.parametrize("shape", ["directory", "link to a directory"])
+def test_an_upload_refuses_a_directory_instead_of_moving_into_it(
+    shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mv would move the file inside a directory at the target and report success."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    directory = staging / "template.yaml" if shape == "directory" else tmp_path / "elsewhere"
+    directory.mkdir()
+    if shape != "directory":
+        (staging / "template.yaml").symlink_to(directory)
+
+    with pytest.raises(LimaCommandFailed):
+        _upload_in_a_local_shell(monkeypatch, staging / "template.yaml", "arch: default\n")
+
+    assert sorted(entry.name for entry in staging.iterdir()) == ["template.yaml"]
+    assert list(directory.iterdir()) == []
+
+
+@needs_posix_sh
+def test_a_failed_upload_leaves_no_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    (shims / "mv").write_text("#!/bin/sh\nexit 1\n")
+    (shims / "mv").chmod(0o755)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    env = {**os.environ, "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}"}
+
+    with pytest.raises(LimaCommandFailed):
+        _upload_in_a_local_shell(monkeypatch, staging / "template.yaml", "arch: default\n", env=env)
+
+    assert list(staging.iterdir()) == []
 
 
 _RUN_DIRECTORY = "/var/tmp/agw-x.AbCdEf1234"

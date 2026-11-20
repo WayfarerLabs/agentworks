@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +13,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks import ssh_config as ssh_config_module
+from agentworks.errors import AuthorizationError, ConfigError
+from agentworks.execution.ssh_process import VMPolicy
+from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.path_rendering import format_host_path
 from agentworks.ssh_config import (
     _LEGACY_MARKER,
     _MANAGED_CONF,
@@ -20,8 +27,76 @@ from agentworks.ssh_config import (
     _remove_legacy_section,
     ssh_host_alias,
     sync_ssh_config,
+    sync_ssh_config_or_warn,
 )
+from tests.conftest import seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
+
+needs_ssh = pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+
+
+def _resolved_hostname(ssh_config: Path, alias: str) -> str:
+    """The HostName the installed client resolves for ``alias``; ``-G`` never connects.
+
+    A failure shows which client ran, its verbose account of reading the
+    configuration and the files it read, since clients and their rules differ
+    by platform and version.
+    """
+    argv = ["ssh", "-G", "-F", str(ssh_config), alias]
+    completed = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+    if completed.returncode != 0:
+        verbose = subprocess.run([*argv[:2], "-vvv", *argv[2:]], capture_output=True, text=True, timeout=10)
+        files = {path: path.read_text() for path in (ssh_config, *sorted((ssh_config.parent / "config.d").glob("*")))}
+        pytest.fail(
+            f"{shutil.which('ssh')} -G exited {completed.returncode} under Python {sys.version}\n"
+            f"verbose stderr: {verbose.stderr}\nfiles: {files}{_acls(ssh_config.parent)}"
+        )
+    return dict(line.split(" ", 1) for line in completed.stdout.splitlines())["hostname"]
+
+
+def _acls(ssh_dir: Path) -> str:
+    """On Windows, what icacls shows for ``ssh_dir``, the two directories above it and everything inside it.
+
+    Win32-OpenSSH refuses an included file whose ACL grants anyone beyond the
+    user, SYSTEM and Administrators, and a file's ACL comes from these
+    directories.
+    """
+    if sys.platform != "win32":
+        return ""
+    paths = [ssh_dir.parent.parent, ssh_dir.parent, ssh_dir, *sorted(ssh_dir.rglob("*"))]
+    shown = (subprocess.run(["icacls", str(path)], capture_output=True, text=True) for path in paths)
+    lines = (line for run in shown for line in (run.stdout + run.stderr).splitlines())
+    return "\nacls:\n" + "\n".join(line for line in lines if line and not line.startswith("Successfully processed"))
+
+
+def _line_written_by_0_19(ssh_config: Path) -> str:
+    """The Include line v0.19.0 wrote for ``ssh_config``: the resolved pattern unquoted, ``~`` for the home directory.
+
+    A fixed copy of that release's writer, so no fixture follows the current one.
+    """
+    resolved = (ssh_config.parent / "config.d").resolve().as_posix()
+    home = Path.home().resolve().as_posix()
+    if resolved == home or resolved.startswith(home + "/"):
+        resolved = "~" + resolved[len(home) :]
+    return f"Include {resolved}/*"
+
+
+def _written_by_0_19(ssh_config: Path, content: str, newline: str = "\n") -> bytes:
+    """The bytes v0.19.0's ``_ensure_include`` wrote above ``content``: its marker comment, its line and a blank line.
+
+    That release read and wrote the file in text mode, so every line ends in
+    ``newline``: CRLF on Windows, LF elsewhere.
+    """
+    text = f"# Added by agentworks\n{_line_written_by_0_19(ssh_config)}\n\n{content}"
+    return text.replace("\n", newline).encode()
+
+
+def _synced_by_0_19(ssh_config: Path) -> None:
+    """One v0.19.0 ``_ensure_include`` on POSIX: the file read with universal newlines, its line prepended if absent."""
+    line = _line_written_by_0_19(ssh_config)
+    content = ssh_config.read_text()
+    if line not in content:
+        ssh_config.write_text(f"# Added by agentworks\n{line}\n\n{content}")
 
 
 def test_ssh_host_alias_default_prefix() -> None:
@@ -46,22 +121,22 @@ def test_include_directive_uses_resolved_path(tmp_path: Path) -> None:
 @pytest.mark.windows
 def test_ensure_include_creates_file(tmp_path: Path) -> None:
     ssh_config = tmp_path / ".ssh" / "config"
-    _ensure_include(ssh_config)
+    directive = _include_directive(ssh_config)
+    _ensure_include(ssh_config, directive)
 
     assert ssh_config.exists()
-    directive = _include_directive(ssh_config)
     assert directive in ssh_config.read_text()
 
 
 def test_ensure_include_adds_to_top(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     ssh_config.write_text("Host *\n    ServerAliveInterval 60\n")
+    directive = _include_directive(ssh_config)
 
-    _ensure_include(ssh_config)
+    _ensure_include(ssh_config, directive)
 
     content = ssh_config.read_text()
     lines = content.splitlines()
-    directive = _include_directive(ssh_config)
     assert lines[0] == "# Added by agentworks"
     assert lines[1] == directive
     assert "ServerAliveInterval" in content
@@ -72,7 +147,7 @@ def test_ensure_include_idempotent(tmp_path: Path) -> None:
     directive = _include_directive(ssh_config)
     ssh_config.write_text(f"{directive}\n\nHost *\n    Foo bar\n")
 
-    _ensure_include(ssh_config)
+    _ensure_include(ssh_config, directive)
 
     content = ssh_config.read_text()
     assert content.count(directive) == 1
@@ -85,9 +160,172 @@ def test_ensure_include_noop_if_present_elsewhere(tmp_path: Path) -> None:
     original = f"Host *\n    Foo bar\n\n{directive}\n"
     ssh_config.write_text(original)
 
-    _ensure_include(ssh_config)
+    _ensure_include(ssh_config, directive)
 
     assert ssh_config.read_text() == original
+
+
+@pytest.mark.parametrize("parent", ["my keys", "o'brien"])
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_the_include_an_earlier_release_wrote_is_rewritten_where_it_stands_and_only_there(
+    parent: str, newline: str, tmp_path: Path
+) -> None:
+    """Copies of that line the operator wrote, at the top level or in a block, keep their meaning, so they stay."""
+    ssh_config = tmp_path / parent / "config"
+    ssh_config.parent.mkdir()
+    directive = _include_directive(ssh_config)
+    unquoted = _line_written_by_0_19(ssh_config)
+    own = f"Host *\n    Foo bar\n\n{unquoted}\nHost work\n    {unquoted}\nMatch all\n    {unquoted}\n"
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, own, newline))
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_bytes() == f"# Added by agentworks\n{directive}\n\n{own}".replace("\n", newline).encode()
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_directory_whose_name_holds_a_unicode_line_separator_gets_the_include_once(
+    newline: str, tmp_path: Path
+) -> None:
+    """ssh breaks lines only at LF, so U+2028 in the directory name is part of the directive's line."""
+    ssh_config = tmp_path / "a\u2028b" / "config"
+    ssh_config.parent.mkdir()
+    ssh_config.write_bytes(f"Host *{newline}    Foo bar{newline}".encode())
+    directive = _include_directive(ssh_config)
+    _ensure_include(ssh_config, directive)
+    once = ssh_config.read_bytes()
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_bytes() == once
+
+
+@pytest.mark.parametrize("parent", ["keys", "my keys"])
+@pytest.mark.parametrize("comment", ["# {directive}", "#{unquoted}", "    #  {unquoted}"])
+def test_the_managed_include_commented_out_is_an_opt_out(parent: str, comment: str, tmp_path: Path) -> None:
+    ssh_config = tmp_path / parent / "config"
+    ssh_config.parent.mkdir()
+    directive = _include_directive(ssh_config)
+    original = comment.format(directive=directive, unquoted=_line_written_by_0_19(ssh_config)) + "\nHost *\n"
+    ssh_config.write_text(original)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_text() == original
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_any_other_comment_naming_the_include_does_not_count(newline: str, tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    directive = _include_directive(ssh_config)
+    original = f"# see {directive}{newline}Host *{newline}"
+    ssh_config.write_bytes(original.encode())
+
+    _ensure_include(ssh_config, directive)
+
+    added = f"# Added by agentworks{newline}{directive}{newline}{newline}"
+    assert ssh_config.read_bytes() == (added + original).encode()
+
+
+def _given_another_group(path: Path) -> bool:
+    """Whether ``path`` was given a group of this process other than its own.
+
+    A listed group may still be one the kernel will not assign, such as the
+    overflow group of a user namespace, and a file system may accept the call
+    and keep the group, so each is tried in turn until the file holds it.
+    """
+    current = path.stat().st_gid
+    for gid in os.getgroups():
+        if gid == current:
+            continue
+        try:
+            os.chown(path, -1, gid)
+        except OSError:
+            continue
+        if path.stat().st_gid == gid:
+            return True
+    return False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    ssh_config.write_text("Host *\n    Foo bar\n")
+    ssh_config.chmod(0o640)
+    if not _given_another_group(ssh_config):
+        pytest.skip("no other group this process can assign")
+    before = ssh_config.stat()
+
+    _ensure_include(ssh_config, _include_directive(ssh_config))
+
+    after = ssh_config.stat()
+    assert stat.S_IMODE(after.st_mode) == 0o640
+    assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_a_new_config_gets_the_mode_of_any_new_file_beside_it(tmp_path: Path) -> None:
+    """The umask and any default ACL on the directory decide, as for a file the operator creates there.
+
+    An uncommon umask, so neither 0644 nor 0600 written explicitly would match.
+    """
+    ssh_config = tmp_path / "config"
+    ordinary = tmp_path / "ordinary"
+    previous = os.umask(0o027)
+    try:
+        _ensure_include(ssh_config, _include_directive(ssh_config))
+        ordinary.write_text("")
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(ssh_config.stat().st_mode) == stat.S_IMODE(ordinary.stat().st_mode)
+
+
+def test_bytes_that_are_not_utf8_survive_a_rewrite(tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    original = "# caf\u00e9 in Latin-1\nHost *\n    Foo bar\n".encode("latin-1")
+    ssh_config.write_bytes(original)
+    directive = _include_directive(ssh_config)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_bytes() == f"# Added by agentworks\n{directive}\n\n".encode() + original
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
+def test_a_symlinked_config_is_updated_through_its_link(tmp_path: Path) -> None:
+    """A dotfiles checkout often owns ~/.ssh/config; the rewrite must not replace the link with a copy."""
+    target = tmp_path / "dotfiles" / "ssh-config"
+    target.parent.mkdir()
+    target.write_text("Host *\n    Foo bar\n")
+    ssh_config = tmp_path / ".ssh" / "config"
+    ssh_config.parent.mkdir()
+    ssh_config.symlink_to(target)
+    directive = _include_directive(ssh_config)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.is_symlink()
+    assert directive in target.read_text().splitlines()
+
+
+@needs_ssh
+def test_the_installed_client_reads_the_file_once_a_stale_include_with_an_apostrophe_is_rewritten(
+    tmp_path: Path,
+) -> None:
+    """An unquoted apostrophe makes ssh reject the whole file, so adding a correct line would fix nothing."""
+    config, _ = _mock_config(tmp_path / "o'brien")
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, ""))
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert _resolved_hostname(ssh_config, "awvm--web") == "100.64.0.1"
 
 
 def test_remove_legacy_section(tmp_path: Path) -> None:
@@ -100,6 +338,15 @@ def test_remove_legacy_section(tmp_path: Path) -> None:
     assert _LEGACY_MARKER not in content
     assert "awvm--old-vm" not in content
     assert "Foo bar" in content
+
+
+def test_removing_the_legacy_section_keeps_crlf_line_endings(tmp_path: Path) -> None:
+    ssh_config = tmp_path / "config"
+    ssh_config.write_bytes(f"Host *\r\n    Foo bar\r\n\r\n{_LEGACY_MARKER}\r\nHost awvm--old-vm\r\n".encode())
+
+    _remove_legacy_section(ssh_config)
+
+    assert ssh_config.read_bytes() == b"Host *\r\n    Foo bar\r\n"
 
 
 def test_remove_legacy_section_noop_if_absent(tmp_path: Path) -> None:
@@ -126,7 +373,8 @@ def _mock_config(tmp_path: Path) -> tuple[MagicMock, Path]:
     config.operator.ssh_config_dir = True
     config.operator.ssh_host_prefix = "awvm--"
     config.operator.ssh_agent_host_prefix = "awagent--"
-    config.operator.ssh_private_key = Path("/home/user/.ssh/id_ed25519")
+    # Absolute on every platform, so the entries carry an IdentityFile line.
+    config.operator.ssh_private_key = tmp_path / "id_ed25519"
     return config, ssh_dir
 
 
@@ -160,6 +408,225 @@ def test_sync_ssh_config_announce_controls_the_synced_line(tmp_path: Path, captu
     sync_ssh_config(config, db, announce=False)
     assert captured_output.info == before  # no new line
     assert conf.exists()  # still written for correctness
+
+
+def _db_with_one_vm() -> MagicMock:
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+    return db
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may write a read-only file")
+@pytest.mark.parametrize(
+    "shape", ["file", pytest.param("symlink", marks=pytest.mark.skipif(sys.platform == "win32", reason="symlinks"))]
+)
+def test_a_config_the_user_may_not_write_is_refused_and_left_as_it_was(
+    shape: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """On Windows the read-only attribute is the refusal; the warning carries the error's hint."""
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    original = b"Host *\n    Foo bar\n"
+    target = ssh_config if shape == "file" else tmp_path / "dotfiles-config"
+    target.write_bytes(original)
+    if shape == "symlink":
+        ssh_config.unlink()
+        ssh_config.symlink_to(target)
+    target.chmod(0o444)
+
+    with pytest.raises(AuthorizationError) as caught:
+        sync_ssh_config(config, _db_with_one_vm())
+    sync_ssh_config_or_warn(config, _db_with_one_vm())
+
+    assert target.read_bytes() == original
+    assert ssh_config.is_symlink() == (shape == "symlink")
+    assert caught.value.hint is not None
+    (warning,) = captured_output.warnings
+    assert caught.value.hint in warning
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes and symlinks")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may read any file")
+@pytest.mark.parametrize("shape", ["mode 000 file", "link through an unsearchable directory"])
+def test_a_config_the_user_may_not_read_is_refused_and_left_as_it_was(
+    shape: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    original = b"Host *\n    Foo bar\n"
+    if shape == "mode 000 file":
+        target, locked, mode = ssh_config, ssh_config, 0o000
+    else:
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        target, mode = locked / "config", 0o600
+        ssh_config.unlink()
+        ssh_config.symlink_to(target)
+    target.write_bytes(original)
+    before = target.stat()
+    locked.chmod(mode)
+    try:
+        with pytest.raises(AuthorizationError) as caught:
+            sync_ssh_config(config, _db_with_one_vm())
+        sync_ssh_config_or_warn(config, _db_with_one_vm())
+    finally:
+        locked.chmod(0o700)
+    after = target.stat()
+
+    assert after.st_ino == before.st_ino
+    assert ssh_config.is_symlink() == (shape != "mode 000 file")
+    assert target.read_bytes() == original
+    assert caught.value.hint is not None
+    (warning,) = captured_output.warnings
+    assert caught.value.hint in warning
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may search and write any directory")
+@pytest.mark.parametrize(
+    ("locked", "refused"), [("above .ssh", "config.d"), (".ssh", "config.d"), ("above a missing .ssh", ".ssh")]
+)
+def test_a_config_d_the_user_may_not_create_is_refused_and_the_config_left_as_it_was(
+    locked: str,
+    refused: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The error names the directory the failing call was given.
+
+    Above ``.ssh`` the user may not search, or, where ``.ssh`` is missing,
+    write; ``.ssh`` itself it may read but not write.
+    """
+    config, ssh_dir = _mock_config(tmp_path / "home")
+    original: bytes | None = b"Host *\n    Foo bar\n"
+    if locked == "above a missing .ssh":
+        shutil.rmtree(ssh_dir)
+        original = None
+        directory, mode = ssh_dir.parent, 0o500
+    else:
+        config.operator.ssh_config.write_bytes(original)
+        directory, mode = (ssh_dir.parent, 0o600) if locked == "above .ssh" else (ssh_dir, 0o500)
+    directory.chmod(mode)
+    try:
+        with pytest.raises(AuthorizationError) as caught:
+            sync_ssh_config(config, _db_with_one_vm())
+        sync_ssh_config_or_warn(config, _db_with_one_vm())
+    finally:
+        directory.chmod(0o700)
+
+    ssh_config = config.operator.ssh_config
+    assert (ssh_config.read_bytes() if ssh_config.exists() else None) == original
+    assert not (ssh_dir / "config.d").exists()
+    named = ssh_dir / "config.d" if refused == "config.d" else ssh_dir
+    assert f"'{format_host_path(named.resolve())}'" in str(caught.value)
+    assert caught.value.hint is not None
+    (warning,) = captured_output.warnings
+    assert caught.value.hint in warning
+
+
+@pytest.mark.parametrize(("error", "refused"), [(errno.EROFS, True), (errno.EIO, False)])
+def test_only_a_refused_config_d_creation_is_reported_as_the_operators_to_fix(
+    error: int,
+    refused: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``.ssh`` on a read-only mount is the operator's to fix; other errors are not."""
+    config, ssh_dir = _mock_config(tmp_path)
+    original = b"Host *\n    Foo bar\n"
+    config.operator.ssh_config.write_bytes(original)
+
+    def mkdir_on_a_failing_mount(path: Path, *args: object, **kwargs: object) -> None:
+        raise OSError(error, os.strerror(error), str(path))
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_on_a_failing_mount)
+
+    with pytest.raises(AuthorizationError if refused else OSError):
+        sync_ssh_config(config, _db_with_one_vm())
+    assert config.operator.ssh_config.read_bytes() == original
+
+
+@pytest.mark.parametrize(("error", "refused"), [(errno.EROFS, True), (errno.EIO, False)])
+def test_only_a_refused_open_is_reported_as_the_operators_to_fix(
+    error: int,
+    refused: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config linked into a read-only mount, as home-manager links into ``/nix/store``, is the operator's to fix."""
+    ssh_config = tmp_path / "config"
+    original = b"Host *\n    Foo bar\n"
+    ssh_config.write_bytes(original)
+    real_open = open
+
+    def open_on_a_failing_mount(file: Path, mode: str = "r", *args: object, **kwargs: object) -> object:
+        if "w" in mode:
+            raise OSError(error, os.strerror(error), str(file))
+        return real_open(file, mode, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(ssh_config_module, "open", open_on_a_failing_mount, raising=False)
+
+    with pytest.raises(AuthorizationError if refused else OSError):
+        _ensure_include(ssh_config, _include_directive(ssh_config))
+    assert ssh_config.read_bytes() == original
+
+
+@pytest.mark.parametrize("message", ["cannot update the file.", "cannot update the file"])
+def test_a_warning_joins_the_errors_hint_after_exactly_one_period(
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    def failing_sync(*args: object, **kwargs: object) -> None:
+        raise AuthorizationError(message, hint="Then retry.")
+
+    monkeypatch.setattr(ssh_config_module, "sync_ssh_config", failing_sync)
+
+    sync_ssh_config_or_warn(MagicMock(), MagicMock())
+
+    (warning,) = captured_output.warnings
+    assert warning.endswith("cannot update the file. Then retry.")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may write into a read-only directory")
+def test_a_writable_config_in_a_read_only_directory_is_updated(tmp_path: Path) -> None:
+    """Only the file's own permissions decide, as for any in-place edit."""
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    ssh_config = ssh_dir / "config"
+    ssh_config.write_text("Host *\n    Foo bar\n")
+    directive = _include_directive(ssh_config)
+    ssh_dir.chmod(0o555)
+    try:
+        _ensure_include(ssh_config, directive)
+    finally:
+        ssh_dir.chmod(0o755)
+
+    assert ssh_config.read_text() == f"# Added by agentworks\n{directive}\n\nHost *\n    Foo bar\n"
+
+
+@pytest.mark.windows
+def test_a_config_is_edited_in_place_keeping_its_inode_and_hard_links(tmp_path: Path) -> None:
+    """A replacement would leave a hard link holding the old content, and on Windows drop the file's own ACL."""
+    ssh_config = tmp_path / "config"
+    ssh_config.write_text("Host *\n    Foo bar\n")
+    linked = tmp_path / "linked-config"
+    os.link(ssh_config, linked)
+    before = ssh_config.stat().st_ino
+    directive = _include_directive(ssh_config)
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.stat().st_ino == before
+    assert directive in linked.read_text().splitlines()
 
 
 @pytest.mark.windows
@@ -219,8 +686,40 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     content = config.operator.ssh_config.read_text()
     assert _LEGACY_MARKER not in content
     assert "Foo bar" in content
-    directive = _include_directive(config.operator.ssh_config)
-    assert directive in content
+    assert _include_directive(config.operator.ssh_config) in content
+
+
+def test_a_stale_include_beside_a_legacy_section_is_rewritten_and_the_section_removed(tmp_path: Path) -> None:
+    config, _ = _mock_config(tmp_path / "my keys")
+    ssh_config = config.operator.ssh_config
+    directive = _include_directive(ssh_config)
+    legacy = f"{_LEGACY_MARKER}\nHost awvm--old\n    HostName 1.2.3.4\n"
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, f"Host *\n    Foo bar\n\n{legacy}"))
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert ssh_config.read_text() == f"# Added by agentworks\n{directive}\n\nHost *\n    Foo bar\n"
+
+
+def test_an_include_inside_the_legacy_section_is_restored_when_the_section_goes(tmp_path: Path) -> None:
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    directive = _include_directive(ssh_config)
+    ssh_config.write_text(
+        f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\n{directive}\nHost awvm--old\n    HostName 1.2.3.4\n"
+    )
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    content = ssh_config.read_text()
+    assert _LEGACY_MARKER not in content
+    assert content.splitlines().count(directive) == 1
 
 
 # On Windows an apostrophe with no whitespace is refused instead (tested below).
@@ -268,6 +767,65 @@ def test_an_identity_file_ssh_would_misread_is_left_out_with_a_warning(
     assert set(blocks) == {"awvm--web", "awagent--claude"}
     assert not any("IdentityFile" in block for block in blocks.values())
     assert len(captured_output.warnings) == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
+@pytest.mark.parametrize(("link_dir", "target_dir", "expected_ok"), [("keys", "100%", True), ("100%", "keys", False)])
+def test_the_managed_entry_and_the_execution_core_judge_the_same_identity_path(
+    link_dir: str,
+    target_dir: str,
+    expected_ok: bool,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config, ssh_dir = _mock_config(tmp_path)
+    target = tmp_path / target_dir / "id_ed25519"
+    target.parent.mkdir()
+    target.write_text("")
+    key = tmp_path / link_dir / "id_ed25519"
+    key.parent.mkdir()
+    key.symlink_to(target)
+    config.operator.ssh_private_key = key
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+    seed_vm_trust("web")
+
+    _rebuild_config_dir(config, db)
+
+    block = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())["awvm--web"]
+    if expected_ok:
+        policy = VMPolicy(key, TrustBinding(TrustMode.VM, "web")).options()
+        assert f"IdentityFile={key.as_posix()}" in policy
+        assert f"    IdentityFile {key.as_posix()}\n" in block  # the link, as the core passes it
+        assert not captured_output.warnings
+    else:
+        with pytest.raises(ConfigError):
+            VMPolicy(key, TrustBinding(TrustMode.VM, "web")).options()
+        assert "IdentityFile" not in block
+        assert len(captured_output.warnings) == 1
+
+
+@pytest.mark.windows
+def test_the_identity_file_is_written_as_the_configured_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ssh reads ``~`` as the passwd home, which need not be ``$HOME``, so the entry never abbreviates."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    config, ssh_dir = _mock_config(tmp_path)
+    key = tmp_path / "keys" / "id_ed25519"
+    config.operator.ssh_private_key = key
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    block = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())["awvm--web"]
+    assert f"    IdentityFile {key.as_posix()}\n" in block
 
 
 def _mock_agent(name: str, linux_user: str, vm_name: str) -> MagicMock:
@@ -389,6 +947,41 @@ def test_legacy_rebuild_emits_per_agent_blocks(tmp_path: Path) -> None:
     assert "User agt-aider" in content
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_the_legacy_rebuild_keeps_the_operators_bytes_line_endings_and_mode(tmp_path: Path) -> None:
+    from agentworks.ssh_config import _legacy_rebuild
+
+    config, _ = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    ssh_config = config.operator.ssh_config
+    operator_section = "# caf\u00e9 in Latin-1\r\nHost *\r\n    Foo bar\r\n".encode("latin-1")
+    ssh_config.write_bytes(operator_section)
+    ssh_config.chmod(0o640)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("solo", "100.64.0.9")]
+    db.list_agents.return_value = []
+
+    _legacy_rebuild(config, db)
+
+    written = ssh_config.read_bytes()
+    assert written.startswith(operator_section)
+    assert b"Host awvm--solo\r\n    HostName 100.64.0.9\r\n" in written
+    assert b"\n" not in written.replace(b"\r\n", b"")
+    assert stat.S_IMODE(ssh_config.stat().st_mode) == 0o640
+
+
+def test_a_legacy_sync_with_no_config_creates_one_holding_the_managed_section(tmp_path: Path) -> None:
+    config, _ = _mock_config(tmp_path)
+    config.operator.ssh_config_dir = False
+    config.operator.ssh_config.unlink()
+
+    sync_ssh_config(config, _db_with_one_vm())
+
+    content = config.operator.ssh_config.read_text()
+    assert content.index(_LEGACY_MARKER) < content.index("Host awvm--web\n")
+
+
 def test_legacy_rebuild_no_agents_no_per_agent_blocks(tmp_path: Path) -> None:
     from agentworks.ssh_config import _legacy_rebuild
 
@@ -490,11 +1083,10 @@ def _comment_lines(block: str) -> list[str]:
 
 
 def _entry_path(path: Path) -> str:
-    """How an entry names ``path``: relative to ``~`` when it is under the home directory, wherever tmp lives."""
-    from agentworks import ssh_config as ssh_config_module
+    """How an entry names ``path``: absolute, as the execution core passes it."""
     from agentworks.execution import trust
 
-    return trust.option_value(ssh_config_module._to_ssh_path(path))
+    return trust.option_value(path.as_posix())
 
 
 @pytest.mark.parametrize("rebuild", ["config_dir", "legacy"])
@@ -577,10 +1169,7 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     store_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.execution import trust
-    from tests.conftest import isolate_home
 
-    # A home beside the store keeps the store path absolute, so ssh's own expansion of ~ is not under test.
-    isolate_home(monkeypatch, tmp_path / "home")
     store = tmp_path / store_name
     monkeypatch.setattr(trust, "STORE_DIR", store)
     config, ssh_dir = _mock_config(tmp_path)
@@ -605,19 +1194,325 @@ def test_the_installed_client_resolves_the_managed_entry_against_the_store(
     assert settings["hostname"] == "100.64.0.2"
 
 
+def _give_the_acl_of_a_profiles_ssh_directory(directory: Path) -> None:
+    """On Windows, give ``directory`` the DACL a profile's ``~/.ssh`` has: the user, SYSTEM and Administrators.
+
+    pytest creates its temporary directories with mode 0o700, which Python on
+    Windows turns into the protected DACL ``D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)
+    (A;OICI;FA;;;OW)``. Directories created below it get those entries, OWNER
+    RIGHTS (S-1-3-4) among them, as explicit entries, not inherited ones
+    (icacls shows no ``(I)`` on them), so removing inheritance keeps them and
+    OWNER RIGHTS has to be removed by name. Win32-OpenSSH checks the
+    permissions of every file an Include pulls in and refuses one granting
+    OWNER RIGHTS, so a test tree must look like a real profile's instead.
+    """
+    if sys.platform != "win32":
+        return
+    grants = [f"{os.environ['USERNAME']}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"]
+    argv = ["icacls", str(directory), "/inheritance:r", "/grant:r", *grants, "/remove:g", "*S-1-3-4"]
+    done = subprocess.run(argv, capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
 @pytest.mark.windows
 @pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
-def test_a_weaker_setting_read_first_still_finds_the_store_only_as_the_file_ssh_never_writes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("parent", ["home", "home with space", "o'brien"])
+def test_the_installed_client_reaches_the_managed_entries_through_the_include(parent: str, tmp_path: Path) -> None:
+    config, ssh_dir = _mock_config(tmp_path / parent)
+    _give_the_acl_of_a_profiles_ssh_directory(ssh_dir)
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+    _rebuild_config_dir(config, db)
+
+    # An Include that names nothing leaves the alias as the host name.
+    assert _resolved_hostname(config.operator.ssh_config, "awvm--web") == "100.64.0.1"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize("parent", ["100%d", "a$b", "a${HOME}b", "b[1]x", "g*x", "q?x", 'a"b', "a\\b", "a\tb"])
+def test_a_config_directory_an_include_cannot_name_gets_no_include_with_a_warning(
+    parent: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
 ) -> None:
+    """OpenSSH 9.9 and later expand ``%`` tokens and ``${VAR}`` in Include; earlier ones do not."""
+    config, ssh_dir = _mock_config(tmp_path / parent)
+    config.operator.ssh_private_key = tmp_path / "id_ed25519"
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
+    db.list_agents.return_value = []
+
+    _rebuild_config_dir(config, db)
+
+    assert "Include" not in config.operator.ssh_config.read_text()
+    assert "Host awvm--web" in (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
+    assert len(captured_output.warnings) == 1
+
+
+def _config_under_an_unnameable_directory(tmp_path: Path, shape: str, name: str = 'a"b') -> MagicMock:
+    """A config whose config.d ssh cannot name: in such a directory, or reached through a ``.ssh`` linked to one."""
+    if shape == "directory":
+        config, _ = _mock_config(tmp_path / name)
+    else:
+        config, ssh_dir = _mock_config(tmp_path / "home")
+        target = tmp_path / name / "ssh"
+        target.parent.mkdir()
+        ssh_dir.rename(target)
+        ssh_dir.symlink_to(target, target_is_directory=True)
+    # A key path ssh can read, so the only warning is about the Include.
+    config.operator.ssh_private_key = tmp_path / "id_ed25519"
+    return config
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
+@pytest.mark.parametrize(
+    ("shape", "name"),
+    [
+        ("directory", 'a"b'),
+        ("directory", "100%d"),
+        ("directory", "g*x"),
+        ("directory", "line\nbreak"),
+        ("symlinked .ssh", 'a"b'),
+    ],
+)
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_removed_with_a_warning(
+    shape: str,
+    name: str,
+    newline: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Only that release's marked line goes, with its marker, matched whole where the directory name holds a newline.
+
+    Copies of it the operator wrote, at the top level or in a block, stay, and
+    the file keeps its other bytes, its inode and its mode.
+    """
+    config = _config_under_an_unnameable_directory(tmp_path, shape, name)
+    ssh_config = config.operator.ssh_config
+    earlier = _line_written_by_0_19(ssh_config)
+    kept = (
+        f"# Include {earlier}\nInclude ~/.ssh/extra/*\n\n{earlier}\nHost other\n    HostName 10.0.0.9\n"
+        f"    {earlier}\nMatch all\n    {earlier}\n"
+    )
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, f"{kept}    ServerAliveInterval 60\n", newline))
+    ssh_config.chmod(0o640)
+    before = ssh_config.stat()
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    after = ssh_config.stat()
+    assert ssh_config.read_bytes() == f"\n{kept}    ServerAliveInterval 60\n".replace("\n", newline).encode()
+    assert (after.st_ino, stat.S_IMODE(after.st_mode)) == (before.st_ino, 0o640)
+    (warning,) = captured_output.warnings
+    assert earlier in warning
+    assert "Host awvm--web" in (ssh_config.parent / "config.d" / _MANAGED_CONF).read_text()
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_0_19_include_for_a_directory_with_a_percent_is_removed(
+    newline: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """0.19 wrote CRLF on Windows."""
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    ssh_config = config.operator.ssh_config
+    earlier = _line_written_by_0_19(ssh_config)
+    rest = "Host other\n    HostName 10.0.0.9\n"
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, rest, newline))
+    expected = f"\n{rest}".replace("\n", newline).encode()
+    before = ssh_config.stat().st_ino
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == expected
+    assert ssh_config.stat().st_ino == before
+    (warning,) = captured_output.warnings
+    assert earlier in warning
+
+
+_OWN_INCLUDES = ["alone, under a space", "alone, under a glob", "below the marked line, under a glob"]
+
+
+def _config_with_the_operators_own_include(tmp_path: Path, case: str) -> tuple[MagicMock, bytes, bytes]:
+    """A config whose unmarked Include, spelled as 0.19's line, is the operator's; and what a sync leaves.
+
+    Each Include also reaches ``Host route``: unquoted under ``my keys``, its
+    first operand is the file ``my``; under ``team-[ab]``, its pattern matches
+    the sibling ``team-a``.
+    """
+    if case == "alone, under a space":
+        config, _ = _mock_config(tmp_path / "my keys")
+        config.operator.ssh_private_key = tmp_path / "id_ed25519"
+        (tmp_path / "my").write_text("Host route\n    HostName route.example\n")
+    else:
+        config = _config_under_an_unnameable_directory(tmp_path, "directory", "team-[ab]")
+        routes = tmp_path / "team-a" / ".ssh" / "config.d"
+        routes.mkdir(parents=True)
+        (routes / "mine.conf").write_text("Host route\n    HostName route.example\n")
+    ssh_config = config.operator.ssh_config
+    line = _line_written_by_0_19(ssh_config)
+    own = f"{line}\n".encode()
+    if case == "alone, under a space":
+        return config, own, f"# Added by agentworks\n{_include_directive(ssh_config)}\n\n".encode() + own
+    if case == "alone, under a glob":
+        return config, own, own
+    return config, f"# Added by agentworks\n{line}\n".encode() + own, own
+
+
+@pytest.mark.parametrize("case", _OWN_INCLUDES)
+def test_an_include_the_operator_wrote_as_0_19_did_is_left_as_written_by_every_sync(
+    case: str,
+    tmp_path: Path,
+) -> None:
+    """Without the marker the line is not that release's, even where it is alone or right below its marked line."""
+    config, original, expected = _config_with_the_operators_own_include(tmp_path, case)
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_bytes(original)
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+    first = ssh_config.read_bytes()
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert (first, ssh_config.read_bytes()) == (expected, expected)
+
+
+@needs_ssh
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize("case", _OWN_INCLUDES)
+def test_the_installed_client_still_routes_through_the_operators_own_include_after_two_syncs(
+    case: str,
+    tmp_path: Path,
+) -> None:
+    config, original, _ = _config_with_the_operators_own_include(tmp_path, case)
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_bytes(original)
+    assert _resolved_hostname(ssh_config, "route") == "route.example"
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert _resolved_hostname(ssh_config, "route") == "route.example"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "between", "end"),
+    [
+        ("# ", "\n", "\n"),
+        ("  ", "\n", "\n"),
+        ("Host x ", "\n", "\n"),
+        ("", "\n\n", "\n"),
+        ("", "\r\n", "\n"),
+        ("", "\n", "\r\n"),
+    ],
+)
+def test_the_marker_counts_only_at_the_start_of_a_line_directly_above_the_line_in_its_newline(
+    prefix: str, between: str, end: str, tmp_path: Path
+) -> None:
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    ssh_config = config.operator.ssh_config
+    line = _line_written_by_0_19(ssh_config)
+    original = f"Host *\n{prefix}# Added by agentworks{between}{line}{end}".encode()
+    ssh_config.write_bytes(original)
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == original
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("path", ["removed", "rewritten", "kept"])
+def test_a_marker_copied_above_a_marked_line_leaves_the_line_copied_below_it_by_every_sync(
+    path: str, newline: str, tmp_path: Path
+) -> None:
+    """The run of markers directly above the line is one block, so no marker is left above the operator's copy.
+
+    The copied marker and line end in ``newline``, the block between them in
+    LF. Where no Include can be written the block goes with both markers;
+    where the Include is quoted only the line is rewritten; where it is the
+    same line nothing changes.
+    """
+    if path == "removed":
+        config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    else:
+        config, _ = _mock_config(tmp_path / ("my keys" if path == "rewritten" else "home"))
+    ssh_config = config.operator.ssh_config
+    line = _line_written_by_0_19(ssh_config)
+    markers = f"# Added by agentworks{newline}# Added by agentworks\n"
+    original = f"{markers}{line}\n{line}{newline}".encode()
+    if path == "removed":
+        expected = f"{line}{newline}".encode()
+    elif path == "rewritten":
+        expected = f"{markers}{_include_directive(ssh_config)}\n{line}{newline}".encode()
+    else:
+        expected = original
+    ssh_config.write_bytes(original)
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+    first = ssh_config.read_bytes()
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert (first, ssh_config.read_bytes()) == (expected, expected)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+def test_both_lines_0_19_left_for_a_directory_with_a_carriage_return_are_removed(
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """0.19 read back the CR it wrote as LF, so its next sync prepended the line again."""
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "a\rb")
+    ssh_config = config.operator.ssh_config
+    own = b"Host other\n    HostName 10.0.0.9\n"
+    ssh_config.write_bytes(own)
+    _synced_by_0_19(ssh_config)
+    _synced_by_0_19(ssh_config)
+    assert ssh_config.read_bytes().count(b"# Added by agentworks") == 2
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == b"\n\n" + own
+
+
+@needs_ssh
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
+@pytest.mark.parametrize(
+    ("shape", "name"),
+    [("directory", 'a"b'), ("symlinked .ssh", 'a"b'), ("directory", "line\nbreak"), ("directory", "a\rb")],
+)
+def test_the_installed_client_reads_the_file_again_once_the_include_it_rejected_is_removed(
+    shape: str,
+    name: str,
+    tmp_path: Path,
+) -> None:
+    """A quote left unbalanced, or a line broken in two, makes ssh reject the whole file, every host with it."""
+    config = _config_under_an_unnameable_directory(tmp_path, shape, name)
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_bytes(b"Host other\n    HostName 10.0.0.9\n")
+    _synced_by_0_19(ssh_config)
+    _synced_by_0_19(ssh_config)
+    argv = ["ssh", "-G", "-F", str(ssh_config), "other"]
+    assert subprocess.run(argv, capture_output=True, timeout=10).returncode != 0
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert _resolved_hostname(ssh_config, "other") == "10.0.0.9"
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
+def test_a_weaker_setting_read_first_still_finds_the_store_only_as_the_file_ssh_never_writes(tmp_path: Path) -> None:
     """ssh takes each option's first value, so an earlier ``Host *`` wins; what it accepts or learns goes to nothing.
 
     ssh writes known hosts only to the first user file, so the store, as the global file, stays read-only to it.
     """
     from agentworks.execution import trust
-    from tests.conftest import isolate_home
 
-    isolate_home(monkeypatch, tmp_path / "home")
     config, ssh_dir = _mock_config(tmp_path)
     db = MagicMock()
     db.get_setting.return_value = None
@@ -715,8 +1610,8 @@ def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_r
 
     assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
     identity_warning, store_warning = captured_output.warnings
-    assert format_host_path(key.resolve()) in identity_warning
-    assert format_host_path(trust.store_file("web").resolve()) in store_warning
+    assert format_host_path(key) in identity_warning
+    assert format_host_path(trust.store_file("web")) in store_warning
 
     # With whitespace the quoted form is one that client reads, so the path is written.
     spaced = tmp_path / "o'brien x" / "id_ed25519"
@@ -726,22 +1621,30 @@ def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_r
 
 
 @pytest.mark.windows
-def test_a_home_directory_named_with_an_apostrophe_never_reaches_an_entry(
+@pytest.mark.parametrize("under_the_profile", ["key", "store"])
+def test_under_a_profile_named_with_an_apostrophe_a_key_drops_its_line_and_a_store_drops_the_entries(
+    under_the_profile: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """A Windows profile such as O'Brien is a default path: the entries name files under it with ``~``."""
+    """A Windows profile such as O'Brien reaches every absolute path under it, which Git for Windows' ssh cannot read.
+
+    A key it cannot read only leaves the operator's own ssh offering its default keys; a store it cannot read would
+    leave the entries trusting whatever answers, so those are not written.
+    """
     from agentworks import ssh_config as ssh_config_module
     from agentworks.execution import trust
     from tests.conftest import isolate_home
 
     monkeypatch.setattr(ssh_config_module, "_GIT_FOR_WINDOWS_MAY_READ", True)
     home = isolate_home(monkeypatch, tmp_path / "O'Brien")
-    monkeypatch.setattr(trust, "STORE_DIR", home / ".config" / "agentworks" / "known_hosts")
+    elsewhere = tmp_path / "elsewhere"
+    store_parent = home if under_the_profile == "store" else elsewhere
+    monkeypatch.setattr(trust, "STORE_DIR", store_parent / ".config" / "agentworks" / "known_hosts")
     config, ssh_dir = _mock_config(tmp_path)
-    key = home / ".ssh" / "id_ed25519"
-    key.parent.mkdir()
+    key = (home if under_the_profile == "key" else elsewhere) / ".ssh" / "id_ed25519"
+    key.parent.mkdir(parents=True)
     key.write_text("")
     config.operator.ssh_private_key = key
     trust.write_records("web", [fake_host_key()])
@@ -752,10 +1655,14 @@ def test_a_home_directory_named_with_an_apostrophe_never_reaches_an_entry(
 
     _rebuild_config_dir(config, db)
 
-    block = _managed_blocks((ssh_dir / "config.d" / _MANAGED_CONF).read_text())["awvm--web"]
-    assert "    IdentityFile ~/.ssh/id_ed25519\n" in block
-    assert "    GlobalKnownHostsFile ~/.config/agentworks/known_hosts/vm-web\n" in block
-    assert captured_output.warnings == []
+    conf = ssh_dir / "config.d" / _MANAGED_CONF
+    if under_the_profile == "key":
+        block = _managed_blocks(conf.read_text())["awvm--web"]
+        assert "IdentityFile" not in block
+        assert f"    GlobalKnownHostsFile {_entry_path(trust.store_file('web'))}\n" in block
+    else:
+        assert not conf.exists()
+    assert len(captured_output.warnings) == 1
 
 
 @pytest.mark.parametrize("field", ["tailscale_host", "admin_username", "linux_user", "name"])
@@ -869,22 +1776,6 @@ def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entr
     assert _resolved(ssh_dir / "config", "awvm--web", context=acl)["hostname"] == "100.64.0.9"
 
 
-def test_an_unquoted_include_split_at_its_space_is_replaced_where_it_stands(tmp_path: Path) -> None:
-    from agentworks import ssh_config as ssh_config_module
-
-    ssh_dir = tmp_path / "my ssh"
-    ssh_dir.mkdir()
-    ssh_config = ssh_dir / "config"
-    unquoted = f"Include {ssh_config_module._include_pattern(ssh_config)}"
-    ssh_config.write_text(f"Host *\n    ServerAliveInterval 60\n\n{unquoted}\n")
-
-    _ensure_include(ssh_config)
-
-    content = ssh_config.read_text()
-    assert unquoted not in content.splitlines()
-    assert content == f"Host *\n    ServerAliveInterval 60\n\n{_include_directive(ssh_config)}\n"
-
-
 def test_an_operators_unrelated_include_is_left_alone(tmp_path: Path) -> None:
     ssh_dir = tmp_path / "my ssh"
     ssh_dir.mkdir()
@@ -892,7 +1783,7 @@ def test_an_operators_unrelated_include_is_left_alone(tmp_path: Path) -> None:
     original = "Include ~/.ssh/work/*\n\nHost *\n    ServerAliveInterval 60\n"
     ssh_config.write_text(original)
 
-    _ensure_include(ssh_config)
+    _ensure_include(ssh_config, _include_directive(ssh_config))
 
     content = ssh_config.read_text()
     assert content.endswith(original)
