@@ -1167,7 +1167,12 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     it planned, and warns, naming that authorize's prefix, unless EC2 answered the one request sent
     with a client error: botocore retries a lost or failed send on its own, so a refusal after a
     retry (`RetryAttempts` above zero) may follow a send that landed, and a server error, a
-    transport failure, a bound running out or an interrupt leaves the outcome unknown.
+    transport failure, a bound running out or an interrupt leaves the outcome unknown. An authorize
+    that succeeds, or answers a duplicate, only after a retry fails the poke the same way, revoking
+    and warning, since the send before it may still add the rule after any later revoke. Carrying
+    that uncertainty to the close instead would have create's bootstrap allow record it in the VM's
+    metadata, whose close runs again after every root-channel route, so the poke counts an authorize
+    as done only when EC2 answered its only send.
   - **The held removals.** Each cloud's route removal, and its close of the provisioning access,
     runs with interrupts held and shares one 300 s bound across its calls: Azure's delete and its
     wait (`_run_route_operation`); GCE's reads, delete and operation wait

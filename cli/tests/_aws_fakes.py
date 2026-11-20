@@ -24,6 +24,10 @@ if TYPE_CHECKING:
     import pytest
 
 
+ANSWERED_ONCE = {"ResponseMetadata": {"HTTPStatusCode": 200, "RetryAttempts": 0}}
+"""A success response as botocore records it when EC2 answered the one request sent."""
+
+
 def client_error(code: str, message: str = "boom", operation: str = "Op") -> ClientError:
     """A botocore ``ClientError`` carrying ``code`` in the structured
     ``response['Error']['Code']`` slot the platform classifies on, answering
@@ -246,7 +250,7 @@ class _FakeEC2:
                     raise client_error("InvalidPermission.Duplicate", "exists", "AuthorizeSecurityGroupIngress")
                 self._next_rule += 1
                 ing[cidr] = f"sgr-{self._next_rule}"
-        return {}
+        return dict(ANSWERED_ONCE)
 
     def revoke_security_group_ingress(self, **kwargs: Any) -> dict[str, Any]:
         self._record("revoke_security_group_ingress", **kwargs)

@@ -1,8 +1,9 @@
 """Which outcomes of an EC2 authorize let the poke's revoke stand without a warning.
 
-An authorize that did not return normally is revoked, and its prefix named
-for checking by hand, unless its outcome is known: EC2 answered the one
-request sent with a client error. These drive a real botocore EC2 client
+An authorize that did not return normally, or returned (or answered a
+duplicate) only after a resend, is revoked, and its prefix named for
+checking by hand, unless its outcome is known: EC2 answered the one request
+sent with a client error. These drive a real botocore EC2 client
 whose sends are answered in memory (a ``before-send`` handler), since what
 they pin is how botocore retries a send on its own and what it records of
 that: an answer after a retry may follow a send that landed.
@@ -20,6 +21,7 @@ from botocore.exceptions import ClientError, ConnectionClosedError, ReadTimeoutE
 
 from agentworks.errors import AgentworksError
 from agentworks.plugins.aws.network import poke_ssh_allow
+from tests._aws_fakes import ANSWERED_ONCE
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -133,6 +135,36 @@ def test_the_warning_names_only_the_prefix_whose_authorize_went_unanswered(
     assert _FIRST not in warning
 
 
+_ADDED = (200, None)
+_DUPLICATE = (400, "InvalidPermission.Duplicate")
+
+
+@pytest.mark.parametrize("answer", [_ADDED, _DUPLICATE], ids=("added", "duplicate"))
+def test_an_authorize_answered_on_its_only_send_stands_without_a_warning(
+    monkeypatch: pytest.MonkeyPatch, warnings: list[str], answer: _Answer
+) -> None:
+    _no_backoff(monkeypatch)
+
+    poke_ssh_allow(_ec2([answer]), _GROUP, [_FIRST])
+
+    assert warnings == []
+
+
+@pytest.mark.parametrize("answer", [_ADDED, _DUPLICATE], ids=("added", "duplicate"))
+def test_an_authorize_answered_only_after_a_resend_fails_the_poke_and_warns(
+    monkeypatch: pytest.MonkeyPatch, warnings: list[str], answer: _Answer
+) -> None:
+    """The send before the resend may still add the rule after any later revoke, so the poke fails now."""
+    _no_backoff(monkeypatch)
+
+    with pytest.raises(AgentworksError):
+        poke_ssh_allow(_ec2([_timeout(), answer]), _GROUP, [_FIRST, _SECOND])
+
+    (warning,) = warnings
+    assert _FIRST in warning
+    assert _SECOND not in warning
+
+
 def test_a_server_error_answering_the_only_send_warns(monkeypatch: pytest.MonkeyPatch, warnings: list[str]) -> None:
     """A 5xx does not say EC2 never applied the request."""
     _no_backoff(monkeypatch)
@@ -159,7 +191,7 @@ class _Authorizes:
         answer = self.answers.pop(0)
         if answer is not None:
             raise answer
-        return {}
+        return dict(ANSWERED_ONCE)
 
 
 def test_an_error_without_botocore_s_retry_record_warns(warnings: list[str]) -> None:
