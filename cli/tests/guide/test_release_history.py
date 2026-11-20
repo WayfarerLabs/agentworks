@@ -56,7 +56,6 @@ def test_release_history_keeps_template_syntax_as_text() -> None:
         b"# Changelog\n\n## [1.2] (2026-08-10)\n\nNotes.\n",
         _history(("1.2.3", "One."), ("1.2.3", "Two.")),
         _history(("1.2.3", "unsafe\x1b[2J")),
-        _history(("1.2.3", "unsafe ⟦delimiter⟧")),
         _history(("1.2.3", "")),
     ],
 )

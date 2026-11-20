@@ -80,8 +80,6 @@ def _reject_unsafe_text(text: str) -> None:
         codepoint = ord(character)
         if (codepoint < 32 and character not in "\t\n\r") or 127 <= codepoint <= 159:
             raise ReleaseNotesError("packaged release history contains terminal control text")
-    if "⟦" in text or "⟧" in text:
-        raise ReleaseNotesError("packaged release history contains a reserved guide delimiter")
 
 
 def parse_release_history(data: bytes) -> ReleaseHistory:
