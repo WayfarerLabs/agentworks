@@ -4,9 +4,9 @@ The poke authorizes through a client that sends each request once
 (``single_send_config``), so an authorize's one answer is all there is. One
 that did not return normally is revoked, and its prefix named for checking
 by hand, unless its outcome is known: EC2 refused that send, with a client
-error or a throttling answer. A throttled authorize alone is sent again, a
-few times. These drive a real botocore EC2 client whose
-sends are answered in memory (a ``before-send`` handler), since what they
+error or its throttling answer, ``RequestLimitExceeded``. A throttled
+authorize alone is sent again, a few times. These drive a real botocore EC2
+client whose sends are answered in memory (a ``before-send`` handler), since what they
 pin is how botocore sends and classifies.
 """
 
@@ -135,15 +135,28 @@ def test_a_refusal_of_the_only_send_fails_without_a_warning(warnings: list[str])
     assert warnings == []
 
 
-@pytest.mark.parametrize("throttled", [_THROTTLED, (400, "Throttling")], ids=("request-limit-exceeded", "throttling"))
-def test_a_throttled_authorize_is_sent_again_and_stands_once_added(warnings: list[str], throttled: _Answer) -> None:
+def test_a_throttled_authorize_is_sent_again_and_stands_once_added(warnings: list[str]) -> None:
     """A throttled send was refused, so sending it again cannot add the rule twice."""
-    ec2 = _EC2([throttled, _ADDED])
+    ec2 = _EC2([_THROTTLED, _ADDED])
 
     ec2.poke([_FIRST])
 
     assert ec2.authorize_sends == 2
     assert warnings == []
+
+
+def test_a_server_error_with_another_services_throttling_code_is_not_sent_again_and_warns(
+    warnings: list[str],
+) -> None:
+    """Only ``RequestLimitExceeded`` is EC2's refusal; botocore's other throttling codes say nothing of EC2's."""
+    ec2 = _EC2([(503, "Throttling")])
+
+    with pytest.raises(AgentworksError):
+        ec2.poke([_FIRST])
+
+    assert ec2.authorize_sends == 1
+    (warning,) = warnings
+    assert _FIRST in warning
 
 
 def test_an_authorize_throttled_every_time_fails_cleanly_without_a_warning(warnings: list[str]) -> None:
