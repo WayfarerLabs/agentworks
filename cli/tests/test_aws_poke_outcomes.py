@@ -2,12 +2,12 @@
 
 The poke authorizes through a client that sends each request once
 (``single_send_config``), so an authorize's one answer is all there is. One
-that did not return normally is revoked, and its prefix named for checking
-by hand, unless its outcome is known: EC2 refused that send, with a client
-error or its throttling answer, ``RequestLimitExceeded``. A throttled
-authorize alone is sent again, a few times. These drive a real botocore EC2
-client whose sends are answered in memory (a ``before-send`` handler), since what they
-pin is how botocore sends and classifies.
+that did not return normally is revoked, and its prefix named for checking by
+hand, unless its outcome is known: EC2 refused that send, with a client error
+or its throttling answer, ``RequestLimitExceeded``. A throttled authorize
+alone is sent again, a few times. These drive a real botocore EC2 client whose
+sends are answered in memory (a ``before-send`` handler), since what they pin
+is how botocore sends and classifies.
 """
 
 from __future__ import annotations

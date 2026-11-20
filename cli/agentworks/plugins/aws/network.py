@@ -272,19 +272,19 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str], *,
     Dry-runs every exact matching revoke before any authorize. Then authorizes
     one prefix at a time so overlap with a concurrent route does not prevent
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
-    ``authorize`` is the client the authorizes go through, one that sends
-    each request once (:func:`single_send_config`), so no resend can follow
-    an earlier send that still lands; the dry runs and revokes go through
+    ``authorize`` is the client the authorizes go through, one that sends each
+    request once (:func:`single_send_config`), so no resend can follow an
+    earlier send that still lands; the dry runs and revokes go through
     ``ec2``. An authorize that EC2 throttled (``RequestLimitExceeded``) was
     refused, so it alone is sent again, after each of
-    ``_THROTTLED_AUTHORIZE_WAITS_SECONDS``. If an
-    actual authorize fails partway through, or is interrupted, all planned
-    tuples are revoked best-effort before the failure propagates, holding
-    interrupts until that is done (within one bound, as
-    :func:`remove_ssh_allow` does). An authorize whose outcome is unknown
-    (see :func:`_authorize_outcome_unknown`) may still land after that
-    revoke, so it also warns naming its prefix; the warning goes out before
-    the held interrupt is delivered, which would otherwise skip it.
+    ``_THROTTLED_AUTHORIZE_WAITS_SECONDS``. If an actual authorize fails
+    partway through, or is interrupted, all planned tuples are revoked
+    best-effort before the failure propagates, holding interrupts until that
+    is done (within one bound, as :func:`remove_ssh_allow` does). An authorize
+    whose outcome is unknown (see :func:`_authorize_outcome_unknown`) may
+    still land after that revoke, so it also warns naming its prefix; the
+    warning goes out before the held interrupt is delivered, which would
+    otherwise skip it.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
