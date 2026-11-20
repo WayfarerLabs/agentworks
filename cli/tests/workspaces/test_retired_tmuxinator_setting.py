@@ -5,11 +5,14 @@ of it in stored settings.
 
 from __future__ import annotations
 
+import sys
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.conftest import ManifestDoc
+from agentworks.errors import ConfigError
+from agentworks.manifests.envelope import API_VERSION
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -17,28 +20,66 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from tests.conftest import CapturedOutput
 
+# An authored ``tmuxinator`` key is the deprecated setting whatever it decodes to.
+# Each row is the authored spec, its decoded value and how many deprecations it makes.
+_AUTHORED = [
+    pytest.param("{tmuxinator: true}", True, 1, id="true"),
+    pytest.param("{tmuxinator: false}", False, 1, id="false"),
+    pytest.param("{tmuxinator: null}", None, 1, id="null"),
+    pytest.param("\n  tmuxinator:", None, 1, id="empty"),
+    pytest.param("{}", None, 0, id="omitted"),
+]
+
+
+def _template(spec: str) -> str:
+    return f"apiVersion: {API_VERSION}\nkind: workspace-template\nmetadata:\n  name: old\nspec: {spec}\n"
+
 
 def _deprecation_lines(captured_output: CapturedOutput) -> list[str]:
     return [line for line in captured_output.warnings if "tmuxinator" in line]
 
 
-@pytest.mark.parametrize(("spec", "expected"), [({"tmuxinator": True}, 1), ({"tmuxinator": False}, 1), ({}, 0)])
-def test_an_explicit_template_setting_warns_once_per_request(
+@pytest.mark.parametrize(("spec", "value", "expected"), _AUTHORED)
+def test_an_authored_template_setting_warns_once_per_request(
     make_config,  # noqa: ANN001
     captured_output: CapturedOutput,
-    spec: dict[str, object],
+    spec: str,
+    value: bool | None,
     expected: int,
 ) -> None:
     from agentworks.bootstrap import begin_request_warning_scope, load_request_registry
 
-    config = make_config(manifests=[ManifestDoc("workspace-template", "old", spec)])
+    config = make_config(manifests=[_template(spec)])
     begin_request_warning_scope()
 
     registry = load_request_registry(config, include_live_resources=False, probe_host_readiness=False)
     load_request_registry(config, include_live_resources=False, probe_host_readiness=False)
 
-    assert registry.lookup("workspace-template", "old").tmuxinator is spec.get("tmuxinator")
+    assert registry.lookup("workspace-template", "old").tmuxinator is value
     assert len(_deprecation_lines(captured_output)) == expected
+
+
+@pytest.mark.parametrize(("spec", "value", "expected"), _AUTHORED)
+def test_a_first_party_bundle_authoring_the_setting_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    spec: str,
+    value: bool | None,
+    expected: int,
+) -> None:
+    from agentworks.manifests.package import load_manifest_package
+
+    anchor = "retired_tmuxinator_setting_bundle"
+    (tmp_path / anchor / "manifests").mkdir(parents=True)
+    (tmp_path / anchor / "__init__.py").write_text("")
+    (tmp_path / anchor / "manifests" / "bundle.yaml").write_text(_template(spec))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    request.addfinalizer(lambda: sys.modules.pop(anchor, None))
+
+    with pytest.raises(ConfigError) if expected else nullcontext():
+        manifests = load_manifest_package(anchor=anchor, subdir="manifests")
+        assert [entry.resource.tmuxinator for entry in manifests.entries] == [value]
 
 
 @pytest.mark.parametrize(("spec", "expected"), [('{"tmuxinator":true}', 1), ('{"tmuxinator":false}', 1), ("{}", 0)])
@@ -99,7 +140,7 @@ def test_doctor_reports_manifest_and_stored_settings_and_ignores_suppression(
     from agentworks import output
     from agentworks.db import Database, VersionedPayload
     from agentworks.doctor import Status, _check_config
-    from tests.conftest import write_cfg
+    from tests.conftest import ManifestDoc, write_cfg
 
     config_path = write_cfg(
         tmp_path,

@@ -98,8 +98,9 @@ class WorkspaceTemplate(DeclaredResource):
     value or a ``{secret: <name>}`` reference per key."""
 
     def deprecated_fields(self) -> dict[str, str]:
-        """Any explicit ``tmuxinator`` value is a setting with no effect."""
-        if self.tmuxinator is None:
+        """An authored ``tmuxinator`` key is a setting with no effect, whatever its
+        value, null included."""
+        if "tmuxinator" not in self.model_fields_set:
             return {}
         return {
             "tmuxinator": (
