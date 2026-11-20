@@ -653,7 +653,7 @@ class TestCloseProvisioningHooks:
         platform.create(_request(), RunContext(config=_config()))  # pokes the bootstrap tuple
         ec2 = _ec2(platform)
         # A concurrent native route from a DIFFERENT egress pokes a distinct tuple.
-        poke_ssh_allow(ec2, "sg-123", ["198.51.100.7/32"])
+        poke_ssh_allow(ec2, "sg-123", ["198.51.100.7/32"], authorize=ec2)
         assert set(ec2.ingress["sg-123"]) == {_DETECTED_PREFIX, "198.51.100.7/32"}
 
         platform.close_provisioning_access(_vm(), RunContext())
@@ -891,15 +891,15 @@ class TestSharedTupleConcurrency:
         install_fakes(monkeypatch)
         platform = _platform()
         ec2 = _ec2(platform)
-        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
-        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])  # duplicate: no error
+        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX], authorize=ec2)
+        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX], authorize=ec2)  # duplicate: no error
         assert ec2.ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1"}
 
     def test_remove_tolerates_an_already_gone_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
         platform = _platform()
         ec2 = _ec2(platform)
-        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
+        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX], authorize=ec2)
         remove_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
         remove_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])  # already gone: no error
         assert ec2.ingress["sg-123"] == {}
@@ -908,7 +908,7 @@ class TestSharedTupleConcurrency:
         install_fakes(monkeypatch)
         ec2 = _ec2(_platform())
         prefixes = [_DETECTED_PREFIX, "198.51.100.0/24"]
-        poke_ssh_allow(ec2, "sg-123", prefixes)
+        poke_ssh_allow(ec2, "sg-123", prefixes, authorize=ec2)
         revoke = ec2.revoke_security_group_ingress
 
         def interrupted_revoke(**kwargs: Any) -> Any:

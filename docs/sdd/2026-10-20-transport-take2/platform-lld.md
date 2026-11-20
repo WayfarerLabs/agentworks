@@ -1163,16 +1163,14 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     and, while an instance insert is unresolved, that insert's named operation reports `DONE`; with
     no operation known they keep the deny and escalate its removal. EC2's opening calls (the dry-run
     revokes and the authorizes) and its address read go through a `BoundedClient` of
-    `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke whose authorize did not return revokes what
-    it planned, and warns, naming that authorize's prefix, unless EC2 answered the one request sent
-    with a client error: botocore retries a lost or failed send on its own, so a refusal after a
-    retry (`RetryAttempts` above zero) may follow a send that landed, and a server error, a
-    transport failure, a bound running out or an interrupt leaves the outcome unknown. An authorize
-    that succeeds, or answers a duplicate, only after a retry fails the poke the same way, revoking
-    and warning, since the send before it may still add the rule after any later revoke. Carrying
-    that uncertainty to the close instead would have create's bootstrap allow record it in the VM's
-    metadata, whose close runs again after every root-channel route, so the poke counts an authorize
-    as done only when EC2 answered its only send.
+    `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke sends each authorize once, through its own
+    client with botocore's retries off (`single_send_config`, `total_max_attempts` 1; the dry runs
+    and revokes keep the ordinary client), so no resend can follow a send that still lands. An
+    authorize that did not return revokes what the poke planned, and warns, naming that authorize's
+    prefix, unless EC2 refused that send: a client error, or a throttling answer (a code botocore's
+    own retry policy reads as throttling, `RequestLimitExceeded` among them, which EC2 sends with a
+    503 before acting). Any other server error, a transport failure, a bound running out or an
+    interrupt leaves the outcome unknown.
   - **The held removals.** Each cloud's route removal, and its close of the provisioning access,
     runs with interrupts held and shares one 300 s bound across its calls: Azure's delete and its
     wait (`_run_route_operation`); GCE's reads, delete and operation wait

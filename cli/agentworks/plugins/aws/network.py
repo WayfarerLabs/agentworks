@@ -142,7 +142,7 @@ def wrap_ec2_error(exc: Exception) -> AgentworksError:
     wrapped Agentworks error's hint."""
     from botocore.exceptions import ClientError
 
-    if isinstance(exc, (AuthorizationError, EC2Error, TokenRejectedError)):
+    if isinstance(exc, (AuthorizationError, TokenRejectedError)):
         return exc
     if isinstance(exc, ClientError):
         error = exc.response.get("Error", {}) if isinstance(exc.response, dict) else {}
@@ -240,24 +240,34 @@ def _ssh_permission(prefix: str) -> dict[str, Any]:
     return {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": prefix}]}
 
 
-def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
+def single_send_config() -> Any:
+    """The botocore config of a client that sends each request once, which ``poke_ssh_allow`` authorizes through.
+
+    ``total_max_attempts`` counts the first send, so 1 turns botocore's own
+    resends off: an authorize then has exactly one send for its answer to
+    settle.
+    """
+    from botocore.config import Config
+
+    return Config(retries={"mode": "standard", "total_max_attempts": 1})
+
+
+def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str], *, authorize: Any) -> None:
     """Authorize an ephemeral SSH allow on TCP/22 scoped to ``prefixes``.
 
     Dry-runs every exact matching revoke before any authorize. Then authorizes
     one prefix at a time so overlap with a concurrent route does not prevent
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
-    If an actual authorize fails partway through, or is interrupted, all
-    planned tuples are revoked best-effort before the failure propagates,
-    holding interrupts until that is done (within one bound, as
+    ``authorize`` is the client the authorizes go through, one that sends
+    each request once (:func:`single_send_config`), so no resend can follow
+    an earlier send that still lands; the dry runs and revokes go through
+    ``ec2``. If an actual authorize fails partway through, or is interrupted,
+    all planned tuples are revoked best-effort before the failure
+    propagates, holding interrupts until that is done (within one bound, as
     :func:`remove_ssh_allow` does). An authorize whose outcome is unknown
     (see :func:`_authorize_outcome_unknown`) may still land after that
     revoke, so it also warns naming its prefix; the warning goes out before
     the held interrupt is delivered, which would otherwise skip it.
-
-    An authorize counts as done only when EC2 answered its only send. A
-    success or duplicate that botocore got only after resending it fails
-    the poke the same way, since the send before it may still add the rule
-    after the route's revoke, and nothing later could tell.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
@@ -265,25 +275,14 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
     try:
         for prefix in prefixes:
             in_flight = prefix
-            answer: object
             try:
-                answer = ec2.authorize_security_group_ingress(
+                authorize.authorize_security_group_ingress(
                     GroupId=security_group_id,
                     IpPermissions=[_ssh_permission(prefix)],
                 )
             except Exception as exc:
                 if error_code(exc) != _DUPLICATE_PERMISSION_CODE:
                     raise
-                answer = exc
-            if not _answered_only_send(answer):
-                raise EC2Error(
-                    f"AWS confirmed the SSH allow for {prefix} on security group '{security_group_id}' only "
-                    "after a resend",
-                    detail="botocore resent the authorize, so the send before it may still add the rule",
-                    entity_kind="security-group",
-                    entity_name=security_group_id,
-                    hint="retry the command",
-                )
             in_flight = None
     except BaseException as exc:
         # The route's own finally never runs for a poke that did not return, so this revoke cleans up.
@@ -302,37 +301,27 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) ->
 
 
 def _authorize_outcome_unknown(exc: BaseException) -> bool:
-    """Whether an authorize that raised ``exc`` may still have added its rule.
+    """Whether an authorize that raised ``exc`` on its only send may still have added its rule.
 
-    Only a client error (4xx) answering the one request sent settles it.
-    botocore retries a lost or failed send on its own, so an answer after a
-    retry (``RetryAttempts`` above zero) may follow a send that landed; a
-    server error says nothing either way; and an interrupt, a bound running
-    out, or a transport failure leaves no answer at all. An error botocore
-    raises before sending anything (``ParamValidationError``,
-    ``NoCredentialsError``) counts as unknown too, so it over-warns; the dry
-    runs before the first authorize have already sent the same permission
-    shape with the same credential.
+    Only EC2's refusal settles it: a client error (4xx), or a throttling
+    answer (a code botocore's own retry policy reads as throttling,
+    ``RequestLimitExceeded`` among them, which EC2 answers with a 503), sent
+    before EC2 acts. Any other server error says nothing either way, and an
+    interrupt, a bound running out, or a transport failure leaves no answer
+    at all. An error botocore raises before sending anything
+    (``ParamValidationError``, ``NoCredentialsError``) counts as unknown too,
+    so it over-warns; the dry runs before the first authorize have already
+    sent the same permission shape with the same credential.
     """
     from botocore.exceptions import ClientError
+    from botocore.retries.standard import RetryContext, ThrottledRetryableChecker
 
-    if not isinstance(exc, ClientError) or not _answered_only_send(exc):
+    if not isinstance(exc, ClientError):
         return True
+    if ThrottledRetryableChecker().is_retryable(RetryContext(attempt_number=1, parsed_response=exc.response)):
+        return False
     status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
     return not (isinstance(status, int) and 400 <= status < 500)
-
-
-def _answered_only_send(answer: object) -> bool:
-    """Whether ``answer``, an EC2 response or the ``ClientError`` raised with one, answered the only request sent.
-
-    botocore records in it how many times it resent the request
-    (``RetryAttempts``); an answer without that record shows nothing.
-    """
-    from botocore.exceptions import ClientError
-
-    response = answer.response if isinstance(answer, ClientError) else answer
-    metadata = response.get("ResponseMetadata") if isinstance(response, dict) else None
-    return isinstance(metadata, dict) and metadata.get("RetryAttempts") == 0
 
 
 def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
