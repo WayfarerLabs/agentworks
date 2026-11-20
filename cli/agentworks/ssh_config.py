@@ -363,9 +363,14 @@ def _read_user_config(ssh_config: Path) -> str:
     """The operator's SSH config with its line endings as written.
 
     Bytes that are not UTF-8 decode to surrogates, which
-    :func:`_write_user_config` writes back unchanged.
+    :func:`_write_user_config` writes back unchanged. A file this user may not
+    read is refused with :class:`AuthorizationError`, as one it may not write is.
     """
-    with open(ssh_config, encoding="utf-8", errors="surrogateescape", newline="") as f:
+    try:
+        f = open(ssh_config, encoding="utf-8", errors="surrogateescape", newline="")  # noqa: SIM115
+    except PermissionError as error:
+        raise _refusal("read", ssh_config.resolve(), error, "readable and writable") from error
+    with f:
         return f.read()
 
 
@@ -385,12 +390,17 @@ def _write_user_config(ssh_config: Path, content: str) -> None:
     except OSError as error:
         if not isinstance(error, PermissionError) and error.errno != errno.EROFS:
             raise
-        raise AuthorizationError(
-            f"cannot update '{format_host_path(target)}': {error.strerror}",
-            hint="Make it writable, then run 'agw config sync-ssh-config'.",
-        ) from error
+        raise _refusal("update", target, error, "writable") from error
     with f:
         f.write(content)
+
+
+def _refusal(action: str, target: Path, error: OSError, fix: str) -> AuthorizationError:
+    """The error for an ``action`` on the operator's SSH config that the system refused, with how to lift it."""
+    return AuthorizationError(
+        f"cannot {action} '{format_host_path(target)}': {error.strerror}",
+        hint=f"Make it {fix}, then run 'agw config sync-ssh-config'.",
+    )
 
 
 # -- Legacy approach (managed section in ssh_config) -----------------------

@@ -299,8 +299,8 @@ has started.
   through an `Include` of your own, so move `ssh_config` to a plain path. To stop Agentworks adding
   the line, comment it out; the commented line is left as it is.
 - **`~/.ssh/config` keeps its bytes and line endings.** Agentworks still edits the file in place, as
-  before, and now keeps CRLF line endings and any bytes that are not UTF-8. A file you cannot write
-  is reported and left as it was.
+  before, and now keeps CRLF line endings and any bytes that are not UTF-8. A file you cannot read
+  or write is reported and left as it was.
 - **Windows passes arguments through unexpanded.** `agw` no longer expands `*`, `?`, `~`, `%VAR%` or
   `$VAR` in its own arguments on Windows, which it did before forwarding them, even after `--`. A
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a

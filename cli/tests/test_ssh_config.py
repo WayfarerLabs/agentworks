@@ -373,6 +373,33 @@ def test_a_config_the_user_may_not_write_is_refused_and_left_as_it_was(
     assert caught.value.hint in warning
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+@pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may read a mode 000 file")
+def test_a_config_the_user_may_not_read_is_refused_and_left_as_it_was(
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    config, _ = _mock_config(tmp_path)
+    ssh_config = config.operator.ssh_config
+    original = b"Host *\n    Foo bar\n"
+    ssh_config.write_bytes(original)
+    ssh_config.chmod(0o000)
+    before = ssh_config.stat()
+    try:
+        with pytest.raises(AuthorizationError) as caught:
+            sync_ssh_config(config, _db_with_one_vm())
+        sync_ssh_config_or_warn(config, _db_with_one_vm())
+        after = ssh_config.stat()
+    finally:
+        ssh_config.chmod(0o600)
+
+    assert (after.st_ino, after.st_mode) == (before.st_ino, before.st_mode)
+    assert ssh_config.read_bytes() == original
+    assert caught.value.hint is not None
+    (warning,) = captured_output.warnings
+    assert caught.value.hint in warning
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
 @pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may write into a read-only directory")
 def test_a_writable_config_in_a_read_only_directory_is_updated(tmp_path: Path) -> None:
