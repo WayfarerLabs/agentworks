@@ -28,8 +28,8 @@ related problems found on the way are fixed here (FRD, 2026-11-08).
 **What exists at HEAD.**
 
 - Workspaces already apply ACLs and remove a rolled-back tmuxinator file through `VMAccess`
-  (`workspaces/backends/vm.py:195-196`, `:214-215`, `workspaces/manager/copy.py:206-207`,
-  `rehome.py:210`, `:264`, `repair.py:256`); every other workspace request is on the legacy
+  (`workspaces/backends/vm.py:125`, `:244`, `:261`, `workspaces/manager/copy.py:197`, `:262`,
+  `rehome.py:227`, `:292`, `repair.py:256`); every other workspace request is on the legacy
   `transport()`.
 - Sessions set up their socket directories and clean stale sockets through `VMAccess`
   (`sessions/tmux.py:274-477`, slice 6), and preflight, artifacts and group membership already run
