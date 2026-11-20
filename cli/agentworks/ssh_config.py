@@ -399,7 +399,7 @@ def _read_user_config(ssh_config: Path) -> str | None:
     except FileNotFoundError:
         return None
     except PermissionError as error:
-        raise _refusal("read", ssh_config.resolve(), error, "readable and writable") from error
+        raise _refusal("read", ssh_config.resolve(), error, "it readable and writable") from error
     with f:
         return f.read()
 
@@ -418,26 +418,37 @@ def _write_user_config(ssh_config: Path, content: str) -> None:
     try:
         f = open(target, "w", encoding="utf-8", errors="surrogateescape", newline="")  # noqa: SIM115
     except OSError as error:
-        if not isinstance(error, PermissionError) and error.errno != errno.EROFS:
+        if not _refused(error):
             raise
-        raise _refusal("update", target, error, "writable") from error
+        raise _refusal("update", target, error, "it writable") from error
     with f:
         f.write(content)
 
 
 def _make_directory(directory: Path) -> None:
-    """Create ``directory`` and its parents as needed, refusing as a read does when this user may not reach them."""
+    """Create ``directory`` and its parents as needed, refused as a write is when the system will not.
+
+    The error names the path the system refused, which may be a parent.
+    """
     try:
         directory.mkdir(parents=True, exist_ok=True)
-    except PermissionError as error:
-        raise _refusal("create", directory, error, "readable and writable") from error
+    except OSError as error:
+        if not _refused(error):
+            raise
+        refused = Path(error.filename).resolve() if error.filename else directory
+        raise _refusal("create", refused, error, "its parent directory writable and searchable") from error
+
+
+def _refused(error: OSError) -> bool:
+    """Whether ``error`` is the system refusing this user, not a fault: no permission, or a read-only mount."""
+    return isinstance(error, PermissionError) or error.errno == errno.EROFS
 
 
 def _refusal(action: str, target: Path, error: OSError, fix: str) -> AuthorizationError:
-    """The error for an ``action`` on the operator's SSH config that the system refused, with how to lift it."""
+    """The error for an ``action`` on ``target`` that the system refused; ``fix`` completes "Make ..." in the hint."""
     return AuthorizationError(
         f"cannot {action} '{format_host_path(target)}': {error.strerror}",
-        hint=f"Make it {fix}, then run 'agw config sync-ssh-config'.",
+        hint=f"Make {fix}, then run 'agw config sync-ssh-config'.",
     )
 
 

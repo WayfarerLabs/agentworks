@@ -17,6 +17,7 @@ from agentworks import ssh_config as ssh_config_module
 from agentworks.errors import AuthorizationError, ConfigError
 from agentworks.execution.ssh_process import VMPolicy
 from agentworks.execution.trust import TrustBinding, TrustMode
+from agentworks.path_rendering import format_host_path
 from agentworks.ssh_config import (
     _LEGACY_MARKER,
     _MANAGED_CONF,
@@ -508,9 +509,32 @@ def test_a_config_d_the_user_may_not_create_is_refused_and_the_config_left_as_it
 
     assert config.operator.ssh_config.read_bytes() == original
     assert not (ssh_dir / "config.d").exists()
+    assert format_host_path((ssh_dir / "config.d").resolve()) in str(caught.value)
     assert caught.value.hint is not None
     (warning,) = captured_output.warnings
     assert caught.value.hint in warning
+
+
+@pytest.mark.parametrize(("error", "refused"), [(errno.EROFS, True), (errno.EIO, False)])
+def test_only_a_refused_config_d_creation_is_reported_as_the_operators_to_fix(
+    error: int,
+    refused: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``.ssh`` on a read-only mount is the operator's to fix; other errors are not."""
+    config, ssh_dir = _mock_config(tmp_path)
+    original = b"Host *\n    Foo bar\n"
+    config.operator.ssh_config.write_bytes(original)
+
+    def mkdir_on_a_failing_mount(path: Path, *args: object, **kwargs: object) -> None:
+        raise OSError(error, os.strerror(error), str(path))
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_on_a_failing_mount)
+
+    with pytest.raises(AuthorizationError if refused else OSError):
+        sync_ssh_config(config, _db_with_one_vm())
+    assert config.operator.ssh_config.read_bytes() == original
 
 
 @pytest.mark.parametrize(("error", "refused"), [(errno.EROFS, True), (errno.EIO, False)])

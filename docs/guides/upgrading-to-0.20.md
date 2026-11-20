@@ -305,7 +305,8 @@ has started.
   is.
 - **`~/.ssh/config` keeps its bytes and line endings.** Agentworks still edits the file in place, as
   before, and now keeps CRLF line endings and any bytes that are not UTF-8. A file you cannot read
-  or write is reported and left as it was.
+  or write, or a directory Agentworks cannot create beside it, is reported and the file left as it
+  was.
 - **Windows passes arguments through unexpanded.** `agw` no longer expands `*`, `?`, `~`, `%VAR%` or
   `$VAR` in its own arguments on Windows, which it did before forwarding them, even after `--`. A
   quoted `*` now reaches the guest as `*`, as on macOS and Linux, where the shell decides. Expand a
