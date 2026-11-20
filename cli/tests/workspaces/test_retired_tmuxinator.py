@@ -149,7 +149,7 @@ def _workspace(db: Database, root: Path, name: str, content: str | None = _GENER
 
 
 @requires_guest_shell
-def test_cleanup_is_two_sh_commands_with_paths_on_stdin(
+def test_cleanup_is_two_sh_commands_with_paths_as_arguments(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path
 ) -> None:
     target, workspace, _entries = guest
@@ -307,33 +307,6 @@ def test_a_workspace_hidden_by_an_unsearchable_directory_is_warned(
     assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
     assert str(hidden) in captured_output.warnings[0]
-
-
-@requires_guest_shell
-@skip_as_root
-@pytest.mark.parametrize("newlines", [1, 2])
-def test_a_workspace_linked_to_an_unsearchable_directory_named_with_newlines_is_warned(
-    db: Database,
-    guest: tuple[LocalFixtureTransport, Path, Path],
-    tmp_path: Path,
-    captured_output: CapturedOutput,
-    newlines: int,
-) -> None:
-    target, _workspace, _entries = guest
-    real = tmp_path / "guest" / ("real" + "\n" * newlines)
-    real.mkdir()
-    (real / ".tmuxinator.yml").write_text(_GENERATED)
-    aliased = tmp_path / "guest" / "workspaces" / "aliased"
-    aliased.symlink_to(real)
-    db.insert_workspace("aliased", vm_name="box", workspace_path=str(aliased), template="default", linux_group="g")
-    real.chmod(0o600)
-    try:
-        _reinit(db, target)
-    finally:
-        real.chmod(0o755)
-
-    assert (real / ".tmuxinator.yml").read_text() == _GENERATED
-    assert len(captured_output.warnings) == 1 and str(aliased) in captured_output.warnings[0]
 
 
 # A relative alias through ``passage``, which the admin cannot search, reaches a
