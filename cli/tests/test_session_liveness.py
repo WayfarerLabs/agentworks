@@ -26,9 +26,9 @@ from agentworks.sessions.manager import (
     observe_session_statuses,
 )
 from agentworks.sessions.manager._status import (
+    _BATCH_ROW_SECONDS,
     _batch_probe_command,
     _batch_probe_data,
-    _batch_row_bound_seconds,
 )
 from agentworks.sessions.tmux import (
     ADMIN_SOCKET_ROOT,
@@ -324,7 +324,7 @@ def test_batch_status_is_one_elevated_request_within_the_deadline_with_each_row_
     # The guest timeout plus one row's bound, since rows are probed side by side.
     assert (request.elevated, request.deadline) == (
         True,
-        GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
+        GUEST_OBSERVATION_TIMEOUT_SECONDS + _BATCH_ROW_SECONDS,
     )
     assert _stdin_rows(request) == [
         ("a1", f"{AGENT_SOCKET_ROOT}/agt-a1/a1.sock", "agt-a1", "100"),
@@ -375,7 +375,7 @@ def test_a_status_read_that_does_not_complete_raises_after_one_dispatch_and_the_
     # The batch request adds one row's bound to the deadline, since rows are probed side by side.
     assert [request.deadline for request in recorder.requests("run")] == [
         GUEST_OBSERVATION_TIMEOUT_SECONDS,
-        GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
+        GUEST_OBSERVATION_TIMEOUT_SECONDS + _BATCH_ROW_SECONDS,
     ]
 
 

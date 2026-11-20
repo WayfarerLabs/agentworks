@@ -1,8 +1,8 @@
-"""Stuck tmux servers, and owners that defeat their own bounds, leave only their own rows unknown in batch status.
+"""A tmux client that hangs or leaves costs only its own row in batch status.
 
 The real batch program runs in a local shell under the request deadline that
 ``batch_check_status`` asks for, with a fake ``tmux`` on its PATH
-and a fake ``runuser`` in place of ``tmux.RUNUSER_PATH``. The timeouts are
+and a fake ``runuser`` in place of ``tmux.RUNUSER_PATH``. The row bound is
 shortened so the test stays quick.
 """
 
@@ -143,12 +143,12 @@ def _kill_if_mentions(pid: int, marker: str) -> None:
 
 @requires_symlinks
 @requires_posix_shell
-def test_an_owner_that_defeats_its_own_bound_leaves_only_its_own_row_unknown(
+def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str]
 ) -> None:
-    """Each row's bound runs as root, outside its owner switch, so no owner can hold the request open."""
-    monkeypatch.setattr(_status, "_BATCH_CLIENT_TIMEOUT_SECONDS", 1)
-    monkeypatch.setattr(_status, "_BATCH_CLIENT_KILL_SECONDS", 1)
+    """Root's kill of each row is the one bound: no owner client holds the request open or outlives it as root's."""
+    row_seconds = 2
+    monkeypatch.setattr(_status, "_BATCH_ROW_SECONDS", row_seconds)
     guest_timeout = 1
     monkeypatch.setattr(_status, "GUEST_OBSERVATION_TIMEOUT_SECONDS", guest_timeout)
     bin_dir = tmp_path / "bin"
@@ -158,17 +158,15 @@ def test_an_owner_that_defeats_its_own_bound_leaves_only_its_own_row_unknown(
         assert executable is not None
         os.symlink(executable, bin_dir / name)
     owned = tmp_path / "owned"
-    # Each rogue client runs as its row's owner, under the client bound that owner can signal. One
-    # stops that bound and hangs; the other kills it and leaves its process group and session,
-    # still holding its read's pipe, as a client its server took over could. Both note their pids.
+    # One kind of client ignores SIGTERM and never answers; the other leaves the row's process group
+    # and session, still holding its read's pipe, as a client its server took over could, and notes
+    # its pid.
     tmux = bin_dir / "tmux"
     tmux.write_text(
         "#!/bin/sh\n"
         'case "$2" in\n'
-        '  *stopped*) printf \'%s\\n\' "$$" "$PPID" >> "$AGW_OWNED_PIDS"; kill -STOP "$PPID";'
-        ' exec "${0%/*}/sleep" 307 ;;\n'
-        '  *escaped*) printf \'%s\\n\' "$$" >> "$AGW_OWNED_PIDS"; kill -KILL "$PPID";'
-        ' exec "${0%/*}/setsid" "${0%/*}/sleep" 307 ;;\n'
+        "  *hangs*) trap '' TERM; while :; do sleep 0.2; done ;;\n"
+        '  *escapes*) printf \'%s\\n\' "$$" >> "$AGW_OWNED_PIDS"; exec "${0%/*}/setsid" "${0%/*}/sleep" 307 ;;\n'
         "esac\n"
         "exit 0\n"
     )
@@ -177,10 +175,11 @@ def test_an_owner_that_defeats_its_own_bound_leaves_only_its_own_row_unknown(
     sockets = tmp_path / OWNER
     sockets.mkdir()
     rows = [
+        _row("hangs-1"),
         _row("fine-1"),
-        _row("stopped", agent=True, sockets=sockets),
+        _row("hangs-2", agent=True),
         _row("fine-2", agent=True),
-        _row("escaped", agent=True, sockets=sockets),
+        _row("escapes", agent=True, sockets=sockets),
     ]
     requests: list[int] = []
     guest = _local_guest(
@@ -193,82 +192,23 @@ def test_an_owner_that_defeats_its_own_bound_leaves_only_its_own_row_unknown(
         started = time.monotonic()
         statuses = _status.batch_check_status(rows, admin=guest)
         elapsed = time.monotonic() - started
-        owners = {int(pid) for pid in owned.read_text().split()}
         (request,) = requests
         left = _live_session_members(request)
     finally:
         for pid in owned.read_text().split() if owned.exists() else ():
             _kill_if_mentions(int(pid), str(tmp_path))
 
-    assert elapsed < guest_timeout + _status._batch_row_bound_seconds()
+    # However many rows hang, side by side they take one row's bound, inside the request's deadline.
+    assert elapsed < guest_timeout + row_seconds
     assert statuses == {
+        "hangs-1": SessionStatus.UNKNOWN,
         "fine-1": SessionStatus.RUNNING,
-        "stopped": SessionStatus.UNKNOWN,
+        "hangs-2": SessionStatus.UNKNOWN,
         "fine-2": SessionStatus.RUNNING,
-        "escaped": SessionStatus.UNKNOWN,
+        "escapes": SessionStatus.UNKNOWN,
     }
-    # Only the owners' own processes outlive the request; every process root started for it is gone.
-    assert left <= owners
-
-
-@requires_symlinks
-@requires_posix_shell
-def test_stuck_servers_leave_only_their_own_rows_unknown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: list[str]
-) -> None:
-    # A row's clients then take at most 2 * (1 + 1) = 4 seconds, and the request's deadline is the
-    # guest timeout plus one row's bound, 1 + 5. Each stuck client ignores SIGTERM and so lasts until
-    # timeout's SIGKILL, 2 seconds: three stuck rows in turn would need 6, so only rows probed side
-    # by side fit.
-    monkeypatch.setattr(_status, "_BATCH_CLIENT_TIMEOUT_SECONDS", 1)
-    monkeypatch.setattr(_status, "_BATCH_CLIENT_KILL_SECONDS", 1)
-    guest_timeout = 1
-    monkeypatch.setattr(_status, "GUEST_OBSERVATION_TIMEOUT_SECONDS", guest_timeout)
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    for name in ("base64", "cat", "od", "sleep", "timeout", "tr"):
-        executable = shutil.which(name)
-        assert executable is not None
-        os.symlink(executable, bin_dir / name)
-    audit = tmp_path / "audit"
-    tmux = bin_dir / "tmux"
-    tmux.write_text(
-        "#!/bin/sh\n"
-        'printf \'%s\\n\' "$*" >> "$AGW_PROBE_AUDIT"\n'
-        "case \"$2\" in *stuck*) trap '' TERM; while :; do sleep 0.2; done ;; esac\n"
-        "exit 0\n"
-    )
-    tmux.chmod(0o755)
-    _switch_stand_ins(bin_dir, monkeypatch)
-    rows = [
-        _row("stuck-1"),
-        _row("fine-1"),
-        _row("stuck-2", agent=True),
-        _row("fine-2", agent=True),
-        _row("stuck-3"),
-    ]
-    guest = _local_guest(
-        shell, {"PATH": f"{bin_dir}:/bin:/usr/bin", "HOME": str(tmp_path), "AGW_PROBE_AUDIT": str(audit)}
-    )
-
-    started = time.monotonic()
-    statuses = _status.batch_check_status(rows, admin=guest)
-    elapsed = time.monotonic() - started
-
-    # However many servers are stuck, the batch takes about one row's worst case.
-    assert elapsed < guest_timeout + _status._batch_row_bound_seconds()
-
-    assert statuses == {
-        "stuck-1": SessionStatus.UNKNOWN,
-        "fine-1": SessionStatus.RUNNING,
-        "stuck-2": SessionStatus.UNKNOWN,
-        "fine-2": SessionStatus.RUNNING,
-        "stuck-3": SessionStatus.UNKNOWN,
-    }
-    # A server that did not answer has-session gets no second client.
-    assert [line for line in audit.read_text().splitlines() if "stuck" in line and "list-sessions" in line] == []
-    # Every stuck client was killed, and no row's job outlived the request.
-    assert _processes_mentioning(str(bin_dir)) == []
+    # Every process the request's session started is gone; only the escaped client, in a session of its own, lives.
+    assert left == set()
 
 
 @requires_symlinks

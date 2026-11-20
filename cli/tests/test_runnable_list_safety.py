@@ -16,7 +16,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
-from agentworks.sessions.manager._status import _batch_row_bound_seconds
+from agentworks.sessions.manager._status import _BATCH_ROW_SECONDS
 from agentworks.sessions.multi_console import console_listing
 from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT
 from agentworks.vms.manager import inspect
@@ -174,7 +174,7 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
         request = call.request
         assert isinstance(request, Script)
         # The guest timeout plus one row's bound, whatever the row count.
-        assert (call.identity, request.elevated, request.deadline) == (Admin(), True, 10 + _batch_row_bound_seconds())
+        assert (call.identity, request.elevated, request.deadline) == (Admin(), True, 10 + _BATCH_ROW_SECONDS)
         assert isinstance(request.stdin, Bytes)
         lines = request.stdin.data.decode().splitlines()
         assert len(lines) == 1

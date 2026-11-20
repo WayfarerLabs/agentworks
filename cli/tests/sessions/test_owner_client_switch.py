@@ -93,8 +93,8 @@ CASES: dict[str, tuple[Callable[[], str | tuple[str, str]], list[list[str]]]] = 
     "batch status (elevated request)": (
         _batch_program,
         [
-            [*SWITCH, "timeout", "-k", "1", "2", "tmux", "-S", SOCKET, "has-session", "-t", "=s1"],
-            [*SWITCH, "timeout", "-k", "1", "2", "tmux", "-S", SOCKET, "list-sessions"],
+            [*SWITCH, "tmux", "-S", SOCKET, "has-session", "-t", "=s1"],
+            [*SWITCH, "tmux", "-S", SOCKET, "list-sessions"],
         ],
     ),
 }

@@ -42,28 +42,15 @@ if TYPE_CHECKING:
 
     from ._tmux_server import SessionTmuxServer
 
-# Bounds each tmux client in the batch probe, as the row's owner. A row runs
-# at most two clients, so a row whose owner leaves those bounds alone ends
-# within two of them.
-_BATCH_CLIENT_TIMEOUT_SECONDS = 2
-_BATCH_CLIENT_KILL_SECONDS = 1
-# Root ends a row this long after its clients' worst case, whatever its owner
-# does, which leaves room for the row's own reads as root.
-_BATCH_ROW_SLACK_SECONDS = 1
+# Root ends each row of the batch probe this long after starting it, whatever
+# its server or owner does. A healthy row's two tmux reads and its reads as
+# root take a fraction of it.
+_BATCH_ROW_SECONDS = 6
 # Each row reports one line, written in one write. Capping every hex field
 # keeps that line well under PIPE_BUF (4096 bytes on Linux), so concurrent
 # rows' lines never interleave on the shared stdout pipe. An oversized field
 # becomes a newline, which no canonical fact contains.
 _BATCH_FIELD_HEX_LIMIT = 512
-
-
-def _batch_row_bound_seconds() -> int:
-    """The longest one row can take in the batch probe, whatever its server or owner does.
-
-    Rows are probed concurrently, so the batch request needs this bound only
-    once on top of the ordinary guest timeout.
-    """
-    return 2 * (_BATCH_CLIENT_TIMEOUT_SECONDS + _BATCH_CLIENT_KILL_SECONDS) + _BATCH_ROW_SLACK_SECONDS
 
 
 _PID_PRESENT_FACT = "present"
@@ -296,7 +283,7 @@ def batch_check_status(
             Shell.SH,
             elevated=True,
             # Rows run concurrently, so one row's bound covers them all.
-            deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
+            deadline=GUEST_OBSERVATION_TIMEOUT_SECONDS + _BATCH_ROW_SECONDS,
             stdin=Bytes(_batch_probe_data(rows).encode()),
         )
     )
@@ -428,25 +415,17 @@ def _batch_probe_command() -> str:
     row reports ``SOCKET_GUARD_REFUSED`` (126) for both reads, which reads as
     unknown.
 
-    Each row is probed in a background job that prints one line, prefixed
-    with the row's position, and the program waits for every job. Every tmux
-    client is bounded as the row's owner, and a row whose has-session times
-    out skips list-sessions, so a stuck server delays no other row. Those
-    bounds are the owner's processes, which the owner can stop or kill, so
-    each job is a root ``timeout`` around the row's own ``/bin/sh``: at
-    ``_batch_row_bound_seconds`` it kills that row's process group, every
-    process root started for the row, whatever its owner does. Only root's
-    processes hold the request's output; the owner's processes a row starts
-    hold only their read's pipe and ``/dev/null``. So a row whose owner defeats its
-    bounds prints no line and reads unknown, the other rows still report,
-    and nothing root starts outlives the program. Rows take no stdin, so
-    the remaining rows stay out of every server's reach. Nothing is written
-    on the guest.
+    Each row is a root ``timeout`` around its own ``/bin/sh``, in the
+    background, printing one line prefixed with its position; the program
+    waits for every row. At ``_BATCH_ROW_SECONDS`` root kills the row's
+    process group, so a server that does not answer, or an owner client that
+    hangs or leaves, costs only its own row, which prints nothing and reads
+    unknown. A client's own processes hold only their read's pipe and
+    ``/dev/null``. Rows take no stdin, and nothing is written on the guest.
     """
     from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, owner_client_command, socket_guard_condition
 
-    client = f'timeout -k {_BATCH_CLIENT_KILL_SECONDS} {_BATCH_CLIENT_TIMEOUT_SECONDS} tmux -S "$SOCK" "$@" </dev/null'
-    as_owner = owner_client_command(client, owner_word='"$O"')
+    as_owner = owner_client_command('tmux -S "$SOCK" "$@" </dev/null', owner_word='"$O"')
     usable = socket_guard_condition('"$SOCK"', '"$O"')
     refused = SOCKET_GUARD_REFUSED
     row = (
@@ -461,9 +440,7 @@ def _batch_probe_command() -> str:
         f"if {{ {usable}; }} 2>/dev/null; then "
         'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
         'HHEX=$(cap "$(printf %s "$HERR" | hex)"); '
-        # 124 and 137 are timeout's own statuses: the server did not answer.
-        'case "$H" in 124|137) S=$H; SHEX=;; '
-        '*) SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(cap "$(printf %s "$SERR" | hex)");; esac; '
+        'SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(cap "$(printf %s "$SERR" | hex)"); '
         f"else H={refused}; HHEX=; S={refused}; SHEX=; fi; "
         'if [ "$PID" = - ]; then PFACT=; P=1; '
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '
@@ -476,7 +453,7 @@ def _batch_probe_command() -> str:
         f"ROW={shlex.quote(row)}; "
         "I=0; while read -r N64 S64 O64 PID; do I=$((I + 1)); "
         # timeout leads a process group of its own and signals all of it.
-        f'timeout -s KILL {_batch_row_bound_seconds()} /bin/sh -c "$ROW" row "$I" "$N64" "$S64" "$O64" "$PID" '
+        f'timeout -s KILL {_BATCH_ROW_SECONDS} /bin/sh -c "$ROW" row "$I" "$N64" "$S64" "$O64" "$PID" '
         # bash reports a killed job on its own stderr, which is no row's diagnostic.
         "</dev/null & done; wait 2>/dev/null"
     )
