@@ -32,12 +32,6 @@ from tests.ssh_fixtures import fake_host_key
 needs_ssh = pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
 
 
-def _directive(ssh_config: Path) -> str:
-    directive = _include_directive(ssh_config)
-    assert directive is not None
-    return directive
-
-
 def _resolved_hostname(ssh_config: Path, alias: str) -> str:
     """The HostName the installed client resolves for ``alias``; ``-G`` never connects.
 
@@ -83,7 +77,7 @@ def test_ssh_host_alias_custom_prefix() -> None:
 @pytest.mark.windows
 def test_include_directive_uses_resolved_path(tmp_path: Path) -> None:
     ssh_config = tmp_path / ".ssh" / "config"
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     assert directive.startswith("Include ")
     assert "config.d/*" in directive
     # Should use forward slashes even on Windows
@@ -94,7 +88,7 @@ def test_include_directive_uses_resolved_path(tmp_path: Path) -> None:
 @pytest.mark.windows
 def test_ensure_include_creates_file(tmp_path: Path) -> None:
     ssh_config = tmp_path / ".ssh" / "config"
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     _ensure_include(ssh_config, directive)
 
     assert ssh_config.exists()
@@ -104,7 +98,7 @@ def test_ensure_include_creates_file(tmp_path: Path) -> None:
 def test_ensure_include_adds_to_top(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     ssh_config.write_text("Host *\n    ServerAliveInterval 60\n")
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
 
     _ensure_include(ssh_config, directive)
 
@@ -117,7 +111,7 @@ def test_ensure_include_adds_to_top(tmp_path: Path) -> None:
 
 def test_ensure_include_idempotent(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     ssh_config.write_text(f"{directive}\n\nHost *\n    Foo bar\n")
 
     _ensure_include(ssh_config, directive)
@@ -129,7 +123,7 @@ def test_ensure_include_idempotent(tmp_path: Path) -> None:
 def test_ensure_include_noop_if_present_elsewhere(tmp_path: Path) -> None:
     """If the directive already exists anywhere, don't add it again."""
     ssh_config = tmp_path / "config"
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     original = f"Host *\n    Foo bar\n\n{directive}\n"
     ssh_config.write_text(original)
 
@@ -144,7 +138,7 @@ def test_every_include_line_written_unquoted_is_rewritten_in_place(parent: str, 
     """Earlier releases wrote the pattern unquoted; the correct line may already be there too."""
     ssh_config = tmp_path / parent / "config"
     ssh_config.parent.mkdir()
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     unquoted = directive.replace('"', "")
     lines = [unquoted, "", "Host *", "    Foo bar", "", directive, "Match all", f"    {unquoted}"]
     ssh_config.write_bytes(newline.join([*lines, ""]).encode())
@@ -160,7 +154,7 @@ def test_every_include_line_written_unquoted_is_rewritten_in_place(parent: str, 
 def test_the_managed_include_commented_out_is_an_opt_out(parent: str, comment: str, tmp_path: Path) -> None:
     ssh_config = tmp_path / parent / "config"
     ssh_config.parent.mkdir()
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     original = comment.format(directive=directive, unquoted=directive.replace('"', "")) + "\nHost *\n"
     ssh_config.write_text(original)
 
@@ -172,7 +166,7 @@ def test_the_managed_include_commented_out_is_an_opt_out(parent: str, comment: s
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_any_other_comment_naming_the_include_does_not_count(newline: str, tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     original = f"# see {directive}{newline}Host *{newline}"
     ssh_config.write_bytes(original.encode())
 
@@ -192,7 +186,7 @@ def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
         os.chown(ssh_config, -1, other_groups[0])
     before = ssh_config.stat()
 
-    _ensure_include(ssh_config, _directive(ssh_config))
+    _ensure_include(ssh_config, _include_directive(ssh_config))
 
     after = ssh_config.stat()
     assert stat.S_IMODE(after.st_mode) == 0o640
@@ -204,7 +198,7 @@ def test_a_new_config_is_created_under_the_umask(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     previous = os.umask(0o022)
     try:
-        _ensure_include(ssh_config, _directive(ssh_config))
+        _ensure_include(ssh_config, _include_directive(ssh_config))
     finally:
         os.umask(previous)
 
@@ -215,7 +209,7 @@ def test_bytes_that_are_not_utf8_survive_a_rewrite(tmp_path: Path) -> None:
     ssh_config = tmp_path / "config"
     original = "# caf\u00e9 in Latin-1\nHost *\n    Foo bar\n".encode("latin-1")
     ssh_config.write_bytes(original)
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
 
     _ensure_include(ssh_config, directive)
 
@@ -231,7 +225,7 @@ def test_a_symlinked_config_is_updated_through_its_link(tmp_path: Path) -> None:
     ssh_config = tmp_path / ".ssh" / "config"
     ssh_config.parent.mkdir()
     ssh_config.symlink_to(target)
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
 
     _ensure_include(ssh_config, directive)
 
@@ -246,7 +240,7 @@ def test_the_installed_client_reads_the_file_once_a_stale_include_with_an_apostr
     """An unquoted apostrophe makes ssh reject the whole file, so adding a correct line would fix nothing."""
     config, _ = _mock_config(tmp_path / "o'brien")
     ssh_config = config.operator.ssh_config
-    ssh_config.write_text(f"{_directive(ssh_config).replace(chr(34), '')}\n")
+    ssh_config.write_text(f"{_include_directive(ssh_config).replace(chr(34), '')}\n")
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
@@ -387,7 +381,7 @@ def test_a_writable_config_in_a_read_only_directory_is_updated(tmp_path: Path) -
     ssh_dir.mkdir()
     ssh_config = ssh_dir / "config"
     ssh_config.write_text("Host *\n    Foo bar\n")
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     ssh_dir.chmod(0o555)
     try:
         _ensure_include(ssh_config, directive)
@@ -405,7 +399,7 @@ def test_a_config_is_edited_in_place_keeping_its_inode_and_hard_links(tmp_path: 
     linked = tmp_path / "linked-config"
     os.link(ssh_config, linked)
     before = ssh_config.stat().st_ino
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
 
     _ensure_include(ssh_config, directive)
 
@@ -436,7 +430,7 @@ def test_rebuild_config_dir(tmp_path: Path) -> None:
 
     # Include directive added (uses ~/forward-slash form via _to_ssh_path)
     ssh_content = config.operator.ssh_config.read_text()
-    assert _directive(config.operator.ssh_config) in ssh_content
+    assert _include_directive(config.operator.ssh_config) in ssh_content
 
 
 @pytest.mark.windows
@@ -470,13 +464,13 @@ def test_rebuild_config_dir_cleans_legacy(tmp_path: Path) -> None:
     content = config.operator.ssh_config.read_text()
     assert _LEGACY_MARKER not in content
     assert "Foo bar" in content
-    assert _directive(config.operator.ssh_config) in content
+    assert _include_directive(config.operator.ssh_config) in content
 
 
 def test_a_stale_include_beside_a_legacy_section_is_rewritten_and_the_section_removed(tmp_path: Path) -> None:
     config, _ = _mock_config(tmp_path / "my keys")
     ssh_config = config.operator.ssh_config
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     unquoted = directive.replace('"', "")
     ssh_config.write_text(
         f"{unquoted}\n\nHost *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old\n    HostName 1.2.3.4\n"
@@ -493,7 +487,7 @@ def test_a_stale_include_beside_a_legacy_section_is_rewritten_and_the_section_re
 def test_an_include_inside_the_legacy_section_is_restored_when_the_section_goes(tmp_path: Path) -> None:
     config, _ = _mock_config(tmp_path)
     ssh_config = config.operator.ssh_config
-    directive = _directive(ssh_config)
+    directive = _include_directive(ssh_config)
     ssh_config.write_text(
         f"Host *\n    Foo bar\n\n{_LEGACY_MARKER}\n{directive}\nHost awvm--old\n    HostName 1.2.3.4\n"
     )
@@ -989,6 +983,87 @@ def test_a_config_directory_an_include_cannot_name_gets_no_include_with_a_warnin
     assert "Include" not in config.operator.ssh_config.read_text()
     assert "Host awvm--web" in (ssh_dir / "config.d" / _MANAGED_CONF).read_text()
     assert len(captured_output.warnings) == 1
+
+
+def _written_by_0_19(ssh_config: Path, content: str) -> bytes:
+    """The bytes v0.19.0's ``_ensure_include`` wrote: its marker comment and the pattern unquoted, above ``content``.
+
+    A fixed copy of that release's writer, so the expectation never follows
+    the current one.
+    """
+    resolved = (ssh_config.parent / "config.d").resolve().as_posix()
+    home = Path.home().resolve().as_posix()
+    if resolved == home or resolved.startswith(home + "/"):
+        resolved = "~" + resolved[len(home) :]
+    return f"# Added by agentworks\nInclude {resolved}/*\n\n{content}".encode()
+
+
+def _config_under_an_unnameable_directory(tmp_path: Path, shape: str, name: str = 'a"b') -> MagicMock:
+    """A config whose config.d ssh cannot name: in such a directory, or reached through a ``.ssh`` linked to one."""
+    if shape == "directory":
+        config, _ = _mock_config(tmp_path / name)
+    else:
+        config, ssh_dir = _mock_config(tmp_path / "home")
+        target = tmp_path / name / "ssh"
+        target.parent.mkdir()
+        ssh_dir.rename(target)
+        ssh_dir.symlink_to(target, target_is_directory=True)
+    # A key path ssh can read, so the only warning is about the Include.
+    config.operator.ssh_private_key = tmp_path / "id_ed25519"
+    return config
+
+
+_OPERATORS_OWN = "# Include {earlier}\nInclude ~/.ssh/extra/*\n\nHost other\n    HostName 10.0.0.9\n"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
+@pytest.mark.parametrize(
+    ("shape", "name"),
+    [("directory", 'a"b'), ("directory", "100%d"), ("directory", "g*x"), ("symlinked .ssh", 'a"b')],
+)
+def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_removed_with_a_warning(
+    shape: str,
+    name: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Only that release's line and its marker go; the file keeps its other bytes, its inode and its mode."""
+    config = _config_under_an_unnameable_directory(tmp_path, shape, name)
+    ssh_config = config.operator.ssh_config
+    written = _written_by_0_19(ssh_config, "")
+    earlier = written.decode().splitlines()[1]
+    operators_own = _OPERATORS_OWN.format(earlier=earlier)
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, operators_own))
+    ssh_config.chmod(0o640)
+    before = ssh_config.stat()
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    after = ssh_config.stat()
+    assert ssh_config.read_bytes() == f"\n{operators_own}".encode()
+    assert (after.st_ino, stat.S_IMODE(after.st_mode)) == (before.st_ino, 0o640)
+    (warning,) = captured_output.warnings
+    assert earlier in warning
+    assert "Host awvm--web" in (ssh_config.parent / "config.d" / _MANAGED_CONF).read_text()
+
+
+@needs_ssh
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
+@pytest.mark.parametrize("shape", ["directory", "symlinked .ssh"])
+def test_the_installed_client_reads_the_file_again_once_the_include_with_a_double_quote_is_removed(
+    shape: str,
+    tmp_path: Path,
+) -> None:
+    """The quote that release left unbalanced makes ssh reject the whole file, so an unrelated host failed too."""
+    config = _config_under_an_unnameable_directory(tmp_path, shape)
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, "Host other\n    HostName 10.0.0.9\n"))
+    argv = ["ssh", "-G", "-F", str(ssh_config), "other"]
+    assert subprocess.run(argv, capture_output=True, timeout=10).returncode != 0
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert _resolved_hostname(ssh_config, "other") == "10.0.0.9"
 
 
 def test_one_vms_store_problem_leaves_its_trust_lines_out_without_aborting_the_rebuild(

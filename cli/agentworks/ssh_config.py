@@ -58,35 +58,34 @@ def _to_ssh_path(path: Path) -> str:
 _GLOB_CHARACTERS = frozenset("*?[")
 
 
-def _include_directive(ssh_config: Path) -> str | None:
-    """The Include directive for config.d, or ``None`` with a warning when ssh would misread its path.
+def _include_directive(ssh_config: Path) -> str:
+    """The Include directive for config.d, or a :class:`ConfigError` when ssh would misread its path.
 
     The pattern is written through :func:`trust.option_value`, so a directory
     with a space or an apostrophe stays one pattern. From OpenSSH 9.9, Include
     expands ``%`` tokens and environment variables, so the directory must pass
     :func:`trust.literal_path`, the rule for every path ssh is given, and hold
-    no glob character. Computed once per rebuild, so the warning appears once.
+    no glob character.
     """
     # Resolved, as the directive has always been written, so a line an
     # earlier rebuild added still matches.
     config_d = (ssh_config.parent / _CONFIG_DIR_NAME).resolve()
-    problem = None
-    try:
-        trust.literal_path(config_d, "SSH config directory")
-    except ConfigError as e:
-        problem = str(e)
-    if problem is None and any(char in _GLOB_CHARACTERS for char in config_d.as_posix()):
-        problem = (
+    trust.literal_path(config_d, "SSH config directory")
+    if any(char in _GLOB_CHARACTERS for char in config_d.as_posix()):
+        raise ConfigError(
             f"SSH config directory '{format_host_path(config_d)}' holds '*', '?' or '[', "
             "which an Include pattern cannot name literally"
         )
-    if problem is not None:
-        output.warn(
-            f"Include directive not written to {format_host_path(ssh_config)}, so ssh reads the managed "
-            f"entries only through an Include already there: {problem}"
-        )
-        return None
     return f"Include {trust.option_value(_to_ssh_path(config_d) + '/*')}"
+
+
+def _earlier_include(ssh_config: Path) -> str:
+    """The Include line releases before 0.20 wrote: the same pattern, never quoted, whatever the directory held.
+
+    The one rule for recognising that line, whether it is rewritten as the
+    quoted directive or, for a directory ssh cannot name, removed.
+    """
+    return f"Include {_to_ssh_path(ssh_config.parent / _CONFIG_DIR_NAME)}/*"
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -212,9 +211,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     # Clean up legacy managed section if present, then ensure the Include
     # directive, so a directive inside that section is restored, not lost.
     _remove_legacy_section(ssh_config)
-    directive = _include_directive(ssh_config)
-    if directive is not None:
-        _ensure_include(ssh_config, directive)
+    _sync_include(ssh_config)
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
@@ -266,6 +263,28 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     atomic_write_text(conf_path, "\n".join(blocks))
 
 
+def _sync_include(ssh_config: Path) -> None:
+    """Ensure the Include directive, or warn once that ssh would misread it and none is written.
+
+    In that case the line an earlier release wrote for the same directory is
+    removed: it names the directory just as unreadably, and a stray double
+    quote in it makes ssh reject the whole file, every host with it. Only that
+    exact line goes, with the comment the release put above it; any other
+    Include is the operator's and is left alone.
+    """
+    try:
+        directive = _include_directive(ssh_config)
+    except ConfigError as e:
+        removed = _remove_earlier_include(ssh_config)
+        removal = f", and the line an earlier release wrote for it, '{removed}', removed" if removed else ""
+        output.warn(
+            f"Include directive not written to {format_host_path(ssh_config)}{removal}, so ssh reads the managed "
+            f"entries only through an Include already there: {e}"
+        )
+        return
+    _ensure_include(ssh_config, directive)
+
+
 def _ensure_include(ssh_config: Path, directive: str) -> None:
     """Ensure ``directive`` is present in ssh_config.
 
@@ -285,7 +304,7 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     # Earlier releases wrote the pattern unquoted. With an apostrophe in it,
     # ssh rejects the whole file, so a correct line beside it would fix
     # nothing; with whitespace, the line names nothing. Rewrite that line where it stands.
-    unquoted = directive.replace('"', "")
+    unquoted = _earlier_include(ssh_config)
     rewritten = [line.replace(unquoted, directive) if line.strip() == unquoted else line for line in lines]
     opted_out = any(_commented_out(line) in (directive, unquoted) for line in lines)
     if opted_out or any(line.strip() == directive for line in rewritten):
@@ -301,6 +320,27 @@ def _commented_out(line: str) -> str | None:
     """What ``line`` comments out, or ``None`` when it is not a comment."""
     stripped = line.strip()
     return stripped[1:].strip() if stripped.startswith("#") else None
+
+
+def _remove_earlier_include(ssh_config: Path) -> str | None:
+    """Remove each :func:`_earlier_include` line with the comment written above it.
+
+    Returns the removed line, or ``None`` when there was none.
+    """
+    if not ssh_config.exists():
+        return None
+    earlier = _earlier_include(ssh_config)
+    lines = _read_user_config(ssh_config).splitlines(keepends=True)
+    kept: list[str] = []
+    for line in lines:
+        if line.strip() != earlier:
+            kept.append(line)
+        elif kept and kept[-1].strip() == _INCLUDE_COMMENT:
+            kept.pop()
+    if len(kept) == len(lines):
+        return None
+    _write_user_config(ssh_config, "".join(kept))
+    return earlier
 
 
 def _remove_legacy_section(ssh_config: Path) -> None:

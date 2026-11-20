@@ -293,9 +293,11 @@ has started.
   `~/.ssh/config` is quoted when its directory holds a space or an apostrophe, and such a line an
   earlier release wrote unquoted is rewritten as the quoted line where it stands. When the directory
   holds `%`, `$`, a quote, a backslash, a control character, `*`, `?` or `[`, no `Include` line is
-  written and a warning says so; your own `ssh` sees the managed entries only through an `Include`
-  already in the file, so move `ssh_config` to a plain path. To stop Agentworks adding the line,
-  comment it out; the commented line is left as it is.
+  written and a warning says so. The line an earlier release wrote for that directory is removed,
+  with its `# Added by agentworks` comment, and the warning names it: a double quote in it made your
+  own `ssh` reject the whole file, for every host. Your own `ssh` then sees the managed entries only
+  through an `Include` of your own, so move `ssh_config` to a plain path. To stop Agentworks adding
+  the line, comment it out; the commented line is left as it is.
 - **`~/.ssh/config` keeps its bytes and line endings.** Agentworks still edits the file in place, as
   before, and now keeps CRLF line endings and any bytes that are not UTF-8. A file you cannot write
   is reported and left as it was.
