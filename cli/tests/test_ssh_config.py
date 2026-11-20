@@ -1098,37 +1098,66 @@ def _config_under_an_unnameable_directory(tmp_path: Path, shape: str, name: str 
     return config
 
 
-_OPERATORS_OWN = "# Include {earlier}\nInclude ~/.ssh/extra/*\n\nHost other\n    HostName 10.0.0.9\n"
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
 @pytest.mark.parametrize(
     ("shape", "name"),
     [("directory", 'a"b'), ("directory", "100%d"), ("directory", "g*x"), ("symlinked .ssh", 'a"b')],
 )
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_removed_with_a_warning(
     shape: str,
     name: str,
+    newline: str,
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """Only that release's line and its marker go; the file keeps its other bytes, its inode and its mode."""
+    """Every copy of that release's line goes, its marker with it; the file keeps its other bytes, inode and mode."""
     config = _config_under_an_unnameable_directory(tmp_path, shape, name)
     ssh_config = config.operator.ssh_config
     earlier = _line_written_by_0_19(ssh_config)
-    operators_own = _OPERATORS_OWN.format(earlier=earlier)
-    ssh_config.write_bytes(_written_by_0_19(ssh_config, operators_own))
+    kept = f"# Include {earlier}\nInclude ~/.ssh/extra/*\n\nHost other\n    HostName 10.0.0.9\n\nMatch all\n"
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, f"{kept}    {earlier}\n    ServerAliveInterval 60\n", newline))
     ssh_config.chmod(0o640)
     before = ssh_config.stat()
 
     _rebuild_config_dir(config, _db_with_one_vm())
 
     after = ssh_config.stat()
-    assert ssh_config.read_bytes() == f"\n{operators_own}".encode()
+    assert ssh_config.read_bytes() == f"\n{kept}    ServerAliveInterval 60\n".replace("\n", newline).encode()
     assert (after.st_ino, stat.S_IMODE(after.st_mode)) == (before.st_ino, 0o640)
     (warning,) = captured_output.warnings
     assert earlier in warning
     assert "Host awvm--web" in (ssh_config.parent / "config.d" / _MANAGED_CONF).read_text()
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("marked", [True, False])
+def test_a_0_19_include_for_a_directory_with_a_percent_is_removed_with_or_without_its_marker(
+    marked: bool,
+    newline: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """0.19 wrote the line alone when removing its legacy section left nothing else, and wrote CRLF on Windows."""
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    ssh_config = config.operator.ssh_config
+    earlier = _line_written_by_0_19(ssh_config)
+    rest = "Host other\n    HostName 10.0.0.9\n"
+    if marked:
+        ssh_config.write_bytes(_written_by_0_19(ssh_config, rest, newline))
+        expected = f"\n{rest}".replace("\n", newline).encode()
+    else:
+        ssh_config.write_bytes(f"{earlier}{newline}".encode())
+        expected = b""
+    before = ssh_config.stat().st_ino
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == expected
+    assert ssh_config.stat().st_ino == before
+    (warning,) = captured_output.warnings
+    assert earlier in warning
 
 
 @needs_ssh
