@@ -471,10 +471,10 @@ not start an old project by hand before then.
 
 The workspace-template `tmuxinator` setting still loads but has no effect, and 0.22.0 stops
 accepting it ([issue #918](https://github.com/WayfarerLabs/agentworks/issues/918)). Setting it to
-any value in a manifest, or in a spec you pass to a command, reports a deprecation in 0.20.x and
-0.21.x; remove it from both. A workspace created with it keeps the value in its stored settings,
-which no command edits; `agw doctor` lists these for information, and 0.22.0 migrates them, so there
-is nothing to do.
+any value in a manifest, or to `true` or `false` in a spec you pass to a command, reports a
+deprecation in 0.20.x and 0.21.x; remove it from both. A workspace created with it keeps the value
+in its stored settings, which no command edits; `agw doctor` lists these for information, and 0.22.0
+migrates them, so there is nothing to do.
 
 New VMs no longer get the `tmuxinator` package; add it to a vm-template's `apt` list if you use it.
 Existing VMs keep it, because Agentworks never uninstalls packages; remove it yourself if you do not
