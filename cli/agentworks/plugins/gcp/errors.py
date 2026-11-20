@@ -29,6 +29,10 @@ class GCEQuotaError(GCEError):
     """Google Cloud refused an operation because quota is exhausted."""
 
 
+class GCERequestRefusedError(GCEError):
+    """Google Cloud answered a request with a client error no narrower type names, so it was not applied."""
+
+
 class GCEOperationError(GCEError):
     """A completed Compute Engine operation failed definitively."""
 
@@ -40,6 +44,20 @@ class GCECapacityError(GCEOperationError):
 class GCEIndeterminateOperationError(GCEError):
     """A bounded Compute Engine wait ended without a known outcome."""
 
+
+DEFINITE_REFUSALS: tuple[type[AgentworksError], ...] = (
+    AlreadyExistsError,
+    AuthorizationError,
+    NotFoundError,
+    TokenRejectedError,
+    GCEQuotaError,
+    GCERequestRefusedError,
+)
+"""What :func:`google_error` maps a Google Cloud client error (4xx) to: an answer refusing the request it answers.
+
+Refusing the only request sent settles a mutation as not applied; refusing
+a retry says nothing about the try before it.
+"""
 
 _ZONE_CAPACITY_CODE = "ZONE_RESOURCE_POOL_EXHAUSTED"
 
@@ -57,6 +75,11 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
 
     Provider exceptions can retain credentials, request bodies, or reflected
     server text. The returned error contains only caller-authored labels.
+    Each class is matched with its subclasses, since the REST transport
+    raises the HTTP status's class (``Forbidden``, ``TooManyRequests``) and
+    gRPC the status code's (``PermissionDenied``, ``ResourceExhausted``). Every
+    client error but ``Cancelled``, which a client can raise of its own,
+    maps to one of :data:`DEFINITE_REFUSALS`.
     """
     from google.api_core import exceptions as api_exceptions
     from google.auth import exceptions as auth_exceptions
@@ -66,13 +89,13 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
         "entity_kind": "gcp-resource" if resource else None,
         "entity_name": resource,
     }
-    if isinstance(exc, auth_exceptions.RefreshError | api_exceptions.Unauthenticated):
+    if isinstance(exc, auth_exceptions.RefreshError | api_exceptions.Unauthorized):
         return TokenRejectedError(
             f"Google Cloud rejected the selected credential while {operation}{target}",
             hint="check the vm-site auth mode and selected credential",
             **common,
         )
-    if isinstance(exc, api_exceptions.PermissionDenied):
+    if isinstance(exc, api_exceptions.Forbidden):
         return AuthorizationError(
             f"Google Cloud denied permission while {operation}{target}",
             hint="grant the selected identity the documented Compute Engine permissions",
@@ -82,10 +105,16 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
         return NotFoundError(f"Google Cloud resource was not found while {operation}{target}", **common)
     if isinstance(exc, (api_exceptions.AlreadyExists, api_exceptions.Conflict)):
         return AlreadyExistsError(f"Google Cloud resource already exists while {operation}{target}", **common)
-    if isinstance(exc, api_exceptions.ResourceExhausted):
+    if isinstance(exc, api_exceptions.TooManyRequests):
         return GCEQuotaError(
-            f"Google Cloud quota was exhausted while {operation}{target}",
+            f"Google Cloud quota or rate limit was exhausted while {operation}{target}",
             hint="review the project's Compute Engine quotas before retrying",
+            **common,
+        )
+    if isinstance(exc, api_exceptions.ClientError) and not isinstance(exc, api_exceptions.Cancelled):
+        return GCERequestRefusedError(
+            f"Google Cloud refused the request while {operation}{target}",
+            hint="inspect the Agentworks debug log and the named Google Cloud resource before retrying",
             **common,
         )
     if isinstance(exc, CallTimedOut):

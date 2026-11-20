@@ -35,6 +35,24 @@ def api_error(kind: type[Exception], message: str) -> Exception:
     return cast("Callable[[str], Exception]", kind)(message)
 
 
+def rest_error(status: int, body_status: str = "PERMISSION_DENIED") -> Exception:
+    """What the Compute REST transport raises for an HTTP ``status`` answer: api_core's own converter's exception.
+
+    ``body_status`` is the error body's gRPC-style status, which the
+    converter ignores in choosing the class.
+    """
+    import json
+
+    import requests
+
+    response = requests.Response()
+    response.status_code = status
+    response._content = json.dumps({"error": {"code": status, "message": "m", "status": body_status}}).encode()
+    response.request = requests.Request("POST", "https://compute.googleapis.com/compute/v1/projects/p").prepare()
+    error: Exception = api_exceptions.from_http_response(response)  # type: ignore[no-untyped-call]
+    return error
+
+
 class FakeOperation:
     error_code = None
 

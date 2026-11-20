@@ -13,18 +13,15 @@ from agentworks.deadline import Deadline
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
-    AuthorizationError,
     ConfigError,
     ConnectivityError,
-    NotFoundError,
-    TokenRejectedError,
 )
 from agentworks.plugins.gcp.compute import canonical_resource_url, provider_operation_name, provider_resource_id
 from agentworks.plugins.gcp.errors import (
+    DEFINITE_REFUSALS,
     GCEError,
     GCEIndeterminateOperationError,
     GCEOperationError,
-    GCEQuotaError,
     call_google,
     call_google_optional,
     wait_for_extended_operation,
@@ -402,7 +399,7 @@ def insert_firewall_reconciled(
             operation="inserting an owned firewall rule",
             resource=f"firewall rule {project_id}/{firewall.name}",
         )
-    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+    except DEFINITE_REFUSALS:
         attempt.outcome_unknown = False  # a definitive answer to the only request sent
         raise
     except (ConnectivityError, GCEError) as exc:
@@ -418,7 +415,7 @@ def insert_firewall_reconciled(
                 operation="reconciling an indeterminate firewall insert",
                 resource=f"firewall rule {project_id}/{firewall.name}",
             )
-        except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+        except DEFINITE_REFUSALS:
             raise  # an answer to the retry alone: the first try may still land
         except (ConnectivityError, GCEError):
             retry_failed = True

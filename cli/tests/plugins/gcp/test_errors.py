@@ -12,14 +12,17 @@ from google.api_core import extended_operation
 from google.cloud import compute_v1
 
 from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut
-from agentworks.errors import ConnectivityError
+from agentworks.errors import AuthorizationError, ConnectivityError, TokenRejectedError
 from agentworks.plugins.gcp.errors import (
+    DEFINITE_REFUSALS,
     GCECapacityError,
     GCEIndeterminateOperationError,
     GCEOperationError,
+    GCEQuotaError,
     google_error,
     wait_for_extended_operation,
 )
+from tests._gcp_platform_fakes import rest_error
 
 _SENTINEL = "provider-secret-'\"$()"
 _ZONE = "us-central1-a"
@@ -286,3 +289,27 @@ def test_a_call_that_ran_out_of_its_bound_is_unreachable_in_type_only() -> None:
 
     assert isinstance(timed_out, ConnectivityError)
     assert str(timed_out) != str(unreachable)
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 405, 409, 411, 412, 416, 429])
+def test_every_client_error_the_rest_transport_raises_is_a_definite_refusal(status: int) -> None:
+    mapped = google_error(rest_error(status), operation="inserting an owned instance", resource="instance p/z/vm")
+
+    assert isinstance(mapped, DEFINITE_REFUSALS)
+
+
+@pytest.mark.parametrize(
+    ("status", "mapped_type"),
+    [(401, TokenRejectedError), (403, AuthorizationError), (429, GCEQuotaError)],
+)
+def test_the_rest_transport_s_status_classes_map_as_their_grpc_subclasses_do(
+    status: int, mapped_type: type[Exception]
+) -> None:
+    assert type(google_error(rest_error(status), operation="inserting an owned instance")) is mapped_type
+
+
+@pytest.mark.parametrize("status", [499, 500, 502, 503, 504])
+def test_a_server_error_or_a_cancellation_is_no_refusal(status: int) -> None:
+    mapped = google_error(rest_error(status), operation="inserting an owned instance")
+
+    assert not isinstance(mapped, DEFINITE_REFUSALS)

@@ -10,10 +10,8 @@ from typing import TYPE_CHECKING, Any
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
-    AuthorizationError,
     ConnectivityError,
     NotFoundError,
-    TokenRejectedError,
 )
 from agentworks.plugins.gcp.cleanup import InstanceOwnership
 from agentworks.plugins.gcp.compute import (
@@ -24,11 +22,11 @@ from agentworks.plugins.gcp.compute import (
     verify_zonal_operation,
 )
 from agentworks.plugins.gcp.errors import (
+    DEFINITE_REFUSALS,
     GCECapacityError,
     GCEError,
     GCEIndeterminateOperationError,
     GCEOperationError,
-    GCEQuotaError,
     call_google,
     call_google_optional,
     wait_for_extended_operation,
@@ -159,7 +157,7 @@ def insert_instance_reconciled(
             operation="inserting an owned instance",
             resource=f"instance {project_id}/{zone}/{instance.name}",
         )
-    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+    except DEFINITE_REFUSALS:
         attempt.outcome_unknown = False  # a definitive answer to the only request sent
         raise
     except (ConnectivityError, GCEError) as exc:
@@ -173,7 +171,7 @@ def insert_instance_reconciled(
                 operation="reconciling an indeterminate instance insert",
                 resource=f"instance {project_id}/{zone}/{instance.name}",
             )
-        except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+        except DEFINITE_REFUSALS:
             raise  # an answer to the retry alone: the first try may still land
         except (ConnectivityError, GCEError):
             retry_failed = True

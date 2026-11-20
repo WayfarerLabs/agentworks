@@ -12,7 +12,12 @@ from google.cloud import compute_v1
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import AlreadyExistsError, AuthorizationError, ConfigError
 from agentworks.plugins.gcp.config import GcpGCEConfig
-from agentworks.plugins.gcp.errors import GCECapacityError, GCEIndeterminateOperationError, GCEOperationError
+from agentworks.plugins.gcp.errors import (
+    DEFINITE_REFUSALS,
+    GCECapacityError,
+    GCEIndeterminateOperationError,
+    GCEOperationError,
+)
 from agentworks.plugins.gcp.network import (
     FirewallInsertAttempt,
     FirewallOwnership,
@@ -28,6 +33,7 @@ from agentworks.plugins.gcp.network import (
     resolve_network,
     zone_region,
 )
+from tests._gcp_platform_fakes import rest_error
 
 _NETWORK = "https://www.googleapis.com/compute/v1/projects/project-a/global/networks/default"
 _REQUEST_ID = "2c12fd6f-97df-42e2-b394-fafb4431020b"
@@ -608,6 +614,30 @@ def test_definite_permission_failure_is_not_retried_or_shape_reconciled() -> Non
             timeout=17,
         )
     assert [name for name, _kwargs in client.calls] == ["insert"]
+
+
+@pytest.mark.parametrize("status", [403, 429, 400])
+@pytest.mark.parametrize("first_send", ["answered", "unanswered"])
+def test_a_rest_refusal_settles_a_firewall_insert_only_when_it_answers_the_only_send(
+    status: int, first_send: str
+) -> None:
+    """A refusal of the same-``requestId`` retry says nothing of the first try, which may still land."""
+    refusal = rest_error(status)
+    results: list[_Operation | Exception] = [refusal] if first_send == "answered" else [rest_error(503), refusal]
+    client = _FirewallClient(states=iter([]), insert_results=iter(results))
+    attempt = FirewallInsertAttempt("allow", _REQUEST_ID)
+
+    with pytest.raises(DEFINITE_REFUSALS):
+        insert_firewall_reconciled(
+            client,
+            project_id="project-a",
+            firewall=_owned_rule("allow", priority=0, deny=False),
+            attempt=attempt,
+            timeout=17,
+        )
+
+    assert [name for name, _kwargs in client.calls] == ["insert"] * len(results)
+    assert attempt.outcome_unknown is (first_send == "unanswered")
 
 
 @pytest.mark.parametrize(
