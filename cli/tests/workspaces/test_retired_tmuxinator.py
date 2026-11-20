@@ -488,8 +488,12 @@ def test_a_transport_error_on_one_command_still_runs_the_other(
 @requires_guest_shell
 @pytest.mark.parametrize(
     "stdout",
-    ["", "AGW_TMUXINATOR_UNFINISHED=0\nAGW_TMUXINATOR_UNFINISHED=2\nAGW_TMUXINATOR_UNFINISHED=x\n"],
-    ids=["none", "naming-no-line-sent"],
+    [
+        "",
+        "AGW_TMUXINATOR_UNFINISHED=0\nAGW_TMUXINATOR_UNFINISHED=2\nAGW_TMUXINATOR_UNFINISHED=x\n",
+        f"AGW_TMUXINATOR_UNFINISHED={'9' * 5000}\n",
+    ],
+    ids=["none", "naming-no-line-sent", "too-long-to-convert"],
 )
 def test_a_failed_project_command_without_usable_markers_still_warns(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, stdout: str
