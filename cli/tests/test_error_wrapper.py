@@ -14,12 +14,15 @@ import typer
 from agentworks.cli import _record_unhandled_error
 from agentworks.cli._errors import echo_hint
 from agentworks.errors import ExternalError, SecretUnavailableError, StateError
-from agentworks.output import AgentworksError
+from agentworks.execution.results import Result
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHError
 
 from ._runtime_probes import framed_runtime_result
-from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
+from .conftest import _FakeResult, stub_build_registry, stub_session_resolvers, stub_vm_gates
+from .vm_access_support import Call, command_line, is_command_check, route_vm_access_to_guest
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
 @pytest.fixture(autouse=True)
@@ -29,17 +32,10 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_build_registry(monkeypatch)
 
 
-def test_ssh_error_is_agentworks_error() -> None:
-    """SSHError must be an AgentworksError subclass so main()'s wrapper catches
-    it (otherwise SSH timeouts leak as tracebacks)."""
-    assert issubclass(SSHError, AgentworksError)
-    assert isinstance(SSHError("boom"), AgentworksError)
-
-
 def test_record_unhandled_error_writes_traceback_with_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The error log records timestamp, argv, and the full traceback so a
     user-visible one-liner can be backed by a debuggable artifact."""
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "vm", "create", "broken"])
 
     try:
@@ -62,10 +58,10 @@ def test_record_unhandled_error_handles_unusable_log_dir(tmp_path: Path, monkeyp
     """If the log path can't be created, the helper must return None (signal
     to the caller) without raising. The user's one-line error is more
     important than the persisted log."""
-    # Point CONFIG_DIR at a file path so the mkdir + open both fail.
+    # Put the log directory under a file, so the mkdir and open both fail.
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory")
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", blocker)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", blocker / "logs")
 
     try:
         raise ValueError("won't fit")
@@ -122,7 +118,7 @@ def test_main_wrapper_catches_unhandled_exception(tmp_path: Path, monkeypatch: p
         raise RuntimeError("synthetic blowup")
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "kaboom"])
     # Force debug off even if AGW_DEBUG happens to be set in the test env.
     monkeypatch.setenv("AGW_DEBUG", "")
@@ -153,7 +149,7 @@ def test_main_wrapper_lets_click_exceptions_through(tmp_path: Path, monkeypatch:
         raise typer.Exit(code=7)
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "bail"])
 
     with pytest.raises(SystemExit) as exc_info:
@@ -186,7 +182,7 @@ def test_main_wrapper_lets_vendored_abort_through(
         raise typer.Abort()
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "bail"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -230,7 +226,7 @@ def test_main_wrapper_maps_escaped_exit_to_its_carried_code(
         raise exc_factory()
 
     monkeypatch.setattr(cli_mod, "app", fake_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "whatever"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -266,7 +262,7 @@ def test_main_wrapper_maps_escaped_abort_to_exit_1(
         raise exc_factory()
 
     monkeypatch.setattr(cli_mod, "app", fake_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "whatever"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -290,7 +286,7 @@ def test_main_wrapper_keeps_native_choice_failure_as_usage_error(
 
     record_calls: list[BaseException] = []
     monkeypatch.setattr(_entry, "record_unhandled_error", lambda exc: record_calls.append(exc))
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     argv = ["agentworks", *(["--debug"] if debug else []), "completion", "show", "--shell", "fish"]
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setenv("AGW_DEBUG", "")
@@ -329,7 +325,7 @@ def test_main_wrapper_handles_keyboard_interrupt(tmp_path: Path, monkeypatch: py
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli_mod, "app", test_app)
-    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "interrupt"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
@@ -426,22 +422,9 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
     # Skip the VM-running probe entirely.
     stub_vm_gates(monkeypatch)
 
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
-    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    # Patch both locations: manager imports ``transport`` eagerly at module
-    # load, so the agentworks.transports-side patch alone wouldn't take effect.
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
-    # deploy_restricted_config does its own SSH writes -- skip them.
+    # Every request completes with status 0 and no output.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)
+    # deploy_restricted_config does its own SSH writes; skip them.
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
     # The inner SSH operation raises KI mid-way through.
@@ -497,24 +480,8 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
 
     stub_vm_gates(monkeypatch)
 
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
-    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
-    # agent_transport is constructed in session_manager.create_session for
-    # agent-mode sessions (FRD R1, direct target-user SSH). Stub it too so
-    # the SimpleNamespace config doesn't need an `operator` attribute.
-    agent_factory = lambda vm, config, agent, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
+    # Every request completes with status 0 and no output.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
 
@@ -574,19 +541,8 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
 
     stub_vm_gates(monkeypatch)
 
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
-    fake_factory = lambda vm, config, **kwargs: _Target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
+    # Every request completes with status 0 and no output.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
     def _explode(*args: object, **kwargs: object) -> tuple[None, None]:
@@ -638,11 +594,11 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     """End-to-end through the manager: a session workload that dies instantly
     (the 2026-08-03 incident: `codex -a on-failure` rejected by clap in
     milliseconds) must surface its own captured output in the operator-visible
-    failure, prove runtime absence before rolling back partial state, and
-    skip server-access grants for the dead pane. Drives the REAL tmux.create_session
+    failure and prove runtime absence before rolling back partial state.
+    Drives the REAL tmux.create_session
     against a scripted agent transport whose pane_dead probe answers dead."""
     from agentworks.agents import grants as agent_grants
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents.manager import access as agent_access
     from agentworks.db import Database
     from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
@@ -662,52 +618,46 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
 
     clap_error = "error: invalid value 'on-failure' for '--ask-for-approval <APPROVAL_POLICY>'"
 
-    class _Result:
-        def __init__(self, ok: bool = True, stdout: str = "") -> None:
-            self.ok = ok
-            self.returncode = 0 if ok else 1
-            self.stdout = stdout
-            self.stderr = ""
-
-    class _AdminTarget:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
     agent_commands: list[str] = []
 
-    class _DeadPaneAgentTarget:
-        """A held dead pane with stable identity until the server is killed."""
+    class _DeadPaneAgentGuest:
+        """The agent's guest: a held dead pane with stable identity until the server is killed."""
 
         def __init__(self) -> None:
             self.alive = True
 
-        def run(self, cmd: str, *args: object, **kwargs: object) -> _Result:
+        def answer(self, call: Call) -> Result | None:
+            cmd = command_line(call.request)
+            if cmd is None or is_command_check(call.request):
+                return None
+            return self.dispatch(cmd).result()
+
+        def dispatch(self, cmd: str) -> _FakeResult:
             agent_commands.append(cmd)
             if cmd.startswith("test -e "):
-                return _Result(ok=False)
+                return _FakeResult(returncode=1)
             if "#{pane_dead}" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="1 2\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="1 2\n"))
             if "#{pid}" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="4242\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="4242\n"))
             if "boot_id" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n"))
             if "test -d /proc/4242" in cmd:
-                return framed_runtime_result(cmd, _Result(stdout="present" if self.alive else "absent"))
+                return framed_runtime_result(cmd, _FakeResult(stdout="present" if self.alive else "absent"))
             if "cat /proc/4242/stat" in cmd:
                 fields = ["S", *[str(value) for value in range(4, 23)]]
-                return framed_runtime_result(cmd, _Result(stdout=f"4242 (tmux: server) {' '.join(fields)}\n"))
+                return framed_runtime_result(cmd, _FakeResult(stdout=f"4242 (tmux: server) {' '.join(fields)}\n"))
             if "capture-pane" in cmd:
-                return _Result(stdout=f"{clap_error}\n\nFor more information, try '--help'.\n")
+                return _FakeResult(stdout=f"{clap_error}\n\nFor more information, try '--help'.\n")
             if "kill-server" in cmd:
                 self.alive = False
-            return _Result()
+            return _FakeResult()
 
-    agent_target = _DeadPaneAgentTarget()
+    agent_target = _DeadPaneAgentGuest()
 
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _AdminTarget())
-    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _AdminTarget())
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: agent_target)
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+    # The admin's requests complete with status 0 and no output; the agent's reach the dead pane's guest.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None, agent_target.answer)
+    monkeypatch.setattr(agent_access, "_assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(agent_grants, "remove_from_workspace_group", lambda *a, **k: None)
@@ -744,11 +694,6 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
     assert db.get_session("s1") is None
     assert not db.has_any_grant("a1", "ws1")
 
-    # Make a dead socket observable before diagnosis, without server grants.
-    assert not any("server-access" in c for c in agent_commands)
-    chmod = next(index for index, command in enumerate(agent_commands) if "chmod g+rwx" in command)
-    death_probe = next(index for index, command in enumerate(agent_commands) if "#{pane_dead}" in command)
-    assert chmod < death_probe
     assert not agent_target.alive
     db.close()
 

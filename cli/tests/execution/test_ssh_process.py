@@ -241,7 +241,7 @@ def test_the_policy_takes_effect(key_dir: str, tmp_path: Path) -> None:
     assert config["hostkeyalias"] == [trust.host_key_alias("box")]
     assert config["userknownhostsfile"] == [trust.store_file("box").as_posix()]
     assert config["stricthostkeychecking"] == ["true"]
-    assert config["globalknownhostsfile"] == [trust._NULL_DEVICE]
+    assert config["globalknownhostsfile"] == [trust.NULL_DEVICE]
     assert config["updatehostkeys"] == ["false"]
     assert config["hashknownhosts"] == ["no"]
     assert config["certificatefile"] == [f"{key.as_posix()}/disabled-certificate"]
@@ -262,7 +262,7 @@ def test_t_beats_a_request_tty_force_supplied_later(tmp_path: Path) -> None:
     argv = argv_for(tmp_path / "key")
     argv[argv.index("--") : argv.index("--")] = ["-o", "RequestTTY=force"]
 
-    assert effective_config(argv)["requesttty"] == ["false"]  # I14
+    assert effective_config(argv)["requesttty"] == ["false"]  # a forced terminal never reaches the guest
 
 
 @needs_ssh
@@ -279,7 +279,7 @@ def test_no_configuration_file_is_read_so_the_defaults_stay_the_defaults(tmp_pat
     config = effective_config(argv_for(tmp_path / "key"), home)
 
     assert config["requesttty"] == ["false"]
-    assert config["controlmaster"] == ["false"]  # I12: no connection sharing
+    assert config["controlmaster"] == ["false"]  # no connection sharing
     assert config["controlpersist"] == ["no"]
     assert "controlpath" not in config
     assert config["forwardagent"] == ["no"]

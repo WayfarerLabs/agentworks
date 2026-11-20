@@ -3,7 +3,7 @@ derived graph, the unwind parity oracle (``create_vm``'s rollback), and
 the reinit gate.
 
 Real config, registry, resolver, and backend loop; the platform's
-backend ops, the initializer, and the transports are the fakes, same
+backend ops, the initializer, and the VM access are the fakes, same
 surfaces the imperative oracle tests use.
 """
 
@@ -42,7 +42,7 @@ from tests.conftest import (
 )
 from tests.orchestrated_fixtures import proxmox_site
 from tests.ssh_fixtures import write_test_ssh_keypair
-from tests.vm_access_support import AccessRecorder, Admin
+from tests.vm_access_support import AccessRecorder, Admin, install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -276,7 +276,7 @@ def test_create_admin_spec_credential_joins_graph_and_logger_redactions(
         def close(self) -> None:
             events.append("close")
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
         events.append("create")
@@ -336,7 +336,7 @@ def test_logger_construction_failure_never_dispatches_and_unwinds_row(
         raise failure
 
     create = MagicMock()
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _logger_failure)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _logger_failure)
     monkeypatch.setattr(LimaPlatform, "create", create)
 
     if isinstance(failure, KeyboardInterrupt):
@@ -382,7 +382,7 @@ def test_create_failure_closes_logger_once_without_replacing_primary(
             closes.append("close")
             raise close_interrupt
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _fail(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         raise failure
@@ -433,7 +433,7 @@ def test_successful_create_propagates_fresh_logger_close_interrupt(
             closes.append("close")
             raise close_interrupt
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
     monkeypatch.setattr(
         LimaPlatform,
         "create",
@@ -483,7 +483,7 @@ def test_logger_close_warning_failure_does_not_replace_primary(
             closes.append("close")
             raise close_interrupt
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _fail_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         raise primary
@@ -621,7 +621,7 @@ def test_create_init_failure_keeps_the_row(
         def close(self) -> None:
             closes.append("close")
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
@@ -947,7 +947,6 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     reinit-able), Phase B still runs, and create completes with a warning
     rather than raising. Only the bootstrap/verify is fatal to provisioning."""
     import agentworks.ssh_config as ssh_config_mod
-    import agentworks.vms.initializer.driver as driver
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.db import ProvisioningStatus
 
@@ -962,9 +961,7 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
 
-    # Phase A runs for real over the recording access (the module's contract fixture);
-    # Phase B's legacy target is only built, since the initializer is faked.
-    monkeypatch.setattr(driver, "SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
+    # Phase A runs for real over the recording access (the module's contract fixture).
 
     # The SSH-config sync fails (e.g. read-only home) at the end of Phase A
     # (and again on the post-init re-sync); both sites handle it non-fatally.
@@ -995,7 +992,6 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
     captured_output,
 ) -> None:
     """Provisioning closes explicitly after Phase A and before Phase B."""
-    import agentworks.vms.initializer.driver as driver
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     # Contain the real SSH-config write inside the test's tmp dir.
@@ -1010,9 +1006,7 @@ def test_create_provisioning_section_has_explicit_closing_body_line(
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
 
-    # Phase A runs for real over the recording access (the module's contract fixture);
-    # Phase B's legacy target is only built, since the initializer is faked.
-    monkeypatch.setattr(driver, "SSHTransport", lambda **kwargs: SimpleNamespace(**kwargs))
+    # Phase A runs for real over the recording access (the module's contract fixture).
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
     vm_manager.create_vm(db, config, name="pvm", interaction=TtyInteractionPolicy.REFUSE)
@@ -1039,11 +1033,6 @@ def _seed_provisioned_vm(db: Database) -> None:
     db.insert_vm("rvm", site="lima-local", hostname="rvm")
     db.update_vm_tailscale("rvm", "100.64.0.9")
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)
-
-
-def _reinit_transport() -> SimpleNamespace:
-    """Phase B's legacy target, which these tests' faked initializer never uses."""
-    return SimpleNamespace()
 
 
 TRIXIE_OS_RELEASE = b'ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n'
@@ -1119,7 +1108,7 @@ def test_reinit_runs_initialization_through_the_gate(
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
     _contract_passes.access(vm_name="rvm").run_outcomes = _contract_outcomes(os_release=BOOKWORM_OS_RELEASE)
 
     steps: list[str] = []
@@ -1132,9 +1121,6 @@ def test_reinit_runs_initialization_through_the_gate(
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: steps.append("sync"))
-    import agentworks.transports as transports
-
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1155,7 +1141,7 @@ def test_reinit_runs_initialization_through_the_gate(
     assert any(role is Role.RESULT and level == 0 and "rvm" in text for role, level, text in captured_output.lines)
 
 
-def test_reinit_refuses_invalid_configured_identity_before_activation_or_transport(
+def test_reinit_refuses_invalid_configured_identity_before_activation_or_access(
     make_config,
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
@@ -1165,13 +1151,12 @@ def test_reinit_refuses_invalid_configured_identity_before_activation_or_transpo
     failure = ConfigError("invalid test identity")
     prepare = MagicMock(side_effect=failure)
     activate = MagicMock()
-    make_transport = MagicMock()
+    recorder = install_access_recorder(monkeypatch)
     monkeypatch.setattr(
         "agentworks.vms.applied_state.prepare_configured_ssh_identity",
         prepare,
     )
     monkeypatch.setattr("agentworks.orchestration.activation.activation_gate", activate)
-    monkeypatch.setattr("agentworks.transports.transport", make_transport)
 
     with pytest.raises(ConfigError) as caught:
         vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
@@ -1182,7 +1167,7 @@ def test_reinit_refuses_invalid_configured_identity_before_activation_or_transpo
         config.operator.ssh_private_key,
     )
     activate.assert_not_called()
-    make_transport.assert_not_called()
+    assert recorder.built == []
 
 
 def test_reinit_resolves_the_stored_admin_template(
@@ -1234,9 +1219,6 @@ def test_reinit_resolves_the_stored_admin_template(
         captured["admin"] = args[4]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
-    import agentworks.transports as transports
-
-    monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1270,7 +1252,6 @@ def test_reinit_applies_a_legacy_flat_vm_payload(
         captured["vm_template"] = args[3]
 
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: _reinit_transport())
 
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
 
@@ -1301,7 +1282,6 @@ def _reinit_with_faked_initializer(
     monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
     ran = [] if initialized is None else initialized
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: ran.append(True))
-    monkeypatch.setattr("agentworks.transports.transport", lambda vm, config, **kw: _reinit_transport())
     recorder.access(vm_name="rvm").run_outcomes = outcomes
     vm_manager.reinit_vm(db, config, "rvm", interaction=TtyInteractionPolicy.REFUSE)
     return ran

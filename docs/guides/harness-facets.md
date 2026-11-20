@@ -189,9 +189,11 @@ Active setup receives environment from the scopes that already exist for that ow
 Inner values win collisions under the normal env merge rules. Core protects `AGENTWORKS_*` identity
 values. Setup environment and declared config secrets join the operation's eager resolution before
 remote mutation and logger construction. Each integration receives only its declared config secrets;
-environment arrives separately through the prepared runner. With neither selected activations nor
-prior applied-state records, this setup path does not resolve otherwise unused environment secrets.
-Existing install commands keep their own execution behavior.
+environment arrives separately as the invocation's `environment`, and `request_environment(local)`
+builds a request's `env` from it with the integration's own variables added, never an `AGENTWORKS_*`
+one. With neither selected activations nor prior applied-state records, this setup path does not
+resolve otherwise unused environment secrets. Existing install commands keep their own execution
+behavior.
 
 Session environment retains its existing precedence: session over actual user, over workspace, over
 VM. It is not produced by merging setup configs. Environment values follow their own merge rules;

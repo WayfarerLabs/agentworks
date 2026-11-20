@@ -3,26 +3,48 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock
 
 import pytest
 
 from agentworks.artifacts.application import ArtifactApplication
+from agentworks.artifacts.session import HOME_PROBE
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.db import VMRow
+from agentworks.execution.access import VMAccess
+from agentworks.execution.files import Files
+from agentworks.execution.oplog import format_record
+from agentworks.execution.requests import Bytes, Command, PythonProgram, Script, Shell
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import NativeClaim, SetupRecord
 from agentworks.plugins._harness_native.native import setup_user
-from agentworks.plugins._harness_native.native_cli import NativeTool
+from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeTool
 from agentworks.plugins._harness_native.native_config import NativeUserConfig
-from agentworks.ssh import SSHResult
-from agentworks.transports import Transport
+from tests.vm_access_support import (
+    Admin,
+    Call,
+    RecordingVMAccess,
+    account_shell,
+    check_result,
+    is_command_check,
+    local_vm_access,
+    run_file_program_locally,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from agentworks.execution.requests import RunRequest
 
 
-class LocalFixtureTransport(Transport):
-    """Execute only fixture commands under a newly constructed child environment."""
+class LocalFixtureAccount:
+    """An account on this machine that answers an access's requests, each run under a newly constructed environment."""
 
     def __init__(self, root: Path):
         self.root = root
@@ -62,54 +84,135 @@ class LocalFixtureTransport(Transport):
             "GIT_CEILING_DIRECTORIES": str(root.resolve()),
             "GIT_TERMINAL_PROMPT": "0",
         }
-        self.logger = None
-        self.default_timeout = 30
         self.commands: list[str] = []
         self.logged_output: list[str] = []
 
-    def describe(self) -> str:
-        return "isolated local native fixture"
-
-    def run(self, command: str, **kwargs) -> SSHResult:
-        self.commands.append(command)
-        result = subprocess.run(
+    def shell(self, command: str) -> subprocess.CompletedProcess[str]:
+        """Run ``command`` with Bash in the fixture's home and environment, to set the fixture up."""
+        return subprocess.run(
             ["bash", "-c", command],
             cwd=self.home,
-            env={**self.environment, **(kwargs.get("env") or {})},
-            input=kwargs.get("input_text", kwargs.get("input_data", "")),
+            env=self.environment,
             text=True,
             capture_output=True,
-            timeout=kwargs.get("timeout") or 30,
+            timeout=30,
+            check=False,
         )
-        hidden = kwargs.get("input_text") is not None or kwargs.get("discard_output")
-        stdout = "" if hidden else result.stdout
-        stderr = "" if hidden else result.stderr
-        self.logged_output.extend([stdout, stderr])
-        return SSHResult(returncode=result.returncode, stdout=stdout, stderr=stderr)
 
-    def copy_to(self, local_path, remote_path, **kwargs) -> None:
-        shutil.copyfile(local_path, remote_path)
+    def answer(self, call: Call) -> Result | None:
+        """Answer an access's request as this fixture's account would, or ``None`` for the default outcome.
 
-    def copy_from(self, remote_path, local_path, **kwargs) -> None:
-        shutil.copyfile(remote_path, local_path)
+        File operations run their real program here (``run_file_program_locally``),
+        the session home probe reads this fixture's home, and every required
+        command is present. Any other ``Command``, a bash or sh ``Script``, a
+        login ``Script`` in the account's own shell and a ``PythonProgram`` run
+        here, in the request's working directory or the fixture's home, with the
+        fixture's environment and the request's over it; a login script or
+        program runs after the fixture's login shell reads its ``.profile``. A
+        command's line or a script's source joins ``commands``, and each
+        answered request's operation log record joins ``logged_output``.
+        """
+        request = call.request
+        if is_command_check(request):
+            return check_result(request, 0)
+        if request == HOME_PROBE:
+            return Result(Completed(0), str(self.home).encode())
+        result = run_file_program_locally(call)
+        if result is None and isinstance(request, Command):
+            self.commands.append(shlex.join(request.argv))
+            result = self._spawn(list(request.argv), request)
+        elif result is None and isinstance(request, Script) and request.shell in (Shell.BASH, Shell.SH):
+            self.commands.append(request.source)
+            result = self._spawn([request.shell.value, "-c", request.source], request)
+        elif result is None and isinstance(request, Script) and request.shell is Shell.USER_DEFAULT and request.login:
+            self.commands.append(request.source)
+            flags = "-lic" if request.interactive else "-lc"
+            result = self._spawn([self.environment["SHELL"], flags, request.source], request)
+        elif result is None and isinstance(request, PythonProgram):
+            program = shlex.join([sys.executable, "-I", "-S", "-c", request.source, *request.args])
+            result = self._spawn(
+                [self.environment["SHELL"], "-lc", program] if request.login else shlex.split(program), request
+            )
+        if result is not None:
+            self.logged_output.append(format_record(request, result, label="fixture"))
+        return result
 
-    def _interactive(self, command: str, **kwargs) -> int:
-        raise AssertionError("interactive operations are outside fixture scope")
+    def _spawn(self, argv: list[str], request: Command | Script | PythonProgram) -> Result:
+        completed = subprocess.run(
+            argv,
+            cwd=request.cwd or self.home,
+            env={**self.environment, **request.env},
+            input=request.stdin.data if isinstance(request.stdin, Bytes) else b"",
+            capture_output=True,
+            timeout=request.deadline or 120,
+            check=False,
+        )
+        return Result(Completed(completed.returncode), completed.stdout, completed.stderr)
 
-    def call_streaming(self, command: str, **kwargs) -> int:
-        raise AssertionError("streaming operations are outside fixture scope")
+    def access(self) -> RecordingVMAccess:
+        """A recording access to this fixture's account, answered by :meth:`answer`."""
+        access = RecordingVMAccess([], Admin())
+        access.answer = self.answer
+        return access
+
+    def files(self) -> Files:
+        """File operations on this fixture's files, through :meth:`access`."""
+        return self.access().files()
 
 
-def invocation(transport: LocalFixtureTransport, claims: list[tuple[NativeClaim, ...]], *, prior=None, env=None):
+def fixture_access(
+    monkeypatch: pytest.MonkeyPatch,
+    account: LocalFixtureAccount,
+    *,
+    log: Callable[[RunRequest, Result], None] | None = None,
+) -> VMAccess:
+    """A real ``VMAccess`` to the fixture's account: its home, and a login shell that reads only its ``.profile``."""
+    return local_vm_access(monkeypatch, home=account.home, shell=account_shell(account.root), log=log)
+
+
+def invocation(
+    account: LocalFixtureAccount,
+    claims: list[tuple[NativeClaim, ...]],
+    *,
+    prior=None,
+    env=None,
+    access: VMAccess | None = None,
+):
+    """User setup of the fixture's account, through ``access`` (the fixture's recording access by default)."""
+    access = access or account.access()
     return UserSetupInvocation(
         vm=cast(VMRow, object()),
-        runner=transport,
+        access=access,
+        files=access.files(),
         prior=prior,
         checkpoint=claims.append,
         username="fixture",
-        home=str(transport.home),
+        home=str(account.home),
         environment=env or {},
     )
+
+
+def forbid_files(monkeypatch: pytest.MonkeyPatch, reason: str = "a guest file operation was not expected") -> None:
+    """Fail the test on any guest file operation, every one of which is a ``Files._run``."""
+
+    def forbid(*args: object, **kwargs: object) -> None:
+        pytest.fail(reason)
+
+    monkeypatch.setattr(Files, "_run", forbid)
+
+
+def native_cli_double() -> MagicMock:
+    """A native CLI double; entering it, as setup does, yields the same double."""
+    cli = MagicMock()
+    cli.__enter__.return_value = cli
+    return cli
+
+
+def native_cli(
+    account: LocalFixtureAccount, tool: NativeTool, config_root: Path | str, *, env=None, access=None
+) -> NativeCLI:
+    """A native CLI for the fixture's account, to use as a context manager."""
+    return NativeCLI(tool, invocation(account, [], env=env, access=access), config_root=str(config_root))
 
 
 def setup_fixture_user(
@@ -121,10 +224,12 @@ def setup_fixture_user(
     mcp_destination: str | None = None,
     skip_mcp: bool = False,
 ) -> ArtifactApplication:
-    """Pass this fixture's selected paths without observing another login shell."""
-    target = cast(LocalFixtureTransport, call.runner)
+    """Pass this fixture's selected paths without observing another login shell.
+
+    The default native home is the one the fixture's environment exports, beneath its home.
+    """
     variable = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
-    root = native_root or call.environment.get(variable) or target.environment[variable]
+    root = native_root or call.environment.get(variable) or call.home + ("/.codex" if tool == "codex" else "/.claude")
     destination = mcp_destination or root + ("/config.toml" if tool == "codex" else "/.claude.json")
     return setup_user(tool, config, call, native_root=root, mcp_destination=destination, skip_mcp=skip_mcp)
 
@@ -139,18 +244,18 @@ def record(claims: tuple[NativeClaim, ...], tool: NativeTool) -> SetupRecord:
     )
 
 
-def market_fixture(transport: LocalFixtureTransport, tool: NativeTool) -> Path:
+def market_fixture(account: LocalFixtureAccount, tool: NativeTool) -> Path:
     binary = shutil.which(tool)
     if binary is None:
         pytest.skip(f"{tool} CLI is not installed")
-    bindir = transport.root / "bin"
+    bindir = account.root / "bin"
     bindir.mkdir(exist_ok=True)
     (bindir / tool).symlink_to(Path(binary).resolve())
     # npm-installed launchers need Node in the fixture's deliberately small PATH.
     node = shutil.which("node")
     if node is not None and not (bindir / "node").exists():
         (bindir / "node").symlink_to(Path(node).resolve())
-    root = transport.root / "market"
+    root = account.root / "market"
     manifest = root / (".agents/plugins/marketplace.json" if tool == "codex" else ".claude-plugin/marketplace.json")
     manifest.parent.mkdir(parents=True)
     entries = []

@@ -3,16 +3,15 @@
 Combines AGENTWORKS_* identity vars (per-context subset only; VM-stable and
 per-user subsets live in VM-side profile fragments) with the user-defined
 env merged across the precedence ladder, secret references filled from the
-command's pre-resolved values. The resulting flat ``dict[str, str]`` is
-handed to the transport layer (``Transport.run(env=...)``), which coalesces
-every pair into one ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
-``_set_env_args`` in ``agentworks/transports/ssh.py``); the remote sshd
-accepts these under the ``AcceptEnv *`` directive deployed by VM init.
+command's pre-resolved values. The resulting flat ``dict[str, str]`` becomes
+a request's ``env`` (``agentworks.execution``), which travels in the request
+envelope on the connection's standard input, never on a command line; a
+console pane's is in the request its terminal handover parks.
 
 ``values`` is the dict returned by the command's single
 ``resolve_for_command`` call. A secret referenced here but absent from it
-means the eager-resolve target and this compose site drifted apart -- a
-bug in the calling command, surfaced loudly rather than resolved on the
+means the eager-resolve target and this compose site drifted apart, a
+bug in the calling command surfaced loudly rather than resolved on the
 fly (there is no resolver to fall back to, by design).
 
 Identity vars take precedence over user-defined env on key collision: an
@@ -73,16 +72,7 @@ def compose_env(
                     "The SecretTarget and this compose_env site must be "
                     "built from the same scope dicts (drift bug)."
                 )
-            from agentworks.secrets.line_safety import (
-                LineOrientedSecretUse,
-                require_line_safe_secret,
-            )
-
-            user_env[key] = require_line_safe_secret(
-                values[entry.secret],
-                use=LineOrientedSecretUse.ENVIRONMENT,
-                secret_name=entry.secret,
-            )
+            user_env[key] = values[entry.secret]
     # Applicable identity collisions were discarded before rendering and
     # secret use. Their managed values are added only at this final step.
     return {**user_env, **identity}

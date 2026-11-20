@@ -317,7 +317,7 @@ def finding(findings: tuple[Problem, ...], row: contract.Check) -> Finding | Non
 def test_base_tools_names_each_missing_tool(shell: str, tmp_path: Path) -> None:
     stubs = tmp_path / "bin"
     stubs.mkdir()
-    for tool in ("install", "nohup", "tar"):
+    for tool in ("install", "tar"):
         (stubs / tool).write_text("#!/bin/sh\n")
         (stubs / tool).chmod(0o755)
 

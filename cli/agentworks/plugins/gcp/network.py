@@ -4,25 +4,24 @@ from __future__ import annotations
 
 import ipaddress
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient
+from agentworks.deadline import Deadline
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
-    AuthorizationError,
     ConfigError,
     ConnectivityError,
-    NotFoundError,
-    TokenRejectedError,
 )
-from agentworks.plugins.gcp.compute import canonical_resource_url, provider_resource_id
+from agentworks.plugins.gcp.compute import canonical_resource_url, provider_operation_name, provider_resource_id
 from agentworks.plugins.gcp.errors import (
+    DEFINITE_REFUSALS,
     GCEError,
     GCEIndeterminateOperationError,
     GCEOperationError,
-    GCEQuotaError,
     call_google,
     call_google_optional,
     wait_for_extended_operation,
@@ -101,10 +100,16 @@ class FirewallState(Enum):
 
 @dataclass(frozen=True)
 class FirewallReconciliation:
-    """One firewall state plus the provider ID observed for that exact name."""
+    """One firewall state plus the provider ID observed for that exact name.
+
+    ``seen_owned`` is set only by :func:`delete_matching_firewall`, when it
+    saw a rule carrying the owned provider ID, before or after deleting it
+    and whatever its shape now, so an insert that created it has landed.
+    """
 
     state: FirewallState
     observed_resource_id: str | None
+    seen_owned: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,12 +122,23 @@ class FirewallOwnership:
 
 @dataclass
 class FirewallInsertAttempt:
-    """The unique request identity and learned resource identity for one insert."""
+    """The unique request identity and learned resource identity for one insert.
+
+    ``outcome_unknown`` says whether a request this attempt sent may still
+    create the rule though nothing has shown whether it will:
+    :func:`insert_firewall_reconciled` sets it when it sends the insert and
+    clears it once the outcome is known, so an insert cut short, or one
+    whose first try went unanswered, leaves it set whatever ends the
+    attempt. ``operation_name`` names the insert's verified operation, once
+    one arrives, for recovery guidance.
+    """
 
     rule_name: str
     request_id: str
     ownership: FirewallOwnership | None = None
     submitted: bool = False
+    outcome_unknown: bool = False
+    operation_name: str | None = None
 
     @classmethod
     def create(cls, rule_name: str) -> FirewallInsertAttempt:
@@ -223,16 +239,9 @@ def resolve_network(clients: GcpClientCache, ctx: RunContext, config: GcpGCEConf
     return NetworkSelection(region, network_url, None)
 
 
-def get_network(
-    clients: GcpClientCache,
-    ctx: RunContext,
-    *,
-    project_id: str,
-    network_url: str,
-) -> Any:
-    """Read the selected network from its resolved resource URL."""
+def get_network(client: Any, *, project_id: str, network_url: str) -> Any:
+    """Read the selected network from its resolved resource URL with the networks ``client``."""
     network_name = canonical_resource_url(network_url).rsplit("/", 1)[-1]
-    client = clients.client("networks", ctx)
     network = call_google_optional(
         lambda: client.get(project=project_id, network=network_name),
         operation="reading the selected network",
@@ -380,6 +389,7 @@ def insert_firewall_reconciled(
         request_id=attempt.request_id,
     )
     attempt.submitted = True
+    attempt.outcome_unknown = True
 
     operation: Any | None = None
     initial_failure: AgentworksError | None = None
@@ -389,7 +399,8 @@ def insert_firewall_reconciled(
             operation="inserting an owned firewall rule",
             resource=f"firewall rule {project_id}/{firewall.name}",
         )
-    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+    except DEFINITE_REFUSALS:
+        attempt.outcome_unknown = False  # a definitive answer to the only request sent
         raise
     except (ConnectivityError, GCEError) as exc:
         initial_failure = exc
@@ -404,8 +415,8 @@ def insert_firewall_reconciled(
                 operation="reconciling an indeterminate firewall insert",
                 resource=f"firewall rule {project_id}/{firewall.name}",
             )
-        except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
-            raise
+        except DEFINITE_REFUSALS:
+            raise  # an answer to the retry alone: the first try may still land
         except (ConnectivityError, GCEError):
             retry_failed = True
         if retry_failed:
@@ -427,6 +438,7 @@ def insert_firewall_reconciled(
             expected_resource_id=None,
         ),
     )
+    attempt.operation_name = provider_operation_name(operation)
 
     wait_failure: AgentworksError | None = None
     try:
@@ -438,6 +450,9 @@ def insert_firewall_reconciled(
         )
     except GCEIndeterminateOperationError as exc:
         wait_failure = exc
+    except GCEOperationError:
+        attempt.outcome_unknown = False  # the operation completed, and failed
+        raise
 
     state = reconcile_firewall(
         client,
@@ -446,6 +461,7 @@ def insert_firewall_reconciled(
         ownership=attempt.ownership,
     )
     if state is FirewallState.REALIZED:
+        attempt.outcome_unknown = False
         return attempt.ownership
     if state is FirewallState.MISMATCHED:
         raise AlreadyExistsError(
@@ -456,6 +472,7 @@ def insert_firewall_reconciled(
         )
     if wait_failure is not None:
         raise wait_failure
+    attempt.outcome_unknown = False  # the operation completed without the rule
     raise GCEOperationError(
         f"GCE firewall rule '{firewall.name}' was absent after its insert operation completed",
         entity_kind="gcp-firewall-rule",
@@ -471,13 +488,21 @@ def delete_matching_firewall(
     ownership: FirewallOwnership | None,
     timeout: float,
 ) -> FirewallReconciliation:
-    """Delete only a verified provider incarnation, then prove the result.
+    """Delete only a verified provider incarnation, then prove the result, all within ``timeout``.
 
     GCE delete accepts only a rule name, not a provider-ID precondition. The
     ownership read therefore closes concurrent identical inserts but is not an
     atomic defense against a hostile delete/recreate between this read and the
     name-based delete.
+
+    Its reads, delete and operation wait share one bound of ``timeout`` on
+    the wall clock (a ``Deadline``), each taking what the ones before left,
+    since its callers hold interrupts while it runs. A call with nothing
+    left of the bound is not made and fails, so the result says the rule
+    was not proven absent; ``seen_owned`` says it found the owned rule.
     """
+    deadline = Deadline.after(timeout)
+    client = BoundedClient(client, deadline)
     try:
         result = inspect_firewall(
             client,
@@ -488,7 +513,8 @@ def delete_matching_firewall(
     except AgentworksError:
         return FirewallReconciliation(FirewallState.INDETERMINATE, None)
     if result.state is not FirewallState.REALIZED:
-        return result
+        owned = ownership is not None and result.observed_resource_id == ownership.resource_id
+        return replace(result, seen_owned=owned)
 
     try:
         from google.cloud import compute_v1
@@ -518,20 +544,21 @@ def delete_matching_firewall(
             operation,
             label=f"firewall rule {expected.name}",
             zone=None,
-            timeout=timeout,
+            timeout=deadline.remaining() or 0.0,  # never unbounded: made from a timeout
         )
     except AgentworksError:
         pass
 
     try:
-        return inspect_firewall(
+        final = inspect_firewall(
             client,
             project_id=project_id,
             expected=expected,
             ownership=ownership,
         )
     except AgentworksError:
-        return FirewallReconciliation(FirewallState.INDETERMINATE, None)
+        return FirewallReconciliation(FirewallState.INDETERMINATE, None, seen_owned=True)
+    return replace(final, seen_owned=True)
 
 
 def _verify_firewall_operation(

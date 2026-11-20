@@ -86,7 +86,7 @@ def test_exhaustion_returns_false_after_every_attempt_and_no_trailing_pause(
         (Result(Unknown(UnknownReason.OUTPUT_LIMIT)), ExecutionIncomplete),
         (Result(NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)), ExecutionIncomplete),
         (Result(NotDelivered(NotDeliveredReason.PYTHON_MISSING)), VMNotReady),
-        (CommandFailed("box", 1, Result(Completed(1))), CommandFailed),
+        (CommandFailed("box", 1, Result(Completed(1)), streams_logged=True), CommandFailed),
         (TrustMissing("box"), TrustMissing),
     ],
     ids=["host-key", "auth-failed", "output-limit", "launcher-failed", "python-missing", "true-failed", "no-record"],

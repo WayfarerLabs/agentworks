@@ -1,25 +1,34 @@
-"""The two-connection terminal attach.
+"""The terminal handover: a parked request, collected by a terminal half.
 
 ssh takes the window size and terminal modes from its own stdin, so the
 operator's real terminal has to be the terminal half's stdin. The request still
 has to travel on a private stdin, so it goes on a first connection that parks:
 agw-launch creates a private socket directory on the guest and waits. The
 terminal half's stage 0 connects to that socket, collects the launcher and the
-request from it, and execs the login shell on the terminal. No guest text
-reaches a command line, and the secret environment never touches the terminal
-connection's argv.
+request from it, and execs the login shell or the terminal command on the
+terminal. No guest text reaches a command line, and the secret environment
+never touches the terminal half's argv.
+
+:class:`Parked` is that first connection. :func:`attach` is ``Parked`` plus a
+terminal half on the operator's terminal; ``VMAccess.park`` is ``Parked`` plus
+a :class:`Handover`, whose command line is the terminal half of a terminal agw
+does not hold (a tmux pane on the guest).
 """
 
 from __future__ import annotations
 
+import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.deadline import Deadline
 from agentworks.execution import ssh_process
+from agentworks.execution.agw_launch import HANDOVER_WAIT_SECONDS
 from agentworks.execution.errors import ExecutionIncomplete
-from agentworks.execution.pump import Deadline, PipeSession, StopReason
+from agentworks.execution.pump import PipeSession, StopReason
 from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
-from agentworks.terminal import guarded_terminal
+from agentworks.terminal import emit_clear, guarded_terminal
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -29,11 +38,15 @@ PARKING_WAIT_SECONDS = 60
 """How long to wait for the parking connection to report ``parked``, before the terminal is touched.
 
 Its own bound for connecting, authenticating and running the account's startup
-files. The launcher's 30 second handover wait starts only after ``parked``.
+files. The launcher's handover wait (``HANDOVER_WAIT_SECONDS``) starts only
+after ``parked``.
 """
 
 PARKING_SHUTDOWN_SECONDS = 2.0
-"""How long to let the parked launcher clean up after the terminal half returns."""
+"""How long to let the parked launcher clean up once the client has closed its end."""
+
+HANDOVER_COLLECT_SECONDS = HANDOVER_WAIT_SECONDS + 5
+"""How long :meth:`Parked.collect` waits for the trailer: the launcher's handover wait and a margin."""
 
 _SSH_STATUS_CONNECTION_ENDED = 255
 
@@ -41,6 +54,108 @@ _SSH_STATUS_CONNECTION_ENDED = 255
 def socket_path(token: str) -> str:
     """Where the parked launcher listens on the guest, for a handover ``token``."""
     return f"/tmp/agw-handover-{token}/s"
+
+
+class Parked:
+    """The parking connection of a handover, from ``parked`` until the client lets it go.
+
+    Entering spawns the connection and waits up to :data:`PARKING_WAIT_SECONDS`
+    for ``parked``. When it does not come (a missing python3, a trust
+    mismatch, a refusal, a refused connection, or a startup file that reads
+    stdin and holds it forever), entering ends the connection and raises the
+    typed error, before anything else happens.
+
+    Leaving closes the parking stdin, which the launcher takes as the client
+    leaving: one that is still waiting removes its socket directory and exits.
+    That is the way out after an attach's terminal half and after an
+    exception; :meth:`collect` is the way out for a handover the client
+    cannot watch being collected.
+    """
+
+    def __init__(self, *, vm_name: str, wire: bytes, nonce: str, argv: Sequence[str], log: Path) -> None:
+        self._vm_name = vm_name
+        self._log = log
+        # Off the operator's console: see ssh_process.spawn.
+        self._session = PipeSession(
+            argv,
+            request=wire,
+            nonce=nonce,
+            hold_stdin_open=True,
+            share_console=False,
+            on_stdout=_ignore,
+            on_stderr=_ignore,
+        )
+        self._ended = False
+
+    def __enter__(self) -> Parked:
+        session = self._session.__enter__()
+        try:
+            stop = session.pump(lambda: session.stdout.parked, budget=Deadline.after(PARKING_WAIT_SECONDS))
+            if not session.stdout.parked:
+                _raise_parking_failure(self._vm_name, session, stop, self._log)
+        except BaseException:
+            session.__exit__(None, None, None)
+            raise
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        try:
+            if not self._ended:
+                self._ended = True
+                try:
+                    self._session.close_stdin()
+                    self._session.pump(budget=Deadline.after(PARKING_SHUTDOWN_SECONDS))
+                finally:
+                    self._session.end()
+        finally:
+            self._session.__exit__(None, None, None)
+
+    def collect(self) -> bool:
+        """Wait for the launcher's trailer, end the connection, and say whether it handed over.
+
+        The wait is bounded by :data:`HANDOVER_COLLECT_SECONDS`, past the
+        launcher's own wait, so its ``refused handover`` arrives first.
+
+        The parking stdin stays open meanwhile, since closing it would make a
+        launcher still waiting for its terminal half give up. ``exit 0`` means
+        a terminal half collected the request; ``refused handover`` (the
+        launcher's own wait ran out) and no trailer at all mean nothing did.
+        """
+        self._ended = True
+        try:
+            stop = self._session.pump(budget=Deadline.after(HANDOVER_COLLECT_SECONDS))
+        finally:
+            self._session.end()
+        return stop is StopReason.DONE and self._session.stderr.closing == "exit 0"
+
+
+@dataclass
+class Handover:
+    """A request parked for a terminal agw does not hold, such as a tmux pane on the guest.
+
+    ``account`` is the Linux account that parked it, the only one that can
+    reach its socket. ``collected`` is set when ``VMAccess.park``'s block
+    exits normally: whether the pane collected the request within
+    :data:`HANDOVER_COLLECT_SECONDS`.
+    """
+
+    token: str
+    account: str
+    collected: bool = False
+
+    def command(self, *, switch_user: bool = False) -> str:
+        """The pane's command line: the handover form of stage 0, which collects the request and runs it.
+
+        Its only values are the token and, with ``switch_user``, the account;
+        the environment is in the parked request. The pane must run as the
+        account that parked. ``switch_user`` is for a pane another account's
+        tmux server creates (an agent's pane in the admin's console): it puts
+        ``sudo -n -u <account>`` in front, which needs only the server
+        owner's passwordless sudo, and whose ``env_reset`` passes the
+        terminal's ``TERM`` and none of tmux's other variables.
+        """
+        command = ssh_process.stage0_command(socket_path(self.token))
+        return f"sudo -n -u {shlex.quote(self.account)} -- {command}" if switch_user else command
 
 
 def attach(
@@ -51,40 +166,27 @@ def attach(
     parking_argv: Sequence[str],
     terminal_argv: Sequence[str],
     log: Path,
+    clear_screen_on_exit: bool = False,
 ) -> int:
     """Park the request, run the terminal half under the guard, and return its exit status.
 
     ``wire`` is the parking connection's message and ``log`` is the client log
     its argv writes. Both argvs arrive built, before anything is spawned, so a
-    missing trust record raises with nothing dispatched. The parking
-    connection fails first on a missing python3, a trust mismatch, a refusal or
-    a refused connection, so the typed error is raised before the terminal is
-    touched. So is a parking connection that never reports ``parked`` (a
-    startup file that reads stdin would hold it forever).
+    missing trust record raises with nothing dispatched. A parking failure
+    raises its typed error before the terminal is touched (see :class:`Parked`).
     """
-    # Off the operator's console: see ssh_process.spawn.
-    with PipeSession(
-        parking_argv,
-        request=wire,
-        nonce=nonce,
-        hold_stdin_open=True,
-        share_console=False,
-        on_stdout=_ignore,
-        on_stderr=_ignore,
-    ) as session:
-        stop = session.pump(lambda: session.stdout.parked, budget=Deadline.after(PARKING_WAIT_SECONDS))
-        if not session.stdout.parked:
-            _raise_parking_failure(vm_name, session, stop, log)
+    with Parked(vm_name=vm_name, wire=wire, nonce=nonce, argv=parking_argv, log=log):
         with guarded_terminal():
             code = ssh_process.run_terminal(terminal_argv)
+        # After the guard, whose mode resets clearing does not cover, and
+        # before the notice, so the notice lands on the cleared screen.
+        if clear_screen_on_exit:
+            emit_clear()
         # After the guard: its exit pass leaves the alternate screen, which
-        # would wipe anything written before it closes (I6).
+        # would wipe anything written before it closes.
         if code == _SSH_STATUS_CONNECTION_ENDED:
             output.warn("connection ended or the command exited 255; terminal restored.")
             output.detail("Remote state is untouched. Re-run the same command to reattach.")
-        session.close_stdin()
-        session.pump(budget=Deadline.after(PARKING_SHUTDOWN_SECONDS))
-        session.end()
     return code
 
 

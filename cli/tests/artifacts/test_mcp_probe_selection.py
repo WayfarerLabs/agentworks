@@ -9,7 +9,7 @@ import pytest
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import NativeSessionArtifacts, prepare_session_delivery
-from agentworks.transports import Transport
+from agentworks.execution.access import VMAccess
 from tests.artifacts.test_native_delivery import artifact, context
 from tests.artifacts.test_native_mcp import server
 
@@ -28,7 +28,7 @@ def test_only_delivered_legacy_artifacts_require_legacy_discovery_probe(legacy, 
     )
     plan = NativeSessionArtifacts(application, ("-c", "mcp_servers.fixture={command='example'}"))
     result, root = prepare_session_delivery(
-        Mock(spec=Transport),
+        Mock(spec=VMAccess),
         tool="codex",
         integration="codex",
         context=current,

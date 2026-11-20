@@ -9,7 +9,6 @@ below belong to ``a``.
 from __future__ import annotations
 
 import base64
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -17,12 +16,14 @@ import pytest
 from agentworks.agents import manager as agents
 from agentworks.db import SessionMode, SessionStatus
 from agentworks.errors import AgentworksError, StateError
+from agentworks.execution.requests import Bytes
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _queries, _status
 from agentworks.sessions.manager._tmux_server import resolve_session_tmux_server
 from agentworks.workspaces import manager as workspaces
 from tests.runtime_state.test_composition import BOOT, REFUSE, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
+from tests.vm_access_support import AccessRecorder, install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,6 +43,9 @@ REFUSED_ROWS = {
     "agent-row-admin-socket": (SessionMode.AGENT, "a", f"{ADMIN_ROOT}/admin/s.sock"),
     # Named for its agent, so only the mode check refuses it.
     "admin-row-agent-socket": (SessionMode.ADMIN, "a", f"{AGENT_ROOT}/agt-a/s.sock"),
+    # Another session's socket in the row's own directory.
+    "agent-row-other-sessions-socket": (SessionMode.AGENT, "a", f"{AGENT_ROOT}/agt-a/t.sock"),
+    "admin-row-other-sessions-socket": (SessionMode.ADMIN, "a", f"{ADMIN_ROOT}/admin/t.sock"),
 }
 
 
@@ -54,28 +58,23 @@ def _seed(db: Database, mode: SessionMode, agent: str | None, socket_path: str) 
 
 
 class _Recorder:
-    """Transport double that records every command, and any stdin data, it is asked to run."""
+    """Records every request, and its input, a VM access is asked to run."""
 
     def __init__(self) -> None:
-        self.commands: list[str] = []
         self.vm_events: list[tuple[str, str]] = []
-
-    def run(self, command: str, **kwargs: Any) -> SimpleNamespace:
-        self.commands.append(command)
-        self.commands.append(str(kwargs.get("input_data") or ""))
-        return SimpleNamespace(returncode=0, ok=True, stdout="", stderr="")
+        self.accesses: AccessRecorder | None = None
 
     def naming(self, socket_path: str) -> list[str]:
         """The requests that name ``socket_path``, plainly or in batch status's encoding."""
         encoded = base64.b64encode(socket_path.encode()).decode()
-        return [command for command in self.commands if socket_path in command or encoded in command]
-
-    def interactive(self, command: str, **kwargs: Any) -> int:
-        self.commands.append(command)
-        return 0
-
-    def write_file(self, path: str, content: str, **kwargs: Any) -> None:
-        self.commands.append(content)
+        sent: list[str] = []
+        for call in self.accesses.calls if self.accesses is not None else []:
+            request = call.request
+            sent.append(repr(request))
+            stdin = getattr(request, "stdin", None)
+            if isinstance(stdin, Bytes):
+                sent.append(stdin.data.decode("utf-8", "replace"))
+        return [command for command in sent if socket_path in command or encoded in command]
 
 
 def _describe(db: Database, config: object) -> object:
@@ -111,14 +110,11 @@ OBSERVERS: dict[str, Callable[[Database, Any], object]] = {
 
 @pytest.fixture
 def recorder(runtime: tuple[object, object, list[tuple[str, str]]], monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """The composition runtime, with the real status checks and every transport recorded."""
+    """The composition runtime, with the real status checks and every VM access recorded."""
     target = _Recorder()
     target.vm_events = runtime[2]
-    factory = lambda *a, **k: target  # noqa: E731
-    monkeypatch.setattr(manager, "transport", factory)
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.transports.agent_transport", factory)
-    monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+    target.accesses = install_access_recorder(monkeypatch)
+    monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(manager, "check_session_status", _status.check_session_status)
     monkeypatch.setattr(manager, "observe_session_statuses", _status.observe_session_statuses)
     monkeypatch.setattr(_queries, "_session_structural_description", lambda db, config, name, status: status)

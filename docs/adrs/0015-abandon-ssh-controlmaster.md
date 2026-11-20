@@ -76,5 +76,7 @@ fresh handshake. The managed config emits only the alias blocks (`Host awvm--<na
   back to fresh handshakes; no operator action required.
 - Env var injection is unaffected. `-o SetEnv=K=V` (per ADR 14) is sent as an SSH2 channel `env`
   request per command, not part of the master's negotiated state, and was never multiplexed.
+  [ADR 0026](0026-environment-travels-inside-the-request.md) has since moved the environment inside
+  each request on the client's stdin, which holds no connection state either.
 - If we want a portion of the perf back later, the lever is "issue fewer SSH calls" (bundle,
   parallelize where safe), not "cache the connection."

@@ -38,8 +38,17 @@ def validate_admin_username(admin_username: str) -> None:
         )
 
 
-def validate_vm_workspaces(path: str) -> None:
-    """Reject a ``paths.vm_workspaces`` value that lives at or under ``/home``.
+def validate_vm_workspaces(path: str) -> str:
+    """Return ``paths.vm_workspaces`` normalized, refusing a relative value, the root, a ``..`` component, or ``/home``.
+
+    The value names a directory on the VM, and every workspace path is built
+    from it, so it must be absolute and below the root. It is normalized once
+    here (``execution.files.normalized_guest_path``: empty and ``.``
+    components dropped, so a trailing ``/`` goes and a leading ``//`` is
+    ``/``), so the paths built from it have one spelling. A ``..`` component
+    is refused rather than collapsed, since collapsing it would name another
+    directory when the component before it is a symbolic link; this is the
+    rule ``workspace rehome --target`` applies too.
 
     ``/home`` is the Linux user-home namespace on the VM. The admin and agent
     users each own ``/home/<user>``, and those homes are locked to mode 0750
@@ -49,34 +58,36 @@ def validate_vm_workspaces(path: str) -> None:
     reach the shared workspace, defeating the isolation. Keeping workspaces
     outside ``/home`` is the single source of truth that makes the 0750 homes
     safe, so we reject the misconfiguration at load time rather than warn at
-    provisioning time.
+    provisioning time. The check is ``== "/home"`` or a ``/home/`` prefix on the
+    normalized path, NOT a bare ``/home`` prefix, so sibling paths that merely
+    start with those characters (``/homelab``, ``/home2/ws``) are accepted.
+    Raises ``ConfigError`` (the type ``_load_paths`` already raises) with a
+    migration hint.
 
-    The path is normalized first (``//`` collapsed, trailing slash and ``.``
-    segments removed) so ``/home``, ``/home/``, ``/home/foo``, and
-    ``/home/foo/bar`` are all rejected. The check is ``== "/home"`` or a
-    ``/home/`` prefix on the normalized path, NOT a bare ``/home`` prefix, so
-    sibling paths that merely start with those characters (``/homelab``,
-    ``/home2/ws``) are accepted. Raises ``ConfigError`` (the type ``_load_paths``
-    already raises) with a migration hint.
-
-    Normalization uses ``posixpath`` explicitly, not ``os.path``. This value is
-    always a VM-side POSIX path regardless of the operator's host OS, and
+    Normalization splits on ``/`` itself, never through ``os.path``. This value
+    is always a VM-side POSIX path regardless of the operator's host OS, and
     agentworks runs natively on Windows, where ``os.path`` is ``ntpath``:
     ``ntpath.normpath('/home/foo')`` returns ``'\\home\\foo'``, which would
     match neither branch below and silently accept every ``/home`` path.
-    ``posixpath`` is the house choice for VM paths across the codebase.
     """
-    import posixpath
+    from agentworks.execution.files import normalized_guest_path
 
-    normalized = posixpath.normpath(path)
+    normalized = normalized_guest_path(path)
+    if not normalized.startswith("/") or normalized == "/" or ".." in normalized.split("/"):
+        raise ConfigError(
+            f"paths.vm_workspaces must be an absolute directory path on the VM, below the root and "
+            f"with no '..' component (got {path!r}), such as the default '/opt/agentworks/workspaces'."
+        )
     if normalized == "/home" or normalized.startswith("/home/"):
         raise ConfigError(
             f"paths.vm_workspaces must not be at or under /home (got {path!r}, "
             f"normalized to {normalized!r}). /home is the Linux user-home namespace "
             "on the VM and will collide with a future 'useradd -m'. Use the default "
             "'/opt/agentworks/workspaces', or mount a data volume at that path (or "
-            "symlink it there), rather than nesting workspaces under /home."
+            "bind-mount a directory there), rather than nesting workspaces under /home. "
+            "A symbolic link will not do: workspace files are never written through one."
         )
+    return normalized
 
 
 _MISE_DURATION_RE = re.compile(r"^[1-9][0-9]*[dhwmy]$")
@@ -86,7 +97,6 @@ class MiseSettingsErrorKind(StrEnum):
     """Stable categories for mise model-validation failures."""
 
     PACKAGE_SYNTAX = "package-syntax"
-    LOCKFILE = "lockfile"
     INSTALL_BEFORE = "install-before"
 
 
@@ -111,7 +121,7 @@ def check_mise_settings(packages: list[str], lockfile: str | None, install_befor
     ``ValueError`` nor an ``AssertionError``, so a ``ConfigError`` here
     would escape ``model_validate`` and bypass the error bridge.
     """
-    from agentworks.sources import SourceRefError, parse_source_ref
+    from agentworks.sources import check_source_ref
 
     for package in packages:
         name, separator, version = package.rpartition("@")
@@ -129,10 +139,7 @@ def check_mise_settings(packages: list[str], lockfile: str | None, install_befor
             )
 
     if lockfile is not None:
-        try:
-            parse_source_ref(lockfile, default_filename="mise.lock")
-        except SourceRefError as exc:
-            raise MiseSettingsError(MiseSettingsErrorKind.LOCKFILE, f"mise_lockfile is invalid: {exc}") from exc
+        check_source_ref(lockfile, field="mise_lockfile")
 
     if _MISE_DURATION_RE.fullmatch(install_before):
         return

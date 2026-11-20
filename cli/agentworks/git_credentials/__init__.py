@@ -24,9 +24,10 @@ if TYPE_CHECKING:
         HttpsCredentialScope,
     )
     from agentworks.config import Config
+    from agentworks.execution.access import VMAccess
     from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.resources import Registry
-    from agentworks.transports import Transport
+    from agentworks.vms.initializer.steps import InitLog
 
 
 class _WarnLogger(Protocol):
@@ -42,8 +43,8 @@ class ScopedContextFactory(Protocol):
         self,
         secret_names: tuple[str, ...],
         *,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
     ) -> RunContext: ...
 
 
@@ -66,14 +67,14 @@ class CredentialRequest:
     def context(
         self,
         *,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
     ) -> RunContext:
         """Assemble a fresh provider-scoped context for one lifecycle stage."""
         return self.scoped_context(
             self.node.secret_refs(),
-            admin_target=admin_target,
-            agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
         )
 
 
@@ -106,7 +107,7 @@ def announce_git_credentials(nodes: Iterable[GitCredentialNode]) -> None:
 
 def materialize_credential_state(
     requests: Iterable[CredentialRequest],
-    target: Transport,
+    access: VMAccess,
     target_role: Literal["admin", "agent"],
     config: Config,
     logger: _WarnLogger | None = None,
@@ -118,7 +119,7 @@ def materialize_credential_state(
     for request in requests:
         if config.defaults.runup_git_credentials:
             runup_context = (
-                request.context(admin_target=target) if target_role == "admin" else request.context(agent_target=target)
+                request.context(admin_access=access) if target_role == "admin" else request.context(agent_access=access)
             )
             output.detail(f"Performing runup test for git-credential/{request.name}...")
             try:
@@ -143,25 +144,27 @@ def materialize_credential_state(
 
 
 def configure_user_git_credentials(
-    target: Transport,
+    access: VMAccess,
     requests: Iterable[CredentialRequest],
     config: Config,
-    logger: _WarnLogger,
+    logger: InitLog,
     *,
     target_role: Literal["admin", "agent"],
 ) -> None:
-    """Materialize and unconditionally reconcile one target user's full state."""
-    from agentworks.ssh import SSHError
+    """Materialize and unconditionally reconcile one target user's full state, as that user on ``access``.
+
+    The providers' runup and the reconcile both run on ``access``. A step
+    failure warns; the initializers are the only callers.
+    """
+    from agentworks.vms.initializer.steps import STEP_FAILURES, warn_step
 
     logger.step("Git credentials")
     output.info("Reconciling git credentials...")
-    state = materialize_credential_state(requests, target, target_role, config, logger)
+    state = materialize_credential_state(requests, access, target_role, config, logger)
     try:
-        reconcile_user_git_credentials(target, state)
-    except SSHError as exc:
-        msg = f"git credential reconciliation failed: {exc}"
-        logger.warning(msg)
-        output.warn(msg)
+        reconcile_user_git_credentials(access, state)
+    except STEP_FAILURES as exc:
+        warn_step(logger, "git credential reconciliation failed", exc)
         return
     output.detail("Git credentials reconciled")
 

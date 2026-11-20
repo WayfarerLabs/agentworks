@@ -1,4 +1,4 @@
-"""Incident row I10 on every platform's create: the Tailscale auth key reaches one root script and nothing else.
+"""Every platform's create: the Tailscale auth key reaches one root script and nothing else.
 
 Each create runs with its channel faked at the lowest seam it uses
 (``root_script.run_process`` for Lima, WSL2 and the clouds, the QGA client

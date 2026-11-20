@@ -40,4 +40,4 @@ def test_line_safety_failure_is_fixed_detached_and_value_free(
 
 def test_line_safety_preserves_other_opaque_string_content() -> None:
     value = " leading\tvalue "
-    assert require_line_safe_secret(value, use=LineOrientedSecretUse.ENVIRONMENT) is value
+    assert require_line_safe_secret(value, use=LineOrientedSecretUse.GIT_CREDENTIAL) is value

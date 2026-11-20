@@ -21,9 +21,13 @@ import pytest
 
 from agentworks.errors import SecretUnavailableError
 from agentworks.secrets.policy import TtyInteractionPolicy
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry, _stub_session_prep
 from .conftest import seed_vm_trust, stub_vm_gates
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 __all__ = ["_stub_build_registry"]
 
@@ -197,11 +201,7 @@ def test_session_restart_broken_no_force_bails_before_eager_resolve(
         "observe_session_statuses",
         lambda sessions, **kwargs: {session.name: SessionStatus.BROKEN for session in sessions},
     )
-    monkeypatch.setattr(
-        session_manager,
-        "_build_session_target",
-        lambda *a, **k: SimpleNamespace(run=lambda *a, **k: None),
-    )
+    monkeypatch.setattr(session_manager, "_verified_session_access", lambda *a, **k: k["admin"])
 
     resolve_calls: list[object] = []
 
@@ -265,11 +265,7 @@ def test_session_restart_eager_resolve_fires_before_teardown(
         "observe_session_statuses",
         lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING for session in sessions},
     )
-    monkeypatch.setattr(
-        session_manager,
-        "_build_session_target",
-        lambda *a, **k: SimpleNamespace(run=lambda *a, **k: None),
-    )
+    monkeypatch.setattr(session_manager, "_verified_session_access", lambda *a, **k: k["admin"])
 
     class _Tmpl:
         name = "default"
@@ -344,21 +340,18 @@ def test_session_attach_does_not_eager_resolve(
 
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _track_resolve)
 
-    # Stub out the SSH probe + transport so we don't need a real VM.
-    fake_target = SimpleNamespace(
-        run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
-        interactive=lambda *a, **k: 0,
-    )
+    # The admin's access is the recording fake, so no VM is needed.
+    admin = RecordingVMAccess([], Admin())
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
     stub_vm_gates(monkeypatch)
 
-    # _prepare_vm is a gate-span context manager now; the stub yields
-    # the same 5-tuple shape inside a trivial span.
+    # _prepare_vm is a gate-span context manager; the stub yields its
+    # (workspace, vm, admin access, log) inside a trivial span.
     @contextlib.contextmanager
     def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
-        yield (ws_row, vm_row, fake_target.run, None, fake_target)
+        yield (ws_row, vm_row, admin, SimpleNamespace(record=lambda *a: None))
 
     monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(
@@ -376,7 +369,7 @@ def test_session_attach_does_not_eager_resolve(
         operator=SimpleNamespace(ssh_private_key=None),
         terminal=SimpleNamespace(clear_on_detach="auto"),
     )
-    # attach_session returns interactive()'s exit code (0, stubbed) and
+    # attach_session returns the attach's exit code (0, recorded) and
     # does not sys.exit; the CLI owns the process exit.
     assert session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE) == 0  # type: ignore[arg-type]
 
@@ -444,14 +437,14 @@ def test_session_describe_does_not_eager_resolve(
     ws_row = db.get_workspace("ws1")
     vm_row = db.get_vm("vm1")
     assert ws_row is not None and vm_row is not None
-    fake_target = SimpleNamespace(
+    guest = SimpleNamespace(
         run=lambda *a, **k: SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""),
     )
     stub_vm_gates(monkeypatch)
 
     @contextlib.contextmanager
     def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
-        yield (ws_row, vm_row, fake_target.run, None, fake_target)
+        yield (ws_row, vm_row, guest.run, None, guest)
 
     monkeypatch.setattr(session_manager, "_prepare_vm", _fake_prepare_vm)
     monkeypatch.setattr(

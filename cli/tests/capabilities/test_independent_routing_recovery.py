@@ -21,7 +21,7 @@ from agentworks.harness_setup.state import write_native_setup
 from agentworks.schema import CapabilityConfig
 from tests.artifacts.test_routing import graph
 from tests.capabilities.test_unknown_route_metadata import _invoke, _registry
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="actual Linux guest file publication")
 
@@ -30,7 +30,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="actual Linux gu
 def test_capture_without_current_retirement_authority_holds_previous_inherited_files(db, tmp_path, damage):
     fixture = graph(db, active=("agent",), counts={"agent": 0})
     _registry(fixture)
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     invocation = _invoke(fixture, target, "agent")
     inputs = fixture.owners["agent"]
     before = run_setup(db, fixture.registry, inputs, invocation, failures=[], operation="initial").records[0]
@@ -74,7 +74,7 @@ def test_unknown_vm_holds_only_unclassified_origins_while_local_changes_converge
     fixture = graph(db, active=("vm", "agent"), counts={"agent": 2})
     _registry(fixture)
     fixture.save("vm", routes={"vm-0": "user"})
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     invocation = _invoke(fixture, target, "agent")
 
     def apply(self, call):
@@ -126,7 +126,7 @@ def test_fresh_workspace_local_setup_is_not_permanently_failed_by_unknown_incomi
     _registry(fixture)
     failed = fixture.save("vm", complete=False).model_copy(update={"artifact_inputs": None})
     write_native_setup(db, "vm", "vm", NativeSetupState(records=(failed,)), operation="fail")
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     invocation = _invoke(fixture, target, "workspace")
     inputs = fixture.owners["workspace"]
     result = run_setup(db, fixture.registry, inputs, invocation, failures=[], operation="create").records[0]

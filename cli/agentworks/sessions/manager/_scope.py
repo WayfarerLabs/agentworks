@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-from functools import partial
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
@@ -15,7 +14,8 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.name_filters import validate_name_filters
-from agentworks.vms.manager import gated_vm_boundary
+from agentworks.vms.manager import gated_vm_boundary, operation_log
+from agentworks.workspaces.guest import FILE_WRITE_FAILURES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -23,12 +23,11 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.sessions.tmux import RunCommand
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
+    from agentworks.vms.initializer.steps import InitLog
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -81,23 +80,21 @@ def _prepare_vm(
     config: Config,
     session: SessionRow,
     *,
-    operation: str | None = None,
+    operation: str,
     held_native_guard: NativeMutationGuard | None = None,
     interaction: TtyInteractionPolicy,
-) -> Iterator[tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]]:
-    """The singular session ops' composition root (stop / delete /
-    describe / attach / logs): validate the session's workspace and VM
-    rows, then yield ``(ws, vm, run_command, run_as_root, target)``
-    INSIDE ``gated_vm_boundary``'s held-active span, which replaces
-    the imperative bind + point gate and the callers' own ``vm_active``
-    holds. The scope is SESSION-level, built here from the session row
-    once the vm/workspace rows it names are resolved: the ops are
-    about the session, not the VM they walk. If ``operation`` is set,
-    an SSHLogger attaches to the Transport so all calls log
-    automatically.
+) -> Iterator[tuple[WorkspaceRow, VMRow, VMAccess, InitLog]]:
+    """The singular session ops' composition root (delete / attach /
+    logs): validate the session's workspace and VM rows, then yield
+    ``(ws, vm, admin, log)`` INSIDE ``gated_vm_boundary``'s held-active
+    span, which replaces the imperative bind + point gate and the
+    callers' own ``vm_active`` holds. ``admin`` is the admin's access,
+    logging to ``log``, the ``operation``'s own log, which redacts what the
+    boundary resolved. The scope is SESSION-level, built here from the
+    session row once the vm/workspace rows it names are resolved: the
+    ops are about the session, not the VM they walk.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.ssh import SSHLogger
 
     ws = _mgr._require_workspace(db, session.workspace_name)
     vm = _require_vm_for_workspace(db, ws)
@@ -123,12 +120,10 @@ def _prepare_vm(
         scope=_session_scope(db, session, ws, vm),
         interaction=interaction,
         held_native_guard=held_native_guard,
-    ):
-        logger = SSHLogger(vm.name, operation) if operation else None
-        target = _mgr.transport(vm, config, logger=logger)
-        run_command: RunCommand = target.run
-        run_as_root: RunCommand = partial(target.run, sudo=True)
-        yield ws, vm, run_command, run_as_root, target
+    ) as (_node, resolver, _context):
+        redactions = tuple(value for value in resolver.values.values() if value)
+        with operation_log(vm.name, operation, redactions=redactions) as log:
+            yield ws, vm, _mgr._identity_access(vm, config, None, logger=log), log
 
 
 def _require_session(db: Database, name: str) -> SessionRow:
@@ -145,27 +140,59 @@ def _require_session(db: Database, name: str) -> SessionRow:
 def _regenerate_tmuxinator(
     db: Database,
     config: Config,
+    admin: VMAccess,
     vm: VMRow,
     ws: WorkspaceRow,
-    *,
-    logger: SSHLogger | None = None,
 ) -> None:
-    """Regenerate the workspace tmuxinator config from current session state."""
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.workspaces.templates import resolve_live_tmuxinator
-    from agentworks.workspaces.tmuxinator import generate_config, remove_config
+    """Regenerate the workspace tmuxinator config from current session state, on the operation's ``admin`` access.
 
-    registry = load_request_registry(config, live_database=db)
-    target = _mgr.transport(vm, config, logger=logger)
-    if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
-        remove_config(target, ws.name, ws.workspace_path)
+    Best effort: the config is a convenience, so a request or file operation
+    that fails, a link in its path included, warns naming the workspace and
+    leaves the session command's result as it is. A stored path the file
+    operations cannot address (``guest.addressable_workspace_path``) warns
+    with its next step before anything runs.
+    """
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.linux_users import managed_home
+    from agentworks.vms.initializer.steps import describe_failure
+    from agentworks.workspaces.guest import addressable_workspace_path
+    from agentworks.workspaces.templates import resolve_live_tmuxinator
+    from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
+
+    try:
+        addressable_workspace_path(ws.workspace_path)
+    except ValidationError as error:
+        output.warn(f"The tmuxinator config of workspace '{ws.name}' was not updated: {error}. {error.hint}")
         return
 
-    sessions = db.list_sessions(workspace_name=ws.name)
-    # Build socket paths for tmuxinator (admin sessions have NULL, agent sessions always set)
-    socket_paths = {s.name: s.socket_path for s in sessions}
-    config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, socket_paths=socket_paths)
-    target.write_file(f"{ws.workspace_path}/.tmuxinator.yml", config_text)
+    registry = load_request_registry(config, live_database=db)
+    try:
+        if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
+            remove_config(
+                admin, home=managed_home(vm.admin_username), ws_name=ws.name, workspace_path=ws.workspace_path
+            )
+            return
+
+        from agentworks.sessions.manager import resolve_session_tmux_server
+
+        sessions, agent_owners = [], {}
+        for session in db.list_sessions(workspace_name=ws.name):
+            try:
+                server = resolve_session_tmux_server(db, session)
+            except StateError as error:
+                output.warn(f"The tmuxinator config of workspace '{ws.name}' leaves out a session: {error}.")
+                continue
+            if server is not None and server.owner is not None:
+                agent_owners[session.name] = server.owner
+            sessions.append(session)
+        config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, agent_owners=agent_owners)
+        write_config(admin, ws.workspace_path, config_text)
+    except FILE_WRITE_FAILURES as error:
+        # Its requests carry no secret, so the stderr tail needs no redaction.
+        output.warn(
+            f"The tmuxinator config of workspace '{ws.name}' was not updated: "
+            f"{describe_failure(error, lambda text: text)}"
+        )
 
 
 def filter_sessions(

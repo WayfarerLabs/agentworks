@@ -7,29 +7,41 @@ managed section at the end of ~/.ssh/config (legacy behavior).
 
 On first run with ssh_config_dir enabled, any legacy managed section is
 cleaned up automatically.
+
+Every VM entry verifies the VM's host key against Agentworks' host-key store
+(``agentworks.execution.trust``), so the operator's own ``ssh`` trusts exactly
+what Agentworks' connections trust and refuses a VM with no recorded key.
 """
 
 from __future__ import annotations
 
 import errno
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.atomic_write import atomic_write_text
-from agentworks.errors import AgentworksError, AuthorizationError, ConfigError
-from agentworks.execution import trust
+from agentworks.errors import AgentworksError, AuthorizationError, ConfigError, ValidationError
+from agentworks.execution import ssh_process, trust
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
 
 _LEGACY_MARKER = "# --- Managed by agentworks. Do not edit below this line. ---"
 _INCLUDE_COMMENT = "# Added by agentworks"
 _CONFIG_DIR_NAME = "config.d"
 _MANAGED_CONF = "agentworks.conf"
+
+# On Windows the ssh shipped with Git for Windows may read the managed entries
+# too, and it accepts neither the quoted nor the bare form of a value with an
+# apostrophe and no whitespace.
+_GIT_FOR_WINDOWS_MAY_READ = sys.platform == "win32"
 
 
 def _to_ssh_path(path: Path) -> str:
@@ -170,10 +182,7 @@ def sync_ssh_config_or_warn(config: Config, db: Database, *, announce: bool = Tr
     try:
         sync_ssh_config(config, db, announce=announce)
     except Exception as e:
-        message = str(e)
-        if isinstance(e, AgentworksError) and e.hint:
-            message += f"{'' if message.endswith('.') else '.'} {e.hint}"
-        output.warn(f"SSH config sync failed: {message}")
+        output.warn(f"SSH config sync failed: {_with_hint(e)}")
         output.info("VM is likely still usable.")
 
 
@@ -185,36 +194,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     """
     ssh_config = config.operator.ssh_config
     user_section = _read_user_section(ssh_config)
-    prefix = config.operator.ssh_host_prefix
-    agent_prefix = config.operator.ssh_agent_host_prefix
-
-    identity = _identity_value(config.operator.ssh_private_key)
-    host_blocks: list[str] = []
-    for vm in db.list_vms():
-        if not vm.tailscale_host:
-            continue
-        host_blocks.append(
-            _format_entry(
-                alias=ssh_host_alias(vm.name, prefix),
-                hostname=vm.tailscale_host,
-                user=vm.admin_username,
-                identity=identity,
-                vm_name=vm.name,
-            )
-        )
-        # Per-agent aliases on this VM (parity with _rebuild_config_dir).
-        for agent in db.list_agents(vm_name=vm.name):
-            host_blocks.append(
-                _format_entry(
-                    alias=ssh_agent_alias(agent.name, agent_prefix),
-                    hostname=vm.tailscale_host,
-                    user=agent.linux_user,
-                    identity=identity,
-                    vm_name=vm.name,
-                )
-            )
-
-    _write_legacy(ssh_config, user_section, host_blocks)
+    _write_legacy(ssh_config, user_section, _host_entries(config, db))
 
 
 # -- config.d approach -----------------------------------------------------
@@ -241,8 +221,6 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
     ssh_config = config.operator.ssh_config
     config_d = ssh_config.parent / _CONFIG_DIR_NAME
     _make_directory(config_d)
-    prefix = config.operator.ssh_host_prefix
-    agent_prefix = config.operator.ssh_agent_host_prefix
 
     # Clean up legacy managed section if present, then ensure the Include
     # directive, so a directive inside that section is restored, not lost.
@@ -251,37 +229,7 @@ def _rebuild_config_dir(config: Config, db: Database) -> None:
 
     # Build all Host blocks from DB
     blocks: list[str] = ["# Managed by agentworks -- do not edit.\n"]
-    identity = _identity_value(config.operator.ssh_private_key)
-    host_entries: list[str] = []
-    for vm in db.list_vms():
-        if not vm.tailscale_host:
-            continue
-        vm_alias = ssh_host_alias(vm.name, prefix)
-        # Admin alias for this VM.
-        host_entries.append(
-            _format_entry(
-                alias=vm_alias,
-                hostname=vm.tailscale_host,
-                user=vm.admin_username,
-                identity=identity,
-                vm_name=vm.name,
-            )
-        )
-        # Per-agent aliases on this VM. Same HostName / IdentityFile as the
-        # VM block; only User and the alias differ. The alias is a
-        # top-level ``<agent_prefix><agent.name>`` (not nested under the
-        # VM alias) because agents belong to exactly one VM and the
-        # operator-facing handle is the agent name, not the Linux user.
-        for agent in db.list_agents(vm_name=vm.name):
-            host_entries.append(
-                _format_entry(
-                    alias=ssh_agent_alias(agent.name, agent_prefix),
-                    hostname=vm.tailscale_host,
-                    user=agent.linux_user,
-                    identity=identity,
-                    vm_name=vm.name,
-                )
-            )
+    host_entries = _host_entries(config, db)
 
     conf_name = _managed_conf_name(db)
     conf_path = config_d / conf_name
@@ -469,56 +417,174 @@ def _refusal(action: str, target: Path, error: OSError, fix: str) -> Authorizati
 # -- Shared helpers --------------------------------------------------------
 
 
-def _trust_options(vm_name: str) -> tuple[str, ...]:
-    """The VM's store options, or none with a warning when its record cannot be
-    read or its store path cannot be written into an SSH config. One VM's store
-    problem never aborts the rebuild for every VM."""
+def _host_entries(config: Config, db: Database) -> list[str]:
+    """Every managed Host block, in database order, for both layouts."""
+    identity = _identity_value(config.operator.ssh_private_key)
+    prefix = config.operator.ssh_host_prefix
+    agent_prefix = config.operator.ssh_agent_host_prefix
+    entries: list[str] = []
+    for vm in db.list_vms():
+        entries.extend(_vm_entries(db, vm, identity, prefix, agent_prefix))
+    return entries
+
+
+def _vm_entries(db: Database, vm: VMRow, identity: str | None, prefix: str, agent_prefix: str) -> list[str]:
+    """The VM's admin entry and one entry per agent on it, verifying its host key against the store.
+
+    Every entry carries the verification options, record or not, so the
+    operator's own ``ssh`` never accepts the VM's key on first use (see
+    :func:`_verification_lines`). A VM whose entries cannot be written safely
+    gets none, with a warning, rather than entries that would trust whatever
+    answers or a line that says something else; it never aborts the rebuild
+    for every other VM. A VM with no tailnet address has nothing to connect to
+    and gets none either.
+
+    Agent entries share the VM entry's ``HostName``, ``IdentityFile`` and
+    verification options; only ``User`` and the alias differ. The agent alias
+    is a top-level ``<agent_prefix><agent.name>``, not nested under the VM
+    alias, because an agent belongs to exactly one VM and the operator-facing
+    handle is the agent name, not the Linux user.
+    """
+    if not vm.tailscale_host:
+        return []
+    agents = db.list_agents(vm_name=vm.name)
     try:
-        return trust.entry_options(vm_name)
+        # Boundary: these are persisted values, and each becomes a token of a line ssh parses. The host and the
+        # users follow the execution core's own rule for the same rows; an agent's name is also its alias.
+        _checked(ssh_process.check_host, vm.tailscale_host, "its tailnet address")
+        _checked(ssh_process.check_user, vm.admin_username, "its admin user")
+        for agent in agents:
+            _checked(ssh_process.check_user, agent.linux_user, f"agent {agent.name!r}'s user")
+            _require_alias_token(agent.name)
+        verification = _verification_lines(vm.name)
     except AgentworksError as e:
-        output.warn(f"Host-key options left out of the SSH config entries for VM '{vm_name}': {e}")
-        return ()
+        output.warn(f"SSH config entries for VM '{vm.name}' left out: {_with_hint(e)}")
+        return []
+    entries = [
+        _format_entry(ssh_host_alias(vm.name, prefix), vm.tailscale_host, vm.admin_username, identity, verification)
+    ]
+    for agent in agents:
+        entries.append(
+            _format_entry(
+                ssh_agent_alias(agent.name, agent_prefix), vm.tailscale_host, agent.linux_user, identity, verification
+            )
+        )
+    return entries
+
+
+def _checked(check: Callable[[str], None], value: str, what: str) -> None:
+    """Run one of ``ssh_process``'s checks, the rule every connection to the row applies, naming ``what`` failed."""
+    try:
+        check(value)
+    except ValidationError as e:
+        raise ValidationError(f"{what} {value!r}: {e}") from e
+
+
+# What an alias's name part may hold: nothing ssh would split, unquote, match as a pattern or end the line at.
+_ALIAS_TOKEN = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _require_alias_token(name: str) -> None:
+    if not _ALIAS_TOKEN.fullmatch(name):
+        raise ValidationError(f"{name!r} cannot be part of an SSH host alias")
+
+
+def _with_hint(error: Exception) -> str:
+    """``error``'s message, then the hint of an Agentworks error that has one, after exactly one period."""
+    message = str(error)
+    hint = error.hint if isinstance(error, AgentworksError) else None
+    return f"{message}{'' if message.endswith('.') else '.'} {hint}" if hint else message
+
+
+def _verification_lines(vm_name: str) -> str:
+    """The option lines that make the operator's own ``ssh`` verify the VM's host key, as entry text.
+
+    The store file is the entry's ``GlobalKnownHostsFile`` and the user
+    known-hosts file is the null device. ssh writes only to the user file, so
+    no host-key checking or update setting of the operator's that takes
+    effect first (an earlier ``Host *``, or ``-o`` on the command line, with
+    ``StrictHostKeyChecking accept-new`` or ``no`` or ``UpdateHostKeys yes``)
+    can write into the store. A known-hosts file setting of the operator's
+    read first takes precedence over these: what ssh accepts then goes to
+    their own file, or the store is skipped and the VM fails closed. A VM with no record has no key
+    in its store, so strict checking refuses it; its entries also carry a
+    comment naming the commands that record one. A record that cannot be read
+    gets no comment: ssh reports the read failure itself.
+
+    The other pins match the execution core's (:func:`trust.pinned_options`).
+    Raises :class:`~agentworks.errors.AgentworksError` when the store path
+    cannot be written into an entry.
+    """
+    options = (
+        f"HostKeyAlias {trust.host_key_alias(vm_name)}",
+        f"GlobalKnownHostsFile {_entry_value(trust.store_file(vm_name), 'host-key store path')}",
+        f"UserKnownHostsFile {trust.NULL_DEVICE}",
+        "StrictHostKeyChecking yes",
+        *(f"{name} {value}" for name, value in trust.pinned_options()),
+    )
+    try:
+        missing = not trust.has_record(vm_name)
+    except AgentworksError:
+        missing = False
+    if missing:
+        options += (
+            f"# No host key is recorded for VM '{vm_name}' yet, so ssh refuses it. Record one with "
+            f"'agw vm import-host-keys {vm_name}' or 'agw vm recover {vm_name}'.",
+        )
+    return "".join(f"    {option}\n" for option in options)
+
+
+def _entry_value(path: Path, what: str) -> str:
+    """``path`` as a value in a managed entry, as the execution core passes it, or a ``ConfigError``.
+
+    The path as given, not its symlink target, must pass
+    :func:`trust.literal_path`, the rule the execution core applies to the
+    same files, so both accept or refuse the same file: a path with ``%``,
+    ``$``, a double quote, a backslash or a control character, which ssh would
+    expand or misread, is refused rather than written as a line that names
+    another file. It is written absolute, so ssh reads the file the core does
+    whatever its own idea of ``~``, which is the passwd home and need not be
+    ``$HOME``. On Windows, where the ssh shipped with Git for Windows may read
+    the entries and accepts no form of a value with an apostrophe and no
+    whitespace, such a path is refused too.
+    """
+    value = trust.literal_path(path, what)
+    if _GIT_FOR_WINDOWS_MAY_READ and "'" in value and not any(char in value for char in " \t"):
+        raise ConfigError(
+            f"{what} {format_host_path(path)} cannot be written into an SSH config entry: the ssh shipped "
+            "with Git for Windows reads no form of a path with an apostrophe (') and no whitespace",
+            hint="Rename the directory or file so its path has no apostrophe.",
+        )
+    return trust.option_value(value)
 
 
 def _identity_value(identity_file: Path) -> str | None:
-    """The operator's key as an ``IdentityFile`` value: the configured path, as the execution core passes it.
+    """The operator's key as an ``IdentityFile`` value (:func:`_entry_value`), or ``None`` with a warning.
 
-    The configured path, not its symlink target, must pass
-    :func:`trust.literal_path`, so both accept or refuse the same key, and it
-    is written absolute, so ssh reads the same file the core does whatever its
-    own idea of ``~``. A path with ``%``, ``$``, a double quote, a backslash or
-    a control character, which ssh would expand or misread, is left out of the
-    entries with a warning (``None``) rather than written as a line that names
-    another file. Computed once per rebuild, so the warning appears once.
+    A key path the entries cannot carry is left out of them rather than
+    refused: the operator's own ``ssh`` then offers its default keys for those
+    aliases. Computed once per rebuild, so the warning appears once.
     """
     try:
-        path = trust.literal_path(identity_file, "SSH identity file")
+        return _entry_value(identity_file, "SSH identity file")
     except ConfigError as e:
+        fix = e.hint or "Move the key to a plain path."
         output.warn(
             f"IdentityFile left out of the SSH config entries: {e}. Your own ssh offers its default keys "
-            "for those aliases instead; move the key to a plain path."
+            f"for those aliases instead. {fix}"
         )
         return None
-    return trust.option_value(path)
 
 
-def _format_entry(
-    alias: str,
-    hostname: str,
-    user: str,
-    identity: str | None,
-    vm_name: str,
-) -> str:
-    """Format a single SSH config Host block for an entry on the VM ``vm_name``.
+def _format_entry(alias: str, hostname: str, user: str, identity: str | None, verification: str) -> str:
+    """Format a single SSH config Host block.
 
     ``identity`` is the ``IdentityFile`` value from :func:`_identity_value`;
-    ``None`` leaves the line out. A VM with a host-key record gets the options
-    that make the operator's own ``ssh`` verify against the store; one without
-    is left as it was.
+    ``None`` leaves the line out. ``verification`` is the VM's
+    :func:`_verification_lines`.
     """
     identity_line = f"    IdentityFile {identity}\n" if identity is not None else ""
-    trust_lines = "".join(f"    {option}\n" for option in _trust_options(vm_name))
-    return f"Host {alias}\n    HostName {hostname}\n    User {user}\n{identity_line}{trust_lines}"
+    return f"Host {alias}\n    HostName {hostname}\n    User {user}\n{identity_line}{verification}"
 
 
 def _read_user_section(ssh_config: Path) -> str:

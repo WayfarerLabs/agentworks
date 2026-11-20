@@ -1,7 +1,8 @@
 # Implementation Plan: Transport Take 2
 
-- Status: Slices 1 and 2 implemented in PR A (#863) and slices 3 and 4 in PR B (#866), with the live
-  evidence cells listed below still open; slices 5 to 8 not started
+- Status: Slices 1 and 2 implemented in PR A (#863, merged), slices 3 and 4 in PR B (#866), and
+  slices 5 and 6 in PR C, with the live evidence cells listed below still open; slices 7 and 8 not
+  started
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -470,67 +471,115 @@ no platform's private access imports a legacy module.
 
 ## Slice 5: Files and capability delivery (HLA D6, D12; PR C)
 
-- [ ] Write `files-lld.md`. It covers:
+- [x] Write [`files-lld.md`](./files-lld.md). It covers:
   - each operation's Python program and its use of stdin and stdout;
   - the `flock` protocol;
   - the symlink policy;
   - mode and ownership;
   - cleanup.
-- [ ] Implement `PythonProgram`, `files.py` and the file program, finite stdin for `run` with
-      `Bytes(data, sensitive=)`, and `RunContext.admin_access()` and `agent_access()`.
-- [ ] Make the operation log keep the streams of a request with a sensitive stdin out entirely (HLA
-      D13), now that `Bytes(data, sensitive=)` gives it a first caller.
-- [ ] Migrate:
+- [x] Implement `PythonProgram`, `Script.interactive`, finite stdin for `run` with `Bytes(data)`,
+      the `log_streams` option, the `CaptureOutput` and `DiscardOutput` sinks, `files.py` and the
+      file program, and `RunContext.admin_access()` and `agent_access()`.
+- [x] Make the operation log keep both streams of a request with `log_streams=False` out entirely
+      (HLA D13), with its first callers, the file program's reads and the native CLI.
+- [x] Migrate:
   - artifact publication and session artifacts;
   - native probing;
   - the harness-native settings merge and CLI transcript reads;
   - the codex and claude artifact reads;
   - harness integrations' readiness and start stages;
-  - the git-credential providers.
-- [ ] Tests:
-  - `write` applies mode and owner before the rename;
-  - `write_if` and `remove_if` detect a concurrent writer, including a tree upload replacing the
-    directory above the target;
-  - JSON null survives an update;
+  - the git-credential providers;
+  - `command_checks.py`;
+  - the harness setup dispatch, readiness and lifecycle, with `SetupInvocation.access`;
+  - the tmux stale-socket cleanup's path check and the workspace backend's generated-config removal,
+    the last other `native_files` importers.
+- [x] Delete `admin_target()`, `agent_target()`, `SetupInvocation.runner`, `SetupRunner` and
+      `native_files.py` with their last readers, after re-proving their incident rows, and bump the
+      harness-integration contract to 8, git-credential to 4 and secret-backend to 3. Re-proved by
+      tests: I35, I36 and I47 through `setup_user`; I37 to I41 by the file program, `Files` and
+      publication tests; I42 and I43 by the L-lane native discovery tests and the settings log test;
+      I50 by vector F8; I51 by `test_setup_request_environment.py`; I54 to I56 by the native CLI
+      failure and marketplace tests. I57 moves with tmux in slice 7.
+- [x] Tests:
+  - `write_if` and `remove_if` detect a concurrent writer;
+  - a truncated stdin publishes nothing;
+  - JSON null survives a settings merge;
   - a malformed destination is refused;
   - a symlinked destination is refused;
   - cleanup touches only what the operation created;
   - `preserve_metadata=True` keeps the existing file's owner, group, mode and ACLs;
-  - a sensitive stdin is absent from logs and exceptions (a conformance vector).
-- [ ] Amend ADR 0019.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: update `capabilities/README.md` and plugin author documentation for the new
+  - a request's stdin is absent from logs and exceptions, and `log_streams=False` keeps its streams
+    out (a conformance vector).
+- [x] Amend ADR 0019.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything. Rows I35 to
+      I57 are in the HLA inventory.
+- [x] Collateral: update `capabilities/README.md` and plugin author documentation for the new
       accessors.
 - [ ] Live evidence: harness setup and a session start with artifacts, on Remote Lima from macOS and
       on one cloud from Windows.
 
-Definition of done: `native_files.py` has no remaining callers.
+Definition of done: `native_files.py` and `harness_setup/runner.py` are deleted, and no capability
+reads a legacy transport.
 
 ## Slice 6: Initialization (PR C)
 
-- [ ] Migrate:
+- [x] Write `init-lld.md`. It covers:
+  - Phase B's move onto VMAccess, request by request, with each bound;
+  - `write` and `update` on the file program and its lock, and the dotfiles tree upload as one
+    `Script`;
+  - each hand-written write it replaces, with mode, owner and secret handling;
+  - the git-credential and agent-grant paths;
+  - the incident audit of the entry points this slice moves.
+- [x] Migrate:
   - `vms/initializer/`, `vms/hardening.py` and `vms/tailscale_dns.py`;
-  - `sources.py` (with `upload_tree`), `command_checks.py` and `git_config.py`;
+  - `sources.py` (with `upload_tree` as one script) and `git_config.py`, and the
+    `dotfiles_destination` validation in `vms/admin.py` and `agents/template.py`;
   - `git_credentials/`;
   - the agent initializer and grants;
-  - the harness setup runners. The `SetupRunner` environment rules become request environment.
-- [ ] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
-      with `files.write` and `files.update`.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+  - `workspaces/acls.py` and the tmux socket helpers with their stale-socket cleanup, which Phase B
+    and agent create call;
+  - `ensure_directory`'s owner and elevation, for the agent's `.ssh`.
+- [x] Replace hand-written `printf | sudo tee`, `tee -a` and `write_file` plus `chmod` sequences
+      with `files.write` and `files.update`, adding `Files.update` here with its first callers and
+      moving slice 5's native settings publish onto it.
+- [x] Tests: `write` applies mode and owner before the rename, a failed or interrupted tree upload
+      leaves the previous tree in place, and a corrupt archive changes nothing.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: guides or reference pages whose described init behavior changes.
+- [x] `vm reinit --admin-template NAME` and `--admin-spec JSON` (operator ruling 2026-11-10), so a
+      VM whose stored admin spec holds a source reference this release refuses has a repair. They
+      follow `agent reinit`'s retain, replace and clear semantics, tolerating what it tolerates; the
+      `StoredSourceReferenceRefused` hint for a VM names `--admin-spec`, since a re-point alone
+      cannot repair a refused layer. A record awaiting replacement is published identity-only, so it
+      stops neither other commands nor another record's repair. Completions, the command reference
+      and the upgrade guide follow.
+- [x] One initialization order for the admin and every agent: fragments, mise config, git
+      credentials, dotfiles, mise install, the fragments' source lines again, user install commands,
+      then a final source-line pass, with one mise install helper and one install-command runner
+      shared by both accounts.
+- [x] Collateral: guides or reference pages whose described init behavior changes.
+- [x] `dotfiles_destination` is checked at use, in `sync_dotfiles`, as rendered for the account,
+      since main's interpolation made it a template (lead ruling, merge of main into PR C). This
+      supersedes the template validation named in the Migrate box above.
 - [ ] Live evidence: create and reinit on every platform from at least one workstation each.
 
 Definition of done: create and reinit run entirely on the new transport.
 
 ## Slice 7: Workspaces, sessions and backup (HLA D7; PR C)
 
-- [ ] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
-- [ ] Add the `observation` request option (a caller's declaration that a request only reads, so it
-      may be dispatched again after `NotDelivered` or `Unknown`) with its first callers,
-      `detached.observe` and the sessions' status probes (HLA D5).
-- [ ] Migrate:
+- [x] Write [`sessions-lld.md`](./sessions-lld.md). It covers:
+  - `detached.py` (launch, observe, interrupt, download) with `FromFile` and `ToFile`, and each
+    read's bound (one dispatch);
+  - each workspace, session, console and backup request it moves, with its bound;
+  - session environment in the request, and every pane path's terminal handover (HLA D8);
+  - the env-newline refusals, the console's env carry across sudo and the legacy probe it deletes;
+  - the incident audit of the entry points this slice moves.
+- [x] Implement `detached.py`, and the `FromFile` and `ToFile` input and sink.
+- [x] Bound the session and console status reads and pid repair at 10 seconds and `vm describe`'s
+      live resources at 30, each one dispatch, and retire `GUEST_OBSERVATION_ATTEMPTS` and
+      `DEDICATED_TEARDOWN_ATTEMPTS` (HLA D5).
+- [x] Migrate:
   - workspace backends, rehome and repair;
   - workspace copy, using `run` over an opaque tar stream;
   - `sessions/`, including tmux, consoles, status probes and pid repair, with session environment in
@@ -539,72 +588,197 @@ Definition of done: create and reinit run entirely on the new transport.
     restore, console recovery after a killed attach) parks a fresh handover;
   - backup's launch, observation, interrupt and download, using `detached` and `ToFile` with
     progress.
-- [ ] Tests:
+  - the codex recorder's install in the session launch line (`plugins/codex/recorder.py`, a
+    `printf`, `chmod` and `mv` fragment), which writes a guest file outside `Files`;
+  - agent delete's session teardown and console window cleanup
+    (`agents/manager/lifecycle.py:389-398`, `:423-425`);
+  - `vm describe`'s live resources (`vms/manager/_helpers.py:306`);
+  - desired runtime state's session teardown and console presence probes
+    (`runtime_state/_session_stop.py`, `_prepare.py`, `_preview.py`), which arrived with #885
+    ([`sessions-lld.md`](./sessions-lld.md), Delivery batches C and D).
+- [x] Tests:
   - a fresh launch never matches an earlier one;
   - observation resumes across a dropped connection;
   - interrupt stops the work;
   - the detached base is never world-writable.
-- [ ] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and every
+- [x] Retire the newline refusals for environment values (`manifests/decode.py:254-261` and every
       `LineOrientedSecretUse.ENVIRONMENT` use, in `env/compose.py:73-81` and
       `secrets/orchestration.py:228-232`), now that no path sends environment by `SetEnv`.
-- [ ] Delete the console's env carry across sudo, which the handover replaces: the `--preserve-env`
+- [x] Delete the console's env carry across sudo, which the handover replaces: the `--preserve-env`
       path and its memo in `sessions/multi_console/`, and the `Defaults:<admin> setenv` sudoers
       grant (`_write_sudoers_console_setenv`), with reinit removing the installed fragment from
       existing VMs.
-- [ ] Move the session callers of `_assert_agent_ssh_works` (`sessions/manager/_create.py`,
+- [x] Retire the admin's standing group access to agent tmux servers (sessions LLD, batch D4): the
+      admin's membership of `tmux-agent-access`, the group-shared modes of the socket root and each
+      agent's socket directory, the socket's `chmod g+rwx` and `_grant_server_access`, with an
+      idempotent initialization step that converts an existing VM on reinit.
+- [x] Move the session callers of `_assert_agent_ssh_works` (`sessions/manager/_create.py`,
       `_create_roll.py`, `_pids.py`) to `_assert_agent_access_works`, and delete the legacy probe.
+- [x] Move `tests/workspaces/test_lifecycle_orchestrated.py` from substring matches over legacy
+      command strings to assertions on the typed requests, as `test_backend_git_identity.py` did in
+      batch B. Batch C, once `delete_workspace` has no legacy target left. Split the file by command
+      while moving it: at about 2,440 lines it is well past the repository's 1,000-line ceiling.
 - [ ] Re-prove incident rows I6a and I8.
-- [ ] Supersede ADR 0017.
-- [ ] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
-      issues and fix history), and add incident inventory rows before deleting anything.
-- [ ] Collateral: guides for sessions, consoles and backup where behavior changes.
-- [ ] Settle with the operator the commented post-bind resolve in
+- [x] Supersede ADR 0017.
+- [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
+      issues and fix history), and add incident inventory rows before deleting anything. The audit
+      is in [`sessions-lld.md`](./sessions-lld.md); rows I80 to I89 landed in the HLA (`a456bb16a`)
+      before batch A deleted `remote_exec.py`.
+- [x] Collateral: guides for sessions, consoles and backup where behavior changes.
+- [x] Settle with the operator the commented post-bind resolve in
       `sessions/multi_console/restore.py` (it either runs or goes), and whether the workspace, agent
       and session refusals of a VM with no recorded SSH identity
-      (`applied_state.require_vm_ssh_identity`) should hint at `agw vm reinit`.
+      (`applied_state.require_vm_ssh_identity`) should hint at `agw vm reinit`. The operator ruled
+      to resolve every console pane's secrets in the boundary pass
+      ([FRD, 2026-11-12](./frd.md#2026-11-12); `sessions-lld.md`, "Console pane secrets in the
+      boundary"), and the refusal already hints at `agw vm reinit` (`vms/applied_state.py:262-273`).
+- [x] Apply the operator's 2026-11-18 ruling to `console restore-session`: it observes the window
+      read-only, refuses what it cannot repair, then checks the agents and resolves the secrets of
+      only the panes it opens, before its first tmux change (fix round 1 of PR C).
 - [ ] Live evidence:
   - session and console create, attach, detach and restore on Remote Lima from all three
     workstations and on WSL2;
   - backup with a forced disconnect and with an interrupt, on WSL2 (idle shutdown) and Remote Lima.
 
-Definition of done: no workspace, session or backup module imports a legacy module, and
-`remote_exec.py` has no remaining callers.
+Definition of done: no workspace, session, backup or desired runtime state module imports a legacy
+module, and `remote_exec.py` is deleted.
 
 ## Slice 8: Removal (PR C)
 
-- [ ] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
+- [x] Audit the legacy modules this slice deletes for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows for anything not yet recorded.
-- [ ] Confirm that every incident inventory row has recorded evidence.
-- [ ] Move `LOG_DIR` and the operation log's readers (`doctor_state.py`, `vms/manager/lifecycle.py`,
+- [x] Confirm that every incident inventory row has recorded evidence. Every row names a test, a
+      live cell, or a recorded disposition: I15's and I39's tests are now named (execution-lld,
+      files-lld), I28's retired shape test and I52's retired workaround are recorded (contract-lld,
+      files-lld), and I63's fragment tests are superseded by their removal tests (init-lld). Many
+      slice 5 to 7 rows cite their tests by description rather than by name; those descriptions each
+      identify an existing test. Pending live halves (I6a, I8, I25 among them) belong to the
+      evidence matrix item below.
+- [x] Move `LOG_DIR` and the operation log's readers (`doctor_state.py`, `vms/manager/lifecycle.py`,
       `vms/manager/_helpers.py`, `vms/manager/power.py`, `vm logs`) and their test patch sites to
       `execution/oplog.py` as `SSHLogger` is deleted, matching log files by the exact
       `<vm>-<timestamp>-<stem>.log` shape so VM `dev` never matches VM `dev-2`'s logs, and update
       the `LOG_DIR` mention in the `transports/ssh.py` docstring.
-- [ ] Once `SSHLogger` is replaced, pass create's operation log to the platforms' join through
+- [x] Once `SSHLogger` is replaced, pass create's operation log to the platforms' join through
       `ProvisionRequest`, so `join_tailscale`'s `root_script.run` records `tailscale up`'s redacted
       stderr, and have a failed join's error name the log. Deferred from slice 4's port, where it
       would have widened the `BootstrapProgress` protocol every plugin implements.
-- [ ] Delete the remaining legacy modules with their tests (slice 4 deletes the sixth,
-      `agentworks.plugins.proxmox.transport`):
+- [x] Delete the remaining legacy modules with their tests (slice 4 deletes
+      `agentworks.plugins.proxmox.transport`, slice 5 `agentworks.harness_setup.runner` and
+      `agentworks.native_files`, and slice 7 `agentworks.remote_exec`):
   - `agentworks.transports`
   - `agentworks.ssh`
-  - `agentworks.remote_exec`
-  - `agentworks.harness_setup.runner`
-  - `agentworks.native_files`
-- [ ] Delete `RunContext.admin_target()` and `agent_target()`, and the `SSHError` special case in
-      `cli/_entry.py`.
-- [ ] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
-- [ ] Delete the independence guards that can no longer fail once the legacy modules are gone: the
+- [x] Delete the `SSHError` special case in `cli/_entry.py`.
+- [x] Delete doctor's `ssh` and `scp` `PATH` presence rows, which the resolver's verdict replaces.
+- [x] Delete the independence guards that can no longer fail once the legacy modules are gone: the
       fresh-interpreter guard, the conftest blocker and the static legacy-import check.
-- [ ] Make the managed SSH entries' store options unconditional, with release notes for operators
-      who never imported.
-- [ ] Search for remaining users of the `AcceptEnv` fragment. If none remain, stop writing it and
+- [x] Make the managed SSH entries' store options unconditional, with release notes for operators
+      who never imported. The entries name the store as `GlobalKnownHostsFile` and the null device
+      as `UserKnownHostsFile`, so no host-key checking or update setting read first can write into
+      the store (trust-lld).
+- [x] Settle how a host path with an apostrophe and no whitespace reaches the ssh shipped with Git
+      for Windows, which rejects both the quoted and the bare form of such an option value
+      (`execution/trust.py`, `option_value`): refuse that path before writing a managed SSH config
+      entry, with a message naming the character, or record the gap in the Windows guidance. The
+      execution core never runs that client, so only an operator's own `ssh` through the managed
+      entries meets it. Raised by #910's review; #898 closed without tracking it. Settled by
+      refusing it on Windows, with the entries naming paths under the home directory relative to
+      `~`, so a profile named with an apostrophe is never refused (trust-lld, Managed SSH entries).
+- [x] Search for remaining users of the `AcceptEnv` fragment. If none remain, stop writing it and
       supersede ADR 0014; otherwise record what still needs it in that ADR.
-- [ ] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
+- [x] Settle when `run_as_root`'s `deadline` starts. Proxmox counts it from the call, so its agent
+      wait spends it; the clouds start it at dispatch, after opening the route, reading the address
+      and waiting for SSH, none of which the deadline bounds (`public_ssh.py`). Choose one reading
+      and make the clouds match, or state in the contract that the wait before dispatch has its own
+      bound. Raised by #866's round 8 review. Settled at dispatch, with Proxmox moved to match and
+      Azure's route operations bounded (platform-lld, When `run_as_root`'s deadline starts).
+- [x] Bound every Azure, GCE and EC2 call on a route on the wall clock, since the SDKs' timeouts
+      bound only silence: each call before dispatch within 300 s, and each held removal and
+      provisioning close within one shared 300 s (`capabilities/vm_platform/wall_bound.py`,
+      `agentworks/deadline.py`), with a warning naming any rule whose create or insert outcome
+      stayed unknown (fix round 4 of PR C; platform-lld, The bounds before dispatch).
+- [x] Settle what an unknown provider outcome leaves behind (fix round 5 of PR C; platform-lld, The
+      bounds before dispatch): GCE create's rollback treats an unresolved insert as settled only
+      once it sees the incarnation that insert owns, so it keeps the lifetime deny while the
+      instance may still appear, whether the instance read as not found or could not be read, and
+      reports each resource an unresolved insert may still create with the operation to watch; an
+      EC2 authorize EC2 did not answer warns; and every warning about a rule that may still appear
+      offers its delete only on the owned provider ID (GCE), the exact rule shape (Azure) or the
+      operator's confirmation (EC2). Also: a second Ctrl-C only requests abandonment, and can lag on
+      Windows; and the published complexity review's tests and cleanups.
+- [x] Merge main after #915 and #922, and close the round 6 review (fix round 6 of PR C): #915's
+      refusal to act on an unanswered presence probe holds on `VMAccess`, where `probe_presence`
+      raises on any status but the probe's own present and absent answers, for the agent user and
+      home, the backup's workspace paths, create's and copy's occupancy check, and rehome's
+      directory checks; #922's host-load fixes are kept in the conformance vectors and the
+      credential helper tests. Also: tests that GCE's steps offer a delete only with an owned ID,
+      that an instance insert whose retry alone was refused stays unknown, and that the route's "may
+      still appear" warning precedes a held Ctrl-C; the route's operation wait checked by the
+      timeout it is given rather than the wall clock; one copy of the rule that an insert's steps
+      replace an unknown read's sentence; and one rendering of the zone flag.
+- [x] Close round 6's private review (fix round 6 of PR C; execution-lld, Presence probes): the git
+      source's checkout probes and the mise lockfile check also use `probe_presence`, and an
+      unanswered lockfile check skips the install rather than install unlocked; a failed dotfiles
+      sync no longer claims the checkout is unchanged; the unanswered agent probes are tested in one
+      file; and every attach and park conformance vector lives in `terminal_vectors.py`.
+- [x] Close round 7 (fix round 7 of PR C, from round 6's integration report and complexity review;
+      platform-lld, The bounds before dispatch; init-lld): GCE's recovery steps offer the owned
+      deny's delete only once the instance reads not found and, for an unresolved instance insert,
+      its named operation reports `DONE`, and keep the deny and escalate with no operation known; a
+      4xx the REST transport raises (`Forbidden`, `TooManyRequests` and their siblings) answering
+      the only insert sent settles it; each EC2 authorize send goes out once, with botocore's
+      resends off; a declared mise lockfile that is not published skips that account's install and
+      prune; rehome refuses an occupied target as occupied; the workspace traversal names each
+      ancestor by its exact bytes; copy's exclusive reservation is tested; and the `getent passwd`
+      probes run unelevated, as on main.
+- [x] Fix #923 and close round 7's private review (fix round 7 of PR C; sessions-lld, Batch status;
+      platform-lld, The bounds before dispatch): each batch status row runs under root's own kill
+      bound outside the owner switch, so an owner that stops, kills or escapes its client leaves
+      only its own row unknown, and a client's stderr is read only as far as its field holds; the
+      workspace traversal collapses leading slashes and refuses a `..` component, and repair reads
+      the stored path through the same check as delete and rehome, and the upgrade guide says how
+      repair treats such rows; an EC2 authorize that EC2 throttled is sent again a few times, each a
+      single send, and a throttle to the end is a refusal; a GCE 403 naming a quota or rate limit is
+      a quota refusal.
+- [x] Keep each batch status row's bound when `timeout` is uutils', as on CI's Ubuntu 26.04 runners,
+      where round 7's `timeout -s KILL` reached only the row's shell and the bounds test hung CI
+      (sessions-lld, Batch status): `timeout` sends TERM, and the row's shell, waiting on its probe,
+      kills the row's process group with KILL as root; the bounds test models uutils' `timeout`
+      beside the host's, and fails rather than hangs when a request outlives its deadline.
+- [x] Merge `main` with #910 and fix round 8 of PR C (complexity review of round 7; trust-lld,
+      Managed SSH entries; sessions-lld, Batch status and the workspace traversal; platform-lld, The
+      bounds before dispatch). The managed entries name the key and the host-key store by the
+      absolute path Agentworks itself uses, never `~`-relative, which supersedes the `~` rule in the
+      apostrophe box above: a Windows profile named with an apostrophe and no whitespace now gets no
+      managed entries, with a warning. A test proves an owner client cannot write into root's status
+      pipe or its row's output; EC2 throttling is `RequestLimitExceeded` alone in the resend, the
+      warning and the hint; the workspace traversal is handed only normalized paths, so its slash
+      handling from round 7 is gone and its `..` refusal stays; GCE recovery steps with no operation
+      known offer none to watch; the Include-with-a-space resolution test runs in Windows CI, the
+      test file's merge duplicates are folded, and SSH config warnings join an error and its hint
+      one way.
+- [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
+- [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
+  - hold interrupts inside each cloud's `remove_ssh_allow` instead of at its call sites, keeping
+    create's rollback on its two-Ctrl-C protocol (done for AWS and Azure; GCP has no such function,
+    platform-lld);
+  - drop `create_vm`'s `ValidationError` pass-through, which no platform's `create` raises now, or
+    document that a `create` may raise it (dropped);
+  - fold `validate_create_hostname` into `validate_create_release` as one pre-create check, if that
+    reads simpler (kept apart: the release hook shipped in 0.19 and catalogs override it, the two
+    check different inputs for different owners, and the call site is already one preflight);
+  - settle whether hostnames with underscores misbehave on platforms other than WSL2 (a live check
+    on one non-WSL2 VM), and move the rule into core if they do (a slice 8 live cell in
+    platform-lld, for the tester);
+  - make the bootstrap's swap step recover from an interruption between `fallocate` and the fstab
+    line (done).
 - [ ] Complete the evidence matrix, sending any gap to the operator.
 - [ ] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
       and the operator guides) describe the end state, then write `locked.md`.
+  - The docs half is done (`d84924c12`, `f138a6cdc`, `3741269b0`, `c328bd1f5`, `bfa173d2d`): the
+    permanent docs describe the end state, no permanent artifact cites this SDD, and ADR 0027
+    carries the design's load-bearing decisions. `locked.md` waits for the evidence matrix.
 
 Definition of done: R10's end state holds, every matrix cell has evidence or an operator
 disposition, and the SDD is locked.

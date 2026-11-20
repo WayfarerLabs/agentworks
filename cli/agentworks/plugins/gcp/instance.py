@@ -10,24 +10,23 @@ from typing import TYPE_CHECKING, Any
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
-    AuthorizationError,
     ConnectivityError,
     NotFoundError,
-    TokenRejectedError,
 )
 from agentworks.plugins.gcp.cleanup import InstanceOwnership
 from agentworks.plugins.gcp.compute import (
     EXTERNAL_ACCESS_CONFIG_NAME,
     canonical_resource_url,
+    provider_operation_name,
     provider_resource_id,
     verify_zonal_operation,
 )
 from agentworks.plugins.gcp.errors import (
+    DEFINITE_REFUSALS,
     GCECapacityError,
     GCEError,
     GCEIndeterminateOperationError,
     GCEOperationError,
-    GCEQuotaError,
     call_google,
     call_google_optional,
     wait_for_extended_operation,
@@ -41,12 +40,23 @@ if TYPE_CHECKING:
 
 @dataclass
 class InstanceInsertAttempt:
-    """One request identity plus ownership learned before an interruptible wait."""
+    """One request identity plus ownership learned before an interruptible wait.
+
+    ``outcome_unknown`` says whether the insert may still create the
+    instance though nothing has shown whether it will:
+    :func:`insert_instance_reconciled` sets it when it sends the insert and
+    clears it once the outcome is known, so an insert cut short, or one
+    whose first try went unanswered, leaves it set whatever ends the
+    attempt. ``operation_name`` names the insert's verified operation, once
+    one arrives, for recovery guidance.
+    """
 
     instance_name: str
     request_id: str
     ownership: InstanceOwnership | None = None
     submitted: bool = False
+    outcome_unknown: bool = False
+    operation_name: str | None = None
 
     @classmethod
     def create(cls, instance_name: str) -> InstanceInsertAttempt:
@@ -137,6 +147,7 @@ def insert_instance_reconciled(
         request_id=attempt.request_id,
     )
     attempt.submitted = True
+    attempt.outcome_unknown = True
 
     operation: Any | None = None
     initial_failure: AgentworksError | None = None
@@ -146,7 +157,8 @@ def insert_instance_reconciled(
             operation="inserting an owned instance",
             resource=f"instance {project_id}/{zone}/{instance.name}",
         )
-    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+    except DEFINITE_REFUSALS:
+        attempt.outcome_unknown = False  # a definitive answer to the only request sent
         raise
     except (ConnectivityError, GCEError) as exc:
         initial_failure = exc
@@ -159,8 +171,8 @@ def insert_instance_reconciled(
                 operation="reconciling an indeterminate instance insert",
                 resource=f"instance {project_id}/{zone}/{instance.name}",
             )
-        except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
-            raise
+        except DEFINITE_REFUSALS:
+            raise  # an answer to the retry alone: the first try may still land
         except (ConnectivityError, GCEError):
             retry_failed = True
         if retry_failed:
@@ -178,16 +190,19 @@ def insert_instance_reconciled(
         expected_resource_id=None,
     )
     attempt.ownership = InstanceOwnership(resource_id=target_id)
+    attempt.operation_name = provider_operation_name(operation)
 
     wait_failure: AgentworksError | None = None
     definitive_failure: GCEOperationError | None = None
     try:
         wait_for_extended_operation(operation, label=f"instance {instance.name}", zone=zone, timeout=timeout)
     except GCECapacityError:
+        attempt.outcome_unknown = False  # the operation completed, and failed
         raise
     except GCEIndeterminateOperationError as exc:
         wait_failure = exc
     except GCEOperationError:
+        attempt.outcome_unknown = False  # the operation completed, and failed
         definitive_failure = GCEOperationError(
             f"Google Cloud rejected instance '{instance.name}' while using selected machine type "
             f"'{selected_machine_type}'",
@@ -199,6 +214,8 @@ def insert_instance_reconciled(
                 "or choose a compatible machine_types entry"
             ),
         )
+    else:
+        attempt.outcome_unknown = False  # the operation completed
 
     if definitive_failure is not None:
         raise definitive_failure
@@ -212,6 +229,7 @@ def insert_instance_reconciled(
         observed_id = provider_resource_id(realized.id)
         if observed_id == target_id:
             # A matching realized incarnation reconciles an indeterminate wait.
+            attempt.outcome_unknown = False
             return realized, attempt.ownership
         raise AlreadyExistsError(
             f"GCE instance '{instance.name}' has a different provider identity after insert",

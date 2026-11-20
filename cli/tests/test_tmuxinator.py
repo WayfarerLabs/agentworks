@@ -1,24 +1,35 @@
-"""Tests for tmuxinator config generation and tmux socket helpers."""
+"""Tests for tmuxinator config generation and the agent socket path."""
 
 from __future__ import annotations
 
+import os
+import shlex
 import shutil
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+import yaml
 
 from agentworks.db import SessionRow
 from agentworks.sessions.tmux import (
-    AGENT_SOCKET_GROUP,
     AGENT_SOCKET_ROOT,
     agent_socket_path,
-    ensure_agent_socket_dir,
-    ensure_agent_socket_root,
+    as_socket_owner_line,
+    exact_tmux_target,
+    tmux_cmd,
 )
 from agentworks.workspaces.tmuxinator import GENERATED_HEADER, console_session_name, generate_config
+from tests.vm_access_support import Admin, RecordingVMAccess
+
+
+def _pane(config: str, window: str) -> str:
+    """The one pane command of ``window`` in a generated config, as tmuxinator reads it."""
+    windows = yaml.safe_load(config)["windows"]
+    [pane] = next(entry[window] for entry in windows if window in entry)["panes"]
+    assert isinstance(pane, str)
+    return pane
 
 
 def test_generate_config_no_sessions() -> None:
@@ -80,8 +91,7 @@ def test_generated_wrapper_does_not_match_a_session_name_prefix() -> None:
                 updated_at="",
                 socket_path=socket_path,
             )
-            config = generate_config("ws", "/tmp/ws", sessions=[session])
-            wrapper = next(line.strip().removeprefix("- ") for line in config.splitlines() if "while tmux" in line)
+            wrapper = _pane(generate_config("ws", "/tmp/ws", sessions=[session]), "foo")
             probe = wrapper.removeprefix("unset TMUX; while ").split(" 2>/dev/null;", maxsplit=1)[0]
             result = subprocess.run(["zsh", "-f", "-c", probe], check=False)
             assert result.returncode == 1
@@ -115,8 +125,8 @@ def test_agent_socket_path() -> None:
     assert path == f"{AGENT_SOCKET_ROOT}/agt--alice/myws-dev.sock"
 
 
-def test_generate_config_agent_session_socket() -> None:
-    """Agent-mode sessions should use -S <socket> in wrapper commands."""
+def test_an_agent_sessions_window_reaches_its_server_only_as_the_agent() -> None:
+    """The admin runs the config, so an agent's window elevates only to switch to the agent behind the guard."""
     sock = "/run/agentworks/agent-tmux-sockets/agt--alice/ws-dev.sock"
     sessions = [
         SessionRow(
@@ -130,9 +140,27 @@ def test_generate_config_agent_session_socket() -> None:
             socket_path=sock,
         ),
     ]
-    config = generate_config("ws", "/tmp/ws", sessions=sessions)
-    assert f"-S {sock}" in config
-    assert "tmux -S" in config
+    pane = _pane(generate_config("ws", "/tmp/ws", sessions=sessions, agent_owners={"ws-dev": "agt--alice"}), "ws-dev")
+
+    switched = [
+        "sudo -n /bin/sh -c "
+        + shlex.quote(
+            as_socket_owner_line(
+                tmux_cmd(f"{verb} -t {exact_tmux_target('ws-dev')}", sock),
+                socket_path=sock,
+                owner="agt--alice",
+                switch_user=True,
+                terminal=terminal,
+            )
+        )
+        # The attach is an interactive client, so it runs on a relay terminal of its own.
+        for verb, terminal in (("has-session", False), ("attach", True))
+    ]
+    assert all(command in pane for command in switched)
+    remainder = pane
+    for command in switched:
+        remainder = remainder.replace(command, "")
+    assert "tmux" not in remainder
 
 
 def test_generate_config_admin_session_no_socket() -> None:
@@ -151,106 +179,108 @@ def test_generate_config_admin_session_no_socket() -> None:
     assert "-S " not in config
 
 
-# -- ensure_agent_socket_root / _dir warning behavior ------------------------
+def test_the_generated_config_is_written_private_to_its_admin() -> None:
+    import json
+
+    from agentworks.execution.requests import PythonProgram
+    from agentworks.workspaces.tmuxinator import write_config
+
+    access = RecordingVMAccess([], Admin())
+
+    write_config(access, "/srv/ws", "config\n")
+
+    [request] = access.requests()
+    assert isinstance(request, PythonProgram) and request.args[0] == "write"
+    params = json.loads(request.args[1])
+    assert (params["path"], params["mode"]) == ("/srv/ws/.tmuxinator.yml", 0o600)
 
 
-@dataclass
-class _FakeResult:
-    stdout: str = ""
-    ok: bool = True
+@pytest.mark.parametrize("stored", ["/data/ws", "/data/ws/", "//data/ws", "/data//./ws/"])
+def test_a_stored_workspace_path_names_its_config_in_one_spelling(stored: str) -> None:
+    from agentworks.workspaces.tmuxinator import config_path
+
+    assert config_path(stored) == "/data/ws/.tmuxinator.yml"
 
 
-class _FakeTarget:
-    """Fake ``Transport`` that returns canned output for the first probe call
-    (the only call that determines warning behavior) and ignores subsequent
-    setup commands. Records whether sudo was requested for each call."""
+@pytest.mark.parametrize("stored", ["~/ws", "/data/link/../ws/", "/data/w\ts"])
+def test_a_stored_path_the_file_operations_cannot_address_names_no_config(stored: str) -> None:
+    """A relative path names no one directory, a ``..`` one names its directory only once the VM resolves it,
+    and the file operations refuse a character that is not printable."""
+    from agentworks.errors import ValidationError
+    from agentworks.workspaces.tmuxinator import config_path
 
-    def __init__(self, probe_stdout: str) -> None:
-        self._probe_stdout = probe_stdout
-        self._probe_done = False
-        self.commands: list[str] = []
-        self.sudo_calls: list[bool] = []
-
-    def run(self, command: str, *, check: bool = True, sudo: bool = False, tty: bool | None = None) -> _FakeResult:
-        self.commands.append(command)
-        self.sudo_calls.append(sudo)
-        # The first call is the probe (contains "if test -d").
-        if not self._probe_done and "if test -d" in command:
-            self._probe_done = True
-            return _FakeResult(stdout=self._probe_stdout)
-        return _FakeResult()
+    with pytest.raises(ValidationError):
+        config_path(stored)
 
 
-def test_ensure_agent_socket_root_missing_warns_by_default(warnings: list[str]) -> None:
-    runner = _FakeTarget("MISSING")
-    ensure_agent_socket_root(runner, "agentworks")
-    assert any("missing" in w for w in warnings)
-    # Probe uses sudo; getent does not; all setup commands use sudo
-    assert runner.sudo_calls[0] is True  # probe
-    assert runner.sudo_calls[1] is False  # getent (no root needed)
-    assert all(runner.sudo_calls[2:])  # groupadd/usermod/mkdir/chown/chmod
-
-
-def test_ensure_agent_socket_root_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_root(_FakeTarget("MISSING"), "agentworks", warn_if_missing=False)
-    assert warnings == []
-
-
-def test_ensure_agent_socket_root_misconfigured_warns_even_when_missing_suppressed(
-    warnings: list[str],
+@pytest.mark.parametrize(
+    ("stored", "target", "removed"),
+    [
+        ("{root}/ws", "{root}/ws/.tmuxinator.yml", True),
+        ("{root}/ws/", "{root}/ws/.tmuxinator.yml", True),
+        ("{root}/home/../srv/ws", "{root}/home/../srv/ws/.tmuxinator.yml", True),
+        ("{root}/home/../srv/ws", "{root}/srv/ws/.tmuxinator.yml", True),
+        ("{root}/ws", "{root}/other/.tmuxinator.yml", False),
+        ("{root}/ws", "ws/.tmuxinator.yml", False),
+    ],
+    ids=["same-spelling", "trailing-slash", "dotdot-as-written", "dotdot-collapsed", "another-workspace", "relative"],
+)
+def test_delete_removes_the_console_link_only_while_it_points_at_this_workspace(
+    tmp_path: Path, stored: str, target: str, removed: bool
 ) -> None:
-    ensure_agent_socket_root(_FakeTarget("root 755"), "agentworks", warn_if_missing=False)
-    assert any("misconfigured" in w for w in warnings)
+    """The guest script itself, run by this machine's ``/bin/sh`` with GNU ``realpath``."""
+    from agentworks.workspaces.tmuxinator import config_link, remove_link_to
+
+    home = tmp_path / "home" / "admin"
+    link = Path(config_link(str(home), "w"))
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target.format(root=tmp_path))
+
+    request = remove_link_to(str(home), "w", stored.format(root=tmp_path))
+    subprocess.run(["/bin/sh", "-c", request.source], check=True)
+
+    assert link.is_symlink() != removed
 
 
-def test_ensure_agent_socket_root_probe_failed_warns_even_when_missing_suppressed(
-    warnings: list[str],
-) -> None:
-    ensure_agent_socket_root(_FakeTarget("PROBE_FAILED"), "agentworks", warn_if_missing=False)
-    assert any("probe failed" in w for w in warnings)
+@pytest.mark.parametrize("fake", ["exit 1", "exit 0"], ids=["fails", "prints-nothing"])
+def test_delete_keeps_the_console_link_when_realpath_gives_no_path(tmp_path: Path, fake: str) -> None:
+    """The guest script itself, with ``realpath`` shadowed on ``PATH``: two empty answers are no match."""
+    from agentworks.workspaces.tmuxinator import config_link, remove_link_to
+
+    home = tmp_path / "home" / "admin"
+    link = Path(config_link(str(home), "w"))
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tmp_path / "other" / ".tmuxinator.yml")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "realpath").write_text(f"#!/bin/sh\n{fake}\n")
+    (bin_dir / "realpath").chmod(0o755)
+
+    request = remove_link_to(str(home), "w", str(tmp_path / "ws"))
+    environment = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    subprocess.run(["/bin/sh", "-c", request.source], check=True, env=environment)
+
+    assert link.is_symlink()
 
 
-def test_ensure_agent_socket_root_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _FakeTarget(f"{AGENT_SOCKET_GROUP} 2771")
-    ensure_agent_socket_root(runner, "agentworks")
-    assert warnings == []
-    # Fast path: probe + group membership check only (no full setup)
-    assert len(runner.commands) == 2
-    # Both calls must use sudo (probe needs root for stat, usermod needs root)
-    assert all(runner.sudo_calls)
+@pytest.mark.parametrize("entry", ["link", "dangling-link", "file"])
+def test_delete_of_a_path_unknown_row_removes_its_console_link_and_nothing_else(tmp_path: Path, entry: str) -> None:
+    """The guest script itself: the link goes whatever it points at, its target stays, and a file is not a link."""
+    from agentworks.workspaces.tmuxinator import config_link, remove_link
 
+    home = tmp_path / "home" / "admin"
+    link = Path(config_link(str(home), "w"))
+    link.parent.mkdir(parents=True)
+    pointed = tmp_path / "ws" / ".tmuxinator.yml"
+    if entry == "file":
+        link.write_text("operator's own\n")
+    else:
+        if entry == "link":
+            pointed.parent.mkdir()
+            pointed.write_text("config\n")
+        link.symlink_to(pointed)
 
-def test_ensure_agent_socket_dir_missing_warns_by_default(warnings: list[str]) -> None:
-    runner = _FakeTarget("MISSING")
-    ensure_agent_socket_dir(runner, "agt--alice")
-    assert any("agt--alice" in w and "missing" in w for w in warnings)
-    # All commands (probe + full setup) must use sudo
-    assert all(runner.sudo_calls)
+    subprocess.run(["/bin/sh", "-c", remove_link(str(home), "w").source], check=True)
 
-
-def test_ensure_agent_socket_dir_missing_silent_when_expected(warnings: list[str]) -> None:
-    ensure_agent_socket_dir(_FakeTarget("MISSING"), "agt--alice", warn_if_missing=False)
-    assert warnings == []
-
-
-def test_ensure_agent_socket_dir_misconfigured_warns_even_when_missing_suppressed(
-    warnings: list[str],
-) -> None:
-    ensure_agent_socket_dir(_FakeTarget("root root 755"), "agt--alice", warn_if_missing=False)
-    assert any("misconfigured" in w for w in warnings)
-
-
-def test_ensure_agent_socket_dir_probe_failed_warns_even_when_missing_suppressed(
-    warnings: list[str],
-) -> None:
-    ensure_agent_socket_dir(_FakeTarget("PROBE_FAILED"), "agt--alice", warn_if_missing=False)
-    assert any("probe failed" in w for w in warnings)
-
-
-def test_ensure_agent_socket_dir_ok_fast_path_no_warning(warnings: list[str]) -> None:
-    runner = _FakeTarget(f"agt--alice {AGENT_SOCKET_GROUP} 2770")
-    ensure_agent_socket_dir(runner, "agt--alice")
-    # Probe must use sudo
-    assert runner.sudo_calls[0] is True
-    assert warnings == []
-    assert len(runner.commands) == 1
+    assert (link.exists() or link.is_symlink()) == (entry == "file")
+    assert pointed.exists() == (entry == "link")
