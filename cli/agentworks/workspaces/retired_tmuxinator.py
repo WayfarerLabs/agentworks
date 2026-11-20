@@ -50,11 +50,14 @@ _UNFINISHED_LINE = re.compile(f"{_UNFINISHED_MARKER}([1-9][0-9]{{0,8}})")
 # something other than a directory, or it does not exist (and is not a link) and the
 # nearest existing ancestor can be entered or is not a directory. Anything else, such
 # as a directory the admin cannot search, a link that leads nowhere or through one, or
-# a relative path, cannot be judged. It walks up in a loop, since a shell's function
-# recursion is too shallow for a deep path. A path too long for the kernel to look up
-# cannot be judged either, yet it fails as a missing one would and the walk then reaches
-# a shorter ancestor, so ``_judgeable`` keeps such workspace paths from being sent. An
-# admin ``HOME`` that long is not guarded.
+# a relative path, cannot be judged; the ``/*`` test also ends the walk, since
+# stripping the last component leaves a path with no slash unchanged. It walks up in a
+# loop, since a shell's function recursion is too shallow for a deep path, and an
+# empty step means the root, because ``cd ""`` stays in the working directory under
+# dash and bash. A path too long for the kernel to look up cannot be judged either,
+# yet it fails as a missing one would and the walk then reaches a shorter ancestor, so
+# ``_judgeable`` keeps such workspace paths from being sent. An admin ``HOME`` that
+# long is not guarded.
 _VACANT_FUNCTION = """\
 vacant() {
   candidate=$1
