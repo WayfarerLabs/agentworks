@@ -4,7 +4,8 @@ The poke authorizes through a client that sends each request once
 (``single_send_config``), so an authorize's one answer is all there is. One
 that did not return normally is revoked, and its prefix named for checking
 by hand, unless its outcome is known: EC2 refused that send, with a client
-error or a throttling answer. These drive a real botocore EC2 client whose
+error or a throttling answer. A throttled authorize alone is sent again, a
+few times. These drive a real botocore EC2 client whose
 sends are answered in memory (a ``before-send`` handler), since what they
 pin is how botocore sends and classifies.
 """
@@ -19,6 +20,7 @@ from botocore.awsrequest import AWSResponse
 from botocore.exceptions import ClientError, ConnectionClosedError, ReadTimeoutError
 
 from agentworks.errors import AgentworksError
+from agentworks.plugins.aws import network as aws_network
 from agentworks.plugins.aws.network import poke_ssh_allow, single_send_config
 
 if TYPE_CHECKING:
@@ -83,6 +85,11 @@ class _EC2:
         poke_ssh_allow(self.client, _GROUP, prefixes, authorize=self.client)
 
 
+@pytest.fixture(autouse=True)
+def _no_throttle_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(aws_network, "_THROTTLED_AUTHORIZE_WAITS_SECONDS", (0.0, 0.0, 0.0))
+
+
 def _timeout() -> ReadTimeoutError:
     return ReadTimeoutError(endpoint_url=_ENDPOINT)
 
@@ -114,20 +121,50 @@ def test_an_authorize_whose_only_send_went_unanswered_warns_naming_its_group_and
     assert _FIRST in warning
 
 
-@pytest.mark.parametrize(
-    "answer",
-    [_REFUSED, (503, "RequestLimitExceeded"), (400, "Throttling")],
-    ids=("refused", "request-limit-exceeded", "throttling"),
-)
-def test_a_refusal_or_throttling_of_the_only_send_fails_without_a_warning(warnings: list[str], answer: _Answer) -> None:
-    """EC2 throttles a request before acting on it, so a throttled authorize added nothing."""
-    ec2 = _EC2([answer])
+_THROTTLED = (503, "RequestLimitExceeded")
+
+
+def test_a_refusal_of_the_only_send_fails_without_a_warning(warnings: list[str]) -> None:
+    ec2 = _EC2([_REFUSED])
 
     with pytest.raises(AgentworksError):
         ec2.poke([_FIRST])
 
     assert ec2.authorize_sends == 1
     assert warnings == []
+
+
+@pytest.mark.parametrize("throttled", [_THROTTLED, (400, "Throttling")], ids=("request-limit-exceeded", "throttling"))
+def test_a_throttled_authorize_is_sent_again_and_stands_once_added(warnings: list[str], throttled: _Answer) -> None:
+    """A throttled send was refused, so sending it again cannot add the rule twice."""
+    ec2 = _EC2([throttled, _ADDED])
+
+    ec2.poke([_FIRST])
+
+    assert ec2.authorize_sends == 2
+    assert warnings == []
+
+
+def test_an_authorize_throttled_every_time_fails_cleanly_without_a_warning(warnings: list[str]) -> None:
+    ec2 = _EC2([_THROTTLED] * (len(aws_network._THROTTLED_AUTHORIZE_WAITS_SECONDS) + 1))
+
+    with pytest.raises(AgentworksError) as caught:
+        ec2.poke([_FIRST])
+
+    assert ec2.authorize_sends == len(aws_network._THROTTLED_AUTHORIZE_WAITS_SECONDS) + 1
+    assert warnings == []
+    assert caught.value.hint is not None
+
+
+def test_a_throttled_authorize_whose_resend_goes_unanswered_warns(warnings: list[str]) -> None:
+    ec2 = _EC2([_THROTTLED, _timeout()])
+
+    with pytest.raises(AgentworksError):
+        ec2.poke([_FIRST])
+
+    assert ec2.authorize_sends == 2
+    (warning,) = warnings
+    assert _FIRST in warning
 
 
 @pytest.mark.parametrize("answer", [_ADDED, _DUPLICATE], ids=("added", "duplicate"))

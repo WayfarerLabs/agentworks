@@ -53,7 +53,7 @@ from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningE
 from agentworks.interrupts import interrupts_deferred
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 
 # The tag key every agentworks-created EC2 resource carries, its value the
@@ -93,6 +93,14 @@ _INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound"})
 # How long one held removal of a route's allows may take on the wall clock, its
 # per-prefix revokes together: interrupts wait this long at most.
 _REMOVAL_TIMEOUT_SECONDS = 300.0
+
+# The waits before each resend of an authorize EC2 throttled, doubling from
+# botocore's standard 1 s base: a throttled send was refused, so resending it
+# is safe, and after the last the throttling is the poke's answer.
+_THROTTLED_AUTHORIZE_WAITS_SECONDS = (1.0, 2.0, 4.0)
+
+# EC2's throttling code, which gets a retry hint wherever it surfaces.
+_REQUEST_LIMIT_EXCEEDED_CODE = "RequestLimitExceeded"
 
 
 class EC2Error(ProvisioningError):
@@ -153,6 +161,10 @@ def wrap_ec2_error(exc: Exception) -> AgentworksError:
             return AuthorizationError(f"AWS denied permission ({summary})")
         if code in _CREDENTIAL_REJECTION_CODES:
             return TokenRejectedError(f"AWS rejected the selected credential ({summary})")
+        if code == _REQUEST_LIMIT_EXCEEDED_CODE:
+            return EC2Error(
+                summary, detail=str(exc), hint="AWS is throttling this account's EC2 requests; retry shortly"
+            )
         return EC2Error(summary, detail=str(exc))
     return EC2Error(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
 
@@ -261,34 +273,43 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str], *,
     ``authorize`` is the client the authorizes go through, one that sends
     each request once (:func:`single_send_config`), so no resend can follow
     an earlier send that still lands; the dry runs and revokes go through
-    ``ec2``. If an actual authorize fails partway through, or is interrupted,
-    all planned tuples are revoked best-effort before the failure
-    propagates, holding interrupts until that is done (within one bound, as
+    ``ec2``. An authorize EC2 throttled was refused, so it alone is sent
+    again, after each of ``_THROTTLED_AUTHORIZE_WAITS_SECONDS``. If an
+    actual authorize fails partway through, or is interrupted, all planned
+    tuples are revoked best-effort before the failure propagates, holding
+    interrupts until that is done (within one bound, as
     :func:`remove_ssh_allow` does). An authorize whose outcome is unknown
     (see :func:`_authorize_outcome_unknown`) may still land after that
     revoke, so it also warns naming its prefix; the warning goes out before
     the held interrupt is delivered, which would otherwise skip it.
     """
+    throttled = _throttling_detector()
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
     in_flight: str | None = None  # the prefix whose authorize has not answered
     try:
         for prefix in prefixes:
-            in_flight = prefix
-            try:
-                authorize.authorize_security_group_ingress(
-                    GroupId=security_group_id,
-                    IpPermissions=[_ssh_permission(prefix)],
-                )
-            except Exception as exc:
-                if error_code(exc) != _DUPLICATE_PERMISSION_CODE:
-                    raise
+            for wait in (*_THROTTLED_AUTHORIZE_WAITS_SECONDS, None):
+                in_flight = prefix
+                try:
+                    authorize.authorize_security_group_ingress(
+                        GroupId=security_group_id,
+                        IpPermissions=[_ssh_permission(prefix)],
+                    )
+                except Exception as exc:
+                    if wait is not None and throttled(exc):
+                        in_flight = None  # refused: nothing is pending while the poke waits
+                        time.sleep(wait)
+                        continue
+                    if error_code(exc) != _DUPLICATE_PERMISSION_CODE:
+                        raise
+                break
             in_flight = None
     except BaseException as exc:
         # The route's own finally never runs for a poke that did not return, so this revoke cleans up.
         with interrupts_deferred():
             remove_ssh_allow_interruptibly(_removal_client(ec2), security_group_id, prefixes)
-            if in_flight is not None and _authorize_outcome_unknown(exc):
+            if in_flight is not None and _authorize_outcome_unknown(exc, throttled=throttled):
                 output.warn(
                     f"The SSH allow for {in_flight} on security group '{security_group_id}' was not confirmed, so "
                     "AWS may still add it after its revoke; check the group for a TCP/22 rule from that source, and "
@@ -300,25 +321,42 @@ def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str], *,
         raise
 
 
-def _authorize_outcome_unknown(exc: BaseException) -> bool:
-    """Whether an authorize that raised ``exc`` on its only send may still have added its rule.
+def _throttling_detector() -> Callable[[BaseException], bool]:
+    """botocore's own reading of a throttling answer, the codes its retry policy throttles on.
 
-    Only EC2's refusal settles it: a client error (4xx), or a throttling
-    answer (a code botocore's own retry policy reads as throttling,
-    ``RequestLimitExceeded`` among them, which EC2 answers with a 503), sent
-    before EC2 acts. Any other server error says nothing either way, and an
-    interrupt, a bound running out, or a transport failure leaves no answer
-    at all. An error botocore raises before sending anything
-    (``ParamValidationError``, ``NoCredentialsError``) counts as unknown too,
-    so it over-warns; the dry runs before the first authorize have already
-    sent the same permission shape with the same credential.
+    Imported when a poke starts, before anything changes, so a botocore that
+    moved it fails there rather than in the poke's cleanup.
     """
     from botocore.exceptions import ClientError
     from botocore.retries.standard import RetryContext, ThrottledRetryableChecker
 
+    checker = ThrottledRetryableChecker()
+
+    def throttled(exc: BaseException) -> bool:
+        return isinstance(exc, ClientError) and bool(
+            checker.is_retryable(RetryContext(attempt_number=1, parsed_response=exc.response))
+        )
+
+    return throttled
+
+
+def _authorize_outcome_unknown(exc: BaseException, *, throttled: Callable[[BaseException], bool]) -> bool:
+    """Whether an authorize that raised ``exc`` on its only send may still have added its rule.
+
+    Only EC2's refusal settles it: a client error (4xx), or a ``throttled``
+    answer (``RequestLimitExceeded`` among them, which EC2 answers with a
+    503), sent before EC2 acts. Any other server error says nothing either
+    way, and an interrupt, a bound running out, or a transport failure
+    leaves no answer at all. An error botocore raises before sending
+    anything (``ParamValidationError``, ``NoCredentialsError``) counts as
+    unknown too, so it over-warns; the dry runs before the first authorize
+    have already sent the same permission shape with the same credential.
+    """
+    from botocore.exceptions import ClientError
+
     if not isinstance(exc, ClientError):
         return True
-    if ThrottledRetryableChecker().is_retryable(RetryContext(attempt_number=1, parsed_response=exc.response)):
+    if throttled(exc):
         return False
     status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
     return not (isinstance(status, int) and 400 <= status < 500)
