@@ -128,10 +128,21 @@ def _vm(*, legacy: bool = False, **metadata: str) -> Any:
     return SimpleNamespace(name="dev", admin_username="agw", platform_metadata={**base, **metadata})
 
 
+def _ingress_clients(rec: Recorder) -> dict[tuple[str, bool], set[int | None]]:
+    """For each ingress call kind (authorize or revoke, and whether a DryRun), the
+    ``total_max_attempts`` of the clients it went through."""
+    clients: dict[tuple[str, bool], set[int | None]] = {}
+    for method, dry_run, attempts in rec.ec2_clients:
+        if method.endswith("_security_group_ingress"):
+            clients.setdefault((method.split("_", 1)[0], dry_run), set()).add(attempts)
+    return clients
+
+
 def _ec2(platform: EC2Platform) -> Any:
-    """The cached fake EC2 client for the platform's region, whose ``ingress``
-    dict is the live per-SG ingress state the exposure tests read."""
-    return platform._client("ec2", "us-east-1", RunContext())
+    """The fake EC2 state behind every client the platform builds for its region, whose ``ingress``
+    dict is the live per-SG ingress state the exposure tests read; a method patched on it is
+    patched for each of those clients."""
+    return platform._client("ec2", "us-east-1", RunContext()).fake
 
 
 class TestCreate:
@@ -204,6 +215,12 @@ class TestCreate:
             ("authorize_security_group_ingress", False, _DETECTED_PREFIX),
             ("authorize_security_group_ingress", False, "198.51.100.0/24"),
         ]
+
+    def test_bootstrap_authorizes_through_a_single_send_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        _platform().create(_request(), RunContext(config=_config(["198.51.100.0/24"])))
+
+        assert _ingress_clients(rec) == {("authorize", False): {1}, ("revoke", True): {None}}
 
     def test_launch_pins_a_permanent_auto_public_ip(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The primary network interface pins AssociatePublicIpAddress=True (a
@@ -734,6 +751,17 @@ class TestTransientRoute:
             ("revoke_security_group_ingress", False),
         ]
 
+    def test_the_route_authorizes_through_a_single_send_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        with _platform()._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"]))):
+            pass
+
+        assert _ingress_clients(rec) == {
+            ("authorize", False): {1},
+            ("revoke", True): {None},
+            ("revoke", False): {None},
+        }
+
     def test_revoke_denial_happens_before_route_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         controls = Controls(
             dry_run_outcomes=[
@@ -826,7 +854,7 @@ class TestTransientRoute:
         install_fakes(monkeypatch)
         platform = _platform()
 
-        real_authorize = platform._client("ec2", "us-east-1", RunContext()).authorize_security_group_ingress
+        real_authorize = _ec2(platform).authorize_security_group_ingress
 
         def _authorize(**kw: Any) -> Any:
             cidr = kw["IpPermissions"][0]["IpRanges"][0]["CidrIp"]

@@ -26,10 +26,11 @@ if TYPE_CHECKING:
 
 def client_error(code: str, message: str = "boom", operation: str = "Op") -> ClientError:
     """A botocore ``ClientError`` carrying ``code`` in the structured
-    ``response['Error']['Code']`` slot the platform classifies on, answering
-    the one request sent (``ResponseMetadata``, as botocore records it)."""
+    ``response['Error']['Code']`` slot the platform classifies on, and a 400
+    in ``ResponseMetadata.HTTPStatusCode``, which tells a refusal from an
+    unknown outcome."""
     return ClientError(
-        {"Error": {"Code": code, "Message": message}, "ResponseMetadata": {"HTTPStatusCode": 400, "RetryAttempts": 0}},
+        {"Error": {"Code": code, "Message": message}, "ResponseMetadata": {"HTTPStatusCode": 400}},
         operation,
     )
 
@@ -90,6 +91,9 @@ class Recorder:
 
     sessions: list[dict[str, Any]] = field(default_factory=list)
     calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+    # Each EC2 call's method, whether it was a DryRun, and the total_max_attempts of the client it went
+    # through (None for a client built with botocore's default retries).
+    ec2_clients: list[tuple[str, bool, int | None]] = field(default_factory=list)
 
     def methods(self, service: str | None = None) -> list[str]:
         return [m for s, m, _ in self.calls if service is None or s == service]
@@ -142,9 +146,11 @@ class _FakeEC2:
         # sg_id -> {cidr: rule_id}; the per-SG ingress the exposure tests read.
         self.ingress: dict[str, dict[str, str]] = {}
         self._next_rule = 0
+        self.serving: int | None = None  # the total_max_attempts of the client this call came through
 
     def _record(self, method: str, **kwargs: Any) -> None:
         self._rec.calls.append(("ec2", method, kwargs))
+        self._rec.ec2_clients.append((method, bool(kwargs.get("DryRun")), self.serving))
 
     def _dry_run(self, operation: str) -> dict[str, Any]:
         idx = self._dry_run_attempts
@@ -330,6 +336,25 @@ class _FakeSSM:
         return {"Parameter": {"Value": self._c.ssm_ami}}
 
 
+class _ConfiguredEC2:
+    """One EC2 client the platform built: its region's shared fake, as reached through this client's retry config."""
+
+    def __init__(self, fake: _FakeEC2, total_max_attempts: int | None) -> None:
+        self.fake = fake
+        self.total_max_attempts = total_max_attempts
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self.fake, name)
+        if not callable(attribute):
+            return attribute
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            self.fake.serving = self.total_max_attempts
+            return attribute(*args, **kwargs)
+
+        return call
+
+
 class _FakeSession:
     def __init__(self, recorder: Recorder, controls: Controls, **kwargs: Any) -> None:
         self._rec = recorder
@@ -339,10 +364,12 @@ class _FakeSession:
         # the platform's cached client lookups within a test.
         self._ec2: dict[str, _FakeEC2] = {}
 
-    def client(self, service: str, region_name: str | None = None, **_kwargs: Any) -> Any:
+    def client(self, service: str, region_name: str | None = None, config: Any = None, **_kwargs: Any) -> Any:
         region = region_name or ""
         if service == "ec2":
-            return self._ec2.setdefault(region, _FakeEC2(self._rec, self._c, region))
+            fake = self._ec2.setdefault(region, _FakeEC2(self._rec, self._c, region))
+            retries = getattr(config, "retries", None) or {}
+            return _ConfiguredEC2(fake, retries.get("total_max_attempts"))
         if service == "sts":
             return _FakeSTS(self._rec, self._c)
         if service == "ssm":
