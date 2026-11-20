@@ -290,20 +290,19 @@ has started.
   those hosts. Move the key to a plain path.
 - **Managed SSH config lines are written for your own `ssh` to read exactly.** Each managed
   `IdentityFile` line holds the configured key path, absolute. The `Include` line added to
-  `~/.ssh/config` is quoted when its directory holds a space or an apostrophe, and such a line an
-  earlier release wrote unquoted is rewritten as the quoted line where it stands. When the directory
-  holds `%`, `$`, a double quote, a backslash, a control character, `*`, `?` or `[`, no `Include`
-  line is written and a warning says so. A line that, apart from surrounding whitespace, is exactly
-  the `Include` an earlier release wrote for that directory is removed, with the
-  `# Added by agentworks` comment directly above it, and the warning names it. Unquoted, that line
-  can name a different or wider directory than the config directory (`*`, `?` and `[` also match its
-  siblings, and from OpenSSH 9.9 `%` and `$` expand), and a double quote in it made your own `ssh`
-  reject the whole file, for every host. Until `ssh_config` is in a directory whose absolute path
-  holds none of those characters, the managed aliases (`awvm--` and `awagent--` by default) do not
-  resolve in your own `ssh` unless an `Include` of your own reaches them. Such an `Include` is left
-  alone unless it is spelled exactly as the removed line; quote it, for example, or the next sync
-  removes it again. To stop Agentworks adding the line, comment it out; the commented line is left
-  as it is.
+  `~/.ssh/config` is quoted when its directory holds a space or an apostrophe. An earlier release
+  wrote that line unquoted, directly below its `# Added by agentworks` comment, or alone in a file
+  that held nothing else; there, it is rewritten as the quoted line where it stands. When the
+  directory holds `%`, `$`, a double quote, a backslash, a control character, `*`, `?` or `[`, no
+  `Include` line is written and a warning says so, and the line an earlier release wrote in either
+  of those places is removed, with its comment, and named in the warning. Unquoted, that line can
+  name a different or wider directory than the config directory (`*`, `?` and `[` also match its
+  siblings, and from OpenSSH 9.9 `%` and `$` expand), and a double quote or a line break in it made
+  your own `ssh` reject the whole file, for every host. An identical line anywhere else is taken to
+  be your own and is left as it is. Until `ssh_config` is in a directory whose absolute path holds
+  none of those characters, the managed aliases (`awvm--` and `awagent--` by default) do not resolve
+  in your own `ssh` unless an `Include` of your own reaches them. To stop Agentworks adding the
+  line, comment it out; the commented line is left as it is.
 - **`~/.ssh/config` keeps its bytes and line endings.** Agentworks still edits the file in place, as
   before, and now keeps CRLF line endings and any bytes that are not UTF-8. A file you cannot read
   or write is reported and left as it was.

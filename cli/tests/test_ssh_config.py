@@ -158,19 +158,33 @@ def test_ensure_include_noop_if_present_elsewhere(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("parent", ["my keys", "o'brien"])
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
-def test_every_include_line_written_unquoted_is_rewritten_in_place(parent: str, newline: str, tmp_path: Path) -> None:
-    """Earlier releases wrote the pattern unquoted; the correct line may already be there too."""
+def test_the_include_an_earlier_release_wrote_is_rewritten_where_it_stands_and_only_there(
+    parent: str, newline: str, tmp_path: Path
+) -> None:
+    """Copies of that line the operator wrote, at the top level or in a block, keep their meaning, so they stay."""
     ssh_config = tmp_path / parent / "config"
     ssh_config.parent.mkdir()
     directive = _include_directive(ssh_config)
     unquoted = _line_written_by_0_19(ssh_config)
-    lines = [unquoted, "", "Host *", "    Foo bar", "", directive, "Match all", f"    {unquoted}"]
-    ssh_config.write_bytes(newline.join([*lines, ""]).encode())
+    own = f"Host *\n    Foo bar\n\n{unquoted}\nHost work\n    {unquoted}\nMatch all\n    {unquoted}\n"
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, own, newline))
 
     _ensure_include(ssh_config, directive)
 
-    expected = [directive, "", "Host *", "    Foo bar", "", directive, "Match all", f"    {directive}"]
-    assert ssh_config.read_bytes() == newline.join([*expected, ""]).encode()
+    assert ssh_config.read_bytes() == f"# Added by agentworks\n{directive}\n\n{own}".replace("\n", newline).encode()
+
+
+@pytest.mark.parametrize("ending", ["", "\n", "\r\n"])
+def test_a_file_holding_only_the_include_an_earlier_release_wrote_is_rewritten(ending: str, tmp_path: Path) -> None:
+    """Releases before 0.20 left that line alone in the file when removing the legacy section left nothing else."""
+    ssh_config = tmp_path / "my keys" / "config"
+    ssh_config.parent.mkdir()
+    directive = _include_directive(ssh_config)
+    ssh_config.write_bytes(f"{_line_written_by_0_19(ssh_config)}{ending}".encode())
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_bytes() == f"{directive}{ending}".encode()
 
 
 @pytest.mark.parametrize("parent", ["keys", "my keys"])
@@ -600,17 +614,15 @@ def test_a_stale_include_beside_a_legacy_section_is_rewritten_and_the_section_re
     config, _ = _mock_config(tmp_path / "my keys")
     ssh_config = config.operator.ssh_config
     directive = _include_directive(ssh_config)
-    unquoted = _line_written_by_0_19(ssh_config)
-    ssh_config.write_text(
-        f"{unquoted}\n\nHost *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old\n    HostName 1.2.3.4\n"
-    )
+    legacy = f"{_LEGACY_MARKER}\nHost awvm--old\n    HostName 1.2.3.4\n"
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, f"Host *\n    Foo bar\n\n{legacy}"))
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = []
 
     _rebuild_config_dir(config, db)
 
-    assert ssh_config.read_text() == f"{directive}\n\nHost *\n    Foo bar\n"
+    assert ssh_config.read_text() == f"# Added by agentworks\n{directive}\n\nHost *\n    Foo bar\n"
 
 
 def test_an_include_inside_the_legacy_section_is_restored_when_the_section_goes(tmp_path: Path) -> None:
@@ -1131,7 +1143,13 @@ def _config_under_an_unnameable_directory(tmp_path: Path, shape: str, name: str 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
 @pytest.mark.parametrize(
     ("shape", "name"),
-    [("directory", 'a"b'), ("directory", "100%d"), ("directory", "g*x"), ("symlinked .ssh", 'a"b')],
+    [
+        ("directory", 'a"b'),
+        ("directory", "100%d"),
+        ("directory", "g*x"),
+        ("directory", "line\nbreak"),
+        ("symlinked .ssh", 'a"b'),
+    ],
 )
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_removed_with_a_warning(
@@ -1141,12 +1159,19 @@ def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_rem
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """Every copy of that release's line goes, its marker with it; the file keeps its other bytes, inode and mode."""
+    """Only that release's marked line goes, with its marker, matched whole where the directory name holds a newline.
+
+    Copies of it the operator wrote, at the top level or in a block, stay, and
+    the file keeps its other bytes, its inode and its mode.
+    """
     config = _config_under_an_unnameable_directory(tmp_path, shape, name)
     ssh_config = config.operator.ssh_config
     earlier = _line_written_by_0_19(ssh_config)
-    kept = f"# Include {earlier}\nInclude ~/.ssh/extra/*\n\nHost other\n    HostName 10.0.0.9\n\nMatch all\n"
-    ssh_config.write_bytes(_written_by_0_19(ssh_config, f"{kept}    {earlier}\n    ServerAliveInterval 60\n", newline))
+    kept = (
+        f"# Include {earlier}\nInclude ~/.ssh/extra/*\n\n{earlier}\nHost other\n    HostName 10.0.0.9\n"
+        f"    {earlier}\nMatch all\n    {earlier}\n"
+    )
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, f"{kept}    ServerAliveInterval 60\n", newline))
     ssh_config.chmod(0o640)
     before = ssh_config.stat()
 
@@ -1161,8 +1186,9 @@ def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_rem
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("newline", ["\n", "\r\n"])
-@pytest.mark.parametrize("marked", [True, False])
+@pytest.mark.parametrize(
+    ("marked", "newline"), [(True, "\n"), (True, "\r\n"), (False, ""), (False, "\n"), (False, "\r\n")]
+)
 def test_a_0_19_include_for_a_directory_with_a_percent_is_removed_with_or_without_its_marker(
     marked: bool,
     newline: str,
@@ -1192,13 +1218,16 @@ def test_a_0_19_include_for_a_directory_with_a_percent_is_removed_with_or_withou
 
 @needs_ssh
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
-@pytest.mark.parametrize("shape", ["directory", "symlinked .ssh"])
-def test_the_installed_client_reads_the_file_again_once_the_include_with_a_double_quote_is_removed(
+@pytest.mark.parametrize(
+    ("shape", "name"), [("directory", 'a"b'), ("symlinked .ssh", 'a"b'), ("directory", "line\nbreak")]
+)
+def test_the_installed_client_reads_the_file_again_once_the_include_it_rejected_is_removed(
     shape: str,
+    name: str,
     tmp_path: Path,
 ) -> None:
-    """The quote that release left unbalanced makes ssh reject the whole file, so an unrelated host failed too."""
-    config = _config_under_an_unnameable_directory(tmp_path, shape)
+    """A quote left unbalanced, or a line broken in two, makes ssh reject the whole file, every host with it."""
+    config = _config_under_an_unnameable_directory(tmp_path, shape, name)
     ssh_config = config.operator.ssh_config
     ssh_config.write_bytes(_written_by_0_19(ssh_config, "Host other\n    HostName 10.0.0.9\n"))
     argv = ["ssh", "-G", "-F", str(ssh_config), "other"]

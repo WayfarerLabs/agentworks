@@ -12,6 +12,7 @@ cleaned up automatically.
 from __future__ import annotations
 
 import errno
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -82,10 +83,32 @@ def _include_directive(ssh_config: Path) -> str:
 def _earlier_include(ssh_config: Path) -> str:
     """The Include line releases before 0.20 wrote: the same pattern, never quoted, whatever the directory held.
 
-    The one rule for recognising that line, whether it is rewritten as the
-    quoted directive or, for a directory ssh cannot name, removed.
+    :func:`_replace_earlier_include` finds it only where those releases wrote it.
     """
     return f"Include {_to_ssh_path(ssh_config.parent / _CONFIG_DIR_NAME)}/*"
+
+
+def _replace_earlier_include(content: str, earlier: str, replacement: str | None) -> str:
+    """``content`` with ``earlier`` replaced by ``replacement`` where an earlier release wrote it.
+
+    Those releases wrote it in two shapes only, and only those are theirs: the
+    ``# Added by agentworks`` line directly followed by it, at the start of a
+    line, and a file holding nothing but it (left by removing the legacy
+    section). The same line anywhere else may be the operator's own and is left
+    alone. For ``None`` the line is removed instead, with its marker, and a file
+    that held only the line is left empty. Those releases wrote in text mode, so
+    every newline, one in the directory name included, is LF, or CRLF on
+    Windows; the text is matched whole, as the line can span physical lines.
+    """
+    for newline in ("\n", "\r\n"):
+        line = earlier.replace("\n", newline)
+        if content in (line, line + newline):
+            return "" if replacement is None else replacement + content[len(line) :]
+        block = f"{_INCLUDE_COMMENT}{newline}{line}{newline}"
+        kept = "" if replacement is None else f"{_INCLUDE_COMMENT}{newline}{replacement}{newline}"
+        # Backslashes doubled, so re.sub reads the replacement literally.
+        content = re.sub(f"(?m)^{re.escape(block)}", kept.replace("\\", "\\\\"), content)
+    return content
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
@@ -267,11 +290,11 @@ def _sync_include(ssh_config: Path) -> None:
     """Ensure the Include directive, or, when ssh would misread the directory, warn once that none is written.
 
     In that case :func:`_remove_earlier_include` removes the line an earlier
-    release wrote for the same directory. Unquoted, that line can name a
-    different or wider directory than the config directory (a glob character
-    also matches its siblings, and from OpenSSH 9.9 ``%`` and ``$`` expand),
-    and a double quote in it makes ssh reject the whole file, every host with
-    it. Any other Include is the operator's and is left alone.
+    release wrote for the same directory, where that release wrote it.
+    Unquoted, that line can name a different or wider directory than the
+    config directory (a glob character also matches its siblings, and from
+    OpenSSH 9.9 ``%`` and ``$`` expand), and a double quote or a line break in
+    it makes ssh reject the whole file, every host with it.
     """
     try:
         directive = _include_directive(ssh_config)
@@ -304,13 +327,14 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     lines = content.splitlines(keepends=True)
     # Earlier releases wrote the pattern unquoted. With an apostrophe in it,
     # ssh rejects the whole file, so a correct line beside it would fix
-    # nothing; with whitespace, the line names nothing. Rewrite that line where it stands.
+    # nothing; with whitespace, the line names nothing. Rewrite what they
+    # wrote where it stands.
     unquoted = _earlier_include(ssh_config)
-    rewritten = [line.replace(unquoted, directive) if line.strip() == unquoted else line for line in lines]
+    rewritten = _replace_earlier_include(content, unquoted, directive)
     opted_out = any(_commented_out(line) in (directive, unquoted) for line in lines)
-    if opted_out or any(line.strip() == directive for line in rewritten):
-        if rewritten != lines:
-            _write_user_config(ssh_config, "".join(rewritten))
+    if opted_out or any(line.strip() == directive for line in rewritten.splitlines()):
+        if rewritten != content:
+            _write_user_config(ssh_config, rewritten)
         return
 
     newline = "\r\n" if "\r\n" in content else "\n"
@@ -324,24 +348,18 @@ def _commented_out(line: str) -> str | None:
 
 
 def _remove_earlier_include(ssh_config: Path) -> str | None:
-    """Remove each line whose stripped text equals :func:`_earlier_include`, with the comment written directly above it.
+    """Remove :func:`_earlier_include` where an earlier release wrote it.
 
-    Returns the removed line, or ``None`` when there was none.
+    Returns the removed line, or ``None`` when it was not there.
     """
     content = _read_user_config(ssh_config)
     if content is None:
         return None
     earlier = _earlier_include(ssh_config)
-    lines = content.splitlines(keepends=True)
-    kept: list[str] = []
-    for line in lines:
-        if line.strip() != earlier:
-            kept.append(line)
-        elif kept and kept[-1].strip() == _INCLUDE_COMMENT:
-            kept.pop()
-    if len(kept) == len(lines):
+    kept = _replace_earlier_include(content, earlier, None)
+    if kept == content:
         return None
-    _write_user_config(ssh_config, "".join(kept))
+    _write_user_config(ssh_config, kept)
     return earlier
 
 
