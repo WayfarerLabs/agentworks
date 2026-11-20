@@ -535,7 +535,11 @@ def test_the_projects_are_reported_whole_unless_the_command_read_every_path(
 
 @requires_guest_shell
 @skip_as_root
-@pytest.mark.parametrize("consumer", ["cat >/dev/null", "IFS= read -r _"], ids=["all", "one-line"])
+@pytest.mark.parametrize(
+    "consumer",
+    ["cat >/dev/null", "IFS= read -r _", "head -c 3 >/dev/null", "dd bs=1 count=1 >/dev/null 2>&1"],
+    ids=["all", "one-line", "part-of-a-line", "one-byte"],
+)
 def test_input_read_before_the_script_runs_leaves_reinit_partial(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
@@ -543,8 +547,8 @@ def test_input_read_before_the_script_runs_leaves_reinit_partial(
     captured_output: CapturedOutput,
     consumer: str,
 ) -> None:
-    """A startup file of the admin's shell that reads stdin takes paths the script never
-    sees, and shifts the line numbers of the rest."""
+    """A startup file of the admin's shell that reads stdin, however little, takes input
+    the script never sees."""
     target, workspace, _entries = guest
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
     later = _workspace(db, tmp_path / "guest" / "workspaces", "zlater")
@@ -615,7 +619,7 @@ def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
     finally:
         locked.chmod(0o755)
 
-    assert sent == [None, f"{locked}\n{workspace}\n"]
+    assert sent == [None, f"AGW_TMUXINATOR_PATHS\n{locked}\n{workspace}\n"]
     assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
     assert str(locked) in captured_output.warnings[0]
