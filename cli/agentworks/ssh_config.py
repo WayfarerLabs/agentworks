@@ -106,9 +106,13 @@ def _replace_earlier_include(content: str, earlier: str, replacement: str | None
             return "" if replacement is None else replacement + content[len(line) :]
         block = f"{_INCLUDE_COMMENT}{newline}{line}{newline}"
         kept = "" if replacement is None else f"{_INCLUDE_COMMENT}{newline}{replacement}{newline}"
-        # Backslashes doubled, so re.sub reads the replacement literally.
-        content = re.sub(f"(?m)^{re.escape(block)}", kept.replace("\\", "\\\\"), content)
+        content = _replace_at_line_starts(content, block, kept)
     return content
+
+
+def _replace_at_line_starts(content: str, old: str, new: str) -> str:
+    """``content`` with each ``old`` that starts a line replaced by ``new``, both taken literally."""
+    return re.sub(f"(?m)^{re.escape(old)}", lambda _: new, content)
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:
