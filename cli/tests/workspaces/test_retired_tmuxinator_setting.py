@@ -109,29 +109,6 @@ def test_an_explicit_instance_spec_setting_warns_and_a_stored_one_still_decodes(
 
 
 @pytest.mark.parametrize("suppressed", [False, True])
-def test_doctor_reports_stored_workspace_settings_and_ignores_suppression(suppressed: bool) -> None:
-    from contextlib import closing
-
-    from agentworks import output
-    from agentworks.db import Database, VersionedPayload
-    from agentworks.doctor import HealthGroup, Status
-    from agentworks.doctor_state import append_workspace_deprecation_checks
-
-    with closing(Database()) as database:
-        database.insert_vm("box", site="lima-local", hostname="box")
-        for name in ("old", "modern"):
-            database.insert_workspace(name, f"/srv/{name}", "box", f"ws-{name}")
-        database.instance_state.put_desired_overlay("workspace", "old", VersionedPayload(1, {"tmuxinator": False}))
-        database.instance_state.put_desired_overlay("workspace", "modern", VersionedPayload(1, {"repo": "r"}))
-    output.set_suppress_deprecations(suppressed)
-    group = HealthGroup("Configuration")
-
-    append_workspace_deprecation_checks(group)
-
-    assert [(check.name, check.status) for check in group.checks] == [("workspace/old.tmuxinator", Status.INFO)]
-
-
-@pytest.mark.parametrize("suppressed", [False, True])
 def test_doctor_reports_manifest_and_stored_settings_and_ignores_suppression(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suppressed: bool
 ) -> None:
@@ -146,13 +123,14 @@ def test_doctor_reports_manifest_and_stored_settings_and_ignores_suppression(
         tmp_path,
         ManifestDoc("vm-template", "default"),
         ManifestDoc("admin-template", "default"),
-        ManifestDoc("workspace-template", "old", {"tmuxinator": True}),
+        _template("{tmuxinator: true}"),
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", config_path)
     with closing(Database()) as database:
         database.insert_vm("box", site="lima-local", hostname="box")
-        database.insert_workspace("stored", "/srv/stored", "box", "ws-stored")
-        database.instance_state.put_desired_overlay("workspace", "stored", VersionedPayload(1, {"tmuxinator": True}))
+        for name, stored in (("old", {"tmuxinator": False}), ("modern", {"repo": "r"})):
+            database.insert_workspace(name, f"/srv/{name}", "box", f"ws-{name}")
+            database.instance_state.put_desired_overlay("workspace", name, VersionedPayload(1, stored))
     output.set_suppress_deprecations(suppressed)
 
     group, _config, registry = _check_config()
@@ -161,4 +139,5 @@ def test_doctor_reports_manifest_and_stored_settings_and_ignores_suppression(
     rows = [check for check in group.checks if check.name == "Manifest"]
     assert [row.status for row in rows] == [Status.WARN]
     assert "workspace-template/old.tmuxinator" in (rows[0].message or "")
-    assert [check.status for check in group.checks if check.name == "workspace/stored.tmuxinator"] == [Status.INFO]
+    stored_rows = [(check.name, check.status) for check in group.checks if check.name.startswith("workspace/")]
+    assert stored_rows == [("workspace/old.tmuxinator", Status.INFO)]

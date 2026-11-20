@@ -41,14 +41,9 @@ _UNFINISHED_MARKER = "AGW_TMUXINATOR_UNFINISHED="
 # another's failure or stop the rest. A test that is merely false never sets it;
 # being unable to search or read something does.
 #
-# A test on a path is also false when an unsearchable ancestor hides the path, so
-# both scripts start with ``hidden``, the one rule for absent versus hidden: it walks
-# up from the path's parent to the nearest ancestor it can see, and the path is hidden
-# when that ancestor is a directory it cannot search. Otherwise the path is absent or
-# visible, so a visible path is never examined itself.
-# Callers canonicalize first with ``realpath -m``, which resolves every link it can
-# reach and keeps the rest literal, so a link into an unsearchable directory walks
-# up from its target rather than stopping at the link.
+# ``hidden`` walks up from the path's parent to the nearest ancestor that exists, and
+# the path is hidden when that ancestor is a directory the admin cannot search.
+# Callers resolve links first with ``realpath -m``.
 _HIDDEN_FUNCTION = """\
 hidden() {
   up="${1%/*}"

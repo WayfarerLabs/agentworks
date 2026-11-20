@@ -358,7 +358,7 @@ def test_a_discovery_directory_hidden_by_an_unsearchable_directory_is_warned(
 
 
 @requires_guest_shell
-@pytest.mark.parametrize("shape", ["missing", "config-missing", "dangling-link"])
+@pytest.mark.parametrize("shape", ["missing", "config-missing", "config-file", "dangling-link"])
 def test_a_missing_discovery_directory_is_a_quiet_success(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
@@ -367,8 +367,10 @@ def test_a_missing_discovery_directory_is_a_quiet_success(
     shape: str,
 ) -> None:
     target, workspace, entries = guest
-    shutil.rmtree(entries.parent if shape == "config-missing" else entries)
-    if shape == "dangling-link":
+    shutil.rmtree(entries.parent if shape.startswith("config-") else entries)
+    if shape == "config-file":
+        entries.parent.write_text("not a directory\n")
+    elif shape == "dangling-link":
         entries.symlink_to(tmp_path / "guest" / "nowhere")
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
 
