@@ -91,29 +91,39 @@ def _earlier_include(ssh_config: Path) -> str:
 def _replace_earlier_include(content: str, earlier: str, replacement: str | None) -> str:
     """``content`` with ``earlier`` replaced by ``replacement`` where an earlier release wrote it.
 
-    Only the ``# Added by agentworks`` line directly followed by it, at the
+    Only the line directly below a ``# Added by agentworks`` line, each at the
     start of a line, is theirs. They left the bare line alone in a file only
     where the operator had already written it, so the same line anywhere
-    without the marker is the operator's own and is left alone. For ``None``
-    the line is removed instead, with its marker. Those releases wrote in text
-    mode, so every newline, one in the directory name included, is LF, or CRLF
-    on Windows; the text is matched whole, as the line can span physical lines.
-    They also read in universal-newline mode, so a CR in the directory name
-    came back as LF and the next sync prepended the line again: the LF form
-    counts with CR and CRLF read as LF, too.
+    without the marker is the operator's own and is left alone. A run of
+    markers directly above the line is one block: the replacement keeps the
+    run as written, and for ``None`` the line is removed with the whole run,
+    so no marker is left directly above a line it was not written for. The
+    shapes below are matched in one pass, so no sync removes a block that its
+    own removal completed.
+
+    Those releases wrote in text mode, so every newline, one in the directory
+    name included, is LF, or CRLF on Windows; the text is matched whole, as the
+    line can span physical lines. They also read in universal-newline mode, so
+    a CR in the directory name came back as LF and the next sync prepended the
+    line again: the LF form counts with CR and CRLF read as LF, too.
     """
     universal = earlier.replace("\r\n", "\n").replace("\r", "\n")
-    shapes = dict.fromkeys([("\n", earlier), ("\n", universal), ("\r\n", earlier.replace("\n", "\r\n"))])
-    for newline, line in shapes:
-        block = f"{_INCLUDE_COMMENT}{newline}{line}{newline}"
-        kept = "" if replacement is None else f"{_INCLUDE_COMMENT}{newline}{replacement}{newline}"
-        content = _replace_at_line_starts(content, block, kept)
-    return content
+    shapes = [("\n", earlier), ("\n", universal), ("\r\n", earlier.replace("\n", "\r\n"))]
+    marker = re.escape(_INCLUDE_COMMENT)
+    # One group per shape holds its run of markers, which ends in the shape's
+    # newline: the marker directly above the line keeps it exactly.
+    blocks = "|".join(
+        rf"((?:{marker}\r?\n)*{marker}{re.escape(newline)}){re.escape(line + newline)}" for newline, line in shapes
+    )
 
+    def kept(block: re.Match[str]) -> str:
+        if replacement is None:
+            return ""
+        markers = next(run for run in block.groups() if run is not None)
+        newline = "\r\n" if markers.endswith("\r\n") else "\n"
+        return f"{markers}{replacement}{newline}"
 
-def _replace_at_line_starts(content: str, old: str, new: str) -> str:
-    """``content`` with each ``old`` that starts a line replaced by ``new``, both taken literally."""
-    return re.sub(f"(?m)^{re.escape(old)}", lambda _: new, content)
+    return re.sub(f"(?m)^(?:{blocks})", kept, content)
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:

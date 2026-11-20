@@ -1362,16 +1362,61 @@ def test_the_marker_counts_only_at_the_start_of_a_line_directly_above_the_line(
     assert ssh_config.read_bytes() == original
 
 
-def test_a_marker_copied_above_a_marked_line_leaves_the_operators_own_line(tmp_path: Path) -> None:
-    """Each shape is matched once, so a block the first removal exposes is not removed again."""
-    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("path", ["removed", "rewritten", "kept"])
+def test_a_marker_copied_above_a_marked_line_leaves_the_line_copied_below_it_by_every_sync(
+    path: str, newline: str, tmp_path: Path
+) -> None:
+    """The run of markers directly above the line is one block, so no marker is left above the operator's copy.
+
+    The copied marker and line end in ``newline``, the block between them in
+    LF. Where no Include can be written the block goes with both markers;
+    where the Include is quoted only the line is rewritten; where it is the
+    same line nothing changes.
+    """
+    if path == "removed":
+        config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    else:
+        config, _ = _mock_config(tmp_path / ("my keys" if path == "rewritten" else "home"))
     ssh_config = config.operator.ssh_config
     line = _line_written_by_0_19(ssh_config)
-    ssh_config.write_bytes(f"# Added by agentworks\n# Added by agentworks\n{line}\n{line}\n".encode())
+    markers = f"# Added by agentworks{newline}# Added by agentworks\n"
+    original = f"{markers}{line}\n{line}{newline}".encode()
+    if path == "removed":
+        expected = f"{line}{newline}".encode()
+    elif path == "rewritten":
+        expected = f"{markers}{_include_directive(ssh_config)}\n{line}{newline}".encode()
+    else:
+        expected = original
+    ssh_config.write_bytes(original)
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+    first = ssh_config.read_bytes()
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert (first, ssh_config.read_bytes()) == (expected, expected)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+def test_a_sync_leaves_a_block_its_own_removal_completes(tmp_path: Path) -> None:
+    """Every shape is matched in one pass, so a block a removal completes is left by that sync.
+
+    A removal can complete a block only inside a line that spans physical
+    lines, and that is the boundary of what is kept: here the operator's CRLF
+    halves of such a line, around an LF block, join into a CRLF block
+    byte-identical to one 0.19 wrote, which the next sync removes as that
+    release's.
+    """
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "line\nbreak")
+    ssh_config = config.operator.ssh_config
+    line = _line_written_by_0_19(ssh_config)
+    head, tail = line.split("\n")
+    marker = "# Added by agentworks"
+    ssh_config.write_bytes(f"{marker}\r\n{head}\r\n{marker}\n{line}\n{tail}\r\n".encode())
 
     _rebuild_config_dir(config, _db_with_one_vm())
 
-    assert ssh_config.read_bytes() == f"# Added by agentworks\n{line}\n".encode()
+    assert ssh_config.read_bytes() == f"{marker}\r\n{head}\r\n{tail}\r\n".encode()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
