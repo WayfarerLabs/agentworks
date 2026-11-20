@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import stat
@@ -12,6 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks import ssh_config as ssh_config_module
 from agentworks.errors import AuthorizationError, ConfigError
 from agentworks.execution.ssh_process import VMPolicy
 from agentworks.execution.trust import TrustBinding, TrustMode
@@ -194,15 +196,18 @@ def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
-def test_a_new_config_is_created_under_the_umask(tmp_path: Path) -> None:
+def test_a_new_config_gets_the_mode_of_any_new_file_beside_it(tmp_path: Path) -> None:
+    """The umask and any default ACL on the directory decide, as for a file the operator creates there."""
     ssh_config = tmp_path / "config"
+    ordinary = tmp_path / "ordinary"
     previous = os.umask(0o022)
     try:
         _ensure_include(ssh_config, _include_directive(ssh_config))
+        ordinary.write_text("")
     finally:
         os.umask(previous)
 
-    assert stat.S_IMODE(ssh_config.stat().st_mode) == 0o644
+    assert stat.S_IMODE(ssh_config.stat().st_mode) == stat.S_IMODE(ordinary.stat().st_mode)
 
 
 def test_bytes_that_are_not_utf8_survive_a_rewrite(tmp_path: Path) -> None:
@@ -398,6 +403,48 @@ def test_a_config_the_user_may_not_read_is_refused_and_left_as_it_was(
     assert caught.value.hint is not None
     (warning,) = captured_output.warnings
     assert caught.value.hint in warning
+
+
+@pytest.mark.parametrize(("error", "refused"), [(errno.EROFS, True), (errno.EIO, False)])
+def test_only_a_refused_open_is_reported_as_the_operators_to_fix(
+    error: int,
+    refused: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config linked into a read-only mount, as home-manager links into ``/nix/store``, is the operator's to fix."""
+    ssh_config = tmp_path / "config"
+    original = b"Host *\n    Foo bar\n"
+    ssh_config.write_bytes(original)
+    real_open = open
+
+    def open_on_a_failing_mount(file: Path, mode: str = "r", *args: object, **kwargs: object) -> object:
+        if "w" in mode:
+            raise OSError(error, os.strerror(error), str(file))
+        return real_open(file, mode, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(ssh_config_module, "open", open_on_a_failing_mount, raising=False)
+
+    with pytest.raises(AuthorizationError if refused else OSError):
+        _ensure_include(ssh_config, _include_directive(ssh_config))
+    assert ssh_config.read_bytes() == original
+
+
+@pytest.mark.parametrize("message", ["cannot update the file.", "cannot update the file"])
+def test_a_warning_joins_the_errors_hint_after_exactly_one_period(
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    def failing_sync(*args: object, **kwargs: object) -> None:
+        raise AuthorizationError(message, hint="Then retry.")
+
+    monkeypatch.setattr(ssh_config_module, "sync_ssh_config", failing_sync)
+
+    sync_ssh_config_or_warn(MagicMock(), MagicMock())
+
+    (warning,) = captured_output.warnings
+    assert warning.endswith("cannot update the file. Then retry.")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
@@ -859,7 +906,6 @@ def _managed_blocks(content: str) -> dict[str, str]:
 
 @pytest.mark.parametrize("rebuild", ["config_dir", "legacy"])
 def test_store_options_appear_exactly_for_vms_with_a_record(tmp_path: Path, rebuild: str) -> None:
-    from agentworks import ssh_config as ssh_config_module
     from agentworks.execution import trust
 
     config, ssh_dir = _mock_config(tmp_path)
