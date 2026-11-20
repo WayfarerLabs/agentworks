@@ -187,6 +187,24 @@ def test_a_file_holding_only_the_include_an_earlier_release_wrote_is_rewritten(e
     assert ssh_config.read_bytes() == f"{directive}{ending}".encode()
 
 
+@pytest.mark.windows
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_directory_whose_name_holds_a_unicode_line_separator_gets_the_include_once(
+    newline: str, tmp_path: Path
+) -> None:
+    """ssh breaks lines only at LF, so U+2028 in the directory name is part of the directive's line."""
+    ssh_config = tmp_path / "a\u2028b" / "config"
+    ssh_config.parent.mkdir()
+    ssh_config.write_bytes(f"Host *{newline}    Foo bar{newline}".encode())
+    directive = _include_directive(ssh_config)
+    _ensure_include(ssh_config, directive)
+    once = ssh_config.read_bytes()
+
+    _ensure_include(ssh_config, directive)
+
+    assert ssh_config.read_bytes() == once
+
+
 @pytest.mark.parametrize("parent", ["keys", "my keys"])
 @pytest.mark.parametrize("comment", ["# {directive}", "#{unquoted}", "    #  {unquoted}"])
 def test_the_managed_include_commented_out_is_an_opt_out(parent: str, comment: str, tmp_path: Path) -> None:

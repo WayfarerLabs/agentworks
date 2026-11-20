@@ -324,7 +324,9 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
         _write_user_config(ssh_config, f"{_INCLUDE_COMMENT}\n{directive}\n")
         return
 
-    lines = content.splitlines(keepends=True)
+    # Split at LF alone, the only line break ssh reads: str.splitlines also
+    # breaks at characters such as U+2028 that a path may hold.
+    lines = content.split("\n")
     # Earlier releases wrote the pattern unquoted. With an apostrophe in it,
     # ssh rejects the whole file, so a correct line beside it would fix
     # nothing; with whitespace, the line names nothing. Rewrite what they
@@ -332,7 +334,7 @@ def _ensure_include(ssh_config: Path, directive: str) -> None:
     unquoted = _earlier_include(ssh_config)
     rewritten = _replace_earlier_include(content, unquoted, directive)
     opted_out = any(_commented_out(line) in (directive, unquoted) for line in lines)
-    if opted_out or any(line.strip() == directive for line in rewritten.splitlines()):
+    if opted_out or any(line.strip() == directive for line in rewritten.split("\n")):
         if rewritten != content:
             _write_user_config(ssh_config, rewritten)
         return
