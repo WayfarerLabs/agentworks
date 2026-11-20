@@ -561,7 +561,8 @@ def test_a_failed_project_command_without_usable_markers_still_warns(
 ) -> None:
     target, workspace, entries = guest
     project, link = _project_and_link(workspace, entries)
-    _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
+    # The run reports finishing, so only its failure, with nothing usable named, is left to warn.
+    _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout + "AGW_TMUXINATOR_FINISHED\n", stderr=""))
 
     _reinit(db, target)
 
@@ -645,6 +646,25 @@ def test_a_project_command_that_died_partway_also_reports_the_rest(
     assert len(reported) == failures
     assert str(workspace) in reported[0]
     assert not any("/srv/unreached" in failure for failure in reported)
+
+
+@requires_guest_shell
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    [(0, ""), (1, "AGW_TMUXINATOR_FINISHED\n")],
+    ids=["never-reached-the-script", "failed-naming-nothing"],
+)
+def test_a_project_command_that_names_nothing_but_did_not_finish_cleanly_is_reported(
+    guest: tuple[LocalFixtureTransport, Path, Path], returncode: int, stdout: str
+) -> None:
+    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
+
+    target, workspace, _entries = guest
+    _replace_call(target, 2, SSHResult(returncode=returncode, stdout=stdout, stderr=""))
+
+    reported = retire_tmuxinator_projects(target, [str(workspace)])
+
+    assert len(reported) == 1 and str(workspace) not in reported[0]
 
 
 @requires_guest_shell
