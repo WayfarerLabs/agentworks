@@ -48,14 +48,13 @@ _UNFINISHED_LINE = re.compile(f"{_UNFINISHED_MARKER}([1-9][0-9]{{0,8}})")
 # substitution that yields a path appends ``x`` and ``%??`` drops it with the one
 # newline the command adds, leaving the exact path. A failed command leaves it empty.
 #
-# ``hidden`` resolves links in its first argument with ``realpath -m`` and appends
-# its second, then walks up from that path's parent to the nearest ancestor that
-# exists. The path is hidden when that ancestor is a directory the admin cannot search.
+# ``hidden`` resolves links in a path with ``realpath -m`` and walks up from it to the
+# nearest path that exists. What is in or below the path is hidden when that is a
+# directory the admin cannot search.
 _HIDDEN_FUNCTION = """\
 hidden() {
   up=$(realpath -m -- "$1" && printf x)
-  up="${up%??}$2"
-  up="${up%/*}"
+  up=${up%??}
   until [ -e "$up" ]; do
     case $up in */*) up="${up%/*}" ;; *) return 1 ;; esac
   done
@@ -108,7 +107,7 @@ while IFS= read -r workspace; do
       1) ;;
       *) unfinished ;;
     esac
-  elif hidden "$workspace" /.tmuxinator.yml; then
+  elif hidden "$workspace"; then
     unfinished
   fi
 done
