@@ -488,17 +488,29 @@ def test_a_config_the_user_may_not_read_is_refused_and_left_as_it_was(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
 @pytest.mark.skipif(sys.platform != "win32" and os.geteuid() == 0, reason="root may search and write any directory")
-@pytest.mark.parametrize("locked", ["above .ssh", ".ssh"])
+@pytest.mark.parametrize(
+    ("locked", "refused"), [("above .ssh", "config.d"), (".ssh", "config.d"), ("above a missing .ssh", ".ssh")]
+)
 def test_a_config_d_the_user_may_not_create_is_refused_and_the_config_left_as_it_was(
     locked: str,
+    refused: str,
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """Above ``.ssh`` the user may not search; ``.ssh`` itself it may read but not write."""
+    """The error names the directory the system refused.
+
+    Above ``.ssh`` the user may not search, or, where ``.ssh`` is missing,
+    write; ``.ssh`` itself it may read but not write.
+    """
     config, ssh_dir = _mock_config(tmp_path / "home")
-    original = b"Host *\n    Foo bar\n"
-    config.operator.ssh_config.write_bytes(original)
-    directory, mode = (ssh_dir.parent, 0o600) if locked == "above .ssh" else (ssh_dir, 0o500)
+    original: bytes | None = b"Host *\n    Foo bar\n"
+    if locked == "above a missing .ssh":
+        shutil.rmtree(ssh_dir)
+        original = None
+        directory, mode = ssh_dir.parent, 0o500
+    else:
+        config.operator.ssh_config.write_bytes(original)
+        directory, mode = (ssh_dir.parent, 0o600) if locked == "above .ssh" else (ssh_dir, 0o500)
     directory.chmod(mode)
     try:
         with pytest.raises(AuthorizationError) as caught:
@@ -507,9 +519,11 @@ def test_a_config_d_the_user_may_not_create_is_refused_and_the_config_left_as_it
     finally:
         directory.chmod(0o700)
 
-    assert config.operator.ssh_config.read_bytes() == original
+    ssh_config = config.operator.ssh_config
+    assert (ssh_config.read_bytes() if ssh_config.exists() else None) == original
     assert not (ssh_dir / "config.d").exists()
-    assert format_host_path((ssh_dir / "config.d").resolve()) in str(caught.value)
+    named = ssh_dir / "config.d" if refused == "config.d" else ssh_dir
+    assert f"'{format_host_path(named.resolve())}'" in str(caught.value)
     assert caught.value.hint is not None
     (warning,) = captured_output.warnings
     assert caught.value.hint in warning
