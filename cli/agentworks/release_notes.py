@@ -25,7 +25,6 @@ _TOPIC_RE = re.compile(
     rf"^{RELEASE_TOPIC}/v(?P<major>{_VERSION_COMPONENT})-"
     rf"(?P<minor>{_VERSION_COMPONENT})-(?P<patch>{_VERSION_COMPONENT})$"
 )
-_EXPRESSION_MARKERS = ("{{", "}}", "${", "<%", "%>", "{%", "%}")
 
 
 class ReleaseNotesError(ValidationError):
@@ -81,10 +80,6 @@ def _reject_unsafe_text(text: str) -> None:
         codepoint = ord(character)
         if (codepoint < 32 and character not in "\t\n\r") or 127 <= codepoint <= 159:
             raise ReleaseNotesError("packaged release history contains terminal control text")
-    if any(marker in text for marker in _EXPRESSION_MARKERS):
-        raise ReleaseNotesError("packaged release history contains an unsafe expression marker")
-    if "⟦" in text or "⟧" in text:
-        raise ReleaseNotesError("packaged release history contains a reserved guide delimiter")
 
 
 def parse_release_history(data: bytes) -> ReleaseHistory:
