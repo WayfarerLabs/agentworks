@@ -171,7 +171,7 @@ def _legacy_rebuild(config: Config, db: Database) -> None:
     ``_rebuild_config_dir``; only the file layout differs.
     """
     ssh_config = config.operator.ssh_config
-    user_section, _old_entries = _read_managed(ssh_config)
+    user_section = _read_user_section(ssh_config)
     prefix = config.operator.ssh_host_prefix
     agent_prefix = config.operator.ssh_agent_host_prefix
 
@@ -486,37 +486,11 @@ def _format_entry(
     return f"Host {alias}\n    HostName {hostname}\n    User {user}\n{identity_line}{trust_lines}"
 
 
-def _read_managed(ssh_config: Path) -> tuple[str, dict[str, str]]:
-    """Read the SSH config, splitting into operator-managed section and auto-managed entries."""
-    entries: dict[str, str] = {}
-
-    content = _read_user_config(ssh_config)
-    if content is None:
-        return "", entries
+def _read_user_section(ssh_config: Path) -> str:
+    """The operator's part of the SSH config: everything before the legacy managed section."""
+    content = _read_user_config(ssh_config) or ""
     marker_idx = content.find(_LEGACY_MARKER)
-
-    if marker_idx == -1:
-        return content, entries
-
-    user_section = content[:marker_idx]
-    managed_section = content[marker_idx + len(_LEGACY_MARKER) :]
-
-    current_alias = ""
-    current_lines: list[str] = []
-
-    for line in managed_section.splitlines():
-        if line.startswith("Host "):
-            if current_alias:
-                entries[current_alias] = "\n".join(current_lines) + "\n"
-            current_alias = line.split()[1] if len(line.split()) > 1 else ""
-            current_lines = [line]
-        elif current_alias:
-            current_lines.append(line)
-
-    if current_alias:
-        entries[current_alias] = "\n".join(current_lines) + "\n"
-
-    return user_section, entries
+    return content if marker_idx == -1 else content[:marker_idx]
 
 
 def _write_legacy(
