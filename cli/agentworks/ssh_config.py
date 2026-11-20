@@ -99,8 +99,12 @@ def _replace_earlier_include(content: str, earlier: str, replacement: str | None
     that held only the line is left empty. Those releases wrote in text mode, so
     every newline, one in the directory name included, is LF, or CRLF on
     Windows; the text is matched whole, as the line can span physical lines.
+    They also read in universal-newline mode, so a CR in the directory name
+    came back as LF and the next sync prepended the line again: the LF form
+    counts with CR and CRLF read as LF, too.
     """
-    shapes = [(newline, earlier.replace("\n", newline)) for newline in ("\n", "\r\n")]
+    universal = earlier.replace("\r\n", "\n").replace("\r", "\n")
+    shapes = [("\n", earlier), ("\n", universal), ("\r\n", earlier.replace("\n", "\r\n"))]
     # The whole-file shape is judged on the file as found, before any marked
     # line is removed from it.
     for newline, line in shapes:

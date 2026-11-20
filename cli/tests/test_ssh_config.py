@@ -90,6 +90,14 @@ def _written_by_0_19(ssh_config: Path, content: str, newline: str = "\n") -> byt
     return text.replace("\n", newline).encode()
 
 
+def _synced_by_0_19(ssh_config: Path) -> None:
+    """One v0.19.0 ``_ensure_include`` on POSIX: the file read with universal newlines, its line prepended if absent."""
+    line = _line_written_by_0_19(ssh_config)
+    content = ssh_config.read_text()
+    if line not in content:
+        ssh_config.write_text(f"# Added by agentworks\n{line}\n\n{content}")
+
+
 def test_ssh_host_alias_default_prefix() -> None:
     assert ssh_host_alias("dev-vm") == "awvm--dev-vm"
 
@@ -1259,10 +1267,30 @@ def test_a_copy_left_once_the_marked_line_goes_is_the_operators_and_stays(
     assert ssh_config.read_bytes() == left.format(line=line).encode()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+def test_both_lines_0_19_left_for_a_directory_with_a_carriage_return_are_removed(
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """0.19 read back the CR it wrote as LF, so its next sync prepended the line again."""
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "a\rb")
+    ssh_config = config.operator.ssh_config
+    own = b"Host other\n    HostName 10.0.0.9\n"
+    ssh_config.write_bytes(own)
+    _synced_by_0_19(ssh_config)
+    _synced_by_0_19(ssh_config)
+    assert ssh_config.read_bytes().count(b"# Added by agentworks") == 2
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == b"\n\n" + own
+
+
 @needs_ssh
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
 @pytest.mark.parametrize(
-    ("shape", "name"), [("directory", 'a"b'), ("symlinked .ssh", 'a"b'), ("directory", "line\nbreak")]
+    ("shape", "name"),
+    [("directory", 'a"b'), ("symlinked .ssh", 'a"b'), ("directory", "line\nbreak"), ("directory", "a\rb")],
 )
 def test_the_installed_client_reads_the_file_again_once_the_include_it_rejected_is_removed(
     shape: str,
@@ -1272,7 +1300,9 @@ def test_the_installed_client_reads_the_file_again_once_the_include_it_rejected_
     """A quote left unbalanced, or a line broken in two, makes ssh reject the whole file, every host with it."""
     config = _config_under_an_unnameable_directory(tmp_path, shape, name)
     ssh_config = config.operator.ssh_config
-    ssh_config.write_bytes(_written_by_0_19(ssh_config, "Host other\n    HostName 10.0.0.9\n"))
+    ssh_config.write_bytes(b"Host other\n    HostName 10.0.0.9\n")
+    _synced_by_0_19(ssh_config)
+    _synced_by_0_19(ssh_config)
     argv = ["ssh", "-G", "-F", str(ssh_config), "other"]
     assert subprocess.run(argv, capture_output=True, timeout=10).returncode != 0
 
