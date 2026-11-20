@@ -139,5 +139,9 @@ def test_doctor_reports_manifest_and_stored_settings_and_ignores_suppression(
     rows = [check for check in group.checks if check.name == "Manifest"]
     assert [row.status for row in rows] == [Status.WARN]
     assert "workspace-template/old.tmuxinator" in (rows[0].message or "")
-    stored_rows = [(check.name, check.status) for check in group.checks if check.name.startswith("workspace/")]
+    stored_rows = [
+        (check.name, check.status)
+        for check in group.checks
+        if check.name.startswith(("workspace/", "Stored workspace"))
+    ]
     assert stored_rows == [("workspace/old.tmuxinator", Status.INFO)]
