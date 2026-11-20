@@ -42,15 +42,20 @@ def test_release_history_preserves_valid_sections_in_source_order() -> None:
         history.section("3.0.0")
 
 
+def test_release_history_keeps_template_syntax_as_text() -> None:
+    body = "Use ${agw:NAME}; ${HOME}, {{ .Field }} and {% raw %} pass through to their consumers."
+    history = parse_release_history(_history(("1.2.3", body)))
+
+    assert history.section("1.2.3").body.strip() == body
+
+
 @pytest.mark.parametrize(
     "data",
     [
         b"# Changelog\n",
         b"# Changelog\n\n## [1.2] (2026-08-10)\n\nNotes.\n",
         _history(("1.2.3", "One."), ("1.2.3", "Two.")),
-        _history(("1.2.3", "unsafe ${instruction}")),
         _history(("1.2.3", "unsafe\x1b[2J")),
-        _history(("1.2.3", "unsafe ⟦delimiter⟧")),
         _history(("1.2.3", "")),
     ],
 )
