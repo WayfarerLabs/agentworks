@@ -524,23 +524,32 @@ def test_a_workspace_missing_deep_is_judged_unless_too_long_to_look_up(
 
 
 @requires_guest_shell
-@pytest.mark.parametrize("exists", [False, True], ids=["missing", "existing"])
-def test_a_relative_home_is_warned_rather_than_walked(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, exists: bool
+@pytest.mark.parametrize(
+    ("home", "exists"),
+    [("relative/home", False), ("relative/home", True), ("", False)],
+    ids=["relative-missing", "relative-existing", "empty"],
+)
+def test_a_home_that_is_not_absolute_is_warned_rather_than_walked(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    captured_output: CapturedOutput,
+    home: str,
+    exists: bool,
 ) -> None:
     target, workspace, _entries = guest
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
     # The commands run from the real home, so a relative one names a tree beneath it.
-    side = target.home / "relative" / "home" / ".config" / "tmuxinator"
+    side_link = target.home / home / ".config" / "tmuxinator" / "ws-proj-console.yml"
     if exists:
-        side.mkdir(parents=True)
-        (side / "ws-proj-console.yml").symlink_to(workspace / ".tmuxinator.yml")
-    target.environment["HOME"] = "relative/home"
+        side_link.parent.mkdir(parents=True)
+        side_link.symlink_to(workspace / ".tmuxinator.yml")
+    target.environment["HOME"] = home
 
     _reinit(db, target)
 
     assert not (workspace / ".tmuxinator.yml").exists()
-    assert (side / "ws-proj-console.yml").is_symlink() is exists
+    if exists:
+        assert side_link.is_symlink()
     assert len(captured_output.warnings) == 1
 
 
