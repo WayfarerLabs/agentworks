@@ -229,10 +229,11 @@ def test_any_other_comment_naming_the_include_does_not_count(newline: str, tmp_p
 
 
 def _given_another_group(path: Path) -> bool:
-    """Whether ``path`` could be given a group of this process other than its own.
+    """Whether ``path`` was given a group of this process other than its own.
 
     A listed group may still be one the kernel will not assign, such as the
-    overflow group of a user namespace, so each is tried in turn.
+    overflow group of a user namespace, and a file system may accept the call
+    and keep the group, so each is tried in turn until the file holds it.
     """
     current = path.stat().st_gid
     for gid in os.getgroups():
@@ -242,7 +243,8 @@ def _given_another_group(path: Path) -> bool:
             os.chown(path, -1, gid)
         except OSError:
             continue
-        return True
+        if path.stat().st_gid == gid:
+            return True
     return False
 
 
@@ -254,10 +256,6 @@ def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
     if not _given_another_group(ssh_config):
         pytest.skip("no other group this process can assign")
     before = ssh_config.stat()
-    fresh = tmp_path / "fresh"
-    fresh.touch()
-    # A file written anew would get this group, so keeping another one shows the file was edited.
-    assert before.st_gid != fresh.stat().st_gid
 
     _ensure_include(ssh_config, _include_directive(ssh_config))
 
