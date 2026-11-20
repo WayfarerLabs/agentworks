@@ -1362,6 +1362,18 @@ def test_the_marker_counts_only_at_the_start_of_a_line_directly_above_the_line(
     assert ssh_config.read_bytes() == original
 
 
+def test_a_marker_copied_above_a_marked_line_leaves_the_operators_own_line(tmp_path: Path) -> None:
+    """Each shape is matched once, so a block the first removal exposes is not removed again."""
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    ssh_config = config.operator.ssh_config
+    line = _line_written_by_0_19(ssh_config)
+    ssh_config.write_bytes(f"# Added by agentworks\n# Added by agentworks\n{line}\n{line}\n".encode())
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == f"# Added by agentworks\n{line}\n".encode()
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
 def test_both_lines_0_19_left_for_a_directory_with_a_carriage_return_are_removed(
     tmp_path: Path,

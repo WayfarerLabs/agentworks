@@ -103,7 +103,7 @@ def _replace_earlier_include(content: str, earlier: str, replacement: str | None
     counts with CR and CRLF read as LF, too.
     """
     universal = earlier.replace("\r\n", "\n").replace("\r", "\n")
-    shapes = [("\n", earlier), ("\n", universal), ("\r\n", earlier.replace("\n", "\r\n"))]
+    shapes = dict.fromkeys([("\n", earlier), ("\n", universal), ("\r\n", earlier.replace("\n", "\r\n"))])
     for newline, line in shapes:
         block = f"{_INCLUDE_COMMENT}{newline}{line}{newline}"
         kept = "" if replacement is None else f"{_INCLUDE_COMMENT}{newline}{replacement}{newline}"
@@ -435,8 +435,9 @@ def _make_directory(directory: Path) -> None:
     except OSError as error:
         if not _refused(error):
             raise
-        refused = Path(error.filename).resolve() if error.filename else directory
-        raise _refusal("create", refused, error, "its parent directory writable and searchable") from error
+        refused = Path(error.filename) if error.filename else directory
+        fix = "its parent directory writable and every directory above it searchable"
+        raise _refusal("create", refused.resolve(), error, fix) from error
 
 
 def _refused(error: OSError) -> bool:
