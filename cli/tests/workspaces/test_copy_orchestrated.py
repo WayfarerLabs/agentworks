@@ -231,6 +231,34 @@ def test_copy_refuses_when_the_destination_check_did_not_answer(
     assert db.get_workspace("ws2") is None
 
 
+def test_copy_extracts_nothing_when_its_reservation_finds_the_path_taken(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The occupancy check runs as the admin, so a directory under a parent the admin cannot search reads
+    free; the exclusive ``mkdir`` is then the only guard, and when it answers "exists" no archive is sent."""
+    from agentworks.workspaces.backends.vm import default_workspace_path
+
+    config = make_config()
+    seed(db)
+    reachable(monkeypatch, True)
+    fake = _wire_copy(monkeypatch, [])
+    reservation = Command(("mkdir", "--", default_workspace_path(config, "ws2")), elevated=True)
+    free = fake.respond
+    monkeypatch.setattr(
+        fake, "respond", lambda request: Result(Completed(1)) if request == reservation else free(request)
+    )
+
+    with pytest.raises(CommandFailed):
+        _copy(db, config)
+
+    assert reservation in fake.requests
+    assert not any(UNPACK(request) for request in fake.requests)
+    assert db.get_workspace("ws2") is None
+
+
 def test_copy_refusals_fail_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
