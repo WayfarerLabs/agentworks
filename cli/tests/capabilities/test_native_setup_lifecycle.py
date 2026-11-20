@@ -303,7 +303,9 @@ def test_exclusive_agent_user_refuses_native_residue_and_races(vm, existing, vm_
     else:
         create_new_agent_user(vm, MagicMock(), "agt-a", shell="bash", logger=Mock())
         assert vm_access_recorder.requests("run")[-1] == useradd
-    assert all(request.elevated for request in vm_access_recorder.requests("run") if request != passwd_lookup("agt-a"))
+    requests = vm_access_recorder.requests("run")
+    assert passwd_lookup("agt-a") in requests and not passwd_lookup("agt-a").elevated
+    assert all(request.elevated for request in requests if request != passwd_lookup("agt-a"))
     assert not any(
         isinstance(request, Command) and request.argv[0] == "userdel" for request in vm_access_recorder.requests("run")
     )
