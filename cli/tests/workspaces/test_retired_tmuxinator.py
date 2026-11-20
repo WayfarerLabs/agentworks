@@ -325,15 +325,13 @@ def test_a_workspace_linked_to_an_unsearchable_directory_named_with_newlines_is_
     aliased = tmp_path / "guest" / "workspaces" / "aliased"
     aliased.symlink_to(real)
     db.insert_workspace("aliased", vm_name="box", workspace_path=str(aliased), template="default", linux_group="g")
-    logger = Mock()
     real.chmod(0o600)
     try:
-        _retire_workspace_tmuxinator_projects(db, "box", target, logger)  # type: ignore[arg-type]
+        _reinit(db, target)
     finally:
         real.chmod(0o755)
 
     assert (real / ".tmuxinator.yml").read_text() == _GENERATED
-    assert logger.warning.call_count == 1, "a warning is what makes reinit record partial"
     assert len(captured_output.warnings) == 1 and str(aliased) in captured_output.warnings[0]
 
 
@@ -506,6 +504,7 @@ def test_a_failed_project_command_without_usable_markers_still_warns(
 
     assert not link.is_symlink() and project.exists()
     assert len(captured_output.warnings) == 1
+    assert str(workspace) not in captured_output.warnings[0]
 
 
 @requires_guest_shell
@@ -628,7 +627,9 @@ def test_a_failure_warns_once_and_does_not_fail_reinit(
 ) -> None:
     failing = Mock()
     failing.run.return_value = SSHResult(returncode=2, stdout="", stderr="")
+    logger = Mock()
 
-    _reinit(db, failing)
+    _retire_workspace_tmuxinator_projects(db, "box", failing, logger)
 
     assert len(captured_output.warnings) == 1
+    assert logger.warning.call_count == 1, "a logged warning is what makes reinit record partial"
