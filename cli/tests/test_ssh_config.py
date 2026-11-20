@@ -1734,30 +1734,17 @@ def test_an_entry_is_written_exactly_when_the_execution_core_would_connect_there
 
 
 @pytest.mark.windows
-@pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
-def _icacls(*args: str) -> str:
-    """Run ``icacls`` (Windows), failing with its own output; returns what it printed."""
-    result = subprocess.run(["icacls", *args], capture_output=True, text=True, check=False)
-    assert result.returncode == 0, f"icacls {' '.join(args)} exited {result.returncode}: {result.stdout}{result.stderr}"
-    return result.stdout
-
-
-def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@needs_ssh
+def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entries(tmp_path: Path) -> None:
     """The product's own writers make the ``Include`` and the managed file, and ssh resolves the entry through both.
 
-    ssh checks an included file's permissions, though not the ``-F`` file's. pytest makes its temporary
-    directories with ``mode=0o700``, which Python 3.13 and later turn on Windows into a protected DACL granting
-    ``OWNER RIGHTS`` with inheritance (``posixmodule.c``, ``os_mkdir_impl``), an entry no profile's ``.ssh``
-    carries and Win32-OpenSSH refuses. So on Windows the managed file gets the ACL a profile would give it, the
-    user's full control alone, before ssh reads it.
+    ssh checks an included file's permissions, so on Windows the directory first gets a profile's ``.ssh`` ACL
+    (:func:`_give_the_acl_of_a_profiles_ssh_directory`), which the files written below it inherit. The home is
+    left as it is, so an Include written relative to ``~`` names the directory ssh expands ``~`` to.
     """
-    from tests.conftest import isolate_home
-
-    home = isolate_home(monkeypatch, tmp_path / "home")
-    ssh_dir = home / "my ssh"
+    ssh_dir = tmp_path / "my ssh"
     ssh_dir.mkdir()
+    _give_the_acl_of_a_profiles_ssh_directory(ssh_dir)
     config, _ = _mock_config(tmp_path)
     config.operator.ssh_config = ssh_dir / "config"
     db = MagicMock()
@@ -1767,13 +1754,7 @@ def test_an_include_of_a_config_directory_with_a_space_resolves_the_managed_entr
 
     _rebuild_config_dir(config, db)
 
-    managed = ssh_dir / "config.d" / _MANAGED_CONF
-    acl = ""
-    if sys.platform == "win32":
-        _icacls(str(managed), "/inheritance:r", "/grant:r", f"{os.environ['USERNAME']}:F", "/remove:g", "*S-1-3-4")
-        acl = _icacls(str(managed))
-        assert "S-1-3-4" not in acl and "OWNER RIGHTS" not in acl, acl
-    assert _resolved(ssh_dir / "config", "awvm--web", context=acl)["hostname"] == "100.64.0.9"
+    assert _resolved_hostname(ssh_dir / "config", "awvm--web") == "100.64.0.9"
 
 
 def test_an_operators_unrelated_include_is_left_alone(tmp_path: Path) -> None:
