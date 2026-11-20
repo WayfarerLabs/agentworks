@@ -139,9 +139,9 @@ exit "$rc"
 # nothing a startup file of the admin's shell reads can change them. They share one
 # command line per VM. Windows caps a workstation's whole ssh command line at 32,767
 # characters, and Linux caps the command the admin's shell receives, as one argument,
-# below 128 KiB. That is hundreds of typical workspace paths from Windows and
-# thousands otherwise, far above any real VM; beyond it the command fails and reinit
-# warns.
+# below 128 KiB on a 4 KiB-page kernel. That is hundreds of typical workspace paths
+# from Windows and thousands otherwise, far above any real VM; beyond it the command
+# fails and reinit warns.
 def _run(target: Transport, script: str, *arguments: str) -> tuple[bool, str]:
     """Run one script with these arguments and stdin closed; whether it succeeded, and its stdout."""
     command = shlex.join(["sh", "-c", script, "sh", *arguments])
