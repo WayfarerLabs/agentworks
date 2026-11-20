@@ -1143,34 +1143,38 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     records on its `FirewallInsertAttempt` whether a request it sent may still create the rule
     without anything having shown it will (`outcome_unknown`): set when it sends, cleared by Google
     Cloud's refusal of the only try sent, by the operation completing, or by the rule being seen. A
-    refusal is any client error but a cancellation (`DEFINITE_REFUSALS` in `plugins/gcp/errors.py`):
-    the REST transport raises each HTTP status's own class (`Forbidden`, `TooManyRequests`), so the
-    mapping matches those along with their gRPC subclasses. A refusal of the same-`requestId` retry
-    answers the retry alone and leaves it set. When it is set and the removal did not see the rule
-    it owns (it found nothing, or could not read the rule), the removal warns, naming the rule and
-    its sources, with the insert's operation to watch until it reports `DONE` when that operation
-    arrived, and allows a delete by name only while the rule reports the provider ID its insert's
-    operation named; without that ID it says to escalate. With no operation known nothing can show
-    the insert settled, since an operations listing without it and a read answering not found can
-    both come before an unanswered insert registers, so the steps say the rule may still appear.
-    Create's instance insert keeps the same record on its `InstanceInsertAttempt`, and each insert
-    attempt also keeps its verified operation's name. Create's rollback (`rollback_partial_create`)
-    treats an unresolved insert as settled only once it sees the incarnation that insert owns
-    (`seen_owned`), so it keeps the lifetime deny while an unresolved instance insert may still
-    create the instance, and reports every resource an unresolved insert may still create with the
-    same steps (`plugins/gcp/recovery.py`, which shell-quotes each value in a suggested command).
-    Its steps for the owned deny match: they offer its delete only once the instance reads not found
-    and, while an instance insert is unresolved, that insert's named operation reports `DONE`; with
-    no operation known they keep the deny and escalate its removal. EC2's opening calls (the dry-run
-    revokes and the authorizes) and its address read go through a `BoundedClient` of
-    `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke sends each authorize once, through its own
-    client with botocore's retries off (`single_send_config`, `total_max_attempts` 1; the dry runs
-    and revokes keep the ordinary client), so no resend can follow a send that still lands. An
-    authorize that did not return revokes what the poke planned, and warns, naming that authorize's
-    prefix, unless EC2 refused that send: a client error, or a throttling answer (a code botocore's
-    own retry policy reads as throttling, `RequestLimitExceeded` among them, which EC2 sends with a
-    503 before acting). Any other server error, a transport failure, a bound running out or an
-    interrupt leaves the outcome unknown.
+    refusal is any `ClientError` subclass api_core raises but `Cancelled` (`DEFINITE_REFUSALS` in
+    `plugins/gcp/errors.py`): the REST transport raises each HTTP status's own class (`Forbidden`,
+    `TooManyRequests`), so the mapping matches those along with their gRPC subclasses, and a 4xx
+    api_core has no class for arrives as the base `GoogleAPICallError` and stays unknown. A 403
+    whose error reasons name a rate limit or quota (`rateLimitExceeded`, `userRateLimitExceeded`,
+    `quotaExceeded`) maps to `GCEQuotaError`, not `AuthorizationError`. A refusal of the
+    same-`requestId` retry answers the retry alone and leaves it set. When it is set and the removal
+    did not see the rule it owns (it found nothing, or could not read the rule), the removal warns,
+    naming the rule and its sources, with the insert's operation to watch until it reports `DONE`
+    when that operation arrived, and allows a delete by name only while the rule reports the
+    provider ID its insert's operation named; without that ID it says to escalate. With no operation
+    known nothing can show the insert settled, since an operations listing without it and a read
+    answering not found can both come before an unanswered insert registers, so the steps say the
+    rule may still appear. Create's instance insert keeps the same record on its
+    `InstanceInsertAttempt`, and each insert attempt also keeps its verified operation's name.
+    Create's rollback (`rollback_partial_create`) treats an unresolved insert as settled only once
+    it sees the incarnation that insert owns (`seen_owned`), so it keeps the lifetime deny while an
+    unresolved instance insert may still create the instance, and reports every resource an
+    unresolved insert may still create with the same steps (`plugins/gcp/recovery.py`, which
+    shell-quotes each value in a suggested command). Its steps for the owned deny match: they offer
+    its delete only once the instance reads not found and, while an instance insert is unresolved,
+    that insert's named operation reports `DONE`; with no operation known they keep the deny and
+    escalate its removal. EC2's opening calls (the dry-run revokes and the authorizes) and its
+    address read go through a `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke
+    sends each authorize once, through its own client with botocore's retries off
+    (`single_send_config`, `total_max_attempts` 1; the dry runs and revokes keep the ordinary
+    client), so no resend can follow a send that still lands. An authorize that did not return
+    revokes what the poke planned, and warns, naming that authorize's prefix, unless EC2 refused
+    that send: a client error, or a throttling answer (a code botocore's own retry policy reads as
+    throttling, `RequestLimitExceeded` among them, which EC2 sends with a 503 before acting). Any
+    other server error, a transport failure, a bound running out or an interrupt leaves the outcome
+    unknown.
   - **The held removals.** Each cloud's route removal, and its close of the provisioning access,
     runs with interrupts held and shares one 300 s bound across its calls: Azure's delete and its
     wait (`_run_route_operation`); GCE's reads, delete and operation wait

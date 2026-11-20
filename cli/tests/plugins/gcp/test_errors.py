@@ -308,8 +308,27 @@ def test_the_rest_transport_s_status_classes_map_as_their_grpc_subclasses_do(
     assert type(google_error(rest_error(status), operation="inserting an owned instance")) is mapped_type
 
 
-@pytest.mark.parametrize("status", [499, 500, 502, 503, 504])
-def test_a_server_error_or_a_cancellation_is_no_refusal(status: int) -> None:
+@pytest.mark.parametrize("status", [418, 499, 500, 502, 503, 504])
+def test_a_4xx_api_core_has_no_class_for_a_cancellation_or_a_server_error_is_no_refusal(status: int) -> None:
     mapped = google_error(rest_error(status), operation="inserting an owned instance")
 
     assert not isinstance(mapped, DEFINITE_REFUSALS)
+
+
+@pytest.mark.parametrize(
+    ("reason", "mapped_type"),
+    [
+        ("rateLimitExceeded", GCEQuotaError),
+        ("userRateLimitExceeded", GCEQuotaError),
+        ("quotaExceeded", GCEQuotaError),
+        ("forbidden", AuthorizationError),
+        (None, AuthorizationError),
+    ],
+)
+def test_a_rest_403_is_a_quota_refusal_only_when_its_reason_names_a_limit(
+    reason: str | None, mapped_type: type[Exception]
+) -> None:
+    mapped = google_error(rest_error(403, reason=reason), operation="inserting an owned instance")
+
+    assert type(mapped) is mapped_type
+    _assert_detached_and_safe(mapped)
