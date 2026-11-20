@@ -721,6 +721,17 @@ module, and `remote_exec.py` is deleted.
       unanswered lockfile check skips the install rather than install unlocked; a failed dotfiles
       sync no longer claims the checkout is unchanged; the unanswered agent probes are tested in one
       file; and every attach and park conformance vector lives in `terminal_vectors.py`.
+- [x] Close round 7 (fix round 7 of PR C, from round 6's integration report and complexity review;
+      platform-lld, The bounds before dispatch; init-lld): GCE's recovery steps offer the owned
+      deny's delete only once the instance reads not found and, for an unresolved instance insert,
+      its named operation reports `DONE`, and keep the deny and escalate with no operation known; a
+      4xx the REST transport raises (`Forbidden`, `TooManyRequests` and their siblings) answering
+      the only insert sent settles it; an EC2 authorize counts as done only when EC2 answered its
+      only send, so a success or duplicate after a resend fails the poke with the uncertain-outcome
+      warning; a declared mise lockfile that is not published skips that account's install and
+      prune; rehome refuses an occupied target as occupied; the workspace traversal names each
+      ancestor by its exact bytes; copy's exclusive reservation is tested; and the `getent passwd`
+      probes run unelevated, as on main.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
