@@ -34,13 +34,13 @@ class GcloudResource:
     name: str
     zone: str | None = None
 
-    def _scope(self, zone_flag: str) -> str:
-        """Where this resource's operations are: ``zone_flag`` and the zone, or ``--global`` for a firewall rule."""
-        return "--global" if self.zone is None else f"{zone_flag} {shlex.quote(self.zone)}"
+    def _scope(self) -> str:
+        """Where this resource and its operations are: its zone, or ``--global`` for a firewall rule."""
+        return "--global" if self.zone is None else f"--zone {shlex.quote(self.zone)}"
 
     def _command(self, verb: str) -> str:
         group = "instances" if self.kind == "instance" else "firewall-rules"
-        location = "" if self.zone is None else f" {self._scope('--zone')}"
+        location = "" if self.zone is None else f" {self._scope()}"
         return (
             f"gcloud compute {group} {verb} {shlex.quote(self.name)} --project {shlex.quote(self.project_id)}{location}"
         )
@@ -51,34 +51,40 @@ class GcloudResource:
     def delete(self) -> str:
         return f"`{self._command('delete')}`"
 
-    def insert_wait(self, operation_name: str | None) -> str:
-        """How to watch this resource's insert until it can no longer create the resource."""
-        project = shlex.quote(self.project_id)
-        if operation_name is not None:
-            return (
-                f"`gcloud compute operations describe {shlex.quote(operation_name)} --project {project} "
-                f"{self._scope('--zone')}` until it reports DONE"
-            )
-        collection = "instances" if self.kind == "instance" else "firewalls"
-        query = shlex.quote(f"operationType=insert AND targetLink~/{collection}/{self.name}$")
+    def operation_describe(self, operation_name: str) -> str:
+        """The command that reads the operation named ``operation_name``, which this resource's insert started."""
         return (
-            f"`gcloud compute operations list --project {project} {self._scope('--zones')} --filter={query}` "
-            "until none it lists is PENDING or RUNNING"
+            f"`gcloud compute operations describe {shlex.quote(operation_name)} "
+            f"--project {shlex.quote(self.project_id)} {self._scope()}`"
         )
 
 
-def may_still_appear(resource: GcloudResource, *, operation_name: str | None, expected_id: str | None) -> str:
+def may_still_appear(
+    resource: GcloudResource, *, operation_name: str | None, expected_id: str | None, hold: str | None = None
+) -> str:
     """The steps for a resource an insert whose outcome is unknown may still create.
 
-    Wait for the insert, then delete the resource only while it reports the
-    provider ID that insert's operation named; with none known, escalate.
+    Wait for the insert's named operation, then delete the resource only
+    while it reports the provider ID that insert's operation named, or
+    follow ``hold`` in place of that delete; with no ID known, escalate.
+    With no operation known nothing can show the insert settled, so the
+    steps say the resource may still appear after it is inspected.
     """
-    then = (
-        f"only while it reports provider ID '{expected_id}', run {resource.delete()}."
-        if expected_id is not None
-        else "do not delete it by name; escalate ownership."
+    if expected_id is None:
+        then = "do not delete it by name; escalate ownership."
+    elif hold is not None:
+        then = hold
+    else:
+        then = f"only while it reports provider ID '{expected_id}', run {resource.delete()}."
+    if operation_name is None:
+        return (
+            f"No operation for this insert is known, so nothing can show it settled and it may appear later: "
+            f"inspect {resource.describe()}; if it appears, {then}"
+        )
+    return (
+        f"Watch {resource.operation_describe(operation_name)} until it reports DONE, "
+        f"then inspect {resource.describe()}; if it appears, {then}"
     )
-    return f"Watch {resource.insert_wait(operation_name)}, then inspect {resource.describe()}; if it appears, {then}"
 
 
 def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None) -> str:
@@ -121,7 +127,6 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
             expected_id=_owned_id(target.instance_ownership),
         )
     )
-    instance_gone = report.instance is InstanceState.ABSENT and may_appear.instance is None
     for role, name, state, observed_id, ownership, insert in (
         (
             "allow",
@@ -134,6 +139,12 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
         ("deny", coordinates.deny_rule, report.deny, report.deny_resource_id, target.deny_ownership, may_appear.deny),
     ):
         rule = GcloudResource("firewall rule", coordinates.project_id, name)
+        expected_id = _owned_id(ownership)
+        hold = (
+            _deny_hold(instance, report.instance, may_appear.instance, deny=rule, expected_id=expected_id)
+            if role == "deny" and expected_id is not None
+            else None
+        )
         actions.extend(
             resource_guidance(
                 subject=role.capitalize(),
@@ -142,14 +153,15 @@ def manual_cleanup_guidance(target: CleanupTarget, report: RollbackReport | None
                     rule,
                     role=role,
                     state=state,
-                    expected_id=_owned_id(ownership),
+                    expected_id=expected_id,
                     observed_id=observed_id,
-                    instance_gone=instance_gone,
+                    hold=hold,
                 ),
                 uncertain=state is FirewallState.INDETERMINATE,
                 observed_id=observed_id,
                 insert=insert,
-                expected_id=_owned_id(ownership),
+                expected_id=expected_id,
+                hold=hold,
             )
         )
     return "Manual cleanup: " + " ".join(actions)
@@ -219,12 +231,14 @@ def resource_guidance(
     observed_id: str | None,
     insert: UnresolvedInsert | None,
     expected_id: str | None,
+    hold: str | None = None,
 ) -> list[str]:
     """The sentences one resource needs: its read's ``state``, and its unresolved insert's steps led by ``subject``.
 
     Steps for an insert that may still create the resource cover a read of
     it whose ownership is unknown (``uncertain``) too, so those replace that
-    read's sentence and carry the provider ID it observed.
+    read's sentence and carry the provider ID it observed. ``hold``, a
+    deny's while the instance may exist, replaces the steps' delete.
     """
     if insert is None:
         return [] if state is None else [state]
@@ -232,7 +246,7 @@ def resource_guidance(
     sentences.append(
         f"{subject} insert outcome unknown, so it may still appear "
         f"({_insert_identity(insert, expected_id=expected_id, observed_id=observed_id if uncertain else None)}). "
-        + may_still_appear(resource, operation_name=insert.operation_name, expected_id=expected_id)
+        + may_still_appear(resource, operation_name=insert.operation_name, expected_id=expected_id, hold=hold)
     )
     return sentences
 
@@ -266,6 +280,39 @@ def _instance_state_guidance(
     return f"Instance ownership is unknown ({identity}). {inspect}; do not delete by name; escalate ownership."
 
 
+def _deny_hold(
+    instance: GcloudResource,
+    state: InstanceState,
+    insert: UnresolvedInsert | None,
+    *,
+    deny: GcloudResource,
+    expected_id: str,
+) -> str | None:
+    """The steps for an owned deny while the instance may exist or still appear, or ``None`` once it is gone.
+
+    Only the instance insert's own operation, seen DONE, shows that insert
+    can no longer create the instance: an operations listing that lacks it,
+    and a describe that reports not found, can both come before an
+    unanswered insert registers. With no operation known the deny stays and
+    its removal is escalated, as rollback keeps it.
+    """
+    if insert is None:
+        if state is InstanceState.ABSENT:
+            return None
+        settled = ""
+    elif insert.operation_name is None:
+        return (
+            "keep it and escalate its removal: no operation for the instance insert is known, so nothing can show "
+            "that the instance will not still appear."
+        )
+    else:
+        settled = f"{instance.operation_describe(insert.operation_name)} reports DONE and "
+    return (
+        f"keep it until {settled}{instance.describe()} reports not found, then re-verify provider ID "
+        f"'{expected_id}' before running {deny.delete()}."
+    )
+
+
 def _firewall_state_guidance(
     rule: GcloudResource,
     *,
@@ -273,19 +320,16 @@ def _firewall_state_guidance(
     state: FirewallState,
     expected_id: str | None,
     observed_id: str | None,
-    instance_gone: bool,
+    hold: str | None,
 ) -> str | None:
+    """``hold`` replaces an owned rule's delete with steps that keep it, as :func:`_deny_hold` gives a deny's."""
     if state is FirewallState.ABSENT:
         return None
     inspect = f"Inspect {rule.describe()}"
     identity = f"expected provider ID '{expected_id or 'unknown'}', observed '{observed_id or 'unknown'}'"
     if state is FirewallState.REALIZED and expected_id is not None and observed_id == expected_id:
-        if role == "deny" and not instance_gone:
-            return (
-                f"Owned deny rule retained while instance absence is unproven ({identity}). {inspect}; keep it until "
-                "the instance describe reports not found and no instance insert operation is still running, then "
-                f"re-verify provider ID '{expected_id}' before running {rule.delete()}."
-            )
+        if hold is not None:
+            return f"Owned {role} rule retained while instance absence is unproven ({identity}). {inspect}; {hold}"
         return (
             f"Owned {role} rule survivor ({identity}). {inspect}; only while it still reports provider ID "
             f"'{expected_id}', run {rule.delete()}."

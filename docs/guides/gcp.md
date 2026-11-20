@@ -289,18 +289,16 @@ names, expected provider IDs, and safe next action. A create stopped while an in
 still unknown (its operation unfinished, or no answer to the insert received) cannot treat that
 resource as gone, whether it read as not found or could not be read at all, until it sees the
 resource it owns: the insert may still create it. Rollback then keeps the owned deny while the
-instance may still appear and prints, for each such resource, the insert's operation to watch: by
-name when one is known, otherwise an operations listing filtered to inserts of that resource. Wait
-until that operation reports `DONE`, or until the listing shows none `PENDING` or `RUNNING`, before
-checking the resource. Verify each provider ID before any manual name-based deletion:
+instance may still appear and prints, for each such resource, the insert's operation to watch when
+one is known. Wait until that operation reports `DONE` before checking the resource. A resource that
+reads as not found, or an operations listing without the insert, does not show the insert settled:
+both can come before an unanswered insert registers. So when no operation is known, the printed
+steps say the resource may still appear, and the deny stays until its removal is escalated. Verify
+each provider ID before any manual name-based deletion:
 
 ```bash
 gcloud compute operations describe OPERATION \
   --project PROJECT --zone ZONE   # --global for a firewall rule's operation
-gcloud compute operations list --project PROJECT --zones ZONE \
-  --filter='operationType=insert AND targetLink~/instances/INSTANCE$'
-gcloud compute operations list --project PROJECT --global \
-  --filter='operationType=insert AND targetLink~/firewalls/RULE$'
 gcloud compute instances describe INSTANCE \
   --project PROJECT --zone ZONE --format='value(id)'
 gcloud compute firewall-rules describe RULE \
@@ -309,8 +307,9 @@ gcloud compute firewall-rules describe RULE \
 
 Only when the observed ID still equals the expected ID printed by Agentworks may you run the exact
 delete command it recommends. Close an owned allow first; delete an owned instance next; remove the
-owned deny only after `instances describe` reports not found and no instance insert operation is
-still running. This ordering preserves fail-closed exposure around a possible survivor.
+owned deny only after `instances describe` reports not found and, when the instance insert's outcome
+was unknown, that insert's operation reports `DONE`. With no operation known for it, keep the deny
+and escalate. This ordering preserves fail-closed exposure around a possible survivor.
 
 If the expected ID is unknown, the observed ID differs, or a same-name resource has a different
 shape, treat it as a collision: inspect ownership and escalate. Do not delete it by name. Matching

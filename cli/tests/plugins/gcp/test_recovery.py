@@ -32,15 +32,11 @@ def test_every_value_in_a_recovery_command_stays_one_argument(resource: GcloudRe
         assert resource.name in argv
         if resource.zone is not None:
             assert argv[argv.index("--zone") + 1] == resource.zone
-    for operation_name in ("operation-1", None):
-        (wait,) = (part for part in resource.insert_wait(operation_name).split("`") if part.startswith("gcloud"))
-        argv = _argv(wait)
-        assert argv[argv.index("--project") + 1] == resource.project_id
-        if resource.zone is not None:
-            assert resource.zone in argv
-        if operation_name is None:
-            (query,) = (arg.removeprefix("--filter=") for arg in argv if arg.startswith("--filter="))
-            assert query.endswith(f"/{resource.name}$")
+    argv = _argv(resource.operation_describe(_HOSTILE))
+    assert argv[argv.index("describe") + 1] == _HOSTILE
+    assert argv[argv.index("--project") + 1] == resource.project_id
+    if resource.zone is not None:
+        assert argv[argv.index("--zone") + 1] == resource.zone
 
 
 @pytest.mark.parametrize(
@@ -74,7 +70,8 @@ def test_an_insert_that_may_still_appear_offers_its_delete_only_with_an_owned_id
     unowned = may_still_appear(resource, operation_name=operation_name, expected_id=None)
 
     for steps in (owned, unowned):
-        assert resource.insert_wait(operation_name) in steps
+        if operation_name is not None:
+            assert resource.operation_describe(operation_name) in steps
         assert resource.describe() in steps
     assert resource.delete() in owned and "4242" in owned
     assert resource.delete() not in unowned

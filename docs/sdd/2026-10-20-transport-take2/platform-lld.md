@@ -1146,21 +1146,26 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     refusal of the same-`requestId` retry answers the retry alone and leaves it set. When it is set
     and the removal did not see the rule it owns (it found nothing, or could not read the rule), the
     removal warns, naming the rule and its sources, with the insert's operation to watch until it
-    can no longer create the rule (by name when its operation arrived, otherwise an operations
-    listing filtered to that rule's inserts), and allows a delete by name only while the rule
-    reports the provider ID its insert's operation named; without that ID it says to escalate.
-    Create's instance insert keeps the same record on its `InstanceInsertAttempt`, and each insert
-    attempt also keeps its verified operation's name. Create's rollback (`rollback_partial_create`)
-    treats an unresolved insert as settled only once it sees the incarnation that insert owns
-    (`seen_owned`), so it keeps the lifetime deny while an unresolved instance insert may still
-    create the instance, and reports every resource an unresolved insert may still create with the
-    same steps (`plugins/gcp/recovery.py`, which shell-quotes each value in a suggested command).
-    EC2's opening calls (the dry-run revokes and the authorizes) and its address read go through a
-    `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke whose authorize did not
-    return revokes what it planned, and warns, naming that authorize's prefix, unless EC2 answered
-    the one request sent with a client error: botocore retries a lost or failed send on its own, so
-    a refusal after a retry (`RetryAttempts` above zero) may follow a send that landed, and a server
-    error, a transport failure, a bound running out or an interrupt leaves the outcome unknown.
+    reports `DONE` when that operation arrived, and allows a delete by name only while the rule
+    reports the provider ID its insert's operation named; without that ID it says to escalate. With
+    no operation known nothing can show the insert settled, since an operations listing without it
+    and a read answering not found can both come before an unanswered insert registers, so the steps
+    say the rule may still appear. Create's instance insert keeps the same record on its
+    `InstanceInsertAttempt`, and each insert attempt also keeps its verified operation's name.
+    Create's rollback (`rollback_partial_create`) treats an unresolved insert as settled only once
+    it sees the incarnation that insert owns (`seen_owned`), so it keeps the lifetime deny while an
+    unresolved instance insert may still create the instance, and reports every resource an
+    unresolved insert may still create with the same steps (`plugins/gcp/recovery.py`, which
+    shell-quotes each value in a suggested command). Its steps for the owned deny match: they offer
+    its delete only once the instance reads not found and, while an instance insert is unresolved,
+    that insert's named operation reports `DONE`; with no operation known they keep the deny and
+    escalate its removal. EC2's opening calls (the dry-run revokes and the authorizes) and its
+    address read go through a `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke
+    whose authorize did not return revokes what it planned, and warns, naming that authorize's
+    prefix, unless EC2 answered the one request sent with a client error: botocore retries a lost or
+    failed send on its own, so a refusal after a retry (`RetryAttempts` above zero) may follow a
+    send that landed, and a server error, a transport failure, a bound running out or an interrupt
+    leaves the outcome unknown.
   - **The held removals.** Each cloud's route removal, and its close of the provisioning access,
     runs with interrupts held and shares one 300 s bound across its calls: Azure's delete and its
     wait (`_run_route_operation`); GCE's reads, delete and operation wait

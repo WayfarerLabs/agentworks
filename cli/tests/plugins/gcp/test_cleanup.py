@@ -21,7 +21,7 @@ from agentworks.plugins.gcp.cleanup import (
     rollback_partial_create,
 )
 from agentworks.plugins.gcp.network import FirewallOwnership, FirewallState
-from agentworks.plugins.gcp.recovery import rollback_after_interrupt, rollback_then_raise
+from agentworks.plugins.gcp.recovery import GcloudResource, rollback_after_interrupt, rollback_then_raise
 
 _COORDINATES = CleanupCoordinates(
     project_id="project-a",
@@ -684,7 +684,68 @@ def test_abandoned_cleanup_gives_each_unresolved_insert_its_steps(monkeypatch: p
             _target(UnresolvedInserts(deny=UnresolvedInsert(None))),
         )
 
-    assert "gcloud compute operations list" in warnings[-1]
+    gate = _deny_delete_gate(warnings[-1])
+    assert gate is not None and _INSTANCE.describe() in gate  # the instance may still exist, so the deny waits on it
+
+
+_INSTANCE = GcloudResource("instance", _COORDINATES.project_id, _COORDINATES.instance_name, _COORDINATES.zone)
+_DENY = GcloudResource("firewall rule", _COORDINATES.project_id, _COORDINATES.deny_rule)
+
+
+def _deny_delete_gate(message: str) -> str | None:
+    """The steps from the deny's inspection to its delete, or ``None`` when the guidance offers no deny delete."""
+    if _DENY.delete() not in message:
+        return None
+    end = message.index(_DENY.delete())
+    return message[message.rindex(_DENY.describe(), 0, end) : end]
+
+
+@pytest.mark.parametrize("instance_read", ["absent", "unreadable"])
+@pytest.mark.parametrize(
+    ("instance_insert", "gated_on"),
+    [
+        (UnresolvedInsert(_OPERATION), _INSTANCE.operation_describe(_OPERATION)),
+        (UnresolvedInsert(None), None),
+    ],
+    ids=("named-operation", "no-operation"),
+)
+def test_the_deny_s_delete_waits_for_the_named_instance_insert_operation(
+    monkeypatch: pytest.MonkeyPatch, instance_read: str, instance_insert: UnresolvedInsert, gated_on: str | None
+) -> None:
+    """Neither a not-found instance nor an operations listing settles an unanswered insert; only its operation can.
+
+    With the instance insert's operation named, the deny's delete follows
+    that operation's DONE and the instance's not found; with none known, no
+    deny delete is offered at all.
+    """
+    report = RollbackReport(
+        InstanceState.ABSENT if instance_read == "absent" else InstanceState.INDETERMINATE,
+        FirewallState.ABSENT,
+        FirewallState.REALIZED,
+        deny_resource_id="102",
+        may_appear=UnresolvedInserts(instance=instance_insert),
+    )
+
+    gate = _deny_delete_gate(_warning_for_report(monkeypatch, report))
+
+    if gated_on is None:
+        assert gate is None
+    else:
+        assert gate is not None
+        assert gated_on in gate
+        assert gate.index(gated_on) < gate.index(_INSTANCE.describe())
+
+
+def test_the_deny_s_delete_needs_only_the_instance_s_absence_once_its_insert_settled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = RollbackReport(
+        InstanceState.INDETERMINATE, FirewallState.ABSENT, FirewallState.REALIZED, deny_resource_id="102"
+    )
+
+    gate = _deny_delete_gate(_warning_for_report(monkeypatch, report))
+
+    assert gate is not None and _INSTANCE.describe() in gate
 
 
 def _warning_for_report(monkeypatch: pytest.MonkeyPatch, report: RollbackReport) -> str:
