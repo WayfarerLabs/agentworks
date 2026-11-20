@@ -68,6 +68,28 @@ def _acls(ssh_dir: Path) -> str:
     return "\nacls:\n" + "\n".join(line for line in lines if line and not line.startswith("Successfully processed"))
 
 
+def _line_written_by_0_19(ssh_config: Path) -> str:
+    """The Include line v0.19.0 wrote for ``ssh_config``: the resolved pattern unquoted, ``~`` for the home directory.
+
+    A fixed copy of that release's writer, so no fixture follows the current one.
+    """
+    resolved = (ssh_config.parent / "config.d").resolve().as_posix()
+    home = Path.home().resolve().as_posix()
+    if resolved == home or resolved.startswith(home + "/"):
+        resolved = "~" + resolved[len(home) :]
+    return f"Include {resolved}/*"
+
+
+def _written_by_0_19(ssh_config: Path, content: str, newline: str = "\n") -> bytes:
+    """The bytes v0.19.0's ``_ensure_include`` wrote above ``content``: its marker comment, its line and a blank line.
+
+    That release read and wrote the file in text mode, so every line ends in
+    ``newline``: CRLF on Windows, LF elsewhere.
+    """
+    text = f"# Added by agentworks\n{_line_written_by_0_19(ssh_config)}\n\n{content}"
+    return text.replace("\n", newline).encode()
+
+
 def test_ssh_host_alias_default_prefix() -> None:
     assert ssh_host_alias("dev-vm") == "awvm--dev-vm"
 
@@ -141,7 +163,7 @@ def test_every_include_line_written_unquoted_is_rewritten_in_place(parent: str, 
     ssh_config = tmp_path / parent / "config"
     ssh_config.parent.mkdir()
     directive = _include_directive(ssh_config)
-    unquoted = directive.replace('"', "")
+    unquoted = _line_written_by_0_19(ssh_config)
     lines = [unquoted, "", "Host *", "    Foo bar", "", directive, "Match all", f"    {unquoted}"]
     ssh_config.write_bytes(newline.join([*lines, ""]).encode())
 
@@ -157,7 +179,7 @@ def test_the_managed_include_commented_out_is_an_opt_out(parent: str, comment: s
     ssh_config = tmp_path / parent / "config"
     ssh_config.parent.mkdir()
     directive = _include_directive(ssh_config)
-    original = comment.format(directive=directive, unquoted=directive.replace('"', "")) + "\nHost *\n"
+    original = comment.format(directive=directive, unquoted=_line_written_by_0_19(ssh_config)) + "\nHost *\n"
     ssh_config.write_text(original)
 
     _ensure_include(ssh_config, directive)
@@ -248,7 +270,7 @@ def test_the_installed_client_reads_the_file_once_a_stale_include_with_an_apostr
     """An unquoted apostrophe makes ssh reject the whole file, so adding a correct line would fix nothing."""
     config, _ = _mock_config(tmp_path / "o'brien")
     ssh_config = config.operator.ssh_config
-    ssh_config.write_text(f"{_include_directive(ssh_config).replace(chr(34), '')}\n")
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, ""))
     db = MagicMock()
     db.get_setting.return_value = None
     db.list_vms.return_value = [_mock_vm("web", "100.64.0.1")]
@@ -548,7 +570,7 @@ def test_a_stale_include_beside_a_legacy_section_is_rewritten_and_the_section_re
     config, _ = _mock_config(tmp_path / "my keys")
     ssh_config = config.operator.ssh_config
     directive = _include_directive(ssh_config)
-    unquoted = directive.replace('"', "")
+    unquoted = _line_written_by_0_19(ssh_config)
     ssh_config.write_text(
         f"{unquoted}\n\nHost *\n    Foo bar\n\n{_LEGACY_MARKER}\nHost awvm--old\n    HostName 1.2.3.4\n"
     )
@@ -1061,19 +1083,6 @@ def test_a_config_directory_an_include_cannot_name_gets_no_include_with_a_warnin
     assert len(captured_output.warnings) == 1
 
 
-def _written_by_0_19(ssh_config: Path, content: str) -> bytes:
-    """The bytes v0.19.0's ``_ensure_include`` wrote: its marker comment and the pattern unquoted, above ``content``.
-
-    A fixed copy of that release's writer, so the expectation never follows
-    the current one.
-    """
-    resolved = (ssh_config.parent / "config.d").resolve().as_posix()
-    home = Path.home().resolve().as_posix()
-    if resolved == home or resolved.startswith(home + "/"):
-        resolved = "~" + resolved[len(home) :]
-    return f"# Added by agentworks\nInclude {resolved}/*\n\n{content}".encode()
-
-
 def _config_under_an_unnameable_directory(tmp_path: Path, shape: str, name: str = 'a"b') -> MagicMock:
     """A config whose config.d ssh cannot name: in such a directory, or reached through a ``.ssh`` linked to one."""
     if shape == "directory":
@@ -1106,8 +1115,7 @@ def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_rem
     """Only that release's line and its marker go; the file keeps its other bytes, its inode and its mode."""
     config = _config_under_an_unnameable_directory(tmp_path, shape, name)
     ssh_config = config.operator.ssh_config
-    written = _written_by_0_19(ssh_config, "")
-    earlier = written.decode().splitlines()[1]
+    earlier = _line_written_by_0_19(ssh_config)
     operators_own = _OPERATORS_OWN.format(earlier=earlier)
     ssh_config.write_bytes(_written_by_0_19(ssh_config, operators_own))
     ssh_config.chmod(0o640)
