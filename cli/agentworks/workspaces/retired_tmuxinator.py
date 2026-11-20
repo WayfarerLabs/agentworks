@@ -64,10 +64,13 @@ vacant() {
 
 # ``$(...)`` strips every trailing newline, and a link's target may end in one, so
 # ``x`` guards the output and ``%??`` drops it with the one newline readlink adds,
-# leaving the exact target. A failed readlink leaves it empty.
+# leaving the exact target. A failed readlink leaves it empty. A ``HOME`` that is not
+# absolute would resolve against the command's working directory and lead into some
+# other tree, so it fails before anything is entered.
 _LINKS_SCRIPT = (
     _VACANT_FUNCTION
     + """\
+case $HOME in /*) ;; *) exit 1 ;; esac
 dir="$HOME/.config/tmuxinator"
 (cd -P -- "$dir") 2>/dev/null || { vacant "$dir"; exit; }
 [ -r "$dir" ] || exit 1
