@@ -525,6 +525,19 @@ def test_a_project_command_that_stopped_early_also_reports_the_rest(
     assert str(workspace) in reported[0] and not any("/srv/unreached" in failure for failure in reported)
 
 
+@requires_guest_shell
+def test_a_workspace_reported_twice_is_named_once(guest: tuple[LocalFixtureTransport, Path, Path]) -> None:
+    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
+
+    target, workspace, _entries = guest
+    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" * 2 + "AGW_TMUXINATOR_FINISHED\n"
+    _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
+
+    reported = retire_tmuxinator_projects(target, [str(workspace)])
+
+    assert len(reported) == 1 and reported[0].count(str(workspace)) == 1
+
+
 def _record_input(target: LocalFixtureTransport) -> list[str | None]:
     """Record the input each command is sent; every command still runs for real."""
     real_run = target.run

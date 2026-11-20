@@ -149,7 +149,7 @@ def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]
         # The guest's output is input, so only a marker naming a line that was sent counts.
         lines = stdout.splitlines()
         numbers = [int(match[1]) for line in lines if (match := _UNFINISHED_LINE.fullmatch(line))]
-        unfinished = [sendable[number - 1] for number in numbers if number <= len(sendable)]
+        unfinished = list(dict.fromkeys(sendable[number - 1] for number in numbers if number <= len(sendable)))
         if unfinished:
             failures.append(f"the projects in {', '.join(unfinished)} could not be checked or removed")
         if _FINISHED_MARKER not in lines or (not ok and not unfinished):
