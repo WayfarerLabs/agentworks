@@ -50,14 +50,14 @@ _UNFINISHED_LINE = re.compile(f"{_UNFINISHED_MARKER}([1-9][0-9]{{0,8}})")
 # recursion is too shallow for a deep path.
 _VACANT_FUNCTION = """\
 vacant() {
-  path=$1
+  candidate=$1
   while :; do
-    if [ -e "$path" ]; then [ ! -d "$path" ]; return; fi
-    [ ! -L "$path" ] || return 1
-    case $path in /*) ;; *) return 1 ;; esac
-    path=${path%/*}
-    path=${path:-/}
-    (cd -P -- "$path") 2>/dev/null && return 0
+    if [ -e "$candidate" ]; then [ ! -d "$candidate" ]; return; fi
+    [ ! -L "$candidate" ] || return 1
+    case $candidate in /*) ;; *) return 1 ;; esac
+    candidate=${candidate%/*}
+    candidate=${candidate:-/}
+    (cd -P -- "$candidate") 2>/dev/null && return 0
   done
 }
 """

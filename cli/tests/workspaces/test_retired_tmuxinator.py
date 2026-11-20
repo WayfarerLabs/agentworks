@@ -258,6 +258,28 @@ def test_an_unsearchable_workspace_directory_is_warned(
 
 @requires_guest_shell
 @skip_as_root
+def test_a_workspace_linked_to_an_unsearchable_directory_is_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, _workspace, _entries = guest
+    real = tmp_path / "guest" / "real"
+    real.mkdir()
+    (real / ".tmuxinator.yml").write_text(_GENERATED)
+    aliased = tmp_path / "guest" / "workspaces" / "aliased"
+    aliased.symlink_to(real)
+    db.insert_workspace("aliased", vm_name="box", workspace_path=str(aliased), template="default", linux_group="g")
+    real.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        real.chmod(0o755)
+
+    assert (real / ".tmuxinator.yml").read_text() == _GENERATED
+    assert len(captured_output.warnings) == 1 and str(aliased) in captured_output.warnings[0]
+
+
+@requires_guest_shell
+@skip_as_root
 @pytest.mark.parametrize("separator", ["\r", "\u2028"], ids=["carriage-return", "line-separator"])
 def test_a_failure_names_a_workspace_whose_path_holds_another_line_break_whole(
     db: Database,
