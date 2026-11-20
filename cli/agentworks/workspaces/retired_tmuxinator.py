@@ -9,20 +9,12 @@ configuration does not belong in workspace content, so the feature is removed an
   symlink whose target ends in ``/.tmuxinator.yml``, as every generated one did, is
   removed, dangling or not. Only the link goes; its target is never followed.
 - A workspace's ``.tmuxinator.yml`` is removed when it is a regular file that starts
-  with the header those releases wrote. Only that many bytes are compared. Anything
-  else stays.
+  with the header those releases wrote, whoever owns it: the header alone decides,
+  and only that many bytes are compared. Anything else stays.
 
-Both commands run under ``sh -c`` as the admin, so the admin's login shell never
-parses them, and both always run. The workspace paths travel as arguments, so
-nothing on stdin, such as a startup file of the admin's shell reading it, can change
-them. Whether a path can be judged is the kernel's answer, never one worked out from
-the path's text: a directory the admin cannot enter, a link that leads nowhere or
-through a directory the admin cannot search, a project file that cannot be read and
-a failed removal stay in place and count as failures. The caller warns once, naming
-the workspaces the project command reports it could not finish. When that command
-cannot run, the warning says so; when it does not report reaching the end of its
-paths, or fails without naming any workspace, the warning also says the projects
-could not all be checked.
+What the admin cannot reach or read well enough to judge, and anything whose removal
+fails, stays in place and is reported: reinit warns once, and a rerun once access is
+restored finishes the job.
 """
 
 from __future__ import annotations
@@ -127,6 +119,12 @@ exit "$rc"
 )
 
 
+# Both scripts run under ``sh -c`` as the admin, so the admin's login shell never
+# parses the scripts. The workspace paths travel as arguments with stdin closed, so
+# nothing a startup file of the admin's shell reads can change them. They share one
+# command line per VM, which holds roughly 670 paths from a Windows workstation and
+# 2700 from Linux or macOS, far above any real VM; beyond that the command fails and
+# reinit warns.
 def _run(target: Transport, script: str, *arguments: str) -> tuple[bool, str]:
     """Run one script with these arguments and stdin closed; whether it succeeded, and its stdout."""
     command = shlex.join(["sh", "-c", script, "sh", *arguments])
@@ -157,7 +155,8 @@ def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]
         failures.append("the workspace-project command could not run over SSH")
     else:
         # The guest's output is input, so only a whole marker line counts, and an
-        # unfinished one only when it names an argument that was sent.
+        # unfinished one only when it names an argument that was sent. A run that did
+        # not report finishing, or failed naming nothing, is also reported as a whole.
         lines = stdout.splitlines()
         numbers = [int(match[1]) for line in lines if (match := _UNFINISHED_LINE.fullmatch(line))]
         unfinished = list(dict.fromkeys(sendable[number - 1] for number in numbers if number <= len(sendable)))
