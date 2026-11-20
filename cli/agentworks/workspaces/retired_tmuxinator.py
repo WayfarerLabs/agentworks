@@ -15,11 +15,18 @@ configuration does not belong in workspace content, so the feature is removed an
 Both commands run under ``sh -c`` as the admin, so the admin's login shell never
 parses them, and both always run. A discovery directory that cannot be read or
 searched, a project file that cannot be read and anything an unsearchable directory
-hides stay in place and count as failures, as does a failed removal. The caller
-warns once, naming the workspaces the project command reports it could not finish.
-When that command cannot run over SSH, the warning says so. When it runs but does
-not report reading every path it was sent, or fails without naming any workspace,
-the warning also says the projects could not all be checked.
+hides stay in place and count as failures, as does a failed removal.
+
+The project command reads the paths after a fixed first line it checks first, and
+stops at once when that line is not intact, since whatever read stdin ahead of it
+took from the start. It ends by reporting how many paths it read. The caller warns
+once:
+
+- naming the workspaces the command reports it could not finish, unless it reports
+  a count other than how many paths were sent, which drops the names;
+- saying the command could not run over SSH, when it could not;
+- saying the projects could not all be checked, when the command did not report
+  reading exactly the paths it was sent, or failed without naming any workspace.
 """
 
 from __future__ import annotations
