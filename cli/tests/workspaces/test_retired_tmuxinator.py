@@ -509,6 +509,23 @@ def test_a_failed_project_command_without_usable_markers_still_warns(
 
 
 @requires_guest_shell
+@pytest.mark.parametrize(("finished", "failures"), [(True, 1), (False, 2)], ids=["finished", "stopped-early"])
+def test_a_project_command_that_stopped_early_also_reports_the_rest(
+    guest: tuple[LocalFixtureTransport, Path, Path], finished: bool, failures: int
+) -> None:
+    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
+
+    target, workspace, _entries = guest
+    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" + ("AGW_TMUXINATOR_FINISHED\n" if finished else "")
+    _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
+
+    reported = retire_tmuxinator_projects(target, [str(workspace), "/srv/unreached"])
+
+    assert len(reported) == failures
+    assert str(workspace) in reported[0] and not any("/srv/unreached" in failure for failure in reported)
+
+
+@requires_guest_shell
 def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
     db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
 ) -> None:
