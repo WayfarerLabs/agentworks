@@ -1,4 +1,4 @@
-"""A tmux client that hangs or leaves costs only its own row in batch status.
+"""A tmux client that hangs, leaves, or writes without end costs only its own row in batch status.
 
 The real batch program runs in a local shell under the request deadline that
 ``batch_check_status`` asks for, with a fake ``tmux`` on its PATH
@@ -153,7 +153,7 @@ def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
     monkeypatch.setattr(_status, "GUEST_OBSERVATION_TIMEOUT_SECONDS", guest_timeout)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("base64", "cat", "od", "setsid", "sleep", "stat", "timeout", "tr"):
+    for name in ("base64", "cat", "head", "od", "setsid", "sleep", "stat", "timeout", "tr"):
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)
@@ -213,12 +213,58 @@ def test_a_client_that_hangs_or_escapes_leaves_only_its_row_unknown(
 
 @requires_symlinks
 @requires_posix_shell
+def test_a_client_s_stderr_is_read_only_as_far_as_its_field_holds(
+    tmp_path: Path, shell: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An owner whose client writes megabytes of diagnostic costs root one field's bytes, not the whole stream."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("base64", "cat", "head", "od", "timeout", "tr"):
+        executable = shutil.which(name)
+        assert executable is not None
+        os.symlink(executable, bin_dir / name)
+    written = tmp_path / "written"
+    # The loud row's client writes 20 MB in 10 kB writes, then notes that it got them all out.
+    tmux = bin_dir / "tmux"
+    tmux.write_text(
+        "#!/bin/sh\n"
+        'case "$2" in *loud*)\n'
+        "  i=0; while [ $i -lt 2000 ]; do printf '%010000d' 0 >&2 || exit 3; i=$((i + 1)); done\n"
+        '  echo all > "$AGW_WRITTEN"; exit 1 ;;\n'
+        "esac\n"
+        "exit 0\n"
+    )
+    tmux.chmod(0o755)
+    _switch_stand_ins(bin_dir, monkeypatch)
+    rows = [_row("loud"), _row("fine")]
+    process = subprocess.run(
+        [*shell, runtime_probe_command(_status._batch_probe_command(), "BATCH")],
+        input=_status._batch_probe_data(rows),
+        text=True,
+        capture_output=True,
+        check=False,
+        env={"PATH": f"{bin_dir}:/bin:/usr/bin", "HOME": str(tmp_path), "AGW_WRITTEN": str(written)},
+        timeout=30,
+    )
+
+    assert not written.exists()  # the read stopped, and the writer with it
+    assert len(process.stdout.splitlines()[1:]) == 2  # every row reported, the loud one included
+    guest = RecordingVMAccess([], Admin())
+    guest.default_outcome = Result(Completed(process.returncode), process.stdout.encode(), process.stderr.encode())
+    assert _status.batch_check_status(rows, admin=guest) == {
+        "loud": SessionStatus.UNKNOWN,
+        "fine": SessionStatus.RUNNING,
+    }
+
+
+@requires_symlinks
+@requires_posix_shell
 def test_a_row_line_stays_under_pipe_buf_whatever_its_clients_print(
     tmp_path: Path, shell: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("base64", "cat", "od", "timeout", "tr"):
+    for name in ("base64", "cat", "head", "od", "timeout", "tr"):
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)
@@ -258,7 +304,7 @@ def test_a_row_whose_socket_fails_the_guard_is_unknown_and_never_reaches_tmux(
     """The batch program refuses a row on the condition every other owner read tests (``socket_guard_condition``)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("base64", "cat", "od", "stat", "timeout", "tr"):
+    for name in ("base64", "cat", "head", "od", "stat", "timeout", "tr"):
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)

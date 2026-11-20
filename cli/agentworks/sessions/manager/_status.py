@@ -420,14 +420,17 @@ def _batch_probe_command() -> str:
     waits for every row. At ``_BATCH_ROW_SECONDS`` root kills the row's
     process group, so a server that does not answer, or an owner client that
     hangs or leaves, costs only its own row, which prints nothing and reads
-    unknown. A client's own processes hold only their read's pipe and
-    ``/dev/null``. Rows take no stdin, and nothing is written on the guest.
+    unknown. A client's stderr is read only up to one more byte than its
+    field holds, and its own processes get no descriptor of root's but their
+    read's pipe and ``/dev/null``. Rows take no stdin, and nothing is written
+    on the guest.
     """
     from agentworks.sessions.tmux import SOCKET_GUARD_REFUSED, owner_client_command, socket_guard_condition
 
     as_owner = owner_client_command('tmux -S "$SOCK" "$@" </dev/null', owner_word='"$O"')
     usable = socket_guard_condition('"$SOCK"', '"$O"')
     refused = SOCKET_GUARD_REFUSED
+    stderr_bytes = _BATCH_FIELD_HEX_LIMIT // 2 + 1
     row = (
         # -v: od otherwise abbreviates repeated 16-byte lines as "*".
         "hex() { od -An -v -tx1 | tr -d ' \\n'; }; "
@@ -437,10 +440,14 @@ def _batch_probe_command() -> str:
         "BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); B=$?; "
         'BOOT_HEX=$(cap "$(printf %s "$BOOT" | hex)"); '
         f"run_tmux() {{ {as_owner}; }}; "
+        # Prints the client's stderr, its first bytes only, in hex, then a space and its status. The
+        # status goes through fd 3 to a reader that prints it once every other write has ended.
+        f'read_tmux() {{ {{ {{ {{ run_tmux "$@" 2>&1 >/dev/null 3>&- 4>&-; echo "$?" >&3; }} '
+        f"| head -c {stderr_bytes} | hex >&4; }} 3>&1 "
+        "| { read -r ST; cat >/dev/null; printf ' %s' \"$ST\"; }; } 4>&1; }; "
         f"if {{ {usable}; }} 2>/dev/null; then "
-        'HERR=$(run_tmux has-session -t "=$N" 2>&1 >/dev/null); H=$?; '
-        'HHEX=$(cap "$(printf %s "$HERR" | hex)"); '
-        'SERR=$(run_tmux list-sessions 2>&1 >/dev/null); S=$?; SHEX=$(cap "$(printf %s "$SERR" | hex)"); '
+        'R=$(read_tmux has-session -t "=$N"); H=${R##* }; HHEX=$(cap "${R% *}"); '
+        'R=$(read_tmux list-sessions); S=${R##* }; SHEX=$(cap "${R% *}"); '
         f"else H={refused}; HHEX=; S={refused}; SHEX=; fi; "
         'if [ "$PID" = - ]; then PFACT=; P=1; '
         'else PFACT=$(sh -c "if test -d /proc/$PID; then printf present; '

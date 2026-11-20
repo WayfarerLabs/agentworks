@@ -802,20 +802,23 @@ root started for that row. That is the only bound. A bound around the owner's cl
 owner's to stop or kill (#923), and a GNU `timeout` there would lead a process group of its own,
 which root's kill of the row's group misses; a server that does not answer, or a client that hangs
 or leaves, holds only its row until root's kill, and the row reads unknown. Only root's processes
-hold the request's output (each owner client's streams are `/dev/null` and its read's pipe), so once
-they are gone nothing holds the request open, whatever the owner's processes do; the row prints no
-line and reads unknown, and nothing is written on the guest. bash reports a killed job on its own
+hold the request's output (each owner client's streams are `/dev/null` and its read's pipe, and it
+gets none of root's other descriptors), so once they are gone nothing holds the request open,
+whatever the owner's processes do; the row prints no line and reads unknown, and nothing is written
+on the guest. A client's stderr is read through `head -c`, one byte more than its hex field holds,
+so an owner that writes without end costs root that much and is cut off by its broken pipe; the
+client's status reaches the row through a separate descriptor. bash reports a killed job on its own
 stderr, so the script's `wait` discards its stderr. The request's deadline is
 `GUEST_OBSERVATION_TIMEOUT_SECONDS` plus one row's bound, 16 seconds. Each row prints one line keyed
 by its position in the request, so lines may arrive in any order; a row without a line reads unknown
 for that row only. `runuser` opens a PAM session per read, which `pam_unix` logs on the guest; the
 elevated request itself is already logged by `sudo`. The real-tmux test
 (`tests/sessions/test_native_batch_status.py`, the sudo lane) runs the script as root against a
-server its user owns; `test_batch_status_bounds.py` has clients hang and leave their row's process
-group, and checks that only their rows read unknown within the deadline;
-`test_owner_client_switch.py` runs each switched client in a shell and checks that root runs
-`runuser` itself, from `/`; and the shell-level test in `test_session_liveness.py` covers the
-refusals and the `runuser` argv without root.
+server its user owns; `test_batch_status_bounds.py` has clients hang, leave their row's process
+group, and write megabytes of stderr, and checks that only their rows read unknown within the
+deadline and that the stderr read stops at its field; `test_owner_client_switch.py` runs each
+switched client in a shell and checks that root runs `runuser` itself, from `/`; and the shell-level
+test in `test_session_liveness.py` covers the refusals and the `runuser` argv without root.
 
 **Every other read and teardown of a dedicated server runs as its owner too** (lead, 2026-11-14), on
 one builder, `tmux.socket_owner_run_command`, which puts root's socket guard before each line and,

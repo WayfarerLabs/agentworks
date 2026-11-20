@@ -440,7 +440,7 @@ def test_batch_probe_reads_each_row_as_its_owner_and_refuses_a_socket_it_cannot_
     bin_dir.mkdir()
     audit = tmp_path / "audit"
 
-    for name in ("base64", "cat", "od", "stat", "timeout", "tr"):
+    for name in ("base64", "cat", "head", "od", "stat", "timeout", "tr"):
         executable = shutil.which(name)
         assert executable is not None
         os.symlink(executable, bin_dir / name)
