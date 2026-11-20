@@ -309,6 +309,33 @@ def test_a_client_s_stderr_is_read_only_as_far_as_its_field_holds(
 
 @requires_symlinks
 @requires_posix_shell
+@pytest.mark.parametrize("descriptor", [3, 4], ids=("status-pipe", "row-output"))
+def test_a_client_cannot_write_into_roots_status_pipe_or_its_rows_output(
+    tmp_path: Path, shell: list[str], monkeypatch: pytest.MonkeyPatch, descriptor: int
+) -> None:
+    """Root's read holds its status pipe on fd 3 and the row's output on fd 4; the client gets neither."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("base64", "cat", "head", "od", "timeout", "tr"):
+        executable = shutil.which(name)
+        assert executable is not None
+        os.symlink(executable, bin_dir / name)
+    # The forging row's client writes fields of its own to the descriptor and exits 0. One stray
+    # field breaks the frame of every row, so the others reading true shows nothing got through.
+    tmux = bin_dir / "tmux"
+    tmux.write_text(f"#!/bin/sh\ncase \"${{2##*/}}\" in *forges*) printf 'x:y:z' >&{descriptor} ;; esac\nexit 0\n")
+    tmux.chmod(0o755)
+    _switch_stand_ins(bin_dir, monkeypatch)
+    rows = [_row("forges"), _row("fine-1"), _row("fine-2", agent=True)]
+    guest = _local_guest(shell, {"PATH": f"{bin_dir}:/bin:/usr/bin", "HOME": str(tmp_path)})
+
+    statuses = _status.batch_check_status(rows, admin=guest)
+
+    assert (statuses["fine-1"], statuses["fine-2"]) == (SessionStatus.RUNNING, SessionStatus.RUNNING)
+
+
+@requires_symlinks
+@requires_posix_shell
 def test_a_row_line_stays_under_pipe_buf_whatever_its_clients_print(
     tmp_path: Path, shell: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
