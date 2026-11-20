@@ -112,11 +112,15 @@ def open_parent_traversal(path: str) -> Script:
 
     The walk starts at the parent: the workspace's own mode is the canonical
     2770, which carries no world bits. It walks only absolute paths, so a
-    relative one, whose ``dirname`` ends at ``.``, stops it at once.
+    relative one stops it at once. Each ancestor is cut from the path by
+    parameter expansion, never captured from a command's output, which would
+    drop trailing newlines from its name and so name another directory.
     """
     return script(
-        'p=$(dirname "$1")\n'
-        'while [ "$p" != "/" ] && [ "${p#/}" != "$p" ]; do chmod -c a+x "$p"; p=$(dirname "$p"); done',
+        "p=$1\n"
+        'while [ "${p%/}" != "$p" ]; do p=${p%/}; done\n'
+        "p=${p%/*}\n"
+        'while [ -n "$p" ] && [ "${p#/}" != "$p" ]; do chmod -c a+x -- "$p"; p=${p%/*}; done',
         path,
         elevated=True,
         deadline=TRAVERSAL_DEADLINE,
