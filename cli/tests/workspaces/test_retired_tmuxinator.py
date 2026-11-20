@@ -581,12 +581,13 @@ def _prefixed(target: LocalFixtureTransport, prefix: str) -> None:
 
 
 @requires_guest_shell
-def test_a_startup_file_that_reads_stdin_changes_nothing(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+@pytest.mark.parametrize("startup", ["cat >/dev/null", "printf unended"], ids=["reads-stdin", "prints-unended"])
+def test_a_startup_file_that_reads_stdin_or_prints_changes_nothing(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, startup: str
 ) -> None:
     target, workspace, entries = guest
     project, link = _project_and_link(workspace, entries)
-    _prefixed(target, "cat >/dev/null")
+    _prefixed(target, startup)
 
     _reinit(db, target)
 
@@ -617,12 +618,33 @@ def test_a_workspace_reported_twice_is_named_once(guest: tuple[LocalFixtureTrans
     from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
 
     target, workspace, _entries = guest
-    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" * 2
+    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" * 2 + "AGW_TMUXINATOR_FINISHED\n"
     _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
 
     reported = retire_tmuxinator_projects(target, [str(workspace)])
 
     assert len(reported) == 1 and reported[0].count(str(workspace)) == 1
+
+
+@requires_guest_shell
+@pytest.mark.parametrize(
+    ("finished", "failures"),
+    [("AGW_TMUXINATOR_FINISHED\n", 1), ("", 2), ("AGW_TMUXINATOR_FINISHED trailing\n", 2)],
+    ids=["finished", "died-partway", "not-a-whole-line"],
+)
+def test_a_project_command_that_died_partway_also_reports_the_rest(
+    guest: tuple[LocalFixtureTransport, Path, Path], finished: str, failures: int
+) -> None:
+    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
+
+    target, workspace, _entries = guest
+    _replace_call(target, 2, SSHResult(returncode=1, stdout="AGW_TMUXINATOR_UNFINISHED=1\n" + finished, stderr=""))
+
+    reported = retire_tmuxinator_projects(target, [str(workspace), "/srv/unreached"])
+
+    assert len(reported) == failures
+    assert str(workspace) in reported[0]
+    assert not any("/srv/unreached" in failure for failure in reported)
 
 
 @requires_guest_shell
