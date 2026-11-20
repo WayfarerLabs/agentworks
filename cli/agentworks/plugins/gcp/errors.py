@@ -165,7 +165,7 @@ def _names_a_quota(exc: GoogleAPICallError) -> bool:
     """Whether ``exc``'s error reasons, the provider's tokens and nothing of its text, name a rate limit or quota."""
     try:
         return any(isinstance(error, dict) and error.get("reason") in _QUOTA_REASONS for error in exc.errors)
-    except Exception:
+    except (AttributeError, TypeError):  # no errors list, one that is not iterable, or an unhashable reason
         return False
 
 
