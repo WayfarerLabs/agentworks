@@ -336,21 +336,82 @@ def test_a_workspace_linked_to_an_unsearchable_directory_named_with_newlines_is_
     assert len(captured_output.warnings) == 1 and str(aliased) in captured_output.warnings[0]
 
 
+# A relative alias through ``passage``, which the admin cannot search, reaches a
+# directory the admin can search; a text-only resolution would cancel ``passage/..``.
+_UNFOLLOWABLE_ALIASES = pytest.mark.parametrize(
+    "alias", ["passage/../work", "nowhere"], ids=["through-an-unsearchable-directory", "dangling"]
+)
+
+
 @requires_guest_shell
-@pytest.mark.parametrize("dangling", [False, True], ids=["deleted", "dangling-link"])
+@skip_as_root
+@_UNFOLLOWABLE_ALIASES
+def test_a_workspace_alias_the_admin_cannot_follow_is_warned(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    alias: str,
+) -> None:
+    target, _proj, _entries = guest
+    root = tmp_path / "guest" / "aliases"
+    (root / "passage").mkdir(parents=True)
+    (root / "work").mkdir()
+    (root / "work" / ".tmuxinator.yml").write_text(_GENERATED)
+    aliased = root / "aliased"
+    aliased.symlink_to(alias)
+    db.insert_workspace("aliased", vm_name="box", workspace_path=str(aliased), template="default", linux_group="g")
+    (root / "passage").chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        (root / "passage").chmod(0o755)
+
+    assert (root / "work" / ".tmuxinator.yml").read_text() == _GENERATED
+    assert len(captured_output.warnings) == 1
+    assert str(aliased) in captured_output.warnings[0]
+
+
+@requires_guest_shell
+@skip_as_root
+@_UNFOLLOWABLE_ALIASES
+def test_a_discovery_directory_alias_the_admin_cannot_follow_is_warned(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, alias: str
+) -> None:
+    target, workspace, entries = guest
+    config = entries.parent
+    (config / "passage").mkdir()
+    shutil.move(entries, config / "work")
+    link = config / "work" / "ws-proj-console.yml"
+    link.symlink_to(workspace / ".tmuxinator.yml")
+    entries.symlink_to(alias)
+    (config / "passage").chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        (config / "passage").chmod(0o755)
+
+    assert link.is_symlink()
+    assert len(captured_output.warnings) == 1
+
+
+@requires_guest_shell
+@pytest.mark.parametrize("shape", ["deleted", "parent-deleted", "a-file"])
 def test_a_workspace_directory_that_is_gone_is_a_quiet_success(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
     tmp_path: Path,
     captured_output: CapturedOutput,
-    dangling: bool,
+    shape: str,
 ) -> None:
     target, workspace, _entries = guest
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    gone = _workspace(db, tmp_path / "guest" / "workspaces", "gone")
-    shutil.rmtree(gone)
-    if dangling:
-        gone.symlink_to(tmp_path / "guest" / "nowhere")
+    parent = tmp_path / "guest" / "workspaces" / "parent"
+    parent.mkdir()
+    gone = _workspace(db, parent, "gone")
+    shutil.rmtree(parent if shape == "parent-deleted" else gone)
+    if shape == "a-file":
+        gone.write_text("not a workspace\n")
 
     _reinit(db, target)
 
@@ -408,7 +469,7 @@ def test_a_discovery_directory_hidden_by_an_unsearchable_directory_is_warned(
 
 
 @requires_guest_shell
-@pytest.mark.parametrize("shape", ["missing", "config-missing", "config-file", "dangling-link"])
+@pytest.mark.parametrize("shape", ["missing", "config-missing", "config-file", "a-file"])
 def test_a_missing_discovery_directory_is_a_quiet_success(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
@@ -420,8 +481,8 @@ def test_a_missing_discovery_directory_is_a_quiet_success(
     shutil.rmtree(entries.parent if shape.startswith("config-") else entries)
     if shape == "config-file":
         entries.parent.write_text("not a directory\n")
-    elif shape == "dangling-link":
-        entries.symlink_to(tmp_path / "guest" / "nowhere")
+    elif shape == "a-file":
+        entries.write_text("not a directory\n")
     (workspace / ".tmuxinator.yml").write_text(_GENERATED)
 
     _reinit(db, target)

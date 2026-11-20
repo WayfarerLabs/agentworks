@@ -15,11 +15,12 @@ configuration does not belong in workspace content, so the feature is removed an
 Both commands run under ``sh -c`` as the admin, so the admin's login shell never
 parses them, and both always run. The workspace paths travel as arguments, so
 nothing on stdin, such as a startup file of the admin's shell reading it, can change
-them. A discovery directory that cannot be read or searched, a project file that
-cannot be read and anything an unsearchable directory hides stay in place and count
-as failures, as does a failed removal. The caller warns once, naming the workspaces
-the project command reports it could not finish; when that command cannot run, or
-fails without naming any, the warning says so instead.
+them. Whether a path can be judged is the kernel's answer, never one worked out from
+the path's text: a directory the admin cannot enter, a link that leads nowhere or
+through a directory the admin cannot search, a project file that cannot be read and
+a failed removal stay in place and count as failures. The caller warns once, naming
+the workspaces the project command reports it could not finish; when that command
+cannot run, or fails without naming any, the warning says so instead.
 """
 
 from __future__ import annotations
@@ -44,33 +45,34 @@ _UNFINISHED_LINE = re.compile(f"{_UNFINISHED_MARKER}([1-9][0-9]{{0,8}})")
 # another's failure or stop the rest. A test that is merely false never sets it;
 # being unable to search or read something does.
 #
-# ``$(...)`` strips every trailing newline, and a path may end in one, so a
-# substitution that yields a path appends ``x`` and ``%??`` drops it with the one
-# newline the command adds, leaving the exact path. A failed command leaves it empty.
-#
-# ``hidden`` resolves links in a path with ``realpath -m`` and walks up from it to the
-# nearest path that exists. What is in or below the path is hidden when that is a
-# directory the admin cannot search.
-_HIDDEN_FUNCTION = """\
-hidden() {
-  up=$(realpath -m -- "$1" && printf x)
-  up=${up%??}
-  until [ -e "$up" ]; do
-    case $up in */*) up="${up%/*}" ;; *) return 1 ;; esac
-  done
-  [ -d "$up" ] && [ ! -x "$up" ]
+# Both scripts first try to enter a directory with ``cd -P`` in a subshell, which
+# succeeds only when the kernel lets the admin reach and search it. When it fails,
+# ``vacant`` says whether the kernel shows nothing can be there: the path exists as
+# something other than a directory, or it does not exist (and is not a link) and the
+# nearest existing ancestor can be entered or is not a directory. Anything else, such
+# as a directory the admin cannot search or a link that leads nowhere or through one,
+# cannot be judged.
+_VACANT_FUNCTION = """\
+vacant() {
+  if [ -e "$1" ]; then [ ! -d "$1" ]; return; fi
+  [ ! -L "$1" ] || return 1
+  parent=${1%/*}
+  (cd -P -- "${parent:-/}") 2>/dev/null || vacant "${parent:-/}"
 }
 """
 
+# ``$(...)`` strips every trailing newline, and a link's target may end in one, so
+# ``x`` guards the output and ``%??`` drops it with the one newline readlink adds,
+# leaving the exact target. A failed readlink leaves it empty.
 _LINKS_SCRIPT = (
-    _HIDDEN_FUNCTION
+    _VACANT_FUNCTION
     + """\
 dir="$HOME/.config/tmuxinator"
-if [ ! -d "$dir" ]; then
-  hidden "$dir" && exit 1
-  exit 0
+if ! (cd -P -- "$dir") 2>/dev/null; then
+  vacant "$dir" && exit 0
+  exit 1
 fi
-[ -x "$dir" ] && [ -r "$dir" ] || exit 1
+[ -r "$dir" ] || exit 1
 rc=0
 for link in "$dir"/ws-*-console.yml; do
   target=$(readlink -- "$link" 2>/dev/null && printf x)
@@ -84,14 +86,12 @@ exit "$rc"
 
 # Workspace paths arrive as arguments. ``[ -f ]`` and ``[ ! -L ]`` keep a FIFO, a
 # directory or a link away from ``cmp``, which exits 1 on a difference and 2 when it
-# cannot read. A project hidden by an unsearchable directory, whether its workspace
-# or one above it, counts as a failure too. Each workspace the script could not
-# finish is reported by its argument position on a marker line of its own, so the
-# caller names it from the path it sent rather than from output that line-ending
-# translation may have changed; the leading newline keeps a marker off any line the
-# admin's shell printed without ending it.
+# cannot read. Each workspace the script could not finish is reported by its argument
+# position on a marker line of its own, so the caller names it from the path it sent
+# rather than from output that line-ending translation may have changed; the leading
+# newline keeps a marker off any line the admin's shell printed without ending it.
 _PROJECTS_SCRIPT = (
-    _HIDDEN_FUNCTION
+    _VACANT_FUNCTION
     + f"""\
 header={shlex.quote(_GENERATED_HEADER.decode())}
 rc=0
@@ -99,15 +99,17 @@ position=0
 unfinished() {{ rc=1; printf '\\n{_UNFINISHED_MARKER}%s\\n' "$position"; }}
 for workspace do
   position=$((position + 1))
-  project="$workspace/.tmuxinator.yml"
-  if [ -f "$project" ] && [ ! -L "$project" ]; then
-    printf %s "$header" | cmp -s -n {len(_GENERATED_HEADER)} -- "$project" -
-    case $? in
-      0) rm -f -- "$project" || unfinished ;;
-      1) ;;
-      *) unfinished ;;
-    esac
-  elif hidden "$workspace"; then
+  if (cd -P -- "$workspace") 2>/dev/null; then
+    project="$workspace/.tmuxinator.yml"
+    if [ -f "$project" ] && [ ! -L "$project" ]; then
+      printf %s "$header" | cmp -s -n {len(_GENERATED_HEADER)} -- "$project" -
+      case $? in
+        0) rm -f -- "$project" || unfinished ;;
+        1) ;;
+        *) unfinished ;;
+      esac
+    fi
+  elif ! vacant "$workspace"; then
     unfinished
   fi
 done
