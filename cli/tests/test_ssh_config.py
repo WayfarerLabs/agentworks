@@ -254,6 +254,10 @@ def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
     if not _given_another_group(ssh_config):
         pytest.skip("no other group this process can assign")
     before = ssh_config.stat()
+    fresh = tmp_path / "fresh"
+    fresh.touch()
+    # A file written anew would get this group, so keeping another one shows the file was edited.
+    assert before.st_gid != fresh.stat().st_gid
 
     _ensure_include(ssh_config, _include_directive(ssh_config))
 
