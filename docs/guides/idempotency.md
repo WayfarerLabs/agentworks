@@ -189,11 +189,11 @@ directory that cannot be read or searched also stays, as does whatever a directo
 search hides: the links behind an unsearchable `~/.config`, or a project inside an unsearchable
 directory above its workspace. So does a workspace or `~/.config/tmuxinator` that is a symbolic link
 the admin cannot follow, because it is dangling or passes through a directory the admin cannot
-search. A workspace path that is not absolute, or so long that its `.tmuxinator.yml` path reaches
-the kernel's 4096-byte lookup limit, is not checked at all, and neither is `~/.config/tmuxinator`
-when the admin's `HOME` is not absolute. Like a failed removal, each makes reinit warn without
-failing. A workspace or `~/.config/tmuxinator` that does not exist, or is a file rather than a
-directory, has nothing to remove and is passed over quietly.
+search. A workspace path that is not absolute, holds a NUL byte, or is so long that its
+`.tmuxinator.yml` path reaches the kernel's 4096-byte lookup limit, is not checked at all, and
+neither is `~/.config/tmuxinator` when the admin's `HOME` is not absolute. Like a failed removal,
+each makes reinit warn without failing. A workspace or `~/.config/tmuxinator` that does not exist,
+or is a file rather than a directory, has nothing to remove and is passed over quietly.
 
 ## Workspace repair
 
