@@ -182,19 +182,6 @@ def test_the_include_an_earlier_release_wrote_is_rewritten_where_it_stands_and_o
     assert ssh_config.read_bytes() == f"# Added by agentworks\n{directive}\n\n{own}".replace("\n", newline).encode()
 
 
-@pytest.mark.parametrize("ending", ["", "\n", "\r\n"])
-def test_a_file_holding_only_the_include_an_earlier_release_wrote_is_rewritten(ending: str, tmp_path: Path) -> None:
-    """Releases before 0.20 left that line alone in the file when removing the legacy section left nothing else."""
-    ssh_config = tmp_path / "my keys" / "config"
-    ssh_config.parent.mkdir()
-    directive = _include_directive(ssh_config)
-    ssh_config.write_bytes(f"{_line_written_by_0_19(ssh_config)}{ending}".encode())
-
-    _ensure_include(ssh_config, directive)
-
-    assert ssh_config.read_bytes() == f"{directive}{ending}".encode()
-
-
 @pytest.mark.windows
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_a_directory_whose_name_holds_a_unicode_line_separator_gets_the_include_once(
@@ -1232,26 +1219,19 @@ def test_the_include_an_earlier_release_wrote_for_an_unnameable_directory_is_rem
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize(
-    ("marked", "newline"), [(True, "\n"), (True, "\r\n"), (False, ""), (False, "\n"), (False, "\r\n")]
-)
-def test_a_0_19_include_for_a_directory_with_a_percent_is_removed_with_or_without_its_marker(
-    marked: bool,
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_0_19_include_for_a_directory_with_a_percent_is_removed(
     newline: str,
     tmp_path: Path,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """0.19 wrote the line alone when removing its legacy section left nothing else, and wrote CRLF on Windows."""
+    """0.19 wrote CRLF on Windows."""
     config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
     ssh_config = config.operator.ssh_config
     earlier = _line_written_by_0_19(ssh_config)
     rest = "Host other\n    HostName 10.0.0.9\n"
-    if marked:
-        ssh_config.write_bytes(_written_by_0_19(ssh_config, rest, newline))
-        expected = f"\n{rest}".replace("\n", newline).encode()
-    else:
-        ssh_config.write_bytes(f"{earlier}{newline}".encode())
-        expected = b""
+    ssh_config.write_bytes(_written_by_0_19(ssh_config, rest, newline))
+    expected = f"\n{rest}".replace("\n", newline).encode()
     before = ssh_config.stat().st_ino
 
     _rebuild_config_dir(config, _db_with_one_vm())
@@ -1262,29 +1242,68 @@ def test_a_0_19_include_for_a_directory_with_a_percent_is_removed_with_or_withou
     assert earlier in warning
 
 
-@pytest.mark.parametrize(
-    ("written", "left"),
-    [
-        ("# Added by agentworks\n{line}\n{line}", "{line}"),
-        ("# Added by agentworks\r\n{line}\r\n{line}\n", "{line}\n"),
-        ("# Added by agentworks\n{line}\n{line}\r\n", "{line}\r\n"),
-    ],
-)
-def test_a_copy_left_once_the_marked_line_goes_is_the_operators_and_stays(
-    written: str,
-    left: str,
-    tmp_path: Path,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """Only a file that held the bare line when found is that release's; one the removal leaves so is not."""
-    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+_OWN_INCLUDES = ["alone, under a space", "alone, under a glob", "below the marked line, under a glob"]
+
+
+def _config_with_the_operators_own_include(tmp_path: Path, case: str) -> tuple[MagicMock, bytes, bytes]:
+    """A config whose unmarked Include, spelled as 0.19's line, is the operator's; and what a sync leaves.
+
+    Each Include also reaches ``Host route``: unquoted under ``my keys``, its
+    first operand is the file ``my``; under ``team-[ab]``, its pattern matches
+    the sibling ``team-a``.
+    """
+    if case == "alone, under a space":
+        config, _ = _mock_config(tmp_path / "my keys")
+        config.operator.ssh_private_key = tmp_path / "id_ed25519"
+        (tmp_path / "my").write_text("Host route\n    HostName route.example\n")
+    else:
+        config = _config_under_an_unnameable_directory(tmp_path, "directory", "team-[ab]")
+        routes = tmp_path / "team-a" / ".ssh" / "config.d"
+        routes.mkdir(parents=True)
+        (routes / "mine.conf").write_text("Host route\n    HostName route.example\n")
     ssh_config = config.operator.ssh_config
     line = _line_written_by_0_19(ssh_config)
-    ssh_config.write_bytes(written.format(line=line).encode())
+    own = f"{line}\n".encode()
+    if case == "alone, under a space":
+        return config, own, f"# Added by agentworks\n{_include_directive(ssh_config)}\n\n".encode() + own
+    if case == "alone, under a glob":
+        return config, own, own
+    return config, f"# Added by agentworks\n{line}\n".encode() + own, own
+
+
+@pytest.mark.parametrize("case", _OWN_INCLUDES)
+def test_an_include_the_operator_wrote_as_0_19_did_is_left_as_written_by_every_sync(
+    case: str,
+    tmp_path: Path,
+) -> None:
+    """Without the marker the line is not that release's, even where it is alone or right below its marked line."""
+    config, original, expected = _config_with_the_operators_own_include(tmp_path, case)
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_bytes(original)
 
     _rebuild_config_dir(config, _db_with_one_vm())
+    first = ssh_config.read_bytes()
+    _rebuild_config_dir(config, _db_with_one_vm())
 
-    assert ssh_config.read_bytes() == left.format(line=line).encode()
+    assert (first, ssh_config.read_bytes()) == (expected, expected)
+
+
+@needs_ssh
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
+@pytest.mark.parametrize("case", _OWN_INCLUDES)
+def test_the_installed_client_still_routes_through_the_operators_own_include_after_two_syncs(
+    case: str,
+    tmp_path: Path,
+) -> None:
+    config, original, _ = _config_with_the_operators_own_include(tmp_path, case)
+    ssh_config = config.operator.ssh_config
+    ssh_config.write_bytes(original)
+    assert _resolved_hostname(ssh_config, "route") == "route.example"
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert _resolved_hostname(ssh_config, "route") == "route.example"
 
 
 @pytest.mark.parametrize("prefix", ["# ", "  ", "Host x "])
