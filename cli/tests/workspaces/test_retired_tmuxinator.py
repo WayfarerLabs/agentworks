@@ -257,6 +257,28 @@ def test_an_unsearchable_workspace_directory_is_warned(
 
 @requires_guest_shell
 @skip_as_root
+@pytest.mark.parametrize("separator", ["\r", "\u2028"], ids=["carriage-return", "line-separator"])
+def test_a_failure_names_a_workspace_whose_path_holds_another_line_break_whole(
+    db: Database,
+    guest: tuple[LocalFixtureTransport, Path, Path],
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    separator: str,
+) -> None:
+    target, _proj, _entries = guest
+    odd = _workspace(db, tmp_path / "guest" / "workspaces", f"odd{separator}name")
+    odd.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        odd.chmod(0o755)
+
+    assert len(captured_output.warnings) == 1
+    assert str(odd) in captured_output.warnings[0]
+
+
+@requires_guest_shell
+@skip_as_root
 @pytest.mark.parametrize("through_link", [False, True], ids=["inside", "through-a-link"])
 def test_a_workspace_hidden_by_an_unsearchable_directory_is_warned(
     db: Database,
@@ -464,12 +486,17 @@ def test_a_transport_error_on_one_command_still_runs_the_other(
 
 
 @requires_guest_shell
-def test_a_failed_project_command_without_markers_still_warns(
-    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+@pytest.mark.parametrize(
+    "stdout",
+    ["", "AGW_TMUXINATOR_UNFINISHED=0\nAGW_TMUXINATOR_UNFINISHED=2\nAGW_TMUXINATOR_UNFINISHED=x\n"],
+    ids=["none", "naming-no-line-sent"],
+)
+def test_a_failed_project_command_without_usable_markers_still_warns(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput, stdout: str
 ) -> None:
     target, workspace, entries = guest
     project, link = _project_and_link(workspace, entries)
-    _replace_call(target, 2, SSHResult(returncode=1, stdout="", stderr=""))
+    _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
 
     _reinit(db, target)
 
