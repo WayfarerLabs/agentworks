@@ -1234,6 +1234,31 @@ def test_a_0_19_include_for_a_directory_with_a_percent_is_removed_with_or_withou
     assert earlier in warning
 
 
+@pytest.mark.parametrize(
+    ("written", "left"),
+    [
+        ("# Added by agentworks\n{line}\n{line}", "{line}"),
+        ("# Added by agentworks\r\n{line}\r\n{line}\n", "{line}\n"),
+        ("# Added by agentworks\n{line}\n{line}\r\n", "{line}\r\n"),
+    ],
+)
+def test_a_copy_left_once_the_marked_line_goes_is_the_operators_and_stays(
+    written: str,
+    left: str,
+    tmp_path: Path,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Only a file that held the bare line when found is that release's; one the removal leaves so is not."""
+    config = _config_under_an_unnameable_directory(tmp_path, "directory", "100%d")
+    ssh_config = config.operator.ssh_config
+    line = _line_written_by_0_19(ssh_config)
+    ssh_config.write_bytes(written.format(line=line).encode())
+
+    _rebuild_config_dir(config, _db_with_one_vm())
+
+    assert ssh_config.read_bytes() == left.format(line=line).encode()
+
+
 @needs_ssh
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names and symlinks")
 @pytest.mark.parametrize(

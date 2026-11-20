@@ -100,10 +100,13 @@ def _replace_earlier_include(content: str, earlier: str, replacement: str | None
     every newline, one in the directory name included, is LF, or CRLF on
     Windows; the text is matched whole, as the line can span physical lines.
     """
-    for newline in ("\n", "\r\n"):
-        line = earlier.replace("\n", newline)
+    shapes = [(newline, earlier.replace("\n", newline)) for newline in ("\n", "\r\n")]
+    # The whole-file shape is judged on the file as found, before any marked
+    # line is removed from it.
+    for newline, line in shapes:
         if content in (line, line + newline):
             return "" if replacement is None else replacement + content[len(line) :]
+    for newline, line in shapes:
         block = f"{_INCLUDE_COMMENT}{newline}{line}{newline}"
         kept = "" if replacement is None else f"{_INCLUDE_COMMENT}{newline}{replacement}{newline}"
         content = _replace_at_line_starts(content, block, kept)
