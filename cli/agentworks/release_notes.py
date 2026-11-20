@@ -25,7 +25,10 @@ _TOPIC_RE = re.compile(
     rf"^{RELEASE_TOPIC}/v(?P<major>{_VERSION_COMPONENT})-"
     rf"(?P<minor>{_VERSION_COMPONENT})-(?P<patch>{_VERSION_COMPONENT})$"
 )
-_EXPRESSION_MARKERS = ("{{", "}}", "${", "<%", "%>", "{%", "%}")
+_EXPRESSION_MARKERS = ("{{", "}}", "<%", "%>", "{%", "%}")
+# Release notes describe Agentworks runtime context references (`${agw:NAME}`),
+# so only that namespace is exempt; any other `${` is still refused.
+_FOREIGN_SUBSTITUTION_RE = re.compile(r"\$\{(?!agw:)")
 
 
 class ReleaseNotesError(ValidationError):
@@ -81,7 +84,7 @@ def _reject_unsafe_text(text: str) -> None:
         codepoint = ord(character)
         if (codepoint < 32 and character not in "\t\n\r") or 127 <= codepoint <= 159:
             raise ReleaseNotesError("packaged release history contains terminal control text")
-    if any(marker in text for marker in _EXPRESSION_MARKERS):
+    if any(marker in text for marker in _EXPRESSION_MARKERS) or _FOREIGN_SUBSTITUTION_RE.search(text):
         raise ReleaseNotesError("packaged release history contains an unsafe expression marker")
     if "⟦" in text or "⟧" in text:
         raise ReleaseNotesError("packaged release history contains a reserved guide delimiter")

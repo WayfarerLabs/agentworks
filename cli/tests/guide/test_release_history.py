@@ -42,6 +42,13 @@ def test_release_history_preserves_valid_sections_in_source_order() -> None:
         history.section("3.0.0")
 
 
+def test_release_history_accepts_runtime_context_references() -> None:
+    body = "Runtime context references use only ${agw:NAME}."
+    history = parse_release_history(_history(("1.2.3", body)))
+
+    assert history.section("1.2.3").body.strip() == body
+
+
 @pytest.mark.parametrize(
     "data",
     [
@@ -49,6 +56,7 @@ def test_release_history_preserves_valid_sections_in_source_order() -> None:
         b"# Changelog\n\n## [1.2] (2026-08-10)\n\nNotes.\n",
         _history(("1.2.3", "One."), ("1.2.3", "Two.")),
         _history(("1.2.3", "unsafe ${instruction}")),
+        _history(("1.2.3", "Use ${agw:user_home_dir}, then unsafe ${instruction}.")),
         _history(("1.2.3", "unsafe\x1b[2J")),
         _history(("1.2.3", "unsafe ⟦delimiter⟧")),
         _history(("1.2.3", "")),
