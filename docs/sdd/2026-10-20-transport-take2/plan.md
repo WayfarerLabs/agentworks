@@ -745,6 +745,16 @@ module, and `remote_exec.py` is deleted.
       (sessions-lld, Batch status): `timeout` sends TERM, and the row's shell, waiting on its probe,
       kills the row's process group with KILL as root; the bounds test models uutils' `timeout`
       beside the host's, and fails rather than hangs when a request outlives its deadline.
+- [x] Merge `main` with #910 and fix round 8 of PR C (complexity review of round 7; trust-lld,
+      Managed SSH entries; sessions-lld, Batch status and the workspace traversal; platform-lld, The
+      bounds before dispatch). The managed entries name the key and the host-key store by the
+      absolute path Agentworks itself uses, never `~`-relative, which supersedes the `~` rule in the
+      apostrophe box above: a Windows profile named with an apostrophe and no whitespace now gets no
+      managed entries, with a warning. A test proves an owner client cannot write into root's status
+      pipe or its row's output; EC2 throttling is `RequestLimitExceeded` alone in the resend, the
+      warning and the hint; the workspace traversal is handed only normalized paths, so its slash
+      handling from round 7 is gone and its `..` refusal stays; GCE recovery steps with no operation
+      known offer none to watch.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
