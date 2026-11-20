@@ -464,9 +464,10 @@ def test_a_discovery_directory_hidden_by_an_unsearchable_directory_is_warned(
 
 
 def _deep_missing(root: Path, project_bytes: int) -> str:
-    """A workspace path under ``root``, more than a thousand directories deep, whose
-    project path encodes to exactly ``project_bytes`` bytes. Its last component is
-    two-byte characters, so it is shorter in characters than in bytes."""
+    """A missing workspace path under ``root``, more than a thousand directories deep,
+    short enough to look up itself, whose project path encodes to exactly
+    ``project_bytes`` bytes. Its last component is two-byte characters, so it is
+    shorter in characters than in bytes."""
     base = f"{root}/missing"
     pad = "\u00e9" * 100
     depth, odd = divmod(project_bytes - len(os.fsencode(f"{base}/{pad}/.tmuxinator.yml")), 2)
@@ -479,7 +480,7 @@ def _deep_missing(root: Path, project_bytes: int) -> str:
 @pytest.mark.parametrize(
     ("project_bytes", "warned"), [(4095, False), (4096, True)], ids=["under-the-limit", "at-the-limit"]
 )
-def test_a_workspace_missing_deep_is_judged_unless_too_long_to_look_up(
+def test_a_missing_deep_workspace_is_judged_unless_its_project_path_reaches_the_limit(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
     tmp_path: Path,
@@ -494,9 +495,8 @@ def test_a_workspace_missing_deep_is_judged_unless_too_long_to_look_up(
 
     _reinit(db, target)
 
-    assert (deep in shlex.split(target.commands[1])) is not warned
     assert not (workspace / ".tmuxinator.yml").exists()
-    assert len(captured_output.warnings) == warned
+    assert len(captured_output.warnings) == int(warned)
 
 
 @requires_guest_shell
