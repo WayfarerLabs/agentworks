@@ -182,10 +182,7 @@ def sync_ssh_config_or_warn(config: Config, db: Database, *, announce: bool = Tr
     try:
         sync_ssh_config(config, db, announce=announce)
     except Exception as e:
-        message = str(e)
-        if isinstance(e, AgentworksError) and e.hint:
-            message += f"{'' if message.endswith('.') else '.'} {e.hint}"
-        output.warn(f"SSH config sync failed: {message}")
+        output.warn(f"SSH config sync failed: {_with_hint(e)}")
         output.info("VM is likely still usable.")
 
 
@@ -492,8 +489,11 @@ def _require_alias_token(name: str) -> None:
         raise ValidationError(f"{name!r} cannot be part of an SSH host alias")
 
 
-def _with_hint(error: AgentworksError) -> str:
-    return f"{error} {error.hint}" if error.hint else str(error)
+def _with_hint(error: Exception) -> str:
+    """``error``'s message, then the hint of an Agentworks error that has one, after exactly one period."""
+    message = str(error)
+    hint = error.hint if isinstance(error, AgentworksError) else None
+    return f"{message}{'' if message.endswith('.') else '.'} {hint}" if hint else message
 
 
 def _verification_lines(vm_name: str) -> str:
