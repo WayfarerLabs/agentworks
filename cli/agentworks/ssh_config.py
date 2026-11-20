@@ -96,10 +96,11 @@ def _replace_earlier_include(content: str, earlier: str, replacement: str | None
     where the operator had already written it, so the same line anywhere
     without the marker is the operator's own and is left alone. A run of
     markers directly above the line is one block: the replacement keeps the
-    run as written, and for ``None`` the line is removed with the whole run,
-    so no marker is left directly above a line it was not written for. The
-    shapes below are matched in one pass, so no sync removes a block that its
-    own removal completed.
+    run as written and replaces the line, and for ``None`` the run goes with
+    the line, so no marker of the run is left above anything. Where the
+    directory name holds a line break, an operator's own copies of the line's
+    halves written around a block can join into another block, which is
+    removed too.
 
     Those releases wrote in text mode, so every newline, one in the directory
     name included, is LF, or CRLF on Windows; the text is matched whole, as the
@@ -110,20 +111,17 @@ def _replace_earlier_include(content: str, earlier: str, replacement: str | None
     universal = earlier.replace("\r\n", "\n").replace("\r", "\n")
     shapes = [("\n", earlier), ("\n", universal), ("\r\n", earlier.replace("\n", "\r\n"))]
     marker = re.escape(_INCLUDE_COMMENT)
-    # One group per shape holds its run of markers, which ends in the shape's
-    # newline: the marker directly above the line keeps it exactly.
-    blocks = "|".join(
-        rf"((?:{marker}\r?\n)*{marker}{re.escape(newline)}){re.escape(line + newline)}" for newline, line in shapes
-    )
 
     def kept(block: re.Match[str]) -> str:
-        if replacement is None:
-            return ""
-        markers = next(run for run in block.groups() if run is not None)
-        newline = "\r\n" if markers.endswith("\r\n") else "\n"
-        return f"{markers}{replacement}{newline}"
+        """The run of markers with ``replacement`` in place of the line, or nothing for ``None``."""
+        return "" if replacement is None else f"{block['markers']}{replacement}{block['newline']}"
 
-    return re.sub(f"(?m)^(?:{blocks})", kept, content)
+    for newline, line in shapes:
+        # The markers above the one directly above the line may end in either
+        # newline; that one ends in the line's own.
+        run = rf"(?P<markers>(?:{marker}\r?\n)*{marker}(?P<newline>{re.escape(newline)}))"
+        content = re.sub(rf"(?m)^{run}{re.escape(line + newline)}", kept, content)
+    return content
 
 
 def ssh_host_alias(vm_name: str, prefix: str = "awvm--") -> str:

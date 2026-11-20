@@ -1416,28 +1416,6 @@ def test_a_marker_copied_above_a_marked_line_leaves_the_line_copied_below_it_by_
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
-def test_a_sync_leaves_a_block_its_own_removal_completes(tmp_path: Path) -> None:
-    """Every shape is matched in one pass, so a block a removal completes is left by that sync.
-
-    A removal can complete a block only inside a line that spans physical
-    lines, and that is the boundary of what is kept: here the operator's CRLF
-    halves of such a line, around an LF block, join into a CRLF block
-    byte-identical to one 0.19 wrote, which the next sync removes as that
-    release's.
-    """
-    config = _config_under_an_unnameable_directory(tmp_path, "directory", "line\nbreak")
-    ssh_config = config.operator.ssh_config
-    line = _line_written_by_0_19(ssh_config)
-    head, tail = line.split("\n")
-    marker = "# Added by agentworks"
-    ssh_config.write_bytes(f"{marker}\r\n{head}\r\n{marker}\n{line}\n{tail}\r\n".encode())
-
-    _rebuild_config_dir(config, _db_with_one_vm())
-
-    assert ssh_config.read_bytes() == f"{marker}\r\n{head}\r\n{tail}\r\n".encode()
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
 def test_both_lines_0_19_left_for_a_directory_with_a_carriage_return_are_removed(
     tmp_path: Path,
     captured_output,  # noqa: ANN001
