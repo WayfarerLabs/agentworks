@@ -7,6 +7,7 @@ so the commands under test are the shipped ones.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import sys
 from typing import TYPE_CHECKING
@@ -507,69 +508,28 @@ def test_a_failed_project_command_without_usable_markers_still_warns(
     assert str(workspace) not in captured_output.warnings[0]
 
 
-@requires_guest_shell
-@pytest.mark.parametrize(
-    ("finished", "failures", "named"),
-    [
-        ("AGW_TMUXINATOR_FINISHED=2\n", 1, True),
-        ("", 2, True),
-        ("AGW_TMUXINATOR_FINISHED=1\n", 1, False),
-        ("AGW_TMUXINATOR_FINISHED=3\n", 1, False),
-        ("AGW_TMUXINATOR_FINISHED=0\nAGW_TMUXINATOR_FINISHED=2\n", 1, False),
-    ],
-    ids=["read-every-path", "stopped-early", "read-too-few", "read-too-many", "counted-twice"],
-)
-def test_the_projects_are_reported_whole_unless_the_command_read_every_path(
-    guest: tuple[LocalFixtureTransport, Path, Path], finished: str, failures: int, named: bool
-) -> None:
-    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
-
-    target, workspace, _entries = guest
-    _replace_call(target, 2, SSHResult(returncode=1, stdout="AGW_TMUXINATOR_UNFINISHED=1\n" + finished, stderr=""))
-
-    reported = retire_tmuxinator_projects(target, [str(workspace), "/srv/unreached"])
-
-    assert len(reported) == failures
-    assert (str(workspace) in reported[0]) is named
-    assert not any("/srv/unreached" in failure for failure in reported)
-
-
-@requires_guest_shell
-@skip_as_root
-@pytest.mark.parametrize(
-    "consumer",
-    ["cat >/dev/null", "IFS= read -r _", "head -c 3 >/dev/null", "dd bs=1 count=1 >/dev/null 2>&1"],
-    ids=["all", "one-line", "part-of-a-line", "one-byte"],
-)
-def test_input_read_before_the_script_runs_leaves_reinit_partial(
-    db: Database,
-    guest: tuple[LocalFixtureTransport, Path, Path],
-    tmp_path: Path,
-    captured_output: CapturedOutput,
-    consumer: str,
-) -> None:
-    """A startup file of the admin's shell that reads stdin, however little, takes input
-    the script never sees."""
-    target, workspace, _entries = guest
-    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    later = _workspace(db, tmp_path / "guest" / "workspaces", "zlater")
-    later.chmod(0o600)
+def _prefixed(target: LocalFixtureTransport, prefix: str) -> None:
+    """Run ``prefix`` ahead of every command, as a startup file of the admin's shell would."""
     real_run = target.run
 
-    def consuming(command: str, **kwargs: object) -> SSHResult:
-        return real_run(f"{consumer}; {command}" if kwargs.get("input_data") else command, **kwargs)
+    def prefixed(command: str, **kwargs: object) -> SSHResult:
+        return real_run(f"{prefix}; {command}", **kwargs)
 
-    target.run = consuming  # type: ignore[method-assign]
-    logger = Mock()
-    try:
-        _retire_workspace_tmuxinator_projects(db, "box", target, logger)
-    finally:
-        later.chmod(0o755)
+    target.run = prefixed  # type: ignore[method-assign]
 
-    assert (workspace / ".tmuxinator.yml").exists()
-    assert logger.warning.call_count == 1
-    assert len(captured_output.warnings) == 1
-    assert str(workspace) not in captured_output.warnings[0] and str(later) not in captured_output.warnings[0]
+
+@requires_guest_shell
+def test_a_startup_file_that_reads_stdin_changes_nothing(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], captured_output: CapturedOutput
+) -> None:
+    target, workspace, entries = guest
+    project, link = _project_and_link(workspace, entries)
+    _prefixed(target, "cat >/dev/null")
+
+    _reinit(db, target)
+
+    assert not project.exists() and not link.is_symlink()
+    assert captured_output.warnings == []
 
 
 @requires_guest_shell
@@ -577,7 +537,7 @@ def test_a_workspace_reported_twice_is_named_once(guest: tuple[LocalFixtureTrans
     from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
 
     target, workspace, _entries = guest
-    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" * 2 + "AGW_TMUXINATOR_FINISHED=1\n"
+    stdout = "AGW_TMUXINATOR_UNFINISHED=1\n" * 2
     _replace_call(target, 2, SSHResult(returncode=1, stdout=stdout, stderr=""))
 
     reported = retire_tmuxinator_projects(target, [str(workspace)])
@@ -585,22 +545,9 @@ def test_a_workspace_reported_twice_is_named_once(guest: tuple[LocalFixtureTrans
     assert len(reported) == 1 and reported[0].count(str(workspace)) == 1
 
 
-def _record_input(target: LocalFixtureTransport) -> list[str | None]:
-    """Record the input each command is sent; every command still runs for real."""
-    real_run = target.run
-    sent: list[str | None] = []
-
-    def recording(command: str, **kwargs: object) -> SSHResult:
-        sent.append(kwargs.get("input_data"))  # type: ignore[arg-type]
-        return real_run(command, **kwargs)
-
-    target.run = recording  # type: ignore[method-assign]
-    return sent
-
-
 @requires_guest_shell
 @skip_as_root
-@pytest.mark.parametrize("unsendable", ["/srv/odd\nname", "", "relative/proj"], ids=["two-lines", "empty", "relative"])
+@pytest.mark.parametrize("unsendable", ["/srv/odd\0name", "", "relative/proj"], ids=["nul", "empty", "relative"])
 def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
     db: Database,
     guest: tuple[LocalFixtureTransport, Path, Path],
@@ -613,17 +560,36 @@ def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
     # Listed by name, so the skipped path comes before the workspace that fails.
     db.insert_workspace("a-odd", vm_name="box", workspace_path=unsendable, template="default", linux_group="g")
     locked = _workspace(db, tmp_path / "guest" / "workspaces", "b-locked")
-    sent = _record_input(target)
     locked.chmod(0o600)
     try:
         _reinit(db, target)
     finally:
         locked.chmod(0o755)
 
-    assert sent == [None, f"AGW_TMUXINATOR_PATHS\n{locked}\n{workspace}\n"]
+    assert shlex.split(target.commands[1])[4:] == [str(locked), str(workspace)]
     assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
     assert str(locked) in captured_output.warnings[0]
+
+
+@requires_guest_shell
+@skip_as_root
+def test_a_workspace_path_holding_a_newline_is_cleaned_and_named(
+    db: Database, guest: tuple[LocalFixtureTransport, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, _proj, _entries = guest
+    cleaned = _workspace(db, tmp_path / "guest" / "workspaces", "new\nline")
+    locked = _workspace(db, tmp_path / "guest" / "workspaces", "un\nsearchable")
+    locked.chmod(0o600)
+    try:
+        _reinit(db, target)
+    finally:
+        locked.chmod(0o755)
+
+    assert not (cleaned / ".tmuxinator.yml").exists()
+    assert (locked / ".tmuxinator.yml").exists()
+    assert len(captured_output.warnings) == 1
+    assert str(locked) in captured_output.warnings[0] and str(cleaned) not in captured_output.warnings[0]
 
 
 @pytest.mark.parametrize(
