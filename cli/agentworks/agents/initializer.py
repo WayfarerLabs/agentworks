@@ -42,6 +42,12 @@ if TYPE_CHECKING:
     from agentworks.vms.initializer.steps import InitLog
 
 
+def passwd_lookup(linux_user: str) -> Command:
+    """The account's ``getent passwd`` probe, unelevated: it needs no root, so no sudo refusal can stand in for its
+    answer."""
+    return Command(("getent", "passwd", linux_user))
+
+
 def create_new_agent_user(
     vm: VMRow,
     config: Config,
@@ -63,8 +69,7 @@ def create_new_agent_user(
 
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
     home = managed_home(linux_user)
-    # getent needs no root, so no sudo refusal can stand in for its answer.
-    account = Command(("getent", "passwd", linux_user))
+    account = passwd_lookup(linux_user)
     home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
     if (
         probe_presence(admin, account, absent_status=GETENT_NOT_FOUND_STATUS) is not None
@@ -163,9 +168,7 @@ def create_agent_on_vm(
     # GID 100), a bare ``useradd`` plus 0750 would GRANT every other agent
     # group read+execute on this home, an inversion of the goal. We do
     # not assume a clean Debian image (see capabilities/vm_platform/README).
-    passwd_entry = probe_presence(
-        admin, Command(("getent", "passwd", linux_user)), absent_status=GETENT_NOT_FOUND_STATUS
-    )
+    passwd_entry = probe_presence(admin, passwd_lookup(linux_user), absent_status=GETENT_NOT_FOUND_STATUS)
     if passwd_entry is None:
         admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
         output.info(f"Created agent user '{linux_user}' on VM '{vm.name}'")

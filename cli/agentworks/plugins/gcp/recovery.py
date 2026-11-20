@@ -34,13 +34,9 @@ class GcloudResource:
     name: str
     zone: str | None = None
 
-    def _scope(self) -> str:
-        """Where this resource and its operations are: its zone, or ``--global`` for a firewall rule."""
-        return "--global" if self.zone is None else f"--zone {shlex.quote(self.zone)}"
-
     def _command(self, verb: str) -> str:
         group = "instances" if self.kind == "instance" else "firewall-rules"
-        location = "" if self.zone is None else f" {self._scope()}"
+        location = "" if self.zone is None else f" --zone {shlex.quote(self.zone)}"
         return (
             f"gcloud compute {group} {verb} {shlex.quote(self.name)} --project {shlex.quote(self.project_id)}{location}"
         )
@@ -52,10 +48,14 @@ class GcloudResource:
         return f"`{self._command('delete')}`"
 
     def operation_describe(self, operation_name: str) -> str:
-        """The command that reads the operation named ``operation_name``, which this resource's insert started."""
+        """The command that reads the operation named ``operation_name``, which this resource's insert started.
+
+        An instance's operations are its zone's; a firewall rule's are global.
+        """
+        scope = "--global" if self.zone is None else f"--zone {shlex.quote(self.zone)}"
         return (
             f"`gcloud compute operations describe {shlex.quote(operation_name)} "
-            f"--project {shlex.quote(self.project_id)} {self._scope()}`"
+            f"--project {shlex.quote(self.project_id)} {scope}`"
         )
 
 

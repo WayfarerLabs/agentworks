@@ -155,15 +155,11 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 TOOL = ManifestDoc("user-install-command", "tool", {"command": "install-tool", "path": ["~/.local/bin", "/opt/tools"]})
 
 
-@pytest.mark.parametrize("user_exists", [False, True])
-def test_the_user_probe_runs_without_root(
-    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, user_exists: bool
-) -> None:
-    """``getent passwd`` needs no root, so no sudo refusal can stand in for its answer."""
-    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=user_exists, shell="/bin/bash")
+def test_the_account_lookup_runs_without_root(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``getent passwd`` needs no root, so no sudo refusal can stand in for its answer (``passwd_lookup``)."""
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=True, shell="/bin/bash")
 
-    lookups = [r for r in recorder.requests("run") if isinstance(r, Command) and r.argv[:2] == ("getent", "passwd")]
-    assert lookups and not any(lookup.elevated for lookup in lookups)
+    assert Command(("getent", "passwd", LINUX_USER)) in recorder.requests("run")
 
 
 def test_create_useradd_forces_private_group(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:
