@@ -422,6 +422,31 @@ def test_a_failed_step_warns_and_every_later_step_still_runs(
     assert guest.access.requests() == steady.access.requests()
 
 
+def _runs_mise(request: RunRequest) -> bool:
+    return isinstance(request, Command) and request.argv[-1].startswith("mise ")
+
+
+@pytest.mark.parametrize("lockfile", ["refused", "published"])
+def test_the_admin_s_declared_mise_lockfile_gates_its_mise_install(
+    run_section: Callable[..., None], tmp_path: Path, lockfile: str
+) -> None:
+    """A declared lockfile that could not be published runs no mise at all; the later steps still run."""
+    source = tmp_path / "mise.lock"
+    source.write_text("[tools]\n")
+    destination = f"{HOME}/.config/mise/mise.lock"
+    guest = Guest()
+    if lockfile == "refused":
+        guest.fail(_is_write_of(destination), PathRefused("box", "write", destination, PathRefusal.UNSUITABLE))
+
+    run_section(
+        guest, AdminConfig(user_install_commands=["user-tool"], mise_packages=["jq@1"], mise_lockfile=str(source))
+    )
+
+    requests = guest.access.requests()
+    assert any(_runs_mise(request) for request in requests) is (lockfile == "published")
+    assert install_run("bash", "install-user-tool") in requests
+
+
 ADMIN_GRANT_REPAIR = Script(repair_admin_sudoers_script("agentworks"), Shell.SH, elevated=True, deadline=60)
 
 

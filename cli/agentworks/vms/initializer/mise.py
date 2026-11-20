@@ -103,8 +103,14 @@ def _write_mise_config(
         warn_step(log, "mise config write failed", error)
 
 
-def _fetch_mise_lockfile(files: Files, lockfile_source: str, home: str, log: InitLog) -> None:
-    """Publish a mise lockfile from a source reference at ``~/.config/mise/mise.lock``, 0644."""
+def _publish_mise_lockfile(files: Files, lockfile_source: str, home: str, log: InitLog) -> bool:
+    """Publish a mise lockfile from a source reference at ``~/.config/mise/mise.lock``, 0644; whether it was.
+
+    A publication that fails (a source that cannot be read, a link or another
+    file the file program refuses at the destination, a write that does not
+    answer) warns that mise install did not run, since installing would use
+    whatever lockfile, or none, is already there.
+    """
     from agentworks.sources import fetch_file, parse_source_ref
 
     log.step("Mise lockfile")
@@ -114,7 +120,9 @@ def _fetch_mise_lockfile(files: Files, lockfile_source: str, home: str, log: Ini
         ref = parse_source_ref(lockfile_source, default_filename="mise.lock")
         fetch_file(ref, files, f"{home}/{MISE_CONFIG_DIR}/mise.lock", log=log)
     except STEP_FAILURES as error:
-        warn_step(log, "mise lockfile fetch failed", error)
+        warn_step(log, "mise lockfile was not published, so mise install did not run", error)
+        return False
+    return True
 
 
 def install_mise(
@@ -131,15 +139,16 @@ def install_mise(
     """Fetch an account's mise lockfile and install its tools as ``files``' identity, after its dotfiles sync.
 
     The admin's and every agent's step. An explicit ``lockfile`` overrides
-    one the dotfiles supplied. The install runs when the template declares
+    one the dotfiles supplied, and one that cannot be published skips the
+    install and its prune. The install runs when the template declares
     ``packages`` or a ``lockfile``, or the home has a config (its dotfiles
     may supply one), and runs even when the config write warned; ``prune``
     is the template's ``mise_prune_on_reinit``. ``mise install`` and
     ``mise prune`` run in a login shell (``{shell} -lc``), so the profile's
     ``PATH`` and exported identity are in scope; nothing is injected.
     """
-    if lockfile:
-        _fetch_mise_lockfile(files, lockfile, home, log)
+    if lockfile and not _publish_mise_lockfile(files, lockfile, home, log):
+        return
     if packages or lockfile or _has_mise_config(files, home):
         _run_mise_install(files, shell, home, allow_unlocked, log, prune=prune)
 

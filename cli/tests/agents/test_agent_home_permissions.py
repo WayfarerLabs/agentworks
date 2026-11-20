@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
-from agentworks.execution.errors import CommandFailed
+from agentworks.execution.errors import CommandFailed, PathRefusal, PathRefused
 from agentworks.execution.requests import Bytes, Command, PythonProgram, Script
 from agentworks.execution.results import Completed, Result
 from tests.conftest import ManifestDoc
@@ -483,6 +483,40 @@ def test_a_failed_git_dotfiles_sync_skips_the_agent_install(
     commands = _commands(recorder)
     assert any(argv[:4] == ("git", "-C", dest, "fetch") for argv in commands)
     assert ("bash", "-lc", "./install.sh") not in commands
+
+
+@pytest.mark.parametrize("lockfile", ["refused", "published"])
+def test_the_agent_s_declared_mise_lockfile_gates_its_mise_install(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, lockfile: str
+) -> None:
+    """A declared lockfile that could not be published runs no mise at all, as the admin's does."""
+    (tmp_path / "mise.lock").write_text("[tools]\n")
+    destination = f"{HOME}/.config/mise/mise.lock"
+
+    def refuse_the_lockfile(recorder: AccessRecorder) -> None:
+        answer = recorder.answer
+
+        def scripted(call: Call) -> Result | BaseException | None:
+            if lockfile == "refused" and _file_op(call.request, "write", destination):
+                return PathRefused("box", "write", destination, PathRefusal.UNSUITABLE)
+            return answer(call) if answer is not None else None
+
+        recorder.answer = scripted
+
+    recorder = _run_create_on_vm(
+        db,
+        config,
+        monkeypatch,
+        user_exists=False,
+        mise_packages=["jq@1"],
+        mise_lockfile=str(tmp_path / "mise.lock"),
+        user_install_commands=["tool"],
+        before_create=refuse_the_lockfile,
+    )
+
+    requests = recorder.requests("run")
+    assert any(isinstance(r, Command) and r.argv[-1].startswith("mise ") for r in requests) is (lockfile == "published")
+    assert any(_runs_the_tool(request) for request in requests)
 
 
 def _file_op(request: object, operation: str, path: str) -> bool:

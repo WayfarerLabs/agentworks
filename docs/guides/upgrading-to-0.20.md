@@ -598,7 +598,9 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   initialization goes on. DNS that tailscaled left latched in direct mode still stops it, with the
   manual fix as its hint. A mise lockfile step that cannot create its directory warns too, and a
   check for the lockfile that gets no answer warns and skips `mise install` instead of installing
-  unlocked.
+  unlocked. An explicit `mise_lockfile` that cannot be published (a source that cannot be read, or a
+  link at `mise.lock`) now warns and skips that account's `mise install` and prune, where a missing
+  source used to warn and install anyway.
 - **Some failures stop initialization instead of warning.** A host key that does not match the VM's
   record, a VM with no record, and a VM that cannot run Agentworks requests fail initialization at
   the first request, with that error, instead of turning every later step into a warning. A failed

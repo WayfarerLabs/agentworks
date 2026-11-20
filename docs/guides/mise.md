@@ -155,8 +155,11 @@ This means:
 - Agentworks never writes the config or the lockfile through a symbolic link. If your dotfiles
   install links `~/.config/mise/config.toml` (or the directory) into the checkout, the next reinit
   leaves it alone and warns while `mise_packages` is set: let the dotfiles own the config and drop
-  `mise_packages`, or stop linking it. The same holds for an explicit `mise_lockfile` over a linked
-  `mise.lock`.
+  `mise_packages`, or stop linking it.
+- An explicit `mise_lockfile` that cannot be published, because its source cannot be read or a link
+  or another file is at `~/.config/mise/mise.lock`, warns and skips that account's mise install and
+  prune, since installing would use whatever lockfile, or none, is already there. Remove the link or
+  let the dotfiles own the lockfile and drop `mise_lockfile`, then reinit.
 - A git dotfiles checkout at `~/.config/mise` itself cannot be combined with `mise_packages`: the
   config write creates that directory first, so the clone then finds it in place and the sync fails.
   Let the dotfiles own the config and drop `mise_packages`, or check the dotfiles out elsewhere.

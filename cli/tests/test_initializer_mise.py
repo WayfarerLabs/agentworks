@@ -165,3 +165,63 @@ def test_mise_setup_still_installs_after_its_config_write_is_refused(tmp_path: P
     assert list((tmp_path / "elsewhere").iterdir()) == []
     assert len(guest.log.warned) == 1
     assert mise_run("bash", "mise install -y", 300) in guest.commands()
+
+
+def _declared_lockfile_setup(tmp_path: Path, destination: str) -> tuple[Path, Path]:
+    """A declared lockfile source and the account's home, with ``destination`` left at the lockfile's path."""
+    home = tmp_path / "home"
+    mise_dir = home / ".config" / "mise"
+    mise_dir.mkdir(parents=True)
+    source = tmp_path / "declared.lock"
+    source.write_text("declared\n")
+    if destination == "dangling-link":
+        (mise_dir / "mise.lock").symlink_to(tmp_path / "absent.lock")
+    elif destination == "link-to-other-lock":
+        (tmp_path / "other.lock").write_text("other\n")
+        (mise_dir / "mise.lock").symlink_to(tmp_path / "other.lock")
+    elif destination == "missing-source":
+        source.unlink()
+    return source, home
+
+
+def _install_declared(guest: StepGuest, source: Path, home: Path, *, allow_unlocked: bool) -> None:
+    install_mise(
+        guest.files,
+        packages=["jq@1"],
+        lockfile=str(source),
+        allow_unlocked=allow_unlocked,
+        prune=True,
+        shell="bash",
+        home=str(home),
+        log=guest.log,
+    )
+
+
+@requires_file_program
+@pytest.mark.parametrize("allow_unlocked", [False, True])
+@pytest.mark.parametrize("destination", ["dangling-link", "link-to-other-lock", "missing-source"])
+def test_a_declared_lockfile_that_is_not_published_installs_and_prunes_nothing(
+    tmp_path: Path, destination: str, allow_unlocked: bool
+) -> None:
+    """Installing would use whatever lockfile, or none, is already at the destination."""
+    source, home = _declared_lockfile_setup(tmp_path, destination)
+    guest = StepGuest()
+
+    _install_declared(guest, source, home, allow_unlocked=allow_unlocked)
+
+    assert guest.commands() == []
+    assert len(guest.log.warned) == 1
+    if destination == "link-to-other-lock":
+        assert (tmp_path / "other.lock").read_text() == "other\n"
+
+
+@requires_file_program
+def test_a_published_declared_lockfile_is_installed_locked(tmp_path: Path) -> None:
+    source, home = _declared_lockfile_setup(tmp_path, "free")
+    guest = StepGuest()
+    guest.respond(Command(("test", "-f", f"{home}/.config/mise/mise.lock"), deadline=60), Result(Completed(0)))
+
+    _install_declared(guest, source, home, allow_unlocked=False)
+
+    assert (home / ".config" / "mise" / "mise.lock").read_text() == "declared\n"
+    assert LOCKED in guest.commands()

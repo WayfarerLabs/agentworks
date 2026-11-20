@@ -321,7 +321,10 @@ Every Phase B step catches `STEP_FAILURES` and warns with `warn_step`, except:
   and `mise prune` is best effort (`mise.py:191-195`). Each catches `STEP_FAILURES` and does what
   today's `except SSHError` did. The lockfile probe is the exception since PR C's round 6: one that
   does not answer warns and skips the install, since reading it as "absent" would install unlocked
-  (execution-lld, Presence probes).
+  (execution-lld, Presence probes). Since round 7 a declared lockfile that is not published (its
+  source unreadable, a link refused at its path, a write that does not answer) skips the install and
+  its prune the same way, since the install would run against whatever lockfile, or none, is already
+  there (`mise._publish_mise_lockfile`).
 - **The dotfiles sync and install** (`driver.py:570-594`) catch `STEP_FAILURES`, where today they
   catch `Exception`. `SourceRefError` is an `ExternalError`, and a local source's `OSError` becomes
   one where it is read (`sources.py`), so no wider catch is needed.
@@ -621,9 +624,9 @@ request before dispatch (D12), so the self-configure phase cannot regress into r
   `_write_agentworks_profile` and `_write_agentworks_rc` (passing its identity exports), runs its
   user install commands through Phase B's `_run_install_commands`, whose completion test runs
   `test_exec` as `{shell} -lic` where the agent's used `-lc`, and sets up mise with Phase B's
-  `_write_mise_config`, `_fetch_mise_lockfile` and `_run_mise_install`, so a failed config write no
-  longer skips the install. One `profile_fragment` builds both accounts' profile, keeping the last
-  of interleaved `PATH` entries (I70) for the admin too.
+  `_write_mise_config`, `_publish_mise_lockfile` and `_run_mise_install`, so a failed config write
+  no longer skips the install. One `profile_fragment` builds both accounts' profile, keeping the
+  last of interleaved `PATH` entries (I70) for the admin too.
 - **The mise shims line.** Today `_run_agent_mise_setup` appends
   `export PATH="<home>/.local/share/mise/shims:$PATH"` to the profile fragment after
   `_run_agent_install_commands` rewrote it (`agents/initializer.py:652-658`), and adds source lines
