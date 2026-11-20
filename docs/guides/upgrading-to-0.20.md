@@ -429,15 +429,17 @@ the VM once no backup is running.
   `paths.vm_workspaces`. Its harness setup was recorded against the relative spelling, so its setup
   record is stale until the workspace is rehomed; rehome records the setup at the new path. One
   created under a value starting with `~` keeps its stored path, since which home it named is not
-  recorded. `workspace rehome` refuses such a path before anything runs, and the session commands
-  warn instead of updating its tmuxinator config and defer delivering MCP servers to its sessions.
+  recorded. `workspace rehome` and `workspace repair` refuse such a path before anything runs,
+  repair with a hint to delete and recreate the workspace, and the session commands warn instead of
+  updating its tmuxinator config and defer delivering MCP servers to its sessions.
   `workspace delete` removes its row, sessions, grants, group and tmuxinator link, but nothing the
   path names, warning that its directory and tmuxinator config are left on the VM to check by hand;
   the workspace can then be recreated under the same name. A stored path with a `..` component, from
   an absolute value typed with one or a relative value such as `../ws` once rewritten, names its
   directory only once the VM resolves it: the session commands warn instead of updating its
   tmuxinator config and defer delivering MCP servers to its sessions, `workspace delete` removes its
-  directory and link, and `workspace rehome` moves it to a path without one.
+  directory and link, `workspace repair` runs its other steps and warns that the parent traversal
+  fix failed, and `workspace rehome` moves it to a path without one.
 - **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
   or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
   dropped. A target that is the workspace's directory, inside it, or around it once the VM resolves
