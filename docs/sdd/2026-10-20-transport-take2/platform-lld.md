@@ -1167,18 +1167,18 @@ dispatch and bounds the script alone; the work before dispatch has bounds of its
     that insert's named operation reports `DONE`; with no operation known they keep the deny and
     escalate its removal. EC2's opening calls (the dry-run revokes and the authorizes) and its
     address read go through a `BoundedClient` of `_ROUTE_CALL_TIMEOUT_SECONDS` (300 s) each. A poke
-    sends each authorize once, through its own client with botocore's retries off
-    (`single_send_config`, `total_max_attempts` 1; the dry runs and revokes keep the ordinary
-    client), so no resend can follow a send that still lands. An authorize that did not return
-    revokes what the poke planned, and warns, naming that authorize's prefix, unless EC2 refused
-    that send: a client error, or a throttling answer (a code botocore's own retry policy reads as
-    throttling, `RequestLimitExceeded` among them, which EC2 sends with a 503 before acting). A
-    throttled send was refused, so that authorize alone is sent again, after 1, 2 and 4 seconds
-    (`_THROTTLED_AUTHORIZE_WAITS_SECONDS`), each still a single send, with nothing pending while it
-    waits; throttled after the last, the poke fails with a retry hint and no warning. Any other
-    server error, a transport failure, a bound running out or an interrupt during a send leaves the
-    outcome unknown. botocore's throttling reader is imported as the poke starts, before anything
-    changes.
+    sends each authorize through its own client with botocore's retries off (`single_send_config`,
+    `total_max_attempts` 1; the dry runs and revokes keep the ordinary client), so botocore never
+    resends one behind a send that may still land; the poke itself sends one again only after EC2
+    throttled it, below. An authorize that did not return revokes what the poke planned, and warns,
+    naming that authorize's prefix, unless EC2 refused that send: a client error, or a throttling
+    answer (a code botocore's own retry policy reads as throttling, `RequestLimitExceeded` among
+    them, which EC2 sends with a 503 before acting). A throttled send was refused, so that authorize
+    alone is sent again, after 1, 2 and 4 seconds (`_THROTTLED_AUTHORIZE_WAITS_SECONDS`), each still
+    a single send, with nothing pending while it waits; throttled after the last, the poke fails
+    with a retry hint and no warning. Any other server error, a transport failure, a bound running
+    out or an interrupt during a send leaves the outcome unknown. botocore's throttling reader is
+    imported as the poke starts, before anything changes.
   - **The held removals.** Each cloud's route removal, and its close of the provisioning access,
     runs with interrupts held and shares one 300 s bound across its calls: Azure's delete and its
     wait (`_run_route_operation`); GCE's reads, delete and operation wait

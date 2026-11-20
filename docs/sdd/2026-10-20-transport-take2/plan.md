@@ -726,11 +726,11 @@ module, and `remote_exec.py` is deleted.
       deny's delete only once the instance reads not found and, for an unresolved instance insert,
       its named operation reports `DONE`, and keep the deny and escalate with no operation known; a
       4xx the REST transport raises (`Forbidden`, `TooManyRequests` and their siblings) answering
-      the only insert sent settles it; an EC2 authorize goes out once, with no resend; a declared
-      mise lockfile that is not published skips that account's install and prune; rehome refuses an
-      occupied target as occupied; the workspace traversal names each ancestor by its exact bytes;
-      copy's exclusive reservation is tested; and the `getent passwd` probes run unelevated, as on
-      main.
+      the only insert sent settles it; each EC2 authorize send goes out once, with botocore's
+      resends off; a declared mise lockfile that is not published skips that account's install and
+      prune; rehome refuses an occupied target as occupied; the workspace traversal names each
+      ancestor by its exact bytes; copy's exclusive reservation is tested; and the `getent passwd`
+      probes run unelevated, as on main.
 - [x] Fix #923 and close round 7's private review (fix round 7 of PR C; sessions-lld, Batch status;
       platform-lld, The bounds before dispatch): each batch status row runs under root's own kill
       bound outside the owner switch, so an owner that stops, kills or escapes its client leaves
