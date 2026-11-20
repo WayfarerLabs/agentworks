@@ -290,11 +290,10 @@ still unknown (its operation unfinished, or no answer to the insert received) ca
 resource as gone, whether it read as not found or could not be read at all, until it sees the
 resource it owns: the insert may still create it. Rollback then keeps the owned deny while the
 instance may still appear and prints, for each such resource, the insert's operation to watch when
-one is known. Wait until that operation reports `DONE` before checking the resource. A resource that
-reads as not found, or an operations listing without the insert, does not show the insert settled:
-both can come before an unanswered insert registers. So when no operation is known, the printed
-steps say the resource may still appear, and the deny stays until its removal is escalated. Verify
-each provider ID before any manual name-based deletion:
+one is known. Wait until that operation reports `DONE` before checking the resource: a resource that
+reads as not found before then can still be created by an unanswered insert. When no operation is
+known, the printed steps say the resource may still appear, and the deny is kept and its removal
+escalated. Verify each provider ID before any manual name-based deletion:
 
 ```bash
 gcloud compute operations describe OPERATION \
