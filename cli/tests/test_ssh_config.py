@@ -197,10 +197,13 @@ def test_a_rewritten_config_keeps_its_mode_and_group(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
 def test_a_new_config_gets_the_mode_of_any_new_file_beside_it(tmp_path: Path) -> None:
-    """The umask and any default ACL on the directory decide, as for a file the operator creates there."""
+    """The umask and any default ACL on the directory decide, as for a file the operator creates there.
+
+    An uncommon umask, so neither 0644 nor 0600 written explicitly would match.
+    """
     ssh_config = tmp_path / "config"
     ordinary = tmp_path / "ordinary"
-    previous = os.umask(0o022)
+    previous = os.umask(0o027)
     try:
         _ensure_include(ssh_config, _include_directive(ssh_config))
         ordinary.write_text("")
