@@ -245,6 +245,7 @@
     "userdel",
     "usermod",
     "userspace",
+    "uutils",
     "variadics",
     "virtiofs",
     "vmbr",
