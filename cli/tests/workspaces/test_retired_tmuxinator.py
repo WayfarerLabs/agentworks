@@ -515,8 +515,9 @@ def test_a_failed_project_command_without_usable_markers_still_warns(
         ("", 2, True),
         ("AGW_TMUXINATOR_FINISHED=1\n", 1, False),
         ("AGW_TMUXINATOR_FINISHED=3\n", 1, False),
+        ("AGW_TMUXINATOR_FINISHED=0\nAGW_TMUXINATOR_FINISHED=2\n", 1, False),
     ],
-    ids=["read-every-path", "stopped-early", "read-too-few", "read-too-many"],
+    ids=["read-every-path", "stopped-early", "read-too-few", "read-too-many", "counted-twice"],
 )
 def test_the_projects_are_reported_whole_unless_the_command_read_every_path(
     guest: tuple[LocalFixtureTransport, Path, Path], finished: str, failures: int, named: bool
