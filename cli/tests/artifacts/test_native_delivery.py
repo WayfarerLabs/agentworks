@@ -315,7 +315,7 @@ def test_native_probe_passes_environment_separately_and_rejects_policy_failures(
 def test_vm_deferral_preserves_input_identity_without_descendant_knowledge(implementation):
     integration = implementation.for_setup(owner_name="box", owner_kind="vm", facet="vm", config={})
     item = artifact(ArtifactType.AGENT)
-    result = integration.vm_init(SimpleNamespace(artifacts=received(item)))
+    result = integration.vm_init(SimpleNamespace(artifacts=received(item), prior=None))
     assert result.files == ()
     assert result.deferred[0].input_id == item.identity
     assert result.deferred[0].destination == "user"

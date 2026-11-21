@@ -61,7 +61,9 @@ def select_session_artifacts(
                 else f"No supported session workaround for artifact type {item.content.type.value}"
             )
             deferred.append(ArtifactDeferral(input_id=item.identity, destination="session", reason=reason))
-    return select_inputs(inputs, selected), tuple(deferred)
+    selected_inputs = select_inputs(inputs, selected)
+    _warn_guidance_name_conflicts(selected_inputs)
+    return selected_inputs, tuple(deferred)
 
 
 def select_inputs(inputs: ArtifactInputs, selected: set[str]) -> ArtifactInputs:
@@ -180,19 +182,36 @@ def _name_conflicts(
 def _name_conflict_reason(items: tuple[ArtifactInput, ...]) -> str:
     content = items[0].content
     owners = ", ".join(f"{item.origin.component}:{item.origin.resource_name}" for item in items)
-    return f"multiple artifacts claim native {content.type.value} name '{content.name}': {owners}"
+    return f"multiple artifacts claim {content.type.value} name '{content.name}': {owners}"
+
+
+def _warn_guidance_name_conflicts(inputs: ArtifactInputs) -> None:
+    for items in _name_conflicts(inputs, types=(ArtifactType.RULE, ArtifactType.HINT)):
+        output.warn(f"{_name_conflict_reason(items)}. Keeping each owner's separate guidance.")
 
 
 def render_setup_artifacts(
     invocation: SetupInvocation,
     render: Callable[[ArtifactInputs], ArtifactApplication],
 ) -> ArtifactApplication:
-    """Defer every colliding input origin before rendering independent setup files."""
+    """Keep a unique applied owner; defer other colliders before rendering setup."""
+    _warn_guidance_name_conflicts(invocation.artifacts)
+    applied_origins = {
+        origin
+        for file in (() if invocation.prior is None else invocation.prior.artifact_files)
+        for origin in file.origins
+    }
     rejected: dict[str, str] = {}
     for items in _name_conflicts(invocation.artifacts):
+        incumbents = tuple(item for item in items if item.origin_identity in applied_origins)
+        incumbent = incumbents[0] if len(incumbents) == 1 else None
         reason = _name_conflict_reason(items)
+        if incumbent is not None:
+            reason += (
+                f"; keeping previously applied owner {incumbent.origin.component}:{incumbent.origin.resource_name}"
+            )
         invocation.report_incomplete(reason)
-        rejected.update((item.identity, reason) for item in items)
+        rejected.update((item.identity, reason) for item in items if item is not incumbent)
     selected = {item.identity for item in invocation.artifacts.items() if item.identity not in rejected}
     application = render(select_inputs(invocation.artifacts, selected))
     return replace(

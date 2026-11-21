@@ -218,17 +218,42 @@ def test_buffered_creation_does_not_publish_ownerless_applied_state(setup_case):
     assert read_native_setup(db, "agent", "agent").records == ()
 
 
-def test_changed_destination_can_be_reconciled_by_owning_integrations(setup_case, monkeypatch):
-    db, inputs, invocation, events, _ = setup_case
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
-    events.clear()
-    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "b" * 64)
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
-    assert events == [("first", False), ("second", False)]
-    assert all(
-        record.complete and record.destination_id == "b" * 64
-        for record in read_native_setup(db, "agent", "agent").records
+@pytest.mark.parametrize("destination", ["a" * 64, "b" * 64], ids=["unchanged", "changed"])
+def test_setup_scopes_prior_artifact_files_to_the_current_destination(setup_case, monkeypatch, destination):
+    from agentworks.artifacts.application import ArtifactPublication, OwnedArtifactFile
+    from agentworks.capabilities.harness_integration import harness_integration_for
+
+    db, inputs, invocation, _, _ = setup_case
+    inputs = replace(inputs, activations={"first": inputs.activations["first"]})
+    old_file = OwnedArtifactFile(path="/home/user/.native/agents/review.md", sha256="c" * 64, origins=("d" * 64,))
+    claim = NativeClaim(role="plugin", identifier="first", destination="home", source="legacy-source")
+    previous = SetupRecord(
+        component="agent",
+        integration="first",
+        destination_id="a" * 64,
+        declaration={"legacy": True},
+        complete=True,
+        claims=(claim,),
+        artifact_files=(old_file,),
     )
+    write_native_setup(db, inputs.kind, inputs.name, NativeSetupState(records=(previous,)), operation="fixture")
+
+    first = harness_integration_for("first")
+    initialize = Mock(side_effect=first.user_init)
+    monkeypatch.setattr(first, "user_init", lambda self, call: initialize(self, call))
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", lambda *a, **k: ArtifactPublication())
+    monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {"updated": True})
+    monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: destination)
+    failures: list[SetupFailure] = []
+    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+
+    assert not failures and state == read_native_setup(db, inputs.kind, inputs.name)
+    (record,) = state.records
+    assert record.complete and record.destination_id == destination and record.declaration == {"updated": True}
+    prior = initialize.call_args.args[1].prior
+    assert prior is not None and prior.complete and prior.destination_id == previous.destination_id
+    assert prior.claims == (claim,) and prior.declaration == {"legacy": True}
+    assert prior.artifact_files == ((old_file,) if destination == previous.destination_id else ())
 
 
 def test_applied_state_omits_env_values_but_detects_declaration_changes(setup_case):
