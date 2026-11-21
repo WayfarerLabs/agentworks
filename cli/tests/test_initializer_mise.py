@@ -124,7 +124,6 @@ def test_a_locked_failure_falls_back_when_allowed_and_a_failed_prune_is_ignored(
     assert guest.commands() == [LOCKFILE_PROBE, LOCKED, UNLOCKED, PRUNE]
 
 
-@requires_file_program
 def _mise_setup(guest: StepGuest, template: ResolvedAgentTemplate, home: str) -> None:
     """An account's mise steps around its dotfiles sync, as both accounts take them."""
     _write_mise_config(guest.files, template.mise_packages, template.mise_install_before, home, guest.log)
@@ -140,6 +139,7 @@ def _mise_setup(guest: StepGuest, template: ResolvedAgentTemplate, home: str) ->
     )
 
 
+@requires_file_program
 def test_mise_setup_writes_its_config_then_installs_unlocked(tmp_path: Path) -> None:
     guest = StepGuest()
     guest.respond(Command(("test", "-f", f"{tmp_path}/.config/mise/mise.lock"), deadline=60), Result(Completed(1)))
