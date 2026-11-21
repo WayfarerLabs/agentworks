@@ -179,9 +179,9 @@ try:
             if skill_root.is_symlink():
                 raise ValueError()
             for directory in skill_root.iterdir():
-                if tool == 'claude' and (directory.name.casefold() == 'synced' or
-                        directory.name in ('.trash', 'anthropic-skills') or
-                        directory.name.startswith('anthropic-skills:')):
+                # Keep direct-name casing aligned with _is_reserved_claude_skill on the host.
+                if tool == 'claude' and (directory.name.casefold() in ('synced', 'anthropic-skills') or
+                        directory.name == '.trash' or directory.name.casefold().startswith('anthropic-skills:')):
                     # These names do not expose ordinary native skills. Do not inspect
                     # account sync, retired skills, or other reserved namespace contents.
                     continue
@@ -400,6 +400,7 @@ def _proposed_sizes(files: Sequence[ArtifactFile | OwnedArtifactFile], tool: str
 
 
 def _is_reserved_claude_skill(identity: str | None) -> bool:
+    """Direct-name counterpart to _PROBE; plugin-qualified identities keep their namespace."""
     return (
         identity is not None
         and identity.startswith("skill:")

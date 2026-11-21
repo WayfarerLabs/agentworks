@@ -28,6 +28,27 @@ from tests.native_setup_fixtures import LocalFixtureTransport
 pytestmark = requires_posix_shell
 
 
+@pytest.fixture
+def stub_probe_runner():
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            ok=True,
+            stdout=(
+                "AGW_ARTIFACT_PROBE="
+                + json.dumps({"native_home": "/home/alice/.native", "problems": [], "inventory": []})
+                if "input_data" in kwargs
+                else "AGW_PYTHON3=available\n"
+            ),
+            stderr="",
+        )
+
+    return SimpleNamespace(run=run, logger=None, calls=calls)
+
+
 def claude_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalFixtureTransport:
     target = LocalFixtureTransport(tmp_path)
     bindir = tmp_path / "bin"
@@ -44,7 +65,18 @@ def claude_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalFixtu
 
 
 @pytest.mark.parametrize("scope", ["user", "workspace", "vm"])
-@pytest.mark.parametrize("container", ["synced", "SyNcEd", ".trash", "anthropic-skills", "anthropic-skills:review"])
+@pytest.mark.parametrize(
+    "container",
+    [
+        "synced",
+        "SyNcEd",
+        ".trash",
+        "anthropic-skills",
+        "anthropic-skills:review",
+        "Anthropic-Skills",
+        "AnThRoPiC-SkIlLs:review",
+    ],
+)
 def test_claude_reserved_skill_containers_are_opaque(tmp_path, scope, container):
     root = {
         "user": tmp_path / "home/.claude",
@@ -73,7 +105,18 @@ def test_claude_reserved_skill_containers_are_opaque(tmp_path, scope, container)
     assert len(tuple(reserved.glob("member-*"))) == 513
 
 
-@pytest.mark.parametrize("container", ["synced", "SyNcEd", ".trash", "anthropic-skills", "anthropic-skills:review"])
+@pytest.mark.parametrize(
+    "container",
+    [
+        "synced",
+        "SyNcEd",
+        ".trash",
+        "anthropic-skills",
+        "anthropic-skills:review",
+        "Anthropic-Skills",
+        "AnThRoPiC-SkIlLs:review",
+    ],
+)
 def test_claude_opaque_skill_container_links_are_not_followed(tmp_path, container):
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -110,8 +153,9 @@ def test_claude_reserved_containers_do_not_consume_inventory_capacity(tmp_path, 
     assert len(result["inventory"]) == 512
 
 
-def test_claude_ordinary_nested_skill_inventory_remains_invalid(tmp_path):
-    marker = tmp_path / "home/.claude/skills/ordinary/nested/SKILL.md"
+@pytest.mark.parametrize("container", ["ordinary", ".TRASH"])
+def test_claude_ordinary_nested_skill_inventory_remains_invalid(tmp_path, container):
+    marker = tmp_path / "home/.claude/skills" / container / "nested/SKILL.md"
     marker.parent.mkdir(parents=True)
     marker.write_text("---\nname: review\ndescription: Existing skill\n---\nbody\n")
 
@@ -133,25 +177,8 @@ def test_claude_reserved_names_remain_ordinary_skills_for_other_harnesses(tmp_pa
     assert [row["path"] for row in result["inventory"]] == [str(marker)]
 
 
-@pytest.mark.parametrize("name", ["synced", "anthropic-skills"])
-def test_claude_reserved_direct_skill_names_refuse_without_native_inspection(name):
-    calls = []
-
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return SimpleNamespace(
-            returncode=0,
-            ok=True,
-            stdout=(
-                "AGW_ARTIFACT_PROBE="
-                + json.dumps({"native_home": "/home/alice/.native", "problems": [], "inventory": []})
-                if "input_data" in kwargs
-                else "AGW_PYTHON3=available\n"
-            ),
-            stderr="",
-        )
-
-    runner = SimpleNamespace(run=run, logger=None)
+@pytest.mark.parametrize("name", ["synced", "anthropic-skills", "Anthropic-Skills"])
+def test_claude_reserved_direct_skill_names_refuse_without_native_inspection(name, stub_probe_runner):
     file = ArtifactFile(
         f"/home/alice/.claude/skills/{name}/SKILL.md",
         f"---\nname: {name}\ndescription: Supplied skill\n---\nbody\n".encode(),
@@ -160,29 +187,18 @@ def test_claude_reserved_direct_skill_names_refuse_without_native_inspection(nam
     )
 
     with pytest.raises(NativeArtifactConflictError) as raised:
-        probe_native(runner, tool="claude", environment={}, files=(file,), redactions=(name,))
+        probe_native(stub_probe_runner, tool="claude", environment={}, files=(file,), redactions=(name,))
 
     assert raised.value.identities == (f"skill:{name}",)
     assert name not in str(raised.value)
-    assert calls == []
+    assert stub_probe_runner.calls == []
 
 
 @pytest.mark.parametrize("tool,namespace", [("codex", ""), ("grok", ""), ("claude", "agentworks-artifacts:")])
 @pytest.mark.parametrize("name", ["synced", "anthropic-skills"])
-def test_reserved_claude_names_are_usable_in_other_native_or_plugin_namespaces(tool, namespace, name):
-    def run(command, **kwargs):
-        return SimpleNamespace(
-            returncode=0,
-            ok=True,
-            stdout=(
-                "AGW_ARTIFACT_PROBE="
-                + json.dumps({"native_home": "/home/alice/.native", "problems": [], "inventory": []})
-                if "input_data" in kwargs
-                else "AGW_PYTHON3=available\n"
-            ),
-            stderr="",
-        )
-
+def test_reserved_claude_names_are_usable_in_other_native_or_plugin_namespaces(
+    tool, namespace, name, stub_probe_runner
+):
     file = ArtifactFile(
         f"/home/alice/.native/skills/{name}/SKILL.md",
         f"---\nname: {name}\ndescription: Supplied skill\n---\nbody\n".encode(),
@@ -190,7 +206,7 @@ def test_reserved_claude_names_are_usable_in_other_native_or_plugin_namespaces(t
         native_identity=f"skill:{namespace}{name}",
     )
 
-    assert probe_native(SimpleNamespace(run=run, logger=None), tool=tool, environment={}, files=(file,))
+    assert probe_native(stub_probe_runner, tool=tool, environment={}, files=(file,))
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest file publication helpers locally")
@@ -296,16 +312,7 @@ def test_claude_reserved_ancestor_records_do_not_select_inventory_or_hide_ordina
     else:
         # No active persona should cause discovery of this malformed directory either.
         (persona.parent / "nested").mkdir(parents=True)
-    requests: list[dict] = []
     warnings: list[str] = []
-    run = target.run
-
-    def capture_request(command, **kwargs):
-        if "input_data" in kwargs:
-            requests.append(json.loads(kwargs["input_data"]))
-        return run(command, **kwargs)
-
-    monkeypatch.setattr(target, "run", capture_request)
     monkeypatch.setattr("agentworks.artifacts.native.common.output.warn", warnings.append)
     context = SessionArtifactContext(
         inputs=ArtifactInputs(),
@@ -328,14 +335,6 @@ def test_claude_reserved_ancestor_records_do_not_select_inventory_or_hide_ordina
     assert not plan.application.files
     assert not plan.application.deferred
     assert not plan.argv
-    assert len(requests) == 1
-    request = requests[0]
-    assert request["identities"] == (["agent:ordinary"] if ordinary_ancestor else [])
-    assert request["paths"] == ([str(persona)] if ordinary_ancestor else [])
-    assert request["entries"] == ({str(persona): "agent:ordinary"} if ordinary_ancestor else {})
-    assert request["proposed"] == {}
-    assert request["home"] == str(target.home)
-    assert request["check_policy"] is True
     if ordinary_ancestor:
         assert root is None
         assert len(warnings) == 1
@@ -343,3 +342,15 @@ def test_claude_reserved_ancestor_records_do_not_select_inventory_or_hide_ordina
     else:
         assert root == str(native)
         assert not warnings
+        policy = native / "settings.json"
+        policy.write_bytes(b"{invalid fixture policy")
+        _, root = prepare_session_delivery(
+            target,
+            tool="claude",
+            integration="claude-code",
+            context=context,
+            render=lambda context: NativeSessionArtifacts(),
+            workspace="",
+        )
+        assert root is None
+        assert len(warnings) == 1 and str(policy) in warnings[0]

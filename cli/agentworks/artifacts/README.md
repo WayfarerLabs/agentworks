@@ -686,13 +686,15 @@ third-party plugin locations, Codex system-configuration policy, or changes afte
 native discovery extensions require separate verification; a successful preflight is not an
 exhaustive native inventory.
 
-Claude's [reserved skill locations](https://code.claude.com/docs/en/skills), `synced` (in any
-capitalization) and `.trash`, contain native-managed account sync and retired skill data. Inventory
-treats these containers and the reserved `anthropic-skills` directory as opaque: it skips their
-contents and excludes them from metadata and entry budgets. Direct Claude skill names `synced` and
-`anthropic-skills` are reserved and deferred rather than reported as applied. Native plugin
-namespaces retain their own name rules. Ordinary skill candidates and their native discovery roots
-still receive the bounds and path checks above.
+Claude's
+[reserved skill locations](https://code.claude.com/docs/en/skills#names-reserved-for-synced-skills)
+include `synced`, `anthropic-skills`, and names beginning with `anthropic-skills:`, ignoring case.
+The exact `.trash` directory holds retired synced skills. Inventory treats these containers as
+opaque: it skips their contents and excludes them from metadata and entry budgets. Direct Claude
+skill names `synced` and `anthropic-skills` are reserved and deferred rather than reported as
+applied. Stored deferrals retain the conflict cause and repair guidance. Native plugin namespaces
+retain their own name rules. Ordinary skill candidates and their native discovery roots still
+receive the bounds and path checks above.
 
 There is no separate session filesystem. Private session files use the actual user's
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/` directory. The opt-in Codex/Grok
