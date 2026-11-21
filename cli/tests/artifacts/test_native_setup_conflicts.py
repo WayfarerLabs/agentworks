@@ -14,24 +14,28 @@ from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native.common import defer_setup_conflicts
 from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, _inventory_problems
+from agentworks.artifacts.publication import validate_application
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
     UserSetupInvocation,
     WorkspaceSetupInvocation,
 )
+from agentworks.harness_setup.model import SetupRecord
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
-from tests.artifacts.test_native_delivery import artifact, context, enabled
+from tests.artifacts.test_native_delivery import artifact, context, enabled, owned
 from tests.conftest import _FakeTarget
 
 
 @pytest.mark.parametrize("implementation", [ClaudeCodeIntegration, CodexIntegration, GrokBuildIntegration])
 @pytest.mark.parametrize("facet", ["user", "workspace"])
 @pytest.mark.parametrize("artifact_type", [ArtifactType.SKILL, ArtifactType.AGENT])
-def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
-    db, monkeypatch, implementation, facet, artifact_type
+@pytest.mark.parametrize("established", [False, True], ids=["cold", "established"])
+@pytest.mark.parametrize("local_first", [False, True], ids=["outer-first", "local-first"])
+def test_setup_keeps_established_owner_or_defers_all_colliders(
+    db, monkeypatch, implementation, facet, artifact_type, established, local_first
 ):
     module = import_module(implementation.__module__)
     monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
@@ -44,7 +48,7 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
     setup_method = "setup_user" if facet == "user" else "setup_workspace"
     if hasattr(module, setup_method):
         monkeypatch.setattr(module, setup_method, native_setup)
-    outer = replace(artifact(artifact_type), origin=ArtifactOrigin("vm", "vm", "vm", entry="review"))
+    outer = replace(artifact(artifact_type), origin=ArtifactOrigin("vm", "vm", "vm", bundle="original", entry="review"))
     component = "agent" if facet == "user" else "workspace"
     local = replace(artifact(artifact_type), origin=ArtifactOrigin(component, component, "local", entry="review"))
     independent = replace(artifact(ArtifactType.RULE), origin=local.origin)
@@ -55,7 +59,7 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
         "prior": None,
         "checkpoint": lambda claims: None,
         "report_incomplete": incomplete,
-        "artifacts": received(outer, local, independent),
+        "artifacts": received(outer),
     }
     invocation: SetupInvocation
     if facet == "user":
@@ -63,13 +67,47 @@ def test_setup_defers_all_colliding_origins_and_applies_independent_rule(
     else:
         invocation = WorkspaceSetupInvocation(**common, workspace_name="ws", root="/workspace", linux_group="ws")
     integration = implementation.for_setup(owner_kind=component, owner_name="local", facet=facet, config={})
-    result = getattr(integration, f"{facet}_init")(invocation)
+    setup = getattr(integration, f"{facet}_init")
+    updated = b"Updated incumbent."
+    if established:
+        initial = setup(invocation)
+        assert initial.files and not initial.deferred
+        incomplete.assert_not_called()
+        native_setup.reset_mock()
+        prior = SetupRecord(
+            component=component,
+            integration=implementation.name,
+            destination_id="a" * 64,
+            declaration={},
+            artifact_files=tuple(owned(file) for file in initial.files),
+        )
+        invocation = replace(invocation, prior=prior)
+        outer = replace(
+            outer,
+            origin=replace(outer.origin, bundle="replacement"),
+            content=replace(
+                outer.content,
+                text=updated.decode(),
+                members=tuple(
+                    replace(member, data=member.data.replace(b"Use this skill.", updated))
+                    for member in outer.content.members
+                ),
+            ),
+        )
 
-    assert {item.input_id for item in result.deferred} == {outer.identity, local.identity}
-    assert all(item.destination == "session" for item in result.deferred)
-    assert result.files and {origin for file in result.files for origin in file.origins} == {
-        independent.origin_identity
+    contenders = (local, outer) if local_first else (outer, local)
+    inputs = received(*contenders, independent)
+    result = setup(replace(invocation, artifacts=inputs))
+    validate_application(result, inputs, facet, integration=implementation.name)
+
+    assert {(item.input_id, item.destination) for item in result.deferred} == {
+        (item.identity, "session") for item in ((local,) if established else contenders)
     }
+    expected_origins = {independent.origin_identity}
+    if established:
+        expected_origins.add(outer.origin_identity)
+        assert any(updated in file.data for file in result.files if outer.origin_identity in file.origins)
+    assert {origin for file in result.files for origin in file.origins} == expected_origins
     incomplete.assert_called_once()
     if implementation is not GrokBuildIntegration:
         native_setup.assert_called_once()
@@ -169,7 +207,6 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
 def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identity_collision(db, tmp_path):
     from agentworks.artifacts.capture import content_from_members
     from agentworks.artifacts.model import ArtifactMember
-    from agentworks.artifacts.publication import validate_application
     from agentworks.plugins.codex.artifacts import outer_artifacts
     from tests.native_setup_fixtures import LocalFixtureTransport
 
