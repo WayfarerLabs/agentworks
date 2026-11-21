@@ -37,7 +37,7 @@ def format_host_path(file: Path) -> str:
     difference carries meaning, and it does not; that mixed screen is the
     defect this helper exists to prevent, and it has recurred twice.
 
-    Four kinds of path are deliberately NOT rendered here, and each
+    Five kinds of path are deliberately NOT rendered here, and each
     exclusion is load-bearing rather than an oversight:
 
     - **Paths on a VM or other remote.** ``$HOME`` here is the *host's*
@@ -62,6 +62,10 @@ def format_host_path(file: Path) -> str:
       this rule's job (``oplog.OperationLogFile.display_path``); rewriting
       the prose lines inside it while the argv beside them stayed absolute
       would recreate the mixed rendering one level down.
+    - **A path whose own characters are the subject of the message**, where
+      ``~`` would hide the character at fault: the Windows home directory
+      named when its apostrophe keeps a managed SSH entry from being
+      written (``ssh_config._entry_value``).
 
     A path outside ``$HOME`` needs no exclusion: it already falls through
     to the absolute form.
