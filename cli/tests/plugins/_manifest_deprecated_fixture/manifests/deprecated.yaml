@@ -1,0 +1,10 @@
+# A bundle carrying a deprecated setting: `load_manifests` records a
+# deprecation rather than raising, which exercises
+# `publish_manifest_package`'s refusal of a bundle that is not issue-free.
+apiVersion: agentworks/v1
+kind: workspace-template
+metadata:
+  name: fixture-deprecated-template
+  description: sets the inert tmuxinator field
+spec:
+  tmuxinator: true

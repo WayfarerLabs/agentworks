@@ -114,7 +114,7 @@ def test_post_spawn_failure_retains_new_owners_and_original_outcome(
             SimpleNamespace(session=SimpleNamespace(history_limit=1), paths=SimpleNamespace(vm_workspaces="/srv")),
             name="s1",
             new_workspace=True,
-            workspace_spec='{"tmuxinator":false}',
+            workspace_spec='{"git_user_name":"Ada"}',
             new_agent=True,
             agent_spec='{"shell":"zsh"}',
             vm_name="vm1",

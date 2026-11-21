@@ -436,9 +436,6 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
-    # _regenerate_tmuxinator fires after create_tmux_session returns; it
-    # scps a YAML file which doesn't help this test's transport assertion.
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
     captured: dict[str, object] = {}
 
@@ -682,8 +679,6 @@ def test_legacy_runtime_is_preserved_until_confirmed_restart(
 
     # Boot ID for the post-create atomic runtime update.
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *_a, **_kw: BOOT_ID)
-    # Tmuxinator regeneration is downstream of the migration; not in scope.
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
     # _resolve_session_linux_user reads the VM/agent rows; stub to a literal.
     monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
     # Restricted-config deploy fires before create; no-op for this test.
@@ -872,7 +867,6 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
 
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
     monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)

@@ -60,13 +60,15 @@ def _sample_hint(kind: str) -> str:
     return f"`agw resource sample {kind}` prints this kind's fields"
 
 
-def decode_document(doc: Document, issues: list[str]) -> Any:
+def decode_document(doc: Document, issues: list[str], deprecations: list[str]) -> Any:
     """Decode one validated envelope into the kind's declared-resource row.
 
     The spec is validated against the kind's model, which is the row class
     itself; the error bridge frames every problem with the document's
     ``file:line`` and the owner's ``kind/name``. Advisory warnings are
-    appended to ``issues``, located the same way.
+    appended to ``issues`` and the row's deprecated settings
+    (``DeclaredResource.deprecated_fields``) to ``deprecations``, located the
+    same way.
     """
     spec = dict(doc.spec)
     _reject_spec_metadata(doc, spec)
@@ -90,6 +92,10 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
             hint=_sample_hint(doc.kind),
         ) from exc
     issues.extend(located(doc.location, issue) for issue in advisory_issues(resource, doc))
+    deprecations.extend(
+        located(doc.location, f"{owner.display}.{field} is deprecated: {guidance}")
+        for field, guidance in resource.deprecated_fields().items()
+    )
     return resource
 
 

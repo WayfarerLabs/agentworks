@@ -775,8 +775,8 @@ Authoring a system plugin is documented in the plugins package README
 The `apt` plugin owns five shipped apt sources and five apt package sets. The `install-command`
 plugin owns six shipped user install commands. They are both disabled by default. Core still owns
 the resource kinds, validation, apt source-before-package ordering, idempotent runners, executors,
-and initialization. Core also continues to own snap, mise, dotfiles, tmuxinator, and Claude
-marketplace/plugin setup. Enable `apt` only for a template selecting its apt catalog, and
+and initialization. Core also continues to own snap, mise, and dotfiles; harness integrations own
+native marketplace/plugin setup. Enable `apt` only for a template selecting its apt catalog, and
 `install-command` only for an admin or agent template selecting its shipped user command. Use
 `agw doctor` to see their states and `agw resource list --include-disabled` to inspect their rows.
 

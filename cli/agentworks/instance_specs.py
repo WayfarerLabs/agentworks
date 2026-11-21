@@ -89,6 +89,21 @@ class ActivationMapMigrationRequired(UnsupportedStoredOverlayError):
 
 
 def parse_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
+    """Parse an operator's strict inline JSON spec, reporting its deprecated settings."""
+    from agentworks import output
+    from agentworks.declared_resource import DeclaredResource
+
+    overlay = _decode_instance_spec(instance_kind, value)
+    if isinstance(overlay.declaration, DeclaredResource):
+        for field, guidance in overlay.declaration.deprecated_fields().items():
+            output.deprecation(
+                f"{instance_kind} instance spec field {field} is deprecated: {guidance}",
+                key=f"instance-spec:{instance_kind}:{field}",
+            )
+    return overlay
+
+
+def _decode_instance_spec(instance_kind: InstanceKind, value: str) -> InstanceOverlay[BaseModel]:
     """Parse strict inline JSON and validate it through the kind's spec model."""
     raw = _parse_json_object(value)
     forbidden = sorted(OVERLAY_EXCLUDED_FIELDS.intersection(raw))
@@ -171,7 +186,7 @@ def decode_stored_overlay(
             sort_keys=True,
             separators=(",", ":"),
         )
-        parsed = parse_instance_spec(record.instance_kind, encoded)
+        parsed = _decode_instance_spec(record.instance_kind, encoded)
     except UnsupportedOverlayFieldsError as error:
         raise UnsupportedStoredOverlayError(
             f"stored {record.instance_kind} {record.instance_name!r} instance spec uses unsupported fields: {error}",

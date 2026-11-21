@@ -95,9 +95,10 @@ These add things on reinit but do not remove them when removed from config:
 
 ### Other
 
-| Step                    | Notes                                                                    |
-| ----------------------- | ------------------------------------------------------------------------ |
-| Dotfiles (local source) | Overwritten, not merged. Side effects from previous installs may linger. |
+| Step                        | Notes                                                                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Dotfiles (local source)     | Overwritten, not merged. Side effects from previous installs may linger.                                                    |
+| Retired tmuxinator projects | Removed for every workspace on the VM; see [Retired workspace tmuxinator projects](#retired-workspace-tmuxinator-projects). |
 
 ## Agent reinit
 
@@ -168,10 +169,7 @@ leftovers.
 
 Cleanup of the attempt and the final reservation proceeds independently. Before confirmed clone
 publication, cleanup removes only an empty final reservation, including for a workspace without a
-repository. A failed non-repository create first retires its confirmed, unchanged generated
-tmuxinator file; its matching discovery link is removed with the reservation. Modified files,
-replacement links and unrelated contents are preserved. Existing tmuxinator discovery entries are
-not overwritten by workspace creation.
+repository. Unrelated contents are preserved.
 
 A lost reservation or publication response, or a reservation that gained content, leaves that path
 and its group for inspection. An absent database row does not establish that a leftover directory is
@@ -180,6 +178,23 @@ empty or safe to remove.
 Inspect and preserve valuable contents before manual cleanup or choosing another name. Check for a
 surviving Git process using the exact attempt path and stop it before removing that attempt. Do not
 recursively delete the final workspace path based on the naming pattern or a failed create alone.
+
+## Retired workspace tmuxinator projects
+
+Releases up to 0.19 generated a tmuxinator project in each workspace (`.tmuxinator.yml`) and linked
+it from the VM admin's `~/.config/tmuxinator/ws-<name>-console.yml`. `vm reinit` removes those admin
+links, without following them, and each workspace's `.tmuxinator.yml` that is a regular file still
+starting with the generated header. Anything else is left alone. A link, project or workspace
+directory that cannot be read or searched also stays, as does whatever a directory the admin cannot
+search hides: the links behind an unsearchable `~/.config`, or a project inside an unsearchable
+directory above its workspace. So does a workspace or `~/.config/tmuxinator` that is a symbolic link
+the admin cannot follow, because it is dangling or passes through a directory the admin cannot
+search. A workspace path that is not absolute, holds a NUL byte, holds a character the workstation's
+filesystem encoding cannot represent, or is so long that its `.tmuxinator.yml` path reaches the
+kernel's 4096-byte lookup limit, is not checked at all, and neither is `~/.config/tmuxinator` when
+the admin's `HOME` is not absolute. Like a failed removal, each makes reinit warn without failing. A
+workspace or `~/.config/tmuxinator` that does not exist, or is a file rather than a directory, has
+nothing to remove and is passed over quietly.
 
 ## Workspace repair
 

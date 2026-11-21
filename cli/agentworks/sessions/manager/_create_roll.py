@@ -508,9 +508,8 @@ def _start_session_slice(
         on_session_retained()
         session_node.mark_realized()
 
-    # The section is closed: the terminal result line and the
-    # post-start tmuxinator regeneration renders
-    # at column 0, mirroring existing-session launch. They stay inside the
+    # The section is closed: the terminal result line renders
+    # at column 0, mirroring existing-session launch. It stays inside the
     # outer try so a failure here still triggers the ephemeral
     # rollback (a completed session itself is never rolled back).
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
@@ -523,9 +522,6 @@ def _start_session_slice(
         output.info(f"{started}{suffix or '; harness setup incomplete'}")
     else:
         output.result(started)
-
-    # Update the workspace's tmuxinator config.
-    _mgr._regenerate_tmuxinator(db, config, vm, ws)
 
 
 def _roll_forward(

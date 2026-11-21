@@ -113,7 +113,6 @@ KINDS = {
         resolve=resolve_workspace,
         declared={
             "repo": "git@github.com:octocat/repo.git",
-            "tmuxinator": False,
             "git_user_name": "Ada Lovelace",
             "git_user_email": "ada@example.com",
             "harness_integrations": {"shell": CapabilityConfig.model_validate({})},

@@ -218,18 +218,8 @@ def copy_workspace(
                 # (#280) can never restore it.
                 materialize_grant_all_agents(db, config, dest_vm, dest_name, logger=lg)
 
-                # Generate tmuxinator config and VS Code workspace
                 from agentworks.workspaces.backends.vm import generate_vscode_workspace
-                from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
-                tmux_config = generate_config(dest_name, workspace_path)
-                dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
-                session = console_session_name(dest_name)
-                dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-                dest_target.run(
-                    f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
-                    timeout=10,
-                )
                 vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
                 output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
             finally:

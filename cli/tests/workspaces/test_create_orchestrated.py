@@ -227,7 +227,7 @@ def test_create_with_spec_persists_owner_and_overlay_and_reports_set(
         config,
         name="ws1",
         vm_name="box",
-        spec='{"tmuxinator":false}',
+        spec='{"git_user_name":"Ada"}',
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
@@ -235,9 +235,9 @@ def test_create_with_spec_persists_owner_and_overlay_and_reports_set(
     assert db.get_workspace("ws1") is not None
     stored = db.instance_state.get_desired_overlay("workspace", "ws1")
     assert stored is not None
-    assert stored.payload == VersionedPayload(1, {"tmuxinator": False})
+    assert stored.payload == VersionedPayload(1, {"git_user_name": "Ada"})
     assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
-        (OverlayDisposition.SET, ("tmuxinator",))
+        (OverlayDisposition.SET, ("git_user_name",))
     ]
 
 
@@ -331,7 +331,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     deletes: list[str] = []
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace",
-        lambda vm, config_, ws_name, path, linux_group, *, logger=None: deletes.append(path),
+        lambda vm, config_, path, linux_group, *, logger=None: deletes.append(path),
     )
 
     with pytest.raises(ExternalError, match="creating workspace: ssh exploded"):
@@ -340,7 +340,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
             config,
             name="ws1",
             vm_name="box",
-            spec='{"tmuxinator":false}',
+            spec='{"git_user_name":"Ada"}',
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
