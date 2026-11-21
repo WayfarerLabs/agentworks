@@ -228,7 +228,7 @@ def test_vm_mcp_defers_to_user_without_native_file_claims(module_name, class_nam
     integration = implementation.for_setup(owner_kind="vm", owner_name="vm", facet="vm", config={})
     server = mcp()
     result = integration.vm_init(
-        SimpleNamespace(artifacts=received(server), environment={}, secrets={}, runner=object())
+        SimpleNamespace(artifacts=received(server), environment={}, secrets={}, runner=object(), prior=None)
     )
     assert not result.files
     assert [(entry.input_id, entry.destination) for entry in result.deferred] == [(server.identity, "user")]

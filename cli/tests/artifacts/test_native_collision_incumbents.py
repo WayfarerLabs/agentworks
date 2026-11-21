@@ -10,17 +10,25 @@ from unittest.mock import Mock
 
 import pytest
 
+from agentworks.artifacts import routing
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
+from agentworks.artifacts.native import probe as native_probe
 from agentworks.artifacts.native.common import render_setup_artifacts
 from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.publication import publish_artifacts, validate_application
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
+from agentworks.harness_setup import dispatch
+from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import SetupRecord
+from agentworks.harness_setup.outcomes import SetupFailure
+from agentworks.harness_setup.state import read_native_setup
 from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
+from agentworks.schema import CapabilityConfig
+from agentworks.secrets.orchestration import SecretTarget
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, enabled, owned
 from tests.conftest import _FakeTarget
@@ -201,3 +209,77 @@ def test_cross_owner_guidance_names_warn_and_coexist_in_setup_and_session(db, mo
         second.origin_identity,
     }
     assert any(all(item.origin.resource_name in warning for item in (first, second)) for warning in warnings)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest probe and publication helpers locally")
+@pytest.mark.parametrize("recreated", [False, True])
+def test_dispatch_uses_incumbent_file_ownership_only_at_its_recorded_destination(tmp_path, db, monkeypatch, recreated):
+    target = LocalFixtureTransport(tmp_path / "guest")
+    binary = target.root / "bin"
+    binary.mkdir()
+    (binary / "python3").symlink_to(sys.executable)
+    executable = binary / "claude"
+    executable.write_text("#!/bin/sh\nexit 91\n")
+    executable.chmod(0o700)
+    machine_id = binary / "cat"
+    machine_id.write_text(
+        '#!/bin/sh\nif [ "$1" = /etc/machine-id ]; then echo fixture-machine; else exec /bin/cat "$@"; fi\n'
+    )
+    machine_id.chmod(0o700)
+    program = native_probe._PROBE
+    for guest_path in ("/etc/claude-code/.claude", "/etc/claude-code/managed-settings.json"):
+        program = program.replace(repr(guest_path), repr(str(target.root / guest_path.removeprefix("/"))))
+    monkeypatch.setattr(native_probe, "_PROBE", program)
+    monkeypatch.setattr(dispatch, "ensure_harness_integration_enabled", lambda *args: None)
+    monkeypatch.setattr(dispatch, "harness_integration_for", lambda name: ClaudeCodeIntegration)
+    monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
+    vm = db.insert_vm("vm", "fixture", "vm")
+    db.insert_agent("worker", "vm", "worker")
+    inputs = SetupInputs(
+        kind="agent",
+        name="worker",
+        component="agent",
+        activations={"claude-code": CapabilityConfig.model_validate({})},
+        target=SecretTarget(vm={}),
+    )
+    invocation = UserSetupInvocation(
+        vm=vm,
+        runner=target,
+        prior=None,
+        checkpoint=lambda claims: None,
+        username="worker",
+        home=str(target.home),
+    )
+    incumbent = replace(artifact(ArtifactType.SKILL), origin=ArtifactOrigin("vm", "vm", "vm", entry="review"))
+    newcomer = replace(artifact(ArtifactType.SKILL), origin=ArtifactOrigin("agent", "agent", "worker", entry="review"))
+    independent = replace(artifact(ArtifactType.RULE), origin=newcomer.origin)
+    routed = received(incumbent)
+    monkeypatch.setattr(routing, "setup_artifacts", lambda *args: routing.RoutingResult(routed))
+    failures: list[SetupFailure] = []
+    before = dispatch.run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-init").records[0]
+    assert not failures and before.complete and before.artifact_files
+    original = {
+        Path(file.path).relative_to(target.home): Path(file.path).read_bytes() for file in before.artifact_files
+    }
+    old_home = target.home
+    if recreated:
+        old_home = target.root / "old-home"
+        target.home.rename(old_home)
+        target.home.mkdir()
+        (target.home / ".profile").write_bytes((old_home / ".profile").read_bytes())
+    routed = received(incumbent, newcomer, independent)
+
+    state = dispatch.run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+
+    assert not failures
+    assert state == read_native_setup(db, "agent", "worker")
+    after = state.records[0]
+    assert (before.destination_id != after.destination_id) is recreated
+    assert {item.input_id for item in after.deferred} == (
+        {incumbent.identity, newcomer.identity} if recreated else {newcomer.identity}
+    )
+    assert {origin for file in after.artifact_files for origin in file.origins} == (
+        {independent.origin_identity} if recreated else {incumbent.origin_identity, independent.origin_identity}
+    )
+    assert (target.home / ".claude/skills/review/SKILL.md").exists() is not recreated
+    assert {path: (old_home / path).read_bytes() for path in original} == original

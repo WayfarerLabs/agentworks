@@ -219,14 +219,28 @@ def test_buffered_creation_does_not_publish_ownerless_applied_state(setup_case):
 
 
 def test_changed_destination_can_be_reconciled_by_owning_integrations(setup_case, monkeypatch):
+    from agentworks.capabilities.harness_integration import harness_integration_for
+
     db, inputs, invocation, events, _ = setup_case
     run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    previous = {record.integration: record for record in read_native_setup(db, "agent", "agent").records}
+    priors = {}
+    first = harness_integration_for("first")
+    initialize = first.user_init
+
+    def record_prior(self, call):
+        priors[self.name] = call.prior
+        return initialize(self, call)
+
+    monkeypatch.setattr(first, "user_init", record_prior)
+    monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {"updated": True})
     events.clear()
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "b" * 64)
     run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert events == [("first", False), ("second", False)]
+    assert priors == previous
     assert all(
-        record.complete and record.destination_id == "b" * 64
+        record.complete and record.destination_id == "b" * 64 and record.declaration == {"updated": True}
         for record in read_native_setup(db, "agent", "agent").records
     )
 
