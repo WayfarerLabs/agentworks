@@ -522,8 +522,10 @@ def _verification_lines(vm_name: str) -> str:
     gets no comment: ssh reports the read failure itself.
 
     The other pins match the execution core's (:func:`trust.pinned_options`).
-    Raises :class:`~agentworks.errors.AgentworksError` when the store path
-    cannot be written into an entry.
+    Raises :class:`~agentworks.errors.ValidationError` when ``vm_name``
+    cannot name a store file (``trust.store_file``). The store directory is
+    checked once by :func:`_host_entries`, and a valid name adds nothing an
+    entry value refuses.
     """
     options = (
         f"HostKeyAlias {trust.host_key_alias(vm_name)}",
