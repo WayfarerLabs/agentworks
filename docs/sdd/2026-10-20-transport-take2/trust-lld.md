@@ -296,31 +296,41 @@ R8's end state does not depend on every operator importing (`ssh_config._vm_entr
 
   `GlobalKnownHostsFile` takes the same value `_entry_value` writes: ssh parses its quoted arguments
   as it does `UserKnownHostsFile`'s (the run above used a quoted path with a space). It gets no `%`
-  or `${}` expansion, which `literal_path` already refuses. The ssh shipped with Git for Windows and
-  native OpenSSH for Windows are builds of the same client, so they read the line the same way.
+  or `${}` expansion, which `literal_path` already refuses. The two Windows clients do not read
+  every value alike: the ssh shipped with Git for Windows rejects a quoted value with no whitespace
+  (`invalid quotes`), so `option_value` quotes only a value ssh would split or unquote, while the
+  installed Win32-OpenSSH client may accept one (`tests/execution/test_trust.py:89` reads a quoted
+  `o'brien` store path through it). So a value with an apostrophe and no whitespace may have a form
+  native ssh reads, and has none Git for Windows' ssh reads. The entries cannot know which client
+  reads them, and `_GIT_FOR_WINDOWS_MAY_READ` is simply `win32`, so on Windows such a value is
+  refused for both: a native-ssh user under such a profile loses the managed entries to protect Git
+  Bash's ssh.
 
 - **Persisted values are checked.** The tailnet address and the admin and agent account names each
   become a token of a line ssh parses, so they must pass the execution core's own rule for the same
   rows (`ssh_process.Destination`), and an agent's name, which becomes its alias, must be a plain
   token. A value that fails leaves that VM's entries out with a warning.
 - **A store path that cannot be written** (`literal_path` refuses it, or the Windows apostrophe rule
-  below) leaves out every entry of that VM, with a warning, rather than writing entries that would
-  trust whatever answers. It never aborts the rebuild for the other VMs. A key path that cannot be
-  written still only drops `IdentityFile`, with a warning, since the operator's own `ssh` then
-  offers its default keys and trust is unaffected.
+  below) leaves out every VM's entries, with one warning, rather than writing entries that would
+  trust whatever answers. `_host_entries` checks `trust.STORE_DIR` once, beside the key: a VM name
+  adds no character either rule refuses (`trust._SAFE_NAME`), so every store file is refused exactly
+  when the directory is. A key path that cannot be written still only drops `IdentityFile`, with a
+  warning, since the operator's own `ssh` then offers its default keys and trust is unaffected.
 - **Paths are written absolute**, as Agentworks itself uses them (`ssh_config._entry_value`): the
   configured key path, not its symbolic link's target, exactly what the execution core passes, and
   the store path as `trust.store_file` gives it. Never `~`-relative, because ssh expands `~` from
   the account's home in the password database, which need not be the `$HOME` Agentworks reads, so
   the entries and the execution core always name the same files.
 - **An apostrophe and no whitespace** is refused on Windows before it reaches an entry, with a
-  message naming the character and the path and a hint to rename it. The `ssh` shipped with Git for
-  Windows may read the entries there and rejects both the quoted and the bare form of such a value;
-  the execution core never runs that client, so `option_value` still double-quotes the value for the
-  `-o` arguments. On Linux and macOS every client reads the quoted form, so nothing is refused
-  there. The store directory is under the home directory (`CONFIG_DIR`), so a Windows profile named
-  with an apostrophe and no space (`C:/Users/O'Brien`) gets no managed entries at all, and a key
-  under it drops `IdentityFile`.
+  message naming the character and the path and a hint to rename it. When the apostrophe is in the
+  home directory, the message names that directory in full, since `~` would hide the apostrophe, and
+  gives no rename hint. The `ssh` shipped with Git for Windows may read the entries there and
+  rejects both the quoted and the bare form of such a value; the execution core never runs that
+  client, so `option_value` still double-quotes the value for the `-o` arguments. On Linux and macOS
+  every client reads the quoted form, so nothing is refused there. The store directory is under the
+  home directory (`CONFIG_DIR`), so a Windows profile named with an apostrophe and no space
+  (`C:/Users/O'Brien`) gets no managed entries at all, and a key under it drops `IdentityFile`: two
+  warnings per sync, whatever the VM count.
 
 ## Errors
 
@@ -373,8 +383,8 @@ Each test guards behavior, per the development principles and the no-prose-polic
   when the VM has a record and the null device with the missing-record comment otherwise; the
   installed client resolves both, and a preceding `Host *` with `accept-new` still leaves the
   record-less entry's known-hosts file the null device; an unreadable record keeps the block; an
-  unwritable store path leaves that VM's entries out without aborting the rebuild; on Windows an
-  apostrophe path without whitespace is refused, a key under a profile named that way dropping only
+  unwritable store path leaves every VM's entries out with one warning; on Windows an apostrophe
+  path without whitespace is refused, a key under a profile named that way dropping only
   `IdentityFile` and a store under it leaving the entries out (`tests/test_ssh_config.py`).
 - **ENROLL only from create** holds by construction: `enrollment_access` is a distinct factory whose
   only caller is Phase A (`vms/initializer/phase_a.py`), reached only from create, and every other
