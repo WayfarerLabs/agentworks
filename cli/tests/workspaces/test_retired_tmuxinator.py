@@ -759,8 +759,8 @@ def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
 
 
 # The workstation's filesystem encoding is fixed at interpreter startup, so this runs
-# in a fresh interpreter under an ASCII locale. Linux takes it from the locale; macOS and
-# Windows always use UTF-8.
+# in a fresh interpreter under an ASCII locale with Python's UTF-8 mode turned off. macOS
+# and Windows always use UTF-8.
 _UNENCODABLE_SCRIPT = dedent("""\
     import json, sys
     from agentworks.ssh import SSHResult
@@ -780,11 +780,11 @@ _UNENCODABLE_SCRIPT = dedent("""\
     """)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="only Linux takes the filesystem encoding from the locale")
+@pytest.mark.skipif(sys.platform != "linux", reason="macOS and Windows always use UTF-8")
 def test_a_path_the_workstation_cannot_encode_is_skipped_and_the_rest_still_cleaned() -> None:
-    env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0"}
     result = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", _UNENCODABLE_SCRIPT], env=env, capture_output=True, text=True, check=False
+        [sys.executable, "-c", _UNENCODABLE_SCRIPT], env=env, capture_output=True, text=True, check=False, timeout=60
     )
 
     assert result.returncode == 0, result.stderr
