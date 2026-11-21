@@ -180,6 +180,12 @@ try:
             if skill_root.is_symlink():
                 raise ValueError()
             for directory in skill_root.iterdir():
+                if tool == 'claude' and (directory.name.casefold() == 'synced' or
+                        directory.name in ('.trash', 'anthropic-skills') or
+                        directory.name.startswith('anthropic-skills:')):
+                    # These names do not expose ordinary native skills. Do not inspect
+                    # account sync, retired skills, or other reserved namespace contents.
+                    continue
                 inspecting = directory
                 existing_entries.add(str(directory))
                 scanned += 1
@@ -416,14 +422,33 @@ def probe_native(
     checks. Their actual native name must still agree before inventory accepts them.
     """
     secret_values = tuple(redactions)
+    entries = {file.path: file.native_identity for file in files if file.native_identity}
+    identities = tuple(entries.values())
+    reserved = tuple(
+        dict.fromkeys(
+            identity
+            for identity in identities
+            if tool == "claude"
+            and identity.startswith("skill:")
+            and identity[6:].casefold() in ("synced", "anthropic-skills")
+        )
+    )
+    if reserved:
+        raise NativeArtifactConflictError(
+            sanitize_setup_diagnostic(
+                f"Claude Code reserves these supplied native skill names: {', '.join(reserved)}",
+                redactions=secret_values,
+                logger=runner.logger,
+            ),
+            reserved,
+            hint="Rename the supplied skills, or use namespaced session plugin delivery.",
+        )
     try:
         require_python3(runner)
     except AgentworksError as error:
         sanitize_setup_error(error, redactions=secret_values, logger=runner.logger)
         raise
-    entries = {file.path: file.native_identity for file in files if file.native_identity}
     recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
-    identities = tuple(entries.values())
     request = {
         "tool": tool,
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
