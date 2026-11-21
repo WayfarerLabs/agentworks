@@ -73,8 +73,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # --- Paths ---
 
 [paths]
-# An absolute directory on the VM, below the root, printable (no control
-# character, and no space but ' ') and with no '..' component (it is
+# An absolute directory on the VM, below the root, printable (no control or
+# format character, and no space but ' ') and with no '..' component (it is
 # normalized: empty and '.' components, so '//' and a trailing '/', go).
 # Must NOT be at or under /home: that is the Linux user-home namespace, and the
 # admin and agent homes there are kept private (mode 0750). Use a data volume path,
