@@ -18,4 +18,6 @@ def secret_redaction_forms(value: str) -> tuple[str, ...]:
     interior = quoted[1:-1] if quoted.startswith("'") and quoted.endswith("'") else quoted
     forms = (value, quoted, interior)
     represented = tuple(repr(form) for form in forms)
-    return tuple(dict.fromkeys((*forms, *represented, *(form[1:-1] for form in represented))))
+    # A larger value can make repr escape apostrophes that repr(secret) leaves raw.
+    single_quote_interiors = tuple(form[1:-1].replace("'", "\\'") for form in represented if form.startswith('"'))
+    return tuple(dict.fromkeys((*forms, *represented, *(form[1:-1] for form in represented), *single_quote_interiors)))
