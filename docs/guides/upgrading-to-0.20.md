@@ -23,9 +23,9 @@ Work through these in order; the sections after this list give the detail.
    connection, so the agent named by `SSH_AUTH_SOCK` serves the configured key, and an encrypted key
    must already be loaded there. Doctor does not check that the agent holds the key, so load an
    encrypted one now with `ssh-add`. Doctor also reports configuration this release refuses
-   outright, such as a relative, `/` or `..` `paths.vm_workspaces`, which stops every command that
-   loads the configuration ([Workspaces](#workspaces)), and stored agent or admin specs that need
-   replacing before `vm reinit` or `agent reinit` will run
+   outright, such as a relative, `/`, `..` or unprintable `paths.vm_workspaces`, which stops every
+   command that loads the configuration ([Workspaces](#workspaces)), and stored agent or admin specs
+   that need replacing before `vm reinit` or `agent reinit` will run
    ([Initialization steps](#initialization-steps)).
 3. **Import host keys.** Run `agw vm import-host-keys --all` until it reports a record for every VM.
    Until a VM has one, every command that reaches it refuses it. Each run also rewrites the managed
@@ -461,6 +461,13 @@ the VM once no backup is running.
   tmuxinator config and defer delivering MCP servers to its sessions, `workspace delete` removes its
   directory and link, `workspace repair` runs its other steps and warns that the parent traversal
   fix failed, and `workspace rehome` moves it to a path without one.
+- **`paths.vm_workspaces` must be printable.** A value holding a control character (a line break, a
+  tab), a format character, or any space but the plain one (such as a no-break space) is refused
+  when the configuration loads, since the file program refuses such a path, so it cannot write a
+  workspace's files below it, its `.tmuxinator.yml` among them. Change the value, then run
+  `agw workspace rehome <name>` for each workspace already below the old one: it moves the tree to
+  the new root as it moves one whose stored path has a `..` component, and the session commands
+  treat the old path that way until it is moved.
 - **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
   or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
   dropped. A target that is the workspace's directory, inside it, or around it once the VM resolves

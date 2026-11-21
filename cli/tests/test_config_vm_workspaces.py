@@ -126,3 +126,12 @@ def test_load_config_refuses_the_root_or_a_dotdot_component(tmp_path: Path, path
     config_file = _write_config(tmp_path, path)
     with pytest.raises(ConfigError):
         load_config(config_file)
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("path", ["/srv/no\\u00a0break/ws", "/srv/new\\nline/ws"], ids=["nbsp", "newline"])
+def test_load_config_refuses_an_unprintable_vm_workspaces(tmp_path: Path, path: str) -> None:
+    """The file operations refuse a guest path that is not printable, so the root they are all built from is refused."""
+    config_file = _write_config(tmp_path, path)
+    with pytest.raises(ConfigError):
+        load_config(config_file)

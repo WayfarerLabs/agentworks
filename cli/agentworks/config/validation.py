@@ -39,10 +39,13 @@ def validate_admin_username(admin_username: str) -> None:
 
 
 def validate_vm_workspaces(path: str) -> str:
-    """Return ``paths.vm_workspaces`` normalized, refusing a relative value, the root, a ``..`` component, or ``/home``.
+    """``paths.vm_workspaces`` normalized, refusing a relative or unprintable value, the root, ``..`` or ``/home``.
 
     The value names a directory on the VM, and every workspace path is built
-    from it, so it must be absolute and below the root. It is normalized once
+    from it, so it must be absolute and below the root. It must also be
+    printable (``str.isprintable``), the rule the file operations apply to
+    every guest path (``execution.files.guest_path``): a workspace under a
+    root they refuse could not be given its files. It is normalized once
     here (``execution.files.normalized_guest_path``: empty and ``.``
     components dropped, so a trailing ``/`` goes and a leading ``//`` is
     ``/``), so the paths built from it have one spelling. A ``..`` component
@@ -77,6 +80,11 @@ def validate_vm_workspaces(path: str) -> str:
         raise ConfigError(
             f"paths.vm_workspaces must be an absolute directory path on the VM, below the root and "
             f"with no '..' component (got {path!r}), such as the default '/opt/agentworks/workspaces'."
+        )
+    if not normalized.isprintable():
+        raise ConfigError(
+            f"paths.vm_workspaces must be printable: no control, format or unassigned character, and no space "
+            f"but ' ' (got {path!r}), such as the default '/opt/agentworks/workspaces'."
         )
     if normalized == "/home" or normalized.startswith("/home/"):
         raise ConfigError(
