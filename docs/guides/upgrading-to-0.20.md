@@ -463,7 +463,7 @@ the VM once no backup is running.
   fix failed, and `workspace rehome` moves it to a path without one.
 - **`paths.vm_workspaces` must be printable.** A value holding a control character (a line break, a
   tab), a format character, or any space but the plain one (such as a no-break space) is refused
-  when the configuration loads, since the file program refuses such a path, so it cannot write a
+  when the configuration loads, since the file program refuses such a path and so cannot write a
   workspace's files below it, its `.tmuxinator.yml` among them. Change the value, then run
   `agw workspace rehome <name>` for each workspace already below the old one: it moves the tree to
   the new root as it moves one whose stored path has a `..` component, and the session commands
