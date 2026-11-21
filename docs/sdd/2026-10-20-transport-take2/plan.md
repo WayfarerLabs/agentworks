@@ -757,6 +757,14 @@ module, and `remote_exec.py` is deleted.
       known offer none to watch; the Include-with-a-space resolution test runs in Windows CI, the
       test file's merge duplicates are folded, and SSH config warnings join an error and its hint
       one way.
+- [x] Fix round 9 of PR C, the operator's last (integration report and complexity review of round 8;
+      trust-lld, Managed SSH entries). `paths.vm_workspaces` is checked at load with the file
+      operations' own path rule, so a root they refuse, such as one holding a no-break space, stops
+      the load instead of leaving a copied workspace unregistered; the upgrade guide tells operators
+      to change it and rehome. Under a Windows profile whose home holds an apostrophe, the host-key
+      store is checked once beside the key, so a sync warns twice whatever the VM count, and the
+      warning names the home in full. The trust-lld says how the two Windows clients read a quoted
+      value, and the mise setup test carries its own `file` marker.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
 - [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
