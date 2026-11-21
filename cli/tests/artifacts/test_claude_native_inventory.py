@@ -10,21 +10,37 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
-from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile, SessionArtifactContext
+from agentworks.artifacts.model import ArtifactInputs, ArtifactType
 from agentworks.artifacts.native import probe as native_probe
+from agentworks.artifacts.native.common import NativeSessionArtifacts, prepare_session_delivery
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.harness_setup.model import SetupRecord
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from tests.artifacts._fixtures import received
-from tests.artifacts.test_native_delivery import artifact
+from tests.artifacts.test_native_delivery import artifact, owned
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
 from tests.native_setup_fixtures import LocalFixtureTransport
 
 pytestmark = requires_posix_shell
+
+
+def claude_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalFixtureTransport:
+    target = LocalFixtureTransport(tmp_path)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "python3").symlink_to(sys.executable)
+    executable = bindir / "claude"
+    executable.write_text("#!/bin/sh\nexit 91\n")
+    executable.chmod(0o700)
+    program = native_probe._PROBE
+    for guest_path in ("/etc/claude-code/.claude", "/etc/claude-code/managed-settings.json", "/etc/codex"):
+        program = program.replace(repr(guest_path), repr(str(tmp_path / guest_path.removeprefix("/"))))
+    monkeypatch.setattr(native_probe, "_PROBE", program)
+    return target
 
 
 @pytest.mark.parametrize("scope", ["user", "workspace", "vm"])
@@ -182,17 +198,7 @@ def test_reserved_claude_names_are_usable_in_other_native_or_plugin_namespaces(t
 def test_claude_user_reinit_preserves_reserved_storage_and_applies_independent_artifacts(
     tmp_path, db, monkeypatch, reserved_name
 ):
-    target = LocalFixtureTransport(tmp_path)
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    (bindir / "python3").symlink_to(sys.executable)
-    executable = bindir / "claude"
-    executable.write_text("#!/bin/sh\nexit 91\n")
-    executable.chmod(0o700)
-    program = native_probe._PROBE
-    for guest_path in ("/etc/claude-code/.claude", "/etc/claude-code/managed-settings.json", "/etc/codex"):
-        program = program.replace(repr(guest_path), repr(str(tmp_path / guest_path.removeprefix("/"))))
-    monkeypatch.setattr(native_probe, "_PROBE", program)
+    target = claude_target(tmp_path, monkeypatch)
     native = target.home / ".claude"
     synced = native / "skills/synced/account/organization/morning/SKILL.md"
     retired = native / "skills/.trash/retired/SKILL.md"
@@ -251,3 +257,89 @@ def test_claude_user_reinit_preserves_reserved_storage_and_applies_independent_a
                 artifact_files=current,
             ),
         )
+
+
+@pytest.mark.parametrize("reserved_name", ["synced", "SyNcEd", "anthropic-skills"])
+@pytest.mark.parametrize("ordinary_ancestor", [False, True])
+def test_claude_reserved_ancestor_records_do_not_select_inventory_or_hide_ordinary_drift(
+    tmp_path, monkeypatch, reserved_name, ordinary_ancestor
+):
+    target = claude_target(tmp_path, monkeypatch)
+    native = target.home / ".claude"
+    reserved = owned(
+        ArtifactFile(
+            str(native / f"skills/{reserved_name}/SKILL.md"),
+            b"old reserved skill contents",
+            ("a" * 64,),
+            native_identity=f"skill:{reserved_name}",
+        )
+    )
+    # An inactive historical skill must not select this unrelated unsafe inventory.
+    unselected = native / "skills/ordinary/nested/SKILL.md"
+    unselected.parent.mkdir(parents=True)
+    unselected.write_bytes(b"---\nname: [malformed metadata\n")
+    persona = native / "agents/ordinary.md"
+    ancestors: tuple[OwnedArtifactFile, ...] = (reserved,)
+    if ordinary_ancestor:
+        persona.parent.mkdir()
+        persona.write_bytes(b"---\nname: drifted\n---\n")
+        ancestors += (
+            owned(
+                ArtifactFile(
+                    str(persona),
+                    b"---\nname: ordinary\n---\n",
+                    ("b" * 64,),
+                    native_identity="agent:ordinary",
+                )
+            ),
+        )
+    else:
+        # No active persona should cause discovery of this malformed directory either.
+        (persona.parent / "nested").mkdir(parents=True)
+    requests: list[dict] = []
+    warnings: list[str] = []
+    run = target.run
+
+    def capture_request(command, **kwargs):
+        if "input_data" in kwargs:
+            requests.append(json.loads(kwargs["input_data"]))
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(target, "run", capture_request)
+    monkeypatch.setattr("agentworks.artifacts.native.common.output.warn", warnings.append)
+    context = SessionArtifactContext(
+        inputs=ArtifactInputs(),
+        home=str(target.home),
+        directory=str(target.home / "session"),
+        session_uuid="u",
+        run_id="r",
+        ancestor_files=ancestors,
+    )
+
+    plan, root = prepare_session_delivery(
+        target,
+        tool="claude",
+        integration="claude-code",
+        context=context,
+        render=lambda context: NativeSessionArtifacts(),
+        workspace="",
+    )
+
+    assert not plan.application.files
+    assert not plan.application.deferred
+    assert not plan.argv
+    assert len(requests) == 1
+    request = requests[0]
+    assert request["identities"] == (["agent:ordinary"] if ordinary_ancestor else [])
+    assert request["paths"] == ([str(persona)] if ordinary_ancestor else [])
+    assert request["entries"] == ({str(persona): "agent:ordinary"} if ordinary_ancestor else {})
+    assert request["proposed"] == {}
+    assert request["home"] == str(target.home)
+    assert request["check_policy"] is True
+    if ordinary_ancestor:
+        assert root is None
+        assert len(warnings) == 1
+        assert str(persona) in warnings[0]
+    else:
+        assert root == str(native)
+        assert not warnings

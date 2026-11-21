@@ -10,7 +10,7 @@ from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from agentworks.artifacts.application import ArtifactFile
+from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
@@ -23,7 +23,6 @@ from agentworks.sources import SourceRefError
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.transports import Transport
 
 
@@ -400,6 +399,14 @@ def _proposed_sizes(files: Sequence[ArtifactFile | OwnedArtifactFile], tool: str
     return result
 
 
+def _is_reserved_claude_skill(identity: str | None) -> bool:
+    return (
+        identity is not None
+        and identity.startswith("skill:")
+        and identity[6:].casefold() in ("synced", "anthropic-skills")
+    )
+
+
 def probe_native(
     runner: Transport,
     *,
@@ -422,16 +429,17 @@ def probe_native(
     checks. Their actual native name must still agree before inventory accepts them.
     """
     secret_values = tuple(redactions)
+    if tool == "claude":
+        # Old placements under Claude-owned names must not select native inventory.
+        files = tuple(
+            file
+            for file in files
+            if not isinstance(file, OwnedArtifactFile) or not _is_reserved_claude_skill(file.native_identity)
+        )
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     identities = tuple(entries.values())
     reserved = tuple(
-        dict.fromkeys(
-            identity
-            for identity in identities
-            if tool == "claude"
-            and identity.startswith("skill:")
-            and identity[6:].casefold() in ("synced", "anthropic-skills")
-        )
+        dict.fromkeys(identity for identity in identities if tool == "claude" and _is_reserved_claude_skill(identity))
     )
     if reserved:
         raise NativeArtifactConflictError(
