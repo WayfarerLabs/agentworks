@@ -299,12 +299,12 @@ R8's end state does not depend on every operator importing (`ssh_config._vm_entr
   or `${}` expansion, which `literal_path` already refuses. The two Windows clients do not read
   every value alike: the ssh shipped with Git for Windows rejects a quoted value with no whitespace
   (`invalid quotes`), so `option_value` quotes only a value ssh would split or unquote, while the
-  installed Win32-OpenSSH client may accept one (`tests/execution/test_trust.py:89` reads a quoted
-  `o'brien` store path through it). So a value with an apostrophe and no whitespace may have a form
-  native ssh reads, and has none Git for Windows' ssh reads. The entries cannot know which client
-  reads them, and `_GIT_FOR_WINDOWS_MAY_READ` is simply `win32`, so on Windows such a value is
-  refused for both: a native-ssh user under such a profile loses the managed entries to protect Git
-  Bash's ssh.
+  installed Win32-OpenSSH client may accept one
+  (`test_the_installed_client_reads_the_store_path_as_written` reads a quoted `o'brien` store path
+  through it). So a value with an apostrophe and no whitespace may have a form native ssh reads, and
+  has none Git for Windows' ssh reads. The entries cannot know which client reads them, and
+  `_GIT_FOR_WINDOWS_MAY_READ` is simply `win32`, so on Windows such a value is refused for both: a
+  native-ssh user under such a profile loses the managed entries to protect Git Bash's ssh.
 
 - **Persisted values are checked.** The tailnet address and the admin and agent account names each
   become a token of a line ssh parses, so they must pass the execution core's own rule for the same
