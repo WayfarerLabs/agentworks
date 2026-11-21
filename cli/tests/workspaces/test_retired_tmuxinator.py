@@ -6,10 +6,13 @@ so the commands under test are the shipped ones.
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
+import subprocess
 import sys
+from textwrap import dedent
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, Mock
 
@@ -753,6 +756,43 @@ def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
     assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
     assert str(locked) in captured_output.warnings[0]
+
+
+# The workstation's filesystem encoding is fixed at interpreter startup, so this runs
+# in a fresh interpreter under an ASCII locale. Linux takes it from the locale; macOS and
+# Windows always use UTF-8.
+_UNENCODABLE_SCRIPT = dedent("""\
+    import json, sys
+    from agentworks.ssh import SSHResult
+    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
+
+    class Recording:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, command, **kwargs):
+            self.commands.append(command)
+            return SSHResult(returncode=0, stdout="AGW_TMUXINATOR_FINISHED\\n", stderr="")
+
+    target = Recording()
+    failures = retire_tmuxinator_projects(target, ["/srv/plain", "/srv/caf\\u00e9"])
+    json.dump({"encoding": sys.getfilesystemencoding(), "commands": target.commands, "failures": failures}, sys.stdout)
+    """)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="only Linux takes the filesystem encoding from the locale")
+def test_a_path_the_workstation_cannot_encode_is_skipped_and_the_rest_still_cleaned() -> None:
+    env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", _UNENCODABLE_SCRIPT], env=env, capture_output=True, text=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout)
+    assert outcome["encoding"] == "ascii"
+    assert len(outcome["commands"]) == 2
+    assert shlex.split(outcome["commands"][1])[4:] == ["/srv/plain"]
+    assert len(outcome["failures"]) == 1, "the unencodable path is reported as skipped"
 
 
 @requires_guest_shell

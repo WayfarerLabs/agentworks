@@ -151,13 +151,18 @@ def _run(target: Transport, script: str, *arguments: str) -> tuple[bool, str]:
 
 def _judgeable(workspace_path: str) -> bool:
     """Whether the projects command can judge this path: absolute, free of the NUL
-    byte no argument can carry, and short enough that its project path, encoded as it
-    reaches the guest, can be looked up."""
-    return (
-        workspace_path.startswith("/")
-        and "\0" not in workspace_path
-        and len(os.fsencode(f"{workspace_path}/{_PROJECT_NAME}")) < _LOOKUP_LIMIT
-    )
+    byte no argument can carry, representable in the workstation's filesystem
+    encoding, and short enough that its project path, encoded as it reaches the
+    guest, can be looked up. The command travels in the argv of the workstation's
+    ``ssh``, which that encoding produces, so a path it cannot represent cannot be
+    sent at all."""
+    if not workspace_path.startswith("/") or "\0" in workspace_path:
+        return False
+    try:
+        project_path = os.fsencode(f"{workspace_path}/{_PROJECT_NAME}")
+    except UnicodeEncodeError:
+        return False
+    return len(project_path) < _LOOKUP_LIMIT
 
 
 def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]) -> list[str]:
@@ -173,7 +178,7 @@ def retire_tmuxinator_projects(target: Transport, workspace_paths: Sequence[str]
     if skipped := len(workspace_paths) - len(judgeable):
         failures.append(
             f"{output.count(skipped, 'workspace path')} skipped as not absolute, holding a NUL byte, "
-            "or too long to look up"
+            "not encodable on this workstation, or too long to look up"
         )
     try:
         if not _run(target, _LINKS_SCRIPT)[0]:
