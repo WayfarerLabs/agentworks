@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.sessions.tmux import _tmux_env_flags
 from agentworks.ssh import SSHLogger, SSHResult
 
@@ -52,3 +53,26 @@ def test_python_diagnostic_representation_cannot_leak_a_registered_secret(
 
     assert marker not in logger.path.read_text()
     assert "/home/agent/native.json" in logger.path.read_text()
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("surrounding_quote", [False, True])
+@pytest.mark.parametrize("suffix", ["", "'quoted", "'back\\slash\nnext"])
+def test_enclosing_python_repr_keeps_registered_secrets_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surrounding_quote: bool, suffix: str
+) -> None:
+    marker = uuid4().hex
+    value = marker + suffix
+    prefix = 'fixture-prefix-"' if surrounding_quote else "fixture-prefix-"
+    rendered = repr(f"/home/worker/{prefix}{value}/native.json")
+    diagnostic = sanitize_setup_diagnostic(rendered, redactions=(value,))
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("redaction", "quoted-path", redactions=(value,))
+    try:
+        logger.log_error(rendered)
+    finally:
+        logger.close()
+
+    for surface in (diagnostic, logger.path.read_text()):
+        assert marker not in surface
+        assert "fixture-prefix-" in surface and "/native.json" in surface

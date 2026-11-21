@@ -148,13 +148,18 @@ def defer_setup_conflicts(
             }
             if not rejected:
                 raise StateError("native artifact conflict does not identify a proposed setup entry") from error
-            invocation.report_incomplete(str(error))
+            reason = sanitize_setup_diagnostic(
+                " ".join(value for value in (str(error), error.hint) if value),
+                redactions=invocation.secrets.values(),
+                logger=invocation.runner.logger,
+            )
+            invocation.report_incomplete(reason)
             existing = {item.input_id for item in application.deferred}
             deferred = tuple(
                 ArtifactDeferral(
                     input_id=item.identity,
                     destination=_setup_deferral_destination(invocation),
-                    reason="Native identity conflicts with existing content; repair that entry and rerun owning setup",
+                    reason=reason,
                 )
                 for item in invocation.artifacts.items()
                 if item.origin_identity in rejected and item.identity not in existing
