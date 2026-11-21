@@ -418,8 +418,18 @@ def _refusal(action: str, target: Path, error: OSError, fix: str) -> Authorizati
 
 
 def _host_entries(config: Config, db: Database) -> list[str]:
-    """Every managed Host block, in database order, for both layouts."""
+    """Every managed Host block, in database order, for both layouts.
+
+    The store directory is checked once, as the key is: a VM name adds no
+    character an entry value refuses (``trust._SAFE_NAME``), so every VM's
+    store file is refused exactly when the directory is.
+    """
     identity = _identity_value(config.operator.ssh_private_key)
+    try:
+        _entry_value(trust.STORE_DIR, "host-key store directory")
+    except ConfigError as e:
+        output.warn(f"SSH config entries left out for every VM: {_with_hint(e)}")
+        return []
     prefix = config.operator.ssh_host_prefix
     agent_prefix = config.operator.ssh_agent_host_prefix
     entries: list[str] = []
@@ -546,10 +556,19 @@ def _entry_value(path: Path, what: str) -> str:
     whatever its own idea of ``~``, which is the passwd home and need not be
     ``$HOME``. On Windows, where the ssh shipped with Git for Windows may read
     the entries and accepts no form of a value with an apostrophe and no
-    whitespace, such a path is refused too.
+    whitespace, such a path is refused too, with a hint to rename it unless the
+    apostrophe is in the home directory.
     """
     value = trust.literal_path(path, what)
     if _GIT_FOR_WINDOWS_MAY_READ and "'" in value and not any(char in value for char in " \t"):
+        home = Path.home()
+        if "'" in home.as_posix() and path.is_relative_to(home):
+            # Named in full: shortening it to ``~`` would hide the apostrophe, and renaming it is no fix.
+            raise ConfigError(
+                f"{what} {format_host_path(path)} cannot be written into an SSH config entry: the ssh shipped "
+                f"with Git for Windows reads no form of a path under the home directory {home}, whose path "
+                "has an apostrophe (') and no whitespace"
+            )
         raise ConfigError(
             f"{what} {format_host_path(path)} cannot be written into an SSH config entry: the ssh shipped "
             "with Git for Windows reads no form of a path with an apostrophe (') and no whitespace",

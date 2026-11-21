@@ -29,7 +29,7 @@ from agentworks.ssh_config import (
     sync_ssh_config,
     sync_ssh_config_or_warn,
 )
-from tests.conftest import seed_vm_trust
+from tests.conftest import isolate_home, seed_vm_trust
 from tests.ssh_fixtures import fake_host_key
 
 needs_ssh = pytest.mark.skipif(shutil.which("ssh") is None, reason="needs an installed OpenSSH client")
@@ -1545,12 +1545,12 @@ def test_an_unreadable_record_keeps_the_vms_entries_verifying_against_the_store(
     assert captured_output.warnings == []
 
 
-def test_a_store_path_ssh_would_expand_leaves_each_vms_entries_out(
+def test_a_store_path_ssh_would_expand_leaves_every_vms_entries_out_with_one_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """Entries that cannot name the store would trust whatever answers, so none are written for those VMs."""
+    """Entries that cannot name the store would trust whatever answers, so none are written, and it is said once."""
     from agentworks.execution import trust
 
     config, ssh_dir = _mock_config(tmp_path)
@@ -1561,6 +1561,34 @@ def test_a_store_path_ssh_would_expand_leaves_each_vms_entries_out(
     monkeypatch.setattr(trust, "STORE_DIR", tmp_path / "100%")
     for name in ("one", "two"):
         trust.write_records(name, [fake_host_key()])
+
+    _rebuild_config_dir(config, db)
+
+    assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
+    assert len(captured_output.warnings) == 1
+
+
+@pytest.mark.windows
+def test_on_windows_a_profile_with_an_apostrophe_warns_once_for_the_key_and_once_for_the_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The store lives under the home, so no VM gets entries, and a sync says so once whatever the VM count."""
+    from agentworks.execution import trust
+
+    monkeypatch.setattr(ssh_config_module, "_GIT_FOR_WINDOWS_MAY_READ", True)
+    home = isolate_home(monkeypatch, tmp_path / "o'brien")
+    monkeypatch.setattr(trust, "STORE_DIR", home / ".config" / "agentworks" / "known_hosts")
+    config, ssh_dir = _mock_config(home)
+    config.operator.ssh_private_key.write_text("")
+    names = ("one", "two", "three")
+    for name in names:
+        trust.write_records(name, [fake_host_key()])
+    db = MagicMock()
+    db.get_setting.return_value = None
+    db.list_vms.return_value = [_mock_vm(name, f"100.64.0.{index}") for index, name in enumerate(names, 1)]
+    db.list_agents.return_value = [_mock_agent("claude", "agt-claude", "one")]
 
     _rebuild_config_dir(config, db)
 
@@ -1596,7 +1624,7 @@ def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_r
     assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
     identity_warning, store_warning = captured_output.warnings
     assert format_host_path(key) in identity_warning
-    assert format_host_path(trust.store_file("web")) in store_warning
+    assert format_host_path(trust.STORE_DIR) in store_warning
 
     # With whitespace the quoted form is one that client reads, so the path is written.
     spaced = tmp_path / "o'brien x" / "id_ed25519"
