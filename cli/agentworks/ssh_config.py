@@ -566,8 +566,8 @@ def _entry_value(path: Path, what: str) -> str:
             # Named in full: shortening it to ``~`` would hide the apostrophe, and renaming it is no fix.
             raise ConfigError(
                 f"{what} {format_host_path(path)} cannot be written into an SSH config entry: the ssh shipped "
-                f"with Git for Windows reads no form of a path under the home directory {home}, whose path "
-                "has an apostrophe (') and no whitespace"
+                f"with Git for Windows reads no form of this path, which is under the home directory {home}, "
+                "and has an apostrophe (') and no whitespace"
             )
         raise ConfigError(
             f"{what} {format_host_path(path)} cannot be written into an SSH config entry: the ssh shipped "
