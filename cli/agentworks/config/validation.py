@@ -20,7 +20,7 @@ from datetime import date
 from enum import StrEnum
 from pathlib import Path
 
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, StateError
 from agentworks.naming import VM_USER_RE
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
@@ -39,19 +39,20 @@ def validate_admin_username(admin_username: str) -> None:
 
 
 def validate_vm_workspaces(path: str) -> str:
-    """``paths.vm_workspaces`` normalized, refusing a relative or unprintable value, the root, ``..`` or ``/home``.
+    """``paths.vm_workspaces`` normalized, refusing a path the file operations refuse, or ``/home``.
 
     The value names a directory on the VM, and every workspace path is built
-    from it, so it must be absolute and below the root. It must also be
-    printable (``str.isprintable``), the rule the file operations apply to
-    every guest path (``execution.files.guest_path``): a workspace under a
-    root they refuse could not be given its files. It is normalized once
-    here (``execution.files.normalized_guest_path``: empty and ``.``
-    components dropped, so a trailing ``/`` goes and a leading ``//`` is
-    ``/``), so the paths built from it have one spelling. A ``..`` component
-    is refused rather than collapsed, since collapsing it would name another
-    directory when the component before it is a symbolic link; this is the
-    rule ``workspace rehome --target`` applies too.
+    from it, so it must be a path the file operations accept
+    (``execution.files.guest_path``): absolute, printable, and with no ``..``
+    component; a workspace under a root they refuse could not be given its
+    files. Their rule is applied here rather than restated. The value is
+    normalized first (``execution.files.normalized_guest_path``: empty and
+    ``.`` components dropped, so a trailing ``/`` goes and a leading ``//``
+    is ``/``, and the root is left with an empty component the rule
+    refuses), so the paths built from it have one spelling. A ``..``
+    component is refused rather than collapsed, since collapsing it would
+    name another directory when the component before it is a symbolic link;
+    ``workspace rehome --target`` applies the same rule.
 
     ``/home`` is the Linux user-home namespace on the VM. The admin and agent
     users each own ``/home/<user>``, and those homes are locked to mode 0750
@@ -73,19 +74,16 @@ def validate_vm_workspaces(path: str) -> str:
     ``ntpath.normpath('/home/foo')`` returns ``'\\home\\foo'``, which would
     match neither branch below and silently accept every ``/home`` path.
     """
-    from agentworks.execution.files import normalized_guest_path
+    from agentworks.execution.files import guest_path, normalized_guest_path
 
     normalized = normalized_guest_path(path)
-    if not normalized.startswith("/") or normalized == "/" or ".." in normalized.split("/"):
+    try:
+        guest_path(normalized)
+    except StateError:
         raise ConfigError(
-            f"paths.vm_workspaces must be an absolute directory path on the VM, below the root and "
+            f"paths.vm_workspaces must be an absolute directory path on the VM, below the root, printable and "
             f"with no '..' component (got {path!r}), such as the default '/opt/agentworks/workspaces'."
-        )
-    if not normalized.isprintable():
-        raise ConfigError(
-            f"paths.vm_workspaces must be printable: no control, format or unassigned character, and no space "
-            f"but ' ' (got {path!r}), such as the default '/opt/agentworks/workspaces'."
-        )
+        ) from None
     if normalized == "/home" or normalized.startswith("/home/"):
         raise ConfigError(
             f"paths.vm_workspaces must not be at or under /home (got {path!r}, "
