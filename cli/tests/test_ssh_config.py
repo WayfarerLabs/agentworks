@@ -1594,6 +1594,11 @@ def test_on_windows_a_profile_with_an_apostrophe_warns_once_for_the_key_and_once
 
     assert not (ssh_dir / "config.d" / _MANAGED_CONF).exists()
     assert len(captured_output.warnings) == 2
+    # The home is named in full, where ``~`` would hide the apostrophe, and renaming it is not offered.
+    assert str(home) in captured_output.warnings[1]
+    with pytest.raises(ConfigError) as refused:
+        ssh_config_module._entry_value(trust.STORE_DIR, "host-key store directory")
+    assert refused.value.hint is None
 
 
 @pytest.mark.windows
@@ -1625,6 +1630,9 @@ def test_on_windows_an_apostrophe_path_without_whitespace_is_refused_before_it_r
     identity_warning, store_warning = captured_output.warnings
     assert format_host_path(key) in identity_warning
     assert format_host_path(trust.STORE_DIR) in store_warning
+    with pytest.raises(ConfigError) as refused:
+        ssh_config_module._entry_value(store, "host-key store directory")
+    assert refused.value.hint is not None  # outside the home, renaming it is the fix
 
     # With whitespace the quoted form is one that client reads, so the path is written.
     spaced = tmp_path / "o'brien x" / "id_ed25519"
