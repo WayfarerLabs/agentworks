@@ -171,23 +171,10 @@ def checked_argv(argv: tuple[str, ...]) -> list[str]:
     return _checked_arguments(argv)
 
 
-def argument_bytes(argument: str, what: str = "an argument") -> bytes:
-    """The bytes ``argument`` reaches the guest's ``exec`` as, once it is one an ``exec`` can take.
-
-    UTF-8 with ``surrogateescape``, so a value that arrived as raw OS bytes
-    goes back out as those bytes. A NUL, a character that has no such
-    encoding (a lone surrogate) or more than :data:`MAX_STRING_BYTES` is a
-    ``ValidationError`` naming ``what``, never quoting the value.
-    """
-    encoded = _text(argument, what)
-    if len(encoded) > MAX_STRING_BYTES:
-        raise ValidationError(f"{what} is longer than {MAX_STRING_BYTES} bytes")
-    return encoded
-
-
 def _checked_arguments(arguments: tuple[str, ...]) -> list[str]:
     for position, argument in enumerate(arguments):
-        argument_bytes(argument, f"argument {position}")
+        if len(_text(argument, f"argument {position}")) > MAX_STRING_BYTES:
+            raise ValidationError(f"argument {position} is longer than {MAX_STRING_BYTES} bytes")
     return list(arguments)
 
 

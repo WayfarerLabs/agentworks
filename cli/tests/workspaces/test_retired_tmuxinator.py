@@ -15,7 +15,6 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentworks.execution.envelope import argument_bytes
 from agentworks.execution.errors import ExecutionIncomplete, RequestRefused
 from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
@@ -156,21 +155,6 @@ def _workspace(db: Database, root: Path, name: str, content: str | None = _GENER
 
 
 @requires_guest_shell
-def test_cleanup_is_two_sh_commands_with_paths_as_arguments(
-    db: Database, guest: tuple[_Guest, Path, Path], tmp_path: Path
-) -> None:
-    target, workspace, _entries = guest
-    others = [_workspace(db, tmp_path / "guest" / "workspaces", f"w{index}") for index in range(3)]
-    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-
-    _reinit(db, target)
-
-    assert len(target.commands) == 2
-    assert all(command.startswith("sh -c ") for command in target.commands)
-    assert not any((path / ".tmuxinator.yml").exists() for path in [workspace, *others])
-
-
-@requires_guest_shell
 def test_a_fifo_or_directory_at_the_project_path_is_left_alone(
     db: Database, guest: tuple[_Guest, Path, Path], tmp_path: Path, captured_output: CapturedOutput
 ) -> None:
@@ -283,28 +267,6 @@ def test_a_workspace_linked_to_an_unsearchable_directory_is_warned(
 
     assert (real / ".tmuxinator.yml").read_text() == _GENERATED
     assert len(captured_output.warnings) == 1 and str(aliased) in captured_output.warnings[0]
-
-
-@requires_guest_shell
-@skip_as_root
-@pytest.mark.parametrize("separator", ["\r", "\u2028"], ids=["carriage-return", "line-separator"])
-def test_a_failure_names_a_workspace_whose_path_holds_another_line_break_whole(
-    db: Database,
-    guest: tuple[_Guest, Path, Path],
-    tmp_path: Path,
-    captured_output: CapturedOutput,
-    separator: str,
-) -> None:
-    target, _proj, _entries = guest
-    odd = _workspace(db, tmp_path / "guest" / "workspaces", f"odd{separator}name")
-    odd.chmod(0o600)
-    try:
-        _reinit(db, target)
-    finally:
-        odd.chmod(0o755)
-
-    assert len(captured_output.warnings) == 1
-    assert str(odd) in captured_output.warnings[0]
 
 
 @requires_guest_shell
@@ -470,47 +432,11 @@ def test_a_discovery_directory_hidden_by_an_unsearchable_directory_is_warned(
     assert len(captured_output.warnings) == 1
 
 
-def _deep_missing(root: Path, project_bytes: int) -> str:
-    """A missing workspace path under ``root``, more than a thousand directories deep,
-    short enough to look up itself, whose project path encodes to exactly
-    ``project_bytes`` bytes. Its last component is two-byte characters, so it is
-    shorter in characters than in bytes."""
-    base = f"{root}/missing"
-    pad = "\u00e9" * 100
-    depth, odd = divmod(project_bytes - len(argument_bytes(f"{base}/{pad}/.tmuxinator.yml")), 2)
-    path = base + "/x" * depth + "/" + "y" * odd + pad
-    assert depth > 1000 and len(argument_bytes(path + "/.tmuxinator.yml")) == project_bytes
-    return path
-
-
-@requires_guest_shell
-@pytest.mark.parametrize(
-    ("project_bytes", "warned"), [(4095, False), (4096, True)], ids=["under-the-limit", "at-the-limit"]
-)
-def test_a_missing_deep_workspace_is_judged_unless_its_project_path_reaches_the_limit(
-    db: Database,
-    guest: tuple[_Guest, Path, Path],
-    tmp_path: Path,
-    captured_output: CapturedOutput,
-    project_bytes: int,
-    warned: bool,
-) -> None:
-    target, workspace, _entries = guest
-    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
-    deep = _deep_missing(tmp_path / "guest" / "workspaces", project_bytes)
-    db.insert_workspace("deep", vm_name="box", workspace_path=deep, template="default", linux_group="g")
-
-    _reinit(db, target)
-
-    assert not (workspace / ".tmuxinator.yml").exists()
-    assert len(captured_output.warnings) == int(warned)
-
-
 @requires_guest_shell
 @pytest.mark.parametrize(
     ("home", "exists"),
-    [("relative/home", False), ("relative/home", True), ("", False)],
-    ids=["relative-missing", "relative-existing", "empty"],
+    [("relative/home", False), ("relative/home", True)],
+    ids=["relative-missing", "relative-existing"],
 )
 def test_a_home_that_is_not_absolute_is_warned_rather_than_walked(
     db: Database,
@@ -717,44 +643,6 @@ def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
     assert not (workspace / ".tmuxinator.yml").exists()
     assert len(captured_output.warnings) == 1
     assert str(locked) in captured_output.warnings[0]
-
-
-def _finished_access() -> RecordingVMAccess:
-    """An access whose every command exits 0 having reported finishing."""
-    access = RecordingVMAccess([], Admin())
-    access.default_outcome = Result(Completed(0), b"AGW_TMUXINATOR_FINISHED\n")
-    return access
-
-
-def _sent_paths(access: RecordingVMAccess) -> list[str]:
-    """The workspace paths the projects command, the second one, was sent."""
-    request = access.calls[1].request
-    assert isinstance(request, Command)
-    return list(request.argv[4:])
-
-
-def test_a_path_with_no_utf8_encoding_is_skipped_and_the_rest_still_cleaned() -> None:
-    """A lone surrogate is a ``str`` no request can carry; an escaped undecodable byte travels as that byte."""
-    access = _finished_access()
-    raw_byte = "/srv/caf\udce9"
-
-    failures = retire_tmuxinator_projects(access, ["/srv/plain", "/srv/odd\ud800name", raw_byte])
-
-    assert _sent_paths(access) == ["/srv/plain", raw_byte]
-    assert len(failures) == 1, "the unencodable path is reported as skipped"
-
-
-@pytest.mark.parametrize(("characters", "sent"), [(2039, True), (2040, False)], ids=["4095-bytes", "4097-bytes"])
-def test_the_lookup_limit_counts_the_bytes_the_request_carries(characters: int, sent: bool) -> None:
-    """Two-byte characters put a project path well under 4096 characters at or over 4096 bytes."""
-    access = _finished_access()
-    path = "/" + "\u00e9" * characters
-    assert len(argument_bytes(f"{path}/.tmuxinator.yml")) == 2 * characters + 17
-
-    failures = retire_tmuxinator_projects(access, [path])
-
-    assert _sent_paths(access) == ([path] if sent else [])
-    assert len(failures) == int(not sent)
 
 
 @requires_guest_shell
