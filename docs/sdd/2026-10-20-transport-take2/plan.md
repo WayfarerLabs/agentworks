@@ -782,6 +782,12 @@ module, and `remote_exec.py` is deleted.
   - make the bootstrap's swap step recover from an interruption between `fallocate` and the fstab
     line (done).
 - [ ] Complete the evidence matrix, sending any gap to the operator.
+  - The [evidence matrix](./evidence-matrix.md) is compiled from every tester report at `main`
+    `2b1d69dac`, and its gaps went to the operator, who ruled one last tester pass over every cell
+    the existing beds reach, with one cloud driven from Windows and one from macOS, and Windows
+    Server 2025 standing in for Windows 11 ([2026-11-22](./frd.md#2026-11-22)).
+- [ ] Run that last tester pass and fold its results into the matrix, recording each cell it cannot
+      reach as a gap.
 - [ ] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
       and the operator guides) describe the end state, then write `locked.md`.
   - The docs half is done (`d84924c12`, `f138a6cdc`, `3741269b0`, `c328bd1f5`, `bfa173d2d`): the

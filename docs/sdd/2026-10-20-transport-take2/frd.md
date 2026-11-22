@@ -434,6 +434,32 @@ and resolves only the missing panes' secrets), the operator answered:]
 
 > I accept your recommendation here. Thanks!
 
+### 2026-11-22
+
+[Told at closeout that the evidence matrix had 96 open live-evidence items (33 covered, 31 partial,
+32 gaps), and offered one last tester pass at `main` over every cell the existing beds can reach
+with the rest recorded as gaps in `locked.md`, locking now with every gap recorded, or standing up
+missing beds first, the operator chose:]
+
+> One last tester pass
+
+[Asked whether Windows Server 2025, which several PR C reports called the authorized substitute for
+Windows 11 although no artifact recorded it, stands in for the Windows 11 cells, the operator
+answered:]
+
+> Yes, record it
+
+[Asked whether macOS and Windows driving Azure and GCP are in scope, given that tester charters had
+marked them out of scope while the 2026-11-04 ruling carried a cloud driven from Windows forward to
+closeout, and offered one cloud from each, out of scope, or every pairing, the operator chose:]
+
+> One cloud from each
+
+[The operator added:]
+
+> And note that my personal Win 11 workspace is now running this. I'll feed back any issues I run
+> into.
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
