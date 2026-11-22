@@ -49,13 +49,16 @@ _DEADLINE = 60
 # Both scripts first try to enter a directory with ``cd -P``, which succeeds only when
 # the kernel lets the admin reach and search it. When it fails, ``vacant`` says
 # whether the kernel shows nothing can be there: the path exists as something other
-# than a directory, or it does not exist (and is not a link) and the nearest existing
-# ancestor can be entered or is not a directory. Anything else, such as a directory
-# the admin cannot search, a link that leads nowhere or through one, or a relative
-# path, cannot be judged; the ``/*`` test also ends the walk, since stripping the last
-# component leaves a path with no slash unchanged. It walks up in a loop, since a
-# shell's function recursion is too shallow for a deep path, and an empty step means
-# the root, because ``cd ""`` stays in the working directory under dash and bash.
+# than a directory, or walking up from it reaches an ancestor that is not a directory,
+# or one the admin can enter that holds nothing, not even a link, under the next
+# component's name. It looks inside that ancestor by name because a false ``[ -e ]``
+# on a whole path can also mean the kernel would not resolve it, as for a path past
+# ``PATH_MAX``. Anything else, such as a directory the admin cannot search, a link
+# that leads nowhere or through one, or a relative path, cannot be judged; the ``/*``
+# test also ends the walk, since stripping the last component leaves a path with no
+# slash unchanged. It walks up in a loop, since a shell's function recursion is too
+# shallow for a deep path, and an empty step means the root, because ``cd ""`` stays
+# in the working directory under dash and bash.
 _VACANT_FUNCTION = """\
 vacant() {
   candidate=$1
@@ -63,9 +66,11 @@ vacant() {
     if [ -e "$candidate" ]; then [ ! -d "$candidate" ]; return; fi
     [ ! -L "$candidate" ] || return 1
     case $candidate in /*) ;; *) return 1 ;; esac
+    component=${candidate##*/}
     candidate=${candidate%/*}
     candidate=${candidate:-/}
-    (cd -P -- "$candidate") 2>/dev/null && return 0
+    (cd -P -- "$candidate") 2>/dev/null || continue
+    (cd -P -- "$candidate" && [ ! -e "$component" ] && [ ! -L "$component" ]); return
   done
 }
 """

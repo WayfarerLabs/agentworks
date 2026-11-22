@@ -208,6 +208,22 @@ def test_a_project_whose_own_path_is_past_the_limit_is_still_removed(
 
 
 @requires_guest_shell
+def test_a_workspace_whose_own_path_is_past_the_limit_is_warned_rather_than_taken_for_gone(
+    db: Database, guest: tuple[_Guest, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, workspace, _entries = guest
+    (workspace / ".tmuxinator.yml").write_text(_GENERATED)
+    path, descriptor = _deep_workspace(db, tmp_path / "guest", _PATH_MAX + 100)
+    try:
+        _reinit(db, target)
+        assert ".tmuxinator.yml" in os.listdir(descriptor)
+    finally:
+        os.close(descriptor)
+    assert not (workspace / ".tmuxinator.yml").exists()
+    assert len(captured_output.warnings) == 1 and path in captured_output.warnings[0]
+
+
+@requires_guest_shell
 def test_a_fifo_or_directory_at_the_project_path_is_left_alone(
     db: Database, guest: tuple[_Guest, Path, Path], tmp_path: Path, captured_output: CapturedOutput
 ) -> None:
