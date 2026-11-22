@@ -46,17 +46,16 @@ _DEADLINE = 60
 # another's failure or stop the rest. A test that is merely false never sets it;
 # being unable to search or read something does.
 #
-# Both scripts first try to enter a directory with ``cd -P`` in a subshell, which
-# succeeds only when the kernel lets the admin reach and search it. When it fails,
-# ``vacant`` says whether the kernel shows nothing can be there: the path exists as
-# something other than a directory, or it does not exist (and is not a link) and the
-# nearest existing ancestor can be entered or is not a directory. Anything else, such
-# as a directory the admin cannot search, a link that leads nowhere or through one, or
-# a relative path, cannot be judged; the ``/*`` test also ends the walk, since
-# stripping the last component leaves a path with no slash unchanged. It walks up in a
-# loop, since a shell's function recursion is too shallow for a deep path, and an
-# empty step means the root, because ``cd ""`` stays in the working directory under
-# dash and bash.
+# Both scripts first try to enter a directory with ``cd -P``, which succeeds only when
+# the kernel lets the admin reach and search it. When it fails, ``vacant`` says
+# whether the kernel shows nothing can be there: the path exists as something other
+# than a directory, or it does not exist (and is not a link) and the nearest existing
+# ancestor can be entered or is not a directory. Anything else, such as a directory
+# the admin cannot search, a link that leads nowhere or through one, or a relative
+# path, cannot be judged; the ``/*`` test also ends the walk, since stripping the last
+# component leaves a path with no slash unchanged. It walks up in a loop, since a
+# shell's function recursion is too shallow for a deep path, and an empty step means
+# the root, because ``cd ""`` stays in the working directory under dash and bash.
 _VACANT_FUNCTION = """\
 vacant() {
   candidate=$1
@@ -94,13 +93,19 @@ exit "$rc"
 """
 )
 
-# Workspace paths arrive as arguments. ``[ -f ]`` and ``[ ! -L ]`` keep a FIFO, a
-# directory or a link away from ``cmp``, which exits 1 on a difference and 2 when it
-# cannot read. Each workspace the script could not finish is reported by its argument
-# position on a marker line of its own, so the caller names it from the path it sent
-# rather than from output, which a path holding a line break would split. A last
-# marker line says the loop reached the end of its arguments, so a run that died
-# partway is not taken to have failed only where it reported.
+# Workspace paths arrive as arguments. Each workspace is entered in the script's own
+# shell and its project handled by name, as rehome and copy write it there: a
+# workspace path within ``PATH_MAX`` can hold a project whose absolute path is past
+# it, which the kernel would refuse to resolve. Every other path the loop resolves is
+# absolute, so the directory one workspace leaves the shell in affects no other, and
+# nothing is resolved by name in a workspace that could not be entered. ``[ -f ]`` and
+# ``[ ! -L ]`` keep a FIFO, a directory or a link away from ``cmp``, which exits 1 on
+# a difference and 2 when it cannot read. Each workspace the script could not finish
+# is reported by its argument position on a marker line of its own, so the caller
+# names it from the path it sent rather than from output, which a path holding a line
+# break would split. A last marker line says the loop reached the end of its
+# arguments, so a run that died partway is not taken to have failed only where it
+# reported.
 _PROJECTS_SCRIPT = (
     _VACANT_FUNCTION
     + f"""\
@@ -110,8 +115,8 @@ position=0
 unfinished() {{ rc=1; printf '{_UNFINISHED_MARKER}%s\\n' "$position"; }}
 for workspace do
   position=$((position + 1))
-  if (cd -P -- "$workspace") 2>/dev/null; then
-    project="$workspace/{_PROJECT_NAME}"
+  if cd -P -- "$workspace" 2>/dev/null; then
+    project={_PROJECT_NAME}
     if [ -f "$project" ] && [ ! -L "$project" ]; then
       printf %s "$header" | cmp -s -n {len(_GENERATED_HEADER)} -- "$project" -
       case $? in

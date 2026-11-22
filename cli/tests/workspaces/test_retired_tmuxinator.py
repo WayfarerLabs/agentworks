@@ -154,6 +154,59 @@ def _workspace(db: Database, root: Path, name: str, content: str | None = _GENER
     return path
 
 
+_PATH_MAX = 4096
+"""Linux's limit on a path the kernel resolves, its NUL included."""
+_COMPONENT = "d" * 100
+
+
+def _deep_workspace(db: Database, root: Path, length: int) -> tuple[str, int]:
+    """Register a workspace whose path is ``length`` bytes, holding a generated project.
+
+    Returns the path and a descriptor open on the workspace, through which the test
+    looks inside it. The tree is built a component at a time relative to an open
+    parent, as rehome and copy write inside a workspace, since the kernel refuses
+    an absolute path this long. Skips when this filesystem cannot hold it.
+    """
+    if os.pathconf(root, "PC_PATH_MAX") != _PATH_MAX:
+        pytest.skip(f"the test is built for a {_PATH_MAX}-byte PATH_MAX, which {root} does not report")
+    if os.pathconf(root, "PC_NAME_MAX") < len(_COMPONENT):
+        pytest.skip(f"{root} cannot name a {len(_COMPONENT)}-byte component")
+    path = str(root)
+    if len(os.fsencode(path)) + 2 > length:
+        pytest.skip(f"{root} is already too long to hold a {length}-byte workspace path")
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    while remaining := length - len(os.fsencode(path)):
+        size = min(len(_COMPONENT), remaining - 1)
+        if remaining - 1 - size == 1:  # One byte left over could not hold another component.
+            size -= 1
+        name = _COMPONENT[:size]
+        os.mkdir(name, dir_fd=descriptor)
+        child = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=descriptor)
+        os.close(descriptor)
+        descriptor, path = child, f"{path}/{name}"
+    project = os.open(".tmuxinator.yml", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+    os.write(project, _GENERATED.encode())
+    os.close(project)
+    db.insert_workspace("deep", vm_name="box", workspace_path=path, template="default", linux_group="ws-deep")
+    return path, descriptor
+
+
+@requires_guest_shell
+def test_a_project_whose_own_path_is_past_the_limit_is_still_removed(
+    db: Database, guest: tuple[_Guest, Path, Path], tmp_path: Path, captured_output: CapturedOutput
+) -> None:
+    target, _proj, _entries = guest
+    # A workspace just short of the limit, so only its project's absolute path is past it.
+    path, descriptor = _deep_workspace(db, tmp_path / "guest", _PATH_MAX - 11)
+    try:
+        assert len(os.fsencode(f"{path}/.tmuxinator.yml")) > _PATH_MAX
+        _reinit(db, target)
+        assert ".tmuxinator.yml" not in os.listdir(descriptor)
+    finally:
+        os.close(descriptor)
+    assert captured_output.warnings == []
+
+
 @requires_guest_shell
 def test_a_fifo_or_directory_at_the_project_path_is_left_alone(
     db: Database, guest: tuple[_Guest, Path, Path], tmp_path: Path, captured_output: CapturedOutput
