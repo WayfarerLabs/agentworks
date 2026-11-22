@@ -28,8 +28,8 @@ from tests.artifacts.test_native_delivery import artifact, context, enabled
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 
-@pytest.mark.parametrize("quoted_path", [False, True])
-def test_setup_conflict_cause_and_hint_survive_redacted_persistence_and_inspection(db, quoted_path):
+@pytest.mark.parametrize("suffix", ["", "'quoted", "'quoted\n"])
+def test_setup_conflict_cause_and_hint_survive_redacted_persistence_and_inspection(db, suffix):
     from agentworks.artifacts.inspection import _integration_metadata
     from agentworks.artifacts.routing import ArtifactOwnerView
     from agentworks.harness_setup.inputs import SetupInputs
@@ -41,8 +41,9 @@ def test_setup_conflict_cause_and_hint_survive_redacted_persistence_and_inspecti
     from agentworks.secrets.orchestration import SecretTarget
 
     cause, remedy, marker = (uuid4().hex for _ in range(3))
-    secret = marker + "'quoted" if quoted_path else marker
-    rendered = repr(f'/home/alice/fixture-prefix-"{secret}/native.json') if quoted_path else secret
+    secret = marker + suffix
+    shown = secret.strip("\r\n")
+    rendered = repr(f'/home/alice/fixture-prefix-"{shown}/native.json') if suffix else secret
     bad, independent = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
     inputs = received(bad, independent)
     incomplete: list[str] = []
@@ -88,7 +89,7 @@ def test_setup_conflict_cause_and_hint_survive_redacted_persistence_and_inspecti
     projected = _integration_metadata(owner, "claude-code", view)
     reason = projected.recorded_deferred[0].reason
     assert cause in reason and remedy in reason
-    assert marker not in saved.model_dump_json()
+    assert all(marker not in surface for surface in (saved.model_dump_json(), reason, *incomplete))
     assert all(cause in diagnostic and remedy in diagnostic for diagnostic in incomplete)
 
 

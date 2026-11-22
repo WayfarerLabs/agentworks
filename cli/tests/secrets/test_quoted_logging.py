@@ -56,14 +56,15 @@ def test_python_diagnostic_representation_cannot_leak_a_registered_secret(
 
 @pytest.mark.windows
 @pytest.mark.parametrize("surrounding_quote", [False, True])
-@pytest.mark.parametrize("suffix", ["", "'quoted", "'back\\slash\nnext"])
+@pytest.mark.parametrize("suffix", ["", "'quoted", "'back\\slash\nnext", "'quoted\n"])
 def test_enclosing_python_repr_keeps_registered_secrets_private(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surrounding_quote: bool, suffix: str
 ) -> None:
     marker = uuid4().hex
     value = marker + suffix
     prefix = 'fixture-prefix-"' if surrounding_quote else "fixture-prefix-"
-    rendered = repr(f"/home/worker/{prefix}{value}/native.json")
+    shown = value.strip("\r\n")
+    rendered = repr(f"/home/worker/{prefix}{shown}/native.json")
     diagnostic = Redactor((value,)).sanitize(rendered)
     monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     logger = OperationLogFile("redaction", "quoted-path", redactions=(value,))

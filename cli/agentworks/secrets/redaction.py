@@ -26,14 +26,14 @@ def secret_redaction_forms(value: str) -> tuple[str, ...]:
     """
     if not value:
         return ()
+    trimmed = value.strip("\r\n")
+    extra = (trimmed,) if trimmed and trimmed != value else ()
     quoted = shlex.quote(value)
     interior = quoted[1:-1] if quoted.startswith("'") and quoted.endswith("'") else quoted
     forms = (value, quoted, interior)
-    represented = tuple(repr(form) for form in forms)
+    represented = tuple(repr(form) for form in (*forms, *extra))
     # A larger value can make repr escape apostrophes that repr(secret) leaves raw.
     single_quote_interiors = tuple(form[1:-1].replace("'", "\\'") for form in represented if form.startswith('"'))
-    trimmed = value.strip("\r\n")
-    extra = (trimmed,) if trimmed and trimmed != value else ()
     ansi_c = tuple(
         spelling
         for text in (value, *extra)
