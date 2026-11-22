@@ -373,6 +373,4 @@ def _execute_session_start(
 
     suffix = setup_completion_suffix(read_native_setup(db, "session", name))
     output.result(f"Session '{name}' {operation}ed{suffix}")
-
-    _mgr._regenerate_tmuxinator(db, config, admin_access, vm, ws)
     return True

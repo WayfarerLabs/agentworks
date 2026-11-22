@@ -21,7 +21,6 @@ from agentworks.interpolation import runtime_values
 from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
 from agentworks.remote_presence import GETENT_NOT_FOUND_STATUS, TEST_FALSE_STATUS, probe_presence
-from agentworks.vms.home_layout import MANAGED
 from agentworks.vms.initializer.dotfiles import sync_dotfiles
 from agentworks.vms.initializer.mise import MISE_ACTIVATE_LINES, _write_mise_config, install_mise
 from agentworks.vms.initializer.packages import _run_install_commands, install_command_paths
@@ -346,7 +345,6 @@ def create_agent_on_vm(
             ),
             shell=agent_shell,
             home=home,
-            managed=MANAGED,
             log=logger,
         )
 

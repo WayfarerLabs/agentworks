@@ -98,7 +98,6 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch, target: _GrokGuest) -> None:
         "_get_boot_id",
         lambda *args, **kwargs: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     )
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *args, **kwargs: None)
     _template(monkeypatch)
 
 

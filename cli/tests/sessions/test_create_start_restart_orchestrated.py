@@ -34,14 +34,12 @@ from agentworks.bootstrap import load_request_registry as _real_load_request_reg
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
-from agentworks.execution.errors import ExecutionIncomplete, FileContentMismatch, PathRefusal, PathRefused
-from agentworks.execution.requests import Command, PythonProgram
-from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
+from agentworks.execution.requests import PythonProgram
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_regenerate_tmuxinator
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from tests.conftest import seed_vm_trust
@@ -50,7 +48,6 @@ from tests.vm_access_support import (
     check_result,
     command_line,
     guest_result,
-    install_access_recorder,
     is_command_check,
     presence_check,
     route_vm_access_to_guest,
@@ -95,9 +92,9 @@ class _Target:
     """Launch guest double: records probe events into a shared log.
 
     :meth:`answer` answers its access's required-command checks, finding
-    every command except those in ``missing``, the tmuxinator file's write
-    and removal, and the startup-protection read (off); every other request
-    completes with status 0.
+    every command except those in ``missing``, records each file write, and
+    answers the startup-protection read (off); every other request completes
+    with status 0.
     """
 
     def __init__(self, events: list[str], *, missing: set[str] | None = None) -> None:
@@ -106,11 +103,8 @@ class _Target:
 
     def answer(self, call: Call) -> Result | None:
         request = call.request
-        if isinstance(request, Command) and request.argv[:2] == ("rm", "-f") and ".tmuxinator.yml" in request.argv[-2]:
-            self._events.append("tmuxinator_remove")
-            return Result(Completed(0))
         if isinstance(request, PythonProgram) and request.args[:1] == ("write",):
-            self._events.append(f"tmuxinator_write:{json.loads(request.args[1])['path']}")
+            self._events.append(f"write:{json.loads(request.args[1])['path']}")
             return Result(Completed(0))
         if not is_command_check(request):
             line = command_line(request)
@@ -280,7 +274,6 @@ def _restart_fixture(
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db, events
 
 
@@ -617,32 +610,6 @@ def test_session_start_records_immediately_after_tmux_creation(
     db.close()
 
 
-def test_session_start_on_a_tilde_workspace_row_launches_and_warns_for_its_tmuxinator_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """A '~' row names no one directory: its session still starts, and only the config's regeneration is skipped."""
-    from agentworks.sessions import manager as session_manager
-
-    db, events = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
-    db._conn.execute("UPDATE workspaces SET workspace_path = '~/ws1' WHERE name = 'ws1'")
-    db._conn.commit()
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", _real_regenerate_tmuxinator)
-
-    session_manager.start_session(
-        db,
-        SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
-        name="s1",
-        interaction=TtyInteractionPolicy.REFUSE,
-    )
-
-    assert "tmux_create" in events
-    assert not any(event.startswith(("tmuxinator_write", "tmuxinator_remove")) for event in events)
-    assert len(captured_output.warnings) == 1
-    db.close()
-
-
 def test_session_start_retains_runtime_if_start_observation_cannot_be_recorded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -953,7 +920,6 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db
 
 
@@ -985,42 +951,6 @@ def test_create_retains_unknown_runtime_if_start_observation_write_fails(
     assert session is not None
     assert session.socket_path == "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
     assert session.pid is None and session.boot_id == BOOT_ID
-    db.close()
-
-
-@pytest.mark.parametrize(
-    ("workspace_spec", "expected_event"),
-    [(None, "tmuxinator_write:/home/me/ws1/.tmuxinator.yml"), ('{"tmuxinator":false}', "tmuxinator_remove")],
-)
-def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    workspace_spec: str | None,
-    expected_event: str,
-) -> None:
-    from agentworks.instance_specs import parse_instance_spec
-
-    events: list[str] = []
-    db = _seed_db(tmp_path)
-    db._conn.execute("UPDATE workspaces SET template = 'copied' WHERE name = 'ws1'")
-    db._conn.commit()
-    if workspace_spec is not None:
-        overlay = parse_instance_spec("workspace", workspace_spec)
-        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    recorder = install_access_recorder(monkeypatch)
-    recorder.answer = _Target(events).answer
-    vm = db.get_vm("vm1")
-    ws = db.get_workspace("ws1")
-    assert vm is not None and ws is not None
-
-    _real_regenerate_tmuxinator(db, make_config(), recorder.access(vm_name="vm1"), vm, ws)
-
-    assert expected_event in events
-    if workspace_spec is None:
-        assert "tmuxinator_remove" not in events
-    else:
-        assert not any(event.startswith("tmuxinator_write:") for event in events)
     db.close()
 
 
@@ -1198,7 +1128,7 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
             name="s1",
             spec='{"env":{"SESSION_SPEC":"set"}}',
             new_workspace=True,
-            workspace_spec='{"tmuxinator":false}',
+            workspace_spec='{"git_user_name":"Ada"}',
             new_agent=True,
             agent_spec='{"shell":"zsh"}',
             vm_name="vm1",
@@ -1219,117 +1149,6 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     db.close()
 
 
-def test_regenerate_tmuxinator_writes_a_legacy_row_with_a_trailing_slash(
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    events: list[str] = []
-    db = _seed_db(tmp_path)
-    db._conn.execute("UPDATE workspaces SET workspace_path = '/home/me/ws1/' WHERE name = 'ws1'")
-    db._conn.commit()
-    recorder = install_access_recorder(monkeypatch)
-    recorder.answer = _Target(events).answer
-    vm = db.get_vm("vm1")
-    ws = db.get_workspace("ws1")
-    assert vm is not None and ws is not None
-
-    _real_regenerate_tmuxinator(db, make_config(), recorder.access(vm_name="vm1"), vm, ws)
-
-    assert events == ["tmuxinator_write:/home/me/ws1/.tmuxinator.yml"]
-    assert captured_output.warnings == []
-    db.close()
-
-
-@pytest.mark.parametrize(
-    ("workspace_spec", "failure"),
-    [
-        # The write: a file operation's failures, and a lost connection.
-        (None, PathRefused("vm1", "write", "/home/me/ws1/.tmuxinator.yml", PathRefusal.UNSUITABLE)),
-        (None, FileContentMismatch("vm1", "/home/me/ws1/.tmuxinator.yml")),
-        (None, ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION)))),
-        # The removal is a plain command, so only a request can fail it.
-        ('{"tmuxinator":false}', ExecutionIncomplete("vm1", Result(Unknown(UnknownReason.CONNECTION)))),
-    ],
-    ids=["write-link-refused", "write-content-mismatch", "write-connection-lost", "remove-connection-lost"],
-)
-def test_regenerate_tmuxinator_failure_warns_and_leaves_the_command_standing(
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-    workspace_spec: str | None,
-    failure: Exception,
-) -> None:
-    from agentworks.instance_specs import parse_instance_spec
-
-    db = _seed_db(tmp_path)
-    if workspace_spec is not None:
-        overlay = parse_instance_spec("workspace", workspace_spec)
-        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    recorder = install_access_recorder(monkeypatch)
-    recorder.access(vm_name="vm1").default_outcome = failure
-    vm = db.get_vm("vm1")
-    ws = db.get_workspace("ws1")
-    assert vm is not None and ws is not None
-
-    _real_regenerate_tmuxinator(db, make_config(), recorder.access(vm_name="vm1"), vm, ws)
-
-    [warning] = captured_output.warnings
-    assert "ws1" in warning
-    db.close()
-
-
-@pytest.mark.parametrize("workspace_spec", [None, '{"tmuxinator":false}'], ids=["enabled", "disabled"])
-@pytest.mark.parametrize("stored", ["~/ws1", "/home/me/../srv/ws1"], ids=["tilde", "dotdot"])
-def test_regenerate_tmuxinator_warns_and_sends_nothing_for_a_stored_path_it_cannot_address(
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-    workspace_spec: str | None,
-    stored: str,
-) -> None:
-    """A '~' row names no one directory, and a '..' row names its directory only once the VM resolves it."""
-    from agentworks.instance_specs import parse_instance_spec
-
-    db = _seed_db(tmp_path)
-    db._conn.execute("UPDATE workspaces SET workspace_path = ? WHERE name = 'ws1'", (stored,))
-    db._conn.commit()
-    if workspace_spec is not None:
-        overlay = parse_instance_spec("workspace", workspace_spec)
-        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    recorder = install_access_recorder(monkeypatch)
-    vm = db.get_vm("vm1")
-    ws = db.get_workspace("ws1")
-    assert vm is not None and ws is not None
-
-    _real_regenerate_tmuxinator(db, make_config(), recorder.access(vm_name="vm1"), vm, ws)
-
-    assert len(captured_output.warnings) == 1
-    assert recorder.requests("run") == []
-    db.close()
-
-
-def test_regenerate_tmuxinator_lets_a_misused_request_raise(
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Only a failed request or file operation is tolerated: a request the execution layer refuses to build raises."""
-    db = _seed_db(tmp_path)
-    recorder = install_access_recorder(monkeypatch)
-    recorder.access(vm_name="vm1").default_outcome = ValidationError("misused request")
-    vm = db.get_vm("vm1")
-    ws = db.get_workspace("ws1")
-    assert vm is not None and ws is not None
-
-    with pytest.raises(ValidationError, match="misused request"):
-        _real_regenerate_tmuxinator(db, make_config(), recorder.access(vm_name="vm1"), vm, ws)
-    db.close()
-
-
 def test_compound_create_reports_each_retained_overlay_once_after_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1342,7 +1161,6 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
     db = _create_stubs(tmp_path, monkeypatch, events)
     outcomes: list[OverlayOutcome] = []
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
-    monkeypatch.setattr("agentworks.sessions.manager._regenerate_tmuxinator", _real_regenerate_tmuxinator)
     monkeypatch.setattr(
         "agentworks.workspaces.manager.delete_workspace",
         lambda db_, config, *, name, **kwargs: db_.delete_workspace(name),
@@ -1378,7 +1196,7 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
         name="s1",
         spec='{"env":{"SESSION_SPEC":"set"}}',
         new_workspace=True,
-        workspace_spec='{"tmuxinator":false}',
+        workspace_spec='{"git_user_name":"Ada"}',
         new_agent=True,
         agent_spec='{"shell":"zsh"}',
         vm_name="vm1",
@@ -1386,15 +1204,14 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
     )
 
     assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
-        (OverlayDisposition.SET, ("tmuxinator",)),
+        (OverlayDisposition.SET, ("git_user_name",)),
         (OverlayDisposition.SET, ("shell",)),
         (OverlayDisposition.SET, ("env",)),
     ]
     stored = db.instance_state.get_desired_overlay("session", "s1")
     assert stored is not None
     assert stored.payload == VersionedPayload(1, {"env": {"SESSION_SPEC": {"value": "set"}}})
-    assert "tmuxinator_remove" in events
-    assert not any(event.startswith("tmuxinator_write:") for event in events)
+    assert not any(event.startswith("write:") for event in events)
     db.close()
 
 
@@ -1434,7 +1251,7 @@ def test_compound_child_post_commit_failure_unwinds_owner_and_overlay_without_ou
         monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _fail_workspace)
         create_kwargs = {
             "new_workspace": True,
-            "workspace_spec": '{"tmuxinator":false}',
+            "workspace_spec": '{"git_user_name":"Ada"}',
             "admin": True,
         }
     else:
@@ -1893,7 +1710,6 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
 def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(

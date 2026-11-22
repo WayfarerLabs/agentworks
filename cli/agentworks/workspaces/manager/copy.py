@@ -9,7 +9,6 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AgentworksError, AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.execution.requests import Command, FromFile, ToFile
-from agentworks.linux_users import managed_home
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
@@ -192,7 +191,6 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.workspaces.acls import apply_workspace_acls
     from agentworks.workspaces.backends.vm import admin_access, generate_vscode_workspace
-    from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config
 
     dest = admin_access(dest_vm, config, lg)
     workspace_path = default_workspace_path(config, dest_name)
@@ -260,16 +258,6 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
     # no-op) and, per #254, denies `other` on both the access and default
     # ACLs, which the old inline top-dir-only default did not.
     apply_workspace_acls(dest.files(), workspace_path)
-
-    # Before the row, so a refused config (a link in its path) leaves no row.
-    publish_tmuxinator_config(
-        dest,
-        home=managed_home(dest_vm.admin_username),
-        ws_name=dest_name,
-        workspace_path=workspace_path,
-        text=generate_config(dest_name, workspace_path),
-        replace_link=True,
-    )
 
     db.insert_workspace(
         dest_name,

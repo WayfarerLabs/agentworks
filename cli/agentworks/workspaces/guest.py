@@ -24,7 +24,7 @@ from agentworks.execution.files import guest_path, normalized_guest_path
 from agentworks.execution.requests import Script, Shell
 
 PROBE_DEADLINE = 10
-"""Seconds a workspace path probe, link check, group removal or tmuxinator file operation may take."""
+"""Seconds a workspace path probe or group removal may take."""
 
 FIND_DEADLINE = 120
 """Seconds one recursive ``find`` or ``chown`` over a workspace tree may take."""

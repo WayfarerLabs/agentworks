@@ -96,28 +96,15 @@ class ManifestSet:
     channel is only what an operator should act on without the config
     refusing to load.
 
-    There is no deprecation channel here YET, and that is a statement
-    about consumers rather than about the design. The one manifest
-    deprecation that ever rode one (the sibling capability-config shape)
-    is a hard error now, so building the carrier today would add a field
-    nothing writes.
-
-    When the next manifest-shape deprecation arrives, and the
-    next-steps saga's target-state compatibility posture says one is
-    expected because this effort removed the warn window that used to
-    exist, the pattern to copy is
-    ``Config.deprecation_issues``: a per-SOURCE carrier feeding the shared
-    surface, so ``--no-deprecations`` and
-    ``output.deprecations_suppressed`` serve it without changes. That
-    field is kept deliberately for the same reason (operator ruling,
-    2026-08-07) even though it is empty today: a warn window is exactly
-    the thing you cannot build at the moment you discover you need it. Do
-    NOT read its emptiness, or this absence, as evidence the mechanism was
-    a mistake.
+    ``deprecations`` mirrors ``Config.deprecation_issues``: the deprecated
+    settings a document makes (``DeclaredResource.deprecated_fields``),
+    located the same way. It feeds the shared deprecation surface, so
+    ``--no-deprecations`` and ``output.deprecations_suppressed`` serve it.
     """
 
     entries: tuple[ManifestEntry, ...]
     issues: tuple[str, ...]
+    deprecations: tuple[str, ...] = ()
 
     @classmethod
     def empty(cls) -> ManifestSet:
@@ -250,6 +237,7 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
     """
     entries: list[ManifestEntry] = []
     issues: list[str] = []
+    deprecations: list[str] = []
     seen: dict[tuple[str, str], SourceLocation] = {}
 
     for path in _iter_manifest_files(resources_dir):
@@ -268,7 +256,7 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                     located(location, f'duplicate {doc.kind} "{doc.name}"{also}'),
                 )
             seen[key] = location
-            resource = decode_document(doc, issues)
+            resource = decode_document(doc, issues, deprecations)
             entries.append(
                 ManifestEntry(
                     kind=doc.kind,
@@ -278,4 +266,4 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                 )
             )
 
-    return ManifestSet(entries=tuple(entries), issues=tuple(issues))
+    return ManifestSet(entries=tuple(entries), issues=tuple(issues), deprecations=tuple(deprecations))

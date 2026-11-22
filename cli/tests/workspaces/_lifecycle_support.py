@@ -9,7 +9,6 @@ requests, and each test asserts on the requests it recorded.
 
 from __future__ import annotations
 
-import json
 import shlex
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
@@ -181,8 +180,8 @@ class Guest:
 
     Records each request in ``requests``, in order, and answers it as a
     healthy, converged guest would: exit 0 and no output. A request ``fails``
-    names exits 1 instead. A file operation is recorded by its path in
-    ``written`` and succeeds. ``links`` maps each directory link to its
+    names exits 1 instead. A file operation succeeds and is not recorded.
+    ``links`` maps each directory link to its
     target, which rehome's path resolution follows. A subclass models more
     of the guest in :meth:`respond`, which may also raise. A non-zero exit
     under ``check`` raises ``CommandFailed``, as the access does. ``events``,
@@ -191,7 +190,6 @@ class Guest:
 
     def __init__(self, *, events: list[str] | None = None, fails: Sequence[Failing] = ()) -> None:
         self.requests: list[Any] = []
-        self.written: list[str] = []
         self.links: dict[str, str] = {}
         self._events = events
         self._fails = tuple(fails)
@@ -199,8 +197,6 @@ class Guest:
     def answer(self, call: Call) -> Result:
         request = call.request
         if isinstance(request, PythonProgram):
-            if request.args[:1] == ("write",):
-                self.written.append(json.loads(request.args[1])["path"])
             return Result(Completed(0))
         self.requests.append(request)
         if self._events is not None:

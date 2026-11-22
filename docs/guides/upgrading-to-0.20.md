@@ -35,9 +35,11 @@ Work through these in order; the sections after this list give the detail.
 4. **Reinit each existing VM once.** `agw vm reinit NAME` removes the sshd and sudoers grants and
    the admin's group access to agent tmux servers that this release no longer uses, which changes
    what your own `ssh` and `sudo` pass on
-   ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)). Read its warnings:
-   it reports settings in `/etc/environment` and other `pam_env` files that commands no longer
-   apply, and login shells Agentworks does not support
+   ([Reinit retires grants nothing uses](#reinit-retires-grants-nothing-uses)). It also removes the
+   workspace tmuxinator projects earlier releases generated
+   ([Workspace tmuxinator projects are removed](#workspace-tmuxinator-projects-are-removed)). Read
+   its warnings: it reports settings in `/etc/environment` and other `pam_env` files that commands
+   no longer apply, and login shells Agentworks does not support
    ([What behaves differently](#what-behaves-differently)). A VM that reinit reports as unable to
    run Agentworks requests lacks `python3`; `agw vm recover NAME` installs it, then reinit again.
 5. **Restart each running named console** with `agw console restart NAME`, once its VM has been
@@ -61,9 +63,10 @@ Work through these in order; the sections after this list give the detail.
    - `session attach` no longer carries your SSH environment, such as `SSH_AUTH_SOCK`, into an agent
      session's server
      ([Agent session tmux clients run as the agent](#agent-session-tmux-clients-run-as-the-agent));
-   - a workspace tmuxinator config an earlier release generated must not be started on a VM with
-     agent sessions until Agentworks rewrites it
-     ([Agent session tmux clients run as the agent](#agent-session-tmux-clients-run-as-the-agent));
+   - workspaces no longer get a generated tmuxinator project, the workspace-template `tmuxinator`
+     setting has no effect and reports a deprecation, and new VMs no longer get the `tmuxinator`
+     package; do not start an old project by hand before reinit removes it
+     ([Workspace tmuxinator projects are removed](#workspace-tmuxinator-projects-are-removed));
    - files an earlier release's interrupted backup or Remote Lima create left under `/var/tmp` are
      no longer cleaned up ([Backups](#backups),
      [Start, recover, rekey and delete](#start-recover-rekey-and-delete));
@@ -188,7 +191,7 @@ each existing VM brings it to the new state. Until then they stay in place, unus
   reinit. `agent create` and `session create` also reset the directories they use, without a
   warning. An agent session started before the reset keeps running, but from the moment an agent's
   directory is reset, any account but the agent and root is refused a new connection to its servers,
-  a console window not yet rebuilt and an old tmuxinator config included. A tool of your own that
+  a console window not yet rebuilt and an old tmuxinator project included. A tool of your own that
   connects to an agent's tmux server as the admin must switch to the agent first, as Agentworks
   does.
 
@@ -210,11 +213,11 @@ then runs the client as the agent with `runuser`. Attach clients run on a termin
   environment, so variables tmux would otherwise copy into the session on attach, such as
   `SSH_AUTH_SOCK`, no longer reach it. Under `sudo`'s default policy `TERM` and the locale variables
   still do.
-- **Workspace tmuxinator configs from earlier releases are not covered until rewritten.** A
-  workspace's `.tmuxinator.yml` that an earlier release generated starts plain tmux clients as the
-  VM admin, including against agent sessions' servers. Agentworks rewrites it, with the switch, when
-  a session in that workspace is next created, started, restarted or deleted; until then, do not
-  start it on a VM with agent sessions.
+- **Workspace tmuxinator projects are no longer generated.** `agw vm reinit` removes what earlier
+  releases left (see
+  [Workspace tmuxinator projects are removed](#workspace-tmuxinator-projects-are-removed)). Until it
+  does, starting one runs plain tmux clients as the VM admin, including against agent sessions'
+  servers. Use named consoles instead.
 - **Rows with a misplaced socket path stop being probed.** A session's stored socket path must sit
   directly inside its agent's socket directory or, for an admin session, the VM admin's, and be
   named for its session. Any other path reports `unknown` status instead of being probed at whatever
@@ -427,19 +430,12 @@ the VM once no backup is running.
 
 ### Workspaces
 
-- **Links are not followed.** A workspace's generated `.tmuxinator.yml` and the admin's
-  `~/.config/tmuxinator` directory are written by the file program, which refuses a symbolic link at
-  the file or any parent, so a workspace path below a link (most likely a `paths.vm_workspaces` that
-  is, or lies under, a symbolic link on the VM), or a linked `~/.config` or `~/.config/tmuxinator`,
-  now fails `workspace create`, `workspace copy` and `workspace rehome` where it was followed. A
-  failed `workspace create` removes what it created, as for any other failure. A refused
-  `workspace copy` leaves the extracted tree in the new directory and no workspace row, so remove
-  that directory before retrying. A refused `workspace rehome` leaves the copied tree at the new
-  path and the workspace where it was, its error naming both; remove the new directory before
-  retrying. The session commands regenerate the config as a convenience: a refusal there, or any
-  failed request, now warns and leaves the session command's result standing, where a failure of the
-  regeneration used to fail the command. To put workspaces on a data volume, mount it, or bind-mount
-  a directory of it, at `paths.vm_workspaces` instead of linking it there.
+- **Links are not followed into a workspace.** The file program, which reads and writes the files
+  Agentworks manages inside a workspace, such as a session's MCP project config (`.mcp.json`),
+  refuses a symbolic link at the file or any parent. A workspace below a link (most likely a
+  `paths.vm_workspaces` that is, or lies under, a symbolic link on the VM) has those reads and
+  writes refused. To put workspaces on a data volume, mount it, or bind-mount a directory of it, at
+  `paths.vm_workspaces` instead of linking it there.
 - **`paths.vm_workspaces` must be an absolute directory below the root.** A relative value, `/`
   itself, or a value with a `..` component is refused when the configuration loads, since every
   workspace path on the VM is built from it; `workspace rehome --target` follows the same rule. An
@@ -451,23 +447,21 @@ the VM once no backup is running.
   record is stale until the workspace is rehomed; rehome records the setup at the new path. One
   created under a value starting with `~` keeps its stored path, since which home it named is not
   recorded. `workspace rehome` and `workspace repair` both refuse such a path before anything runs,
-  with a hint to delete and recreate the workspace, and the session commands warn instead of
-  updating its tmuxinator config and defer delivering MCP servers to its sessions.
-  `workspace delete` removes its row, sessions, grants, group and tmuxinator link, but nothing the
-  path names, warning that its directory and tmuxinator config are left on the VM to check by hand;
-  the workspace can then be recreated under the same name. A stored path with a `..` component, from
-  an absolute value typed with one or a relative value such as `../ws` once rewritten, names its
-  directory only once the VM resolves it: the session commands warn instead of updating its
-  tmuxinator config and defer delivering MCP servers to its sessions, `workspace delete` removes its
-  directory and link, `workspace repair` runs its other steps and warns that the parent traversal
-  fix failed, and `workspace rehome` moves it to a path without one.
+  with a hint to delete and recreate the workspace, and the session commands defer delivering MCP
+  servers to its sessions. `workspace delete` removes its row, sessions, grants and group, but
+  nothing the path names, warning that its directory is left on the VM to check by hand; the
+  workspace can then be recreated under the same name. A stored path with a `..` component, from an
+  absolute value typed with one or a relative value such as `../ws` once rewritten, names its
+  directory only once the VM resolves it: the session commands defer delivering MCP servers to its
+  sessions, `workspace delete` removes its directory, `workspace repair` runs its other steps and
+  warns that the parent traversal fix failed, and `workspace rehome` moves it to a path without one.
 - **`paths.vm_workspaces` must be printable.** A value holding a control character (a line break, a
   tab), a format character, or any space but the plain one (such as a no-break space) is refused
   when the configuration loads, since the file program refuses such a path and so cannot write a
-  workspace's files below it, its `.tmuxinator.yml` among them. Change the value, then run
-  `agw workspace rehome <name>` for each workspace already below the old one: it moves the tree to
-  the new root as it moves one whose stored path has a `..` component, and the session commands
-  treat the old path that way until it is moved.
+  workspace's files below it. Change the value, then run `agw workspace rehome <name>` for each
+  workspace already below the old one: it moves the tree to the new root as it moves one whose
+  stored path has a `..` component, and the session commands treat the old path that way until it is
+  moved.
 - **`workspace rehome --target` takes an absolute path.** A relative path, a `host:path`, the root,
   or a path with an empty, `.` or `..` component is refused before anything runs; a trailing `/` is
   dropped. A target that is the workspace's directory, inside it, or around it once the VM resolves
@@ -670,11 +664,9 @@ place its `authorized_keys`; every later step runs as the agent, which cannot ru
   account when it holds `${agw:NAME}` references, is a path in the home (`dots` or `~/dots`) or an
   absolute path. It may not name the home itself or one of its parents, may not be, hold or lie
   inside a path Agentworks manages in that account's home (`~/.ssh`, `~/.agentworks`,
-  `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments, and for the admin also the
-  workspaces' `~/.config/tmuxinator`, so an admin's `~/.config` is refused too), and may not contain
-  an empty, `.` or `..` component; a trailing `/` is dropped, and only its leading `~` is expanded.
-  A refused destination warns and syncs nothing. A stored destination such as `dots` keeps meaning
-  `~/dots`.
+  `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments), and may not contain an empty,
+  `.` or `..` component; a trailing `/` is dropped, and only its leading `~` is expanded. A refused
+  destination warns and syncs nothing. A stored destination such as `dots` keeps meaning `~/dots`.
 - **Git source URLs may not carry credentials.** A `git::https://` source whose URL holds a user
   name or token, such as `https://user:token@github.com/...`, is refused when the template loads,
   without echoing it; declare a `git-credential` resource for the host instead. A subpath with an
@@ -857,6 +849,32 @@ new connection layer, so they need what [What these commands need](#what-these-c
   terminal itself), the rest of that output is dropped and the command carries on to the end, a
   create's rollback included, with the exit status it would have had. Output redirected to a file
   that cannot be written, such as on a full disk, still fails the command.
+
+## Workspace tmuxinator projects are removed
+
+Agentworks no longer generates a tmuxinator project for each workspace. No command has started one
+since `agw workspace console` was retired;
+[named consoles](../../cli/command-reference.md#named-consoles) replace it. Keeping admin-side
+configuration inside workspace content crossed the boundary between the two, so the feature is
+removed rather than repaired.
+
+After upgrading, run `agw vm reinit <vm>` on each VM. Reinit removes the admin's links to the old
+projects and the workspace project files that still start with the generated header, including one a
+repository committed with that header (see
+[Retired workspace tmuxinator projects](idempotency.md#retired-workspace-tmuxinator-projects)). Do
+not start an old project by hand before then.
+
+The workspace-template `tmuxinator` setting still loads but has no effect, and 0.22.0 stops
+accepting it ([issue #918](https://github.com/WayfarerLabs/agentworks/issues/918)). Setting it to
+`true`, `false` or `null` in a manifest, or to `true` or `false` in a spec you pass to a command,
+reports a deprecation in 0.20.x and 0.21.x, and any other value, such as a string, is refused;
+remove it from both. A workspace created with it keeps the value in its stored settings, which no
+command edits; `agw doctor` lists these for information, and 0.22.0 migrates them, so there is
+nothing to do.
+
+New VMs no longer get the `tmuxinator` package; add it to a vm-template's `apt` list if you use it.
+Existing VMs keep it, because Agentworks never uninstalls packages; remove it yourself if you do not
+use it.
 
 ## Native harness setup
 

@@ -73,7 +73,8 @@ def shared_workspace(db, deletion, tmp_path, monkeypatch):
     monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
     removed = []
 
-    def remove(vm, config, name, path, linux_group, **kwargs):
+    def remove(vm, config, path, linux_group, **kwargs):
+        name = "project"
         assert not any(
             claim.role == "artifact-git-exclude"
             for record in read_native_setup(db, "workspace", name).records
@@ -156,7 +157,8 @@ def test_incomplete_shared_cleanup_warns_and_keeps_parent_deletion_best_effort(
     before = exclude.read_bytes() if exclude.exists() else None
     observed = []
 
-    def remove(vm, config, name, path, linux_group, **kwargs):
+    def remove(vm, config, path, linux_group, **kwargs):
+        name = "project"
         record = read_native_setup(db, "workspace", name).records[0]
         observed.append(record)
         assert record.pending_cleanup and not record.complete and record.incomplete_reasons
@@ -264,7 +266,8 @@ def test_malformed_metadata_destination_warns_without_blocking_actual_parent_del
     metadata_destination(target, destination)
     observed = []
 
-    def remove(vm, config, name, path, linux_group, **kwargs):
+    def remove(vm, config, path, linux_group, **kwargs):
+        name = "project"
         current = read_native_setup(db, "workspace", name).records[0]
         observed.append(current)
         assert current.claims[0] == first_claims[0] and current.incomplete_reasons
