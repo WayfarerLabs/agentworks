@@ -6,6 +6,7 @@ import sys
 from dataclasses import replace
 from importlib import import_module
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
@@ -25,6 +26,71 @@ from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, enabled
 from tests.vm_access_support import Admin, RecordingVMAccess
+
+
+@pytest.mark.parametrize("suffix", ["", "'quoted", "'quoted\n"])
+def test_setup_conflict_cause_and_hint_survive_redacted_persistence_and_inspection(db, suffix):
+    from agentworks.artifacts.inspection import _integration_metadata
+    from agentworks.artifacts.routing import ArtifactOwnerView
+    from agentworks.harness_setup.inputs import SetupInputs
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.outcomes import Redactor
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
+    from agentworks.plugins.claude.artifacts import outer_artifacts
+    from agentworks.schema import CapabilityConfig
+    from agentworks.secrets.orchestration import SecretTarget
+
+    cause, remedy, marker = (uuid4().hex for _ in range(3))
+    secret = marker + suffix
+    shown = secret.strip("\r\n")
+    rendered = repr(f'/home/alice/fixture-prefix-"{shown}/native.json') if suffix else secret
+    bad, independent = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
+    inputs = received(bad, independent)
+    incomplete: list[str] = []
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "site", "host"),
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
+        prior=None,
+        checkpoint=lambda claims: None,
+        report_incomplete=incomplete.append,
+        artifacts=inputs,
+        redactor=Redactor((secret,)),
+        username="alice",
+        home="/home/alice",
+    )
+
+    def check(files):
+        if any(file.native_identity == "skill:review" for file in files):
+            raise NativeArtifactConflictError(f"{cause} {rendered}", ("skill:review",), hint=f"{remedy} {rendered}")
+
+    application = defer_setup_conflicts(outer_artifacts(inputs, "/home/alice/.claude"), invocation, check)
+    assert {origin for file in application.files for origin in file.origins} == {independent.origin_identity}
+    assert [item.input_id for item in application.deferred] == [bad.identity]
+    record = SetupRecord(
+        component="agent",
+        integration="claude-code",
+        destination_id="a" * 64,
+        declaration={},
+        artifact_inputs=tuple(item.identity for item in inputs.items()),
+        deferred=application.deferred,
+        incomplete_reasons=tuple(incomplete),
+    )
+    write_native_setup(db, "agent", "fixture", NativeSetupState(records=(record,)), operation="fixture-init")
+    saved = read_native_setup(db, "agent", "fixture").records[0]
+    owner = SetupInputs(
+        kind="agent",
+        name="fixture",
+        component="agent",
+        activations={"claude-code": CapabilityConfig()},
+        target=SecretTarget(vm={}),
+    )
+    view = ArtifactOwnerView(owner, None, "current", "incomplete", record=saved)
+    projected = _integration_metadata(owner, "claude-code", view)
+    reason = projected.recorded_deferred[0].reason
+    assert cause in reason and remedy in reason
+    assert all(marker not in surface for surface in (saved.model_dump_json(), reason, *incomplete))
+    assert all(cause in diagnostic and remedy in diagnostic for diagnostic in incomplete)
 
 
 @pytest.mark.parametrize("implementation", [ClaudeCodeIntegration, CodexIntegration, GrokBuildIntegration])
