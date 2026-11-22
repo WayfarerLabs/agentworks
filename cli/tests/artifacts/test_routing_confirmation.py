@@ -20,7 +20,7 @@ from agentworks.harness_setup.state import write_native_setup
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.artifacts.test_routing import graph
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
@@ -47,22 +47,22 @@ def test_confirmed_empty_deferrals_do_not_hold_receiver_content(db, tmp_path, re
 
     # Exercise the publisher with this routing decision: own content can update
     # and retire even though the VM's unrelated native application is incomplete.
-    transport = LocalFixtureTransport(tmp_path / receiver)
+    account = LocalFixtureAccount(tmp_path / receiver)
     assert routed.inputs.local is not None
     item = next(routed.inputs.local.items())
-    path = transport.home / "own-rule"
-    retired = transport.home / "own-skill"
+    path = account.home / "own-rule"
+    retired = account.home / "own-skill"
     files = (
         ArtifactFile(str(path), b"old rule", (item.origin_identity,)),
         ArtifactFile(str(retired), b"old skill", (item.origin_identity,)),
     )
-    previous = publish_artifacts(transport, files, (), lambda _: None, roots=(str(transport.home),)).files
+    previous = publish_artifacts(account.files(), files, (), lambda _: None, roots=(str(account.home),)).files
     updated = publish_artifacts(
-        transport,
+        account.files(),
         (replace(files[0], data=b"new rule"),),
         previous,
         lambda _: None,
-        roots=(str(transport.home),),
+        roots=(str(account.home),),
         retain_origins=frozenset(),
     )
     assert path.read_bytes() == b"new rule" and not retired.exists()

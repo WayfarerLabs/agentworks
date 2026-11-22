@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks.db import SessionMode
@@ -18,15 +19,30 @@ class SessionTmuxServer:
     """A session's validated dedicated tmux server.
 
     ``owner`` is ``None`` for the VM admin's own server, which the admin's
-    transport reaches directly. Otherwise it names the agent account that
-    runs the server, and every tmux client the admin's transport starts
-    against it runs as ``owner``. Production code builds it only through
-    ``resolve_session_tmux_server``, so holding one there means the row
-    passed the whole owner rule.
+    access reaches directly. Otherwise it names the agent account that runs
+    the server, and every tmux client the admin's access starts against it
+    runs as ``owner``, which is always the name of the socket's directory:
+    a server built with any other owner raises ``ValueError``. Production code builds it
+    only through ``resolve_session_tmux_server``, so holding one there means
+    the row passed the whole owner rule.
     """
 
     socket_path: str
     owner: str | None
+
+    def __post_init__(self) -> None:
+        # The path's rule, read here rather than through ``account``, which tests monkeypatch.
+        if self.owner is not None and self.owner != PurePosixPath(self.socket_path).parent.name:
+            raise ValueError(f"tmux server owner '{self.owner}' is not the account of socket '{self.socket_path}'")
+
+    @property
+    def account(self) -> str:
+        """The account that runs the server, the admin's included: its socket directory's name.
+
+        The socket guard checks the socket belongs to it
+        (``tmux.as_socket_owner_line``).
+        """
+        return PurePosixPath(self.socket_path).parent.name
 
 
 def resolve_session_tmux_server(db: Database, session: SessionRow) -> SessionTmuxServer | None:
@@ -34,7 +50,7 @@ def resolve_session_tmux_server(db: Database, session: SessionRow) -> SessionTmu
 
     Returns ``None`` for a legacy row without a socket path, whose clients use
     the connecting account's own default server. Otherwise the stored path
-    must satisfy ``socket_owner`` for the session's VM admin, its owner must
+    must satisfy ``socket_owner`` for the session's VM admin and name, its owner must
     match the row's mode, and an agent row's owner must be that agent's own
     Linux account. Raises ``StateError`` when any of these fails: such a row
     is refused or reported unknown, and never probed.
@@ -50,7 +66,7 @@ def resolve_session_tmux_server(db: Database, session: SessionRow) -> SessionTmu
             entity_kind="session",
             entity_name=session.name,
         )
-    owner = socket_owner(socket_path, admin_username=vm.admin_username)
+    owner = socket_owner(socket_path, admin_username=vm.admin_username, session_name=session.name)
     if (owner is not None) != (session.mode == SessionMode.AGENT.value):
         raise StateError(
             f"session '{session.name}' has no managed tmux socket for its mode",

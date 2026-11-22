@@ -175,7 +175,7 @@ def test_whole_vm_delete_logs_out_then_deletes_without_tearing_down_sessions(
     monkeypatch.setattr(ProxmoxPlatform, "delete", delete)
     monkeypatch.setattr(session_manager, "ensure_pids_batch", unexpected)
     monkeypatch.setattr(session_manager, "_teardown_session", unexpected)
-    monkeypatch.setattr("agentworks.transports.transport", unexpected)
+    monkeypatch.setattr("agentworks.execution.vm_access", unexpected)
 
     vm_manager.delete_vm(db, config, "dvm", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
@@ -195,6 +195,28 @@ def _bind_before_corrupt_inventory(db: Database, config: Config, monkeypatch: py
     assert vm is not None
     bound = _live_vm_boundary(db, config, vm, interaction=TtyInteractionPolicy.REFUSE)
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", lambda *args, **kwargs: bound)
+
+
+def test_delete_removes_only_its_own_vms_logs(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    from agentworks.execution import oplog
+
+    monkeypatch.setattr(oplog, "LOG_DIR", tmp_path / "logs")
+    _seed(db)
+    own, other = oplog.OperationLogFile("dvm", "vm-create"), oplog.OperationLogFile("dvm-2", "vm-create")
+    own.close()
+    other.close()
+    _fake_backend(monkeypatch)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not own.path.exists()
+    assert other.path.exists()
 
 
 def test_delete_removes_only_its_workspace_artifacts(

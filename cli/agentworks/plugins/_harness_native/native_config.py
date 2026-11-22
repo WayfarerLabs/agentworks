@@ -49,3 +49,13 @@ class NativeUserConfig(NativeWorkspaceConfig):
         if len(values) != len(set(values)):
             raise ValueError("native setup entries must be unique")
         return values
+
+    @field_validator("marketplaces")
+    @classmethod
+    def _not_an_option(cls, values: list[str] | None) -> list[str] | None:
+        """Reject a source the native CLI would read as an option; boundary: operator-authored config."""
+        if values is not None and any(value.startswith("-") for value in values):
+            raise ValueError(
+                "native marketplace sources must not begin with '-', which a native CLI reads as an option"
+            )
+        return values

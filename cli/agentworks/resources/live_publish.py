@@ -60,6 +60,29 @@ def _read_database[T](read: Callable[[], T]) -> T:
         _raise_malformed_database(error)
 
 
+class _ReplacementRequired:
+    """Marks a stored instance layer that needs an explicit replacement (``ExplicitReplacementRequired``)."""
+
+
+_REPLACEMENT_REQUIRED = _ReplacementRequired()
+
+
+def _stored_layer[T](read: Callable[[], T]) -> T | _ReplacementRequired:
+    """Read an owner's stored instance layer, or mark it as one that needs an explicit replacement.
+
+    Such an owner is published identity-only, its selection and owner edges
+    without layer references, so one unusable record never takes down the
+    registry every other command loads. A command acting on that owner
+    decodes the record itself and refuses with its value-free repair hint.
+    """
+    from agentworks.instance_specs import ExplicitReplacementRequired
+
+    try:
+        return _read_database(read)
+    except ExplicitReplacementRequired:
+        return _REPLACEMENT_REQUIRED
+
+
 def _is_published(registry: Registry, kind: str, name: str) -> bool:
     try:
         registry.lookup(kind, name)
@@ -263,12 +286,12 @@ def agent_live_resource(db: Database, registry: Registry, row: AgentRow) -> Live
         if _is_published(registry, "agent-template", selected)
         else None
     )
-    overlay = _read_database(lambda: get_instance_overlay(db, "agent", row.name, legacy_user_base=base))
-    if not _is_published(registry, "agent-template", selected):
+    overlay = _stored_layer(lambda: get_instance_overlay(db, "agent", row.name, legacy_user_base=base))
+    if isinstance(overlay, _ReplacementRequired) or not _is_published(registry, "agent-template", selected):
         return project_agent_live_resource(
             name=row.name,
             vm_name=_published_name(registry, "vm", row.vm_name),
-            template_name=None,
+            template_name=_published_name(registry, "agent-template", selected),
             layered=None,
         )
     layered = resolve_template_with_provenance(
@@ -291,12 +314,12 @@ def workspace_live_resource(db: Database, registry: Registry, row: WorkspaceRow)
     from agentworks.workspaces.templates import resolve_template_with_provenance
 
     selected = "default" if row.template is None else row.template
-    overlay = _read_database(lambda: get_instance_overlay(db, "workspace", row.name))
-    if not _is_published(registry, "workspace-template", selected):
+    overlay = _stored_layer(lambda: get_instance_overlay(db, "workspace", row.name))
+    if isinstance(overlay, _ReplacementRequired) or not _is_published(registry, "workspace-template", selected):
         return project_workspace_live_resource(
             name=row.name,
             vm_name=_published_name(registry, "vm", row.vm_name),
-            template_name=None,
+            template_name=_published_name(registry, "workspace-template", selected),
             layered=None,
         )
     layered = resolve_template_with_provenance(
@@ -318,13 +341,13 @@ def session_live_resource(db: Database, registry: Registry, row: SessionRow) -> 
     from agentworks.instance_specs import get_instance_overlay
     from agentworks.sessions.templates import resolve_template_with_provenance
 
-    overlay = _read_database(lambda: get_instance_overlay(db, "session", row.name))
-    if not _is_published(registry, "session-template", row.template):
+    overlay = _stored_layer(lambda: get_instance_overlay(db, "session", row.name))
+    if isinstance(overlay, _ReplacementRequired) or not _is_published(registry, "session-template", row.template):
         projected = project_session_live_resource(
             name=row.name,
             workspace_name=_published_name(registry, "workspace", row.workspace_name),
             agent_name=(None if row.agent_name is None else _published_name(registry, "agent", row.agent_name)),
-            template_name=None,
+            template_name=_published_name(registry, "session-template", row.template),
             layered=None,
         )
     else:
@@ -376,9 +399,18 @@ def vm_live_resource(db: Database, registry: Registry, row: VMRow) -> LiveResour
         if _is_published(registry, "admin-template", selected_admin)
         else None
     )
-    overlays = _read_database(lambda: get_vm_instance_overlays(db, row.name, legacy_user_base=base))
+    overlays = _stored_layer(lambda: get_vm_instance_overlays(db, row.name, legacy_user_base=base))
     vm_template_name = _published_name(registry, "vm-template", selected_vm)
     admin_template_name = _published_name(registry, "admin-template", selected_admin)
+    if isinstance(overlays, _ReplacementRequired):
+        return project_vm_live_resource(
+            name=row.name,
+            site=_published_name(registry, "vm-site", row.site),
+            vm_template_name=vm_template_name,
+            admin_template_name=admin_template_name,
+            layered_vm=None,
+            layered_admin=None,
+        )
     layered_vm = (
         None
         if vm_template_name is None

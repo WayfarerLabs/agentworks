@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import AlreadyExistsError, ConfigError
@@ -15,6 +16,9 @@ if TYPE_CHECKING:
 
 EXTERNAL_ACCESS_CONFIG_NAME = "External NAT"
 
+# A Compute operation name: a lowercase resource name, printed in recovery guidance.
+_OPERATION_NAME = re.compile(r"[a-z][-a-z0-9]{0,127}")
+
 
 def provider_resource_id(value: object) -> str | None:
     """Normalize one positive uint64 provider ID without accepting zero."""
@@ -25,6 +29,14 @@ def provider_resource_id(value: object) -> str | None:
     except ValueError:
         return None
     return str(normalized) if normalized > 0 else None
+
+
+def provider_operation_name(operation: object) -> str | None:
+    """The operation's provider name, or ``None`` when it is missing or not a plain resource name."""
+    name = getattr(operation, "name", None)
+    if isinstance(name, str) and _OPERATION_NAME.fullmatch(name):
+        return name
+    return None
 
 
 def canonical_resource_url(value: str) -> str:

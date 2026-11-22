@@ -28,7 +28,11 @@ from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
-    from tests.vm_access_support import AccessRecorder
+    from agentworks.db import VMRow
+    from agentworks.execution.results import Result
+    from agentworks.sessions.multi_console import ConsoleAccess
+    from agentworks.sessions.tmux import RunCommand
+    from tests.vm_access_support import AccessRecorder, Call, RecordingVMAccess
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -75,6 +79,18 @@ requires_posix_shell = pytest.mark.skipif(
 )
 
 
+def current_user_name() -> str:
+    """This process's account name from the passwd database, as a socket's owner reads.
+
+    ``pwd`` is POSIX-only, so it is imported here: a module importing it at
+    top level fails to collect on the Windows controller, even when every
+    test in it is skipped there.
+    """
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
 class _Terminal(io.StringIO):
     """A text stream that reports itself as a terminal."""
 
@@ -90,18 +106,53 @@ def pretend_windows_console(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
-    """Keep default SSH logs in this worker's temporary directory."""
-    import agentworks.ssh as ssh
+def _isolate_operation_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
+    """Keep default operation logs in this worker's temporary directory."""
+    from agentworks.execution import oplog
 
-    prior = ssh.LOG_DIR
-    log_dir = tmp_path_factory.getbasetemp() / "ssh-logs"
+    prior = oplog.LOG_DIR
+    log_dir = tmp_path_factory.getbasetemp() / "operation-logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    ssh.LOG_DIR = log_dir
+    oplog.LOG_DIR = log_dir
     try:
         yield
     finally:
-        ssh.LOG_DIR = prior
+        oplog.LOG_DIR = prior
+
+
+@pytest.fixture(scope="session")
+def file_lock_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The guest file program's VM-wide lock for programs this worker runs on this machine."""
+    directory = tmp_path_factory.getbasetemp() / "file-lock"
+    directory.mkdir(exist_ok=True)
+    return directory / "agentworks-files.lock"
+
+
+@pytest.fixture(scope="session")
+def _file_program_with_private_lock(file_lock_path: Path) -> str:
+    from agentworks.execution import file_program, files
+
+    source = files.program_source()
+    declaration = f'LOCK_PATH = "{file_program.LOCK_PATH}"'
+    if source.count(declaration) != 1:
+        raise RuntimeError(f"the file program no longer declares {declaration}; update this fixture")
+    return source.replace(declaration, f'LOCK_PATH = "{file_lock_path}"')
+
+
+@pytest.fixture(autouse=True)
+def _private_file_lock(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Send the file program with its lock at :func:`file_lock_path` in every non-integration test.
+
+    The L and S lanes and ``run_file_program_locally`` run the program on this
+    machine, where the VM's lock path is the host's own ``/run/lock``.
+    Integration tests reach a VM and keep its real lock.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return
+    from agentworks.execution import files
+
+    source = request.getfixturevalue("_file_program_with_private_lock")
+    monkeypatch.setattr(files, "program_source", lambda: source)
 
 
 # ---------------------------------------------------------------------------
@@ -437,17 +488,17 @@ def warnings(captured_output: CapturedOutput) -> Generator[list[str], None, None
 
 
 # ---------------------------------------------------------------------------
-# Fake tmux target (named-console tests)
+# Fake guest (named-console and session tests)
 #
-# Several test modules drive the named-console SSH layer through a stand-in
-# target that captures commands rather than actually running them on a VM.
-# Defined here so all test files that import the classes (or use the
-# fixture) share the same implementation.
+# Several test modules drive the console and session layers against a stand-in
+# guest that answers each request a recording access is asked, from its
+# command line, rather than running it on a VM. Defined here so all test files
+# that import the classes (or use the fixture) share the same implementation.
 # ---------------------------------------------------------------------------
 
 
 class _FakeResult:
-    """Minimal stand-in for ssh.SSHResult."""
+    """What a guest command printed and exited with, as a test scripts it."""
 
     def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
         self.returncode = returncode
@@ -458,9 +509,15 @@ class _FakeResult:
     def ok(self) -> bool:
         return self.returncode == 0
 
+    def result(self) -> Result:
+        """This as the completed ``Result`` a recording access returns."""
+        from agentworks.execution.results import Completed, Result
+
+        return Result(Completed(self.returncode), self.stdout.encode(), self.stderr.encode())
+
 
 class _SupportsDispatch(Protocol):
-    """The one method ``_FakeTarget`` needs from a stateful tmux model.
+    """The one method ``_ScriptedGuest`` needs from a stateful tmux model.
 
     Typed as a Protocol (rather than importing ``tests._tmux_model.TmuxModel``)
     because that module imports ``_FakeResult`` from here; a concrete import
@@ -470,20 +527,23 @@ class _SupportsDispatch(Protocol):
     def dispatch(self, command: str) -> _FakeResult: ...
 
 
-class _FakeTarget:
-    """Captures the commands run against it. Supports a per-test override map
-    that lets us simulate (e.g.) `has-session` returning nonzero on first probe.
+class _ScriptedGuest:
+    """The guest a test's recording accesses reach: it answers each request from its command line.
 
-    Optionally stateful: pass a ``model`` (a ``tests._tmux_model.TmuxModel``)
-    and ``run()`` answers from live tmux state instead of a fixed default.
-    Resolution order is override map first, then the model, then default-OK,
-    so a test can still force a specific failure (e.g. "make this one
-    split-window fail") on top of an otherwise stateful target. Without a
-    model the target is the original stateless substring map, so every
-    existing test is unaffected.
+    ``answer`` is a ``RecordingVMAccess`` answer (``install_scripted_guest``
+    installs it for every access): a ``Command``'s line is ``shlex.join`` of
+    its argv and a ``Script``'s is its source. ``commands`` records every
+    line in order, and ``recorder`` is the access recorder, whose calls hold
+    the typed requests, parks included.
+
+    Supports a per-test override map that lets us simulate (e.g.)
+    `has-session` returning nonzero on first probe. Optionally stateful: pass
+    a ``model`` (a ``tests._tmux_model.TmuxModel``) and it answers from live
+    tmux state instead of a fixed default. Resolution order is override map
+    first, then the model, then default-OK, so a test can still force a
+    specific failure (e.g. "make this one split-window fail") on top of an
+    otherwise stateful guest.
     """
-
-    logger = None
 
     def __init__(
         self,
@@ -491,13 +551,14 @@ class _FakeTarget:
         *,
         model: _SupportsDispatch | None = None,
     ) -> None:
-        self.logger = None
         self.commands: list[str] = []
         # Substring -> response. First matching substring wins; default = ok.
         self.responses = responses or {}
         self.model = model
+        self.recorder: AccessRecorder | None = None
 
-    def run(self, command: str, **kwargs: object) -> _FakeResult:
+    def dispatch(self, command: str) -> _FakeResult:
+        """Record ``command`` and return what the guest answers for it."""
         from tests._runtime_probes import framed_runtime_result
 
         self.commands.append(command)
@@ -507,6 +568,43 @@ class _FakeTarget:
         if self.model is not None:
             return self.model.dispatch(command)
         return framed_runtime_result(command, _FakeResult())
+
+    def answer(self, call: Call) -> Result | None:
+        """Answer a ``Command`` or ``Script`` from its command line; ``None`` for a command check and anything else."""
+        from tests.vm_access_support import command_line, is_command_check
+
+        line = command_line(call.request)
+        return None if line is None or is_command_check(call.request) else self.dispatch(line).result()
+
+    def admin(self) -> RecordingVMAccess:
+        """The admin's recording access, whose requests this guest answers."""
+        assert self.recorder is not None
+        return self.recorder.access()
+
+    def run_command(self) -> RunCommand:
+        """The admin's tmux ``RunCommand``, as the console modules build it, for a helper that takes one."""
+        from agentworks.sessions.tmux import access_run_command
+
+        return access_run_command(self.admin(), deadline=None, elevated=False)
+
+    def console_access(self, vm: VMRow, agents: dict[str, str] | None = None) -> ConsoleAccess:
+        """A console operation's accesses on ``vm``: the admin's and, unchecked, ``agents``' (Linux user to name)."""
+        from agentworks.execution.access import Agent
+        from agentworks.sessions.multi_console import ConsoleAccess
+
+        assert self.recorder is not None
+        accesses = {user: self.recorder.access(Agent(name, user)) for user, name in (agents or {}).items()}
+        return ConsoleAccess(vm, None, self.admin(), accesses)  # type: ignore[arg-type]
+
+    def parks(self) -> list[Call]:
+        """Every ``park`` the test's accesses were asked, in order."""
+        assert self.recorder is not None
+        return [call for call in self.recorder.calls if call.operation == "park"]
+
+    def attaches(self) -> list[Call]:
+        """Every ``attach`` the test's accesses were asked, in order."""
+        assert self.recorder is not None
+        return [call for call in self.recorder.calls if call.operation == "attach"]
 
 
 class _StubPlatform:
@@ -651,60 +749,54 @@ def stub_vm_ssh_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.vms.manager.boundary.require_vm_ssh_boundary", lambda *args, **kwargs: None)
 
 
-def install_fake_target(monkeypatch: pytest.MonkeyPatch, target: _FakeTarget) -> _FakeTarget:
-    """Route the transport layer through ``target`` and stub the VM gates.
+def install_scripted_guest(monkeypatch: pytest.MonkeyPatch, guest: _ScriptedGuest) -> _ScriptedGuest:
+    """Answer every ``VMAccess`` request from ``guest`` and stub the VM gates.
 
-    Shared by the ``fake_target`` fixture (stateless) and the
-    ``console_target_factory`` fixture (stateful, model-backed), so both
-    install the same transport seams and gate stubs. Returns ``target`` for
-    the caller to keep a reference.
+    Shared by the ``scripted_guest`` fixture (stateless) and the
+    ``console_guest_factory`` fixture (stateful, model-backed), so both
+    install the same seams and gate stubs. ``execution.vm_access`` builds
+    recording accesses (``vm_access_support.route_vm_access_to_guest``) whose
+    requests ``guest`` answers, every identity's alike; a required-command
+    check finds its command. Returns ``guest`` for the caller to keep a
+    reference.
     """
-    # ``agentworks.transports.transport`` is the canonical admin-transport
-    # factory; ``agentworks.sessions.manager.transport`` covers manager's
-    # eager top-level import (used by observe_session_statuses and friends).
-    fake_factory = lambda vm, config, **kwargs: target  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", fake_factory)
-    # ``sessions.manager`` and the agents modules import ``transport`` at
-    # module load (eager), so the agentworks.transports-side patch alone
-    # wouldn't take effect for callers that already captured the binding.
-    monkeypatch.setattr("agentworks.sessions.manager.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.manager.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.grants.transport", fake_factory)
-    monkeypatch.setattr("agentworks.agents.initializer.transport", fake_factory)
+    from tests.vm_access_support import route_vm_access_to_guest
+
+    # Late-bound, so a test that replaces ``guest.answer`` is answered by its replacement.
+    guest.recorder = route_vm_access_to_guest(monkeypatch, lambda call: guest.answer(call))
     stub_vm_gates(monkeypatch)
-    # The interactive code path now lives on the transport itself; the
-    # fake target exposes it as a no-op so attach flows return cleanly.
-    target.interactive = lambda command, **kwargs: 0  # type: ignore[attr-defined]
-    return target
+    return guest
 
 
 @pytest.fixture
-def fake_target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    """Install a FakeTarget for the transport layer and stub the VM gates."""
-    return install_fake_target(monkeypatch, _FakeTarget())
+def scripted_guest(monkeypatch: pytest.MonkeyPatch) -> _ScriptedGuest:
+    """Install a stateless ``_ScriptedGuest`` that answers every ``VMAccess`` request, and stub the VM gates."""
+    return install_scripted_guest(monkeypatch, _ScriptedGuest())
 
 
 @pytest.fixture
-def console_target_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - returns a local factory
-    """Return a factory that installs a stateful, model-backed fake target.
+def console_guest_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - returns a local factory
+    """Return a factory that installs a stateful, model-backed ``_ScriptedGuest``.
 
     Usage::
 
-        def test_x(db, console_target_factory):
+        def test_x(db, console_guest_factory):
             model = TmuxModel()
             model.seed_session("aw-console-con", "a", pane_tags=(None, 0))
-            target = console_target_factory(model)
+            guest = console_guest_factory(model)
             restore_session(db, _StubConfig(), console_name="con", session_name="a")
             assert model.has_session("aw-console-con")
 
-    The installed target routes through the same transport seams / gate
-    stubs as ``fake_target``; ``responses`` still layers per-test overrides
+    The installed guest answers through the same access seam and gate stubs
+    as ``scripted_guest``; ``responses`` still layers per-test overrides
     on top of the model (override map wins), so a test can force one command
     to fail while the rest stay stateful.
     """
 
-    def _make(model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None) -> _FakeTarget:
-        return install_fake_target(monkeypatch, _FakeTarget(responses=responses, model=model))
+    def _make(
+        model: _SupportsDispatch | None = None, responses: dict[str, _FakeResult] | None = None
+    ) -> _ScriptedGuest:
+        return install_scripted_guest(monkeypatch, _ScriptedGuest(responses=responses, model=model))
 
     return _make
 
@@ -1064,24 +1156,12 @@ def provisioning_trust_for_tests(vm_name: str) -> TrustBinding:
     return TrustBinding(TrustMode.UNVERIFIED, vm_name, Path(tempfile.gettempdir()) / f"provisioning-{vm_name}")
 
 
-def ssh_enrolls_on_first_use(trust_binding: object) -> None:
-    """What ssh does on a successful connection under ``accept-new`` to the VM's
-    store file: record the key. Call it from a fake transport's ``run`` with the
-    transport's ``trust``; it records only under ENROLL, as ssh would."""
-    if isinstance(trust_binding, TrustBinding) and trust_binding.mode is TrustMode.ENROLL:
-        seed_vm_trust(trust_binding.vm_name)
-
-
 @pytest.fixture
 def vm_access_recorder(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
     """Route ``execution.vm_access`` and ``enrollment_access`` to a recording fake, and resolve ssh without a client."""
-    from tests.vm_access_support import AccessRecorder
+    from tests.vm_access_support import install_access_recorder
 
-    recorder = AccessRecorder()
-    monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
-    monkeypatch.setattr("agentworks.execution.enrollment_access", recorder.enrollment_access)
-    monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
-    return recorder
+    return install_access_recorder(monkeypatch)
 
 
 def seed_vm_trust(vm_name: str) -> None:

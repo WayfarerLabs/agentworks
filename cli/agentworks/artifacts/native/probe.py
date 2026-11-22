@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -15,16 +14,16 @@ from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
 from agentworks.errors import AgentworksError, ExternalError, StateError
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic, sanitize_setup_error
-from agentworks.native_files import require_python3
+from agentworks.execution.requests import Bytes, CaptureOutput, PythonProgram
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class NativeArtifactConflictError(StateError):
@@ -35,9 +34,9 @@ class NativeArtifactConflictError(StateError):
         self.identities = identities
 
 
-# Executed in the same login-shell environment as the native workload. Only selected
-# bounded artifact frontmatter and discovery facts return for local identity checks.
-# Settings bodies and artifact instruction bodies are not returned.
+# Executed in the same login and interactive environment as the native workload. Only
+# selected bounded artifact frontmatter and discovery facts return for local identity
+# checks. Settings bodies and artifact instruction bodies are not returned.
 _PROBE = r"""
 import fnmatch, json, os, pathlib, shutil, subprocess, sys, tomllib
 request = json.load(sys.stdin)
@@ -394,12 +393,17 @@ def _proposed_sizes(files: Sequence[ArtifactFile | OwnedArtifactFile], tool: str
     return result
 
 
+# What the probe's stdout may hold: up to 1 MiB of frontmatter, which JSON can grow
+# sixfold, and 512 paths of up to 4096 bytes, with room for login-shell noise.
+_PROBE_OUTPUT_LIMIT = 16 * 1024 * 1024
+
+
 def probe_native(
-    runner: Transport,
+    access: VMAccess,
     *,
     tool: str,
     environment: Mapping[str, str],
-    redactions: Iterable[str] = (),
+    redactor: Redactor = Redactor(),
     home: str | None = None,
     native_root: str | None = None,
     workspace: str = "",
@@ -414,13 +418,11 @@ def probe_native(
 
     Recognized files do not widen the proposed paths, selected identities or policy
     checks. Their actual native name must still agree before inventory accepts them.
+    The probe is a Python program run by the system ``python3`` after the
+    account's login and interactive startup, so it sees the environment the
+    native workload gets. The request travels on its stdin, so a large
+    package needs no argument.
     """
-    secret_values = tuple(redactions)
-    try:
-        require_python3(runner)
-    except AgentworksError as error:
-        sanitize_setup_error(error, redactions=secret_values, logger=runner.logger)
-        raise
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
     identities = tuple(entries.values())
@@ -444,33 +446,32 @@ def probe_native(
         "identities": identities,
         "check_policy": check_policy,
     }
-    command = shlex.join(["python3", "-c", _PROBE])
     try:
-        result = runner.run(
-            f'"$SHELL" -lic {shlex.quote(command)}',
-            env=dict(environment),
-            input_data=json.dumps(request),
-            tty=False,
-            check=False,
-            timeout=30,
+        result = access.run(
+            PythonProgram(
+                _PROBE,
+                login=True,
+                interactive=True,
+                env=dict(environment),
+                stdin=Bytes(json.dumps(request).encode()),
+                deadline=30,
+            ),
+            stdout=CaptureOutput(_PROBE_OUTPUT_LIMIT),
         )
+        status = result.require_completed(access.vm_name)
     except AgentworksError as error:
-        sanitize_setup_error(error, redactions=secret_values, logger=runner.logger)
+        redactor.sanitize_error(error)
         raise
+    stdout = result.stdout.decode("utf-8", "replace")
+    stderr = result.stderr.decode("utf-8", "replace")
     # Login startup scripts can echo the supplied runtime environment on failure.
     # Redact known values and their shell-quoted forms before publishing diagnostics.
-    if result.returncode:
-        raise ExternalError(
-            sanitize_setup_diagnostic(
-                f"{tool} artifact discovery probe failed (exit {result.returncode}): {result.stderr}",
-                redactions=secret_values,
-                logger=runner.logger,
-            )
-        )
+    if status:
+        raise ExternalError(redactor.sanitize(f"{tool} artifact discovery probe failed (exit {status}): {stderr}"))
     try:
         lines = [
             line.removeprefix("AGW_ARTIFACT_PROBE=")
-            for line in result.stdout.splitlines()
+            for line in stdout.splitlines()
             if line.startswith("AGW_ARTIFACT_PROBE=")
         ]
         if len(lines) != 1:
@@ -492,7 +493,7 @@ def probe_native(
     except (ValueError, KeyError, IndexError, TypeError):
         raise ExternalError(
             f"{tool} artifact discovery probe returned an invalid response",
-            hint=sanitize_setup_diagnostic(result.stderr, redactions=secret_values, logger=runner.logger) or None,
+            hint=redactor.sanitize(stderr) or None,
         ) from None
     inventory_problems = _inventory_problems(
         observed.get("inventory"), identities, entries, recognized_entries=recognized_entries
@@ -514,14 +515,12 @@ def probe_native(
         message = f"{tool} artifact delivery: " + "; ".join(
             [*(_PROBLEM_MESSAGES[problem].format(tool=tool) for problem in problems), *details]
         )
-        message = sanitize_setup_diagnostic(message, redactions=secret_values, logger=runner.logger)
+        message = redactor.sanitize(message)
         paths = [*problem_paths, *(problem.path for problem in inventory_problems if problem.path)]
-        hint = sanitize_setup_diagnostic(
+        hint = redactor.sanitize(
             "Inspect native paths: " + ", ".join(repr(path) for path in dict.fromkeys(paths))
             if paths
-            else f"Native configuration directory: {root!r}",
-            redactions=secret_values,
-            logger=runner.logger,
+            else f"Native configuration directory: {root!r}"
         )
         if all(problem in ("native-artifact-collision", "native-artifact-identity-mismatch") for problem in problems):
             raise NativeArtifactConflictError(

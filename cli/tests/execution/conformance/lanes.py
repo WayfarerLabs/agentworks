@@ -37,14 +37,15 @@ import pytest
 from agentworks.execution import attach as attach_module
 from agentworks.execution import client, envelope, ssh_process, trust
 from agentworks.execution.access import Admin, VMAccess
-from agentworks.execution.client import SSHClient
-from agentworks.execution.requests import Command, RunRequest, Script, Shell
+from agentworks.execution.requests import Bytes, Command, RunRequest, Script, Shell
 from agentworks.execution.results import Completed, Result
+from tests.vm_access_support import local_remote_argv, rewrite_launcher, run_requests_locally
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from typing import NoReturn
 
+    from agentworks.config import Config
     from agentworks.db import VMRow
 
 SHELLS = ("sh", "dash", "bash", "zsh")
@@ -181,24 +182,59 @@ class Lane:
 
     def rewrite_launcher(self, old: bytes, new: bytes) -> None:
         """Send a launcher whose source has ``old`` replaced by ``new``, to make the guest behave as a fault would."""
-        source = envelope.launcher_source()
-        rewritten = source.replace(old, new)
-        assert rewritten != source
-        self.monkeypatch.setattr(envelope, "launcher_source", lambda: rewritten)
+        rewrite_launcher(self.monkeypatch, old, new)
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         """The lane's access to the same account with another key, for a vector about the key itself."""
         raise NotImplementedError
 
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        """The lane's access to the same account, with an operation log, for a vector about what a log holds."""
+        raise NotImplementedError
+
     def shorten_handover_wait(self, seconds: int = 1) -> None:
         """Send a launcher whose parked half gives up after ``seconds``, instead of 30."""
-        self.rewrite_launcher(b"handover_wait_seconds = 30", b"handover_wait_seconds = %d" % seconds)
+        self.rewrite_launcher(b"HANDOVER_WAIT_SECONDS = 30", b"HANDOVER_WAIT_SECONDS = %d" % seconds)
+
+    # -- A pane: a terminal agw does not hold ----------------------------------
+
+    def quiet_interactive_startup(self) -> None:
+        """Keep an interactive shell on the lane from reading any startup file of a person's (a no-op on a VM)."""
+
+    def pane(self, command: str, *, owner_env: Mapping[str, str], keys: bytes) -> Result:
+        """Run ``command`` on a fresh terminal, as tmux runs a pane's command, typing ``keys`` into it.
+
+        The terminal is ``script``'s pty on the guest, and ``owner_env`` is
+        what its owner sets in the command's environment, as tmux sets
+        ``TERM`` from ``default-terminal`` and ``TMUX`` for its server. The
+        result's stdout is what the terminal showed, echo and prompts
+        included.
+        """
+        # script runs the command line through $SHELL -c, as tmux runs a pane's through its default shell.
+        argv = ("script", "-q", "-e", "-c", self.pane_command(command), "/dev/null")
+        return self.access.run(Command(argv, env=dict(owner_env), stdin=Bytes(keys), deadline=60))
+
+    def pane_command(self, command: str) -> str:
+        """``command`` as the guest runs it: the L lane points stage 0 at its own interpreter."""
+        return command
 
 
 class LocalFilesystem(Lane):
     """Lanes whose guest is this machine."""
 
     scratch: Path
+
+    def quiet_interactive_startup(self) -> None:
+        """Send a launcher whose passwd entry has a home of the lane's, not the runner's own.
+
+        Its zsh startup keeps an interactive zsh from reading the keys a
+        vector types: ``.zshenv`` sets ``skip_global_compinit``, so Ubuntu's
+        ``/etc/zsh/zshrc`` runs no ``compinit``, whose insecure-directories
+        prompt takes the first key on a CI runner; an empty ``.zshrc`` keeps
+        zsh from starting its new-user setup.
+        """
+        home = self.make_dir({".zshenv": "skip_global_compinit=1\n", ".zshrc": ""})
+        self.rewrite_launcher(b"home = entry.pw_dir", b"home = " + repr(home).encode())
 
     def make_dir(self, files: Mapping[str, str] | None = None) -> str:
         directory = self.scratch / f"dir-{uuid.uuid4().hex[:8]}"
@@ -257,6 +293,28 @@ def sudo_granted() -> bool:
     return subprocess.run([sudo, "-n", "true"], capture_output=True, check=False).returncode == 0
 
 
+def needs_sudo(lane: Lane) -> None:
+    """A local guest elevates only where the runner grants passwordless sudo: CI does, so it fails there without it."""
+    if isinstance(lane, LocalFilesystem) and not sudo_granted():
+        unavailable("the elevation vectors need passwordless sudo")
+
+
+def local(lane: Lane) -> LocalLane:
+    if not isinstance(lane, LocalLane):
+        pytest.skip("local lane only")
+    return lane
+
+
+def needs_startup_files(lane: LocalLane) -> None:
+    """sh and dash read no startup file under ``-c``, so a vector about startup files has nothing to test there."""
+    if lane.shell_name not in ("bash", "zsh"):
+        pytest.skip(f"{lane.shell_name} reads no startup file for a non-interactive command")
+
+
+def startup_file(lane: LocalLane) -> str:
+    return ".zshenv" if lane.shell_name == "zsh" else ".bashrc"
+
+
 def require_shell(name: str) -> str:
     """The shell's path; a missing one fails on CI and skips elsewhere."""
     found = find_shell(name)
@@ -299,47 +357,46 @@ class LocalLane(LocalFilesystem):
         self.home = tmp_path / "account-home"
         self.home.mkdir()
         self.workdir = str(tmp_path)
-        self.access = VMAccess(
+        self.access = self.access_with_log(None)
+        run_requests_locally(monkeypatch, self._remote_argv)
+        if python != ssh_process.DEFAULT_PYTHON:
+            # The guest's python3 is this interpreter for the payload's Python programs too.
+            self.rewrite_launcher(
+                b'program_interpreter = "/usr/bin/python3"', b"program_interpreter = " + repr(python).encode()
+            )
+
+    def use_lane_shell_as_account_shell(self) -> None:
+        """Send a launcher whose passwd entry names this lane's shell, as the account's default shell.
+
+        The runner's own account shell is whatever it is; a vector about the
+        default shell's startup needs the one the lane is parametrized by.
+        """
+        self.rewrite_launcher(b'shell = entry.pw_shell or "/bin/sh"', b"shell = " + repr(self.shell).encode())
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        return VMAccess(
             vm_name="local",
             host="127.0.0.1",
             user=getpass.getuser(),
             identity=Admin(),
             identity_file=Path("/nonexistent/identity"),
+            log=log,
         )
-        monkeypatch.setattr(client, "resolve_ssh", lambda: SSHClient("/nonexistent/ssh", (9, 9)))
-        monkeypatch.setattr(ssh_process, "build_argv", self._argv)
 
     def startup(self, name: str, content: str) -> None:
         """Write an account startup file (``.zshenv``, ``.bashrc``) read by the account shell."""
         (self.home / name).write_text(content)
 
-    def _argv(
-        self,
-        client: SSHClient,
-        policy: object,
-        destination: object,
-        mode: object,
-        remote_command: str | None = None,
-        forwards: object = (),
-        *,
-        client_log: Path | None = None,
-        verbose: bool = False,
-    ) -> list[str]:
-        assert remote_command is not None
-        user = getpass.getuser()
-        environment = [
-            f"HOME={self.home}",
-            "PATH=/usr/bin:/bin",
-            f"USER={user}",
-            f"LOGNAME={user}",
-            f"SHELL={self.shell}",
-            "LANG=C.UTF-8",
-            # sshd exports these, and Debian's bash reads ~/.bashrc when it sees them.
-            "SSH_CLIENT=203.0.113.5 52000 22",
-            "SSH_CONNECTION=203.0.113.5 52000 10.0.0.2 22",
-        ]
-        command = remote_command.replace(ssh_process.DEFAULT_PYTHON, shlex.quote(self.python), 1)
-        guest = ["/usr/bin/env", "-i", *environment, self.shell, "-c", command]
+    def quiet_interactive_startup(self) -> None:
+        """As for every local lane, with the lane's shell as the account's, so each shell is tried interactive."""
+        super().quiet_interactive_startup()
+        self.use_lane_shell_as_account_shell()
+
+    def pane_command(self, command: str) -> str:
+        return command.replace(ssh_process.DEFAULT_PYTHON, shlex.quote(self.python), 1)
+
+    def _remote_argv(self, remote_command: str) -> list[str]:
+        guest = local_remote_argv(remote_command, home=self.home, shell=self.shell, python=self.python)
         return [sys.executable, "-I", "-S", "-c", SSH_STAND_IN, *guest]
 
 
@@ -373,19 +430,30 @@ def free_port() -> int:
         return int(probe.getsockname()[1])
 
 
+RESTART_ATTEMPTS = 5
+"""How often an sshd started on a given port tries: another worker's process may briefly hold the port."""
+
+
 @contextlib.contextmanager
-def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
-    """A loopback sshd run by the current user, with a temporary host key and authorized key."""
+def rootless_sshd(directory: Path, port: int | None = None) -> Iterator[SSHDServer]:
+    """A loopback sshd run by the current user, with a temporary host key and authorized key.
+
+    Started again on the same ``directory`` and ``port``, it keeps the keys it
+    made there, so a client that trusted the first server reaches the second
+    as the same VM; a port it cannot bind is tried again, with a backoff.
+    """
     sshd = find_sshd()
     if sshd is None:
         unavailable("S lane needs an sshd binary")
     directory.mkdir(parents=True, exist_ok=True)
     host_key, client_key = directory / "host_key", directory / "client_key"
     for key in (host_key, client_key):
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+        if not key.exists():
+            generate_key(key)
     authorized = directory / "authorized_keys"
     authorized.write_text(Path(f"{client_key}.pub").read_text())
-    port = free_port()
+    attempts = 1 if port is None else RESTART_ATTEMPTS
+    port = port or free_port()
     config = directory / "sshd_config"
     config.write_text(
         "\n".join(
@@ -406,29 +474,63 @@ def rootless_sshd(directory: Path) -> Iterator[SSHDServer]:
         )
         + "\n"
     )
-    server = subprocess.Popen([sshd, "-D", "-e", "-f", str(config)], stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    failure = b""
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(0.2 * 2**attempt)
+        server = subprocess.Popen(
+            [sshd, "-D", "-e", "-f", str(config)], stdin=subprocess.DEVNULL, stderr=subprocess.PIPE
+        )
+        if _listening(server, port, directory / "sshd.pid"):
+            break
+        failure = _stop(server)
+    else:
+        unavailable(f"sshd could not start listening on port {port}: {failure[:300]!r}")
     try:
-        deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
-        while True:
-            if server.poll() is not None:
-                unavailable(f"sshd could not start: {(server.stderr.read() if server.stderr else b'')[:300]!r}")
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=1).close()
-                break
-            except OSError:
-                if time.monotonic() > deadline:
-                    unavailable("sshd did not start listening")
-                time.sleep(0.1)
         key_fields = Path(f"{host_key}.pub").read_text().split()
         yield SSHDServer(port, client_key, trust.HostKey(key_fields[0], key_fields[1]))
     finally:
-        server.terminate()
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            server.wait(timeout=5)
-        server.kill()
-        server.wait()
-        if server.stderr:
-            server.stderr.close()
+        _stop(server)
+
+
+def _listening(server: subprocess.Popen[bytes], port: int, pid_file: Path) -> bool:
+    """Whether ``server`` itself listens on ``port`` before it exits or the startup bound passes.
+
+    A connection alone proves nothing: another process holding the port
+    accepts it while this sshd fails to bind and exits. sshd writes its pid
+    file only once it has bound its address, so the file naming this
+    server's pid, with the server still running, is the proof; the
+    connection then shows it accepts.
+    """
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while server.poll() is None and time.monotonic() < deadline:
+        if _pid_in(pid_file) == server.pid:
+            with contextlib.suppress(OSError):
+                socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                return server.poll() is None
+        time.sleep(0.1)
+    return False
+
+
+def _pid_in(pid_file: Path) -> int | None:
+    """The pid an sshd pid file names, or ``None`` while there is none or it is still being written."""
+    try:
+        return int(pid_file.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _stop(server: subprocess.Popen[bytes]) -> bytes:
+    """Stop ``server`` and return what it wrote to stderr."""
+    server.terminate()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        server.wait(timeout=5)
+    server.kill()
+    server.wait()
+    if server.stderr is None:
+        return b""
+    with server.stderr:
+        return server.stderr.read()
 
 
 class SSHDLane(LocalFilesystem):
@@ -447,16 +549,11 @@ class SSHDLane(LocalFilesystem):
         self.scratch = tmp_path
         self.workdir = str(tmp_path)
         trust.write_records(vm_name, [server.host_key])
-        self.access = VMAccess(
-            vm_name=vm_name,
-            host="127.0.0.1",
-            user=getpass.getuser(),
-            identity=Admin(),
-            identity_file=server.client_key,
-            port=server.port,
-        )
+        self.access = self.access_with_identity(server.client_key)
 
-    def access_with_identity(self, identity_file: Path) -> VMAccess:
+    def access_with_identity(
+        self, identity_file: Path, log: Callable[[RunRequest, Result], None] | None = None
+    ) -> VMAccess:
         return VMAccess(
             vm_name=self.vm_name,
             host="127.0.0.1",
@@ -464,7 +561,11 @@ class SSHDLane(LocalFilesystem):
             identity=Admin(),
             identity_file=identity_file,
             port=self.server.port,
+            log=log,
         )
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        return self.access_with_identity(self.server.client_key, log)
 
 
 # -- V ----------------------------------------------------------------------------------
@@ -476,11 +577,17 @@ class LiveLane(Lane):
     name = "V"
     workdir = "/tmp"
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, access: VMAccess) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, vm: VMRow, config: Config) -> None:
         super().__init__(monkeypatch)
         self.vm = vm
-        self.access = access
+        self.config = config
+        self.access = self.access_with_log(None)
         self._created: list[str] = []
+
+    def access_with_log(self, log: Callable[[RunRequest, Result], None] | None) -> VMAccess:
+        from agentworks.execution import vm_access
+
+        return vm_access(self.vm, self.config, Admin(), log=log)
 
     def access_with_identity(self, identity_file: Path) -> VMAccess:
         return VMAccess(

@@ -1,13 +1,14 @@
-"""The two-phase init driver: Phase A (first contact and the VM contract, over
-``agentworks.execution``) and Phase B (setup, over the legacy Tailscale SSH
-transport, non-fatal-on-failure).
+"""The two-phase init driver: Phase A (first contact and the VM contract) and
+Phase B (setup, non-fatal-on-failure), both over ``agentworks.execution``.
 
 Phase A is provisioning: after the platform completes create-time bootstrap,
 ``bootstrap_vm`` runs ``phase_a.bootstrap`` (record the address, enroll the
-host key, check the contract) and syncs SSH config, then returns the Tailscale
-transport and home for Phase B. Phase B is initialization:
-``run_initialization`` runs it, both after ``bootstrap_vm`` on ``vm create``
-and standalone on ``vm reinit``.
+host key, check the contract) and syncs SSH config, then returns the admin's
+``VMAccess`` and home for Phase B. Every Phase B request runs on that one
+access, each bounded by ``steps.STEP_DEADLINE`` unless it has a bound of its
+own. Phase B is initialization: ``run_initialization`` runs it, both after
+``bootstrap_vm`` on ``vm create`` and standalone on ``vm reinit``, with the
+access reinit built for the VM contract.
 
 ``create_vm`` (in ``vms.manager.lifecycle``) drives ``bootstrap_vm`` inside
 its ``Provisioning`` output section and ``run_initialization`` after it, so
@@ -18,29 +19,28 @@ owns only the per-phase step sequences and status/event bookkeeping.
 
 from __future__ import annotations
 
-import shlex
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.db import InitStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
-from agentworks.execution import trust
+from agentworks.execution.access import Admin
+from agentworks.execution.requests import Command
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.interpolation import context_values
 from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
-from agentworks.ssh import SSHError, SSHLogger
-from agentworks.transports import SSHTransport, Transport
 
 from . import phase_a
+from .dotfiles import sync_dotfiles
 from .mise import (
     MISE_ACTIVATE_LINES,
-    _fetch_mise_lockfile,
     _mise_shims_path,
-    _run_mise_install,
     _write_mise_config,
+    install_mise,
 )
 from .packages import (
     _configure_apt_sources,
@@ -48,18 +48,19 @@ from .packages import (
     _install_system_packages,
     _resolve_apt_sources,
     _run_install_commands,
+    install_command_paths,
 )
 from .shell_env import (
     _ensure_agentworks_files_sourced,
     _harden_admin_home,
+    _remove_retired_sudoers_fragments,
+    _remove_sshd_accept_env,
+    _repair_admin_sudoers,
+    _set_login_shell,
     _write_agentworks_identity_profile,
     _write_agentworks_profile,
     _write_agentworks_rc,
     _write_skel_seeds,
-    _write_sshd_accept_env,
-    _write_sudoers_admin,
-    _write_sudoers_console_setenv,
-    _write_sudoers_env_keep,
 )
 from .ssh_keys import (
     AuthorizedKeysApplied,
@@ -68,6 +69,7 @@ from .ssh_keys import (
     _preserve_ssh_host_keys,
     _reconcile_authorized_keys,
 )
+from .steps import STEP_DEADLINE, STEP_FAILURES, InitLog, warn, warn_step
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
@@ -79,6 +81,8 @@ if TYPE_CHECKING:
     from agentworks.db import Database, DesiredOverlayRecord
     from agentworks.db.instance_state import VersionedPayload
     from agentworks.debian import DebianRelease
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.files import Files
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.locking import NativeMutationGuard
@@ -101,21 +105,21 @@ def bootstrap_vm(
     vm_name: str,
     platform: VMPlatform,
     ctx: RunContext,
-    logger: SSHLogger,
+    logger: InitLog,
     *,
     admin_username: str,
     tailnet_address: str,
     expected_release: DebianRelease,
-) -> tuple[Transport, str, DebianRelease]:
-    """Run Phase A (``phase_a.bootstrap``), then hand Phase B its legacy target.
+) -> tuple[VMAccess, str, DebianRelease]:
+    """Run Phase A (``phase_a.bootstrap``), then hand Phase B the admin's access.
 
     Phase A records the platform's address, makes the first contact in Enroll
     mode and runs the VM contract, release first, all over
     ``agentworks.execution``; see :mod:`.phase_a` for its fail-closed span.
-    What stays here is what stays legacy until initialization moves: the
-    non-fatal SSH-config sync, and Phase B's VM-bound ``SSHTransport``.
+    The non-fatal SSH-config sync follows.
 
-    Returns ``(ts_target, home, release)``: the target and home for
+    Returns ``(access, home, release)``: the admin's access, built from the
+    row Phase A recorded the address on, the home for
     ``run_initialization``, and the release Phase A attested. The caller owns
     the availability hold spanning both phases, the ``Provisioning`` output
     section and ``logger``'s lifetime.
@@ -138,15 +142,10 @@ def bootstrap_vm(
 
     sync_ssh_config_or_warn(config, db)
 
-    ts_target = SSHTransport(
-        host=address,
-        trust=trust.TrustBinding(trust.TrustMode.VM, vm_name),
-        user=admin_username,
-        identity_file=config.operator.ssh_private_key,
-        default_timeout=60,
-        logger=logger,
-    )
-    return ts_target, managed_home(admin_username), release
+    vm = db.get_vm(vm_name)
+    assert vm is not None, f"VM '{vm_name}' missing from DB after Phase A"
+    access = execution.vm_access(vm, config, Admin(), log=logger.record)
+    return access, managed_home(admin_username), release
 
 
 def run_initialization(
@@ -156,11 +155,11 @@ def run_initialization(
     vm_template: ResolvedVMTemplate,
     admin: AdminConfig,
     vm_name: str,
-    ts_target: Transport,
+    access: VMAccess,
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
-    logger: SSHLogger,
+    logger: InitLog,
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
@@ -179,6 +178,9 @@ def run_initialization(
     Native setup failures join the caller's collector and leave initialization
     partial after terminal key reconciliation and checkpointing. The caller
     reports them after its remaining command bookkeeping.
+
+    ``access`` is the admin's, and every step's requests run on it, bounded
+    by ``STEP_DEADLINE`` through one ``Files``.
     """
     from agentworks.harness_setup.locking import native_mutation_guard
 
@@ -188,6 +190,7 @@ def run_initialization(
         require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
         db.insert_vm_event(vm_name, "init_started")
 
+        files = access.files(deadline=STEP_DEADLINE)
         try:
             _phase_b_setup(
                 db,
@@ -196,7 +199,7 @@ def run_initialization(
                 vm_template,
                 admin,
                 vm_name,
-                ts_target,
+                files,
                 credential_requests,
                 home,
                 admin_username,
@@ -211,17 +214,18 @@ def run_initialization(
                 assert vm is not None
                 apply_vm_setup(
                     db,
+                    files,
                     registry,
                     inputs=setup_inputs,
                     vm=vm,
-                    target=ts_target,
                     values=setup_values or {},
+                    logger=logger,
                     held=guard,
                     operation=operation.value,
                     failures=setup_failures,
                 )
             # Terminal guest mutation follows every integration's setup.
-            authorized_keys = _reconcile_authorized_keys(ts_target, config, home, logger)
+            authorized_keys = _reconcile_authorized_keys(files, config, home, logger)
         except Exception as e:
             with db.transaction():
                 db.update_vm_init_status(vm_name, InitStatus.FAILED)
@@ -289,23 +293,83 @@ def run_initialization(
                 )
 
 
-def _retire_workspace_tmuxinator_projects(db: Database, vm_name: str, ts_target: Transport, logger: SSHLogger) -> None:
+def _retire_workspace_tmuxinator_projects(db: Database, vm_name: str, files: Files, log: InitLog) -> None:
     """Remove the workspace tmuxinator projects and admin discovery links earlier
     releases generated, for every workspace on this VM. Non-fatal: a failure
     warns once and reinit continues."""
     from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
 
-    logger.step("Remove leftover workspace tmuxinator projects")
+    log.step("Remove leftover workspace tmuxinator projects")
     failures = retire_tmuxinator_projects(
-        ts_target, [workspace.workspace_path for workspace in db.list_workspaces(vm_name=vm_name)]
+        files.access, [workspace.workspace_path for workspace in db.list_workspaces(vm_name=vm_name)]
     )
     if failures:
-        msg = (
+        warn(
+            log,
             f"Leftover workspace tmuxinator projects were not all removed ({'; '.join(failures)}); what "
-            f"could not be checked or removed stays in place. Inspect it, then rerun 'agw vm reinit {vm_name}'."
+            f"could not be checked or removed stays in place. Inspect it, then rerun 'agw vm reinit {vm_name}'.",
         )
-        logger.warning(msg)
-        output.warn(msg)
+
+
+def _converge_agent_sockets(files: Files, linux_users: list[str], log: InitLog, *, warn_if_missing: bool) -> None:
+    """Repair the agent socket root and each of ``linux_users``' directories, then retire the shared group if all were.
+
+    Each directory is tried even when an earlier one fails, each failure
+    warning on its own. The group goes only once none of these can still
+    carry it: a directory left in the earlier layout keeps the group's ID
+    and its group bits, and a later ``useradd -U`` could give that ID to a
+    new agent's private group. So a failed repair keeps the group, with a
+    warning, for a later reinit to retire. Only the listed agents'
+    directories are checked: one a failed agent delete left behind is not.
+    """
+    from agentworks.sessions.tmux import (
+        RETIRED_AGENT_SOCKET_GROUP,
+        cleanup_stale_sockets,
+        ensure_agent_socket_dir,
+        ensure_agent_socket_root,
+        retire_agent_socket_group,
+    )
+
+    log.step("Agent tmux socket directories")
+    output.info("Setting up agent tmux socket infrastructure...")
+    repaired = True
+    try:
+        ensure_agent_socket_root(files, warn_if_missing=warn_if_missing)
+    except STEP_FAILURES as error:
+        warn_step(log, "agent tmux socket root setup failed", error)
+        repaired = False
+    for linux_user in linux_users:
+        try:
+            ensure_agent_socket_dir(files, linux_user)
+        except STEP_FAILURES as error:
+            warn_step(log, f"tmux socket directory setup for {linux_user} failed", error)
+            repaired = False
+            continue
+        try:
+            removed = cleanup_stale_sockets(files, linux_user)
+        except STEP_FAILURES as error:
+            warn_step(log, f"stale tmux socket cleanup for {linux_user} failed", error)
+            continue
+        if removed:
+            output.detail(f"Cleaned up {output.count(removed, 'stale socket')} for {linux_user}")
+
+    log.step("Retired tmux socket group")
+    if not repaired:
+        warn(
+            log,
+            f"kept the retired {RETIRED_AGENT_SOCKET_GROUP} group, since a socket directory above was not "
+            "repaired; the next 'agw vm reinit' retires it once that directory is repaired",
+        )
+        return
+    try:
+        retire_agent_socket_group(files)
+    except STEP_FAILURES as error:
+        warn_step(
+            log,
+            f"deleting the retired {RETIRED_AGENT_SOCKET_GROUP} group failed; if an account has it as its "
+            "primary group, give that account another, then run 'agw vm reinit'",
+            error,
+        )
 
 
 def _phase_b_setup(
@@ -315,16 +379,16 @@ def _phase_b_setup(
     vm_template: ResolvedVMTemplate,
     admin: AdminConfig,
     vm_name: str,
-    ts_target: Transport,
+    files: Files,
     credential_requests: tuple[CredentialRequest, ...],
     home: str,
     admin_username: str,
-    logger: SSHLogger,
+    logger: InitLog,
     *,
     debian_release: DebianRelease,
     operation: VMInitializationOperation,
 ) -> None:
-    """Phase B: Setup (over Tailscale SSH). Non-fatal steps warn and continue."""
+    """Phase B: setup on the admin's ``files.access``. Non-fatal steps warn and continue."""
     with output.section("VM Initialization"):
         from agentworks.resources.access import kind_dict
 
@@ -353,7 +417,7 @@ def _phase_b_setup(
         # Runs first so VMs predating the create-time bootstrap step are
         # repaired on reinit even if a later step warns. Idempotent overwrite
         # with identical content.
-        _preserve_ssh_host_keys(ts_target, logger)
+        _preserve_ssh_host_keys(files, logger)
 
         # Non-fatal: repair the Apple-vz SVE trap (arm64.nosve grub drop-in) on
         # VMs provisioned before the create-time bootstrap mask existed. Runs
@@ -361,7 +425,7 @@ def _phase_b_setup(
         # least gets the fix installed this pass; it needs a restart plus one
         # more reinit to converge. A silent no-op on every non-Apple host and on
         # already-masked VMs.
-        _apply_sve_mask(ts_target, logger)
+        _apply_sve_mask(files, logger)
 
         # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
         # Runs before the rest of init so subsequent steps execute under the
@@ -370,7 +434,7 @@ def _phase_b_setup(
         # reinit.
         from agentworks.vms.hardening import apply_vm_hardening
 
-        apply_vm_hardening(ts_target, logger)
+        apply_vm_hardening(files, logger)
 
         # Check VM DNS works before subsequent steps that need external
         # resolution (apt-get update, source fetches, etc.) fail cryptically.
@@ -384,7 +448,7 @@ def _phase_b_setup(
             check_vm_dns,
         )
 
-        check_vm_dns(ts_target, logger)
+        check_vm_dns(files, logger)
 
         # Non-fatal: tailscaled cold-boot DNS race fix (GitHub issue #117).
         # Drops in a systemd override that orders tailscaled after the DNS
@@ -392,17 +456,14 @@ def _phase_b_setup(
         # falling back to direct mode. Applied early in Phase B so existing
         # VMs pick up the fix on the first reinit. Does not restart
         # tailscaled (would disconnect us); takes effect on next cold boot.
-        apply_tailscaled_dns_fix(ts_target, logger)
+        apply_tailscaled_dns_fix(files, logger)
 
-        # Non-fatal: VM-wide SetEnv plumbing.
-        # Runs before apt install so subsequent SSH commands within init can
-        # rely on the SetEnv path. These targets don't touch zsh-shipped files,
-        # so dpkg conffile handling doesn't apply.
-        _write_sshd_accept_env(ts_target, logger)
-        _write_sudoers_admin(ts_target, logger, admin_username)
-        _write_sudoers_env_keep(ts_target, logger)
-        # Pairs with the --preserve-env in _split_shell_pane's agent-pane branch.
-        _write_sudoers_console_setenv(ts_target, logger, admin_username)
+        # Non-fatal: remove the sshd and sudoers fragments earlier releases
+        # installed to carry environment that now travels in each request, and
+        # repair the mode of the admin's own sudo grant.
+        _remove_sshd_accept_env(files, logger)
+        _remove_retired_sudoers_fragments(files, logger)
+        _repair_admin_sudoers(files, logger, admin_username)
         vm_row = db.get_vm(vm_name)
         # Init runs against a VM that exists in the DB (bootstrap_vm fetches the
         # row up front). A None here is an internal invariant violation, not a
@@ -430,11 +491,11 @@ def _phase_b_setup(
         # consoles), never build-time install machinery.
 
         # Required system packages must succeed before dependent setup runs.
-        _install_system_packages(ts_target, logger)
+        _install_system_packages(files, logger)
 
         # Non-fatal: apt sources required by selected apt_packages
         _configure_apt_sources(
-            ts_target,
+            files,
             vm_template,
             apt_packages,
             apt_sources,
@@ -444,7 +505,7 @@ def _phase_b_setup(
         )
 
         # Non-fatal: apt packages (direct list + apt-package entries)
-        _install_apt_packages(ts_target, vm_template, apt_packages, logger)
+        _install_apt_packages(files, vm_template, apt_packages, logger)
 
         # Identity profile fragments. Runs AFTER apt install because apt uses
         # `--force-confnew`, which would replace the agentworks block in
@@ -453,7 +514,7 @@ def _phase_b_setup(
         # on top of whatever the package shipped. The mirror is idempotent on
         # reinit (strip-and-rewrite via begin/end markers).
         _write_agentworks_identity_profile(
-            ts_target,
+            files,
             vm_stable_identity_env(identity_ctx),
             logger,
         )
@@ -464,7 +525,7 @@ def _phase_b_setup(
         # `--force-confnew` would let a bash upgrade silently replace the
         # seed with Debian's stock skel (saving ours as .dpkg-old). Future
         # `useradd -m` would then inherit Debian's skel instead.
-        _write_skel_seeds(ts_target, logger)
+        _write_skel_seeds(files, logger)
 
         # Non-fatal: snap packages
         if vm_template.snap:
@@ -472,11 +533,9 @@ def _phase_b_setup(
             output.info(f"Installing {output.count(len(vm_template.snap), 'snap package')}...")
             for pkg in vm_template.snap:
                 try:
-                    ts_target.run(f"snap install {shlex.quote(pkg)}", sudo=True, timeout=120)
-                except SSHError as e:
-                    msg = f"snap install '{pkg}' failed: {e}"
-                    logger.warning(msg)
-                    output.warn(msg)
+                    files.access.run(Command(("snap", "install", pkg), elevated=True, deadline=120), check=True)
+                except STEP_FAILURES as error:
+                    warn_step(logger, f"snap install '{pkg}' failed", error)
 
         # admin_shell is a pure config read, hoisted above the system install
         # commands below (which run in it) so they stay in the VM section; the
@@ -488,8 +547,8 @@ def _phase_b_setup(
         # the VM section: they run via ``{admin_shell} -lc`` explicitly, so
         # they do not depend on the login-shell usermod, and they install
         # system-wide tools rather than touching the admin's rc.
-        system_path = _run_install_commands(
-            ts_target,
+        failed_system = _run_install_commands(
+            files,
             vm_template.system_install_commands,
             system_install_commands,
             admin_shell,
@@ -499,82 +558,78 @@ def _phase_b_setup(
             context=setup_context,
         )
 
-        # Non-fatal: agent tmux socket directory infrastructure (VM-level:
-        # shared group, root directory, per-agent subdirectories, all
-        # root-owned system state). No dependency on the admin steps below, so
-        # it closes out the VM phase.
-        try:
-            from agentworks.sessions.tmux import (
-                cleanup_stale_sockets,
-                ensure_agent_socket_dir,
-                ensure_agent_socket_root,
-            )
-
-            logger.step("Agent tmux socket directories")
-            output.info("Setting up agent tmux socket infrastructure...")
-
-            ensure_agent_socket_root(
-                ts_target,
-                admin_username,
-                warn_if_missing=operation is not VMInitializationOperation.VM_CREATE,
-            )
-            for agent in db.list_agents(vm_name=vm_name):
-                ensure_agent_socket_dir(ts_target, agent.linux_user)
-                removed = cleanup_stale_sockets(ts_target, agent.linux_user)
-                if removed:
-                    output.detail(f"Cleaned up {output.count(removed, 'stale socket')} for {agent.linux_user}")
-        except SSHError as e:
-            msg = f"agent tmux socket setup failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+        # Non-fatal: agent tmux socket directory infrastructure (VM-level,
+        # root-made system state), then the retirement of the group earlier
+        # releases used to share agents' servers with the admin, which
+        # converts an existing VM on reinit. No dependency on the admin steps
+        # below, so they close out the VM phase.
+        _converge_agent_sockets(
+            files,
+            [agent.linux_user for agent in db.list_agents(vm_name=vm_name)],
+            logger,
+            warn_if_missing=operation is not VMInitializationOperation.VM_CREATE,
+        )
 
     with output.section("Admin Initialization"):
         # Non-fatal: set default shell (before the USER install commands so
         # those installers write to the correct rc file). The zsh
         # ``zsh-newuser-install`` first-run wizard is pre-empted by the skel seed.
-        logger.step("Shell configuration")
-        output.info(f"Setting shell to {admin_shell}...")
-        try:
-            ts_target.run(
-                f"usermod -s $(which {shlex.quote(admin_shell)}) {shlex.quote(admin_username)}",
-                sudo=True,
-            )
-        except SSHError as e:
-            msg = f"shell configuration failed: {e}"
-            logger.warning(msg)
-            output.warn(msg)
+        _set_login_shell(files, shell=admin_shell, admin_username=admin_username, log=logger)
 
         # Non-fatal: tighten the admin's home to 0750 (mirrors the agent-home
         # hardening in agents/initializer.py). Runs on both initial provision
         # and reinit (both reach _phase_b_setup), so a pre-existing
         # world-readable admin home is repaired on the next reinit.
-        _harden_admin_home(ts_target, home=home, admin_username=admin_username, logger=logger)
+        _harden_admin_home(files, home=home, admin_username=admin_username, log=logger)
 
         # Non-fatal: the shared workspaces parent directory and its canonical
         # ACL (recursive over all workspaces). The ACL apply and the
         # parent-traversal re-grant are order-dependent, so they live in one
         # helper that documents and enforces the order (see #254).
-        _setup_workspaces_directory(ts_target, config, logger)
+        _setup_workspaces_directory(files, config, logger)
+
+        # Non-fatal: the profile and rc fragments, written early as the agent's
+        # are, so every later login shell (the dotfiles installer, mise, the user
+        # install commands) reads them. The profile's entries are declarations:
+        # mise's shims, with the user install commands' own paths taking
+        # precedence over them. A system install command that failed above
+        # contributes none; a user install command that fails is dropped after
+        # the batch, below.
+        def profile_paths(failed_user: list[str]) -> list[str]:
+            return (
+                install_command_paths(
+                    [name for name in vm_template.system_install_commands if name not in failed_system],
+                    system_install_commands,
+                    context=setup_context,
+                )
+                + _mise_shims_path(home)
+                + install_command_paths(
+                    [name for name in admin.user_install_commands if name not in failed_user],
+                    user_install_commands,
+                    context=setup_context,
+                )
+            )
+
+        _write_agentworks_profile(files, profile_paths([]), logger, home=home, shell=admin_shell)
+        rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
+        _write_agentworks_rc(files, rc_snippets, logger, home=home, shell=admin_shell)
 
         # Non-fatal: mise config (written before dotfiles so dotfiles can override)
-        mise_path: list[str] = _mise_shims_path(home)
         if admin.mise_packages:
-            _write_mise_config(ts_target, admin.mise_packages, admin.mise_install_before, home, logger)
+            _write_mise_config(files, admin.mise_packages, admin.mise_install_before, home, logger)
 
         # Non-fatal: git safe.directory wildcard (disables ownership checks for the
         # multi-user workspace model where agents access repos owned by admin)
         if admin.git_force_safe_directory:
             try:
-                ensure_safe_directory_wildcard(ts_target)
+                ensure_safe_directory_wildcard(files)
                 output.info("Git safe.directory wildcard configured")
-            except SSHError as e:
-                msg = f"git safe.directory setup failed: {e}"
-                logger.warning(msg)
-                output.warn(msg)
+            except STEP_FAILURES as error:
+                warn_step(logger, "git safe.directory setup failed", error)
 
         # Non-fatal: git credentials (before dotfiles and mise lockfile for private repos)
         configure_user_git_credentials(
-            ts_target,
+            files.access,
             credential_requests,
             config,
             logger,
@@ -582,84 +637,49 @@ def _phase_b_setup(
         )
 
         # Non-fatal: dotfiles (can override mise config, can provide lockfile).
-        # Sync and install are reported separately because a failed sync skips
-        # the install entirely. Saying so is the difference between a warning an
-        # operator can act on and a later failure that looks unrelated to it.
         if admin.dotfiles_source:
-            logger.step("Dotfiles")
-            dest = render_scalar_field(
-                type(admin),
-                "dotfiles_destination",
-                admin.dotfiles_destination,
-                setup_context,
-                location=f"admin/{admin_username}.dotfiles_destination",
-            ).replace("~", home)
-            dotfiles_command = render_scalar_field(
-                type(admin),
-                "dotfiles_install_cmd",
-                admin.dotfiles_install_cmd,
-                setup_context,
-                location=f"admin/{admin_username}.dotfiles_install_cmd",
+            sync_dotfiles(
+                files,
+                source=admin.dotfiles_source,
+                destination=render_scalar_field(
+                    type(admin),
+                    "dotfiles_destination",
+                    admin.dotfiles_destination,
+                    setup_context,
+                    location=f"admin/{admin_username}.dotfiles_destination",
+                ),
+                install_cmd=render_scalar_field(
+                    type(admin),
+                    "dotfiles_install_cmd",
+                    admin.dotfiles_install_cmd,
+                    setup_context,
+                    location=f"admin/{admin_username}.dotfiles_install_cmd",
+                ),
+                shell=admin_shell,
+                home=home,
+                log=logger,
             )
-            synced = False
-            try:
-                from agentworks.sources import fetch_dir, parse_source_ref
 
-                ref = parse_source_ref(admin.dotfiles_source)
-                output.info(f"Syncing dotfiles from {admin.dotfiles_source}...")
-                fetch_dir(ref, ts_target, dest, logger=logger)
-                synced = True
-            except Exception as e:
-                msg = (
-                    f"dotfiles sync failed, so '{dotfiles_command}' did not run and {dest} may be left incomplete: {e}"
-                )
-                logger.warning(msg)
-                output.warn(msg)
-            if synced:
-                try:
-                    output.info(f"Running dotfiles install: {dotfiles_command}")
-                    ts_target.run(
-                        f"cd {shlex.quote(dest)} && {dotfiles_command}",
-                        timeout=120,
-                    )
-                except Exception as e:
-                    msg = f"dotfiles install '{dotfiles_command}' failed in {dest}: {e}"
-                    logger.warning(msg)
-                    output.warn(msg)
+        # Non-fatal: the mise lockfile and install (after git creds and dotfiles;
+        # an explicit lockfile overrides the dotfiles').
+        install_mise(
+            files,
+            packages=admin.mise_packages,
+            lockfile=admin.mise_lockfile,
+            allow_unlocked=admin.mise_allow_unlocked,
+            prune=admin.mise_prune_on_reinit,
+            shell=admin_shell,
+            home=home,
+            log=logger,
+        )
 
-        # Non-fatal: mise lockfile (after git creds and dotfiles; overrides dotfiles lockfile)
-        if admin.mise_lockfile:
-            _fetch_mise_lockfile(ts_target, admin.mise_lockfile, home, logger)
-
-        # Non-fatal: mise install (after config + dotfiles + lockfile are all settled)
-        prune = admin.mise_prune_on_reinit
-        if admin.mise_packages or admin.mise_lockfile:
-            _run_mise_install(
-                ts_target,
-                admin_shell,
-                home,
-                admin.mise_allow_unlocked,
-                logger,
-                prune=prune,
-            )
-        else:
-            try:
-                check = ts_target.run(f"test -f {home}/.config/mise/config.toml", check=False)
-                if check.ok:
-                    _run_mise_install(
-                        ts_target,
-                        admin_shell,
-                        home,
-                        admin.mise_allow_unlocked,
-                        logger,
-                        prune=prune,
-                    )
-            except SSHError:
-                pass
+        # A dotfiles installer can replace an rc file, so the fragments' source
+        # lines are ensured again before the install commands' login shells.
+        _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)
 
         # Non-fatal: user install commands for admin user (may depend on mise tools)
-        user_path = _run_install_commands(
-            ts_target,
+        failed_user = _run_install_commands(
+            files,
             admin.user_install_commands,
             user_install_commands,
             admin_shell,
@@ -668,26 +688,14 @@ def _phase_b_setup(
             label="User install command",
             context=setup_context,
         )
+        if failed_user:
+            # A failed install command keeps no PATH entry in the profile.
+            _write_agentworks_profile(files, profile_paths(failed_user), logger, home=home, shell=admin_shell)
 
-        # Non-fatal: shell profile (PATH exports sourced at login)
-        all_paths = system_path + mise_path + user_path
-        _write_agentworks_profile(ts_target, all_paths, logger)
-
-        # Non-fatal: shell rc (interactive shell hooks like mise activate)
-        rc_snippets = [MISE_ACTIVATE_LINES] if admin.mise_activate else ["# mise activation disabled"]
-        _write_agentworks_rc(ts_target, rc_snippets, logger)
-
-        # Non-fatal, reinit only (a new VM has none): runs after dotfiles so
-        # nothing installed above can restore a link.
+        # Non-fatal, reinit only (a new VM has none): runs after dotfiles and the
+        # install commands so nothing installed above can restore a link.
         if operation is VMInitializationOperation.VM_REINIT:
-            _retire_workspace_tmuxinator_projects(db, vm_name, ts_target, logger)
+            _retire_workspace_tmuxinator_projects(db, vm_name, files, logger)
 
-        # Defensive final step: re-ensure source lines in case any earlier
-        # step (dotfiles install in particular) overwrote a shell rc file
-        # in place. Idempotent grep-or-append.
-        _ensure_agentworks_files_sourced(
-            ts_target,
-            home=home,
-            shell=admin_shell,
-            logger=logger,
-        )
+        # An install command can replace an rc file too.
+        _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)

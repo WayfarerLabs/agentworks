@@ -5,7 +5,7 @@ the unit test cannot prove on its own.
   probes no session state at all (a brand-new row owns no codex
   conversation, and both identity channels are name-derived, so adopting
   here is how a namesake would inherit a dead session's conversation),
-  provisions the recorder, clears any stale recording, and persists an
+  installs the recorder, clears any stale recording, and persists an
   EMPTY ``codex`` namespace;
 - the binding round trip through a real restart: a session whose recorder
   file already holds a codex-reported thread id adopts it, resumes it, and
@@ -33,15 +33,26 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.artifacts.declarations import ArtifactsConfig
+from agentworks.artifacts.session import HOME_PROBE
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionStatus
+from agentworks.execution.requests import PythonProgram
+from agentworks.execution.results import Completed, Result
+from agentworks.plugins.codex.harness_integration import discovery_probe, recorder_probe, rollout_probe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from tests.conftest import seed_vm_trust
+from tests.vm_access_support import check_result, is_command_check, route_vm_access_to_guest
 
 from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests.vm_access_support import Call
+
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 _SID = "939b1597-7c61-4ace-80f4-14617b7b4257"
 _OTHER_SID = "22222222-3333-4444-8555-666666666666"
@@ -58,22 +69,17 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_build_registry(monkeypatch)
 
 
-class _Result:
-    def __init__(self, returncode: int = 0, stdout: str = "") -> None:
-        self.returncode = returncode
-        self.ok = returncode == 0
-        self.stdout = stdout
-        self.stderr = ""
-
-
-class _CodexTarget:
-    """Transport double for the codex op: answers the readiness
-    ``command -v codex`` probe and the three op-time probes (the recorder
-    read, the ``*-<sid>.jsonl`` rollout presence probe, and the
+class _CodexGuest:
+    """Launch guest double for the codex op: its access answers the
+    readiness ``command -v codex`` check and the three op-time probes (the
+    recorder read, the ``*-<sid>.jsonl`` rollout presence probe, and the
     source-filtered discovery probe), recording each into a shared event
-    log. ``recorded`` seeds the recorder file with a codex-reported thread
-    id; ``rollout_present`` decides the bound-id fork; ``discovered``
-    (rollout paths, one per line) drives discovery."""
+    log, and the recorder install's home read and file write. Each probe is
+    matched by its builder, for session ``s1`` in
+    workspace ``/home/me/ws1``. ``recorded`` seeds the recorder file with a
+    codex-reported thread id; ``rollout_present`` decides the fork for the
+    ``bound`` id's rollout; ``discovered`` (rollout paths, one per line)
+    drives discovery."""
 
     def __init__(
         self,
@@ -82,28 +88,35 @@ class _CodexTarget:
         recorded: str | None = None,
         rollout_present: bool = False,
         discovered: str | None = None,
+        bound: str = _SID,
     ) -> None:
         self._events = events
         self._recorded = recorded
         self._present = rollout_present
         self._discovered = discovered
+        self._bound = bound
 
-    def run(self, cmd: str, **kwargs: object) -> _Result:
-        if "command -v codex" in cmd:
+    def answer(self, call: Call) -> Result | None:
+        if is_command_check(call.request):
             self._events.append("probe")
-            return _Result()
-        if ".thread" in cmd:
+            return check_result(call.request, 0)
+        if call.request == recorder_probe("s1"):
             self._events.append("read_recorder")
             if self._recorded is None:
-                return _Result(returncode=1)  # no recorder file: nothing bound
-            return _Result(returncode=0, stdout=f"{self._recorded}\n")
-        if "-exec awk" in cmd:
+                return Result(Completed(1))  # no recorder file: nothing bound
+            return Result(Completed(0), f"{self._recorded}\n".encode())
+        if call.request == HOME_PROBE:
+            return Result(Completed(0), b"/home/me")
+        if isinstance(call.request, PythonProgram) and call.request.args[:1] == ("write",):
+            self._events.append(f"install_recorder:{json.loads(call.request.args[1])['path']}")
+            return Result(Completed(0))
+        if call.request == discovery_probe("/home/me/ws1"):
             self._events.append("discover")
-            return _Result(returncode=0, stdout=self._discovered or "")
-        if ".jsonl" in cmd:
+            return Result(Completed(0), (self._discovered or "").encode())
+        if call.request == rollout_probe(self._bound):
             self._events.append("detect")
-            return _Result(returncode=0 if self._present else 1)
-        return _Result()
+            return Result(Completed(0 if self._present else 1))
+        return None
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -134,10 +147,8 @@ def _harness_integration_template(monkeypatch: pytest.MonkeyPatch, config: dict[
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
-def _patch_transport(monkeypatch: pytest.MonkeyPatch, target: _CodexTarget) -> None:
-    admin_factory = lambda vm, config, **kwargs: target  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", admin_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
+def _route_guest(monkeypatch: pytest.MonkeyPatch, target: _CodexGuest) -> None:
+    route_vm_access_to_guest(monkeypatch, target.answer)
 
 
 def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], captured: dict[str, str]) -> None:
@@ -174,7 +185,7 @@ def _restart_stubs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    target: _CodexTarget,
+    target: _CodexGuest,
     events: list[str],
     stored_state: dict[str, object] | None,
 ) -> tuple[Database, dict[str, str]]:
@@ -191,7 +202,7 @@ def _restart_stubs(
     )
 
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, target)
+    _route_guest(monkeypatch, target)
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -233,14 +244,14 @@ def test_create_launches_fresh_without_probing_any_session_state(
     codex conversation, so the op adopts nothing. This
     target would happily report a recording AND a discovery candidate, and
     rollout-discovery probe is not issued; the recorder is only fingerprinted
-    so a stale notification cannot bind the new session to prior state. The pane provisions
-    the recorder so the following start has something new to bind."""
+    so a stale notification cannot bind the new session to prior state. The op installs
+    the recorder before the launch so the following start has something new to bind."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _CodexTarget(events, recorded=_SID, rollout_present=True, discovered=f"{_ROLLOUT}\n"))
+    _route_guest(monkeypatch, _CodexGuest(events, recorded=_SID, rollout_present=True, discovered=f"{_ROLLOUT}\n"))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -254,12 +265,15 @@ def test_create_launches_fresh_without_probing_any_session_state(
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    assert set(events) == {"probe", "read_recorder", "tmux_create"}
+    installs = [event for event in events if event.startswith("install_recorder:")]
+    assert set(events) - set(installs) == {"probe", "read_recorder", "tmux_create"}
+    assert installs == ["install_recorder:/home/admin/.agentworks/codex/record-thread-v1.sh"] and events.index(
+        installs[0]
+    ) < events.index("tmux_create")
     session = db.get_session("s1")
     assert session is not None
     assert session.harness_integration_state == {"codex": {"fresh_pending": _SID}}
     command = captured["command"]
-    assert 'chmod +x "$HOME"/.agentworks/codex/.record-thread-v1.sh."$$"' in command
     # No namesake's binding survives a create.
     assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in command
     assert "notify=[" in command
@@ -276,7 +290,7 @@ def test_restart_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, m
     the recorder during the last launch, so the next op reads it, resumes
     it, and the id lands on the row in the namespaced shape."""
     events: list[str] = []
-    target = _CodexTarget(events, recorded=_SID, rollout_present=True)
+    target = _CodexGuest(events, recorded=_SID, rollout_present=True)
     db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
     _restart(db)
@@ -298,7 +312,7 @@ def test_restart_resumes_the_stored_id_without_a_recording(tmp_path: Path, monke
     resumes it verbatim even though the recorder file is gone (the
     recording is a binding mechanism, not the system of record)."""
     events: list[str] = []
-    target = _CodexTarget(events, rollout_present=True)
+    target = _CodexGuest(events, rollout_present=True)
     db, captured = _restart_stubs(
         tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
@@ -322,7 +336,7 @@ def test_restart_adopts_a_discovered_rollout_when_nothing_is_recorded(
     id, one source-filtered rollout in the workspace, so the op adopts its
     uuid and persists it."""
     events: list[str] = []
-    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n", rollout_present=True)
+    target = _CodexGuest(events, discovered=f"{_ROLLOUT}\n", rollout_present=True)
     db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
     _restart(db)
@@ -343,7 +357,7 @@ def test_restart_with_several_candidates_opens_the_picker_and_binds_nothing(
     pane, not as a failed op: the row keeps no id, and the next completed
     turn binds whatever the human picked."""
     events: list[str] = []
-    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")
+    target = _CodexGuest(events, discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")
     db, captured = _restart_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
     _restart(db)
@@ -363,7 +377,7 @@ def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     gone (archived or deleted) drops the id, finds nothing to adopt, and
     launches fresh with the stale-specific decision line."""
     events: list[str] = []
-    target = _CodexTarget(events, rollout_present=False)
+    target = _CodexGuest(events, rollout_present=False)
     db, captured = _restart_stubs(
         tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
@@ -382,7 +396,7 @@ def test_restart_retires_a_marker_era_blob_key(tmp_path: Path, monkeypatch: pyte
     2026-08-04) still resumes: the retired ``discovery_marker`` key is
     dropped from the persisted blob and its file removed by the pane."""
     events: list[str] = []
-    target = _CodexTarget(events, rollout_present=True)
+    target = _CodexGuest(events, rollout_present=True)
     db, captured = _restart_stubs(
         tmp_path,
         monkeypatch,
@@ -411,7 +425,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
     ``codex`` namespace, and the claude id is neither read (no inherited
     ``session_id``) nor dropped on persist."""
     events: list[str] = []
-    target = _CodexTarget(events, recorded=_SID, rollout_present=True)
+    target = _CodexGuest(events, recorded=_SID, rollout_present=True)
     db, captured = _restart_stubs(
         tmp_path,
         monkeypatch,
@@ -450,7 +464,7 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     db.update_workspace_path("ws1", workspace_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _CodexTarget(events))
+    _route_guest(monkeypatch, _CodexGuest(events))
     _common_stubs(monkeypatch)
     _harness_integration_template(
         monkeypatch,
@@ -487,10 +501,9 @@ def test_substitution_preserves_workload_values_and_substitutes_extra_args(
     )
 
     command = captured["command"]
-    # The generated skeleton survived substitution unmangled, the recorder
-    # provisioning and the notify override's nested quoting included.
+    # The generated skeleton survived substitution unmangled, the notify
+    # override's nested quoting included.
     assert command.startswith("sh -c ")
-    assert 'mkdir -p "$HOME"/.agentworks/codex' in command
     assert 'notify=["' in command
     assert '"$HOME"/.agentworks/codex/record-thread-v1.sh' in command
     assert "exec codex " in command

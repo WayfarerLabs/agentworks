@@ -28,8 +28,9 @@ def _reconfigure_std_streams() -> None:
     stdout additionally gets bare-LF newlines: machine-readable listings are
     iterated by shells and agents, and Windows text-mode CRLF rides a stray
     carriage return into the consumer's next argument. The same trap on the
-    way into a child process is handled in ``agentworks/subprocess_io.py``. stderr keeps platform
-    newline translation; it is human-facing only.
+    way into a child process is avoided by writing its stdin as bytes
+    (``execution.pump`` and ``lima_host``). stderr keeps platform newline
+    translation; it is human-facing only.
 
     The isinstance guard skips StringIO-like stand-ins without reconfigure()
     that tests and embedders install.
@@ -102,10 +103,11 @@ def main() -> None:
     except (ConnectivityError, ExternalError) as e:
         # External-system failures: render the one-liner AND persist the
         # full traceback to the error log so postmortem diagnosis can see
-        # the underlying SSH command, platform API response, etc. Type-qualify
-        # the message (Error: SSHError: ...) since these often have messages
-        # that don't carry the failure category in their text. The handler
-        # owns the `Error:` prefix, so the rendered line is `Error: SSHError: ...`.
+        # the underlying request, platform API response, etc. Type-qualify the
+        # message (Error: ExecutionIncomplete: ...) since these often have
+        # messages that don't carry the failure category in their text. The
+        # handler owns the `Error:` prefix, so the rendered line is
+        # `Error: ExecutionIncomplete: ...`.
         error(f"{type(e).__name__}: {e}")
         echo_hint(e)
         if debug_enabled():

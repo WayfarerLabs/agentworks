@@ -85,7 +85,7 @@ def test_preview_console_deleted_after_route_selection_keeps_independent_results
     config = make_config()
     deleted: list[bool] = []
     rendered = []
-    monkeypatch.setattr(consoles, "_live_target", lambda *a, **k: None)
+    monkeypatch.setattr(consoles, "_live_access", lambda *a, **k: None)
 
     def get_console(name):
         if name == "gone" and not deleted:

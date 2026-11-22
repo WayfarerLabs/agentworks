@@ -7,15 +7,16 @@ are nominal, class-registered capabilities: implementations subclass `SecretBack
 contribute the class itself, and registration never constructs one.
 
 This is the permanent authoring contract. The supported secret-backend contract version is exactly
-`1`; there is no adapter for an older shape. Version `2` shipped in Agentworks 0.14.0 and 0.14.1,
-when plugins could already contribute secret backends, although there are no known third-party
-implementations. Agentworks 0.15 intentionally renumbers the incompatible complete surface
-documented here to exact version `1`; that number does not claim compatibility with the former
-version-2 contract.
+`3`; there is no adapter for an older shape. Version `2` shipped in Agentworks 0.14.0 and 0.14.1
+with an incompatible surface, when plugins could already contribute secret backends, although there
+are no known third-party implementations. Agentworks 0.15 renumbered the surface documented here to
+version `1`, and version `3` is that surface with the run context of Agentworks 0.20 (its
+`admin_access()` and `agent_access()` accessors). The number `2` is skipped so that no
+implementation written for the 0.14 contract can register.
 
 ## Migrating a 0.14 backend to 0.15
 
-Migrate the entire contract atomically; version 1 has no adapter for a version-2 implementation:
+Migrate the entire contract atomically; there is no adapter for a version-2 implementation:
 
 - rename class attribute `interactive` to exact-boolean `supports_tty_interaction`;
 - remove `would_attempt` and derive static applicability through `describe_lookup`;
@@ -32,7 +33,7 @@ Migrate the entire contract atomically; version 1 has no adapter for a version-2
 Every implementation declares:
 
 - a non-empty, slash-free `name` and a string `description`;
-- `contract_version = 1`;
+- `contract_version = 3`;
 - `supports_tty_interaction` as an exact `bool`;
 - `config_model`, an `AgwModel` for one source's shared configuration; and
 - `mapping_model`, an `AgwRootModel` for one secret's optional lookup address.
@@ -304,7 +305,7 @@ class ExampleClient:
 
 
 class ExampleBackend(SecretBackend):
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 3
     name: ClassVar[str] = "example"
     description: ClassVar[str] = "resolves through the example provider"
     supports_tty_interaction: ClassVar[bool] = False

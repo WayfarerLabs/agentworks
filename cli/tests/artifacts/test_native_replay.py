@@ -13,6 +13,7 @@ from agentworks.artifacts.model import ArtifactType
 from tests.artifacts.test_native_delivery import artifact
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
+from tests.phase_b_support import is_file_operation
 
 pytestmark = requires_posix_shell
 
@@ -30,18 +31,18 @@ pytestmark = requires_posix_shell
 def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     tmp_path, db, monkeypatch, tool, class_name, workaround, placement, prior_state
 ):
-    import shlex
     from dataclasses import replace
     from importlib import import_module
-    from types import SimpleNamespace
 
     from agentworks.artifacts.application import ArtifactApplication, SessionArtifactContext
     from agentworks.artifacts.declarations import AgentArtifactSpec
     from agentworks.artifacts.model import ArtifactGroup, ArtifactInputs, ArtifactOwner
+    from agentworks.artifacts.native.probe import _PROBE
     from agentworks.artifacts.routing import session_artifacts
     from agentworks.artifacts.state import capture_owner, write_capture
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.execution.requests import Bytes, PythonProgram
     from agentworks.harness_setup.model import NativeSetupState, SetupRecord
     from agentworks.harness_setup.state import write_native_setup
     from agentworks.origin import Origin
@@ -49,10 +50,10 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     from agentworks.plugins.codex import artifacts as codex_adapter
     from agentworks.plugins.grok import artifacts as grok_adapter
     from agentworks.schema import CapabilityConfig
-    from agentworks.ssh import SSHResult
     from tests.artifacts._fixtures import group, received
     from tests.artifacts.test_native_delivery import owned
     from tests.artifacts.test_routing import graph
+    from tests.vm_access_support import account_shell, local_vm_access
 
     fixture = graph(db)
     source_owner = "agent" if placement == "user" else "workspace"
@@ -141,25 +142,19 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     }
     requests = []
 
-    def run(command, *, env=None, **kwargs):
-        argv = ["bash", "-c", command]
-        if "input_data" in kwargs:
-            argv = shlex.split(shlex.split(command)[-1])
-            argv[2] = (
-                argv[2]
-                .replace("/etc/claude-code", str(tmp_path / "etc/claude-code"))
-                .replace("/etc/codex", str(tmp_path / "etc/codex"))
-            )
-            requests.append(json.loads(kwargs["input_data"]))
-        observed = subprocess.run(
-            argv,
-            input=kwargs.get("input_data"),
-            env={**os.environ, **(env or {})},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return SSHResult(observed.returncode, observed.stdout, observed.stderr)
+    def log(request, result):
+        # The artifact probes' requests; a file operation (the codex recorder's install) is not one.
+        if isinstance(request, PythonProgram) and not is_file_operation(request):
+            assert isinstance(request.stdin, Bytes)
+            requests.append(json.loads(request.stdin.data))
+
+    monkeypatch.setattr(
+        "agentworks.artifacts.native.probe._PROBE",
+        _PROBE.replace("/etc/claude-code", str(tmp_path / "etc/claude-code")).replace(
+            "/etc/codex", str(tmp_path / "etc/codex")
+        ),
+    )
+    access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path), log=log)
 
     inputs = routed.inputs
     if prior_state == "competing":
@@ -189,9 +184,7 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.output.warn", warnings.append)
     retained = {file.path: Path(file.path).read_bytes() for file in all_files}
-    result = integration.start(
-        RunContext(admin_target=SimpleNamespace(run=run, logger=None)), intent=HarnessLaunchIntent.RESUME_OR_NEW
-    )
+    result = integration.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.RESUME_OR_NEW)
     assert result.command == "fixture-launch"
     assert warnings
     assert {path: Path(path).read_bytes() for path in retained} == retained

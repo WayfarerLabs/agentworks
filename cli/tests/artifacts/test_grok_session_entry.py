@@ -13,6 +13,7 @@ import pytest
 from agentworks.artifacts.application import ArtifactFile, SessionArtifactContext
 from agentworks.artifacts.model import ArtifactType
 from agentworks.artifacts.native.common import NativeSessionArtifacts
+from agentworks.artifacts.native.probe import _PROBE
 from agentworks.artifacts.session import validate_session_application
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import HarnessStart, ShellIntegration
@@ -22,7 +23,8 @@ from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, owned
 from tests.artifacts.test_session_lifecycle import lifecycle as lifecycle
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.vm_access_support import RecordingVMAccess
 
 
 def render(current: SessionArtifactContext) -> NativeSessionArtifacts:
@@ -102,8 +104,8 @@ def test_changed_private_artifacts_reuse_exactly_one_owned_entry_through_restart
 
 
 @pytest.fixture
-def login_target(tmp_path: Path) -> LocalFixtureTransport:
-    target = LocalFixtureTransport(tmp_path / "guest")
+def login_target(tmp_path: Path) -> LocalFixtureAccount:
+    target = LocalFixtureAccount(tmp_path / "guest")
     (target.root / "login-shell").write_text(
         '#!/bin/bash\ncase "$1" in -lc|-lic) ;; *) exit 9 ;; esac\n'
         '. "$HOME/.profile"\nexec /bin/bash --noprofile --norc -c "$2"\n'
@@ -116,10 +118,11 @@ def login_target(tmp_path: Path) -> LocalFixtureTransport:
 
 
 def start(
-    target: LocalFixtureTransport,
+    target: LocalFixtureAccount,
     current: SessionArtifactContext,
     monkeypatch: pytest.MonkeyPatch,
     workarounds: list[str],
+    access: RecordingVMAccess | None = None,
 ) -> HarnessStart:
     integration = GrokBuildIntegration(
         "grok-build",
@@ -134,7 +137,7 @@ def start(
         artifact_context=current,
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
-    return integration.start(RunContext(admin_target=target))
+    return integration.start(RunContext(admin_access=access or target.access()))
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux login environment")
@@ -152,10 +155,12 @@ def test_disabled_grok_publication_keeps_invalid_home_and_ancestor_checks_adviso
             "GROK_HOME": "relative-grok" if override == "relative" else str(login_target.home / ".grok") + "/"
         },
     )
-    result = start(login_target, current, monkeypatch, [])
+    access = login_target.access()
+    result = start(login_target, current, monkeypatch, [], access)
     assert not result.artifacts.files
     assert {item.input_id for item in result.artifacts.deferred} == ({rule.identity} if local else set())
-    assert bool(login_target.commands) == ancestor
+    # Only an ancestor needs the native home, so only then does the discovery probe run, once.
+    assert [request.source for request in access.requests()] == ([_PROBE] if ancestor else [])
     if ancestor:
         assert captured_output.warnings
     assert not (login_target.home / "native-executed").exists()

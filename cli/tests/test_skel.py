@@ -3,29 +3,27 @@
 Pins:
 
 - The bash and zsh seeds end with a source-line that references
-  ``.agentworks-rc.sh`` literally, so ``_write_agentworks_rc``'s
-  idempotent grep-or-append no-ops cleanly on a seeded user (no
-  duplicate source-line on next reinit).
+  ``.agentworks-rc.sh`` literally, so ``ensure_source_line`` leaves a
+  seeded user's file alone (no duplicate source-line on next reinit).
 - The seeds contain the identity-aware prompt expression with
   fallbacks (``${AGENTWORKS_AGENT:-admin}`` / ``${AGENTWORKS_VM:-...}``)
   so a user who opens a shell before init populates the identity
   profile still sees a usable prompt.
-- ``_write_skel_seeds`` writes both seeds to ``/etc/skel/.bashrc``
-  and ``/etc/skel/.zshrc`` via ``sudo tee`` and chmods 644. The
-  ``/etc/skel`` location is what makes ``useradd -m`` (i.e. agent
-  creation) inherit the seed without an explicit copy step.
+- The seeds' paths are ``/etc/skel/.bashrc`` and ``/etc/skel/.zshrc``:
+  the ``/etc/skel`` location is what makes ``useradd -m`` (i.e. agent
+  creation) inherit the seed without an explicit copy step. What
+  ``_write_skel_seeds`` leaves on disk is in
+  ``test_initializer_system_fragments.py``, and its order after apt in
+  ``tests/vms/test_phase_b_driver.py``.
 """
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 from agentworks.capabilities.vm_platform.skel import BASHRC, SKEL_HEADER, ZSHRC
 from agentworks.vms.initializer import (
     AGENTWORKS_RC,
     SKEL_BASHRC_PATH,
     SKEL_ZSHRC_PATH,
-    _write_skel_seeds,
 )
 
 # ---------------------------------------------------------------------------
@@ -45,13 +43,9 @@ def test_seeds_open_with_managed_by_agentworks_marker() -> None:
 
 def test_seeds_reference_agentworks_rc_filename() -> None:
     """The seed's source-line must reference the same filename
-    (``.agentworks-rc.sh``) that ``_write_agentworks_rc`` greps for
-    when deciding whether to append. Filename match means the existing
-    grep-or-append correctly no-ops once the seed is present, so reinit
-    doesn't duplicate the source-line."""
-    # The grep in _write_agentworks_rc is `grep -q .agentworks-rc.sh <rc>`.
-    # The seeds need that substring present somewhere for the grep to
-    # match. (Substring match, not full-line match.)
+    (``.agentworks-rc.sh``) that ``ensure_source_line`` looks for when
+    deciding whether to append, so reinit doesn't duplicate the
+    source-line. (Substring match, not full-line match.)"""
     assert AGENTWORKS_RC in BASHRC
     assert AGENTWORKS_RC in ZSHRC
 
@@ -202,67 +196,9 @@ def test_zsh_seed_includes_compinit() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_write_skel_seeds_writes_both_files_to_etc_skel() -> None:
-    """Both /etc/skel/.bashrc and /etc/skel/.zshrc get written via
-    ``sudo tee`` (so the file ends up root-owned, which is correct for
-    a system template directory)."""
-    target = MagicMock()
-    target.run.return_value = MagicMock(ok=True)
-    logger = MagicMock()
-
-    _write_skel_seeds(target, logger)
-
-    commands = [call.args[0] for call in target.run.call_args_list]
-    # Each seed -> one printf | sudo tee + one sudo chmod, so 4 calls total.
-    assert len(commands) == 4
-    bashrc_tee = [c for c in commands if SKEL_BASHRC_PATH in c and "tee" in c]
-    zshrc_tee = [c for c in commands if SKEL_ZSHRC_PATH in c and "tee" in c]
-    assert len(bashrc_tee) == 1
-    assert len(zshrc_tee) == 1
-    # chmod 644 on each seed file.
-    assert f"sudo chmod 644 {SKEL_BASHRC_PATH}" in commands
-    assert f"sudo chmod 644 {SKEL_ZSHRC_PATH}" in commands
-
-
 def test_write_skel_seeds_skel_paths_are_etc_skel() -> None:
     """``/etc/skel`` is the standard Debian location ``useradd -m``
     copies from when creating a new user's home. Anything else
     wouldn't propagate to future agents automatically."""
     assert SKEL_BASHRC_PATH == "/etc/skel/.bashrc"
     assert SKEL_ZSHRC_PATH == "/etc/skel/.zshrc"
-
-
-def test_write_skel_seeds_runs_after_apt_install_in_initializer() -> None:
-    """Regression guard: ``/etc/skel/.bashrc`` is a Debian conffile
-    shipped by ``bash``. Running ``_write_skel_seeds`` BEFORE
-    ``_install_apt_packages`` would let apt's ``--force-confnew``
-    silently replace the seed on any reinit that upgrades bash
-    (the seed lands at ``/etc/skel/.bashrc.dpkg-old`` and future
-    ``useradd -m`` inherits Debian's stock skel instead). Same
-    conffile-clobber pattern as ``_write_agentworks_identity_profile``,
-    which carries an explanatory comment for exactly this reason.
-
-    This test scans the init source for the relative positions of the
-    two calls so a refactor that reorders them has to update a test.
-    """
-    import inspect
-    import re
-
-    from agentworks.vms import initializer
-
-    # Inspect ``_phase_b_setup`` -- the function that actually houses
-    # both calls. ``run_initialization`` is the public entry; the
-    # ordering constraint is on the helper.
-    src = inspect.getsource(initializer._phase_b_setup)
-    # Match only actual call sites (line starts with whitespace + the
-    # function name + ``(``) so a stray reference inside a comment
-    # can't trip the assertion.
-    skel = re.search(r"^\s+_write_skel_seeds\(", src, re.MULTILINE)
-    apt = re.search(r"^\s+_install_apt_packages\(", src, re.MULTILINE)
-    assert skel is not None, "expected _write_skel_seeds call in _phase_b_setup"
-    assert apt is not None, "expected _install_apt_packages call in _phase_b_setup"
-    assert skel.start() > apt.start(), (
-        "_write_skel_seeds must run AFTER _install_apt_packages so apt's "
-        "--force-confnew doesn't replace /etc/skel/.bashrc (a bash-package "
-        "conffile) with Debian's stock skel."
-    )

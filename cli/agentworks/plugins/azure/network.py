@@ -1,6 +1,8 @@
-"""Azure SDK plumbing shared by the platform's ops: the typed error
-wrapper, operator egress-IP discovery, and the per-VM network-resource
-helpers (public IP, NSG exposure rules, resource cleanup).
+"""Azure SDK plumbing shared by the platform's ops: operator egress-IP
+discovery and the per-VM network-resource helpers (public IP, NSG exposure
+rules, resource cleanup). The typed error and its wrapper live in
+``errors.py``, and the bound on each Azure call a route makes in
+``route_calls.py``.
 
 Split out of ``platform.py`` (issue #331): ``platform.py`` keeps the
 ``VMPlatform`` capability surface (lifecycle ops, SDK clients, sizing);
@@ -38,8 +40,10 @@ priority band [100, 199] under the deny:
 from __future__ import annotations
 
 import contextlib
+import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from functools import partial
+from typing import TYPE_CHECKING, Any, cast
 
 from agentworks import output
 
@@ -53,12 +57,24 @@ from agentworks.capabilities.vm_platform.ssh_exposure import (
     normalize_allow_cidrs,
     operator_ssh_prefixes,
 )
-from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError
+from agentworks.deadline import Deadline
+from agentworks.errors import AuthorizationError
 from agentworks.interrupts import interrupts_deferred
+from agentworks.plugins.azure.errors import AzureError, wrap_azure_error
+from agentworks.plugins.azure.route_calls import (
+    _bounded_route_call,
+    _finish_route_operation,
+    _route_call_options,
+    _route_operation_options,
+    _RouteCallTimeout,
+    _run_route_operation,
+    _start_route_operation,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from azure.core.rest import HttpResponse
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.network.models import SecurityRule
@@ -116,73 +132,34 @@ ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
 # the next free slot.
 _POKE_ALLOCATION_ATTEMPTS = 5
 
-# How long a rule removal waits for Azure. It runs with interrupts deferred,
-# so this bound is also how long a Ctrl-C can wait; GCP bounds its firewall
-# operations the same way.
-_RULE_REMOVAL_TIMEOUT_SECONDS = 300.0
+# How long the poke waits before its next allocation when Azure answered a
+# create with a status azure-core would itself have retried, since the create
+# goes unretried: the Retry-After Azure sent, at most
+# _POKE_RETRY_AFTER_MAX_SECONDS, or else an exponential backoff on the factor of
+# azure-core's own RetryPolicy (its default 0.8s gives 0.8s, 1.6s, 3.2s, 6.4s).
+# The cap, and a backoff that stays far below it, keep the waits between a
+# poke's five attempts to two minutes in all.
+_POKE_RETRY_AFTER_MAX_SECONDS = 30.0
+
+# How much longer a poke whose create did not finish waits for that create
+# before it removes the rule, with interrupts deferred: a delete while the
+# create is in flight can fail (AnotherOperationInProgress) or find nothing,
+# and the rule then lands after. With the removal's own
+# _OPERATION_TIMEOUT_SECONDS, that held step can take 360s; the close of the
+# provisioning access that follows it is a second, so a Ctrl-C can be held
+# 660s in all.
+_UNFINISHED_CREATE_SETTLE_SECONDS = 60.0
+
+# How often that wait reads the state the create's polling method holds. It
+# reads rather than joining the poller: the poller's polling thread also ends on
+# a transport error while the operation still runs, and on CPython 3.12 a join
+# that Ctrl-C cut short marks the still-running thread stopped, so every later
+# join returns at once.
+_UNFINISHED_CREATE_POLL_SECONDS = 1.0
 
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
-
-
-class AzureError(ProvisioningError):
-    """An Azure API operation failed.
-
-    Attributes:
-        summary: A concise, user-facing error message.
-        detail: The full error details (for logs).
-
-    The optional entity / hint keywords are the base ``AgentworksError``
-    ones, forwarded so a failure that KNOWS which resource it is about
-    can say so (the service-principal credential build names its site and
-    its secret). :func:`wrap_azure_error`, which converts an arbitrary
-    exception, has no such knowledge and passes only the hint of an
-    Agentworks error it wraps.
-    """
-
-    def __init__(
-        self,
-        summary: str,
-        detail: str,
-        *,
-        entity_kind: str | None = None,
-        entity_name: str | None = None,
-        hint: str | None = None,
-    ) -> None:
-        super().__init__(summary, entity_kind=entity_kind, entity_name=entity_name, hint=hint)
-        self.summary = summary
-        self.detail = detail
-
-
-def wrap_azure_error(exc: Exception) -> AzureError:
-    """Convert an Azure SDK exception into an AzureError, keeping a wrapped Agentworks error's hint."""
-    from azure.core.exceptions import HttpResponseError
-
-    if isinstance(exc, HttpResponseError):
-        # Walk inner errors to find the most specific message
-        code = exc.error.code if exc.error else None
-        message = exc.error.message if exc.error else str(exc)
-
-        if exc.error and exc.error.details:
-            inner = exc.error.details[0]
-            code = inner.code or code
-            message = inner.message or message
-
-        summary = f"{code}: {_trim_message(str(message))}" if code else _trim_message(str(message))
-        return AzureError(summary, detail=str(exc))
-
-    return AzureError(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
-
-
-def _trim_message(message: str) -> str:
-    """Trim an Azure error message to the first meaningful sentence."""
-    # Cut at first URL or "Learn more" / "Submit a request" noise
-    for marker in [". Setup Alerts", ". Learn more", ". Submit a request", " https://"]:
-        idx = message.find(marker)
-        if idx != -1:
-            return message[: idx + 1] if marker.startswith(".") else message[:idx]
-    return message
 
 
 def _deny_all_inbound_rule() -> SecurityRule:
@@ -264,17 +241,31 @@ def converge_nsg(network: NetworkManagementClient, rg: str, name: str) -> None:
     from azure.core.exceptions import ResourceNotFoundError
 
     try:
-        network.security_rules.begin_create_or_update(
-            rg,
-            f"{name}-nsg",
-            DENY_ALL_INBOUND_RULE_NAME,
-            _deny_all_inbound_rule(),
-        ).result()
+        _run_route_operation(
+            partial(
+                network.security_rules.begin_create_or_update,
+                rg,
+                f"{name}-nsg",
+                DENY_ALL_INBOUND_RULE_NAME,
+                _deny_all_inbound_rule(),
+                **_route_operation_options(),
+            ),
+            f"ensuring the '{DENY_ALL_INBOUND_RULE_NAME}' rule on NSG '{name}-nsg'",
+        )
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 
     try:
-        network.security_rules.begin_delete(rg, f"{name}-nsg", LEGACY_SSH_RULE_NAME).result()
+        _run_route_operation(
+            partial(
+                network.security_rules.begin_delete,
+                rg,
+                f"{name}-nsg",
+                LEGACY_SSH_RULE_NAME,
+                **_route_operation_options(),
+            ),
+            f"deleting the legacy '{LEGACY_SSH_RULE_NAME}' rule on NSG '{name}-nsg'",
+        )
     except ResourceNotFoundError:
         pass
     except Exception as exc:
@@ -298,11 +289,17 @@ def _lowest_free_allow_priority(network: NetworkManagementClient, rg: str, name:
     from agentworks.errors import StateError
 
     try:
-        rules = network.security_rules.list(rg, f"{name}-nsg")
-        # list() returns a lazy ItemPaged: the HTTP requests happen
-        # during iteration, so the wrap must cover the comprehension,
-        # not just the call.
-        used = {rule.priority for rule in rules if rule.direction == "Inbound"}
+        # list() returns a lazy ItemPaged: the HTTP requests happen during
+        # iteration, so the bounded call and the wrap must cover the
+        # comprehension, not just the call.
+        used = _bounded_route_call(
+            lambda: {
+                rule.priority
+                for rule in network.security_rules.list(rg, f"{name}-nsg", **_route_call_options())
+                if rule.direction == "Inbound"
+            },
+            f"listing the rules on NSG '{name}-nsg'",
+        )
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
     for priority in range(ALLOW_PRIORITY_BAND_START, ALLOW_PRIORITY_BAND_END + 1):
@@ -335,44 +332,171 @@ def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixe
     priority uniqueness per direction, so losing a slot race to a
     concurrent allocation surfaces as a create error; the loser re-lists
     and takes the next free slot. After the attempts are exhausted the
-    last error raises wrapped. A failed attempt cleans up its own rule
-    name (via :func:`remove_ssh_allow`: 404-tolerant, and a cleanup
-    failure warns naming the rule, NSG, and prefixes rather than being
-    swallowed) before moving on: the create may have succeeded
-    server-side even though the client-side wait failed, and only this
-    function knows the nonce name, so the cleanup cannot be left to the
-    caller's exit path. An interrupt during the create removes the rule
-    the same way and propagates. Each of those removals holds interrupts
-    until it is done, since the route's own exit never runs for a poke
-    that did not return.
+    last error raises wrapped. A create is never retried (``retry_total=0``),
+    so no try whose delivery is unknown is replayed: azure-core resends it
+    only after an explicit answer (a redirect, or a 401 challenge).
+    An answer azure-core would have retried (a throttle, a timeout, a server
+    error) gets a wait on azure-core's backoff factor before the next
+    attempt (see :func:`_back_off_after`), so a throttled or briefly
+    unavailable network provider does not burn every attempt at once.
+
+    Every create that did not return normally, whatever stopped it, goes
+    through :func:`_remove_unfinished_allow` before anything else happens:
+    only this function knows the nonce name, so that cleanup cannot be left
+    to the caller's exit path. A timeout or interrupt then propagates; the
+    route's own exit never runs for a poke that did not return.
     """
     from uuid import uuid4
 
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
     last_exc: Exception | None = None
-    for _attempt in range(_POKE_ALLOCATION_ATTEMPTS):
+    for attempt in range(_POKE_ALLOCATION_ATTEMPTS):
+        if last_exc is not None:
+            _back_off_after(last_exc, attempt)
         priority = _lowest_free_allow_priority(network, rg, name)
         rule_name = f"{TRANSIENT_ALLOW_RULE_PREFIX}{uuid4().hex[:8]}"
+        what = f"creating the '{rule_name}' rule on NSG '{name}-nsg'"
+        poller: Any = None
         try:
-            network.security_rules.begin_create_or_update(
-                rg,
-                f"{name}-nsg",
-                rule_name,
-                _allow_ssh_rule(rule_name, prefixes, priority),
-            ).result()
-        except Exception as exc:
-            with interrupts_deferred():
-                remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            poller, deadline = _start_route_operation(
+                partial(
+                    network.security_rules.begin_create_or_update,
+                    rg,
+                    f"{name}-nsg",
+                    rule_name,
+                    _allow_ssh_rule(rule_name, prefixes, priority),
+                    **_route_operation_options(retries=0),
+                ),
+                what,
+            )
+            _finish_route_operation(poller, what, deadline)
+        except BaseException as exc:
+            # The create did not return, so the rule may exist or still land, and only this name finds it.
+            _remove_unfinished_allow(network, rg, name, rule_name, prefixes, poller, exc)
+            if not isinstance(exc, Exception) or isinstance(exc, _RouteCallTimeout):
+                raise  # an interrupt, or a timeout that another attempt would wait out as long again
             last_exc = exc
             continue
-        except BaseException:
-            # An interrupt mid-create: the rule may exist, and only this name finds it.
-            with interrupts_deferred():
-                remove_ssh_allow(network, rg, name, rule_name, prefixes)
-            raise
         return rule_name
     assert last_exc is not None  # the loop only falls through via the except arm
     raise wrap_azure_error(last_exc) from last_exc
+
+
+def _back_off_after(error: Exception, attempts: int) -> None:
+    """Wait before the poke's next allocation if azure-core would have retried the create ``error`` answered.
+
+    azure-core's own ``RetryPolicy`` decides, so the answers are the ones it
+    retries: 408, 429, 500, 502, 503, 504 and every status from 506, and any
+    error status carrying Retry-After. The wait honors Retry-After, capped at
+    ``_POKE_RETRY_AFTER_MAX_SECONDS``, and otherwise doubles from the
+    policy's ``backoff_factor`` with each of the ``attempts`` made. It
+    holds no interrupts, so Ctrl-C ends it; the failed attempt's cleanup is
+    already done.
+    """
+    from azure.core.exceptions import HttpResponseError
+    from azure.core.pipeline import PipelineContext, PipelineResponse
+    from azure.core.pipeline.policies import RetryPolicy
+
+    if not isinstance(error, HttpResponseError) or error.response is None:
+        return
+    policy = RetryPolicy()
+    response = cast("HttpResponse", error.response)  # what the generated clients raise with
+    answer = PipelineResponse(response.request, response, PipelineContext(None))
+    if not policy.is_retry(policy.configure_retries({}), answer):
+        return
+    try:
+        retry_after = policy.get_retry_after(answer)
+    except ValueError:  # a Retry-After azure-core cannot parse takes the backoff
+        retry_after = None
+    if retry_after is not None:
+        wait = min(retry_after, _POKE_RETRY_AFTER_MAX_SECONDS)
+    else:
+        wait = policy.backoff_factor * 2 ** (attempts - 1)
+    output.info(f"Azure answered the create with {error.status_code}; trying again in {wait:.1f}s...")
+    time.sleep(wait)
+
+
+def _remove_unfinished_allow(
+    network: NetworkManagementClient,
+    rg: str,
+    name: str,
+    rule_name: str,
+    prefixes: list[str],
+    create: Any | None,
+    error: BaseException,
+) -> None:
+    """Remove the poke's rule whose create did not return, holding interrupts.
+
+    That is a create that raised ``error``, ran out of time or was
+    interrupted, whether or not it had returned a poller (``create`` is
+    ``None`` when it had not, as when its first request ran out of time).
+    Interrupts are held for the settle below, when there is a
+    poller, and the removal's own ``_OPERATION_TIMEOUT_SECONDS``: at most
+    360s for this step. The removal is silent only when the outcome
+    is known; otherwise the warning names the rule for removal by hand, and
+    goes out before the held interrupt is delivered, which would otherwise
+    skip it.
+
+    Before a poller, the outcome is known only when ``error`` is Azure's 4xx
+    answer to the create: the create is never retried, and azure-core
+    resends it only after an explicit answer (a redirect, or a 401
+    challenge), so every try was turned away and the rule never exists. A
+    request with no answer may have reached Azure, and a 5xx (a gateway
+    timeout among them) does not say the network provider never took it,
+    so both warn.
+
+    A create with a poller gets up to ``_UNFINISHED_CREATE_SETTLE_SECONDS``
+    more first, so the delete does not race it, reading the state its
+    polling method holds every ``_UNFINISHED_CREATE_POLL_SECONDS`` until
+    that state is final; when polling itself has stopped that state never
+    changes and the wait takes its whole bound. Its outcome is known only
+    when that state is the ``Succeeded`` Azure reported, since then the rule
+    exists and the delete removes it: azure-core records its own failure to
+    observe the operation (a status read Azure refused, or one without a
+    status) as ``Failed``, so no other state proves the rule will not land.
+    """
+    with interrupts_deferred():
+        settled = create is not None and _create_settled(create)
+        if create is not None and not settled:
+            output.info(
+                f"Waiting up to {_UNFINISHED_CREATE_SETTLE_SECONDS:.0f}s for Azure to settle "
+                f"the '{rule_name}' rule before removing it..."
+            )
+            settle = Deadline.after(_UNFINISHED_CREATE_SETTLE_SECONDS)
+            while not settled and not settle.expired:
+                time.sleep(min(_UNFINISHED_CREATE_POLL_SECONDS, settle.remaining() or 0.0))
+                settled = _create_settled(create)
+        known = _create_succeeded(create) if create is not None else _refused_by_azure(error)
+        remove_ssh_allow(network, rg, name, rule_name, prefixes)
+        if not known:
+            output.warn(
+                f"Could not confirm that Azure created the '{rule_name}' rule on NSG '{name}-nsg' before removing "
+                f"it, so it may still appear, open to source(s) {', '.join(prefixes)}; check the NSG, and delete "
+                "that rule only if it allows TCP/22 from exactly those sources, escalating otherwise."
+            )
+
+
+def _refused_by_azure(error: BaseException) -> bool:
+    """Whether ``error`` is Azure's 4xx answer to a request, which it therefore did not carry out."""
+    from azure.core.exceptions import HttpResponseError
+
+    return isinstance(error, HttpResponseError) and error.response is not None and 400 <= (error.status_code or 0) < 500
+
+
+def _create_settled(create: Any) -> bool:
+    """Whether ``create``'s polling method holds a final state; a failed read counts as not."""
+    try:
+        return bool(create.polling_method().finished())
+    except Exception:
+        return False
+
+
+def _create_succeeded(create: Any) -> bool:
+    """Whether ``create``'s polling method holds the ``Succeeded`` Azure reported; a failed read counts as not."""
+    try:
+        return str(create.polling_method().status()).lower() == "succeeded"
+    except Exception:
+        return False
 
 
 def remove_ssh_allow(
@@ -402,20 +526,37 @@ def remove_ssh_allow(
     the coupling; the rule NAME, by contrast, is always known (fixed for
     bootstrap, returned by the poke), so it is always named.
 
-    The removal waits at most ``_RULE_REMOVAL_TIMEOUT_SECONDS`` for Azure,
-    since a caller that holds interrupts around it (``interrupts_deferred``:
-    the poke's own cleanup, the route's exit, ``close_provisioning_access_or_warn``)
-    makes the operator wait that long; an operation still running then is an
-    outcome nobody saw, so it warns that the rule may remain. This function
-    does not hold interrupts itself.
+    Ctrl-C and the terminations wait for the removal to finish
+    (:func:`~agentworks.interrupts.interrupts_deferred`), since a removal cut
+    short leaves the rule open. So it waits at most
+    ``_OPERATION_TIMEOUT_SECONDS`` for Azure on the wall clock, however
+    slowly the delete request is answered (see :func:`_bounded_route_call`),
+    and that is as long as the operator waits; an operation still running
+    then is an outcome nobody saw, so it warns that the rule may remain.
     """
+    with interrupts_deferred():
+        _delete_ssh_allow(network, rg, name, rule_name, prefixes)
+
+
+def _delete_ssh_allow(
+    network: NetworkManagementClient, rg: str, name: str, rule_name: str, prefixes: list[str] | None
+) -> None:
     from azure.core.exceptions import ResourceNotFoundError
 
     scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
     try:
-        poller = network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name)
-        poller.result(timeout=_RULE_REMOVAL_TIMEOUT_SECONDS)
+        _run_route_operation(
+            partial(network.security_rules.begin_delete, rg, f"{name}-nsg", rule_name, **_route_operation_options()),
+            f"removing the '{rule_name}' rule on NSG '{name}-nsg'",
+        )
     except ResourceNotFoundError:
+        return
+    except _RouteCallTimeout as timeout:
+        output.warn(
+            f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
+            f"{timeout.seconds:.0f}s, so the VM's SSH port may remain open to {scope}; check "
+            "the rule and delete it manually if it is still there."
+        )
         return
     except Exception as exc:
         err = wrap_azure_error(exc)
@@ -423,13 +564,6 @@ def remove_ssh_allow(
             f"could not remove the '{rule_name}' rule on NSG "
             f"'{name}-nsg': {err.summary}. The VM's SSH port stays open to "
             f"{scope}; delete the rule manually to restore zero inbound exposure."
-        )
-        return
-    if not poller.done():
-        output.warn(
-            f"Azure did not confirm the removal of the '{rule_name}' rule on NSG '{name}-nsg' within "
-            f"{_RULE_REMOVAL_TIMEOUT_SECONDS:.0f}s, so the VM's SSH port may remain open to {scope}; check "
-            "the rule and delete it manually if it is still there."
         )
         return
     output.info(f"Closed SSH route (removed allow rule '{rule_name}')")
@@ -457,38 +591,54 @@ def ensure_public_ip(
     )
 
     try:
-        nic = network.network_interfaces.get(rg, f"{name}-nic")
+        nic = _bounded_route_call(
+            partial(network.network_interfaces.get, rg, f"{name}-nic", **_route_call_options()),
+            f"reading the NIC '{name}-nic'",
+        )
         if nic.ip_configurations and nic.ip_configurations[0].public_ip_address is not None:
             return
 
         output.info("Restoring missing public IP...")
-        ip_poller = network.public_ip_addresses.begin_create_or_update(
-            rg,
-            f"{name}-ip",
-            PublicIPAddress(
-                location=_get_vm_location(compute, rg, name),
-                sku=PublicIPAddressSku(name="Standard"),
-                properties=PublicIPAddressPropertiesFormat(public_ip_allocation_method="Static"),
-                tags={"owner": "agentworks"},
+        location = _get_vm_location(compute, rg, name)
+        ip_result = _run_route_operation(
+            partial(
+                network.public_ip_addresses.begin_create_or_update,
+                rg,
+                f"{name}-ip",
+                PublicIPAddress(
+                    location=location,
+                    sku=PublicIPAddressSku(name="Standard"),
+                    properties=PublicIPAddressPropertiesFormat(public_ip_allocation_method="Static"),
+                    tags={"owner": "agentworks"},
+                ),
+                **_route_operation_options(),
             ),
+            f"creating the public IP '{name}-ip'",
         )
-        ip_result = ip_poller.result()
 
         if nic.ip_configurations:
             nic.ip_configurations[0].public_ip_address = PublicIPAddress(id=ip_result.id)
-        network.network_interfaces.begin_create_or_update(
-            rg,
-            f"{name}-nic",
-            nic,
-        ).result()
+        _run_route_operation(
+            partial(
+                network.network_interfaces.begin_create_or_update, rg, f"{name}-nic", nic, **_route_operation_options()
+            ),
+            f"attaching the public IP to '{name}-nic'",
+        )
 
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
 
 
-def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
-    """Resolve the public IP address for a VM from its NIC, using the
-    caller's (cached) network client."""
+def get_vm_public_ip(compute: ComputeManagementClient, network: NetworkManagementClient, rg: str, name: str) -> str:
+    """The VM's public IP address, read live through its NIC, or ``""`` when it has none.
+
+    It is the route's address read, so each of its reads (the VM, its NIC,
+    the public IP) is bounded as a route call.
+    """
+    vm_info = _bounded_route_call(
+        partial(compute.virtual_machines.get, rg, name, expand="instanceView", **_route_call_options()),
+        f"reading the VM '{name}'",
+    )
     nic_refs = (
         getattr(
             getattr(vm_info, "network_profile", None),
@@ -507,7 +657,10 @@ def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
         nic_rg = parts[rg_idx + 1]
         nic_name = parts[-1]
 
-        nic = network.network_interfaces.get(nic_rg, nic_name)
+        nic = _bounded_route_call(
+            partial(network.network_interfaces.get, nic_rg, nic_name, **_route_call_options()),
+            f"reading the NIC '{nic_name}'",
+        )
         for ip_config in nic.ip_configurations or []:
             pip_ref = ip_config.public_ip_address
             if pip_ref and pip_ref.id:
@@ -515,7 +668,10 @@ def get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
                 pip_rg_idx = next(i for i, p in enumerate(pip_parts) if p.lower() == "resourcegroups")
                 pip_rg = pip_parts[pip_rg_idx + 1]
                 pip_name = pip_parts[-1]
-                pip = network.public_ip_addresses.get(pip_rg, pip_name)
+                pip = _bounded_route_call(
+                    partial(network.public_ip_addresses.get, pip_rg, pip_name, **_route_call_options()),
+                    f"reading the public IP '{pip_name}'",
+                )
                 if pip.properties and pip.properties.ip_address:
                     return pip.properties.ip_address
     return ""
@@ -783,6 +939,8 @@ def rollback_create_on_interrupt(
 
 def _get_vm_location(compute: ComputeManagementClient, rg: str, name: str) -> str:
     """Get the Azure region for a VM by querying the compute API, using
-    the caller's (cached) compute client."""
-    vm_info = compute.virtual_machines.get(rg, name)
+    the caller's (cached) compute client, bounded as a route call."""
+    vm_info = _bounded_route_call(
+        partial(compute.virtual_machines.get, rg, name, **_route_call_options()), f"reading the VM '{name}'"
+    )
     return vm_info.location or "eastus"

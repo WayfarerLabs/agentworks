@@ -9,20 +9,29 @@ strips agent traversal into the whole workspaces tree (see #254).
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from agentworks import output
-from agentworks.ssh import SSHError
+from agentworks.execution.requests import Command
 from agentworks.workspaces.acls import apply_workspace_acls
+
+from .steps import STEP_FAILURES, warn_step
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
+    from agentworks.execution.files import Files
+
+    from .steps import InitLog
 
 
-def _setup_workspaces_directory(target: Transport, config: Config, logger: SSHLogger) -> None:
-    """Create the shared workspaces parent and apply the canonical ACL.
+def traversal_paths(workspaces_dir: str) -> tuple[str, ...]:
+    """``workspaces_dir`` and each of its ancestors but ``/``, deepest first: the paths agents traverse."""
+    path = PurePosixPath(workspaces_dir)
+    return tuple(str(directory) for directory in (path, *path.parents) if str(directory) != "/")
+
+
+def _setup_workspaces_directory(files: Files, config: Config, log: InitLog) -> None:
+    """Create the shared workspaces parent and apply the canonical ACL, as root.
 
     Non-fatal: a failure warns and continues (the operator recovers on the
     next ``vm reinit``). ``vm_workspaces`` is guaranteed outside ``/home``
@@ -37,15 +46,15 @@ def _setup_workspaces_directory(target: Transport, config: Config, logger: SSHLo
        everything under it. That hardens the workspace subtrees (no
        world-read/traverse), which is what we want, but it also clears the
        ``other`` traverse bit on ``workspaces_dir`` itself.
-    2. The parent-traversal loop then re-grants ``other::--x`` on
-       ``workspaces_dir`` and its ANCESTORS. Those parents are ``root:root``
-       and agents are neither their owner nor in their group, so agents reach
+    2. The traversal re-grant then gives ``other::--x`` back to
+       ``workspaces_dir`` and its ANCESTORS (:func:`traversal_paths`, computed
+       here and passed to one ``chmod``). Those parents are ``root:root`` and
+       agents are neither their owner nor in their group, so agents reach
        ``workspaces_dir`` only via ``other``-x; step 1 having cleared it, this
-       loop restores it. It walks UPWARD via ``dirname`` (never into the
-       subtrees), so the workspace subtrees stay at ``other::---`` while the
-       shared parent chain regains traverse. ``chmod`` does not touch default
-       ACLs, so the ``default:other::---`` seeded on ``workspaces_dir`` (which
-       new workspaces inherit) survives.
+       restores it. It never descends into the subtrees, so they stay at
+       ``other::---`` while the shared parent chain regains traverse.
+       ``chmod`` does not touch default ACLs, so the ``default:other::---``
+       seeded on ``workspaces_dir`` (which new workspaces inherit) survives.
 
     Applying the ACL first and re-granting traverse second is therefore
     mandatory: the reverse order lets step 1 clobber the traverse bit step 2
@@ -54,20 +63,20 @@ def _setup_workspaces_directory(target: Transport, config: Config, logger: SSHLo
     workspaces_dir = config.paths.vm_workspaces
     try:
         # acl is installed as a system package in _install_system_packages.
-        target.run(f"mkdir -p {workspaces_dir}", sudo=True)
+        files.access.run(
+            Command(("mkdir", "-p", "--", workspaces_dir), elevated=True, deadline=files.deadline), check=True
+        )
         # The canonical workspace ACL on the workspaces parent, the same spec
         # (and shared helper) workspace create, repair, copy, and rehome apply
         # per workspace, so all of them never drift. Every workspace ACL path
         # denies `other` (access and default), so copied and rehomed workspaces
         # are hardened identically to created ones.
-        apply_workspace_acls(target, workspaces_dir)
+        apply_workspace_acls(files, workspaces_dir)
         # Re-grant agent traversal on workspaces_dir and its ancestors, AFTER
         # the ACL apply (see the ordering rationale above).
-        target.run(
-            f'sh -c \'p={workspaces_dir}; while [ "$p" != "/" ]; do chmod a+x "$p"; p=$(dirname "$p"); done\'',
-            sudo=True,
+        files.access.run(
+            Command(("chmod", "a+x", "--", *traversal_paths(workspaces_dir)), elevated=True, deadline=files.deadline),
+            check=True,
         )
-    except SSHError as e:
-        msg = f"workspaces directory setup failed: {e}"
-        logger.warning(msg)
-        output.warn(msg)
+    except STEP_FAILURES as error:
+        warn_step(log, "workspaces directory setup failed", error)

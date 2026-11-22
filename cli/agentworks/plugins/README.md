@@ -151,13 +151,12 @@ failing far from the mistake. The checks:
 
 Each failure is a `PluginError` naming the plugin, the kind, the impl, and what is missing.
 
-The complete version-1 secret-backend authoring contract, including exact result variants, reason
+The complete version-3 secret-backend authoring contract, including exact result variants, reason
 ownership, core flow, lifecycle, TTY broker rules, value containment, and a conforming example,
 lives in the [secret-backend capability README](../capabilities/secret_backend/README.md).
-Secret-backend version `2` shipped in Agentworks 0.14.0 and 0.14.1, when plugins could already
-contribute this capability, but every implementation was bundled. Agentworks 0.15 intentionally
-renumbers the incompatible complete contract to exact version `1`, with no adapter. Bundled backends
-must migrate the complete client and tagged-result API before registration.
+Secret-backend version `2` shipped in Agentworks 0.14.0 and 0.14.1 with an incompatible contract,
+when plugins could already contribute this capability, but every implementation was bundled. The
+number is skipped, so no implementation written for it can register.
 
 ## Declaring config
 
@@ -260,7 +259,7 @@ source config is tagged, while its per-secret mapping is selected by its outer m
 tag, and extends `AgwRootModel` rather than `AgwModel` because a mapping may be a bare string.
 Conformance checks both backend models against their separate contracts.
 
-Git credential providers use contract version 3. Each provider owns its entire config model,
+Git credential providers use contract version 4. Each provider owns its entire config model,
 including any acquisition discriminator and every `SecretRef`, and implements `credential_scopes()`
 to declare generic HTTPS routing plus `credential_material(ctx)` to return either a stored
 credential or a provider-authored runtime helper. It may override the default no-op

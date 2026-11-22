@@ -237,11 +237,12 @@ balanced disk type, and every stable name before its first insert. The final ins
 auto-deleted boot disk, no guest service account, an explicit IPv4-only interface, and one lifetime
 ephemeral external access config. The retained startup metadata contains no Tailscale or Google
 credential. After its durable success marker appears, Agentworks joins the VM to the tailnet once,
-as root over SSH to the external address, with the Tailscale key only on the join script's stdin
-(`tailscale up --auth-key=file:/dev/stdin`), and then reads the VM's Tailscale address the same way.
-If the address cannot be read, it logs the node out and the create fails and rolls back. The
-resulting VM row records the original canonical operator SSH source prefixes so later cleanup can
-reconstruct the create-time allow independently; it still does not store the VM's external IPv4.
+as root (`sudo` behind the admin's SSH to the external address), with the Tailscale key only on the
+join script's stdin (`tailscale up --auth-key=file:/dev/stdin`), and then reads the VM's Tailscale
+address the same way. If the address cannot be read, it logs the node out and the create fails and
+rolls back. The resulting VM row records the original canonical operator SSH source prefixes so
+later cleanup can reconstruct the create-time allow independently; it still does not store the VM's
+external IPv4.
 
 Starting a GCE VM resumes a suspended instance and starts a terminated instance. If shutdown or
 suspension is still in progress, Agentworks waits within the power-state timeout for it to settle
@@ -284,10 +285,19 @@ the database row and deny for a retry. The boot disk is removed by the instance'
 auto-delete setting.
 
 If create rollback or delete cannot prove cleanup, Agentworks prints the project, zone, resource
-names, expected provider IDs, and safe next action. Verify each provider ID before any manual
-name-based deletion:
+names, expected provider IDs, and safe next action. A create stopped while an insert's outcome was
+still unknown (its operation unfinished, or no answer to the insert received) cannot treat that
+resource as gone, whether it read as not found or could not be read at all, until it sees the
+resource it owns: the insert may still create it. Rollback then keeps the owned deny while the
+instance may still appear and prints, for each such resource, the insert's operation to watch when
+one is known. Wait until that operation reports `DONE` before checking the resource: a resource that
+reads as not found before then can still be created by an unanswered insert. When no operation is
+known, the printed steps say the resource may still appear, and the deny is kept and its removal
+escalated. Verify each provider ID before any manual name-based deletion:
 
 ```bash
+gcloud compute operations describe OPERATION \
+  --project PROJECT --zone ZONE   # --global for a firewall rule's operation
 gcloud compute instances describe INSTANCE \
   --project PROJECT --zone ZONE --format='value(id)'
 gcloud compute firewall-rules describe RULE \
@@ -296,8 +306,9 @@ gcloud compute firewall-rules describe RULE \
 
 Only when the observed ID still equals the expected ID printed by Agentworks may you run the exact
 delete command it recommends. Close an owned allow first; delete an owned instance next; remove the
-owned deny only after `instances describe` reports not found. This ordering preserves fail-closed
-exposure around a possible survivor.
+owned deny only after `instances describe` reports not found and, when the instance insert's outcome
+was unknown, that insert's operation reports `DONE`. With no operation known for it, keep the deny
+and escalate. This ordering preserves fail-closed exposure around a possible survivor.
 
 If the expected ID is unknown, the observed ID differs, or a same-name resource has a different
 shape, treat it as a collision: inspect ownership and escalate. Do not delete it by name. Matching

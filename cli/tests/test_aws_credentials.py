@@ -200,7 +200,7 @@ class TestSessionCaching:
         platform.stop(vm, _ctx())
 
         assert len(rec.sessions) == 1
-        assert set(platform._clients) == {("ec2", "us-east-1")}
+        assert set(platform._clients) == {("ec2", "us-east-1", False)}
 
         second = _creds_platform()
         second.status(vm, _ctx())
@@ -218,4 +218,4 @@ class TestSessionCaching:
         platform.status(vm_a, _ctx())
         platform.status(vm_b, _ctx())
 
-        assert set(platform._clients) == {("ec2", "us-east-1"), ("ec2", "eu-west-1")}
+        assert set(platform._clients) == {("ec2", "us-east-1", False), ("ec2", "eu-west-1", False)}

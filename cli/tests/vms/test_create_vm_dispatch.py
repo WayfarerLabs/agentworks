@@ -30,6 +30,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.execution import trust
+from agentworks.path_rendering import format_host_path
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import (
@@ -317,16 +318,15 @@ def test_create_vm_metadata_failure_retains_owner_and_reports_once(
         StateError("plugin has no Trixie selector", hint="update the plugin"),
         AuthorizationError("provider denied create", hint="grant the required action"),
         TokenRejectedError("provider rejected the credential", hint="check the credential"),
-        ValidationError("the platform would rename this hostname", hint="pick another VM name"),
     ],
-    ids=("operator-map", "code-map", "authorization", "credential", "refused-request"),
+    ids=("operator-map", "code-map", "authorization", "credential"),
 )
 def test_create_vm_preserves_typed_platform_failure(
     db: Database,
     make_config,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: object,
-    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError | ValidationError,
+    failure: ConfigError | StateError | AuthorizationError | TokenRejectedError,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
@@ -380,8 +380,13 @@ def test_create_vm_refuses_a_platform_refused_hostname_before_anything_resolves(
 
 @pytest.mark.parametrize(
     "failure",
-    [ConnectivityError("node did not report its address", hint="log in again"), RuntimeError("no hint here")],
-    ids=("agentworks-error", "other"),
+    [
+        ConnectivityError("node did not report its address", hint="log in again"),
+        # A provider-reported address PublicSSH refuses, after the backend VM exists.
+        ValidationError("SSH host must be a literal DNS name or unbracketed IP address"),
+        RuntimeError("no hint here"),
+    ],
+    ids=("agentworks-error", "validation-error", "other"),
 )
 def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
     db: Database,
@@ -399,6 +404,33 @@ def test_create_vm_wraps_an_untyped_platform_failure_with_its_hint(
 
     assert caught.value.__cause__ is failure
     assert caught.value.hint == getattr(failure, "hint", None)
+
+
+def test_a_failed_join_names_the_create_log_which_holds_tailscale_s_reason(
+    db: Database, make_config, monkeypatch: pytest.MonkeyPatch, captured_output: object, tmp_path: Path
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale
+    from agentworks.execution import oplog
+    from tests._root_channel_fakes import Answer, FakeGuest
+
+    monkeypatch.setattr(oplog, "LOG_DIR", tmp_path / "logs")
+    guest = FakeGuest(lambda payload, seen: Answer(status=1, stderr=b"backend error: invalid key\n"))
+
+    def create(self: LimaPlatform, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        join_tailscale(
+            guest.run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+        )
+        raise AssertionError("the join fails")
+
+    monkeypatch.setattr(LimaPlatform, "create", create)
+
+    with pytest.raises(ProvisioningError) as caught:
+        vm_manager.create_vm(db, make_config(), name="join-fail", interaction=TtyInteractionPolicy.REFUSE)
+
+    (log,) = oplog.vm_logs("join-fail", stem="vm-create")
+    assert format_host_path(log) in str(caught.value)
+    assert "backend error: invalid key" in log.read_text()
 
 
 @pytest.mark.parametrize(
@@ -509,8 +541,8 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
     captured_output: object,
 ) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.execution.oplog import OperationLogFile
     from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
-    from agentworks.ssh import SSHLogger
 
     config = make_config()
     outcomes: list[OverlayOutcome] = []
@@ -529,7 +561,7 @@ def test_create_vm_logger_close_failure_retains_owner_and_reports_once(
         lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks", DebianRelease.TRIXIE),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
-    monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
+    monkeypatch.setattr(OperationLogFile, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
 
     with pytest.raises(RuntimeError, match="close failed"):
         vm_manager.create_vm(

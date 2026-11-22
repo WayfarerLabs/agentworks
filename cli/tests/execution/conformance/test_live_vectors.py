@@ -3,9 +3,13 @@
 Set ``AGW_CONFORMANCE_VM`` to the name of a VM in the operator's own state and
 run ``uv run pytest tests/execution/conformance/test_live_vectors.py -m integration``
 from each workstation. The lane reaches the VM as the operator's configured
-admin, over the operator's real host-key store, and creates and removes only
+admin, over the operator's real host-key store, and creates and removes
 files and directories under ``/tmp`` named ``agw-conformance-*`` and
-``agw-handover-*``. Deadlines on every request bound a hung guest.
+``agw-handover-*``. The detached vectors (DT1, DT2) also create
+``/var/lib/agentworks/detached``, and its parent if absent, and leave both;
+they discard each launch they make, and every launch removes the sibling
+launch directories that are not running and are older than seven days.
+Deadlines on every request bound a hung guest.
 """
 
 from __future__ import annotations
@@ -39,15 +43,13 @@ def live_lane(monkeypatch: pytest.MonkeyPatch) -> Iterator[LiveLane]:
     monkeypatch.setattr(db_module, "DB_PATH", REAL_DB_PATH)
     monkeypatch.setattr(trust, "STORE_DIR", REAL_STORE_DIR)
     from agentworks.config import load_config
-    from agentworks.execution import vm_access
-    from agentworks.execution.access import Admin
 
     database = db_module.Database()
     try:
         vm = database.get_vm(name)
         if vm is None:
             pytest.fail(f"AGW_CONFORMANCE_VM names '{name}', which is not a VM in the operator's state")
-        lane = LiveLane(monkeypatch, vm, vm_access(vm, load_config(), Admin()))
+        lane = LiveLane(monkeypatch, vm, load_config())
         yield lane
         lane.cleanup()
     finally:

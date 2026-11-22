@@ -260,7 +260,7 @@ def _report_contents(
 ) -> None:
     """Report stored counts and flag VMs in non-complete states."""
     from agentworks.db import InitStatus
-    from agentworks.ssh import LOG_DIR
+    from agentworks.execution import oplog
 
     group.ok(
         "Contents",
@@ -269,9 +269,7 @@ def _report_contents(
     )
 
     def log_hint(vm_name: str) -> str:
-        if not LOG_DIR.exists():
-            return ""
-        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+        logs = oplog.vm_logs(vm_name)
         return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:
@@ -300,7 +298,11 @@ def _report_instance_state(
     )
     from agentworks.errors import StateError
     from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, decode_native_setup
-    from agentworks.instance_specs import UnsupportedStoredOverlayError, decode_stored_overlay
+    from agentworks.instance_specs import (
+        ExplicitReplacementRequired,
+        UnsupportedStoredOverlayError,
+        decode_stored_overlay,
+    )
     from agentworks.legacy_claude import LegacyClaudeContextRequired
     from agentworks.ssh_identity import SSHIdentityReadError, read_private_ssh_identity
     from agentworks.vms.applied_state import (
@@ -401,6 +403,15 @@ def _report_instance_state(
                 InstanceStateHealthFactType.MIGRATION_PENDING,
                 metadata,
                 hint="Migrate the selected template, then run owning reinit to convert the stored overlay.",
+            )
+        except ExplicitReplacementRequired as error:
+            add(
+                Status.WARN,
+                label(metadata),
+                "record holds a value this release retired and needs an explicit replacement",
+                InstanceStateHealthFactType.MIGRATION_PENDING,
+                metadata,
+                hint=error.hint,
             )
         except UnsupportedStoredOverlayError:
             add(

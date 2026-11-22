@@ -4,7 +4,7 @@ shape), the banner and failure parity with the imperative commands, and
 the grant-all reconciliation riding the realization body.
 
 Real config, registry, resolver, and backend loop (env-var backend);
-the platform's backend ops, the reachability probe, the transports,
+the platform's backend ops, the reachability probe, the VM access,
 and the on-VM mutation (``create_agent_on_vm``) are the fakes.
 """
 
@@ -30,6 +30,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
+from tests.vm_access_support import answer_destination_identity, install_access_recorder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -223,7 +224,7 @@ def test_create_and_reinit_loggers_receive_all_git_credential_inputs(
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", _LoggerSpy)
 
     agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
     agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
@@ -492,15 +493,15 @@ def test_create_logger_close_failure_retains_owner_and_reports_once(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
+    from agentworks.execution.oplog import OperationLogFile
     from agentworks.instance_specs import OverlayDisposition, OverlayOutcome
-    from agentworks.ssh import SSHLogger
 
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
     outcomes: list[OverlayOutcome] = []
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
-    monkeypatch.setattr(SSHLogger, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
+    monkeypatch.setattr(OperationLogFile, "close", lambda self: (_ for _ in ()).throw(RuntimeError("close failed")))
 
     with pytest.raises(RuntimeError, match="close failed"):
         agent_manager.create_agent(
@@ -1075,7 +1076,7 @@ def test_create_grant_all_reconciles_between_insert_and_sync(
 # therefore pin the reconcile itself (that it runs, over which workspaces,
 # without re-inserting rows), NOT that the recreate branch specifically was
 # taken. Driving the two user-step outcomes would require exercising the real
-# ``create_agent_on_vm`` against a fake transport, which is out of scope here.
+# ``create_agent_on_vm`` against a fake access, which is out of scope here.
 
 
 def _add_workspace(db: Database, name: str) -> None:
@@ -1283,7 +1284,6 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
     from agentworks.harness_setup.state import read_native_setup
-    from agentworks.transports import Transport
 
     config = make_config()
     _seed_vm(db)
@@ -1291,10 +1291,7 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     monkeypatch.setenv("AW_SECRET_SETUP_TOKEN", "setup-private")
     if operation == "reinit":
         db.insert_agent("dev", "box", "agt-dev", template="default")
-    target = MagicMock(spec=Transport)
-    target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    install_access_recorder(monkeypatch).answer = answer_destination_identity
     calls = []
 
     def setup(self, invocation):
@@ -1328,7 +1325,6 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
     from dataclasses import replace
 
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
-    from agentworks.transports import Transport
 
     manifests = [
         *AGENT_MANIFESTS[:2],
@@ -1349,10 +1345,7 @@ def test_legacy_overlay_conversion_waits_for_successful_native_reinit(
     db.instance_state.put_desired_overlay("agent", "dev", payload)
     original = db.instance_state.get_desired_overlay("agent", "dev")
     _reachable(monkeypatch, True)
-    target = MagicMock(spec=Transport)
-    target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    install_access_recorder(monkeypatch).answer = answer_destination_identity
 
     def setup(self, invocation):
         assert db.instance_state.get_desired_overlay("agent", "dev") == original
@@ -1403,7 +1396,6 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.state import read_native_setup
     from agentworks.plugins.codex.harness_integration import CodexIntegration
-    from agentworks.transports import Transport
 
     config = make_config()
     config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "codex"))
@@ -1413,10 +1405,7 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
     if operation == "reinit":
         db.insert_agent("dev", "box", "agt-dev", template="default")
         db.insert_agent_grant("dev", "project", "explicit")
-    target = MagicMock(spec=Transport)
-    target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    install_access_recorder(monkeypatch).answer = answer_destination_identity
     events = []
 
     def fail_setup(self, invocation):
@@ -1454,3 +1443,27 @@ def test_native_failure_preserves_agent_and_continues_sibling_grants_and_ssh(
     assert not records["shell"].complete
     assert records["codex"].complete
     assert db.instance_state.get_desired_overlay("agent", "dev") is not None
+
+
+def test_reinit_binding_line_appears_only_when_the_effective_template_changes(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: dict[str, Any],
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Leaving a NULL template names it as the reserved ``default``; re-pointing to the current one says nothing."""
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev")
+    _reachable(monkeypatch, True)
+
+    agent_manager.reinit_agent(db, config, name="dev", update_template="other", interaction=TtyInteractionPolicy.REFUSE)
+    changed = list(captured_output.info)
+    captured_output.info.clear()
+    agent_manager.reinit_agent(db, config, name="dev", update_template="other", interaction=TtyInteractionPolicy.REFUSE)
+    unchanged = list(captured_output.info)
+
+    (binding,) = [line for line in changed if repr("other") in line]
+    assert repr("default") in binding
+    assert not any(repr("other") in line for line in unchanged)

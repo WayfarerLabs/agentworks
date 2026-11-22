@@ -94,7 +94,7 @@ KINDS = {
             "shell": "zsh",
             "git_credentials": ["github"],
             "user_install_commands": ["mise"],
-            "dotfiles_source": "git@github.com:octocat/dotfiles.git",
+            "dotfiles_source": "git::git@github.com:octocat/dotfiles.git",
             "dotfiles_destination": "~/config/dotfiles",
             "dotfiles_install_cmd": "./bootstrap.sh",
             "mise_activate": False,

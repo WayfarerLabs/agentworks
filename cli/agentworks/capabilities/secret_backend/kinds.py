@@ -77,7 +77,7 @@ def _backend_readiness(name: str, impl: Any) -> Readiness:
 
 SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     kind="secret-backend",
-    contract_version=1,
+    contract_version=3,
     implementation_contract=SecretBackend,
     registry=_backend_registry,
     required_operations=frozenset(

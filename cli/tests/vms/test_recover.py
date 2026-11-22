@@ -272,17 +272,17 @@ def test_the_operation_log_never_holds_the_key(
     captured_output: CapturedOutput,
     tmp_path: Path,
 ) -> None:
-    from agentworks import ssh
+    from agentworks.execution import oplog
 
     # The suite's log directory is per worker, so this test's log needs one of its own.
-    monkeypatch.setattr(ssh, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(oplog, "LOG_DIR", tmp_path / "logs")
     _seed(db)
     _guest(monkeypatch, repair=Answer(stdout=f"echoed {KEY}\njoined\n".encode()))
     _waits(monkeypatch)
 
     _recover(db, make_config())
 
-    (log,) = ssh.LOG_DIR.glob("box-*-recover.log")
+    (log,) = oplog.vm_logs("box", stem="recover")
     text = log.read_text(encoding="utf-8")
     assert "BackendState" not in text  # the script's source is never written
     assert KEY not in text
@@ -356,7 +356,7 @@ def test_a_read_alone_that_runs_out_points_at_the_log_that_recorded_every_read(
     def _recording_log(*_args: object, **_kwargs: object):  # noqa: ANN202
         yield _Log()
 
-    monkeypatch.setattr(recover, "_operation_log", _recording_log)
+    monkeypatch.setattr(recover, "operation_log", _recording_log)
     _seed(db)
     guest = _guest(monkeypatch, address=Answer(status=1))
     _waits(monkeypatch)

@@ -1,10 +1,10 @@
 """Transport identity for single-session ops (FRD R1).
 
 Pins the contract that ``create_session`` / ``restart_session`` /
-``stop_session`` / ``delete_session`` route destructive tmux operations
-on agent-mode sessions through direct agent SSH (``agent_transport``)
-rather than admin+sudo, and that the pre-rollout SSH probe runs BEFORE
-any state mutation in each path.
+``stop_session`` / ``delete_session`` run destructive tmux operations on
+agent-mode sessions on the agent's own access (direct SSH as the agent)
+rather than elevated on the admin's, and that the pre-rollout SSH probe
+runs BEFORE any state mutation in each path.
 
 These are integration-shaped: they spin up a real ``Database``,
 monkey-patch the SSH layer, and call the public service-layer functions
@@ -15,13 +15,25 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks.db import Database, ProvisioningStatus
+from agentworks.execution.access import Admin, Agent
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
+from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint, access_run_command
+from tests._runtime_probes import owner_probe_line
+from tests.vm_access_support import (
+    Call,
+    RecordingVMAccess,
+    check_result,
+    command_line,
+    guest_result,
+    is_command_check,
+    presence_check,
+    route_vm_access_to_guest,
+)
 
 from .conftest import (
     seed_vm_trust,
@@ -41,26 +53,36 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 if TYPE_CHECKING:
-    pass
+    from agentworks.execution.results import Result
+    from tests.vm_access_support import AccessRecorder
 
 
-class _Result:
-    ok = True
-    returncode = 0
-    stdout = ""
-    stderr = ""
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
 class _Target:
-    """``Transport`` stub that records every ``run`` call against a shared log."""
+    """A guest that records every request's command line against a shared log and completes it with status 0."""
 
     def __init__(self, label: str, log: list[tuple[str, str]]) -> None:
         self.label = label
         self.log = log
 
-    def run(self, cmd: str, *_args: object, **_kwargs: object) -> _Result:
+    def answer(self, call: Call) -> Result | None:
+        cmd = command_line(call.request)
+        if cmd is None:
+            return None
         self.log.append((self.label, cmd))
-        return _Result()
+        return self.outcome(cmd)
+
+    def outcome(self, cmd: str) -> Result:
+        return guest_result()
+
+    def access(self) -> RecordingVMAccess:
+        """The admin's access, its requests answered here."""
+        access = RecordingVMAccess([], Admin())
+        access.answer = self.answer
+        return access
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -83,17 +105,13 @@ def _patch_common(
     *,
     call_log: list[tuple[str, str]],
 ) -> dict[str, _Target]:
-    """Patch the SSH factories so admin/agent targets are distinguishable."""
+    """Route the admin's and the agent's accesses to distinguishable targets."""
     targets = {
         "admin": _Target("admin", call_log),
         "agent": _Target("agent", call_log),
     }
 
-    admin_factory = lambda vm, config, **kwargs: targets["admin"]  # noqa: E731
-    agent_factory = lambda vm, config, agent, **kwargs: targets["agent"]  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", admin_factory)
-    monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
+    route_vm_access_to_guest(monkeypatch, targets["admin"].answer, targets["agent"].answer)
     monkeypatch.setattr(
         "agentworks.sessions.tmux.capture_tmux_server_fingerprint",
         lambda **kwargs: FingerprintProbe(
@@ -161,14 +179,8 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
     commands: list[tuple[str, str]] = []
 
     class _RemovalTarget(_Target):
-        def run(self, cmd: str, *_args: object, **_kwargs: object) -> _Result:
-            self.log.append((self.label, cmd))
-            if cmd.startswith("test -e "):
-                result = _Result()
-                result.ok = False
-                result.returncode = 1
-                return result
-            return _Result()
+        def outcome(self, cmd: str) -> Result:
+            return guest_result(1 if owner_probe_line(cmd).startswith("test -e ") else 0)
 
     target = _RemovalTarget("admin", commands)
     monkeypatch.setattr(
@@ -187,9 +199,9 @@ def test_dedicated_teardown_kills_the_fingerprinted_server_and_not_a_numeric_pid
     )
     monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", lambda plan: True)
 
-    session_manager._teardown_session(  # type: ignore[arg-type]
-        session,
-        target=target,
+    session_manager._teardown_session(
+        session,  # type: ignore[arg-type]
+        access=target.access(),
         target_owns_session=True,
         db=db,
         force=False,
@@ -225,9 +237,9 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
     )
 
     with pytest.raises(BrokenStateError):
-        session_manager._teardown_session(  # type: ignore[arg-type]
-            session,
-            target=target,
+        session_manager._teardown_session(
+            session,  # type: ignore[arg-type]
+            access=target.access(),
             target_owns_session=True,
             db=db,
             force=False,
@@ -236,7 +248,7 @@ def test_dedicated_teardown_refuses_a_fingerprint_mismatch(tmp_path: Path, monke
 
 
 @pytest.mark.parametrize("operation", ["recover", "post-kill"])
-def test_admin_transport_elevates_agent_runtime_absence_proof(
+def test_admin_access_elevates_agent_runtime_absence_proof(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
@@ -252,7 +264,7 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
     observed_sudo: list[bool] = []
 
     def _still_live_plan(plan):  # type: ignore[no-untyped-def]
-        observed_sudo.append(plan.sudo)
+        observed_sudo.append(plan.switch_user)
         return False
 
     monkeypatch.setattr(teardown_mod, "_prove_plan_runtime_absent", _still_live_plan)
@@ -263,9 +275,9 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
             lambda **kwargs: FingerprintProbe(ProbeStatus.ABSENT),
         )
         with pytest.raises(BrokenStateError):
-            session_manager._teardown_session(  # type: ignore[arg-type]
-                session,
-                target=target,
+            session_manager._teardown_session(
+                session,  # type: ignore[arg-type]
+                access=target.access(),
                 target_owns_session=False,
                 db=db,
                 force=False,
@@ -282,9 +294,9 @@ def test_admin_transport_elevates_agent_runtime_absence_proof(
         )
         monkeypatch.setattr(tmux_mod, "kill_server", lambda **kwargs: True)
         with pytest.raises(ExternalError):
-            session_manager._teardown_session(  # type: ignore[arg-type]
-                session,
-                target=target,
+            session_manager._teardown_session(
+                session,  # type: ignore[arg-type]
+                access=target.access(),
                 target_owns_session=False,
                 db=db,
                 force=False,
@@ -307,12 +319,17 @@ def test_runtime_absence_proof_rejects_a_malformed_stored_boot_identity(tmp_path
     assert session is not None
 
     with pytest.raises(StateError):
-        session_manager._prove_stored_runtime_absent(session, target=_Target("admin", []))
+        session_manager._prove_stored_runtime_absent(
+            session,  # type: ignore[arg-type]
+            run_command=access_run_command(_Target("admin", []).access(), deadline=None, elevated=False),
+        )
 
 
-def test_legacy_teardown_uses_root_transport_when_the_target_is_not_the_owner(
+def test_legacy_teardown_reads_the_admins_own_server_without_elevating(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A legacy row is always an admin's, so even a caller that does not own it reads the admin's default
+    server as the admin: root's would be a different server."""
     from agentworks.db import SessionMode
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
@@ -331,10 +348,12 @@ def test_legacy_teardown_uses_root_transport_when_the_target_is_not_the_owner(
 
     calls: list[tuple[str, bool]] = []
 
-    class _RootAwareTarget:
-        def run(self, command: str, *, sudo: bool = False, **_kwargs: object) -> _Result:
-            calls.append((command, sudo))
-            return _Result()
+    def root_aware(call: Call) -> Result:
+        calls.append((str(command_line(call.request)), call.request.elevated))
+        return guest_result()
+
+    admin = RecordingVMAccess([], Admin())
+    admin.answer = root_aware
 
     presences = iter((ProbeStatus.PRESENT, ProbeStatus.ABSENT))
 
@@ -351,14 +370,14 @@ def test_legacy_teardown_uses_root_transport_when_the_target_is_not_the_owner(
 
     session_manager._teardown_session(
         session,
-        target=_RootAwareTarget(),  # type: ignore[arg-type]
+        access=admin,
         target_owns_session=False,
         db=db,
         force=False,
         legacy_running_authorized=True,
     )
 
-    assert calls == [("probe", True), ("kill", True), ("probe", True)]
+    assert calls == [("probe", False), ("kill", False), ("probe", False)]
 
 
 def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -367,10 +386,10 @@ def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch
 
     Pre-rollout agents (whose ``~/.ssh/authorized_keys`` was never
     populated) should surface as a clean ``StateError`` from
-    ``_assert_agent_ssh_works`` rather than mutating state that the
+    ``_assert_agent_access_works`` rather than mutating state that the
     rollback path then has to unwind.
     """
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents.manager import access as agent_access
     from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
 
@@ -385,7 +404,7 @@ def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch
     )
 
     # Probe fails: simulate pre-rollout agent.
-    def _probe_rejects(target, agent):  # type: ignore[no-untyped-def]
+    def _probe_rejects(access, admin, agent):  # type: ignore[no-untyped-def]
         raise StateError(
             f"agent '{agent.name}' rejected direct SSH",
             entity_kind="agent",
@@ -393,9 +412,9 @@ def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch
             hint="run reinit",
         )
 
-    # _assert_agent_ssh_works is imported into create_session as a local;
+    # _assert_agent_access_works is imported where it is called;
     # patching at its source module catches every late import.
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", _probe_rejects)
+    monkeypatch.setattr(agent_access, "_assert_agent_access_works", _probe_rejects)
 
     stub_session_resolvers(monkeypatch)
 
@@ -423,21 +442,21 @@ def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch
 
 def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The ``run_command`` passed to ``create_tmux_session`` for an agent
-    session must come from ``agent_transport``, not admin+sudo.
+    session runs on the agent's access, not elevated on the admin's.
     """
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents.manager import access as agent_access
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
     db = _seed_db(tmp_path)
     call_log: list[tuple[str, str]] = []
-    targets = _patch_common(monkeypatch, call_log=call_log)
+    _patch_common(monkeypatch, call_log=call_log)
 
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+    monkeypatch.setattr(agent_access, "_assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
 
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     def _capture_create(
         name,
@@ -446,7 +465,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         linux_user,
         *,
         run_command,
-        target,
+        admin_files,
         admin_username,
         is_admin,
         env=None,
@@ -457,7 +476,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         if before_spawn is not None:
             before_spawn()
         captured["run_command"] = run_command
-        captured["target"] = target
+        captured["admin_files"] = admin_files
         captured["env"] = env
         return ("/tmp/sock", 12345)
 
@@ -477,45 +496,38 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
-    # run_command must be agent_target.run, not admin_target.run.
-    assert captured["run_command"] == targets["agent"].run
-    # `target` (used for socket-root setup) is still admin's.
-    assert captured["target"] is targets["admin"]
+    # The launch's commands run as the agent, not elevated on the admin's access.
+    captured["run_command"]("launch-probe")
+    assert call_log[-1] == ("agent", "launch-probe")
+    # The socket roots are still set up on the admin's access.
+    assert isinstance(captured["admin_files"].access.identity, Admin)
     db.close()
 
 
-def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_session_aborts_on_missing_required_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, vm_access_recorder: AccessRecorder
+) -> None:
     """A template whose ``required_commands`` aren't installed on the agent must
     abort with a clear ``StateError`` BEFORE any state mutation, rather than
     leaving the operator with the cryptic downstream tmux server-access failure.
     """
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents.manager import access as agent_access
     from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
 
     db = _seed_db(tmp_path)
 
-    # Agent target whose `command -v` probe reports the binary as missing.
-    class _MissingCmdResult:
-        def __init__(self, ok: bool) -> None:
-            self.ok = ok
-            self.returncode = 0 if ok else 20
-            self.stdout = ""
-            self.stderr = ""
+    # The agent's command check reports the binary as missing.
+    seen_probes: list[Call] = []
 
-    seen_probes: list[str] = []
+    def answer(call: Call) -> Result | None:
+        if not is_command_check(call.request):
+            return None
+        seen_probes.append(call)
+        return check_result(call.request, 20)
 
-    class _MissingCmdTarget:
-        def run(self, cmd: str, *_a: object, **_k: object) -> _MissingCmdResult:
-            if "command -v" in cmd:
-                seen_probes.append(cmd)
-                return _MissingCmdResult(ok=False)
-            return _MissingCmdResult(ok=True)
-
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _MissingCmdTarget())
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+    vm_access_recorder.answer = answer
+    monkeypatch.setattr(agent_access, "_assert_agent_access_works", lambda *a, **k: None)
     stub_vm_gates(monkeypatch)
 
     add_calls: list[tuple[str, str]] = []
@@ -558,20 +570,19 @@ def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monke
     assert not db.has_any_grant("a1", "ws1")
     assert add_calls == [], "agent added to workspace group before command preflight"
 
-    # Pin the probe's shell flags to `-lic`: same flags `tmux._pane_command`
-    # uses for the actual pane. A regression to `-lc` would silently skip
-    # PATH additions hidden behind interactive-only shell config.
-    assert len(seen_probes) == 1
-    assert " -lic " in seen_probes[0]
+    # The agent's own check, with the startup `tmux._pane_command` gives the
+    # pane: login and interactive (presence_probe), so PATH additions behind
+    # interactive-only shell config count.
+    assert [(call.identity, presence_check(call.request)) for call in seen_probes] == [(Agent("a1", "aw-a1"), "claude")]
     db.close()
 
 
 def test_delete_session_probes_before_confirm_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pre-rollout agent must trip ``_assert_agent_ssh_works`` BEFORE the
+    """A pre-rollout agent must trip ``_assert_agent_access_works`` BEFORE the
     "Delete session ...?" prompt fires; otherwise the operator confirms a
     delete that immediately bails with a StateError, wasting the confirm.
     """
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents.manager import access as agent_access
     from agentworks.db import SessionMode
     from agentworks.errors import StateError
     from agentworks.sessions import manager as session_manager
@@ -609,12 +620,12 @@ def test_delete_session_probes_before_confirm_prompt(tmp_path: Path, monkeypatch
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
     # Probe rejects.
-    def _probe_rejects(target, agent):  # type: ignore[no-untyped-def]
+    def _probe_rejects(access, admin, agent):  # type: ignore[no-untyped-def]
         raise StateError("rejected", entity_kind="agent", entity_name="a1", hint="reinit")
 
-    # _assert_agent_ssh_works is imported into create_session as a local;
+    # _assert_agent_access_works is imported where it is called;
     # patching at its source module catches every late import.
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", _probe_rejects)
+    monkeypatch.setattr(agent_access, "_assert_agent_access_works", _probe_rejects)
 
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
@@ -721,7 +732,7 @@ def test_legacy_runtime_is_preserved_until_confirmed_restart(
         linux_user,
         *,
         run_command,
-        target,
+        admin_files,
         admin_username,
         is_admin,
         env=None,
@@ -833,24 +844,18 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
 
     clap_error = "error: invalid value 'on-failure' for '--ask-for-approval <APPROVAL_POLICY>'"
 
-    class _ScriptedResult:
-        def __init__(self, ok: bool = True, stdout: str = "") -> None:
-            self.ok = ok
-            self.returncode = 0 if ok else 1
-            self.stdout = stdout
-            self.stderr = ""
-
-    class _DeadPaneTarget:
-        """Admin transport whose fresh tmux session holds a dead pane."""
-
-        def run(self, cmd: str, *_args: object, **_kwargs: object) -> _ScriptedResult:
-            if cmd.startswith("test -e "):
-                return _ScriptedResult(ok=False)
-            if "#{pane_dead}" in cmd:
-                return _ScriptedResult(ok=True, stdout="AGW_RUNTIME_PANE=1 2\n")
-            if "capture-pane" in cmd:
-                return _ScriptedResult(ok=True, stdout=f"{clap_error}\n")
-            return _ScriptedResult()
+    def dead_pane(call: Call) -> Result | None:
+        """The admin's guest, whose fresh tmux session holds a dead pane."""
+        cmd = command_line(call.request)
+        if cmd is None:
+            return None
+        if owner_probe_line(cmd).startswith("test -e "):
+            return guest_result(1)
+        if "#{pane_dead}" in cmd:
+            return guest_result(stdout="AGW_RUNTIME_PANE=1 2\n")
+        if "capture-pane" in cmd:
+            return guest_result(stdout=f"{clap_error}\n")
+        return guest_result()
 
     monkeypatch.setattr(
         tmux_mod,
@@ -859,11 +864,7 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
             ProbeStatus.PRESENT, TmuxServerFingerprint(pid=12345, boot_id=BOOT_ID, start_ticks=1)
         ),
     )
-    target = _DeadPaneTarget()
-    factory = lambda *a, **k: target  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
-    monkeypatch.setattr("agentworks.transports.agent_transport", factory)
+    route_vm_access_to_guest(monkeypatch, dead_pane)
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
 

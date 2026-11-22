@@ -25,13 +25,14 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.execution.access import VMAccess
     from agentworks.orchestration.node import Node
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.sessions.nodes import LiveSessionNode
     from agentworks.sessions.template import SessionTemplate
     from agentworks.sessions.templates import ResolvedSessionTemplate
-    from agentworks.transports import Transport
+    from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.nodes import LiveVMNode
     from agentworks.workspaces.nodes import LiveWorkspaceNode
 
@@ -63,11 +64,15 @@ class SessionLaunchDefinition:
 
 @dataclass(frozen=True, kw_only=True)
 class PreparedSessionLaunch:
-    """One eligible workload with its own SESSION scope and owning transport."""
+    """One eligible workload with its own SESSION scope and its owner's access.
+
+    Both accesses keep no log: preparation precedes secret resolution, and
+    the launch opens its own log once the redactions are known.
+    """
 
     definition: SessionLaunchDefinition
-    admin_target: Transport
-    session_target: Transport
+    admin_access: VMAccess
+    session_access: VMAccess
     observed_status: SessionStatus
     legacy: bool
     recovered_startup: bool
@@ -100,8 +105,8 @@ class PreparedSessionStop:
     session: SessionRow
     workspace: WorkspaceRow
     vm: VMRow
-    admin_target: Transport | None
-    session_target: Transport | None
+    admin_access: VMAccess | None
+    session_access: VMAccess | None
     observed_status: SessionStatus
     parent_off: bool
     force: bool
@@ -253,7 +258,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     """Classify eligibility and preflight this session without writing evidence."""
     from agentworks.capabilities.base import RunContext
     from agentworks.harness_setup.readiness import require_setup_ready
-    from agentworks.sessions.tmux import server_owner_run_command, startup_protection_enabled
+    from agentworks.sessions.tmux import startup_protection_enabled
 
     db, config, session = definition.db, definition.config, definition.session
 
@@ -266,20 +271,21 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     require_vm_ssh_boundary(db, config, definition.vm)
-    admin_target = _mgr.transport(definition.vm, config)
+    # Preflight precedes secret resolution, so its accesses log nothing.
+    admin = _mgr._identity_access(definition.vm, config, None, logger=None)
     try:
-        status = observe_session_runtime(current, admin_target=admin_target, server=server)
+        status = observe_session_runtime(current, admin=admin, server=server)
     except StateError:
-        if not can_checkpoint_session(current, vm=definition.vm, admin_target=admin_target, server=server):
+        if not can_checkpoint_session(current, vm=definition.vm, admin=admin, server=server):
             raise
         status = SessionStatus.UNKNOWN
     if status is SessionStatus.UNKNOWN and can_checkpoint_session(
-        current, vm=definition.vm, admin_target=admin_target, server=server
+        current, vm=definition.vm, admin=admin, server=server
     ):
         return PreparedSessionLaunch(
             definition=definition,
-            admin_target=admin_target,
-            session_target=admin_target,
+            admin_access=admin,
+            session_access=admin,
             observed_status=status,
             legacy=current.socket_path is None,
             recovered_startup=False,
@@ -304,7 +310,7 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
                     protection = startup_protection_enabled(
                         current.name,
                         socket_path=server.socket_path,
-                        run_command=server_owner_run_command(admin_target, server.owner),
+                        run_command=_mgr.owner_run_command(admin, server),
                     )
                     if protection is None:
                         raise StateError(
@@ -316,8 +322,8 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
             if not recovered_startup:
                 return PreparedSessionLaunch(
                     definition=definition,
-                    admin_target=admin_target,
-                    session_target=admin_target,
+                    admin_access=admin,
+                    session_access=admin,
                     observed_status=status,
                     legacy=current.socket_path is None,
                     recovered_startup=False,
@@ -327,14 +333,16 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
             raise StateError(
                 "session became running without restart authorization", entity_kind="session", entity_name=session.name
             )
-    require_unaddressed_session_absence(current, vm=definition.vm, admin_target=admin_target)
-    target = _mgr._build_session_target(current, vm=definition.vm, config=config, db=db, admin_target=admin_target)
+    require_unaddressed_session_absence(current, vm=definition.vm, admin=admin)
+    session_access = _mgr._verified_session_access(
+        current, vm=definition.vm, config=config, db=db, admin=admin, logger=None
+    )
     if not recovered_startup or definition.replace_running:
         context = RunContext(
             config=config,
             operation_scope=definition.scope,
-            admin_target=admin_target,
-            agent_target=None if current.agent_name is None else target,
+            admin_access=admin,
+            agent_access=None if current.agent_name is None else session_access,
         )
         for node in definition.nodes:
             node.preflight(context)
@@ -345,12 +353,12 @@ def prepare_session_launch(definition: SessionLaunchDefinition) -> PreparedSessi
             vm=definition.vm,
             workspace=definition.workspace,
             agent_name=current.agent_name,
-            runner=target,
+            access=session_access,
         )
     return PreparedSessionLaunch(
         definition=definition,
-        admin_target=admin_target,
-        session_target=target,
+        admin_access=admin,
+        session_access=session_access,
         observed_status=status,
         legacy=current.socket_path is None,
         recovered_startup=recovered_startup,
@@ -365,8 +373,12 @@ def prepare_session_stop(
     *,
     parent_off: bool = False,
     force: bool = False,
+    logger: OperationLog | None = None,
 ) -> PreparedSessionStop:
-    """Prepare direct teardown, never activating or holding the parent VM."""
+    """Prepare direct teardown, never activating or holding the parent VM.
+
+    Its accesses log to ``logger``, the stop operation's own log, or to none.
+    """
     workspace = _mgr._require_workspace(db, session.workspace_name)
     vm = _mgr._require_vm_for_workspace(db, workspace)
     # A parent that is off runs no tmux client, so only live preparation
@@ -376,19 +388,19 @@ def prepare_session_stop(
         from agentworks.vms.manager import require_vm_ssh_boundary
 
         require_vm_ssh_boundary(db, config, vm)
-    admin_target = None if parent_off else _mgr.transport(vm, config)
+    admin = None if parent_off else _mgr._identity_access(vm, config, None, logger=logger)
     checkpoint_only = False
-    if admin_target is None:
+    if admin is None:
         status = SessionStatus.STOPPED
     else:
         try:
-            status = observe_session_runtime(session, admin_target=admin_target, server=server)
+            status = observe_session_runtime(session, admin=admin, server=server)
         except StateError:
-            if not can_checkpoint_session(session, vm=vm, admin_target=admin_target, server=server):
+            if not can_checkpoint_session(session, vm=vm, admin=admin, server=server):
                 raise
             status = SessionStatus.UNKNOWN
         checkpoint_only = status is SessionStatus.UNKNOWN and can_checkpoint_session(
-            session, vm=vm, admin_target=admin_target, server=server
+            session, vm=vm, admin=admin, server=server
         )
     if status is SessionStatus.UNKNOWN and not checkpoint_only:
         raise StateError("session runtime state is unknown", entity_kind="session", entity_name=session.name)
@@ -396,20 +408,20 @@ def prepare_session_stop(
         raise BrokenStateError(
             "session runtime requires explicit force recovery", entity_kind="session", entity_name=session.name
         )
-    if admin_target is not None and not checkpoint_only:
-        require_unaddressed_session_absence(session, vm=vm, admin_target=admin_target)
-    target = None
+    if admin is not None and not checkpoint_only:
+        require_unaddressed_session_absence(session, vm=vm, admin=admin)
+    owner = None
     if status is not SessionStatus.STOPPED and not checkpoint_only:
-        assert admin_target is not None
-        target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
+        assert admin is not None
+        owner = _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=logger)
     return PreparedSessionStop(
         db=db,
         config=config,
         session=session,
         workspace=workspace,
         vm=vm,
-        admin_target=admin_target,
-        session_target=target,
+        admin_access=admin,
+        session_access=owner,
         observed_status=status,
         parent_off=parent_off,
         force=force,
@@ -441,29 +453,29 @@ def execute_session_stop(prepared: PreparedSessionStop) -> bool:
         # Inactive power is not proof of process death: suspended memory may resume.
         return False
     if prepared.checkpoint_only:
-        assert prepared.admin_target is not None
+        assert prepared.admin_access is not None
         checkpoint_session_identity(
             prepared.db,
             session,
             vm=vm,
-            admin_target=prepared.admin_target,
+            admin=prepared.admin_access,
             server=resolve_session_tmux_server(prepared.db, session),
         )
     if prepared.observed_status is SessionStatus.STOPPED:
-        assert prepared.admin_target is not None
+        assert prepared.admin_access is not None
         if _mgr._needs_repair(session) or session.socket_path is None:
-            repaired = _mgr._ensure_pid(session, target=prepared.admin_target, db=prepared.db)
+            repaired = _mgr._ensure_pid(session, admin=prepared.admin_access, db=prepared.db)
             return repaired != session
         return False
-    assert prepared.admin_target is not None and prepared.session_target is not None
+    assert prepared.admin_access is not None and prepared.session_access is not None
     session = (
-        _mgr._ensure_pid(session, target=prepared.admin_target, db=prepared.db)
+        _mgr._ensure_pid(session, admin=prepared.admin_access, db=prepared.db)
         if session.socket_path is not None
         else session
     )
     _mgr._teardown_session(
         session,
-        target=prepared.session_target,
+        access=prepared.session_access,
         target_owns_session=True,
         db=prepared.db,
         force=prepared.force,

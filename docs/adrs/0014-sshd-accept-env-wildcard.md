@@ -4,17 +4,10 @@ Date: 2026-06-13
 
 ## Status
 
-Accepted. Where this document describes how the CLI sources secret values, that mechanism is
-superseded by ADR 0016's backend-chain model; the transport decision itself stands. The sudoers
-`env_keep` decision below (only `AGENTWORKS_* AW_*` survive a sudo boundary) is refined by ADR 0017
-for the console agent-pane case, where composed operator env and secrets also cross via
-`--preserve-env`.
+Superseded by [ADR 0026](0026-environment-travels-inside-the-request.md).
 
-Amended: the commands that run through `agentworks.execution` send no environment through ssh (see
-[`cli/agentworks/execution/README.md`](../../cli/agentworks/execution/README.md)). Their request
-carries it on the client's stdin, so nothing passes through `SetEnv` option parsing. `AcceptEnv *`
-and the coalesced `SetEnv` remain for the paths not yet migrated; whether the sshd fragment keeps a
-user is decided when the last of them moves. ADR 0020's closed-stdin path likewise stays until then.
+The text below is the record of the decision as it was taken. Where it describes how the CLI sources
+secret values, that mechanism was already superseded by ADR 0016's backend-chain model.
 
 ## Context
 

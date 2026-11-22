@@ -26,13 +26,15 @@ from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, InstanceStateInspection, SessionRow
+    from agentworks.execution.requests import TerminalCommand
     from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject, JsonValue
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
-    from agentworks.transports import Transport
+
+    from ._tmux_server import SessionTmuxServer
 
 
 @dataclass(frozen=True)
@@ -182,13 +184,7 @@ def _delete_session_runtime(
         operation="session-delete",
         held_native_guard=held_native_guard,
         interaction=interaction,
-    ) as (
-        ws,
-        vm,
-        _run_command,
-        _run_as_root,
-        admin_target,
-    ):
+    ) as (ws, vm, admin, log):
         from agentworks.harness_setup.locking import native_mutation_guard
 
         with native_mutation_guard(db.path, vm.name, held=held_native_guard):
@@ -197,11 +193,11 @@ def _delete_session_runtime(
             if legacy:
                 status = SessionStatus.RUNNING
             else:
-                session = _mgr._ensure_pid(session, target=admin_target, db=db)
+                session = _mgr._ensure_pid(session, admin=admin, db=db)
                 # Resolved again from the reloaded row: repair can give an old
                 # admin row its dedicated socket.
                 status = _mgr.check_session_status(
-                    session, target=admin_target, server=_mgr.resolve_session_tmux_server(db, session)
+                    session, admin=admin, server=_mgr.resolve_session_tmux_server(db, session)
                 )
 
             if status == SessionStatus.UNKNOWN:
@@ -219,13 +215,13 @@ def _delete_session_runtime(
                     hint="Use --force to delete.",
                 )
 
-            # Pick the destructive-op transport BEFORE prompting the operator.
-            # For agent sessions, ``_build_session_target`` probes direct agent
+            # Pick the destructive-op access BEFORE prompting the operator.
+            # For agent sessions, ``_verified_session_access`` probes direct agent
             # SSH; a pre-rollout agent surfaces here as an
             # actionable error rather than after the operator has already
-            # confirmed the delete. The helper returns a same-uid target, so
-            # no sudo is needed for the destructive ops below.
-            session_target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
+            # confirmed the delete. The access is the owner's, so nothing
+            # below elevates.
+            owner = _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=log)
 
             # Confirm before any destructive action
             if not yes and not output.confirm(f"Delete session '{name}'?"):
@@ -235,7 +231,7 @@ def _delete_session_runtime(
             if status != SessionStatus.STOPPED:
                 _mgr._teardown_session(
                     session,
-                    target=session_target,
+                    access=owner,
                     target_owns_session=True,
                     db=db,
                     force=force,
@@ -250,7 +246,7 @@ def _delete_session_runtime(
 
             from agentworks.artifacts.session import cleanup_session_artifacts
 
-            cleanup_session_artifacts(db, session, session_target)
+            cleanup_session_artifacts(db, session, owner)
             _require_selected_session(db, name, selected_session_uuid)
             db.delete_session(name)
 
@@ -268,14 +264,14 @@ def _delete_session_runtime(
             # Best-effort console cleanup runs after all DB / workspace state has
             # settled. Stale tmux windows are recoverable cosmetic noise; if the
             # helper raises AgentworksError we skip the success message and any
-            # created_workspace / created_agent cleanup below -- those would re-use
-            # the same broken transport and just compound errors.
+            # created_workspace / created_agent cleanup below, which would reach
+            # the same broken VM and just compound errors.
             if member_consoles:
                 from agentworks.sessions.multi_console import kill_session_windows
 
                 # Consoles are admin-owned (carve-out): admin manages
-                # admin's tmux server. Use admin_target regardless of session mode.
-                kill_session_windows(admin_target, pairs=[(c, name) for c in member_consoles])
+                # admin's tmux server, whatever the session's mode.
+                kill_session_windows(admin, pairs=[(c, name) for c in member_consoles])
 
             output.info(f"Session '{name}' deleted")
 
@@ -476,10 +472,12 @@ def session_description(
     status = SessionStatus.UNKNOWN
     try:
         server = _mgr.resolve_session_tmux_server(db, session)
-    except StateError:
-        server = None  # Never probed: a row the owner rule refuses stays UNKNOWN.
+    except StateError as exc:
+        # Never probed: a row the owner rule refuses stays UNKNOWN.
+        output.warn(f"Session status is unavailable: {exc}.")
+        server = None
     if session.socket_path is None:
-        status = _mgr.check_session_status(session)
+        status = _mgr._legacy_session_status(session)
     elif server is not None:
         from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 
@@ -497,24 +495,13 @@ def session_description(
             pass
         else:
             try:
-                target = _mgr.transport(vm, config)
+                status = _mgr.check_session_status(
+                    session, admin=_mgr._identity_access(vm, config, None, logger=None), server=server
+                )
             except UserAbort:
                 raise
-            except (ConnectivityError, StateError):
+            except ConnectivityError:
                 pass
-            else:
-                from agentworks.sessions.manager._status import _BoundedStatusTarget
-
-                try:
-                    status = _mgr.check_session_status(
-                        session,
-                        target=cast("Transport", _BoundedStatusTarget(target)),
-                        server=server,
-                    )
-                except UserAbort:
-                    raise
-                except ConnectivityError:
-                    pass
     if status is SessionStatus.UNKNOWN:
         output.warn(f"Session '{name}' runtime status could not be determined.")
     return _session_structural_description(db, config, name, status)
@@ -944,27 +931,18 @@ def attach_session(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
-    from agentworks.sessions.tmux import tmux_attach_cmd
-
     session = _mgr._require_session(db, name)
     # Refuse a socket outside its owner's directory before any VM work. A
     # legacy row without a socket meets the status check's own refusal.
     server = _mgr.resolve_session_tmux_server(db, session)
-    owner = server.owner if server is not None else None
     with _mgr._prepare_vm(
         db,
         config,
         session,
         operation="session-attach",
         interaction=interaction,
-    ) as (
-        _ws,
-        _vm,
-        _run_command,
-        _run_as_root,
-        target,
-    ):
-        status = _mgr.check_session_status(session, target=target, server=server)
+    ) as (_ws, _vm, admin, _log):
+        status = _mgr.check_session_status(session, admin=admin, server=server)
 
         if status == SessionStatus.STOPPED:
             raise StateError(
@@ -997,7 +975,39 @@ def attach_session(
 
         # A session attach is a full-screen tmux; clear the local screen on
         # detach where we don't trust the terminal to restore cleanly.
-        return target.interactive(
-            tmux_attach_cmd(name, session.socket_path, owner=owner),
+        return admin.attach(
+            _attach_command(session, server),
             clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),
         )
+
+
+def _attach_command(session: SessionRow, server: SessionTmuxServer | None) -> TerminalCommand:
+    """The admin's terminal command that attaches to ``session``, reaching its tmux server only as its owner.
+
+    A legacy row's session is on the admin's own default server and an admin
+    session's server is the admin's, so the admin attaches directly. An agent
+    session's server is the agent's, and no other account is ever its client:
+    the admin elevates only to switch to the agent behind the socket guard
+    (``as_socket_owner_line``), which says on the terminal why it refuses a
+    socket. The agent's client runs on ``runuser``'s relay terminal, never on
+    the admin's.
+    """
+    from agentworks.execution.requests import TerminalCommand
+    from agentworks.sessions.tmux import as_socket_owner_line, exact_tmux_target, tmux_cmd
+
+    target = "=" + session.name
+    if server is None:
+        return TerminalCommand(("tmux", "attach", "-t", target))
+    if server.owner is None:
+        return TerminalCommand(("tmux", "-S", server.socket_path, "attach", "-t", target))
+    line = as_socket_owner_line(
+        tmux_cmd(f"attach -t {exact_tmux_target(session.name)}", server.socket_path),
+        socket_path=server.socket_path,
+        owner=server.owner,
+        switch_user=True,
+        terminal=True,
+        refusal=(
+            f"Not attaching to session '{session.name}': its tmux socket is not a socket that '{server.owner}' owns."
+        ),
+    )
+    return TerminalCommand(("sudo", "-n", "/bin/sh", "-c", line))
