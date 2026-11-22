@@ -18,10 +18,10 @@ Status checking asks the stored dedicated server for the exact canonical session
 with a recorded positive PID, success is `RUNNING`. If that session is absent but the server still
 responds, the status is `RESIDUAL`: managed windows or panes remain but the canonical session cannot
 be attached. If the server does not respond, a changed VM boot ID or a provably absent fingerprint
-is `STOPPED`; a live matching fingerprint with an unreachable socket is `BROKEN`. An SSH transport
-failure or indeterminate identity is `UNKNOWN`, never evidence that the session stopped. A stopped
-row with a present unrecorded server is also `UNKNOWN`: a socket path locates a server but does not
-establish ownership.
+is `STOPPED`; a live matching fingerprint with an unreachable socket is `BROKEN`. A request that
+does not complete, or an indeterminate identity, is `UNKNOWN`, never evidence that the session
+stopped. A stopped row with a present unrecorded server is also `UNKNOWN`: a socket path locates a
+server but does not establish ownership.
 
 Inspection is read-only. Existing positive-PID rows retain their ordinary presence checks without
 eager identity repair. Batched checks combine the normal probes into one remote request per
@@ -30,10 +30,17 @@ reachable VM. That request probes the VM's sessions side by side and bounds each
 leaves only its own session `UNKNOWN` and delays no other. A pending launch with no recorded PID
 requires additional bounded reads to verify its native attempt identity and stable process
 fingerprint. These reads do not adopt the runtime or repair its row. Incomplete or indeterminate
-evidence stays `UNKNOWN`. Each guest call is non-interactive, makes one attempt, and has a 10-second
-timeout; the batched request adds 6 seconds, the most one session's clients can take, however many
-sessions it checks. Calls without fact input explicitly close stdin so Windows SSH does not retain
-the operator's console handle after returning the complete result.
+evidence stays `UNKNOWN`. Every read runs on the VM admin's access as one request, sent once, with a
+10-second deadline; the batched request adds 6 seconds, the most one session's clients can take,
+however many sessions it checks. A legacy row on the shared server is always an admin session, so
+its read runs on that same access. Every read reaches a session's dedicated server only as the
+account that owns it (below). A listing that cannot read a VM shows its sessions as `UNKNOWN` and
+warns once with the reason.
+
+The listings, `session describe` and the reads that prepare a start or restart write no operation
+log. A command that reads status inside its own operation (`session attach`, `logs`, `delete`,
+`stop`, and a start's or restart's checks once it begins) writes those reads to that operation's
+log.
 
 Plain `agw session list` is local inventory and does not run these probes. Add `--status` to request
 them; the table adds `STATUS`, reports progress before SSH begins, and appends compact uptime to a
@@ -97,35 +104,30 @@ every tmux client Agentworks starts runs as the account that owns the server. On
 session's stored socket path, names that account. A socket directly inside the VM admin's directory
 under `/run/agentworks/admin-tmux-sockets` is the admin's own, and the admin's connection uses it
 unchanged. A socket directly inside `/run/agentworks/agent-tmux-sockets/<user>` belongs to `<user>`,
-which must be a Linux account name other than `root` and the admin. Clients started from the VM
-admin's connection switch to that account first, with `sudo` and `runuser`, starting in `/`: status
-probes, identity repair and observation, the startup-protection check, teardown from `session stop`
-and `session stop --all` and from agent or workspace deletion, `session logs`, `session attach`,
-named console windows and stale-socket cleanup. Startup, startup recovery, and the teardown inside
-`session delete` and `session restart` already connect as the agent. Status, describe, logs, attach
-and lifecycle commands also require the owner to be the session's own agent or VM admin. Any other
-path is observed as `UNKNOWN`, never probed, and refused by lifecycle operations, logs and attach.
-Process reads, socket inspection and socket removal still run as root. A legacy row without a socket
-path needs no switch: its session lives on the connecting account's own default tmux server, into
-which an agent cannot plant a server.
+which must be a Linux account name other than `root` and the admin; that directory is the agent's
+alone (mode `0700`), so no other account can connect to a server inside it. Clients started from the
+VM admin's connection switch to that account first, with `sudo` and `runuser`, starting in `/`:
+status probes, identity repair and observation, the startup-protection check, teardown from
+`session stop --all` and from agent or workspace deletion, `session logs`, `session attach`, named
+console windows, the workspace's tmuxinator windows and stale-socket cleanup. Startup, startup
+recovery, and the teardown inside `session stop`, `session delete` and `session restart` already
+connect as the agent. Status, describe, logs, attach and lifecycle commands also require the owner
+to be the session's own agent or VM admin, and the socket's name to be the one Agentworks gives it.
+Any other path is observed as `UNKNOWN`, never probed, and refused by lifecycle operations, logs and
+attach. Before each switch, root checks the socket itself: one that is a link, is not a socket, or
+belongs to another account is never read and shows as `UNKNOWN`, and `session attach` refuses it
+with a one-line reason. The batched status request reads the boot ID and process presence as root,
+which runs no tmux client. A legacy row without a socket path needs no switch: its session lives on
+the connecting account's own default tmux server, into which an agent cannot plant a server.
 
-Workspace tmuxinator projects, including those generated by earlier releases, do not follow this
-rule: starting one runs plain tmux clients as the VM admin, including against agent sessions'
-servers. Do not start one on a VM with agent sessions. Named consoles are the supported way to view
-several sessions together.
+A workspace's tmuxinator config gives an agent session's window the same switch. A config an earlier
+release generated runs plain tmux clients as the VM admin, including against agent sessions'
+servers, until Agentworks rewrites it when a session in that workspace is next created, started,
+restarted or deleted. Do not start such a config on a VM with agent sessions.
 
 Interactive clients, `session attach` and the attach in a named console window, run as the agent on
 a pseudo-terminal of their own (`runuser --pty`) rather than on the admin's terminal, where the
 agent's other processes could reach them.
-
-Startup access sharing grants read/write tmux access to the socket group's members. Agentworks does
-not use that grant to reach agent servers, and it is not a supported way for the VM admin to do so.
-Retrying startup completion reapplies that access, including restoring a member's read-only entry to
-read/write. The server owner and root already have tmux access and need no explicit grant. Member
-names are read individually from the comma-separated group entry, without shell option or filename
-expansion. A failed group or user lookup or member grant stops sharing rather than reporting
-successful completion; the retained runtime remains available for a later retry unless workload
-death is confirmed.
 
 If no process identity can be recovered and the same VM boot is still running, preserve the row and
 inspect the guest. `--force` cannot turn missing identity into evidence of absence. A mutating
@@ -149,11 +151,13 @@ imply that a session is currently running or that process death was verified whi
 unreachable.
 
 `agw session stop --all` runs complete-fingerprint dedicated teardown operations concurrently, with
-a fixed ceiling of eight active sessions. Each worker owns one fresh transport and performs only
-remote identity validation, tmux teardown, absence proof, and exact socket cleanup. The invoking
-thread retains database and output ownership, persists verified results before announcing success,
-and runs incomplete dedicated or shared-server compatibility work serially after the concurrent
-lane. A failure in one session does not cancel its siblings.
+a fixed ceiling of eight active sessions. Each worker sends its requests on its VM's admin access,
+as root, each with a 10-second deadline, and performs only remote identity validation, tmux
+teardown, absence proof, and exact socket cleanup. The VM's requests from every worker are written
+to one `session-stop-all` operation log per VM. The invoking thread retains database and output
+ownership, persists verified results before announcing success, and runs incomplete dedicated or
+shared-server compatibility work serially after the concurrent lane. A failure in one session does
+not cancel its siblings.
 
 Before submission, an actionable unknown runtime refuses the entire destructive batch. Stopped
 intent accepted by the command remains recorded for retry. Safe PID repair and fresh observation
@@ -175,8 +179,9 @@ sibling is interrupted. Queued work that never ran remains blocked. During a qui
 it reports completed, active, and queued counts every five seconds.
 
 `--force` is intentionally narrow. It permits stale dedicated-socket cleanup only after the stored
-boot/PID/start-time fingerprint proves the old server process is absent. It does not turn unknown
-transport state, missing identity, PID reuse, or a matching live process into cleanup authority.
+boot/PID/start-time fingerprint proves the old server process is absent. It does not turn a request
+that did not complete, missing identity, PID reuse, or a matching live process into cleanup
+authority.
 
 The implementation is split between `cli/agentworks/sessions/manager/_status.py` (status
 derivation), `cli/agentworks/sessions/manager/_pids.py` (repair),

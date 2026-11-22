@@ -13,7 +13,7 @@ from agentworks.errors import ConfigError
 from tests.artifacts.test_mcp_session_delivery import mcp
 from tests.artifacts.test_native_delivery import artifact, context
 from tests.artifacts.test_rendered_launch_args import integration
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize(
@@ -30,17 +30,17 @@ def test_large_complete_launch_defers_mcp_and_preserves_legacy_files(config, pay
     current = context(server, skill)
     monkeypatch.setattr("agentworks.plugins.codex.harness_integration.session_mcp_conflicts", lambda *a, **k: {})
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *a, **k: "/home/alice/.codex")
-    target = _FakeTarget({".thread": _FakeResult(1)})
+    access = RecordingVMAccess([], Admin())
     baseline = integration(
         "codex", "CodexIntegration", {**config, "enabled_workarounds": ["session-home-skills"]}, artifacts=current
-    ).start(RunContext(admin_target=target), intent=HarnessLaunchIntent.CREATE)
+    ).start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
     selected = integration(
         "codex",
         "CodexIntegration",
         {**config, "enabled_workarounds": ["session-home-skills", "session-mcp-overrides"]},
         artifacts=current,
     )
-    actual = selected.start(RunContext(admin_target=target), intent=HarnessLaunchIntent.CREATE)
+    actual = selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
     assert actual.command == baseline.command
     assert actual.artifacts.files == baseline.artifacts.files and actual.artifacts.files
     assert {entry.input_id for entry in actual.artifacts.deferred} == {server.identity}
@@ -87,6 +87,4 @@ def test_existing_legacy_command_limit_remains_strict(mcp_enabled, monkeypatch):
         artifacts=context(server, agent),
     )
     with pytest.raises(ConfigError):
-        selected.start(
-            RunContext(admin_target=_FakeTarget({".thread": _FakeResult(1)})), intent=HarnessLaunchIntent.CREATE
-        )
+        selected.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)

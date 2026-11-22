@@ -1,6 +1,6 @@
 """An opt-in stateful tmux model for the named-console test fakes.
 
-The stateless ``_FakeTarget`` in ``tests/conftest.py`` is a substring
+The stateless ``_ScriptedGuest`` in ``tests/conftest.py`` is a substring
 map: a ``kill-window`` has no effect on a later ``list-windows`` /
 ``list-panes`` / ``has-session``, because ``run()`` just replays a
 seeded response. That is exactly the blind spot a real console-destroying
@@ -15,8 +15,8 @@ mutates them from the console layer's own tmux commands, and answers the
 console layer's queries from that state. ``dispatch(command)`` parses the
 tmux subcommand off a command string and routes it to the same mutator /
 query methods that the model self-tests drive directly. A command the
-model does not understand (or a non-tmux command such as the sudo
-preserve-env probe) falls through to a default-OK ``_FakeResult``.
+model does not understand (or a non-tmux command such as an agent's
+access check) falls through to a default-OK ``_FakeResult``.
 
 These tmux behaviors are modeled faithfully, because that is where the
 bug class lives:
@@ -57,7 +57,7 @@ within, rather than bugs):
   a shell) that position is the tail, so the model matches within that
   envelope but does not reproduce tmux's general spatial insertion.
 
-Opt-in: a ``_FakeTarget`` built without a ``model`` behaves exactly as
+Opt-in: a ``_ScriptedGuest`` built without a ``model`` behaves exactly as
 before, so every existing stateless test is untouched.
 """
 
@@ -374,7 +374,7 @@ class TmuxModel:
         than full-string equality, so incidental changes to quoting or
         trailing arguments do not break dispatch. Anything the model does not
         recognize returns a default-OK result, matching the stateless fake's
-        fall-through so mixed command streams (sudo probes, select-pane,
+        fall-through so mixed command streams (access checks, select-pane,
         resize) stay quiet."""
         frame = runtime_probe_parts(command)
         if frame is not None:
@@ -430,6 +430,8 @@ class TmuxModel:
         fmt = _opt(tokens, "-F") or ""
         if SHELL_INDEX_OPTION in fmt:
             lines = [f"{pid}|{pidx}|{'' if tag is None else tag}" for pid, pidx, tag in rows]
+        elif fmt == "#{pane_dead}":
+            lines = ["0" for _row in rows]  # a modeled pane's process never exits
         else:
             # ``#{pane_index} #{pane_id}`` (space-separated), the layout query form.
             lines = [f"{pidx} {pid}" for pid, pidx, _tag in rows]

@@ -10,17 +10,17 @@ from agentworks.agents.manager import delete_agent
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.db import AppliedStateKey, VersionedPayload
-from agentworks.errors import StateError
+from agentworks.errors import ConnectivityError, StateError
+from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.ssh import SSHError, SSHResult
-from agentworks.transports import Transport
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
+from tests.vm_access_support import install_access_recorder
 
 
 def _record(component) -> SetupRecord:
@@ -49,10 +49,8 @@ def deletion(db, tmp_path, monkeypatch):
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *a, **k: registry)
     monkeypatch.setattr("agentworks.agents.manager.lifecycle.gated_vm_boundary", lambda *a, **k: nullcontext())
     monkeypatch.setattr("agentworks.workspaces.manager.delete.gated_vm_boundary", lambda *a, **k: nullcontext())
-    target = Mock(spec=Transport)
-    target.run.return_value = SSHResult(0, "native", "")
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
-    monkeypatch.setattr("agentworks.transports.transport_for_user", lambda *a, **k: target)
+    # Session teardown and console cleanup run on the admin's access.
+    install_access_recorder(monkeypatch)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *a, **kw: "a" * 64)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
@@ -79,6 +77,7 @@ def deletion(db, tmp_path, monkeypatch):
     class Logger:
         closed = False
         display_path = "fixture.log"
+        redactions: tuple[str, ...] = ()
 
         def __init__(self, *a, **k):
             logs.append(self)
@@ -86,12 +85,17 @@ def deletion(db, tmp_path, monkeypatch):
         def close(self):
             self.closed = True
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", Logger)
+        def record(self, request, result):
+            pass
+
+        def sanitize(self, text):
+            return text
+
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", Logger)
     config = SimpleNamespace(paths=SimpleNamespace(vscode_workspaces=tmp_path))
     return SimpleNamespace(
         vm=vm,
         registry=registry,
-        target=target,
         config=config,
         removed=removed,
         logs=logs,
@@ -148,7 +152,7 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
         with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
             pass
         if outcome == "delete-failed":
-            raise SSHError("platform refused")
+            raise ConnectivityError("platform refused")
         removed.append(vm.name)
 
     def boundary(*args, **kwargs):
@@ -190,7 +194,8 @@ def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
 def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, deletion, monkeypatch, kind, name):
     _store_applied_state(db, kind, name, "claims")
-    deletion.target.run.side_effect = SSHError("unreachable")
+    # The user delete and the workspace's own removal run on the admin's access.
+    install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
     if kind == "agent":
         monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
         delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)

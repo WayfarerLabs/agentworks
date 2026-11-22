@@ -8,9 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
-from agentworks.sessions.tmux import _tmux_env_flags
-from agentworks.ssh import SSHLogger, SSHResult
+from agentworks.execution.oplog import OperationLogFile
+from agentworks.harness_setup.outcomes import Redactor
 
 
 @pytest.mark.parametrize("value_shape", ["quoted", "spaced", "multiline"])
@@ -23,10 +22,10 @@ def test_actual_tmux_assignment_cannot_leak_a_registered_secret_fragment(
         "spaced": f"prefix {marker} suffix",
         "multiline": f"prefix'{marker}\nsecond part",
     }[value_shape]
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("redaction", "startup", redactions=(value,))
-    command = "tmux new-session" + _tmux_env_flags({"TOKEN": value, "PLAIN": "/home/agent"})
-    logger.log_command(command, SSHResult(1, "", ""))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("redaction", "startup", redactions=(value,))
+    command = "tmux new-session " + shlex.join(["-e", "TOKEN=" + value, "-e", "PLAIN=/home/agent"])
+    logger.output(command)
     logger.close()
 
     assert marker not in logger.path.read_text()
@@ -42,8 +41,8 @@ def test_python_diagnostic_representation_cannot_leak_a_registered_secret(
 ) -> None:
     marker = uuid4().hex
     value = marker + suffix
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("redaction", "startup", redactions=(value,))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("redaction", "startup", redactions=(value,))
     command = "tmux new-session -e " + shlex.quote("TOKEN=" + value)
     rendered = repr(command if shell_assignment else value)
     if interior:
@@ -65,9 +64,9 @@ def test_enclosing_python_repr_keeps_registered_secrets_private(
     value = marker + suffix
     prefix = 'fixture-prefix-"' if surrounding_quote else "fixture-prefix-"
     rendered = repr(f"/home/worker/{prefix}{value}/native.json")
-    diagnostic = sanitize_setup_diagnostic(rendered, redactions=(value,))
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    logger = SSHLogger("redaction", "quoted-path", redactions=(value,))
+    diagnostic = Redactor((value,)).sanitize(rendered)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("redaction", "quoted-path", redactions=(value,))
     try:
         logger.log_error(rendered)
     finally:

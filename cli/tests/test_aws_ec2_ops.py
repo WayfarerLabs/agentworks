@@ -30,7 +30,7 @@ from agentworks.errors import (
 )
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
-from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
+from tests._aws_fakes import Controls, _FakeEC2, client_error, install_fakes, stub_egress, unreachable
 from tests._root_channel_fakes import Answer, FakeGuest, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
@@ -128,10 +128,21 @@ def _vm(*, legacy: bool = False, **metadata: str) -> Any:
     return SimpleNamespace(name="dev", admin_username="agw", platform_metadata={**base, **metadata})
 
 
+def _ingress_clients(rec: Recorder) -> dict[tuple[str, bool], set[int | None]]:
+    """For each ingress call kind (authorize or revoke, and whether a DryRun), the
+    ``total_max_attempts`` of the clients it went through."""
+    clients: dict[tuple[str, bool], set[int | None]] = {}
+    for method, dry_run, attempts in rec.ec2_clients:
+        if method.endswith("_security_group_ingress"):
+            clients.setdefault((method.split("_", 1)[0], dry_run), set()).add(attempts)
+    return clients
+
+
 def _ec2(platform: EC2Platform) -> Any:
-    """The cached fake EC2 client for the platform's region, whose ``ingress``
-    dict is the live per-SG ingress state the exposure tests read."""
-    return platform._client("ec2", "us-east-1", RunContext())
+    """The fake EC2 state behind every client the platform builds for its region, whose ``ingress``
+    dict is the live per-SG ingress state the exposure tests read; a method patched on it is
+    patched for each of those clients."""
+    return platform._client("ec2", "us-east-1", RunContext()).fake
 
 
 class TestCreate:
@@ -204,6 +215,12 @@ class TestCreate:
             ("authorize_security_group_ingress", False, _DETECTED_PREFIX),
             ("authorize_security_group_ingress", False, "198.51.100.0/24"),
         ]
+
+    def test_bootstrap_authorizes_through_a_single_send_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        _platform().create(_request(), RunContext(config=_config(["198.51.100.0/24"])))
+
+        assert _ingress_clients(rec) == {("authorize", False): {1}, ("revoke", True): {None}}
 
     def test_launch_pins_a_permanent_auto_public_ip(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The primary network interface pins AssociatePublicIpAddress=True (a
@@ -347,12 +364,16 @@ class TestCreate:
 
     def test_tailscale_path_waits_for_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
+        bootstrap: dict[str, object] = {}
         monkeypatch.setattr(
             "agentworks.plugins.aws.platform.complete_cloud_bootstrap",
-            lambda run_as_root, auth_key, **kwargs: "100.64.0.5",
+            lambda run_as_root, auth_key, **kwargs: bootstrap.update(kwargs) or "100.64.0.5",
         )
-        result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
+        request = _request(tailscale="tskey-abc")
+        result = _platform().create(request, RunContext(config=_config()))
         assert result.tailnet_address == "100.64.0.5"
+        # The join and the address read are recorded in the create's operation log.
+        assert bootstrap["log"] == request.progress.record
 
 
 class TestCreateRollback:
@@ -373,8 +394,8 @@ class TestCreateRollback:
         assert "terminate_instances" in methods
         assert "delete_security_group" in methods
 
-    def test_non_ssherror_after_launch_rolls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A non-SSHError escaping the post-launch region (here a raw OSError
+    def test_an_untyped_error_after_launch_rolls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An untyped error escaping the post-launch region (here a raw OSError
         from the inline bootstrap wait, e.g. a missing ssh binary) is inside the
         guarded region now, so it sweeps the partial instance + SG instead of
         leaking them past both rollback arms."""
@@ -603,6 +624,30 @@ class TestCreateRollback:
         assert guest.payloads == expected_commands
         assert cleanup_calls == [{"InstanceIds": ["i-123"]}]
 
+    def test_a_second_interrupt_during_the_rollbacks_revoke_abandons_the_rollback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every other revoke holds Ctrl-C until it is done; create's rollback is the one a second Ctrl-C abandons."""
+        rec = install_fakes(monkeypatch)
+        _guest_failing(monkeypatch, "true", KeyboardInterrupt("first"))
+        real_revoke = _FakeEC2.revoke_security_group_ingress
+        groups: list[_FakeEC2] = []
+
+        def _interrupted_revoke(self: _FakeEC2, **kwargs: Any) -> object:
+            if not kwargs.get("DryRun"):  # not the poke's permission check
+                groups.append(self)
+                signal.raise_signal(signal.SIGINT)
+            return real_revoke(self, **kwargs)
+
+        monkeypatch.setattr(_FakeEC2, "revoke_security_group_ingress", _interrupted_revoke)
+        with pytest.raises(RetainedProvisioningError) as caught:
+            _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
+
+        assert isinstance(caught.value.__cause__, KeyboardInterrupt)
+        # The interrupt cut the revoke short instead of waiting for it, and nothing after it ran.
+        assert groups[0].ingress["sg-123"]
+        assert "terminate_instances" not in rec.methods()
+
 
 class TestCloseProvisioningHooks:
     def test_the_close_revokes_the_bootstrap_tuples(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -625,7 +670,7 @@ class TestCloseProvisioningHooks:
         platform.create(_request(), RunContext(config=_config()))  # pokes the bootstrap tuple
         ec2 = _ec2(platform)
         # A concurrent native route from a DIFFERENT egress pokes a distinct tuple.
-        poke_ssh_allow(ec2, "sg-123", ["198.51.100.7/32"])
+        poke_ssh_allow(ec2, "sg-123", ["198.51.100.7/32"], authorize=ec2)
         assert set(ec2.ingress["sg-123"]) == {_DETECTED_PREFIX, "198.51.100.7/32"}
 
         platform.close_provisioning_access(_vm(), RunContext())
@@ -705,6 +750,17 @@ class TestTransientRoute:
             ("revoke_security_group_ingress", False),
             ("revoke_security_group_ingress", False),
         ]
+
+    def test_the_route_authorizes_through_a_single_send_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = install_fakes(monkeypatch)
+        with _platform()._transient_route(_vm(), RunContext(config=_config(["198.51.100.0/24"]))):
+            pass
+
+        assert _ingress_clients(rec) == {
+            ("authorize", False): {1},
+            ("revoke", True): {None},
+            ("revoke", False): {None},
+        }
 
     def test_revoke_denial_happens_before_route_mutation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         controls = Controls(
@@ -798,7 +854,7 @@ class TestTransientRoute:
         install_fakes(monkeypatch)
         platform = _platform()
 
-        real_authorize = platform._client("ec2", "us-east-1", RunContext()).authorize_security_group_ingress
+        real_authorize = _ec2(platform).authorize_security_group_ingress
 
         def _authorize(**kw: Any) -> Any:
             cidr = kw["IpPermissions"][0]["IpRanges"][0]["CidrIp"]
@@ -863,17 +919,34 @@ class TestSharedTupleConcurrency:
         install_fakes(monkeypatch)
         platform = _platform()
         ec2 = _ec2(platform)
-        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
-        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])  # duplicate: no error
+        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX], authorize=ec2)
+        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX], authorize=ec2)  # duplicate: no error
         assert ec2.ingress["sg-123"] == {_DETECTED_PREFIX: "sgr-1"}
 
     def test_remove_tolerates_an_already_gone_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
         platform = _platform()
         ec2 = _ec2(platform)
-        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
+        poke_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX], authorize=ec2)
         remove_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])
         remove_ssh_allow(ec2, "sg-123", [_DETECTED_PREFIX])  # already gone: no error
+        assert ec2.ingress["sg-123"] == {}
+
+    def test_an_interrupt_during_a_remove_waits_for_every_revoke(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        install_fakes(monkeypatch)
+        ec2 = _ec2(_platform())
+        prefixes = [_DETECTED_PREFIX, "198.51.100.0/24"]
+        poke_ssh_allow(ec2, "sg-123", prefixes, authorize=ec2)
+        revoke = ec2.revoke_security_group_ingress
+
+        def interrupted_revoke(**kwargs: Any) -> Any:
+            signal.raise_signal(signal.SIGINT)
+            return revoke(**kwargs)
+
+        monkeypatch.setattr(ec2, "revoke_security_group_ingress", interrupted_revoke)
+        with pytest.raises(KeyboardInterrupt):
+            remove_ssh_allow(ec2, "sg-123", prefixes)
+
         assert ec2.ingress["sg-123"] == {}
 
 

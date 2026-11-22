@@ -17,7 +17,6 @@ from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, ProvisioningError, StateError
-from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
@@ -30,10 +29,11 @@ from agentworks.plugins.azure.config import (
     _select_vm_size,
     _size_catalog,
 )
+from agentworks.plugins.azure.errors import wrap_azure_error
 
 # The network-resource plumbing (public IP, the NSG exposure rules,
-# egress-IP discovery, cleanup) and the shared SDK-error wrapper live in
-# the sibling network module; this module keeps the VMPlatform
+# egress-IP discovery, cleanup) lives in the sibling network module, and
+# the shared SDK-error wrapper in errors; this module keeps the VMPlatform
 # capability surface.
 from agentworks.plugins.azure.network import (
     BOOTSTRAP_ALLOW_RULE_NAME,
@@ -50,7 +50,6 @@ from agentworks.plugins.azure.network import (
     remove_ssh_allow,
     rollback_create_on_interrupt,
     verify_vm_deleted,
-    wrap_azure_error,
 )
 from agentworks.topics import TopicProse
 
@@ -273,7 +272,7 @@ class AzureVMPlatform(PublicAddressPlatform):
         existence probe (``resource_groups.check_existence``) is
         read-only and mutates nothing. A credential or reachability
         failure is NOT a "group missing" verdict: those surface through
-        :func:`agentworks.plugins.azure.network.wrap_azure_error` exactly
+        :func:`agentworks.plugins.azure.errors.wrap_azure_error` exactly
         as the ops report them, so a bad or absent credential never
         masquerades as an absent resource group.
 
@@ -636,7 +635,10 @@ class AzureVMPlatform(PublicAddressPlatform):
                 # a credential. Wait for it over the VM's root channel, then
                 # join once and settle the address.
                 target = PublicSSH(public_ip, admin_username, request.ssh_private_key, request.provisioning_trust)
-                tailnet_address = complete_cloud_bootstrap(target, tailscale_auth_key, node=request.hostname)
+                request.progress.step("Wait for cloud-init and join Tailscale")
+                tailnet_address = complete_cloud_bootstrap(
+                    target, tailscale_auth_key, node=request.hostname, log=request.progress.record
+                )
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than
@@ -782,14 +784,9 @@ class AzureVMPlatform(PublicAddressPlatform):
         compute = self._compute_client(az_cfg, ctx)
         network = self._network_client(az_cfg, ctx)
         try:
-            vm_info = compute.virtual_machines.get(
-                rg,
-                name,
-                expand="instanceView",
-            )
+            return get_vm_public_ip(compute, network, rg, name)
         except Exception as exc:
             raise wrap_azure_error(exc) from exc
-        return get_vm_public_ip(network, vm_info)
 
     def close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
         """Delete the bootstrap allow rule by its fixed name (no in-process state needed).
@@ -835,6 +832,11 @@ class AzureVMPlatform(PublicAddressPlatform):
         module's ``poke_ssh_allow`` / ``remove_ssh_allow``, which carry
         the full contracts).
 
+        Each Azure call enter makes is bounded on its own (the
+        route_calls module's ``_OPERATION_TIMEOUT_SECONDS``), not the whole
+        enter, so opening the route can take more than one bound; it comes
+        before the script's deadline, which starts at dispatch.
+
         ``ctx`` is the op-start context (the composition root's own):
         every NSG call below reads the SP credential through it, with no
         ambient fallback.
@@ -848,8 +850,7 @@ class AzureVMPlatform(PublicAddressPlatform):
             yield
         finally:
             if rule_name is not None:
-                with interrupts_deferred():
-                    self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
+                self._remove_ssh_allow(vm, ctx, rule_name, prefixes)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):

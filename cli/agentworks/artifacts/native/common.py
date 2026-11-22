@@ -11,15 +11,15 @@ from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactInputs, ArtifactType
 from agentworks.errors import AgentworksError, ConfigError, StateError
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.harness_setup.outcomes import Redactor
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
     from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
     from agentworks.capabilities.harness_integration.setup import SetupInvocation
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 # Agentworks budget for a rendered persona TOML file, including its instruction body.
@@ -148,11 +148,7 @@ def defer_setup_conflicts(
             }
             if not rejected:
                 raise StateError("native artifact conflict does not identify a proposed setup entry") from error
-            reason = sanitize_setup_diagnostic(
-                " ".join(value for value in (str(error), error.hint) if value),
-                redactions=invocation.secrets.values(),
-                logger=invocation.runner.logger,
-            )
+            reason = invocation.redactor.sanitize(" ".join(value for value in (str(error), error.hint) if value))
             invocation.report_incomplete(reason)
             existing = {item.input_id for item in application.deferred}
             deferred = tuple(
@@ -261,18 +257,12 @@ def json_text(value: object) -> str:
 
 
 @contextmanager
-def ancestor_diagnostics(
-    integration: str, *, runner: Transport | None = None, redactions: Iterable[str] = ()
-) -> Iterator[None]:
+def ancestor_diagnostics(integration: str, *, redactor: Redactor = Redactor()) -> Iterator[None]:
     """Keep native checks of existing upstream placement advisory at session start."""
     try:
         yield
     except AgentworksError as error:
-        diagnostic = sanitize_setup_diagnostic(
-            " ".join(part for part in (str(error), error.hint) if part),
-            redactions=redactions,
-            logger=None if runner is None else runner.logger,
-        )
+        diagnostic = redactor.sanitize(" ".join(part for part in (str(error), error.hint) if part))
         output.warn(f"Existing ancestor artifacts via {integration}: {diagnostic} Continuing with existing placement.")
 
 
@@ -331,7 +321,7 @@ def recognized_ancestor_files(
 
 
 def prepare_session_delivery(
-    runner: Transport | None,
+    access: VMAccess | None,
     *,
     tool: str,
     integration: str,
@@ -361,13 +351,13 @@ def prepare_session_delivery(
                 for item in current.inputs.items()
             )
             if legacy_delivery and (plan.application.files or plan.argv):
-                if runner is None:
+                if access is None:
                     raise StateError("artifact delivery requires the actual native launch target")
                 root = probe_native(
-                    runner,
+                    access,
                     tool=tool,
                     environment=current.environment,
-                    redactions=current.redactions,
+                    redactor=current.redactor,
                     home=current.home,
                     workspace=workspace,
                     files=plan.application.files,
@@ -412,14 +402,14 @@ def prepare_session_delivery(
         ),
     )
     if context.ancestor_files:
-        with ancestor_diagnostics(integration, runner=runner, redactions=context.redactions):
-            if runner is None:
+        with ancestor_diagnostics(integration, redactor=context.redactor):
+            if access is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             ancestor_root = probe_native(
-                runner,
+                access,
                 tool=tool,
                 environment=context.environment,
-                redactions=context.redactions,
+                redactor=context.redactor,
                 home=context.home,
                 workspace=workspace,
                 files=context.ancestor_files,

@@ -28,7 +28,6 @@ from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, ProvisioningError, StateError
 from agentworks.execution import root_script
-from agentworks.execution.root_script import ChannelUnreachable
 from agentworks.plugins.proxmox import guest_agent
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.identity import Gone, find_guest
@@ -45,11 +44,15 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.execution.root_script import RawRun
 
 BOOTSTRAP_DEADLINE_SECONDS = 600
-CLOUD_INIT_DEADLINE_SECONDS = guest_agent.AGENT_WAIT_SECONDS + 300
-"""The guest agent's wait, then cloud-init's own 300 s: the one root-channel call draws on both."""
+CLOUD_INIT_DEADLINE_SECONDS = 420
+"""cloud-init's budget, counted from the first attempt across the ones a channel failure starts."""
+CLOUD_INIT_RETRY_MIN_SECONDS = 60
+"""The least an attempt after a channel failure dispatches with; none starts once less of the budget remains."""
 STATUS_DEADLINE_SECONDS = 10.0
 """How long ``status`` may spend confirming the guest and reading its state before it reads as unknown."""
 
@@ -415,7 +418,8 @@ class ProxmoxPlatform(VMPlatform):
                 # the VM's root channel
                 run_as_root = functools.partial(guest_agent.run_as_root, self._api(ctx), node, newid)
                 output.detail("Waiting for cloud-init...")
-                _wait_for_cloud_init(run_as_root, newid)
+                request.progress.step("Wait for cloud-init")
+                _wait_for_cloud_init(run_as_root, newid, log=request.progress.record)
                 run_bootstrap(
                     run_as_root,
                     admin_username=request.admin_username,
@@ -425,9 +429,12 @@ class ProxmoxPlatform(VMPlatform):
                     deadline=BOOTSTRAP_DEADLINE_SECONDS,
                     progress=request.progress,
                 )
-                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                request.progress.step("Join Tailscale")
+                join_tailscale(
+                    run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+                )
                 tailnet_address = settle_tailnet_address(
-                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT, log=request.progress.record
                 )
             except Exception as failure:
                 # Re-raised unwrapped after rollback: the manager preserves
@@ -535,26 +542,13 @@ class ProxmoxPlatform(VMPlatform):
     def run_as_root(self, vm: VMRow, ctx: RunContext, script: bytes, deadline: float) -> RawRun:
         """Run ``script`` as root through the QEMU Guest Agent, which needs no guest sshd, once the guest is ours.
 
-        The identity check spends the same ``deadline`` the script runs under,
-        no wait of it outlasting what remains. A check that spends all of it,
-        including one whose API failure the deadline cut short, raises
-        ``ChannelUnreachable`` with nothing dispatched, as the guest agent's
-        own wait does.
+        Confirming the guest and waiting for its agent come before the
+        deadline, which starts at dispatch, and each has its own bound: the
+        identity check's reads each wait at most the API's request timeout,
+        and the agent's wait is ``guest_agent.AGENT_WAIT_SECONDS``.
         """
-        expires = time.monotonic() + deadline
-        try:
-            self._guest(vm, ctx, expires=expires)
-        except ProxmoxAPIError:
-            # A failure at the deadline is the deadline's, refused below like a check that spent it.
-            if time.monotonic() < expires:
-                raise
-        if time.monotonic() >= expires:
-            raise ChannelUnreachable(
-                f"confirming that Proxmox VMID {self._vmid(vm)} is VM '{vm.name}' took the whole "
-                f"{deadline:g}-second deadline, so no script was dispatched",
-                hint="Check that the Proxmox API is answering promptly, then run the command again.",
-            )
-        return guest_agent.run_as_root_until(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, expires)
+        self._guest(vm, ctx)
+        return guest_agent.run_as_root(self._api(ctx), self._vm_node(vm), self._vmid(vm), script, deadline)
 
     # -- Helpers ---------------------------------------------------------------
 
@@ -573,28 +567,37 @@ def _clone_names(vm: VMRow) -> tuple[str, ...]:
     return (vm.hostname,)
 
 
-def _wait_for_cloud_init(run_as_root: Callable[[bytes, float], RawRun], vmid: int) -> None:
+def _wait_for_cloud_init(
+    run_as_root: Callable[[bytes, float], RawRun], vmid: int, *, log: Callable[[RunRequest, Result], None] | None
+) -> None:
     """Wait for cloud-init to finish inside the VM; :data:`CLOUD_INIT_RECOVERABLE_STATUS` warns.
 
     The wait is the cloud bootstrap's own command, so a failure quotes
     cloud-init's status and detail the same way (``readiness_failure``). A
-    channel failure is asked again until :data:`CLOUD_INIT_DEADLINE_SECONDS`
-    runs out: cloud-init can restart the guest agent mid-run (Proxmox's
-    ``ciupgrade``), and ``cloud-init status --wait`` changes nothing, so
-    running it again is safe.
+    channel failure after a dispatch is asked again while at least
+    :data:`CLOUD_INIT_RETRY_MIN_SECONDS` of :data:`CLOUD_INIT_DEADLINE_SECONDS`
+    remains, each attempt's deadline being what remains: cloud-init can
+    restart the guest agent mid-run (Proxmox's ``ciupgrade``), and
+    ``cloud-init status --wait`` changes nothing, so running it again is safe.
+    ``ChannelUnreachable`` is not asked again: the guest agent's own bounded
+    wait already found no agent, so it propagates at once. That wait comes
+    before each attempt's deadline, so the whole wait can end up to
+    ``guest_agent.AGENT_WAIT_SECONDS`` after the budget. ``log`` records each
+    wait that ran to an outcome.
     """
     expires = time.monotonic() + CLOUD_INIT_DEADLINE_SECONDS
+    deadline: float = CLOUD_INIT_DEADLINE_SECONDS
     while True:
         try:
-            result = root_script.run(
-                run_as_root, DEFAULT_READINESS_COMMAND, deadline=max(expires - time.monotonic(), 0.1)
-            )
+            result = root_script.run(run_as_root, DEFAULT_READINESS_COMMAND, deadline=deadline, log=log)
             break
+        except root_script.ChannelUnreachable:
+            raise
         except ConnectivityError:
-            remaining = expires - time.monotonic()
-            if remaining <= 0:
+            if expires - time.monotonic() < CLOUD_INIT_RETRY_MIN_SECONDS:
                 raise
-            time.sleep(min(guest_agent.POLL_INTERVAL_SECONDS, remaining))
+            time.sleep(guest_agent.POLL_INTERVAL_SECONDS)
+            deadline = expires - time.monotonic()
     if result.status == CLOUD_INIT_RECOVERABLE_STATUS:
         output.warn(f"cloud-init completed with recoverable errors on Proxmox VMID {vmid}; continuing")
     elif result.status != 0:

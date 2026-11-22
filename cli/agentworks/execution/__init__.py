@@ -2,7 +2,7 @@
 
 Callers build an access object with :func:`vm_access` (or, for create's
 first contact only, :func:`enrollment_access`) and call its ``run``,
-``stream``, ``attach`` and ``forward``; requests and results are in
+``stream``, ``attach``, ``park`` and ``forward``; requests and results are in
 ``agentworks.execution.requests`` and ``results``. The functions here import
 their modules on first use: ``trust`` pulls in ``config``, about 250 ms, which
 a command that never connects should not pay. A test reaches every caller by

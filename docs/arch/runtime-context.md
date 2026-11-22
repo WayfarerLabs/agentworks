@@ -107,23 +107,26 @@ its own credentials before remote preflight.
 The readiness path checks declared `required_commands` on an available target; a new target's probe
 defers until that target exists. These checks cover whether the template renders and whether
 declared commands are available. Command behavior is determined by execution. Launch renders the
-selected field again from its declaration before launch or destructive replacement. Native
-transports retain their documented env-delivery limitations.
+selected field again from its declaration before launch or destructive replacement.
 
 `agw env show --session NAME` previews winning plaintext values and their scopes from managed state
 without connecting to the VM. `--vm`, `--workspace`, and `--agent` select other contexts. Secrets
-remain redacted unless `--resolve` is explicit. This is a managed-config preview, not an observation
-of a process's live environment or user shell startup effects.
+remain redacted unless `--resolve` is explicit. Each value prints on one row, with a backslash as
+`\\` and line breaks and other control characters escaped (`\n`, `\r`, `\t`, `\x1b`). This is a
+managed-config preview, not an observation of a process's live environment or user shell startup
+effects.
 
-Env delivery depends on the consumer. VM/agent shell and exec use the
+Every consumer that reaches the VM over SSH (VM and agent shell and exec, initialization and setup,
+sessions, and console shells) uses the
 [execution channel](../../cli/agentworks/execution/README.md), which sends environment values in its
-stdin request envelope. Legacy SSH transport consumers use the client's `SetEnv` option. Clients
-that expand SetEnv values can reinterpret literal `${...}` text using the controller's environment,
-or refuse it when that variable is absent. Ordinary `${agw:user_name}` references render before
-transport; intentionally escaped plaintext and opaque secret contents can still contain literal
-namespace text. Preview and setup rendering do not perform SSH client expansion. The legacy
-transport behavior is tracked in
-[issue #873](https://github.com/WayfarerLabs/agentworks/issues/873).
+stdin request envelope; a console shell's travel in the request its terminal handover parks. No
+value is on a command line or in the client's `SetEnv` option, so the SSH client never expands one,
+and literal `${...}` text in an escaped plaintext or a secret reaches the workload as written. A
+value may hold line breaks, which arrive intact; a plaintext value with a NUL, which no process
+environment can hold, is refused when it is rendered, before any request carries it. Operation logs
+and diagnostics redact a secret's whole value in its usual spellings (see
+[Value handling](../../cli/agentworks/secrets/README.md#value-handling)), but not one line of a
+multi-line secret shown on its own.
 
 ## Secrets
 
@@ -168,12 +171,15 @@ VM/admin initialization knows `user_name`, `user_home_dir` and `vm_name`. Agent 
 knows `agent_name`. Neither has workspace or session context; references to those names fail with
 the owning PATH element identified.
 
-After the install-command batch, contributions from successful commands and commands skipped by
-completion checks are written to `~/.agentworks-profile.sh`. Failed commands contribute no paths.
-The contributions do not update the CLI's PATH or become available between installers in that batch.
-Later shells that source the profile prepend them to PATH; child processes inherit the result.
-Changing a declaration requires the applicable initialization or reinitialization operation to
-rewrite the profile.
+Contributions are declarations: each account's `~/.agentworks-profile.sh` is written from the
+selected commands' rendered `path` lists before that account's dotfiles installer, mise install and
+user install commands run their login shells, so those shells already find every declared directory,
+including those of commands skipped by completion checks. A user install command that fails keeps
+its paths for the rest of that batch, and they leave the profile when the batch finishes. A system
+install command that fails contributes none. The contributions do not update the CLI's PATH. Later
+shells that source the profile prepend them to PATH; child processes inherit the result. Changing a
+declaration requires the applicable initialization or reinitialization operation to rewrite the
+profile.
 
 The profile writer converts a leading `~` to `$HOME` and writes each entry inside a double-quoted
 assignment, followed by the shell's existing `$PATH`. For an agent running as `agt-demo`:

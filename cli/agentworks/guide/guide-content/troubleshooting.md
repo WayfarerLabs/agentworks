@@ -35,9 +35,13 @@ A message that a VM has no recorded host key is fixed with `agw vm import-host-k
 `--help` for a VM with no matching entry. `agw vm recover NAME` can instead read the keys through
 the platform and record them once you confirm their fingerprints against the VM's console.
 
+A host key verification failure means the VM presented a key other than the recorded one. Neither
+the import nor `agw vm recover` replaces an existing record; the error's hint gives the manual
+procedure for a VM that was rebuilt, and an unexpected change is a reason not to connect.
+
 When the failure appears to be below SSH, use `tailscale status` to confirm the workstation is
 connected and can see the VM, then `tailscale ping HOST` with the Tailscale address from
-`agw vm describe NAME`. `agw vm logs NAME` shows the VM's recent SSH logs.
+`agw vm describe NAME`. `agw vm logs NAME` shows the VM's recent operation logs.
 
 When a VM does not answer after `agw vm start`, or Tailscale itself needs repair, run
 `agw vm recover NAME`, which starts the VM first if it is stopped. It works through the platform's

@@ -43,18 +43,18 @@ def record_unhandled_error(exc: BaseException) -> Path | None:
     Returns the log path on success, or None if writing failed (the user's
     one-line error message takes precedence over the persisted traceback).
 
-    Operation-level errors land in the per-operation ``SSHLogger`` file via
-    ``SSHLogger.close()``'s ``sys.exc_info()`` introspection. This central
-    log is the fallback for crashes that happen before any ``SSHLogger`` is
+    Operation-level errors land in the per-operation log, whose
+    ``OperationLogFile.close()`` writes the exception in flight. This central
+    log is the fallback for crashes that happen before any operation log is
     constructed (config-load failures, CLI argument errors, etc.).
 
-    The log appends forever -- not currently rotated. Crashes outside an
-    operation are rare; a few MB takes years to accumulate. Add rotation
-    later if it becomes an issue.
+    The log sits beside the operation logs (``oplog.LOG_DIR``) and appends
+    forever, unrotated. Crashes outside an operation are rare; a few MB
+    takes years to accumulate. Add rotation later if it becomes an issue.
     """
-    from agentworks.config import CONFIG_DIR
+    from agentworks.execution import oplog
 
-    log_dir = CONFIG_DIR / "logs"
+    log_dir = oplog.LOG_DIR
     log_path = log_dir / "error.log"
 
     ts = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

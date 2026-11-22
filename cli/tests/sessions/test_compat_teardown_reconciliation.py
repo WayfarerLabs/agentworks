@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import FrozenInstanceError
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -16,14 +16,14 @@ from agentworks.sessions import manager as session_manager
 from agentworks.sessions import tmux as tmux_mod
 from agentworks.sessions.manager import _lifecycle as lifecycle_mod
 from agentworks.sessions.manager import _teardown as teardown_mod
+from tests.vm_access_support import install_access_recorder
 
-from .test_session_batch_stop_parallelism import BOOT_ID, _seed_session, _Target
+from .test_session_batch_stop_parallelism import BOOT_ID, _access, _seed_session
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db import SessionRow
-    from agentworks.transports import Transport
 
 
 def _compat_session(db: Database, branch: str) -> SessionRow:
@@ -63,7 +63,7 @@ def _native_absence(monkeypatch: pytest.MonkeyPatch, at_cleanup: Callable[[], No
 def _stop(db: Database, session: SessionRow) -> None:
     lifecycle_mod._teardown_session(
         session,
-        target=cast("Transport", _Target("compat")),
+        access=_access("compat"),
         target_owns_session=True,
         db=db,
         force=False,
@@ -209,7 +209,7 @@ def test_malformed_complete_fields_never_authorize_native_work(
             "observe_session_statuses",
             lambda sessions, **kwargs: {session.name: SessionStatus.RUNNING},
         )
-        monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target("invalid"))
+        install_access_recorder(monkeypatch).answer = _access("invalid").answer
         with pytest.raises(StateError):
             lifecycle_mod.stop_all_sessions(db, config, interaction=TtyInteractionPolicy.REFUSE)
     current = db.get_session(session.name)

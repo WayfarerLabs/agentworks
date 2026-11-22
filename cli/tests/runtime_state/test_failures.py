@@ -8,6 +8,7 @@ import pytest
 
 from agentworks.db import DesiredRuntimeState, SessionStatus, VMStatus
 from agentworks.errors import AgentworksError, StateError, UserAbort
+from agentworks.execution.results import Result
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.runtime_state import reconcile_session, reconcile_vm
 from agentworks.runtime_state._models import Outcome
@@ -21,6 +22,7 @@ from tests.conftest import ManifestDoc
 from tests.console_helpers import create_console_record
 from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
+from tests.vm_access_support import Call, command_line, is_command_check, route_vm_access_to_guest
 
 
 def required_template() -> ManifestDoc:
@@ -194,6 +196,40 @@ def test_fleet_console_results_retain_console_target_independently_of_vm(
         reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
     result = next(row for row in rendered if row.kind == "console")
     assert result.target_known and result.desired_runtime_state is console_target
+
+
+def test_misbound_member_socket_blocks_the_console_before_its_vm_starts(db, make_config, runtime, monkeypatch):
+    """Reconcile checks every window's stored bindings before the console asks for a running guest."""
+    from agentworks.runtime_state import reconcile_console
+
+    powers, _, events = runtime
+    seed_vm(db, "box", target=DesiredRuntimeState.ON_DEMAND)
+    powers["box"] = VMStatus.STOPPED
+    seed_session(db, "a", "box")
+    seed_session(db, "b", "box")
+    create_console_record(db, name="view", vm_name="box", session_specs=["a", "b"])
+    db._conn.execute(
+        "UPDATE sessions SET socket_path = ? WHERE name = ?",
+        ("/run/agentworks/admin-tmux-sockets/admin/other.sock", "b"),
+    )
+    db._conn.commit()
+    commands: list[str] = []
+
+    def guest(call: Call) -> Result | None:
+        command = command_line(call.request)
+        if command is not None and not is_command_check(call.request):
+            commands.append(command)
+        return None
+
+    route_vm_access_to_guest(monkeypatch, guest)
+    rendered = []
+    monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
+    with pytest.raises(StateError):
+        reconcile_console(db, make_config(), name="view", interaction=REFUSE)
+    result = next(row for row in rendered if row.kind == "console")
+    assert result.outcome is Outcome.BLOCKED
+    assert ("vm-start", "box") not in events
+    assert not any("tmux" in command for command in commands)
 
 
 def test_busy_console_family_reports_unselected_target_as_unknown(db, make_config, runtime, monkeypatch):

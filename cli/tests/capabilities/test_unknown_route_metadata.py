@@ -19,13 +19,13 @@ from agentworks.harness_setup.outcomes import SetupFailure
 from agentworks.origin import Origin
 from agentworks.schema import CapabilityConfig
 from tests.artifacts.test_routing import Graph, graph
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
 
 
 def _invoke(
-    fixture: Graph, target: LocalFixtureTransport, component: str
+    fixture: Graph, target: LocalFixtureAccount, component: str
 ) -> UserSetupInvocation | WorkspaceSetupInvocation:
     if component == "workspace":
         import grp
@@ -37,7 +37,8 @@ def _invoke(
         fixture.workspace = workspace
         return WorkspaceSetupInvocation(
             vm=fixture.vm,
-            runner=target,
+            access=(recorded := target.access()),
+            files=recorded.files(),
             prior=None,
             checkpoint=lambda _: None,
             workspace_name="workspace",
@@ -45,7 +46,13 @@ def _invoke(
             linux_group=grp.getgrgid(os.getgid()).gr_name,
         )
     return UserSetupInvocation(
-        vm=fixture.vm, runner=target, prior=None, checkpoint=lambda _: None, username="worker", home=str(target.home)
+        vm=fixture.vm,
+        access=(recorded := target.access()),
+        files=recorded.files(),
+        prior=None,
+        checkpoint=lambda _: None,
+        username="worker",
+        home=str(target.home),
     )
 
 
@@ -84,7 +91,7 @@ def test_unreadable_explicit_input_is_forwarded_even_without_previous_result(
     fixture.save("vm", routes={"vm-0": facet})
     source = fixture.captures["vm"]
     missing = next(source.inputs.items())
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     invocation = _invoke(fixture, target, component)
     inputs = fixture.owners[component]
     failures: list[SetupFailure] = []
@@ -154,7 +161,7 @@ def test_unreadable_explicit_input_is_forwarded_even_without_previous_result(
 def test_unknown_input_set_records_source_repair_for_fresh_and_existing_receivers(db, tmp_path, previous):
     fixture = graph(db, active=("agent",), counts={"workspace": 0})
     _registry(fixture)
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     invocation = _invoke(fixture, target, "agent")
     inputs = fixture.owners["agent"]
     failures: list[SetupFailure] = []

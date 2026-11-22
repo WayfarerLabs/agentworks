@@ -9,12 +9,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.errors import AgentworksError, StateError
-from agentworks.harness_setup.outcomes import sanitize_setup_error
+from agentworks.execution.requests import Script, Shell
+from agentworks.harness_setup.outcomes import Redactor
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Mapping
 
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 @dataclass(frozen=True)
@@ -147,51 +148,74 @@ print('\nAGW_CLAUDE_CONVERSATION=' + json.dumps({
 }, separators=(',', ':')))
 """
 
+_FIND_FAILED_EXIT = 6  # find itself failed (not a mere no-match): raise
+
+
+def conversation_request(sid: str, *, detect: bool = True, environment: Mapping[str, str] | None = None) -> Script:
+    """The probe for ``sid``: exit 0 when its transcript exists, 1 when not, 6 when ``find`` failed.
+
+    It runs in the launch target's login and interactive shell, the
+    environment the pane gets, with ``environment`` added, so
+    ``CLAUDE_CONFIG_DIR`` resolves as the pane's Claude resolves it. Its
+    detection metadata is the last ``AGW_CLAUDE_CONVERSATION=`` line on
+    stdout, written only when that shell finds a ``python3``.
+    """
+    program = shlex.join(("python3", "-c", _PROGRAM))
+    inner = (
+        'root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"; out=""; '
+        'if [ -d "$root" ]; then '
+        f'out=$(find "$root" -name {shlex.quote(sid + ".jsonl")} -print -quit 2>/dev/null); rc=$?; '
+        f'[ -n "$out" ] || [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; fi; '
+        'exists=0; [ -z "$out" ] || exists=1; '
+        f'if command -v python3 >/dev/null 2>&1; then {program} "$out" {shlex.quote(sid)} '
+        f'{"1" if detect else "0"}; fi; [ "$exists" -eq 1 ]'
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True, env=dict(environment or {}))
+
 
 def probe_conversation(
-    transport: Transport,
+    access: VMAccess,
     sid: str,
     *,
     detect: bool = True,
     environment: Mapping[str, str] | None = None,
-    redactions: Iterable[str] = (),
+    redactor: Redactor = Redactor(),
 ) -> ConversationProbe:
     """Probe exact stored UUID addressing in one login-shell round trip.
 
-    Transcript existence failures raise. Optional metadata detection fails soft,
-    including a target without Python 3, preserving the existing resume boundary.
-    No Claude process runs here and no transcript content leaves the target.
+    Transcript existence failures raise: a probe that may not have run raises
+    its typed execution error, and any exit but 0 or 1 (the 6 of a failed
+    ``find``, or a status from a startup file that exits or fails before the
+    probe's own command) raises :class:`StateError`, since guessing "fresh"
+    would launch ``--session-id`` with a UUID Claude already holds. Optional
+    metadata detection fails soft, including a target without Python 3,
+    preserving the existing resume boundary. No Claude process runs here and
+    no transcript content leaves the target.
     """
     try:
         if str(uuid.UUID(sid)) != sid:
             raise ValueError
     except (ValueError, TypeError, AttributeError) as error:
         raise StateError("Claude Code conversation ID must be a canonical UUID") from error
-    program = shlex.join(("python3", "-c", _PROGRAM))
-    inner = (
-        'root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"; out=""; '
-        'if [ -d "$root" ]; then '
-        f'out=$(find "$root" -name {shlex.quote(sid + ".jsonl")} -print -quit 2>/dev/null); rc=$?; '
-        '[ -n "$out" ] || [ "$rc" -eq 0 ] || exit 6; fi; '
-        'exists=0; [ -z "$out" ] || exists=1; '
-        f'if command -v python3 >/dev/null 2>&1; then {program} "$out" {shlex.quote(sid)} '
-        f'{"1" if detect else "0"}; fi; [ "$exists" -eq 1 ]'
-    )
     try:
-        result = transport.run(
-            f'"$SHELL" -lic {shlex.quote(inner)}', check=False, env=dict(environment or {}), tty=False
-        )
+        result = access.run(conversation_request(sid, detect=detect, environment=environment))
+        status = result.require_completed(access.vm_name)
     except AgentworksError as error:
-        sanitize_setup_error(error, redactions=redactions, logger=transport.logger)
+        redactor.sanitize_error(error)
         raise
-    if result.returncode not in (0, 1):
+    if status not in (0, 1):
         raise StateError(
-            f"could not probe for the Claude transcript (exit {result.returncode}); "
-            "refusing to guess resume-vs-launch.",
-            hint="Retry once the launch target is reachable.",
+            f"could not probe for the Claude transcript (exit {status}); refusing to guess resume-vs-launch.",
+            hint=(
+                "Check that the Claude projects directory ($CLAUDE_CONFIG_DIR/projects, by default "
+                "~/.claude/projects) is readable by the launch user, then retry."
+                if status == _FIND_FAILED_EXIT
+                else "Check that the launch user's login and interactive shell startup files run to "
+                "completion without exiting or failing, then retry."
+            ),
         )
-    lines = result.stdout.splitlines()
-    exists = result.returncode == 0
+    lines = result.stdout.decode("utf-8", "replace").splitlines()
+    exists = status == 0
     fallback = ConversationProbe(exists)
     try:
         payload = next(

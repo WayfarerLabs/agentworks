@@ -6,7 +6,7 @@ import json
 import sys
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,43 +17,39 @@ from agentworks.artifacts.native.common import NativeSessionArtifacts, prepare_s
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.model import SetupRecord
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, owned
 from tests.artifacts.test_native_probe import probe
 from tests.conftest import requires_posix_shell
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount, fixture_access
+from tests.vm_access_support import Admin, RecordingVMAccess
+
+if TYPE_CHECKING:
+    from agentworks.execution.access import VMAccess
 
 pytestmark = requires_posix_shell
 
 
 @pytest.fixture
-def stub_probe_runner():
-    calls = []
-
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return SimpleNamespace(
-            returncode=0,
-            ok=True,
-            stdout=(
-                "AGW_ARTIFACT_PROBE="
-                + json.dumps({"native_home": "/home/alice/.native", "problems": [], "inventory": []})
-                if "input_data" in kwargs
-                else "AGW_PYTHON3=available\n"
-            ),
-            stderr="",
-        )
-
-    return SimpleNamespace(run=run, logger=None, calls=calls)
+def stub_probe_access():
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(
+        Completed(0),
+        (
+            "AGW_ARTIFACT_PROBE=" + json.dumps({"native_home": "/home/alice/.native", "problems": [], "inventory": []})
+        ).encode(),
+    )
+    return access
 
 
-def claude_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalFixtureTransport:
-    target = LocalFixtureTransport(tmp_path)
+def claude_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[LocalFixtureAccount, VMAccess]:
+    target = LocalFixtureAccount(tmp_path)
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    (bindir / "python3").symlink_to(sys.executable)
     executable = bindir / "claude"
     executable.write_text("#!/bin/sh\nexit 91\n")
     executable.chmod(0o700)
@@ -61,7 +57,7 @@ def claude_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalFixtu
     for guest_path in ("/etc/claude-code/.claude", "/etc/claude-code/managed-settings.json", "/etc/codex"):
         program = program.replace(repr(guest_path), repr(str(tmp_path / guest_path.removeprefix("/"))))
     monkeypatch.setattr(native_probe, "_PROBE", program)
-    return target
+    return target, fixture_access(monkeypatch, target)
 
 
 @pytest.mark.parametrize("scope", ["user", "workspace", "vm"])
@@ -178,7 +174,7 @@ def test_claude_reserved_names_remain_ordinary_skills_for_other_harnesses(tmp_pa
 
 
 @pytest.mark.parametrize("name", ["synced", "anthropic-skills", "Anthropic-Skills"])
-def test_claude_reserved_direct_skill_names_refuse_without_native_inspection(name, stub_probe_runner):
+def test_claude_reserved_direct_skill_names_refuse_without_native_inspection(name, stub_probe_access):
     file = ArtifactFile(
         f"/home/alice/.claude/skills/{name}/SKILL.md",
         f"---\nname: {name}\ndescription: Supplied skill\n---\nbody\n".encode(),
@@ -187,17 +183,17 @@ def test_claude_reserved_direct_skill_names_refuse_without_native_inspection(nam
     )
 
     with pytest.raises(NativeArtifactConflictError) as raised:
-        probe_native(stub_probe_runner, tool="claude", environment={}, files=(file,), redactions=(name,))
+        probe_native(stub_probe_access, tool="claude", environment={}, files=(file,), redactor=Redactor((name,)))
 
     assert raised.value.identities == (f"skill:{name}",)
     assert name not in str(raised.value)
-    assert stub_probe_runner.calls == []
+    assert stub_probe_access.requests() == []
 
 
 @pytest.mark.parametrize("tool,namespace", [("codex", ""), ("grok", ""), ("claude", "agentworks-artifacts:")])
 @pytest.mark.parametrize("name", ["synced", "anthropic-skills"])
 def test_reserved_claude_names_are_usable_in_other_native_or_plugin_namespaces(
-    tool, namespace, name, stub_probe_runner
+    tool, namespace, name, stub_probe_access
 ):
     file = ArtifactFile(
         f"/home/alice/.native/skills/{name}/SKILL.md",
@@ -206,7 +202,7 @@ def test_reserved_claude_names_are_usable_in_other_native_or_plugin_namespaces(
         native_identity=f"skill:{namespace}{name}",
     )
 
-    assert probe_native(stub_probe_runner, tool=tool, environment={}, files=(file,))
+    assert probe_native(stub_probe_access, tool=tool, environment={}, files=(file,))
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest file publication helpers locally")
@@ -214,7 +210,7 @@ def test_reserved_claude_names_are_usable_in_other_native_or_plugin_namespaces(
 def test_claude_user_reinit_preserves_reserved_storage_and_applies_independent_artifacts(
     tmp_path, db, monkeypatch, reserved_name
 ):
-    target = claude_target(tmp_path, monkeypatch)
+    target, access = claude_target(tmp_path, monkeypatch)
     native = target.home / ".claude"
     synced = native / "skills/synced/account/organization/morning/SKILL.md"
     retired = native / "skills/.trash/retired/SKILL.md"
@@ -241,11 +237,13 @@ def test_claude_user_reinit_preserves_reserved_storage_and_applies_independent_a
     incomplete: list[str] = []
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        runner=target,
+        access=access,
+        files=access.files(),
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete.append,
         artifacts=received(supplied, ordinary, rule),
+        environment=target.environment,
         username="fixture",
         home=str(target.home),
     )
@@ -256,7 +254,9 @@ def test_claude_user_reinit_preserves_reserved_storage_and_applies_independent_a
         assert incomplete
         assert [(item.input_id, item.destination) for item in plan.deferred] == [(supplied.identity, "session")]
         assert not any(supplied.origin_identity in file.origins for file in plan.files)
-        published = publish_artifacts(target, plan.files, current, lambda files: None, roots=(str(target.home),))
+        published = publish_artifacts(
+            invocation.files, plan.files, current, lambda files: None, roots=(str(target.home),)
+        )
         current = published.files
         assert (native / "skills/review/SKILL.md").read_bytes() == ordinary.content.members[0].data
         assert any(rule.origin_identity in file.origins for file in current)
@@ -280,7 +280,7 @@ def test_claude_user_reinit_preserves_reserved_storage_and_applies_independent_a
 def test_claude_reserved_ancestor_records_do_not_select_inventory_or_hide_ordinary_drift(
     tmp_path, monkeypatch, reserved_name, ordinary_ancestor
 ):
-    target = claude_target(tmp_path, monkeypatch)
+    target, access = claude_target(tmp_path, monkeypatch)
     native = target.home / ".claude"
     reserved = owned(
         ArtifactFile(
@@ -321,10 +321,11 @@ def test_claude_reserved_ancestor_records_do_not_select_inventory_or_hide_ordina
         session_uuid="u",
         run_id="r",
         ancestor_files=ancestors,
+        environment=target.environment,
     )
 
     plan, root = prepare_session_delivery(
-        target,
+        access,
         tool="claude",
         integration="claude-code",
         context=context,
@@ -345,7 +346,7 @@ def test_claude_reserved_ancestor_records_do_not_select_inventory_or_hide_ordina
         policy = native / "settings.json"
         policy.write_bytes(b"{invalid fixture policy")
         _, root = prepare_session_delivery(
-            target,
+            access,
             tool="claude",
             integration="claude-code",
             context=context,

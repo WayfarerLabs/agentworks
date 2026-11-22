@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, cast
 
-import agentworks.agents.manager as _mgr
 from agentworks import output
 from agentworks.errors import (
     AgentworksError,
@@ -35,18 +34,10 @@ if TYPE_CHECKING:
     from agentworks.agents.template import AgentTemplate
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.execution.access import VMAccess
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
     from agentworks.vms.nodes import LiveVMNode
-
-# ``_mgr`` binds this module's own package object (safe: by the time
-# ``lifecycle`` is imported, ``agentworks.agents.manager`` is already in
-# ``sys.modules``, mid-initialization). ``delete_agent`` below reads
-# ``_mgr.transport`` at call time rather than importing ``transport``
-# directly, so ``tests/conftest.py`` and
-# ``tests/agents/test_delete_grant_revoke_orchestrated.py`` monkeypatching
-# ``agentworks.agents.manager.transport`` still reaches this call.
 
 
 def create_agent(
@@ -218,14 +209,14 @@ def create_agent(
         def scoped_ctx(
             secret_names: tuple[str, ...],
             *,
-            admin_target: Transport | None = None,
-            agent_target: Transport | None = None,
+            admin_access: VMAccess | None = None,
+            agent_access: VMAccess | None = None,
         ) -> RunContext:
             return RunContext(
                 config=config,
                 operation_scope=scope,
-                admin_target=admin_target,
-                agent_target=agent_target,
+                admin_access=admin_access,
+                agent_access=agent_access,
                 secrets=ScopedSecrets(resolver.values, secret_names),
             )
 
@@ -338,9 +329,9 @@ def delete_agent(
     from agentworks.harness_setup.locking import native_mutation_guard
 
     with native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard) as guard:
-        from agentworks.ssh import SSHLogger
+        from agentworks.execution.oplog import OperationLogFile
 
-        ssh_logger = SSHLogger(vm.name, "agent-delete")
+        log = OperationLogFile(vm.name, "agent-delete")
         try:
             output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
             # Refuse a session row the owner rule rejects before any VM work.
@@ -390,9 +381,12 @@ def delete_agent(
             with boundary:
                 # Kill running sessions for this agent (status-aware)
                 if agent_sessions:
+                    import agentworks.execution as execution
+                    from agentworks.execution.access import Admin
                     from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
 
-                    target = _mgr.transport(vm, config, logger=ssh_logger)
+                    # The admin tears the agent's sessions down as the agent and owns the console windows.
+                    admin = execution.vm_access(vm, config, Admin(), log=log.record)
                     agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
                     # Snapshot console memberships before db.delete_session cascades them.
                     console_pairs = [
@@ -403,7 +397,7 @@ def delete_agent(
                         try:
                             _teardown_session(
                                 session,
-                                target=target,
+                                access=admin,
                                 target_owns_session=False,
                                 db=db,
                                 force=True,
@@ -428,7 +422,7 @@ def delete_agent(
                     if console_pairs:
                         from agentworks.sessions.multi_console import kill_session_windows
 
-                        kill_session_windows(target, pairs=console_pairs)
+                        kill_session_windows(admin, pairs=console_pairs)
 
                 # Remove from all workspace groups
                 from agentworks.agents.grants import remove_from_workspace_group
@@ -436,9 +430,9 @@ def delete_agent(
 
                 granted_workspaces = db.list_granted_workspaces(name)
                 for ws_name in granted_workspaces:
-                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
 
-                delete_agent_on_vm(vm, config, agent.linux_user, logger=ssh_logger)
+                delete_agent_on_vm(vm, config, agent.linux_user, logger=log)
 
                 db.delete_agent(name)
 
@@ -450,7 +444,7 @@ def delete_agent(
                 output.info(f"Agent '{name}' deleted")
 
         finally:
-            ssh_logger.close()
+            log.close()
 
 
 def reinit_agent(
@@ -534,13 +528,10 @@ def reinit_agent(
             candidate_overlay = None
 
         if update_template is not None:
-            from agentworks.resources.access import require_declared_template
-
-            require_declared_template(registry, "agent-template", update_template)
-            # Refuse a repoint to a disabled-recipe template BEFORE persisting it,
-            # so a refused reinit never leaves the DB row pointing at the refused
+            # An undeclared re-point already failed resolving its base above. Refuse
+            # one to a disabled-recipe template BEFORE persisting it too, so a
+            # refused reinit never leaves the DB row pointing at the refused
             # template (mirrors create's "gate before any DB / VM / realize work").
-            # require_declared_template only checks the name is DECLARED, not enabled.
             ensure_recipe_enabled(registry, "agent-template", update_template)
         layered_agent_tmpl = resolve_template_with_provenance(
             registry,
@@ -575,7 +566,7 @@ def reinit_agent(
 
         from agentworks.instance_specs import replace_agent_overlay, report_overlay_outcome
 
-        previous_template = agent.template
+        previous_template = "default" if agent.template is None else agent.template
         with db.transaction():
             if update_template is not None:
                 db.update_agent_template(name, update_template)
@@ -586,9 +577,10 @@ def reinit_agent(
                 parsed_overlay,
                 supplied=supplied_overlay,
             )
-        if agent.template != previous_template:
+        selected_template = "default" if agent.template is None else agent.template
+        if selected_template != previous_template:
             output.info(
-                f"Agent '{name}' template binding saved as {agent.template!r} (previously {previous_template!r}). "
+                f"Agent '{name}' template binding saved as {selected_template!r} (previously {previous_template!r}). "
                 "The binding remains if setup fails; use --update-template to choose a different template."
             )
 
@@ -676,14 +668,14 @@ def reinit_agent(
             def scoped_ctx(
                 secret_names: tuple[str, ...],
                 *,
-                admin_target: Transport | None = None,
-                agent_target: Transport | None = None,
+                admin_access: VMAccess | None = None,
+                agent_access: VMAccess | None = None,
             ) -> RunContext:
                 return RunContext(
                     config=config,
                     operation_scope=scope,
-                    admin_target=admin_target,
-                    agent_target=agent_target,
+                    admin_access=admin_access,
+                    agent_access=agent_access,
                     secrets=ScopedSecrets(resolver.values, secret_names),
                 )
 
@@ -702,9 +694,9 @@ def reinit_agent(
             native_setup = None
             with output.section("Agent Initialization"):
                 from agentworks.agents.initializer import create_agent_on_vm
-                from agentworks.ssh import SSHLogger
+                from agentworks.execution.oplog import OperationLogFile
 
-                ssh_logger = SSHLogger(
+                log = OperationLogFile(
                     vm.name,
                     "agent-reinit",
                     redactions=tuple(
@@ -723,7 +715,7 @@ def reinit_agent(
                             agent.linux_user,
                             agent_name=agent.name,
                             credential_requests=credential_ops,
-                            logger=ssh_logger,
+                            logger=log,
                             admin_git_force_safe_directory=resolve_admin_template(
                                 db,
                                 registry,
@@ -744,7 +736,7 @@ def reinit_agent(
                                 vm=vm,
                                 username=agent.linux_user,
                                 values=resolver.values,
-                                logger=ssh_logger,
+                                logger=log,
                                 held=guard,
                                 operation="agent-reinit",
                             )
@@ -788,7 +780,7 @@ def reinit_agent(
                         reconciled = 0
                         for ws_name in db.list_granted_workspaces(name):
                             try:
-                                add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                                add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
                                 reconciled += 1
                             except NotFoundError:
                                 # The only NotFoundError reachable here is the
@@ -833,7 +825,7 @@ def reinit_agent(
                     except KeyboardInterrupt:
                         output.warn(
                             f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
-                            f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.display_path}"
+                            f"Re-run 'agent reinit {name}' to retry. Operation log: {log.display_path}"
                         )
                         raise
                     except AgentworksError as error:
@@ -846,10 +838,10 @@ def reinit_agent(
                             f"reinitializing agent: {e}",
                             entity_kind="agent",
                             entity_name=name,
-                            hint=f"SSH log: {ssh_logger.display_path}",
+                            hint=f"Operation log: {log.display_path}",
                         ) from e
                 finally:
-                    ssh_logger.close()
+                    log.close()
 
                 # Refresh operator SSH config (declarative rebuild; picks up any
                 # config changes that affect the per-agent block).

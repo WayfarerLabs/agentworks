@@ -1,61 +1,67 @@
-"""Stale-socket maintenance never treats shell output as a removal authority."""
+"""Stale-socket maintenance never treats shell output as a removal authority.
+
+The cleanup runs over the fixture's recording access, whose requests run on
+this machine (``LocalFixtureAccount.answer``), elevation ignored. A
+``runuser`` shim in place of ``tmux.RUNUSER_PATH`` records the account each server
+probe asks for and runs the probe as the test's own user.
+"""
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.errors import ExternalError, StateError
+from agentworks.execution.requests import Command, Script
+from agentworks.execution.results import Completed, Result
 from agentworks.sessions.manager._teardown import (
     DedicatedTeardownPlan,
     _remove_stale_socket,
     execute_dedicated_teardown,
 )
-from agentworks.sessions.tmux import _cleanup_stale_sockets_under
-from agentworks.ssh import SSHResult
-from tests.native_setup_fixtures import LocalFixtureTransport
+from agentworks.sessions.tmux import _cleanup_stale_sockets_under, access_run_command
+from tests.conftest import current_user_name
+from tests.native_setup_fixtures import LocalFixtureAccount
 
 if TYPE_CHECKING:
-    from agentworks.transports import Transport
+    pass
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="executes Linux guest socket and tmux commands")
 
-
-OWNER = "agt-owner"
+"""The socket directory's owner: this account, which owns every socket the fixture makes."""
 
 
 @pytest.fixture
-def target() -> Iterator[LocalFixtureTransport]:
+def target(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalFixtureAccount]:
     with tempfile.TemporaryDirectory(prefix="agw-r8-sessions-sockets-") as location:
-        fixture = LocalFixtureTransport(Path(location))
+        fixture = LocalFixtureAccount(Path(location))
+        shim = fixture.root / "bin" / "runuser"
+        shim.parent.mkdir()
+        shim.write_text(
+            '#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\n'
+            f'printf "%s\\n" "$2" >> {shlex.quote(str(fixture.root / "runuser.log"))}\nshift 3\nexec "$@"\n'
+        )
+        shim.chmod(0o755)
+        monkeypatch.setattr("agentworks.sessions.tmux.RUNUSER_PATH", str(shim))
         yield fixture
 
 
-@pytest.fixture(autouse=True)
-def runuser_log(target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Stand in for the switch to an owner: record the account, then run the command."""
+def cleanup(target: LocalFixtureAccount, directory: str) -> int:
+    return _cleanup_stale_sockets_under(target.files(), directory, owner=current_user_name())
+
+
+def probed_as(target: LocalFixtureAccount) -> list[str]:
     log = target.root / "runuser.log"
-    shim = target.root / "runuser"
-    shim.write_text(
-        f'#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 97\nprintf \'%s\\n\' "$2" >> {log}\nshift 3\nexec "$@"\n'
-    )
-    shim.chmod(0o755)
-    monkeypatch.setattr("agentworks.sessions.tmux.RUNUSER_PATH", str(shim))
-    # Elevation without privilege: this user stands in for root.
-    bin_dir = target.root / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    sudo = bin_dir / "sudo"
-    sudo.write_text('#!/bin/sh\n[ "$1" = -n ] || exit 97\nshift\nexec "$@"\n')
-    sudo.chmod(0o755)
-    return log
+    return log.read_text().split() if log.exists() else []
 
 
 def stale(path: Path) -> None:
@@ -66,7 +72,7 @@ def stale(path: Path) -> None:
 @pytest.mark.parametrize("symlink", [False, True])
 @pytest.mark.parametrize("phase", ["worker-entry", "socket-removal"])
 def test_dedicated_worker_preserves_non_socket_paths(
-    target: LocalFixtureTransport,
+    target: LocalFixtureAccount,
     symlink: bool,
     phase: str,
 ) -> None:
@@ -85,11 +91,13 @@ def test_dedicated_worker_preserves_non_socket_paths(
             run_id=None,
             vm_name="vm",
             socket_path=str(candidate),
+            owner=current_user_name(),
             stored_pid=101,
             stored_boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             stored_start_ticks=201,
-            target=cast("Transport", target),
-            owner=None,
+            access=target.access(),
+            switch_user=False,
+            deadline=None,
             force=True,
         )
         with pytest.raises(StateError):
@@ -98,7 +106,9 @@ def test_dedicated_worker_preserves_non_socket_paths(
     else:
         with pytest.raises(ExternalError):
             _remove_stale_socket(
-                session_name="selected", socket_path=str(candidate), target=cast("Transport", target), sudo=False
+                session_name="selected",
+                socket_path=str(candidate),
+                run_command=access_run_command(target.access(), deadline=None, elevated=False),
             )
 
     assert outside.is_socket()
@@ -112,23 +122,41 @@ def inventory(*paths: str) -> str:
     return "\nAGW_STALE_SOCKETS_BEGIN\0" + "".join(path + "\0" for path in paths) + "AGW_STALE_SOCKETS_END\0"
 
 
-def observe(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, stdout: str, *, returncode: int = 0
+def source_of(request: object) -> str:
+    if isinstance(request, Script):
+        return request.source
+    if isinstance(request, Command):
+        return shlex.join(request.argv)
+    return ""
+
+
+def intercept(
+    target: LocalFixtureAccount,
+    monkeypatch: pytest.MonkeyPatch,
+    replace: Callable[[str, Callable[[], Result]], Result],
 ) -> None:
-    original = target.run
+    """Answer each command or script through ``replace(source, run_it)``, which may run it, change it or not."""
+    original = target._spawn
 
-    def run(command: str, **kwargs: Any) -> SSHResult:
-        if "find " in command:
-            return SSHResult(returncode, stdout, "")
-        return original(command, **kwargs)
+    def spawn(argv: list[str], request) -> Result:  # noqa: ANN001
+        return replace(source_of(request), lambda: original(argv, request))
 
-    monkeypatch.setattr(target, "run", run)
+    monkeypatch.setattr(target, "_spawn", spawn)
+
+
+def observe(target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, stdout: str, *, returncode: int = 0) -> None:
+    def replace(source: str, run: Callable[[], Result]) -> Result:
+        if "find " in source:
+            return Result(Completed(returncode), stdout.encode())
+        return run()
+
+    intercept(target, monkeypatch, replace)
 
 
 @pytest.mark.parametrize("banner", ["Welcome\n", "Welcome"])
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_socket(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, runuser_log: Path, banner: str, stream: str
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, banner: str, stream: str
 ) -> None:
     binary = shutil.which("tmux")
     assert binary is not None, "tmux must be installed for native runtime safety coverage"
@@ -147,26 +175,25 @@ def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_so
         capture_output=True,
     )
     subprocess.run([binary, "-S", str(live), "list-sessions"], env=native_environment, check=True, capture_output=True)
-    original = target.run
 
-    def run(command: str, **kwargs: Any) -> SSHResult:
-        result = original(command, **kwargs)
-        return SSHResult(
-            result.returncode,
-            (banner if stream == "stdout" else "") + result.stdout,
-            (banner if stream == "stderr" else "") + result.stderr,
+    def replace(source: str, run: Callable[[], Result]) -> Result:
+        result = run()
+        return Result(
+            result.completion,
+            (banner.encode() if stream == "stdout" else b"") + result.stdout,
+            (banner.encode() if stream == "stderr" else b"") + result.stderr,
         )
 
-    monkeypatch.setattr(target, "run", run)
+    intercept(target, monkeypatch, replace)
     try:
-        removed = _cleanup_stale_sockets_under(target, str(directory), owner=OWNER)
+        removed = cleanup(target, str(directory))
         assert valuable.read_bytes() == b"operator file"
         assert removed == 1
         assert not dead.exists()
         assert live.is_socket()
-        # Each server probe ran through the account switch, as the owner.
-        assert runuser_log.read_text().splitlines() == [OWNER, OWNER]
-        assert original(f"tmux -S {live} list-sessions", check=False).ok
+        assert probed_as(target) == [current_user_name(), current_user_name()]
+        alive = subprocess.run([binary, "-S", str(live), "list-sessions"], env=native_environment, check=False)
+        assert alive.returncode == 0
     finally:
         subprocess.run(
             [binary, "-S", str(live), "kill-server"], env=target.environment, check=False, capture_output=True
@@ -191,7 +218,7 @@ def test_native_cleanup_retains_banner_file_and_live_server_but_removes_stale_so
     ],
 )
 def test_untrusted_inventory_cannot_authorize_any_removal(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, case: str
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
@@ -215,14 +242,14 @@ def test_untrusted_inventory_cannot_authorize_any_removal(
         "control": inventory(str(dead), str(directory / "bad\nname.sock")),
     }[case]
     observe(target, monkeypatch, payload, returncode=1 if case == "failed" else 0)
-    assert _cleanup_stale_sockets_under(target, str(directory), owner=OWNER) == 0
+    assert cleanup(target, str(directory)) == 0
     assert dead.is_socket() and outside.is_socket()
     assert valuable.read_bytes() == b"operator file"
 
 
 @pytest.mark.parametrize("symlink", [False, True])
 def test_native_type_is_checked_before_tmux_and_before_unlink(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, symlink: bool
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, symlink: bool
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
@@ -234,7 +261,8 @@ def test_native_type_is_checked_before_tmux_and_before_unlink(
     else:
         candidate.write_bytes(b"operator content")
     observe(target, monkeypatch, inventory(str(candidate)))
-    assert _cleanup_stale_sockets_under(target, str(directory), owner=OWNER) == 0
+    assert cleanup(target, str(directory)) == 0
+    assert probed_as(target) == []
     assert outside.is_socket()
     if symlink:
         assert candidate.is_symlink()
@@ -244,7 +272,7 @@ def test_native_type_is_checked_before_tmux_and_before_unlink(
 
 @pytest.mark.parametrize("symlink", [False, True])
 def test_native_type_is_rechecked_after_the_tmux_probe(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, symlink: bool
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, symlink: bool
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
@@ -252,11 +280,10 @@ def test_native_type_is_rechecked_after_the_tmux_probe(
     stale(candidate)
     outside = target.root / "outside.sock"
     stale(outside)
-    original = target.run
 
-    def run(command: str, **kwargs: Any) -> SSHResult:
-        result = original(command, **kwargs)
-        if "list-sessions" in command:
+    def replace(source: str, run: Callable[[], Result]) -> Result:
+        result = run()
+        if "list-sessions" in source:
             candidate.unlink(missing_ok=True)
             if symlink:
                 candidate.symlink_to(outside)
@@ -264,8 +291,8 @@ def test_native_type_is_rechecked_after_the_tmux_probe(
                 candidate.write_bytes(b"concurrent operator content")
         return result
 
-    monkeypatch.setattr(target, "run", run)
-    assert _cleanup_stale_sockets_under(target, str(directory), owner=OWNER) == 0
+    intercept(target, monkeypatch, replace)
+    assert cleanup(target, str(directory)) == 0
     assert outside.is_socket()
     if symlink:
         assert candidate.is_symlink()
@@ -275,28 +302,28 @@ def test_native_type_is_rechecked_after_the_tmux_probe(
 
 @pytest.mark.parametrize("failure", ["unknown-tmux", "unlink-failed"])
 def test_unknown_native_presence_or_failed_unlink_does_not_claim_removal(
-    target: LocalFixtureTransport, monkeypatch: pytest.MonkeyPatch, failure: str
+    target: LocalFixtureAccount, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     directory = target.root / "s"
     directory.mkdir()
     candidate = directory / "dead.sock"
     stale(candidate)
-    original = target.run
 
-    def run(command: str, **kwargs: Any) -> SSHResult:
-        if failure == "unknown-tmux" and "list-sessions" in command:
-            return SSHResult(1, "", "unclassified native refusal")
-        if failure == "unlink-failed" and "rm -f" in command:
-            return SSHResult(1, "", "fixture removal denied")
-        return original(command, **kwargs)
+    def replace(source: str, run: Callable[[], Result]) -> Result:
+        if failure == "unknown-tmux" and "list-sessions" in source:
+            return Result(Completed(1), b"", b"unclassified native refusal")
+        if failure == "unlink-failed" and "rm -f" in source:
+            return Result(Completed(1), b"", b"fixture removal denied")
+        return run()
 
-    monkeypatch.setattr(target, "run", run)
-    assert _cleanup_stale_sockets_under(target, str(directory), owner=OWNER) == 0
+    intercept(target, monkeypatch, replace)
+    assert cleanup(target, str(directory)) == 0
     assert candidate.is_socket()
 
 
 @pytest.mark.parametrize("directory", ["relative", "/", "/run/../tmp", "/run//sockets", "/run/./sockets"])
-def test_invalid_expected_directory_is_rejected_before_dispatch(target: LocalFixtureTransport, directory: str) -> None:
+def test_invalid_expected_directory_is_rejected_before_dispatch(target: LocalFixtureAccount, directory: str) -> None:
+    files = target.files()
     with pytest.raises(StateError):
-        _cleanup_stale_sockets_under(target, directory, owner=OWNER)
-    assert target.commands == []
+        _cleanup_stale_sockets_under(files, directory, owner=current_user_name())
+    assert files.access.requests() == []  # type: ignore[attr-defined]

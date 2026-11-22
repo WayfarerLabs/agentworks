@@ -9,11 +9,13 @@ import pytest
 import agentworks.bootstrap as bootstrap
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError, UserAbort, ValidationError
+from agentworks.execution.access import Admin
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.console_helpers import create_console_record
+from tests.vm_access_support import RecordingVMAccess, install_access_recorder
 
 if TYPE_CHECKING:
     from agentworks.db import ConsoleRow, Database, SessionRow, VMRow
@@ -54,14 +56,14 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
     calls = []
     monkeypatch.setattr(mc, "_console_runtime_presence", lambda *a: (canonical, staging))
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: calls.append("collect") or [])
-    target = object()
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
+            _StubConfig(),  # type: ignore[arg-type]
             registry,
             console=console,
             vm=_vm(db),
-            target=target,
+            admin=RecordingVMAccess([], Admin()),
             held_native_guard=guard,
         )
         assert prepared.action is action
@@ -84,10 +86,11 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
     with mc.guarded_console_selection(db, "con") as (console, guard), pytest.raises(StateError):
         mc.prepare_console_reconcile(
             db,
+            _StubConfig(),  # type: ignore[arg-type]
             registry,
             console=console,
             vm=_vm(db),
-            target=object(),
+            admin=RecordingVMAccess([], Admin()),
             held_native_guard=guard,
         )
 
@@ -106,10 +109,11 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
+            _StubConfig(),  # type: ignore[arg-type]
             registry,
             console=console,
             vm=_vm(db),
-            target=object(),
+            admin=RecordingVMAccess([], Admin()),
             held_native_guard=guard,
         )
         assert not changed
@@ -143,7 +147,7 @@ def test_delete_consent_holds_family_guard_and_nested_reuses_it(db: Database, mo
         return True
 
     monkeypatch.setattr(output, "confirm", confirm)
-    monkeypatch.setattr(mc, "_live_target", lambda *a: None)
+    monkeypatch.setattr(mc, "_live_access", lambda *a: None)
     with native_mutation_guard(db.path, "vm1") as guard:
         mc.delete_console(db, _StubConfig(), name="con", held_native_guard=guard)
     assert db.get_console("con") is None
@@ -152,65 +156,104 @@ def test_delete_consent_holds_family_guard_and_nested_reuses_it(db: Database, mo
 def test_delete_cancellation_propagates_and_retains_definition(db: Database, monkeypatch):
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
-    monkeypatch.setattr(mc, "_live_target", lambda *a: (_ for _ in ()).throw(UserAbort("cancelled")))
+    monkeypatch.setattr(mc, "_live_access", lambda *a: (_ for _ in ()).throw(UserAbort("cancelled")))
     with pytest.raises(UserAbort):
         mc.delete_console(db, _StubConfig(), name="con", yes=True)
     assert db.get_console("con") is not None
 
 
-def test_admin_only_env_is_literal_delivered_and_redacted(db: Database, tmp_path, monkeypatch):
+def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, tmp_path, monkeypatch):
     import shlex
     from uuid import uuid4
 
-    from agentworks.ssh import SSHResult
+    from agentworks.execution.attach import Handover
+    from agentworks.execution.requests import LoginShell
     from tests._tmux_model import TmuxModel
-    from tests.conftest import _FakeTarget
+    from tests.conftest import _ScriptedGuest, install_scripted_guest
+    from tests.vm_access_support import PARK_TOKEN
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     marker = uuid4().hex
     value = f"prefix'{marker}' $(touch ignored) suffix"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
-
-    class Target(_FakeTarget):
-        def run(self, command, **kwargs):
-            result = super().run(command, **kwargs)
-            if self.logger:
-                self.logger.log_command(command, SSHResult(result.returncode, result.stdout, result.stderr))
-            if command.startswith("tmux new-session"):
-                assert kwargs["env"] == {"TOKEN": value}
-                assert "TOKEN=" + value in shlex.split(command)
-            return result
-
-    target = Target(model=TmuxModel())
+    guest = install_scripted_guest(monkeypatch, _ScriptedGuest(model=TmuxModel()))
+    admin = guest.admin()
     with mc.guarded_console_selection(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
+            _StubConfig(),  # type: ignore[arg-type]
             registry,
             console=console,
             vm=_vm(db),
-            target=target,
+            admin=admin,
             held_native_guard=guard,
         )
         assert mc.execute_console_reconcile(prepared, values={"token": value})
         assert mc.observe_prepared_console(prepared).value == "running"
-    logs = list(tmp_path.glob("**/*.log"))
+    # The value travels in the admin's parked request, and the window runs only the handover's command.
+    assert [call.request for call in admin.calls if call.operation == "park"] == [LoginShell(env={"TOKEN": value})]
+    [command] = [line for line in guest.commands if line.startswith("tmux new-session")]
+    assert shlex.split(command)[-1] == Handover(PARK_TOKEN, "agentworks").command()
+    assert not [line for line in guest.commands if marker in line]
+    assert not [call for call in admin.calls if call.operation == "run" and call.request.env]
+    logs = list(tmp_path.glob("**/*console-build*.log"))
     assert logs
     assert all(marker not in log.read_text() for log in logs)
-    assert target.logger is None
 
 
-def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, monkeypatch):
-    import agentworks.sessions.multi_console.attach as attach
-    from tests.conftest import _FakeTarget
+@pytest.mark.parametrize("failure", ["window", "handover", "gone", "dead"])
+def test_an_admin_window_that_does_not_start_its_shell_fails_the_build(db: Database, tmp_path, monkeypatch, failure):
+    from agentworks.errors import ExternalError
+    from tests._tmux_model import TmuxModel
+    from tests.conftest import _FakeResult, _ScriptedGuest, install_scripted_guest
 
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    monkeypatch.setattr("agentworks.ssh.SSHLogger.close", lambda *a: (_ for _ in ()).throw(StateError("log failed")))
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {})
+    model = TmuxModel()
+
+    class Guest(_ScriptedGuest):
+        def dispatch(self, command: str) -> _FakeResult:
+            if failure == "window" and command.startswith("tmux new-session"):
+                self.commands.append(command)
+                return _FakeResult(returncode=1, stderr="no server")
+            if command.startswith("tmux list-panes") and "#{pane_dead}" in command:
+                # After collection: the shell ended at once, taking the window, or left a dead pane.
+                self.commands.append(command)
+                if failure == "gone":
+                    return _FakeResult(returncode=1, stderr="can't find session")
+                if failure == "dead":
+                    return _FakeResult(stdout="1\n")
+            return super().dispatch(command)
+
+    guest = install_scripted_guest(monkeypatch, Guest(model=model))
+    admin = guest.admin()
+    admin.park_collected = failure != "handover"
+    with pytest.raises(ExternalError):
+        mc._build_console_tmux(guest.console_access(_vm(db)), db, registry, _console(db), values={}, layout="tiled")
+
+    assert [call.operation for call in admin.calls if call.operation != "run"] == ["park"]
+    assert not model.has_session("aw-console-con")
+    assert not any("rename-session" in command for command in guest.commands)
+    assert _console(db).last_started_at is None
+
+
+def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, monkeypatch):
+    import agentworks.sessions.multi_console.attach as attach
+    from tests.conftest import _FakeResult, _ScriptedGuest, install_scripted_guest
+
+    _seed_vm(db)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    monkeypatch.setattr(
+        "agentworks.execution.oplog.OperationLogFile.close", lambda *a: (_ for _ in ()).throw(StateError("log failed"))
+    )
     monkeypatch.setattr(attach, "_tmux_session_presence", lambda *a: ProbeStatus.ABSENT)
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {})
     cleanup = []
@@ -220,18 +263,18 @@ def test_failed_build_cleanup_cannot_mask_cancellation(db: Database, tmp_path, m
         if len(cleanup) > 1:
             raise StateError("cleanup failed")
 
-    class Target(_FakeTarget):
-        def run(self, *a, **kw):
+    class Guest(_ScriptedGuest):
+        def dispatch(self, command: str) -> _FakeResult:
             raise UserAbort("cancelled")
 
+    guest = install_scripted_guest(monkeypatch, Guest())
     monkeypatch.setattr(attach, "_teardown_console_tmux", teardown)
     with pytest.raises(UserAbort):
         mc._build_console_tmux(
-            Target(),
+            guest.console_access(_vm(db)),
             db,
             registry,
             _console(db),
-            _vm(db),
             values={},
             layout="tiled",
         )
@@ -254,14 +297,14 @@ def test_stop_off_parent_accepts_without_transport_activation_or_hold(db: Databa
     monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: context)
     monkeypatch.setattr("agentworks.vms.manager.runtime.observe_vm_runtime", lambda *a, **kw: VMStatus.STOPPED)
     monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: pytest.fail("activated"))
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **kw: pytest.fail("constructed transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **kw: pytest.fail("built an access"))
     mc.stop_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
     assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
     assert calls == ["clear"]
 
 
 @pytest.mark.parametrize("error_type", [UserAbort, StateError])
-def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_target, monkeypatch, error_type):
+def test_start_acceptance_survives_infrastructure_failure(db: Database, scripted_guest, monkeypatch, error_type):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -280,7 +323,7 @@ def test_start_acceptance_survives_infrastructure_failure(db: Database, fake_tar
     assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
 
 
-def test_start_below_stopped_parent_records_child_running_without_activation(db: Database, fake_target, monkeypatch):
+def test_start_below_stopped_parent_records_child_running_without_activation(db: Database, scripted_guest, monkeypatch):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -299,7 +342,7 @@ def test_start_below_stopped_parent_records_child_running_without_activation(db:
     assert _vm(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
-def test_known_preflight_refusal_preserves_console_target(db: Database, fake_target, monkeypatch):
+def test_known_preflight_refusal_preserves_console_target(db: Database, scripted_guest, monkeypatch):
     import agentworks.sessions.multi_console.lifecycle as lifecycle
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -354,7 +397,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
     monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: context)
     monkeypatch.setattr("agentworks.vms.manager.runtime.observe_vm_runtime", lambda *a: VMStatus(power_state))
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **kw: object())
+    install_access_recorder(monkeypatch)
 
     def disconnected(*a):
         raise ConnectivityError("guest disappeared")
@@ -369,7 +412,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
 
 
 def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
-    db: Database, console_target_factory, monkeypatch
+    db: Database, console_guest_factory, monkeypatch
 ):
     from copy import deepcopy
 
@@ -387,7 +430,7 @@ def test_noop_start_preserves_canonical_panes_and_independent_member_intent(
     mc.set_console_desired_runtime_state(db, name="con", state="stopped")
     model = TmuxModel()
     model.seed_session("aw-console-con", "alpha")
-    console_target_factory(model)
+    console_guest_factory(model)
     before = deepcopy(model._sessions)
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: pytest.fail("collected pane secrets"))
     mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
@@ -417,7 +460,7 @@ def test_missing_host_record_refuses_console_start_before_accepting_intent(
         pytest.fail("locally refused start reached a resolver, provider or guest")
 
     monkeypatch.setattr("agentworks.secrets.resolver.Resolver.__init__", forbidden)
-    monkeypatch.setattr("agentworks.transports.transport", forbidden)
+    monkeypatch.setattr("agentworks.execution.vm_access", forbidden)
     for name in ("status", "start", "stop", "vm_active"):
         monkeypatch.setattr(ProxmoxPlatform, name, forbidden)
 

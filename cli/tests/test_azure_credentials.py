@@ -27,7 +27,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError
-from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.errors import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 
 #: The well-known default the model's SecretRef template names.
@@ -56,13 +56,16 @@ def _fake_vm(resource_id: str = _RESOURCE_ID) -> Any:
 
 
 class _Poller:
-    """A begin_* long-running-operation stub: ``.result()`` yields a value."""
+    """A begin_* long-running-operation stub: ``.result()`` yields a value, at once."""
 
     def __init__(self, value: object) -> None:
         self._value = value
 
-    def result(self) -> object:
+    def result(self, timeout: float | None = None) -> object:
         return self._value
+
+    def done(self) -> bool:
+        return True
 
 
 class _FakeVMs:
@@ -77,15 +80,15 @@ class _FakeVMs:
 
 
 class _FakePublicIps:
-    def begin_create_or_update(self, rg: str, name: str, params: object) -> _Poller:
+    def begin_create_or_update(self, rg: str, name: str, params: object, **_kw: object) -> _Poller:
         return _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"))
 
 
 class _FakeNics:
-    def get(self, rg: str, name: str) -> object:
+    def get(self, rg: str, name: str, **_kw: object) -> object:
         return SimpleNamespace(ip_configurations=[SimpleNamespace(public_ip_address=None)])
 
-    def begin_create_or_update(self, rg: str, name: str, nic: object) -> _Poller:
+    def begin_create_or_update(self, rg: str, name: str, nic: object, **_kw: object) -> _Poller:
         return _Poller(None)
 
 

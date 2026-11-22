@@ -47,6 +47,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient, CallTimedOut
+from agentworks.deadline import Deadline
 from agentworks.errors import AgentworksError, AuthorizationError, ProvisioningError, TokenRejectedError
 from agentworks.interrupts import interrupts_deferred
 
@@ -87,6 +89,20 @@ _DUPLICATE_PERMISSION_CODE = "InvalidPermission.Duplicate"
 _PERMISSION_NOT_FOUND_CODE = "InvalidPermission.NotFound"
 _GROUP_NOT_FOUND_CODES = frozenset({"InvalidGroup.NotFound", "InvalidGroupId.NotFound"})
 _INSTANCE_NOT_FOUND_CODES = frozenset({"InvalidInstanceID.NotFound"})
+
+# How long one held removal of a route's allows may take on the wall clock, its
+# per-prefix revokes together: interrupts wait this long at most.
+_REMOVAL_TIMEOUT_SECONDS = 300.0
+
+# The waits before each resend of an authorize EC2 throttled, doubling from
+# botocore's standard 1 s base: a throttled send was refused, so resending it
+# is safe, and after the last the throttling is the poke's answer.
+_THROTTLED_AUTHORIZE_WAITS_SECONDS = (1.0, 2.0, 4.0)
+
+# EC2's throttling code: a request it answers with this was refused, so it is
+# the one code an authorize is resent for, and it gets a retry hint wherever
+# it surfaces.
+_REQUEST_LIMIT_EXCEEDED_CODE = "RequestLimitExceeded"
 
 
 class EC2Error(ProvisioningError):
@@ -147,6 +163,10 @@ def wrap_ec2_error(exc: Exception) -> AgentworksError:
             return AuthorizationError(f"AWS denied permission ({summary})")
         if code in _CREDENTIAL_REJECTION_CODES:
             return TokenRejectedError(f"AWS rejected the selected credential ({summary})")
+        if code == _REQUEST_LIMIT_EXCEEDED_CODE:
+            return EC2Error(
+                summary, detail=str(exc), hint="AWS is throttling this account's EC2 requests; retry shortly"
+            )
         return EC2Error(summary, detail=str(exc))
     return EC2Error(str(exc), detail=str(exc), hint=exc.hint if isinstance(exc, AgentworksError) else None)
 
@@ -234,42 +254,116 @@ def _ssh_permission(prefix: str) -> dict[str, Any]:
     return {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": prefix}]}
 
 
-def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
+def single_send_config() -> Any:
+    """The botocore config of a client that sends each request once, which ``poke_ssh_allow`` authorizes through.
+
+    ``total_max_attempts`` counts the first send, so 1 turns botocore's own
+    resends off: an authorize then has exactly one send for its answer to
+    settle.
+    """
+    from botocore.config import Config
+
+    return Config(retries={"mode": "standard", "total_max_attempts": 1})
+
+
+def poke_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str], *, authorize: Any) -> None:
     """Authorize an ephemeral SSH allow on TCP/22 scoped to ``prefixes``.
 
     Dry-runs every exact matching revoke before any authorize. Then authorizes
     one prefix at a time so overlap with a concurrent route does not prevent
     non-overlapping prefixes from being added. Duplicate tuples are tolerated.
-    If an actual authorize fails partway through, or is interrupted, all
-    planned tuples are revoked best-effort before the failure propagates, with
-    interrupts held until the revoke is done.
+    ``authorize`` is the client the authorizes go through, one that sends each
+    request once (:func:`single_send_config`), so no resend can follow an
+    earlier send that still lands; the dry runs and revokes go through
+    ``ec2``. An authorize that EC2 throttled (``RequestLimitExceeded``) was
+    refused, so it alone is sent again, after each of
+    ``_THROTTLED_AUTHORIZE_WAITS_SECONDS``. If an actual authorize fails
+    partway through, or is interrupted, all planned tuples are revoked
+    best-effort before the failure propagates, holding interrupts until that
+    is done (within one bound, as :func:`remove_ssh_allow` does). An authorize
+    whose outcome is unknown (see :func:`_authorize_outcome_unknown`) may
+    still land after that revoke, so it also warns naming its prefix; the
+    warning goes out before the held interrupt is delivered, which would
+    otherwise skip it.
     """
     _check_ssh_revoke_permissions(ec2, security_group_id, prefixes)
     output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
+    in_flight: str | None = None  # the prefix whose authorize has not answered
     try:
         for prefix in prefixes:
-            try:
-                ec2.authorize_security_group_ingress(
-                    GroupId=security_group_id,
-                    IpPermissions=[_ssh_permission(prefix)],
+            for wait in (*_THROTTLED_AUTHORIZE_WAITS_SECONDS, None):
+                in_flight = prefix
+                try:
+                    authorize.authorize_security_group_ingress(
+                        GroupId=security_group_id,
+                        IpPermissions=[_ssh_permission(prefix)],
+                    )
+                except Exception as exc:
+                    if wait is not None and error_code(exc) == _REQUEST_LIMIT_EXCEEDED_CODE:
+                        in_flight = None  # refused: nothing is pending while the poke waits
+                        time.sleep(wait)
+                        continue
+                    if error_code(exc) != _DUPLICATE_PERMISSION_CODE:
+                        raise
+                break
+            in_flight = None
+    except BaseException as exc:
+        # The route's own finally never runs for a poke that did not return, so this revoke cleans up.
+        with interrupts_deferred():
+            remove_ssh_allow_interruptibly(_removal_client(ec2), security_group_id, prefixes)
+            if in_flight is not None and _authorize_outcome_unknown(exc):
+                output.warn(
+                    f"The SSH allow for {in_flight} on security group '{security_group_id}' was not confirmed, so "
+                    "AWS may still add it after its revoke; check the group for a TCP/22 rule from that source, and "
+                    "revoke it only once you have confirmed nothing else added it or relies on it, escalating "
+                    "otherwise."
                 )
-            except Exception as exc:
-                if error_code(exc) == _DUPLICATE_PERMISSION_CODE:
-                    continue
-                raise
-    except KeyboardInterrupt:
-        # The route's own finally never runs for a poke that did not return, so this revoke is held too.
-        with interrupts_deferred():
-            remove_ssh_allow(ec2, security_group_id, prefixes)
+        if isinstance(exc, Exception):
+            raise wrap_ec2_error(exc) from exc
         raise
-    except Exception as exc:
-        failure = wrap_ec2_error(exc)
-        with interrupts_deferred():
-            remove_ssh_allow(ec2, security_group_id, prefixes)
-        raise failure from exc
+
+
+def _authorize_outcome_unknown(exc: BaseException) -> bool:
+    """Whether an authorize that raised ``exc`` on its only send may still have added its rule.
+
+    Only EC2's refusal settles it: a client error (4xx), or
+    ``RequestLimitExceeded``, EC2's throttling answer, which it sends with a
+    503 before it acts. Any other server error says nothing either way,
+    whatever its code, and an interrupt, a bound running out, or a transport
+    failure leaves no answer at all. An error botocore raises before sending
+    anything (``ParamValidationError``, ``NoCredentialsError``) counts as
+    unknown too, so it over-warns; the dry runs before the first authorize
+    have already sent the same permission shape with the same credential.
+    """
+    from botocore.exceptions import ClientError
+
+    if not isinstance(exc, ClientError):
+        return True
+    if error_code(exc) == _REQUEST_LIMIT_EXCEEDED_CODE:
+        return False
+    status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return not (isinstance(status, int) and 400 <= status < 500)
 
 
 def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
+    """:func:`remove_ssh_allow_interruptibly`, with Ctrl-C and the terminations held until it is done.
+
+    A revoke cut short leaves the allow open, so every removal holds them
+    (:func:`~agentworks.interrupts.interrupts_deferred`) except create's
+    rollback. Since they are held, its revokes share one bound of
+    ``_REMOVAL_TIMEOUT_SECONDS`` on the wall clock, however many prefixes it
+    revokes.
+    """
+    with interrupts_deferred():
+        remove_ssh_allow_interruptibly(_removal_client(ec2), security_group_id, prefixes)
+
+
+def _removal_client(ec2: Any) -> BoundedClient:
+    """``ec2`` with every call through it sharing one ``_REMOVAL_TIMEOUT_SECONDS`` bound, starting now."""
+    return BoundedClient(ec2, Deadline.after(_REMOVAL_TIMEOUT_SECONDS))
+
+
+def remove_ssh_allow_interruptibly(ec2: Any, security_group_id: str, prefixes: Sequence[str]) -> None:
     """Revoke exactly the TCP/22 allows this operation authorized for
     ``prefixes``, restoring zero inbound exposure through them (the empty-group
     baseline stays, and any concurrent operation's non-overlapping allows are
@@ -281,7 +375,13 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
     is tolerated silently; any
     other failure warns naming the prefix and the residual exposure rather
     than raising, because every call site must keep unwinding. Only what was
-    actually revoked is reported as closed."""
+    actually revoked is reported as closed.
+
+    It holds no interrupts and adds no bound of its own. Create's rollback
+    calls it as it is, since there a second Ctrl-C is how the operator
+    abandons a cleanup that hangs, and the create retains what it could not
+    confirm; the poke's own cleanup holds interrupts and bounds it itself.
+    Everything else calls :func:`remove_ssh_allow`."""
     warnings: list[str] = []
     revoked: list[str] = []
     for prefix in prefixes:
@@ -295,9 +395,10 @@ def remove_ssh_allow(ec2: Any, security_group_id: str, prefixes: Sequence[str]) 
             if code == _PERMISSION_NOT_FOUND_CODE or code in _GROUP_NOT_FOUND_CODES:
                 continue
             err = wrap_ec2_error(exc)
+            exposure = "may remain open" if isinstance(exc, CallTimedOut) else "stays open"
             warnings.append(
                 f"could not revoke the SSH allow for {prefix} on security group "
-                f"'{security_group_id}': {err}. The VM's SSH port stays open to "
+                f"'{security_group_id}': {err}. The VM's SSH port {exposure} to "
                 f"{prefix}; revoke it manually to restore zero inbound exposure."
             )
             continue

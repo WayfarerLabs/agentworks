@@ -168,7 +168,7 @@ def test_outer_facets_compose_entry_deferrals_and_shared_paths_with_legacy_files
 
     from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
-    from tests.conftest import _FakeTarget
+    from tests.vm_access_support import Admin, RecordingVMAccess
 
     module = import_module(f"agentworks.plugins.{module_name}.harness_integration")
     implementation = getattr(module, implementation_name)
@@ -199,7 +199,8 @@ def test_outer_facets_compose_entry_deferrals_and_shared_paths_with_legacy_files
     monkeypatch.setattr(module, method, native_setup)
     common = {
         "vm": db.insert_vm("vm", "site", "host"),
-        "runner": _FakeTarget(),
+        "access": (access := RecordingVMAccess([], Admin())),
+        "files": access.files(),
         "prior": None,
         "checkpoint": lambda claims: None,
         "artifacts": received(server, rule),
@@ -228,7 +229,7 @@ def test_vm_mcp_defers_to_user_without_native_file_claims(module_name, class_nam
     integration = implementation.for_setup(owner_kind="vm", owner_name="vm", facet="vm", config={})
     server = mcp()
     result = integration.vm_init(
-        SimpleNamespace(artifacts=received(server), environment={}, secrets={}, runner=object())
+        SimpleNamespace(artifacts=received(server), environment={}, secrets={}, access=object())
     )
     assert not result.files
     assert [(entry.input_id, entry.destination) for entry in result.deferred] == [(server.identity, "user")]
@@ -244,7 +245,7 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from tests.artifacts.test_rendered_launch_args import integration
-    from tests.conftest import _FakeResult, _FakeTarget
+    from tests.vm_access_support import Admin, RecordingVMAccess
 
     server = mcp()
     first = context(server)
@@ -253,8 +254,8 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
         f"agentworks.plugins.{module_name}.harness_integration.session_mcp_conflicts", lambda *args, **kwargs: {}
     )
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.native")
-    runner = _FakeTarget({".thread": _FakeResult(1)})
-    a = selected.start(RunContext(admin_target=runner), intent=HarnessLaunchIntent.CREATE)
+    access = RecordingVMAccess([], Admin())
+    a = selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
     if module_name == "claude":
         assert first.directory + "/mcp.json" in a.command
     else:
@@ -268,7 +269,7 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
     )
     second = replace(first, inputs=received(second_server), directory=first.directory + "-next", run_id="next")
     selected.prepare_artifacts(second)
-    b = selected.start(RunContext(admin_target=runner), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+    b = selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.RESUME_OR_NEW)
     assert not b.artifacts.deferred
     if module_name == "claude":
         assert second.directory + "/mcp.json" in b.command and first.directory + "/mcp.json" not in b.command
@@ -299,7 +300,7 @@ def test_codex_modeled_profile_remains_usable_with_optional_mcp_deferred(monkeyp
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from tests.artifacts.test_rendered_launch_args import integration
-    from tests.conftest import _FakeResult, _FakeTarget
+    from tests.vm_access_support import Admin, RecordingVMAccess
 
     item = mcp()
     selected = integration(
@@ -313,9 +314,7 @@ def test_codex_modeled_profile_remains_usable_with_optional_mcp_deferred(monkeyp
         pytest.fail("modeled profile MCP reached partial native inspection")
 
     monkeypatch.setattr("agentworks.plugins.codex.harness_integration.session_mcp_conflicts", forbid)
-    result = selected.start(
-        RunContext(admin_target=_FakeTarget({".thread": _FakeResult(1)})), intent=HarnessLaunchIntent.CREATE
-    )
+    result = selected.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)
     assert {entry.input_id for entry in result.artifacts.deferred} == {item.identity}
     assert "--profile operator" in result.command or "-p operator" in result.command
     assert item.content.name not in result.command

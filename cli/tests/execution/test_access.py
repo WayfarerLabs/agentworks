@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import io
 import shutil
 import subprocess
@@ -27,7 +28,7 @@ from agentworks.execution.errors import (
     TrustMissing,
     VMNotReady,
 )
-from agentworks.execution.requests import Command, LoginShell, Script, Shell
+from agentworks.execution.requests import Bytes, CaptureOutput, Command, LoginShell, NoInput, Script, Shell
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -36,8 +37,9 @@ from agentworks.execution.results import (
     Unknown,
     UnknownReason,
 )
-from tests.conftest import seed_vm_trust
+from tests.conftest import requires_posix_shell, seed_vm_trust
 from tests.ssh_fixtures import TEST_SSH_PUBLIC_KEY, write_test_ssh_keypair
+from tests.vm_access_support import local_remote_argv, run_requests_locally
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -191,6 +193,60 @@ def test_an_agent_access_refuses_an_elevated_request_before_anything_resolves(
     assert resolved == [True, True]
 
 
+def test_stream_refuses_a_request_that_carries_its_own_input_before_anything_resolves(
+    monkeypatch: pytest.MonkeyPatch, no_spawn: list[object], tmp_path: Path
+) -> None:
+    resolved: list[bool] = []
+    monkeypatch.setattr(client, "resolve_ssh", lambda: resolved.append(True))  # type: ignore[func-returns-value]
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+
+    with pytest.raises(ValidationError):
+        access.stream(Command(("cat",), stdin=Bytes(b"data")), stdin=None, stdout=io.BytesIO(), stderr=io.BytesIO())  # type: ignore[arg-type]
+
+    assert resolved == []
+    assert no_spawn == []
+
+
+@pytest.mark.parametrize(
+    ("stdin", "sink"),
+    [
+        ("data", CaptureOutput()),
+        (Bytes("data"), CaptureOutput()),  # type: ignore[arg-type]
+        (Bytes(bytearray(b"data")), CaptureOutput()),  # type: ignore[arg-type]
+        (NoInput(), CaptureOutput(0)),
+        (NoInput(), CaptureOutput(-1)),
+        (NoInput(), CaptureOutput(True)),
+        (NoInput(), CaptureOutput(1.5)),  # type: ignore[arg-type]
+        (NoInput(), "discard"),
+    ],
+    ids=[
+        "str-stdin",
+        "str-bytes",
+        "bytearray-bytes",
+        "zero-limit",
+        "negative-limit",
+        "bool-limit",
+        "float-limit",
+        "str-sink",
+    ],
+)
+def test_run_refuses_input_its_types_rule_out_before_anything_resolves(
+    monkeypatch: pytest.MonkeyPatch, no_spawn: list[object], tmp_path: Path, stdin: object, sink: object
+) -> None:
+    resolved: list[bool] = []
+    monkeypatch.setattr(client, "resolve_ssh", lambda: resolved.append(True))  # type: ignore[func-returns-value]
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+    request = Command(("cat",), stdin=stdin)  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError):
+        access.run(request, stdout=sink)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        access.run(request, stderr=sink)  # type: ignore[arg-type]
+
+    assert resolved == []
+    assert no_spawn == []
+
+
 def test_an_agent_access_must_connect_as_the_agents_own_user(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         VMAccess(
@@ -319,7 +375,7 @@ def test_errors_show_ssh_diagnostics_but_never_the_payload() -> None:
 
     for error in (
         ExecutionIncomplete("box", loud),
-        CommandFailed("box", 3, result(Completed(3), stdout=SECRET.encode())),
+        CommandFailed("box", 3, result(Completed(3), stdout=SECRET.encode()), streams_logged=True),
         RequestRefused("box", "exec ENOENT", result(NotDelivered(NotDeliveredReason.REFUSED, "exec ENOENT"))),
         VMNotReady("box", NotDeliveredReason.STDLIB_MISSING),
         TrustMismatch("box", tail),
@@ -327,7 +383,7 @@ def test_errors_show_ssh_diagnostics_but_never_the_payload() -> None:
         for text in (str(error), repr(error), error.hint or ""):
             assert SECRET not in text
     assert tail in str(ExecutionIncomplete("box", loud))
-    assert CommandFailed("box", 3, result(Completed(3))).status == 3
+    assert CommandFailed("box", 3, result(Completed(3)), streams_logged=True).status == 3
 
 
 def test_a_result_does_not_repr_its_streams() -> None:
@@ -688,3 +744,43 @@ def test_with_nothing_in_flight_the_closing_flush_tries_both_streams_then_raises
 
     assert caught.value is failure
     assert stderr.flushes == 1
+
+
+@requires_posix_shell
+def test_a_staged_source_needs_an_open_file_limit_above_its_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Staging a script or program needs a soft RLIMIT_NOFILE above 100; a plain command does not."""
+    run_requests_locally(
+        monkeypatch,
+        lambda command: [
+            "/bin/sh",
+            "-c",
+            'ulimit -n 64 && exec "$@"',
+            "sh",
+            *local_remote_argv(command, home=tmp_path, shell="/bin/sh", python=ssh_process.DEFAULT_PYTHON),
+        ],
+    )
+    access = VMAccess(
+        vm_name="local",
+        host="127.0.0.1",
+        user=getpass.getuser(),
+        identity=Admin(),
+        identity_file=tmp_path / "identity",
+    )
+
+    assert access.run(Command(("true",))).completion == Completed(0)
+    assert access.run(Script("true\n", Shell.SH)).completion == NotDelivered(NotDeliveredReason.LAUNCHER_FAILED)
+
+
+@pytest.mark.parametrize("log_streams", [True, False])
+def test_a_checked_failure_carries_whether_the_request_logged_its_streams(
+    supported_client: SSHClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, log_streams: bool
+) -> None:
+    monkeypatch.setattr(VMAccess, "_execute", lambda self, *a, **k: result(Completed(2)))
+    access = vm_access(vm(), config(tmp_path / "key"), Admin())
+
+    with pytest.raises(CommandFailed) as failed:
+        access.run(Command(("false",), log_streams=log_streams), check=True)
+
+    assert failed.value.streams_logged is log_streams
