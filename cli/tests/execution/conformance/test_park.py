@@ -1,0 +1,113 @@
+"""What ``park`` does around a pane's handover: entering, leaving, and the pane's command line.
+
+The pane itself, with its ``TERM`` and its shell, is vector T2 in ``vectors.py``,
+on ``script``'s terminal so every lane can run it; the last test here runs it in
+a real tmux pane.
+"""
+
+from __future__ import annotations
+
+import getpass
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from typing import TYPE_CHECKING
+
+import pytest
+
+from agentworks.errors import ValidationError
+from agentworks.execution import ssh_process
+from agentworks.execution.agw_launch import HANDOVER_WAIT_SECONDS
+from agentworks.execution.errors import RequestRefused
+from agentworks.execution.requests import LoginShell, TerminalCommand
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tests.execution.conformance.lanes import LocalLane
+
+
+def test_a_block_that_raises_lets_the_request_go_at_once(local_lane: LocalLane) -> None:
+    token = local_lane.handover_token()
+    started = time.monotonic()
+
+    with pytest.raises(RuntimeError, match="split failed"), local_lane.access.park(LoginShell()):
+        raise RuntimeError("split failed")
+
+    # Closing the parking stdin ends the launcher's wait, so the block never waits it out.
+    assert time.monotonic() - started < HANDOVER_WAIT_SECONDS
+    assert local_lane.wait_gone(f"/tmp/agw-handover-{token}")
+
+
+def test_a_handover_no_pane_collects_reports_it(local_lane: LocalLane) -> None:
+    local_lane.shorten_handover_wait(1)
+    token = local_lane.handover_token()
+
+    with local_lane.access.park(LoginShell()) as handover:
+        pass
+
+    assert handover.collected is False
+    assert local_lane.wait_gone(f"/tmp/agw-handover-{token}")
+
+
+def test_a_directory_it_cannot_enter_is_refused_before_anything_is_parked(local_lane: LocalLane) -> None:
+    token = local_lane.handover_token()
+
+    with pytest.raises(RequestRefused) as raised, local_lane.access.park(LoginShell(cwd="/nonexistent/agw-5e")):
+        pytest.fail("the block ran")
+
+    assert raised.value.code == "cwd"
+    assert not local_lane.exists(f"/tmp/agw-handover-{token}")
+
+
+def test_a_pane_another_account_runs_switches_to_the_account_that_parked(local_lane: LocalLane) -> None:
+    local_lane.shorten_handover_wait(1)
+
+    with local_lane.access.park(LoginShell()) as handover:
+        pass
+
+    # The pane's own command, run by the account that parked, has no switch in front.
+    assert handover.account == getpass.getuser()
+    plain = shlex.split(handover.command())
+    switched = shlex.split(handover.command(switch_user=True))
+    assert switched == ["sudo", "-n", "-u", handover.account, "--", *plain]
+
+
+def test_only_a_login_shell_parks(local_lane: LocalLane, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ssh_process, "spawn", lambda *a, **k: pytest.fail("spawned"))
+
+    with pytest.raises(ValidationError), local_lane.access.park(TerminalCommand(("tmux",))):  # type: ignore[arg-type]
+        pytest.fail("the block ran")
+
+
+@pytest.mark.skipif(sys.platform != "linux" or shutil.which("tmux") is None, reason="runs a real tmux server on Linux")
+def test_a_tmux_pane_collects_its_request_and_has_the_panes_terminal(local_lane: LocalLane, tmp_path: Path) -> None:
+    secret = "sekrit-pane-value-5e"
+    local_lane.quiet_interactive_startup()
+    config = tmp_path / "tmux.conf"
+    config.write_text('set -g default-terminal "screen-256color"\n')
+    shown = tmp_path / "shown"
+    tmux = ["tmux", "-f", str(config), "-S", str(tmp_path / "tmux.sock")]
+    # The server's environment: tmux runs a pane's command through the default shell it names.
+    environment = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "SHELL": local_lane.shell}
+    try:
+        with local_lane.access.park(LoginShell(cwd=local_lane.workdir, env={"TOKEN": secret})) as handover:
+            pane = local_lane.pane_command(handover.command())
+            subprocess.run([*tmux, "new-session", "-d", pane], check=True, env=environment)
+
+        assert handover.collected
+        fields = '"$TERM" "$TOKEN" "$PWD" "$TMUX" "$TMUX_PANE" "$TERM_PROGRAM"'
+        probe = f'printf "%s:%s:%s:%s:%s:%s\\n" {fields} > {shlex.quote(str(shown))}'
+        subprocess.run([*tmux, "send-keys", probe, "Enter"], check=True, env=environment)
+        deadline = time.monotonic() + 20
+        while not (shown.exists() and shown.read_text().endswith("\n")) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        term, token, directory, server, pane_id, program = shown.read_text().rstrip("\n").split(":")
+        assert (term, token, directory, program) == ("screen-256color", secret, local_lane.workdir, "tmux")
+        # tmux's own description of the pane: its server's socket, then its pid and session; then the pane.
+        assert server.startswith(f"{tmp_path / 'tmux.sock'},")
+        assert pane_id.startswith("%")
+    finally:
+        subprocess.run([*tmux, "kill-server"], check=False, env=environment, capture_output=True)

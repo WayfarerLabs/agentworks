@@ -117,10 +117,26 @@ class AdminConfig(DeclaredResource):
     """Names of ``user-install-command`` resources run during admin init."""
 
     dotfiles_source: str | None = None
-    """Where to fetch the admin user's dotfiles from. Omit to install none."""
+    """Where to fetch the admin user's dotfiles from, a source reference (see the source
+    references guide) checked at load. Omit to install none."""
+
+    @field_validator("dotfiles_source")
+    @classmethod
+    def _check_dotfiles_source(cls, value: str | None) -> str | None:
+        from agentworks.sources import check_source_ref
+
+        return None if value is None else check_source_ref(value, field="dotfiles_source")
 
     dotfiles_destination: Annotated[str, Interpolated()] = "~/.dotfiles"
-    """Where the fetched dotfiles are checked out."""
+    """Where the fetched dotfiles are checked out: a path in the admin's home
+    (`dots` or `~/dots`), or an absolute path. Supports ${agw:NAME} context
+    substitution. The rendered value is checked before the sync: it may not be
+    the home itself or one of its parents, be, hold or lie inside a path
+    Agentworks manages in the home (`~/.ssh`, `~/.agentworks`,
+    `~/.agentworks-artifacts`, the workspaces' `~/.config/tmuxinator` and the
+    `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..` component,
+    and a trailing `/` is dropped. A refused destination warns and syncs
+    nothing."""
 
     dotfiles_install_cmd: Annotated[str, Interpolated()] = "./install.sh"
     """The command run inside the checkout to install the dotfiles."""

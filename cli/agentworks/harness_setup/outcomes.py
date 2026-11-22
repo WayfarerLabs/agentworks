@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from agentworks.harness_setup.model import NativeSetupState
-    from agentworks.ssh import SSHLogger
 
 # Remove complete terminal strings and escape sequences before the shared scalar
 # boundary strips remaining controls, including truncated or malformed sequences.
@@ -35,20 +34,13 @@ def normalize_setup_diagnostic(text: str, *, preserve_lines: bool = False) -> st
     return sanitize_fact_line(" ".join(text.split()))
 
 
-def sanitize_setup_diagnostic(
-    text: str,
-    *,
-    redactions: Iterable[str] = (),
-    logger: SSHLogger | None = None,
-) -> str:
+def sanitize_setup_diagnostic(text: str, *, redactions: Iterable[str] = ()) -> str:
     """Bound a setup diagnostic to one terminal-safe line and 2 KiB of UTF-8.
 
-    Only explicit resolved values and the operation logger's registered secrets
-    are redacted. Match raw and normalized representations before truncation.
-    Render persisted older diagnostics through the same boundary without rewriting state.
+    Only the explicit ``redactions`` are redacted, matching their raw and
+    normalized representations before truncation. Render persisted older
+    diagnostics through the same boundary without rewriting state.
     """
-    if logger is not None:
-        text = logger.sanitize(text)
     patterns = {form for value in redactions for form in secret_redaction_forms(value)}
     for pattern in sorted(patterns, key=len, reverse=True):
         text = text.replace(pattern, "[REDACTED]")
@@ -56,29 +48,22 @@ def sanitize_setup_diagnostic(
     normalized = {normalize_setup_diagnostic(pattern) for pattern in patterns}
     for pattern in sorted(filter(None, normalized), key=len, reverse=True):
         text = text.replace(pattern, "[REDACTED]")
-    if logger is not None:
-        text = logger.sanitize(text, normalize=normalize_setup_diagnostic)
     encoded = text.encode("utf-8")
     if len(encoded) > _DIAGNOSTIC_LIMIT:
         text = encoded[: _DIAGNOSTIC_LIMIT - len(_TRUNCATED)].decode("utf-8", errors="ignore") + _TRUNCATED
     return text
 
 
-def sanitize_setup_error(
-    error: AgentworksError,
-    *,
-    redactions: Iterable[str] = (),
-    logger: SSHLogger | None = None,
-) -> None:
+def sanitize_setup_error(error: AgentworksError, *, redactions: Iterable[str] = ()) -> None:
     """Keep guest-derived error text safe without changing its type or identity."""
     values = tuple(redactions)
     seen: set[int] = set()
     current: BaseException | None = error
     while isinstance(current, AgentworksError) and id(current) not in seen:
         seen.add(id(current))
-        current.args = (sanitize_setup_diagnostic(str(current), redactions=values, logger=logger),)
+        current.args = (sanitize_setup_diagnostic(str(current), redactions=values),)
         if current.hint:
-            current.hint = sanitize_setup_diagnostic(current.hint, redactions=values, logger=logger)
+            current.hint = sanitize_setup_diagnostic(current.hint, redactions=values)
         # Provider exception attributes can embed SSH argv and resolved values.
         # Keep safe domain causes, but do not expose raw provider chains in logs
         # or --debug output after sanitizing only their outer message.
@@ -89,6 +74,39 @@ def sanitize_setup_error(
             current.__cause__ = None
             break
         current = cause
+
+
+class Redactor:
+    """Sanitizes guest text against a fixed set of secret values that are not part of its interface.
+
+    Core builds one from every secret an operation resolved or its log
+    registered and gives it to integrations, which sanitize the guest text
+    an error or warning quotes without receiving those values themselves.
+    Integrations are trusted Python, so this scopes what core delivers; it
+    is not an isolation boundary. :meth:`including` returns a new one rather
+    than changing this one. Equality is identity, so a dataclass that holds
+    one leaves it out of its comparison.
+    """
+
+    __slots__ = ("_values",)
+
+    def __init__(self, values: Iterable[str] = ()) -> None:
+        self._values = tuple(dict.fromkeys(value for value in values if value))
+
+    def __repr__(self) -> str:
+        return "Redactor(...)"
+
+    def including(self, values: Iterable[str]) -> Redactor:
+        """A redactor that also redacts ``values``."""
+        return Redactor((*self._values, *values))
+
+    def sanitize(self, text: str) -> str:
+        """``text`` bounded as :func:`sanitize_setup_diagnostic` bounds it, with these values redacted."""
+        return sanitize_setup_diagnostic(text, redactions=self._values)
+
+    def sanitize_error(self, error: AgentworksError) -> None:
+        """Sanitize ``error`` and its domain causes in place, as :func:`sanitize_setup_error` does."""
+        sanitize_setup_error(error, redactions=self._values)
 
 
 @dataclass(frozen=True)

@@ -222,6 +222,7 @@ def test_cli_write_tolerates_missing_ssh_keys(tmp_path: Path, monkeypatch: pytes
     from agentworks.cli import app
 
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "config.toml")
     (tmp_path / "config.toml").write_text(
         f"""\
@@ -450,6 +451,7 @@ def test_sample_capability_kind_is_a_clean_cli_error(
     from agentworks import cli as cli_mod
 
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agentworks", "resource", "sample", "harness-integration"])
     monkeypatch.setenv("AGW_DEBUG", "")
 

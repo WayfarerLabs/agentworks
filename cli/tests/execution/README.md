@@ -6,10 +6,7 @@ Run everything local from `cli/`:
 uv run pytest tests/execution
 ```
 
-The package's tests pass with the legacy modules blocked: `conftest.py` here evicts them from
-`sys.modules`, removes the attribute on their parent package and puts a finder that refuses them
-first on `sys.meta_path`, for every test. `test_independence.py` proves the same at import time in a
-fresh interpreter. Tests that exercise a migrated manager live elsewhere in `tests/` and use the
+Tests that exercise a manager built on the package live elsewhere in `tests/` and use the
 `vm_access_recorder` fixture (`tests/vm_access_support.py`), a `VMAccess` that records requests and
 returns canned outcomes without ssh.
 
@@ -29,15 +26,26 @@ returns canned outcomes without ssh.
 - `test_access.py`, `test_launcher_source.py`, `test_stream_process.py`: passivity and ordering, the
   launcher's structure, and `stream` in a real process whose stdin stays open.
 - `test_trust.py`: the host-key store.
+- `test_detached_program.py`: the guest detached program against real processes and a temporary
+  base, under each interpreter: launch identity, every state and the read order, the prune,
+  interrupt, discard, and (under the sudo lane) the base's modes. Linux only.
+- `test_detached.py`: the detached client over the recording fake: each request, the follow-up after
+  a connection outcome, and the boundary checks.
+- `test_from_file.py`: the `FromFile` input: a file that cannot be opened and a path that is not a
+  `Path` refused before dispatch, `stream` refusing it, every byte reaching the payload on the L
+  lane, and a file that fails part way failing the request.
+- `test_to_file.py`: the `ToFile` sink: an existing path refused before dispatch, bytes unchanged,
+  and the file kept only for `Completed(0)`. Marked `windows`, where binary mode is what keeps CR
+  LF.
 - `test_reachability.py`: what `reachability.wait` polls, what it raises on the first attempt, and
   the confirming probe, over the recording fake.
 - `test_oplog.py`: the operation log record holds a request's shape and never its secrets.
+- `test_operation_log_file.py`: the operation log file's one redacting sink, its close and its
+  sharing between threads, and finding a VM's logs by their exact name.
 - `test_root_script.py`: the root-script wrapper over fabricated channel output (the status rule,
   the secret in no field, one dispatch), `read_host_keys`, and `run_process` against a local Bash.
 - `test_run_process.py`: `run_process` over Python children (the deadline, the output limit, a
   background child, end of file). Marked `windows`, since WSL2's root channel runs only there.
-- `legacy_modules.py`: the legacy module names, shared by the conftest blocker, the fresh
-  interpreter guard and the static import check.
 
 ## Conformance vectors
 
@@ -67,28 +75,116 @@ included; the root channel's W3 skips on a local lane without `/proc`.
   starts dropping unauthenticated connections at random past 10, so parallel vectors would fail
   unpredictably.
 
-  It creates and removes only `/tmp/agw-conformance-*` and `/tmp/agw-handover-*` on the guest. Run
-  it from each workstation the evidence matrix names; Windows is where binary stdin and early exit
-  matter most. The lane is not part of the default run.
+  It creates and removes `/tmp/agw-conformance-*` and `/tmp/agw-handover-*` on the guest. The
+  detached vectors also create `/var/lib/agentworks/detached`, and its parent if absent, and leave
+  both; they discard each launch they make, and every launch removes the sibling launch directories
+  that are not running and are older than seven days. Run it from each supported workstation (Linux,
+  macOS and Windows); Windows is where binary stdin and early exit matter most. The lane is not part
+  of the default run.
 
 The elevation vectors (E1, E2 and E6) run on L and V. On L they need the runner's passwordless
 `sudo -n`, skipping without it locally and failing without it when `CI` is set; E4, the
 distribution's default sudoers on a fresh VM, is V only.
 
-`conformance/test_attach_terminal.py` and `conformance/test_forward.py` cover what happens around
-the terminal half and a forward, on the same lanes.
+`conformance/program_vectors.py` holds the vectors for the request vocabulary (programs, input,
+sinks), which join the list in `vectors.py`:
 
-`conformance/root_vectors.py` holds the root channel's vectors (W1 to W9 in the platform LLD), on
-two lanes of their own. L runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and
-again under `sudo -n` where the runner grants it (`conformance/test_root_vectors.py`). V runs
-through the platform `run_as_root` of the VM named by `AGW_CONFORMANCE_VM`, inside the same gated
-boundary `vm shell --platform` opens:
+- F1 (L, S and V): a request's `Bytes` input reaches no record of a real `OperationLogFile` and no
+  error, and `log_streams=False` keeps its streams out of the record.
+- F2 and F3 (L, S and V): every input byte reaches a `PythonProgram` from its first byte, its
+  arguments arrive exactly, and its source is in no argument.
+- F4 (L and V): a `PythonProgram` with `login`, `interactive` and both, under startup files that
+  print, export and end with a failing command substitution. On L the account's default shell is the
+  lane's own (`LocalLane.use_lane_shell_as_account_shell`), so the four shells are each covered; on
+  V it is the admin's.
+- F5 (L and V): an interactive `Script` under `sh`, `bash` and the default shell sees its
+  interactive startup, returns its own `exit` status and prints none of the prompts its startup
+  sets, which a shell reading the script as its input would.
+- F9 (L and V): a startup file that closes descriptors 3 to 9 still leaves a login and interactive
+  `PythonProgram` and an interactive `Script` their source.
+- F8 (L and V): an elevated request keeps its environment; on L it needs `sudo -n`, as the elevation
+  vectors do.
+- The `run` sinks capture to their limit or discard (L and S).
+
+On L, a 3.11 interpreter that is not the system one becomes the program interpreter as well as the
+launcher's, so a `PythonProgram` runs under it too.
+
+`conformance/file_vectors.py` holds the file operations' vectors, which join the same list:
+
+- F6 (V): the VM-wide file lock under the image's `fs.protected_regular`. The admin and root each
+  create it in turn, and the other then takes it unelevated or elevated and completes a `write_if`.
+  The lane reaches the VM as its admin only, so root stands in for a second account. It removes the
+  lock file between rounds.
+- F7 (S and V): an elevated `write_if` creates a root-owned file that an elevated `read` returns
+  (with `sudo -n` on S), and an agent's elevated `write_if` is refused before anything is sent.
+
+Every test but an integration test sends the file program with its lock in the worker's temporary
+directory (the suite conftest's `file_lock_path`), so the L and S lanes and
+`run_file_program_locally` never take the host's own `/run/lock`.
+
+`test_file_program.py` runs the guest file program's `main` in its own interpreter, under each
+interpreter the L lane uses, on a temporary tree with its lock in a sticky directory of its own:
+conflicts, truncated input, links at the destination, a parent and the lock path, the lock's mode,
+wait and sharing, cleanup after a failure or `SIGTERM`, and pruning. `test_file_program_metadata.py`
+runs it the same way (`_file_program_support.py` holds the shared harness) for metadata preservation
+and the temporary file's privacy until publication. Their sudo lane (a lock root created first,
+owner preservation, a root-owned write) needs the runner's passwordless `sudo -n` and follows the
+elevation vectors' rule. `test_files.py` covers `Files`: the status-to-error mapping and refusals
+before dispatch over the recording access, and a round trip, a link refusal and the private lock
+over the L lane.
+
+The terminal vectors join the same list:
+
+- T1 (L, S and V): a `TerminalCommand` runs its argv from `PATH` with its environment, which never
+  reaches the terminal half's command line, and one that cannot run or whose directory is missing is
+  refused with the shell's status, the last before the terminal is touched.
+- T2 (L, S and V): a pane's handover. The lane parks a login shell, runs the handover's command on
+  `script`'s pty (as tmux runs a pane's command through its default shell), and types into the
+  shell: it is interactive, has its environment, takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM`
+  and `TERM_PROGRAM_VERSION` from the pane's environment, with `DEFAULT_TERM` when `TERM` is absent,
+  and has no `SSH_TTY`. On local lanes the account's home is one of the lane's
+  (`quiet_interactive_startup`), so an interactive shell reads no startup file of the runner's, and
+  its `.zshenv` sets `skip_global_compinit`, so Ubuntu's global `compinit` cannot prompt and take a
+  typed key; on L the account shell is the lane's own, so the four shells are each covered. On L, an
+  attach on `script`'s pty whose stage 0 shell exports `TMUX`, `TMUX_PANE` and `TERM_PROGRAM` shows
+  its shell none of them, and `SSH_TTY`.
+
+`conformance/detached_vectors.py` holds detached work's vectors over the real wire, which join the
+same list. The real `Detached` client sends the real guest program through `VMAccess` and
+agw-launch, elevated, so on S they need the runner's passwordless `sudo -n` and follow the elevation
+vectors' rule:
+
+- DT1 (S and V): a payload still running after its launch's connection closed is observed, completed
+  and downloaded through `ToFile` by later requests, every byte unchanged.
+- DT2 (V): root owns the VM's base and its parent, and neither is group- or world-writable.
+
+Launch identity, interrupt and the launch directory's own modes need no sudo and are tested
+elsewhere: the guest program in `test_detached_program.py` and the client over the recording fake in
+`test_detached.py` (a fresh id per launch, the follow-up after a lost connection, and `interrupt`).
+
+The L and S lane fixtures request `private_detached_base` (the conformance `conftest.py`), which
+sends the program with its base under the worker's temporary directory, removed with `sudo -n`
+afterwards, so no test writes the runner's own `/var/lib`; L runs no detached vector today and
+requests it as a guard for any that comes. Each payload waits at most a minute for its `go` file, so
+one a failed test leaves behind ends by itself. `conformance/test_detached_resume.py` stops the S
+lane's own sshd while a launch waits for a file, creates the file on this machine meanwhile, and
+starts sshd again: while it is down an observation is an outcome backup's loop waits out, and once
+it is back the next one reads the finished payload's status and output.
+`conformance/test_rootless_sshd.py` shows the S lane's sshd counts as started only once it holds its
+port: a port a plain listener holds is retried and then reported unavailable.
+
+`conformance/test_attach_terminal.py`, `conformance/test_park.py` and `conformance/test_forward.py`
+cover what happens around the terminal half, a pane's handover (including one in a real tmux pane,
+skipped where none is installed) and a forward, on the same lanes.
+
+`conformance/root_vectors.py` holds the root channel's vectors, W1 to W9, on two lanes of their own.
+L runs `root_script.run_process(["/bin/bash", "-s"], ...)` locally, and again under `sudo -n` where
+the runner grants it (`conformance/test_root_vectors.py`). V runs through the platform `run_as_root`
+of the VM named by `AGW_CONFORMANCE_VM`, inside the same gated boundary `vm shell --platform` opens:
 
 ```console
-AGW_CONFORMANCE_VM=my-vm uv run pytest tests/test_root_channel_live_vectors.py -m integration
+AGW_CONFORMANCE_VM=my-vm uv run pytest tests/execution/conformance/test_root_live_vectors.py -m integration
 ```
-
-That runner sits outside this directory because the platform boundary imports legacy modules.
 
 ## Writing a vector
 

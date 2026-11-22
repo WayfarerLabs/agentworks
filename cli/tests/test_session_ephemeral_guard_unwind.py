@@ -43,7 +43,7 @@ def test_session_failure_unwinds_actual_realized_owners_through_real_delete_serv
     )
     logger = MagicMock()
     logger.sanitize.side_effect = lambda message: message
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", lambda *a, **k: logger)
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", lambda *a, **k: logger)
     monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.initializer.create_agent_on_vm", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
@@ -139,7 +139,7 @@ def test_pending_teardown_preserves_user_abort_from_actual_delete_path(db, tmp_p
     def abort(*args, **kwargs):
         raise error
 
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", lambda *a, **k: MagicMock())
+    monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", lambda *a, **k: MagicMock())
     monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", abort)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", abort)
     with native_mutation_guard(db.path, vm.name) as guard:

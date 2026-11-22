@@ -20,6 +20,7 @@ from agentworks.sessions.manager._runtime import (
     prepare_session_stop,
 )
 from tests._runtime_probes import server_for
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 from .test_create_start_restart_orchestrated import _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
@@ -91,7 +92,7 @@ def _definition(db: Database, monkeypatch: pytest.MonkeyPatch, *, status: Sessio
 def test_running_noop_preparation_never_repairs_or_uses_env_targets(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     definition = _definition(db, monkeypatch, status=SessionStatus.RUNNING)
-    monkeypatch.setattr(manager, "_build_session_target", lambda *a, **k: pytest.fail("owning transport probed"))
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: pytest.fail("owning access probed"))
     prepared = prepare_session_launch(definition)
     assert prepared.noop and prepared.secret_targets == ()
     db.close()
@@ -106,9 +107,9 @@ def test_ineligible_preparation_never_repairs_or_collects_values(tmp_path, monke
     db.close()
 
 
-def test_off_parent_stop_retains_runtime_identity_without_transport(tmp_path, monkeypatch):
+def test_off_parent_stop_retains_runtime_identity_without_access(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("transport created"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("access built"))
     before = _session(db)
     changes = db._conn.total_changes
     prepared = prepare_session_stop(db, SimpleNamespace(), before, parent_off=True)
@@ -150,9 +151,9 @@ def test_prepared_stop_propagates_cancellation_without_marking_runtime_stopped(t
     failure = control_signal("cancelled")
     attempted: list[str] = []
 
-    def cancel(session, *, target, **kwargs):
+    def cancel(session, *, access, **kwargs):
         assert session == before
-        assert target is prepared.session_target
+        assert access is prepared.session_access
         attempted.append(session.session_uuid)
         raise failure
 
@@ -298,7 +299,7 @@ def test_stopped_parent_refuses_launch_before_transport_creation(tmp_path, monke
     definition = _definition(db, monkeypatch, status=SessionStatus.STOPPED)
     vm = _vm(db)
     db.set_vm_desired_runtime_state("vm1", DesiredRuntimeState.STOPPED, expected_vm_uuid=vm.vm_uuid)
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport created"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("guest transport created"))
     with pytest.raises(StateError):
         prepare_session_launch(definition)
     assert _session(db).desired_runtime_state is DesiredRuntimeState.RUNNING
@@ -416,9 +417,8 @@ def test_pending_runtime_ownership_probe_propagates_cancellation(tmp_path, monke
         raise failure
 
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", cancel)
-    target = manager.transport(_vm(db), SimpleNamespace())
     with pytest.raises(UserAbort) as caught:
-        _status._pending_launch_is_owned(pending, target=target, server=server_for(pending))
+        _status._pending_launch_is_owned(pending, admin=RecordingVMAccess([], Admin()), server=server_for(pending))
     assert caught.value is failure
     db.close()
 
@@ -453,7 +453,7 @@ def test_local_definition_rejects_canonical_identity_before_guest_or_secret_work
         raise failure
 
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", refuse)
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("guest transport created"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("guest transport created"))
     with pytest.raises(StateError) as caught:
         _prepare_launch(db, monkeypatch)
     assert caught.value is failure
@@ -529,4 +529,21 @@ def test_recovery_only_action_never_widens_after_preparation(tmp_path, monkeypat
     with pytest.raises(StateError):
         execute_session_start(prepared, secret_values={}, graph_secret_values={})
     assert _session(db) == before
+    db.close()
+
+
+def test_launch_preparation_reads_a_running_agent_sessions_startup_protection_as_the_agent(tmp_path, monkeypatch):
+    from tests.sessions.test_owner_reads import _admin, _Reply, assert_tmux_runs_as_the_agent
+    from tests.vm_access_support import install_access_recorder
+
+    db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.RUNNING)
+    definition = _launch_definition(db)
+    admin = _admin({"@agentworks-launch-pane": _Reply(stdout="off")})
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = admin.answer
+
+    prepared = prepare_session_launch(definition)
+
+    assert prepared.noop
+    assert_tmux_runs_as_the_agent(recorder.access())
     db.close()

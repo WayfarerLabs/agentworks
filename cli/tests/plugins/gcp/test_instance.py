@@ -10,13 +10,19 @@ from google.api_core import exceptions as api_exceptions
 from google.cloud import compute_v1
 
 from agentworks.errors import AlreadyExistsError
-from agentworks.plugins.gcp.errors import GCECapacityError, GCEOperationError
+from agentworks.plugins.gcp.errors import (
+    DEFINITE_REFUSALS,
+    GCECapacityError,
+    GCEIndeterminateOperationError,
+    GCEOperationError,
+)
 from agentworks.plugins.gcp.instance import (
     InstanceInsertAttempt,
     build_instance_resource,
     insert_instance_reconciled,
 )
 from agentworks.plugins.gcp.network import NetworkSelection
+from tests._gcp_platform_fakes import rest_error
 
 _REQUEST_ID = "d1486754-0828-49ff-b788-66938c44a5ea"
 _NETWORK = "projects/project-a/global/networks/default"
@@ -304,3 +310,67 @@ def test_definite_already_exists_never_shape_reconciles() -> None:
             timeout=17,
         )
     assert [name for name, _kwargs in client.calls] == ["insert"]
+
+
+@pytest.mark.parametrize(
+    ("wait_failure", "realized_id", "raised", "unknown"),
+    [
+        (None, None, GCEOperationError, False),
+        (TimeoutError("still running"), 201, None, False),
+        (TimeoutError("still running"), None, GCEIndeterminateOperationError, True),
+    ],
+    ids=("completed-without-the-instance", "wait-ran-out-but-instance-seen", "wait-ran-out-and-nothing-seen"),
+)
+def test_an_insert_s_outcome_is_known_once_its_operation_completed_or_its_instance_was_seen(
+    wait_failure: BaseException | None, realized_id: int | None, raised: type[BaseException] | None, unknown: bool
+) -> None:
+    realized = None
+    if realized_id is not None:
+        realized = _resource()
+        realized.id = realized_id
+    attempt = InstanceInsertAttempt("vm-a", _REQUEST_ID)
+
+    def _insert() -> None:
+        insert_instance_reconciled(
+            _Instances(iter([realized]), operation=_Operation(failure=wait_failure)),
+            project_id="project-a",
+            zone="us-central1-a",
+            instance=_resource(),
+            selected_machine_type="e2-standard-2",
+            attempt=attempt,
+            timeout=17,
+        )
+
+    if raised is None:
+        _insert()
+    else:
+        with pytest.raises(raised):
+            _insert()
+
+    assert attempt.outcome_unknown is unknown
+
+
+@pytest.mark.parametrize("status", [403, 429, 400])
+@pytest.mark.parametrize("first_send", ["answered", "unanswered"])
+def test_a_rest_refusal_settles_an_instance_insert_only_when_it_answers_the_only_send(
+    status: int, first_send: str
+) -> None:
+    """A refusal of the same-``requestId`` retry says nothing of the first try, which may still land."""
+    refusal = rest_error(status)
+    results: list[_Operation | Exception] = [refusal] if first_send == "answered" else [rest_error(503), refusal]
+    client = _Instances(iter([]), results=iter(results))
+    attempt = InstanceInsertAttempt("vm-a", _REQUEST_ID)
+
+    with pytest.raises(DEFINITE_REFUSALS):
+        insert_instance_reconciled(
+            client,
+            project_id="project-a",
+            zone="us-central1-a",
+            instance=_resource(),
+            selected_machine_type="e2-standard-2",
+            attempt=attempt,
+            timeout=17,
+        )
+
+    assert [name for name, _kwargs in client.calls] == ["insert"] * len(results)
+    assert attempt.outcome_unknown is (first_send == "unanswered")

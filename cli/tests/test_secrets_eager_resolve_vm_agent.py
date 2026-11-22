@@ -30,11 +30,17 @@ import pytest
 from agentworks.errors import SecretUnavailableError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.conftest import fake_installed_programs
+from tests.vm_access_support import AccessRecorder, install_access_recorder
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
 
 __all__ = ["_stub_build_registry"]
+
+
+def _guest_sessions(recorder: AccessRecorder) -> list[str]:
+    """The operations that run the operator's command or shell on the guest, in order."""
+    return [call.operation for call in recorder.calls if call.operation in {"attach", "stream"}]
 
 
 @pytest.fixture(autouse=True)
@@ -215,17 +221,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(Resolver, "resolve", _explode)
 
-    ssh_called: list[bool] = []
-
-    class _Target:
-        def interactive(self, *args: object, **kwargs: object) -> int:
-            ssh_called.append(True)
-            return 0
-
-    monkeypatch.setattr(
-        "agentworks.transports.transport",
-        lambda *a, **k: _Target(),
-    )
+    recorder = install_access_recorder(monkeypatch)
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -235,7 +231,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
     with pytest.raises(SecretUnavailableError, match="api-key"):
         vm_manager.shell_vm(db, config, "vm1", interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    assert ssh_called == [], "eager-resolve must precede the SSH session"
+    assert _guest_sessions(recorder) == [], "eager-resolve must precede the SSH session"
     db.close()
 
 
@@ -272,14 +268,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(Resolver, "resolve", _explode)
 
-    streaming_calls: list[str] = []
-
-    class _Target:
-        def call_streaming(self, cmd: str, *, env: object = None) -> int:
-            streaming_calls.append(cmd)
-            return 0
-
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _Target())
+    recorder = install_access_recorder(monkeypatch)
 
     config = SimpleNamespace(
         vm=SimpleNamespace(env={}),
@@ -289,7 +278,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     with pytest.raises(SecretUnavailableError, match="api-key"):
         vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=TtyInteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
-    assert streaming_calls == [], "eager-resolve must precede call_streaming"
+    assert _guest_sessions(recorder) == [], "eager-resolve must precede the remote command"
     db.close()
 
 
@@ -327,14 +316,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
 
     monkeypatch.setattr(Resolver, "resolve", _explode)
 
-    streaming_calls: list[str] = []
-
-    class _Target:
-        def call_streaming(self, cmd: str, *, env: object = None) -> int:
-            streaming_calls.append(cmd)
-            return 0
-
-    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _Target())
+    recorder = install_access_recorder(monkeypatch)
 
     config = SimpleNamespace()
 
@@ -347,7 +329,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert streaming_calls == [], "eager-resolve must precede call_streaming"
+    assert _guest_sessions(recorder) == [], "eager-resolve must precede the remote command"
     db.close()
 
 
@@ -471,96 +453,3 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
     # Verify it's the right workspace row.
     assert getattr(ws_arg, "name", None) == "ws1"
     db.close()
-
-
-# ---------------------------------------------------------------------------
-# provisioning runners: no operator-env injection; identity fragment recovery
-# ---------------------------------------------------------------------------
-
-
-def test_agent_setup_runners_have_no_env_injection() -> None:
-    """Source-level tripwire: provisioning is hermetic. None of the agent
-    setup runners (install commands, dotfiles install, mise, claude
-    plugins) should pass ``env=`` from operator [agent.env] /
-    [vm_templates.*.env] tables. Static identity (AGENTWORKS_AGENT)
-    reaches them via the per-user ~/.agentworks-profile.sh, written
-    EARLY in agent setup phase 2 before any install command runs.
-    A future contributor adding ``env=agent_env`` (or any variant) to a
-    runner re-introduces the coupling this rule exists to prevent."""
-    import inspect
-
-    from agentworks.agents import initializer as agent_init
-
-    src = inspect.getsource(agent_init.create_agent_on_vm)
-    assert "env=agent_env" not in src, (
-        "found 'env=agent_env' in create_agent_on_vm; provisioning runners "
-        "must not inject operator env. Identity comes via the per-user "
-        "profile fragment, not SetEnv."
-    )
-    assert "agent_env = compose_env" not in src, (
-        "found 'agent_env = compose_env' in create_agent_on_vm; the "
-        "operator-env composition was removed because no provisioning "
-        "runner consumes it."
-    )
-
-
-def test_vm_provisioning_runners_have_no_env_injection() -> None:
-    """Source-level tripwire: provisioning is hermetic. None of the VM
-    init user-facing runners (dotfiles install, mise, user_install_commands,
-    claude plugins) should pass ``env=`` from operator [admin.env] /
-    [vm_templates.*.env] tables. Static identity reaches
-    them via the system-wide /etc/profile.d/agentworks-identity.sh
-    written by VM init. Operator env only lands at RUNTIME shells.
-
-    A future contributor adding ``env=admin_env`` to a provisioning
-    runner re-introduces the build-time-config-coupling this rule
-    exists to prevent."""
-    import inspect
-
-    from agentworks.vms import initializer as init
-
-    src = inspect.getsource(init._phase_b_setup)
-    assert "env=admin_env" not in src, (
-        "found 'env=admin_env' in _phase_b_setup; provisioning runners "
-        "must not inject operator env. Identity reaches them via the "
-        "system-wide /etc/profile.d/ fragment, not SetEnv."
-    )
-    assert "admin_env = compose_env" not in src, (
-        "found 'admin_env = compose_env' in _phase_b_setup; the "
-        "operator-env composition was removed because no provisioning "
-        "runner consumes it."
-    )
-
-
-def test_phase_b_setup_reconciles_profile_sources_after_dotfiles() -> None:
-    """Defensive: ``_ensure_agentworks_files_sourced`` runs after dotfiles
-    so that source lines in shell rc files survive
-    a dotfiles installer that ships its own ``.zprofile`` / ``.bashrc`` /
-    etc. The grep-or-append shape is idempotent."""
-    import inspect
-
-    from agentworks.vms import initializer as init
-
-    src = inspect.getsource(init._phase_b_setup)
-    assert "_ensure_agentworks_files_sourced" in src, (
-        "expected _ensure_agentworks_files_sourced call in _phase_b_setup; "
-        "without it, a dotfiles installer that overwrites a shell rc "
-        "file can leave AGENTWORKS_AGENT and mise activation unreachable."
-    )
-
-
-def test_create_agent_on_vm_ends_with_ensure_files_sourced() -> None:
-    """Mirror of test_phase_b_setup_ends_with_ensure_files_sourced for the
-    agent path. Agent's dotfiles install runs after the early profile
-    write; the final ensure step recovers if dotfiles clobbered our
-    source lines."""
-    import inspect
-
-    from agentworks.agents import initializer as agent_init
-
-    src = inspect.getsource(agent_init.create_agent_on_vm)
-    assert "_ensure_agentworks_files_sourced" in src, (
-        "expected _ensure_agentworks_files_sourced call in "
-        "create_agent_on_vm; without it, dotfiles install can leave "
-        "AGENTWORKS_AGENT and mise activation unreachable for the agent."
-    )

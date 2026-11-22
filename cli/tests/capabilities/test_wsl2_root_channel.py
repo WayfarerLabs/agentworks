@@ -59,7 +59,7 @@ def _in_distro_argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_the_script_has_no_controlling_terminal_even_when_wsl_gives_its_program_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``wsl.exe`` makes its program a session leader on a pseudo-terminal (I34, vector W7); the script must not see it.
+    """``wsl.exe`` makes its program a session leader on a pseudo-terminal (vector W7); the script must not see it.
 
     The in-distro argv runs here as that program would: a session leader whose
     controlling terminal is a fresh pty, with the script on a stdin pipe.

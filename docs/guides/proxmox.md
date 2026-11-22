@@ -233,11 +233,13 @@ Agentworks uses QEMU Guest Agent as the root channel that works without Tailscal
 bootstrap and Tailscale join, `agw vm recover`, `vm rekey` and the logout during deletion run their
 root scripts through it. Before each script, Agentworks waits up to about two minutes for the guest
 agent to answer, since a VM that has just started has none running yet; a VM whose agent never
-answers fails with nothing dispatched. Create's wait for cloud-init asks again for about seven
-minutes in all, since cloud-init can restart the agent, so a create from a template without the
-agent fails after about seven minutes. A started VM that does not answer over Tailscale SSH fails
-`vm start` with a hint to run `agw vm recover`, which can also restart a broken SSH server here,
-since the guest agent does not depend on it.
+answers fails with nothing dispatched. That wait comes before the script's own time limit, so a VM
+that is still starting never shortens it. Create's wait for cloud-init gives cloud-init seven
+minutes, and when the agent answered and then lost the script, as when cloud-init restarts it, asks
+again within them. A create from a template without the agent fails after that first two-minute
+wait, with nothing dispatched. A started VM that does not answer over Tailscale SSH fails `vm start`
+with a hint to run `agw vm recover`, which can also restart a broken SSH server here, since the
+guest agent does not depend on it.
 
 QEMU Guest Agent does not provide an interactive terminal, so `vm shell --platform` is unavailable
 for Proxmox. Use the Proxmox web UI's serial console for interactive access. Normal Agentworks work
@@ -258,7 +260,7 @@ When you run `agw vm create <name> --site proxmox`:
 6. Returns that address to core, which connects over Tailscale SSH, records the VM's host key,
    checks the VM contract (the live Debian release first), and completes initialization
 
-After provisioning, normal operations use Tailscale SSH, as they do on Lima and Azure VMs.
+After provisioning, normal operations use Tailscale SSH, as they do on every platform.
 
 ## Troubleshooting
 
@@ -266,8 +268,9 @@ After provisioning, normal operations use Tailscale SSH, as they do on Lima and 
 
 A root script fails with
 `the QEMU guest agent of Proxmox VM <vmid>@<node> did not answer, so no script was dispatched` when
-the agent does not answer within about two minutes; create's wait for cloud-init asks again until
-about seven minutes have passed. Check:
+the agent does not answer within about two minutes. Create's wait for cloud-init stops there too: it
+asks again only when the agent answered and then lost the script, as when cloud-init restarts it.
+Check:
 
 - The guest agent is installed in the template (the setup script handles this via `virt-customize`)
 - The guest agent is enabled in the VM config (`qm set <vmid> --agent enabled=1`)

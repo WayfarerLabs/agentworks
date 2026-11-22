@@ -15,7 +15,7 @@ from agentworks.harness_setup.model import SetupRecord
 from agentworks.plugins.claude import artifacts as claude
 from tests.artifacts._fixtures import received
 from tests.artifacts.test_native_delivery import artifact, context, enabled, owned
-from tests.conftest import _FakeTarget
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize("prior_owner", ["withdrawn", "ambiguous", "different-type", "changed-scope"])
@@ -41,9 +41,11 @@ def test_setup_requires_unique_current_owner_evidence(db, prior_owner, artifact_
     )
     for contenders in ((first, second), (second, first)):
         incomplete = Mock()
+        access = RecordingVMAccess([], Admin())
         invocation = UserSetupInvocation(
             vm=db.insert_vm(f"vm-{contenders[0].origin.resource_name}", "site", "host"),
-            runner=_FakeTarget(),
+            access=access,
+            files=access.files(),
             prior=prior,
             checkpoint=lambda claims: None,
             report_incomplete=incomplete,
@@ -65,9 +67,11 @@ def test_cross_owner_guidance_names_warn_and_coexist_in_setup_and_session(db, mo
     warnings: list[str] = []
     monkeypatch.setattr("agentworks.artifacts.native.common.output.warn", warnings.append)
     incomplete = Mock()
+    access = RecordingVMAccess([], Admin())
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        runner=_FakeTarget(),
+        access=access,
+        files=access.files(),
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete,

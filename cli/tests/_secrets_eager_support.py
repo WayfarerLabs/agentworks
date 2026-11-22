@@ -28,6 +28,7 @@ import pytest
 from agentworks.db import Database, ProvisioningStatus
 
 from .conftest import stub_build_registry, stub_vm_gates
+from .vm_access_support import route_vm_access_to_guest
 
 
 @pytest.fixture(autouse=True)
@@ -47,20 +48,6 @@ class _NullCM:
         return None
 
 
-def _stub_target() -> object:
-    class _Result:
-        ok = True
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    class _Target:
-        def run(self, *args: object, **kwargs: object) -> _Result:
-            return _Result()
-
-    return _Target()
-
-
 def _seed_basic_db(tmp_path: Path) -> Database:
     """VM + workspace seeded; no agent. Enough for an admin-mode session."""
     db = Database(tmp_path / "test.db")
@@ -78,6 +65,5 @@ def _seed_basic_db(tmp_path: Path) -> Database:
 def _stub_session_prep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch ssh / vm probes that would otherwise need a real VM."""
     stub_vm_gates(monkeypatch)
-    factory = lambda *a, **k: _stub_target()  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
+    # Every request completes with status 0 and no output; every command check finds its command.
+    route_vm_access_to_guest(monkeypatch, lambda _call: None)

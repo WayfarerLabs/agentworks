@@ -31,7 +31,7 @@ from .boundary import _platform_ops_ctx, _warn_legacy_release
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, DesiredOverlayRecord, InstanceStateInspection, VMRow
-    from agentworks.instance_description import InstanceStateDescription
+    from agentworks.instance_description import InstanceSpecUnavailableReason, InstanceStateDescription
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -743,6 +743,7 @@ def _vm_instance_state(
         malformed_desired_record_present,
     )
     from agentworks.instance_specs import (
+        ExplicitReplacementRequired,
         UnsupportedStoredOverlayError,
         VMInstanceOverlays,
         decode_stored_vm_overlays,
@@ -771,7 +772,7 @@ def _vm_instance_state(
     issues = list(metadata_issues)
     record = inspected_desired_record(inspection)
     overlays: VMInstanceOverlays | None = None
-    desired_unavailable: Literal["malformed", "unsupported-version", "migration-pending"] | None = None
+    desired_unavailable: InstanceSpecUnavailableReason | None = None
     if malformed_desired_record_present(inspection):
         desired_unavailable = "malformed"
     elif record is not None:
@@ -788,6 +789,9 @@ def _vm_instance_state(
         except LegacyClaudeContextRequired:
             desired_unavailable = "migration-pending"
             issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_MIGRATION_PENDING, slot="admin"))
+        except ExplicitReplacementRequired:
+            desired_unavailable = "replacement-required"
+            issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_REPLACEMENT_REQUIRED))
         except UnsupportedStoredOverlayError:
             desired_unavailable = "unsupported-version"
             issues.append(InstanceStateIssue(InstanceStateIssueCode.INSTANCE_SPEC_UNSUPPORTED))

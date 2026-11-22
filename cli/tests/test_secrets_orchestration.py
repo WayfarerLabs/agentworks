@@ -349,15 +349,19 @@ def test_resolve_for_command_rejects_non_enum_policy_before_any_source_work(
 @pytest.mark.parametrize(
     "value",
     [
-        pytest.param("standalone-sentinel\nsecond\n", id="lf-with-terminal-newline"),
-        pytest.param("standalone-sentinel\r\nsecond\r\n", id="crlf-with-terminal-newline"),
+        pytest.param("first 100%\nsecond %s\n", id="lf-with-terminal-newline"),
+        pytest.param("first 100%\r\nsecond %s\r\n", id="crlf-with-terminal-newline"),
     ],
 )
-def test_resolve_for_command_rejects_multiline_environment_target_after_delivery(
+def test_a_multiline_secret_and_plaintext_compose_into_the_environment_exactly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     value: str,
 ) -> None:
+    """The request carries environment values whole, so line breaks reach the composed env as resolved."""
+    from agentworks.env import compose_env
+    from agentworks.env.identity import ResourceContext
+
     monkeypatch.setenv("AW_SECRET_API_KEY", value)
     cfg = _write_config(
         tmp_path,
@@ -368,20 +372,19 @@ def test_resolve_for_command_rejects_multiline_environment_target_after_delivery
         manifests=[ManifestDoc("secret", "api-key", description="api")],
     )
     config = load_config(cfg, warn_issues=False)
-    target = SecretTarget(vm={"API_KEY": EnvEntry({"secret": "api-key"})})
+    vm_env = {"API_KEY": EnvEntry({"secret": "api-key"}), "NOTE": EnvEntry({"value": value})}
+    target = SecretTarget(vm=vm_env)
+    target.validate_context({})
 
-    with pytest.raises(ValidationError) as caught:
-        resolve_for_command(
-            [target],
-            config,
-            build_registry(config),
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    values = resolve_for_command([target], config, build_registry(config), interaction=TtyInteractionPolicy.REFUSE)
+    env = compose_env(
+        values=values,
+        ctx=ResourceContext(vm_name="v", platform="lima", site="lima", user="u"),
+        vm=vm_env,
+    )
 
-    assert "cannot be used for environment injection" in str(caught.value)
-    assert "standalone-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert values == {"api-key": value}
+    assert (env["API_KEY"], env["NOTE"]) == (value, value)
 
 
 def test_resolved_values_are_plain_data(
@@ -477,7 +480,6 @@ def test_identity_collisions_do_not_validate_collect_or_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: EnvEntry
 ) -> None:
     from agentworks.interpolation import context_values
-    from agentworks.secrets.orchestration import validate_target_values
 
     config = load_config(_write_config(tmp_path), warn_issues=False)
     registry = build_registry(config)
@@ -493,7 +495,6 @@ def test_identity_collisions_do_not_validate_collect_or_resolve(
     )
     target.validate_context(context_values(vm_name="vm", user="admin", workspace_name="ws", session_name="s"))
     assert compute_needed_secrets([target], registry) == []
-    validate_target_values([target], {})
 
     def unexpected_resolve(*args: object, **kwargs: object) -> None:
         pytest.fail("An ignored secret must not reach resolution")

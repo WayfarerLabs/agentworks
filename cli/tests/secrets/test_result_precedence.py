@@ -182,7 +182,7 @@ class _Client:
 class _Backend(SecretBackend):
     name = "fixture"
     description = "fixture"
-    contract_version = 1
+    contract_version = 3
     config_model = _Config
     mapping_model = _Mapping
     supports_tty_interaction = False

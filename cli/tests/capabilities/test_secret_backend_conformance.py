@@ -54,7 +54,7 @@ def _reason(**changes: object) -> str:
     return reason
 
 
-def test_a_nominal_concrete_version_one_backend_conforms() -> None:
+def test_a_nominal_concrete_current_version_backend_conforms() -> None:
     assert conformance_error(DESCRIPTOR, _backend()) is None
 
 
@@ -78,7 +78,7 @@ def test_an_abstract_backend_is_rejected_as_not_constructible() -> None:
     class AbstractBackend(SecretBackend):
         name = "abstract"
         description = "still abstract"
-        contract_version = 1
+        contract_version = 3
         config_model = GoodConfig
         mapping_model = GoodMapping
         supports_tty_interaction = False
@@ -127,7 +127,7 @@ def test_a_concrete_backend_without_a_declared_contract_version_is_rejected() ->
 class MissingTtySupportBackend(SecretBackend):
     name = "phase3-fixture"
     description = "omits one required class fact"
-    contract_version = 1
+    contract_version = 3
     config_model = GoodConfig
     mapping_model = GoodMapping
 

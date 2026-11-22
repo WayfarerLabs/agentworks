@@ -30,17 +30,21 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
     from agentworks.execution.errors import FeatureUnavailable
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.execution.root_script import RawRun
     from agentworks.execution.trust import HostKey, TrustBinding
 
 
 class BootstrapProgress(Protocol):
-    """Value-free progress sink for create-time VM bootstrap.
+    """Value-free progress sink for create-time VM bootstrap: the create's operation log.
 
-    Platforms can report the bootstrap transcript through this narrow surface
-    without depending on the VM manager or the concrete logger that owns the
-    durable operation log. The manager retains construction and lifecycle
-    ownership of that logger.
+    The surface a platform may write: steps, output, warnings and errors, and
+    ``record``, the ``log`` callable a root script takes (``root_script.run``,
+    ``tailscale_join``), so the join and the address read land in the same
+    log with their secret redacted. It leaves out the log's ``close``: the
+    manager constructs the log and closes it once, after the platform's create
+    and initialization, so a platform must not end it.
     """
 
     def step(self, name: str) -> None: ...
@@ -50,6 +54,8 @@ class BootstrapProgress(Protocol):
     def warning(self, msg: str) -> None: ...
 
     def log_error(self, msg: str) -> None: ...
+
+    def record(self, request: RunRequest, result: Result) -> None: ...
 
 
 @dataclass
@@ -381,7 +387,13 @@ class VMPlatform(Capability):
         The channel works without the VM's Tailscale state. Write ``script``,
         close stdin, and return everything the channel printed on each
         stream when it ends or ``deadline`` seconds pass; stop waiting at the
-        deadline and never claim the guest command stopped. A channel that
+        deadline and never claim the guest command stopped. The deadline
+        starts at dispatch and bounds the script alone: what the channel does
+        before it (opening a route, reading an address, confirming the guest,
+        waiting for the VM to answer) has bounds of its own, each cloud
+        provider call a bound on the wall clock (see ``wall_bound``), each
+        Proxmox request its socket timeout, and the wait for the VM about
+        two minutes, so a caller sizes ``deadline`` for its script. A channel that
         reaches the guest through an HTTP API bounds each socket wait by what
         remains, which is as far as a socket timeout reaches: a response that
         keeps arriving can carry one request past the deadline. Run it once:
@@ -476,7 +488,7 @@ class VMPlatform(Capability):
         yet not observed-stopped either (``ensure_active`` skips
         ``auto_start`` when a status probe reports RUNNING while
         tailscaled is mid-reattach) proceeds into the hold and the op and
-        surfaces a plain SSHError, uniformly, rather than a WSL2-only
+        surfaces the request's own ``ExecutionIncomplete``, uniformly, rather than a WSL2-only
         reachability retry. Default no-op for platforms without
         an idle-shutdown mechanism (lima, azure, proxmox); wsl2 overrides
         to anchor the distro against ``vmIdleTimeout``. ``config`` is

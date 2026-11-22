@@ -3,7 +3,7 @@
 Direct-agent-user SSH, as opposed to the admin+sudo detour: the
 agent's own ``authorized_keys`` accepts the operator's key (see
 ``agents/initializer.py``). Both commands reach the VM through
-``agentworks.execution``, and this file imports no retired transport module.
+``agentworks.execution``.
 """
 
 from __future__ import annotations

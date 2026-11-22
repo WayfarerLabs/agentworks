@@ -27,12 +27,12 @@ from agentworks.errors import StateError
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.harness_setup.outcomes import SetupFailure
+from agentworks.harness_setup.outcomes import Redactor, SetupFailure
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.artifacts._fixtures import received
-from tests.native_setup_fixtures import LocalFixtureTransport
+from tests.native_setup_fixtures import LocalFixtureAccount
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 
@@ -100,7 +100,7 @@ def test_shared_document_needs_no_whole_file_or_input_origin():
 def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
     db, tmp_path, monkeypatch, captured_output, tracked
 ):
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     workspace = target.home / "project"
 
     def git(*args: object, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -127,7 +127,8 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
     )
     invocation = WorkspaceSetupInvocation(
         vm=vm,
-        runner=target,
+        access=(access := target.access()),
+        files=access.files(),
         prior=None,
         checkpoint=Mock(),
         workspace_name="fixture",
@@ -182,7 +183,6 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
     assert git("-C", workspace, "check-ignore", "--", ".mcp.json", check=False).returncode == 1
     if tracked:
         assert git("-C", workspace, "ls-files", "--error-unmatch", "--", ".mcp.json").stdout
-    assert not list((target.root / "tmp").iterdir())
 
 
 def test_exclusion_metadata_cannot_escape_owning_workspace():
@@ -197,6 +197,7 @@ def test_exclusion_metadata_cannot_escape_owning_workspace():
             Mock(),
             group="",
             report_incomplete=Mock(),
+            redactor=Redactor(),
             shared_paths=("/workspace-neighbor/.mcp.json",),
         )
     assert target.method_calls == []

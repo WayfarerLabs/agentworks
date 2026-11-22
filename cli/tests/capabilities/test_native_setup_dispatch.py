@@ -1,12 +1,17 @@
 """Mutation prefixes, retirement order, and destination ownership at dispatch."""
 
 from dataclasses import replace
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
 from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.publication import ROOT_FILE_DIRECTORIES
 from agentworks.artifacts.routing import RoutingResult
+from agentworks.capabilities.harness_integration import harness_integration_for
 from agentworks.capabilities.harness_integration.setup import (
     SetupInvocation,
     UserSetupInvocation,
@@ -18,13 +23,14 @@ from agentworks.errors import ExternalError, StateError
 from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
-from agentworks.harness_setup.outcomes import SetupFailure
+from agentworks.harness_setup.outcomes import Redactor, SetupFailure
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
-from agentworks.native_files import ROOT_FILE_DIRECTORIES
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.plugins._fixtures import ConformingHarnessIntegration
+from tests.reachable_data_support import reachable_data
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.fixture
@@ -37,7 +43,13 @@ def facet_case(db, monkeypatch, component):
         activations={},
         target=SecretTarget(vm={}),
     )
-    common = dict(vm=vm, runner=Mock(logger=None), prior=None, checkpoint=Mock())
+    common = dict(
+        vm=vm,
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
+        prior=None,
+        checkpoint=Mock(),
+    )
     invocation: SetupInvocation
     if component == "vm":
         invocation = VMSetupInvocation(**common)
@@ -73,7 +85,7 @@ def test_unimplemented_activation_fails_without_successful_record(db, facet_case
     assert caught.value.entity_kind == inputs.kind and caught.value.entity_name == inputs.name
     assert failures == []
     assert read_native_setup(db, inputs.kind, inputs.name).records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace"])
@@ -84,7 +96,7 @@ def test_inactive_integrations_remain_absent(db, facet_case, monkeypatch):
     )
     state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
     assert state.records == read_native_setup(db, inputs.kind, inputs.name).records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["admin", "agent", "workspace"])
@@ -97,7 +109,7 @@ def test_implemented_default_setup_completes_without_native_changes(db, facet_ca
         (record,) = state.records
         assert record.complete and record.claims == ()
         assert record == read_native_setup(db, inputs.kind, inputs.name).records[0]
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["vm", "admin", "agent", "workspace"])
@@ -109,7 +121,7 @@ def test_retirement_removes_legacy_claim_free_unsupported_record(db, facet_case)
     write_native_setup(db, inputs.kind, inputs.name, NativeSetupState(records=(previous,)), operation="fixture-setup")
     state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
     assert state.records == read_native_setup(db, inputs.kind, inputs.name).records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.fixture
@@ -146,7 +158,13 @@ def setup_case(tmp_path, monkeypatch):
         target=SecretTarget(vm={}, agent={}),
     )
     invocation = UserSetupInvocation(
-        vm=vm, runner=Mock(logger=None), prior=None, checkpoint=lambda claims: None, username="user", home="/home/user"
+        vm=vm,
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
+        prior=None,
+        checkpoint=lambda claims: None,
+        username="user",
+        home="/home/user",
     )
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: "a" * 64)
     monkeypatch.setattr(
@@ -172,6 +190,55 @@ def test_failure_checkpoints_prefix_and_retry_completes(setup_case):
     failures.clear()
     run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert all(record.complete for record in read_native_setup(db, "agent", "agent").records)
+
+
+def test_an_integration_s_invocation_holds_no_secret_outside_its_declared_ones_and_its_owner_s_environment(
+    setup_case, monkeypatch
+):
+    """The operation's other secrets are redacted for the integration without being handed to it.
+
+    ``environment`` is the owner's composed environment, which carries any secret it references by
+    design, so its value is reachable; every other value the operation resolved or logged is not.
+    """
+    db, inputs, invocation, _, _ = setup_case
+    declared, undeclared, logged, environment = (
+        f"{label}-{uuid4().hex}" for label in ("declared", "undeclared", "logged", "environment")
+    )
+    invocation = replace(
+        invocation,
+        environment={"OWNER_VALUE": environment},
+        secrets={"declared": declared, "other": undeclared},
+        redactor=Redactor((logged,)),
+    )
+    first = harness_integration_for("first")
+    monkeypatch.setattr(first, "config_secret_refs", lambda self: (SimpleNamespace(name="declared"),))
+    received: list[SetupInvocation] = []
+    original = first.user_init
+
+    def initialize(self, call):
+        received.append(call)
+        return original(self, call)
+
+    monkeypatch.setattr(first, "user_init", initialize)
+
+    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+
+    assert received
+    for call in received:
+        assert call.secrets == {"declared": declared}
+        assert call.environment == {"OWNER_VALUE": environment}
+        exposed = list(reachable_data(call))
+        assert declared in exposed and environment in exposed
+        assert not any(hidden in text for text in exposed for hidden in (undeclared, logged))
+        sanitized = call.redactor.sanitize(f"{declared} {undeclared} {logged}")
+        assert not any(value in sanitized for value in (declared, undeclared, logged))
+
+
+@pytest.mark.parametrize("render", [repr, str])
+def test_a_redactor_s_text_form_shows_none_of_its_values(render):
+    held, added = f"held-{uuid4().hex}", f"added-{uuid4().hex}"
+    text = render(Redactor((held,)).including((added,)))
+    assert held not in text and added not in text
 
 
 def test_retirement_follows_desired_order_and_preserves_other_records(setup_case):
@@ -221,7 +288,6 @@ def test_buffered_creation_does_not_publish_ownerless_applied_state(setup_case):
 @pytest.mark.parametrize("destination", ["a" * 64, "b" * 64], ids=["unchanged", "changed"])
 def test_setup_scopes_prior_artifact_files_to_the_current_destination(setup_case, monkeypatch, destination):
     from agentworks.artifacts.application import ArtifactPublication, OwnedArtifactFile
-    from agentworks.capabilities.harness_integration import harness_integration_for
 
     db, inputs, invocation, _, _ = setup_case
     inputs = replace(inputs, activations={"first": inputs.activations["first"]})
@@ -310,7 +376,7 @@ def test_inactive_capture_notice_requires_local_artifacts(db, facet_case, monkey
     state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup", buffered=True)
     assert warning.call_count == (1 if capture == "nonempty" else 0)
     assert state.records == ()
-    assert invocation.runner.method_calls == []
+    assert cast(RecordingVMAccess, invocation.access).requests() == []
 
 
 @pytest.mark.parametrize("component", ["vm"])
@@ -612,3 +678,35 @@ def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setu
     run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert retirement_calls == 2
     assert [record.integration for record in read_native_setup(db, "agent", "agent").records] == ["second"]
+
+
+def test_a_failed_integration_reaches_the_operation_log_through_a_lifecycle_entry_point(
+    setup_case, monkeypatch, tmp_path
+):
+    from agentworks.execution.oplog import OperationLogFile
+    from agentworks.harness_setup.lifecycle import apply_agent_setup
+    from tests.vm_access_support import install_access_recorder
+
+    db, inputs, _, _, failures = setup_case
+    failures.add("first")
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
+    install_access_recorder(monkeypatch)
+    monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
+    logger = OperationLogFile("agent", "agent-reinit")
+    observed: list[SetupFailure] = []
+    apply_agent_setup(
+        db,
+        Mock(),
+        Mock(),
+        inputs=inputs,
+        vm=db.get_vm("vm"),
+        username="user",
+        values={},
+        logger=logger,
+        held=None,
+        operation="agent-reinit",
+        failures=observed,
+    )
+    logger.close()
+    (failure,) = observed
+    assert failure.reason in logger.path.read_text()

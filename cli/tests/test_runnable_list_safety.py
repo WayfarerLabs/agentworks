@@ -5,21 +5,22 @@ from __future__ import annotations
 import base64
 import contextlib
 import sqlite3
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.db import SessionMode, SessionStatus, VMStatus
+from agentworks.execution.requests import Bytes, Script, Shell
+from agentworks.execution.results import Completed, Result
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions import manager as session_manager
-from agentworks.sessions.manager._status import _batch_row_bound_seconds
+from agentworks.sessions.manager._status import _BATCH_ROW_SECONDS
 from agentworks.sessions.multi_console import console_listing
-from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
+from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT
 from agentworks.vms.manager import inspect
-from tests._runtime_probes import framed_runtime_result
+from tests.vm_access_support import Admin, Call, install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -80,6 +81,10 @@ def _guard_mutating_seams(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(session_manager, "_repair_session_pid", _forbidden("single PID repair"))
 
 
+WORK_SOCKET = f"{ADMIN_SOCKET_ROOT}/agentworks/work.sock"
+"""The seeded session's socket, in the seeded VM admin's (``insert_vm``'s default ``agentworks``) directory."""
+
+
 def _seed_vm(db: Database) -> None:
     db.insert_vm("box", site="proxmox", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
@@ -93,22 +98,15 @@ def _seed_session(db: Database) -> None:
         "ws",
         "default",
         SessionMode.ADMIN,
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/work.sock",
+        socket_path=WORK_SOCKET,
     )
     db.update_session_runtime(
         "work",
-        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/work.sock",
+        socket_path=WORK_SOCKET,
         pid=100,
         boot_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         tmux_server_start_ticks=1,
     )
-
-
-@dataclass
-class _Result:
-    returncode: int
-    stdout: str
-    stderr: str = ""
 
 
 def test_vm_plain_and_status_lists_keep_their_distinct_safety_boundaries(
@@ -136,7 +134,7 @@ def test_vm_plain_and_status_lists_keep_their_distinct_safety_boundaries(
 
     monkeypatch.setattr(Resolver, "resolve", resolve)
     monkeypatch.setattr(ProxmoxPlatform, "status", provider_status)
-    monkeypatch.setattr("agentworks.transports.transport", _forbidden("guest transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", _forbidden("guest access"))
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", _forbidden("SSH identity"))
     _guard_mutating_seams(monkeypatch)
 
@@ -172,44 +170,29 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     vm = db.get_vm("box")
     assert vm is not None
 
-    class Target:
-        def run(self, _command: str, **kwargs: object) -> _Result:
-            input_data = kwargs.pop("input_data")
-            # The guest timeout plus one row's bound, whatever the row count.
-            assert kwargs == {
-                "check": False,
-                "timeout": GUEST_OBSERVATION_TIMEOUT_SECONDS + _batch_row_bound_seconds(),
-                "retries": 1,
-                "tty": False,
-            }
-            assert isinstance(input_data, str)
-            assert input_data.endswith("\n")
-            lines = input_data.splitlines()
-            assert len(lines) == 1
-            encoded_name, encoded_socket, pid, owner = lines[0].split()
-            assert base64.b64decode(encoded_name, validate=True).decode() == "work"
-            assert base64.b64decode(encoded_socket, validate=True).decode() == (
-                "/run/agentworks/admin-tmux-sockets/agentworks/work.sock"
-            )
-            assert (pid, owner) == ("100", "-")
-            events.append("transport-read")
-            return framed_runtime_result(_command, _Result(0, "S:1:0::0::0::0:\n"))
-
-    def open_transport(*args: object, **kwargs: object) -> Target:
-        assert len(args) == 2
-        assert args[0] == vm
-        assert args[1] is config
-        assert kwargs == {}
-        events.append("transport-open")
-        return Target()
+    def read_status(call: Call) -> Result:
+        request = call.request
+        assert isinstance(request, Script)
+        # The guest timeout plus one row's bound, whatever the row count.
+        assert (call.identity, request.elevated, request.deadline) == (Admin(), True, 10 + _BATCH_ROW_SECONDS)
+        assert isinstance(request.stdin, Bytes)
+        lines = request.stdin.data.decode().splitlines()
+        assert len(lines) == 1
+        encoded_name, encoded_socket, encoded_owner, pid = lines[0].split()
+        assert base64.b64decode(encoded_name, validate=True).decode() == "work"
+        assert base64.b64decode(encoded_socket, validate=True).decode() == WORK_SOCKET
+        assert base64.b64decode(encoded_owner, validate=True).decode() == "agentworks"
+        assert pid == "100"
+        events.append("status-read")
+        return Result(Completed(0), b"\nAGW_RUNTIME_BATCH=S:1:0::0::0::0:\n")
 
     def require_identity(*_args: object, **_kwargs: object) -> None:
         events.append("ssh-identity")
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _forbidden("provider status"))
     monkeypatch.setattr(Resolver, "resolve", _forbidden("secret resolution"))
-    monkeypatch.setattr(session_manager, "transport", open_transport)
-    monkeypatch.setattr("agentworks.transports.transport", open_transport)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = read_status
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require_identity)
     _guard_mutating_seams(monkeypatch)
 
@@ -225,7 +208,8 @@ def test_session_plain_and_status_lists_keep_their_distinct_safety_boundaries(
 
     assert status_writes == []
     assert observed.sessions[0].status == SessionStatus.RUNNING.value
-    assert events == ["ssh-identity", "transport-open", "transport-read"]
+    assert events == ["ssh-identity", "status-read"]
+    assert recorder.built == [("box", Admin())]
 
 
 def test_console_plain_and_status_lists_keep_their_distinct_safety_boundaries(
@@ -238,35 +222,23 @@ def test_console_plain_and_status_lists_keep_their_distinct_safety_boundaries(
     db.insert_console("desk", "box")
     config: Config = make_config()
     events: list[str] = []
-    vm = db.get_vm("box")
-    assert vm is not None
 
-    class Target:
-        def run(self, command: str, **kwargs: object) -> _Result:
-            assert command == "tmux list-sessions -F '#{session_name}'"
-            assert kwargs == {
-                "check": False,
-                "tty": False,
-                "timeout": 10,
-                "retries": 1,
-            }
-            events.append("transport-read")
-            return _Result(0, "aw-console-desk\n")
-
-    def open_transport(*args: object, **kwargs: object) -> Target:
-        assert len(args) == 2
-        assert args[0] == vm
-        assert args[1] is config
-        assert kwargs == {}
-        events.append("transport-open")
-        return Target()
+    def read_status(call: Call) -> Result:
+        # One bounded enumeration of the admin's default tmux server, unelevated.
+        assert (call.identity, call.request) == (
+            Admin(),
+            Script("tmux list-sessions -F '#{session_name}'", Shell.SH, deadline=10),
+        )
+        events.append("status-read")
+        return Result(Completed(0), b"aw-console-desk\n")
 
     def require_identity(*_args: object, **_kwargs: object) -> None:
         events.append("ssh-identity")
 
     monkeypatch.setattr(ProxmoxPlatform, "status", _forbidden("provider status"))
     monkeypatch.setattr(Resolver, "resolve", _forbidden("secret resolution"))
-    monkeypatch.setattr("agentworks.transports.transport", open_transport)
+    recorder = install_access_recorder(monkeypatch)
+    recorder.answer = read_status
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", require_identity)
     _guard_mutating_seams(monkeypatch)
 
@@ -282,4 +254,5 @@ def test_console_plain_and_status_lists_keep_their_distinct_safety_boundaries(
 
     assert status_writes == []
     assert observed.consoles[0].status == "running"
-    assert events == ["ssh-identity", "transport-open", "transport-read"]
+    assert events == ["ssh-identity", "status-read"]
+    assert recorder.built == [("box", Admin())]

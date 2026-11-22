@@ -138,7 +138,8 @@ def _tailscale_logout(vm: VMRow, platform: VMPlatform, ctx: RunContext) -> str |
         return f"VM '{vm.name}' is {status.value}"
     output.info("Logging out of Tailscale...")
     try:
-        result = log_out(partial(platform.run_as_root, vm, ctx))
+        # Delete keeps no operation log.
+        result = log_out(partial(platform.run_as_root, vm, ctx), log=None)
     except UserAbort:
         raise
     except TrustMissing:

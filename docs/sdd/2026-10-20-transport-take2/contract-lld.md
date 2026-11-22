@@ -427,7 +427,7 @@ then the elevated request (`RequestCheck`).
 | Row            | Severity | How it is checked                                                                                  |
 | -------------- | -------- | -------------------------------------------------------------------------------------------------- |
 | `systemd`      | FAIL     | Script: `[ -d /run/systemd/system ]`, the test `sd_booted()` uses                                  |
-| `base-tools`   | FAIL     | Script: `command -v` of `install`, `flock`, `nohup`, `setsid` and `tar`                            |
+| `base-tools`   | FAIL     | Script: `command -v` of `install`, `flock`, `setsid` and `tar`                                     |
 | `login-shells` | WARN     | Script: for the admin and each agent, the passwd shell's basename is `sh`, `dash`, `bash` or `zsh` |
 | `pam-env`      | WARN     | Script: the existing probe over `/etc/environment`, `pam_env.conf` and `~/.pam_environment`        |
 | `sudo`         | FAIL     | Own request: `Command(("id", "-u"), elevated=True)`, stdout `0`                                    |
@@ -436,7 +436,12 @@ Every FAIL row means the VM cannot be repaired by initialization, so a failure n
 (`agw vm delete NAME`, then create again) and the table carries no remedy field. The warnings carry
 their own commands. The `base-tools` list is what the transport and slices 5 to 7 call: `install`
 (`vms/hardening.py:182`), `tar` (`vms/backup.py:342`), `setsid` and `nohup` (the detached wrapper,
-HLA D7) and `flock` (the file lock, HLA D6).
+HLA D7) and `flock` (the file lock, HLA D6). As built in slice 7 (paths at the PR C head), `nohup`
+left the list with the detached wrapper, `remote_exec.py`, since nothing on the guest runs it; the
+list is `install` (initialization, `vms/initializer/packages.py:143`), `tar` (backup and workspace
+copy, `vms/backup.py:307`, `workspaces/manager/copy.py:130`), `setsid` (the WSL2 root channel,
+`capabilities/vm_platform/wsl2.py:79`) and `flock` (git credentials,
+`git_credentials/reconcile.py:31`).
 
 Not rows, and why:
 
@@ -553,9 +558,9 @@ the shell and the login flag, with no source; then `elevated`, the `cwd`, the en
 and the deadline. Environment values, script source and stdin are never passed to the formatter, so
 no code path can write them. D13 says the log records a label: it is the caller's step heading, the
 name of the `SSHLogger` step in effect (`logger.step(...)`) when the request ran. Streams are
-retained as `Result` holds them, bytes decoded with replacement. A sensitive stdin keeping the
-streams out of the log arrives with `Bytes(data, sensitive=)` in slice 5, its first consumer; this
-slice has no stdin to log.
+retained as `Result` holds them, bytes decoded with replacement. A request's `log_streams=False`
+keeping both streams out of the log arrives in slice 5 with its first consumers
+([files-lld.md](./files-lld.md)); this slice has no stdin to log.
 
 **Wiring.** `VMAccess` takes an optional `log: Callable[[RunRequest, Result], None]`. `run` calls it
 after `_execute` and before it raises for a bad completion, so failures are logged. `stream`,
@@ -745,7 +750,13 @@ open live-evidence box.
 | I25 | The hold enters `init_stack` just before Phase A, and the stack closes after Phase B (`vms/manager/lifecycle.py:364`, `:612`)                                                                                                           | `test_create_keeps_a_vm_whose_phase_a_did_not_complete_out_of_every_command` (the hold precedes Phase A); the span through Phase B is by construction, with no test of its own; the live half has no evidence                                     |
 | I26 | The release is the contract's first request, recorded from the guest's answer and enforced before `COMPLETE` (`vms/initializer/phase_a.py:107-111`)                                                                                     | `test_the_sequence_records_enrolls_checks_then_completes`, `test_a_failure_before_the_contract_passes_marks_failed_and_closes_access` (its `_release_mismatch` case), `test_a_failed_release_check_records_no_release`                            |
 | I27 | `reconcile_release` raises `StateError` on live drift, and `confirm_vm_release` is the explicit adoption (`vms/manager/release.py:23-42`)                                                                                               | `test_reconcile_release_refuses_recorded_live_drift`, the `test_confirm_release_*` tests in `tests/test_vm_release.py`                                                                                                                            |
-| I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns                               | `test_redactions_cannot_be_registered_after_writes`, `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`     |
+| I28 | `SSHLogger` takes its redactions at construction, before any write (`ssh.py:117-132`); `_operation_log` passes them (`vms/manager/_helpers.py:215-223`); `root_script.run` redacts every field it returns                               | `test_shell_quoted_secret_is_redacted_from_command`, `test_record_redacts_a_registered_secret_in_the_argv_the_streams_and_the_diagnostics`, `test_the_operation_log_never_holds_the_key`                                                          |
+
+I28's ordering half has no test of its own since `cb4024c55`, which retired
+`test_redactions_cannot_be_registered_after_writes` because it only asserted that no `add_redaction`
+method existed. The ordering is structural: `OperationLogFile` takes its redactions as a constructor
+parameter and registers them before it writes the header (`execution/oplog.py:75-94`), and nothing
+can add one later; the three tests the row names prove the redaction itself.
 
 ## Collateral
 
@@ -835,7 +846,7 @@ probes (its first callers) are, not slice 5 as the first draft of this list said
     `SSHLogger`'s deletion); "the readers move to the new constant in slice 3" is withdrawn.
   - "The request's secret values" are the set registered at the log's construction, as `SSHLogger`
     does; per-request marking has no consumer yet.
-  - The sensitive-stdin rule is implemented with `Bytes(sensitive=)` in slice 5.
+  - Keeping streams out of the log is implemented with `log_streams=False` in slice 5.
 - **HLA Migration and Incident inventory.**
   - Slice 3 (`hla.md:719-726`): remove "the initialized checks land too"; replace "`oplog.py` lands
     with its `LOG_DIR` constant and the readers that move to it" with `format_record` and

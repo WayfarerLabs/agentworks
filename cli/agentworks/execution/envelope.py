@@ -6,7 +6,9 @@ ASCII decimal digits, zero padded, then that many bytes.
 
 The envelope is one JSON object, ASCII-only whatever the workstation's locale.
 ``encode`` is the one function that turns a request into bytes, so it is where
-operator-authored input is validated. Everything the guest prints for the
+operator-authored input is validated; ``Detached.launch`` applies the same
+``checked_argv`` and ``checked_env`` to the spec it sends on stdin, which no
+envelope carries. Everything the guest prints for the
 client is a marker line: ``0x1E``, the request's nonce, a space, a word and a
 newline. A :class:`StreamFilter` per stream finds the start marker, passes
 payload bytes through and stops at the closing line; :func:`classify` combines
@@ -25,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution.agw_launch import STDLIB_MISSING_STATUS
-from agentworks.execution.requests import Command, LoginShell, Script
+from agentworks.execution.requests import Command, LoginShell, PythonProgram, Script, TerminalCommand
 from agentworks.execution.results import (
     REFUSAL_CODE,
     Completed,
@@ -50,7 +52,6 @@ MAX_STRING_BYTES = 131_071
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _EXIT_LINE = re.compile(r"exit (\d{1,3})")
 _MAX_CLOSING_LINE = 4096
-DEFAULT_TERM = "xterm-256color"
 
 
 _NONCE_BYTES = 16
@@ -87,38 +88,56 @@ def _text(value: str, what: str) -> bytes:
     try:
         return value.encode("utf-8", "surrogateescape")
     except UnicodeEncodeError:
-        raise ValidationError(f"{what} cannot be encoded as bytes") from None
+        pass
+    # Raised clear of the except block: ``from None`` would still leave the
+    # codec error, which holds the whole value, on ``__context__``.
+    raise ValidationError(f"{what} cannot be encoded as bytes")
 
 
 def encode(request: Request, *, nonce: str, term: str | None = None, handover: str | None = None) -> bytes:
     """The envelope for ``request``, unframed.
 
-    A :class:`LoginShell` is the one request that travels as a handover, so it
-    needs the ``handover`` token and the operator's ``term``; every other
-    request runs in ``run`` mode and takes neither.
+    A :class:`LoginShell` or a :class:`TerminalCommand` travels as a handover,
+    so it needs the ``handover`` token. An attach sends the operator's
+    ``term``; a pane's handover (``VMAccess.park``) sends none, and the
+    launcher then takes ``TERM`` from the environment the pane's owner gave
+    it. Every other request runs in ``run`` mode and takes neither.
     """
-    if isinstance(request, LoginShell):
-        if handover is None or term is None:
-            raise ValueError("a login shell travels as a handover and needs its token and TERM")
-        mode, kind = "park", "shell"
+    if isinstance(request, LoginShell | TerminalCommand):
+        if handover is None:
+            raise ValueError("a terminal request travels as a handover and needs its token")
+        mode, kind = "park", "shell" if isinstance(request, LoginShell) else "argv"
     else:
-        mode, kind = "run", "argv" if isinstance(request, Command) else "script"
+        mode, kind = (
+            "run",
+            "argv" if isinstance(request, Command) else "python" if isinstance(request, PythonProgram) else "script",
+        )
         if handover is not None or term is not None:
-            raise ValueError("only a login shell takes a handover or TERM")
+            raise ValueError("only a terminal request takes a handover or TERM")
     body: dict[str, object] = {
         "nonce": nonce,
         "mode": mode,
         "kind": kind,
         "cwd": _checked_cwd(request.cwd),
-        "env": _checked_env(request.env),
+        "env": checked_env(request.env),
         "term": None if term is None else _checked_term(term),
         "handover": handover,
     }
-    if isinstance(request, Command):
-        body["argv"] = _checked_argv(request.argv)
+    if isinstance(request, Command | TerminalCommand):
+        body["argv"] = checked_argv(request.argv)
     elif isinstance(request, Script):
         _text(request.source, "script source")
-        body.update(shell=request.shell.value, source=request.source, login=request.login)
+        body.update(
+            shell=request.shell.value, source=request.source, login=request.login, interactive=request.interactive
+        )
+    elif isinstance(request, PythonProgram):
+        _text(request.source, "program source")
+        body.update(
+            source=request.source,
+            args=_checked_arguments(request.args),
+            login=request.login,
+            interactive=request.interactive,
+        )
     return json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
@@ -141,16 +160,26 @@ def _checked_term(term: str) -> str:
     return term
 
 
-def _checked_argv(argv: tuple[str, ...]) -> list[str]:
+def checked_argv(argv: tuple[str, ...]) -> list[str]:
+    """``argv`` as a list, once it has a program name and every argument is one an ``exec`` can take.
+
+    The envelope's rule for a ``Command``; detached work applies it to the
+    argv it sends on stdin, which no envelope encodes.
+    """
     if not argv or not argv[0]:
         raise ValidationError("a command needs a non-empty program name")
-    for position, argument in enumerate(argv):
+    return _checked_arguments(argv)
+
+
+def _checked_arguments(arguments: tuple[str, ...]) -> list[str]:
+    for position, argument in enumerate(arguments):
         if len(_text(argument, f"argument {position}")) > MAX_STRING_BYTES:
             raise ValidationError(f"argument {position} is longer than {MAX_STRING_BYTES} bytes")
-    return list(argv)
+    return list(arguments)
 
 
-def _checked_env(env: Mapping[str, str]) -> dict[str, str]:
+def checked_env(env: Mapping[str, str]) -> dict[str, str]:
+    """``env`` as a dict, once every name is a shell name and every entry one an ``exec`` can take."""
     checked: dict[str, str] = {}
     for name, value in env.items():
         if not _ENV_NAME.fullmatch(name):

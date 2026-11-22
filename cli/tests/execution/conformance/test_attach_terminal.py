@@ -33,6 +33,7 @@ def events(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
             log.append(("exit", None))
 
     monkeypatch.setattr(attach_module, "guarded_terminal", guard)
+    monkeypatch.setattr(attach_module, "emit_clear", lambda: log.append(("clear", None)))
     monkeypatch.setattr(output, "warn", lambda message: log.append(("warn", message)))
     monkeypatch.setattr(output, "detail", lambda message: log.append(("detail", message)))
     return log
@@ -45,7 +46,7 @@ def test_a_dropped_connection_is_explained_after_the_guard_has_closed(
         assert local_lane.access.attach(LoginShell(cwd=local_lane.workdir)) == 255
 
     kinds = [kind for kind, _ in events]
-    assert kinds == ["enter", "exit", "warn", "detail"]  # I6: the guard's reset would wipe an earlier notice
+    assert kinds == ["enter", "exit", "warn", "detail"]  # the guard's reset would wipe an earlier notice
 
 
 def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
@@ -55,15 +56,11 @@ def test_the_terminal_is_restored_when_the_terminal_half_is_interrupted(
         raise KeyboardInterrupt
 
     token = local_lane.handover_token()
-    try:
-        with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
-            local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
+    with local_lane.terminal(behavior=interrupted), pytest.raises(KeyboardInterrupt):
+        local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
-        assert events == [("enter", None), ("exit", None)]  # I21
-    finally:
-        # The pump kills the parking client at once here, and in this lane that kills the launcher
-        # itself; over ssh the launcher sees its stdin close and removes the directory.
-        local_lane.remove_dir(f"/tmp/agw-handover-{token}")
+    assert events == [("enter", None), ("exit", None)]
+    assert local_lane.wait_gone(f"/tmp/agw-handover-{token}")  # the launcher saw the client leave
 
 
 def test_the_terminal_half_runs_the_handover_stage_and_not_the_request(local_lane: LocalLane) -> None:
@@ -116,3 +113,12 @@ def test_only_the_parking_connection_leaves_the_operators_console(
         local_lane.access.attach(LoginShell(cwd=local_lane.workdir))
 
     assert spawned == [False]  # the terminal half is stubbed here; it spawns with the default
+
+
+def test_a_requested_clear_follows_the_guard_and_precedes_the_notice(
+    local_lane: LocalLane, events: list[tuple[str, Any]]
+) -> None:
+    with local_lane.terminal(behavior=lambda argv, half: 255):
+        local_lane.access.attach(LoginShell(cwd=local_lane.workdir), clear_screen_on_exit=True)
+
+    assert [kind for kind, _ in events] == ["enter", "exit", "clear", "warn", "detail"]

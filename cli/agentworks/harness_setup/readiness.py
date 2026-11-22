@@ -10,21 +10,20 @@ from agentworks.capabilities.harness_integration.setup import (
     SetupGap,
     SetupReadiness,
 )
-from agentworks.errors import StateError
+from agentworks.errors import ConnectivityError, StateError
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup
 from agentworks.linux_users import managed_home
-from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from agentworks.capabilities.harness_integration import HarnessIntegration
     from agentworks.capabilities.harness_integration.setup import SetupStatus
     from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.model import SetupFacet, SetupRecord
     from agentworks.resources.registry import Registry
-    from agentworks.transports import Transport
 
 
 class RequiredSetupMissingError(StateError):
@@ -37,7 +36,7 @@ def evaluate_setup(
     integration_name: str,
     *,
     vm: VMRow,
-    runner: Transport,
+    access: VMAccess,
     remediation: str,
     location: str | None = None,
     username: str | None = None,
@@ -70,9 +69,9 @@ def evaluate_setup(
     if block is None or inputs.declaration(integration_name, block) != record.declaration:
         return result("stale", record)
     try:
-        if destination_id(vm, runner, location=location, username=username) != record.destination_id:
+        if destination_id(vm, access, location=location, username=username) != record.destination_id:
             return result("stale", record)
-    except (SSHError, StateError):
+    except (ConnectivityError, StateError):
         return result("unavailable", record)
     return result("current", record)
 
@@ -85,7 +84,7 @@ def require_setup_ready(
     vm: VMRow,
     workspace: WorkspaceRow,
     agent_name: str | None,
-    runner: Transport,
+    access: VMAccess,
 ) -> None:
     """Give the integration the actual bound owners and enforce returned severity."""
 
@@ -98,10 +97,10 @@ def require_setup_ready(
             vm=vm,
             workspace=workspace,
             agent_name=agent_name,
-            runner=runner,
+            access=access,
         )
 
-    enforce_setup_gaps(integration.check_setup(SetupReadiness(lookup, runner)))
+    enforce_setup_gaps(integration.check_setup(SetupReadiness(lookup)))
 
 
 def _applicable_evidence(
@@ -113,7 +112,7 @@ def _applicable_evidence(
     vm: VMRow,
     workspace: WorkspaceRow,
     agent_name: str | None,
-    runner: Transport,
+    access: VMAccess,
 ) -> SetupEvidence:
     from agentworks.agents.templates import resolve_live_template as resolve_agent
     from agentworks.harness_setup.inputs import SetupInputs
@@ -180,7 +179,7 @@ def _applicable_evidence(
         inputs,
         integration_name,
         vm=vm,
-        runner=runner,
+        access=access,
         location=location,
         username=username,
         remediation=remedy,

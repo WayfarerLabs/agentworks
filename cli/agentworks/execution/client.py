@@ -1,11 +1,11 @@
 """Resolve the OpenSSH client once, to an absolute path and a version.
 
 Every spawn in this package takes the resolved :class:`SSHClient`, so none of
-it launches a bare ``ssh``; the legacy transports (``transports/ssh.py``)
-still do until they are removed. Two hazards guard the resolution: on Windows a bare ``ssh`` is
-looked up in the current directory first and ``PATH`` commonly finds the MSYS
-build bundled with Git for Windows, whose argument handling corrupts every
-invocation; and an empty ``PATH`` element means the current directory on POSIX.
+it launches a bare ``ssh``. Two hazards guard the resolution: on Windows a
+bare ``ssh`` is looked up in the current directory first and ``PATH`` commonly
+finds the MSYS build bundled with Git for Windows, whose argument handling
+corrupts every invocation; and an empty ``PATH`` element means the current
+directory on POSIX.
 """
 
 from __future__ import annotations
