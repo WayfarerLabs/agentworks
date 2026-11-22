@@ -15,6 +15,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from agentworks.execution.envelope import MAX_STRING_BYTES
 from agentworks.execution.errors import ExecutionIncomplete, RequestRefused
 from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
@@ -175,18 +176,24 @@ def _deep_workspace(db: Database, root: Path, length: int) -> tuple[str, int]:
     if len(os.fsencode(path)) + 2 > length:
         pytest.skip(f"{root} is already too long to hold a {length}-byte workspace path")
     descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-    while remaining := length - len(os.fsencode(path)):
-        size = min(len(_COMPONENT), remaining - 1)
-        if remaining - 1 - size == 1:  # One byte left over could not hold another component.
-            size -= 1
-        name = _COMPONENT[:size]
-        os.mkdir(name, dir_fd=descriptor)
-        child = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=descriptor)
+    try:
+        while remaining := length - len(os.fsencode(path)):
+            size = min(len(_COMPONENT), remaining - 1)
+            if remaining - 1 - size == 1:  # One byte left over could not hold another component.
+                size -= 1
+            name = _COMPONENT[:size]
+            os.mkdir(name, dir_fd=descriptor)
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor, path = child, f"{path}/{name}"
+        project = os.open(".tmuxinator.yml", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+        try:
+            os.write(project, _GENERATED.encode())
+        finally:
+            os.close(project)
+    except BaseException:
         os.close(descriptor)
-        descriptor, path = child, f"{path}/{name}"
-    project = os.open(".tmuxinator.yml", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
-    os.write(project, _GENERATED.encode())
-    os.close(project)
+        raise
     db.insert_workspace("deep", vm_name="box", workspace_path=path, template="default", linux_group="ws-deep")
     return path, descriptor
 
@@ -689,7 +696,11 @@ def test_a_project_command_that_names_nothing_but_did_not_finish_cleanly_is_repo
 
 @requires_guest_shell
 @skip_as_root
-@pytest.mark.parametrize("unsendable", ["/srv/odd\0name", "", "relative/proj"], ids=["nul", "empty", "relative"])
+@pytest.mark.parametrize(
+    "unsendable",
+    ["/srv/odd\0name", "/" + "a" * MAX_STRING_BYTES, "", "relative/proj"],
+    ids=["nul", "too-long-to-send", "empty", "relative"],
+)
 def test_a_path_that_cannot_be_sent_is_skipped_and_warned(
     db: Database,
     guest: tuple[_Guest, Path, Path],
