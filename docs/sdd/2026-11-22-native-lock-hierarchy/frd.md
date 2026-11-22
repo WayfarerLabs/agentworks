@@ -25,7 +25,7 @@ against VMs that hold several workspaces, agents and sessions.
 - Create or reinitialize an agent while sessions of other agents run and change.
 - Create, repair or delete a workspace while sessions in other workspaces start and stop.
 - Open `vm shell`, `vm exec`, `agent shell`, `session attach` or `session logs` while unrelated
-  creates, reinits and session changes run on that VM.
+  creates, reinitializations and session changes run on that VM.
 - Run a VM-wide operation (`vm reinit`, `vm stop`, `vm delete`, `vm rekey`, `vm recover`) and have
   it refused while anything below it is changing, rather than racing it.
 - When refused, learn which operation holds what, without guessing.
