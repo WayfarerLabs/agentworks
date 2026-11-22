@@ -14,7 +14,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env import EnvEntry
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import StateError
 from agentworks.secrets import SecretTarget
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolve import ResolutionBatch
@@ -120,33 +120,6 @@ def test_operation_resolver_preserves_env_var_multiline_value(
     resolver.resolve()
 
     assert resolver.get("structured") == value
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        pytest.param("environment-sentinel\nsecond\n", id="lf-with-terminal-newline"),
-        pytest.param("environment-sentinel\r\nsecond\r\n", id="crlf-with-terminal-newline"),
-    ],
-)
-def test_operation_resolver_rejects_multiline_environment_target_after_delivery(
-    env,
-    monkeypatch: pytest.MonkeyPatch,
-    value: str,
-) -> None:
-    config, registry = env(manifests=[ManifestDoc("secret", "structured", description="environment input")])
-    monkeypatch.setenv("AW_SECRET_STRUCTURED", value)
-    resolver = Resolver(config, registry, interaction=TtyInteractionPolicy.REFUSE)
-    resolver.register_targets([SecretTarget(vm={"STRUCTURED": EnvEntry({"secret": "structured"})})])
-
-    with pytest.raises(ValidationError) as caught:
-        resolver.resolve()
-
-    assert not resolver.resolved
-    assert "cannot be used for environment injection" in str(caught.value)
-    assert "environment-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
 
 
 def test_empty_set_resolves_without_touching_backends(env, monkeypatch: pytest.MonkeyPatch) -> None:

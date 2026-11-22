@@ -3,13 +3,13 @@
 QGA always starts commands as root, so there is no elevation. The agent is
 pinged every two seconds until it answers, since a VM that has just started
 has none running yet; a ping carries no script, so asking again is safe. The
-pinging stops at ``AGENT_WAIT_SECONDS`` or the script's deadline, whichever
-comes first, so a VM with no agent at all fails in about two minutes. Then
-one ``exec`` dispatches the script as ``input-data`` (limited to 65,536
-characters), unless the pinging left none of the deadline, then
-``exec-status`` is polled every two seconds until the guest reports an exit
-or the deadline passes. Each request's wait is bounded by what remains of
-the deadline, at most the API's ``REQUEST_TIMEOUT_SECONDS``: a socket
+pinging has its own bound, ``AGENT_WAIT_SECONDS``, so a VM with no agent at
+all fails in about two minutes whatever the script's deadline. The deadline
+starts when the agent has answered: one ``exec`` dispatches the script as
+``input-data`` (limited to 65,536 characters), then ``exec-status`` is polled
+every two seconds until the guest reports an exit or the deadline passes.
+Each request's wait is bounded by what remains of the deadline, or of the
+ping's own bound, at most the API's ``REQUEST_TIMEOUT_SECONDS``: a socket
 timeout bounds the TCP connect and each wait for data, not name resolution
 or a whole response, so an API that keeps a response arriving can carry one
 request past the deadline. A poll carries only the PID, so a failed one is
@@ -45,38 +45,26 @@ _ROOT_SHELL = ["/bin/bash", "-s"]
 
 
 def run_as_root(api: ProxmoxAPI, node: str, vmid: int, script: bytes, deadline: float) -> RawRun:
-    """Run ``script`` through QGA once, with ``deadline`` seconds from now; see :func:`run_as_root_until`."""
-    return run_as_root_until(api, node, vmid, script, time.monotonic() + deadline)
+    """Run ``script`` through QGA once and return what the guest reported, or empty streams at the deadline.
 
-
-def run_as_root_until(api: ProxmoxAPI, node: str, vmid: int, script: bytes, expires: float) -> RawRun:
-    """Run ``script`` through QGA once and return what the guest reported, or empty streams at ``expires``.
-
-    ``expires`` is on ``time.monotonic()``'s clock, so a caller that has
-    already spent part of its budget passes the same instant it started
-    from, and no time passes uncounted between the two.
-
-    A dispatch failure, or status polls failing for ``STATUS_RETRY_SECONDS``,
-    raises ``ConnectivityError`` saying how far the request got, and never
-    chains the original error, whose request could quote the script. A status
-    failure from the API adds the API's own error text, since that request
-    carries only the PID. The API refusing the site's token (401 or 403) is a
-    ``TokenRejectedError`` instead, since no connection problem explains it.
-    A guest agent that does not answer its ping in time to dispatch by the
-    deadline raises ``ChannelUnreachable`` before anything is dispatched.
+    ``deadline`` seconds count from the dispatch, once the guest agent has
+    answered its ping; a guest agent that does not answer within
+    ``AGENT_WAIT_SECONDS`` raises ``ChannelUnreachable`` before anything is
+    dispatched. A dispatch failure, or status polls failing for
+    ``STATUS_RETRY_SECONDS``, raises ``ConnectivityError`` saying how far the
+    request got, and never chains the original error, whose request could
+    quote the script. A status failure from the API adds the API's own error
+    text, since that request carries only the PID. The API refusing the site's
+    token (401 or 403) is a ``TokenRejectedError`` instead, since no
+    connection problem explains it.
     """
     where = f"{vmid}@{node}"
     text = script.decode("utf-8")
     if len(text) > INPUT_DATA_LIMIT:
         raise ConnectivityError(f"a root script for Proxmox VM {where} exceeds QGA's {INPUT_DATA_LIMIT} characters")
-    _await_agent(api, node, vmid, where, min(expires, time.monotonic() + AGENT_WAIT_SECONDS))
-    remaining = expires - time.monotonic()
-    if remaining <= 0:
-        raise ChannelUnreachable(
-            f"the QEMU guest agent of Proxmox VM {where} answered only as the deadline passed, so no script was"
-            " dispatched",
-            hint="Check that the Proxmox API is answering promptly, then run the command again.",
-        )
+    _await_agent(api, node, vmid, where, time.monotonic() + AGENT_WAIT_SECONDS)
+    expires = time.monotonic() + deadline
+    remaining = deadline
     # Each failure is raised after its handler, so the original is not even the context.
     failure: AgentworksError | None = None
     try:

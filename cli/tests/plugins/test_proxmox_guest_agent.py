@@ -96,24 +96,26 @@ def test_the_deadline_returns_empty_streams_without_dispatching_again(monkeypatc
 
 
 @pytest.mark.parametrize(("deadline", "timeout"), [(600, REQUEST_TIMEOUT_SECONDS), (5, 5)])
-def test_no_request_outlasts_the_deadline_or_the_request_timeout(deadline: float, timeout: float) -> None:
+def test_no_request_outlasts_its_bound_or_the_request_timeout(deadline: float, timeout: float) -> None:
     api = FakeAPI([{"exited": True, "exitcode": 0}])
 
     run(api, deadline=deadline)
 
-    assert api.timeouts == [timeout] * 3  # the ping, the dispatch and the poll
+    # The ping is bounded by the agent wait, the dispatch and the poll by the deadline.
+    assert api.timeouts == [REQUEST_TIMEOUT_SECONDS, timeout, timeout]
 
 
-def test_an_agent_that_answers_as_the_deadline_passes_gets_nothing_dispatched(monkeypatch: pytest.MonkeyPatch) -> None:
-    clock = itertools.chain([0.0, 0.0, 0.0], itertools.repeat(100.0))
-    monkeypatch.setattr("agentworks.plugins.proxmox.guest_agent.time.monotonic", lambda: next(clock))
-    api = FakeAPI([])
+def test_the_deadline_starts_once_the_agent_answers() -> None:
+    """A VM that has just started spends its agent wait, not the script's deadline."""
+    not_yet = ProxmoxAPIError("QEMU guest agent is not running")
+    pings: list[BaseException | None] = [not_yet] * 50
+    api = FakeAPI([{"exited": True, "exitcode": 0}], pings=[*pings, None])
 
-    with pytest.raises(ChannelUnreachable):
-        run(api, deadline=5)
+    run(api, deadline=5)
 
-    assert api.ping_count == 1
-    assert api.execs == []
+    assert api.ping_count == 51
+    assert len(api.execs) == 1
+    assert api.timeouts[-2:] == [5, 5]
 
 
 @pytest.mark.parametrize(

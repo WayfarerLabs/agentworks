@@ -26,7 +26,7 @@ _ENV_KEY_RE: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _check_env_var_name(value: str) -> str:
-    if not _ENV_KEY_RE.match(value):
+    if not _ENV_KEY_RE.fullmatch(value):
         raise ValueError(f"invalid env var name {value!r} (must match /{_ENV_KEY_RE.pattern}/)")
     return value
 

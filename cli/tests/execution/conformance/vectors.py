@@ -14,7 +14,6 @@ import shlex
 import signal
 import subprocess
 import tempfile
-import threading
 import time
 from dataclasses import dataclass
 from functools import partial
@@ -24,8 +23,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ValidationError
-from agentworks.execution.errors import ExecutionIncomplete, RequestRefused, TrustMismatch
-from agentworks.execution.requests import Command, LoginShell, Script, Shell, shell_command_line
+from agentworks.execution.errors import TrustMismatch
+from agentworks.execution.requests import Command, Script, Shell, shell_command_line
 from agentworks.execution.results import (
     Completed,
     NotDelivered,
@@ -33,7 +32,17 @@ from agentworks.execution.results import (
     Unknown,
     UnknownReason,
 )
-from tests.execution.conformance.lanes import Lane, LocalFilesystem, LocalLane, SSHDLane, sudo_granted, unavailable
+from tests.execution.conformance import detached_vectors, file_vectors, program_vectors, terminal_vectors
+from tests.execution.conformance.lanes import (
+    Lane,
+    LocalFilesystem,
+    LocalLane,
+    SSHDLane,
+    local,
+    needs_startup_files,
+    needs_sudo,
+    startup_file,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,22 +63,6 @@ def script(source: str, shell: Shell = Shell.SH, **options: object) -> Script:
 
 def refused(code: str) -> NotDelivered:
     return NotDelivered(NotDeliveredReason.REFUSED, code)
-
-
-def local(lane: Lane) -> LocalLane:
-    if not isinstance(lane, LocalLane):
-        pytest.skip("local lane only")
-    return lane
-
-
-def needs_startup_files(lane: LocalLane) -> None:
-    """sh and dash read no startup file under ``-c``, so a vector about startup files has nothing to test there."""
-    if lane.shell_name not in ("bash", "zsh"):
-        pytest.skip(f"{lane.shell_name} reads no startup file for a non-interactive command")
-
-
-def startup_file(lane: LocalLane) -> str:
-    return ".zshenv" if lane.shell_name == "zsh" else ".bashrc"
 
 
 # -- Shared by L, S and V ---------------------------------------------------------------
@@ -342,7 +335,8 @@ def deadline(lane: Lane) -> None:
 
     lane.monkeypatch.setattr(subprocess, "Popen", Recording)
 
-    result = lane.run(cmd("sleep", "3", deadline=0.5))
+    # Far past the deadline, so only the deadline's kill ends it, however loaded the host.
+    result = lane.run(cmd("sleep", "30", deadline=0.5))
 
     assert result.completion == Unknown(UnknownReason.DEADLINE)
     assert spawned
@@ -405,92 +399,6 @@ def payload_leaves_the_shared_streams_non_blocking_and_full(lane: Lane) -> None:
     assert status == 0
     assert out.getvalue() == b"x" * len(out.getvalue()) != b""
     assert err.getvalue() == b"x" * len(err.getvalue()) != b""
-
-
-# -- Handover ---------------------------------------------------------------------------
-
-
-def handover_hands_the_terminal_a_login_shell(lane: Lane) -> None:
-    token = lane.handover_token()
-    with lane.terminal(b"pwd\nexit 7\n") as terminal:
-        code = lane.access.attach(LoginShell(cwd=lane.workdir))
-
-    assert code == 7
-    assert terminal.stdout.splitlines()[-1] == lane.workdir.encode()
-    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
-
-
-def handover_refuses_before_the_terminal_is_touched(lane: Lane) -> None:
-    lane.handover_token()
-    with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
-        lane.access.attach(LoginShell(cwd=f"{lane.workdir}/no-such-directory-agw"))
-
-    assert raised.value.code == "cwd"
-    assert terminal.calls == 0
-
-
-def handover_never_reuses_an_existing_name(lane: Lane) -> None:
-    token = lane.handover_token()
-    planted = f"/tmp/agw-handover-{token}"
-    lane.mkdir(planted)
-    try:
-        with lane.terminal() as terminal, pytest.raises(RequestRefused) as raised:
-            lane.access.attach(LoginShell())
-
-        assert raised.value.code == "handover"
-        assert terminal.calls == 0
-        assert lane.exists(planted)  # the launcher removed nothing it did not create
-    finally:
-        lane.remove_dir(planted)
-
-
-def handover_whose_second_connection_never_arrives_leaves_nothing(lane: Lane) -> None:
-    token = lane.handover_token()
-    with lane.terminal(behavior=lambda argv, half: 0) as terminal:
-        assert lane.access.attach(LoginShell()) == 0
-
-    assert terminal.calls == 1
-    assert lane.wait_gone(f"/tmp/agw-handover-{token}")
-
-
-def handover_gives_up_after_its_wait(lane: Lane) -> None:
-    lane.shorten_handover_wait(1)
-    directory = f"/tmp/agw-handover-{lane.handover_token()}"
-
-    def never_connects(argv: list[str], half: object) -> int:
-        # The parking connection stays open meanwhile, so only the launcher's own wait can remove its
-        # directory. 15 s leaves a loaded host room past the 1 s wait, and is half the default 30 s.
-        assert lane.wait_gone(directory, seconds=15)
-        return 0
-
-    with lane.terminal(behavior=never_connects):
-        assert lane.access.attach(LoginShell()) == 0
-
-
-def parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone(lane: Lane) -> None:
-    account = local(lane)
-    needs_startup_files(account)
-    account.startup(startup_file(account), "cat >/dev/null\n")  # holds the request and the connection open
-    account.shorten_parking_wait(2)
-    caught: list[BaseException] = []
-
-    def attach() -> None:
-        try:
-            account.access.attach(LoginShell(cwd=account.workdir))
-        except BaseException as error:  # noqa: BLE001 - the thread hands every outcome to the vector
-            caught.append(error)
-
-    # A regression in the bound would hang the attach forever, so the vector bounds itself.
-    with account.terminal() as terminal:
-        thread = threading.Thread(target=attach, daemon=True)
-        thread.start()
-        thread.join(timeout=30)
-        assert not thread.is_alive(), "the parking wait did not end"
-
-    assert len(caught) == 1
-    assert isinstance(caught[0], ExecutionIncomplete)
-    assert caught[0].result.completion == Unknown(UnknownReason.DEADLINE)
-    assert terminal.calls == 0
 
 
 def memfd_refusing_the_noexec_seal_still_runs_the_script(lane: Lane) -> None:
@@ -690,26 +598,7 @@ def login_flag_runs_the_account_login_startup(lane: Lane) -> None:
         assert account.run(script(probe, shell, login=False, env={"HOME": home})).stdout == b"unset\n", shell
 
 
-def handover_shell_starts_with_clean_dispositions(lane: Lane) -> None:
-    account = local(lane)
-    needs_startup_files(account)
-    account.startup(startup_file(account), "trap '' HUP INT TERM USR1 USR2\n")
-    home = account.make_dir()
-
-    with account.terminal(b"grep -E 'SigIgn|SigBlk' /proc/self/status\nexit 0\n") as terminal:
-        code = account.access.attach(LoginShell(cwd=account.workdir, env={"HOME": home}))
-
-    assert code == 0
-    assert terminal.stdout.decode().splitlines() == ["SigBlk:\t0000000000000000", "SigIgn:\t0000000000000000"]
-
-
 # -- Elevation (E1, E2, E4, E6) ----------------------------------------------------------
-
-
-def needs_sudo(lane: Lane) -> None:
-    """A local guest elevates only where the runner grants passwordless sudo: CI does, so it fails there without it."""
-    if isinstance(lane, LocalFilesystem) and not sudo_granted():
-        unavailable("the elevation vectors need passwordless sudo")
 
 
 def elevated_runs_as_root_in_the_rebuilt_environment(lane: Lane) -> None:
@@ -792,15 +681,6 @@ def build() -> list[Vector]:
         Vector("background-child-holds-both-streams", "LSV", background_child_holds_both_streams),
         Vector("no-trailing-newline-and-refusal", "LS", output_without_a_trailing_newline_and_a_refusal),
         Vector("deadline", "LS", deadline),
-        Vector("handover-success", "LSV", handover_hands_the_terminal_a_login_shell),
-        Vector("handover-refused-before-terminal", "LSV", handover_refuses_before_the_terminal_is_touched),
-        Vector("handover-existing-name", "LSV", handover_never_reuses_an_existing_name),
-        Vector(
-            "handover-second-connection-never-arrives",
-            "LSV",
-            handover_whose_second_connection_never_arrives_leaves_nothing,
-        ),
-        Vector("handover-wait-expires", "LSV", handover_gives_up_after_its_wait),
         Vector("streams-left-non-blocking", "LSV", payload_leaves_the_shared_streams_non_blocking_and_full),
         Vector("host-key-mismatch", "S", host_key_mismatch_is_trust_mismatch),
         Vector("wrong-identity-is-auth-failed", "SV", wrong_identity_is_an_authentication_failure),
@@ -840,12 +720,12 @@ def build() -> list[Vector]:
         Vector(
             "resets-signals-descriptors-session-variables", "L", signals_descriptors_and_session_variables_are_reset
         ),
-        Vector("handover-clean-dispositions", "L", handover_shell_starts_with_clean_dispositions),
-        Vector("parking-never-reports", "L", parking_that_never_reports_is_bounded_and_leaves_the_terminal_alone),
         Vector("memfd-noexec-seal-refused", "L", memfd_refusing_the_noexec_seal_still_runs_the_script),
         Vector("memfd-cannot-be-created", "L", memfd_that_cannot_be_created_is_not_delivered),
     ]
-    return [*shared, *startup_exits, *startup_redirects, *local_only]
+    modules = (terminal_vectors, program_vectors, file_vectors, detached_vectors)
+    others = [Vector(*entry) for module in modules for entry in module.ENTRIES]
+    return [*shared, *startup_exits, *startup_redirects, *local_only, *others]
 
 
 VECTORS = build()

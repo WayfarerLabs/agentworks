@@ -27,9 +27,11 @@ explicit recovery rather than routine operation.
 
 ## SSH
 
-The workstation needs an SSH client and a public/private key pair that the operator authorizes
-Agentworks to use. The configuration names the two paths; Agentworks does not need to inspect the
-private-key contents.
+The workstation needs OpenSSH 8.5 or newer (on Windows, the Win32-OpenSSH build rather than the
+`ssh` bundled with Git for Windows) and a public/private key pair that the operator authorizes
+Agentworks to use. The configuration names the two paths. Agentworks never prompts for a passphrase,
+so a passphrase-protected key must be loaded in the SSH agent; nobody needs to read the private
+key's contents to set this up. `agw doctor` shows which client Agentworks resolved.
 
 ## A place to run VMs
 

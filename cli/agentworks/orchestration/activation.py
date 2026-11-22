@@ -122,9 +122,9 @@ def ensure_active(target: GateTarget, resolve_secret: Callable[[str], str]) -> d
     target's gate secrets just-in-time and drive observe-then-start,
     with the stopped-intent refusal raised from the node's own
     ``auto_start``. Returns every gate-resolved value (empty on the fast
-    path). A singular pre-boundary caller's resolve callback seeds its
-    later boundary as each value lands; a post-boundary caller (rekey)
-    serves its completed cache and never seeds after resolution.
+    path). A singular pre-boundary caller's resolve callback joins each
+    value to its later boundary as it lands; a post-boundary caller
+    (rekey) serves its completed cache and resolves nothing more.
     """
     if target.confirmed_active():
         return {}
@@ -141,13 +141,13 @@ def gate_secret_resolver(
     resolver: Resolver,
 ) -> Callable[[str], str]:
     """The gate's just-in-time resolve callback, shared by every
-    command whose gate opens BEFORE its boundary resolve: resolve
-    through the normal source chain and SEED the boundary resolver as
-    each value lands (``Resolver.seed``), so the boundary pass skips
-    the gate-resolved names and no secret resolves or prompts twice in
-    one command. (The ops themselves read the gate's scoped reader,
-    not the resolver: seeding is purely the no-double-resolve
-    property.)"""
+    command whose gate opens BEFORE its boundary resolve: each name
+    resolves once through the normal source chain on the boundary
+    resolver (``Resolver.resolve_gate``), which keeps the value for its
+    boundary pass, so that pass skips the gate-resolved names and no
+    secret resolves or prompts twice in one command. (The ops themselves
+    read the gate's scoped reader, not the resolver: keeping the value
+    is purely the no-double-resolve property.)"""
 
     def resolve_gate_secret(secret_name: str) -> str:
         return resolver.resolve_gate(secret_name)

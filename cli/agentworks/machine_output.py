@@ -14,6 +14,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, assert_never, cast
 
+from agentworks.terminal import TERMINAL_UNSAFE_CATEGORIES
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -28,7 +30,6 @@ type JsonObject = dict[str, JsonValue]
 # The version every JSON v1 envelope carries. Consumers branch on it; nothing
 # here does, so it stays a named constant rather than a fact any record holds.
 _SCHEMA_VERSION = 1
-_TERMINAL_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 
 def project_json_value(value: Any) -> JsonValue:
@@ -105,7 +106,7 @@ def _escape_terminal_unsafe_characters(document: str) -> str:
     """
     return "".join(
         json.dumps(character, ensure_ascii=True)[1:-1]
-        if unicodedata.category(character) in _TERMINAL_UNSAFE_CATEGORIES
+        if unicodedata.category(character) in TERMINAL_UNSAFE_CATEGORIES
         else character
         for character in document
     )

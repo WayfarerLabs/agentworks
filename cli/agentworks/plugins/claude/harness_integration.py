@@ -52,6 +52,7 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
@@ -71,7 +72,7 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class ClaudeCodeUserConfig(NativeUserConfig):
@@ -175,7 +176,7 @@ class ClaudeCodeConfig(AgwModel):
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig
@@ -234,10 +235,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     files=files,
                     vm_only=True,
                 ),
@@ -291,10 +292,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
             item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
         ):
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="claude",
-                environment=invocation.environment,
-                redactions=invocation.secrets.values(),
+                environment=invocation.request_environment(),
+                redactor=invocation.redactor,
                 home=invocation.home,
                 native_root=root,
                 check_policy=False,
@@ -314,10 +315,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     home=invocation.home,
                     native_root=root,
                     files=files,
@@ -346,10 +347,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
                     workspace_only=True,
@@ -421,9 +422,9 @@ class ClaudeCodeIntegration(HarnessIntegration):
         sid, resume = self._conversation(ctx, intent=intent)
         self._rendered_extra_args = self.render_context_args("extra_args", self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
-        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        access = ctx.admin_access() if self._admin else ctx.agent_access()
         self._artifact_plan, native_root = prepare_session_delivery(
-            runner,
+            access,
             tool="claude",
             integration=self.name,
             context=artifact_context,
@@ -433,7 +434,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 enabled_workarounds=self.config.enabled_workarounds or (),
                 mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
                     "claude",
-                    runner,
+                    access,
                     inputs,
                     home=prepared.home,
                     environment=prepared.environment,
@@ -480,7 +481,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if resume_only and forced is None and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
         sid = forced or (stored_sid if not fresh and isinstance(stored_sid, str) and stored_sid else str(uuid.uuid4()))
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         resume = False
         if (not fresh or forced is not None) and launch_target is not None:
             try:
@@ -490,7 +491,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     sid,
                     detect=forced is None,
                     environment=context.environment if context is not None else {},
-                    redactions=context.redactions if context is not None else (),
+                    redactor=context.redactor if context is not None else Redactor(),
                 )
             except StateError as error:
                 raise StateError(
@@ -638,12 +639,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
             prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
         return prompt
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         """Readiness proves only that ``claude`` is installed; it never
         inspects session state (detection is an op-time concern)."""
         require_commands(
             ("claude",),
-            transport,
+            access,
             harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,

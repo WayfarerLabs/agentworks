@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
+    from agentworks.execution.requests import TerminalRequest
+
 
 @pytest.fixture(autouse=True)
 def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,7 +95,12 @@ def _patch_common(
     recorder = AccessRecorder()
     monkeypatch.setattr("agentworks.execution.vm_access", recorder.vm_access)
     monkeypatch.setattr("agentworks.execution.resolve_ssh", lambda: recorder.client)
-    recorder.access(Admin()).attach = lambda request: interactive_log.append(True) or 0  # type: ignore[method-assign]
+
+    def attach(request: TerminalRequest, *, clear_screen_on_exit: bool = False) -> int:
+        interactive_log.append(True)
+        return 0
+
+    recorder.access(Admin()).attach = attach  # type: ignore[method-assign]
 
 
 # -- Tailscale-host gate ------------------------------------------------------
@@ -142,7 +149,7 @@ def test_platform_shell_opens_the_native_shell_with_no_tailnet_address_and_no_en
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A VM with no tailnet address still gets its native shell, and no environment is composed (R7)."""
+    """A VM with no tailnet address still gets its native shell, and no environment is composed."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path, tailscale_host=None)
@@ -221,7 +228,7 @@ def test_the_native_shell_runs_under_the_terminal_guard_and_255_is_noted_after_i
     monkeypatch: pytest.MonkeyPatch,
     status: int,
 ) -> None:
-    """The guard's exit pass leaves the alternate screen, so the 255 notice must come after it (I6)."""
+    """The guard's exit pass leaves the alternate screen, so the 255 notice must come after it."""
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)

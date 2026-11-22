@@ -6,7 +6,7 @@ caller's sinks. It starts the process through ``ssh_process.spawn`` and
 otherwise knows nothing about ssh, which is what lets the conformance suite
 run it against a local shell.
 
-A :class:`Deadline` bounds the local wait and never claims the guest command
+A :class:`~agentworks.deadline.Deadline` bounds the local wait and never claims the guest command
 stopped.
 """
 
@@ -20,11 +20,12 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks.deadline import Deadline
 from agentworks.execution import ssh_process
 from agentworks.execution.envelope import StreamFilter
+from agentworks.execution.requests import CAPTURE_LIMIT_BYTES
 from agentworks.execution.results import UnknownReason
 from agentworks.output import consumer_left
 
@@ -33,34 +34,12 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 CHUNK_BYTES = 65_536
-CAPTURE_LIMIT_BYTES = 1_048_576
 
 _POLL_SECONDS = 0.01
 _NATURAL_EXIT_SECONDS = 1.0
 _REAP_SECONDS = 0.5
 _EXIT_DRAIN_SECONDS = 0.1
 _STDIN_QUEUE_CHUNKS = 4
-
-
-@dataclass(frozen=True)
-class Deadline:
-    """One local observation budget, not guest cancellation; None is unbounded."""
-
-    expires_at: float | None
-
-    @classmethod
-    def after(cls, seconds: float | None) -> Deadline:
-        return cls(None if seconds is None else time.monotonic() + seconds)
-
-    def remaining(self) -> float | None:
-        if self.expires_at is None:
-            return None
-        return max(0.0, self.expires_at - time.monotonic())
-
-    @property
-    def expired(self) -> bool:
-        remaining = self.remaining()
-        return remaining is not None and remaining <= 0
 
 
 Sink = Callable[[bytes], None]
@@ -90,6 +69,21 @@ class Capture:
         if len(self.data) > self._limit:
             del self.data[self._limit :]
             raise OutputLimitExceeded
+
+
+class FileWriter:
+    """A sink that writes every chunk to ``file`` and then reports the running byte count to ``on_progress``."""
+
+    def __init__(self, file: BinaryIO, on_progress: Callable[[int], None] | None = None) -> None:
+        self.written = 0
+        self._file = file
+        self._on_progress = on_progress
+
+    def __call__(self, chunk: bytes) -> None:
+        self._file.write(chunk)
+        self.written += len(chunk)
+        if self._on_progress is not None:
+            self._on_progress(self.written)
 
 
 class StopReason(enum.Enum):
@@ -127,10 +121,13 @@ class _InputFeeder:
     exit. The queue is bounded so a slow consumer does not buffer the stream.
     """
 
-    def __init__(self, stream: BinaryIO) -> None:
+    def __init__(self, stream: BinaryIO, *, fail_on_error: bool = False) -> None:
         self._stream = stream
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=_STDIN_QUEUE_CHUNKS)
+        self._fail_on_error = fail_on_error
         self.exhausted = False
+        self.error: OSError | None = None
+        """The read error that stopped the input; set only with ``fail_on_error``."""
 
     def start(self) -> None:
         threading.Thread(target=self._run, daemon=True, name="agw-stdin").start()
@@ -145,7 +142,13 @@ class _InputFeeder:
                 self._queue.put(chunk)
                 if not chunk:
                     return
-        except (OSError, ValueError):
+        except OSError as error:
+            if self._fail_on_error:
+                # The session raises it; the payload still sees its input end where the read stopped.
+                self.error = error
+                return
+            self._queue.put(b"")
+        except ValueError:  # the stream was closed under the thread
             self._queue.put(b"")
 
     def poll(self) -> bytes | None:
@@ -168,6 +171,13 @@ class PipeSession:
     is how a terminal handover keeps its parking connection while the terminal
     half runs.
 
+    A read error from the caller's input ends it as end of input, which suits
+    the operator's stdin. With ``fail_on_input_error`` (a file) :meth:`pump`
+    instead kills the client and raises the error, so the request fails rather
+    than reporting the guest's outcome. The payload still sees its input end
+    where the read stopped, once sshd closes its pipes, so a payload that must
+    not act on a truncated file detects truncation itself.
+
     The client's stdin closes once the request and the caller's input are sent,
     unless ``hold_stdin_open`` keeps it open for :meth:`close_stdin` (a parked
     launcher treats its closing as the client leaving).
@@ -186,8 +196,12 @@ class PipeSession:
     that stream and then closes its read end, so ssh's write after that one
     fails with ``EPIPE``, as it did when it held the operator's streams; the
     read end stays open until then because ssh drops the stderr, status
-    included, that follows a failed write to its stdout (``execution-lld.md``
-    has the mechanism and its one edge). ssh does not end the channel for a
+    included, that follows a failed write to its stdout, so a quiet payload's
+    trailer must not meet a closed read end. The one edge: a guest that writes
+    once more after its consumer left and then goes quiet meets the closed read
+    end, so its trailer survives only when it reaches ssh in the same read as
+    that last write, and otherwise the result is ``Unknown(CONSUMER_LEFT)``,
+    which ``stream`` reports as 141. ssh does not end the channel for a
     departed stderr, and the status travels on stderr, so :meth:`pump` returns
     :attr:`StopReason.STDERR_CONSUMER_LEFT` once stdout has nothing held for a
     slow consumer and the trailer has not already arrived (with it in hand,
@@ -206,6 +220,7 @@ class PipeSession:
         request: bytes,
         nonce: str | None,
         stdin: BinaryIO | None = None,
+        fail_on_input_error: bool = False,
         hold_stdin_open: bool = False,
         share_console: bool = True,
         on_stdout: Sink,
@@ -214,7 +229,7 @@ class PipeSession:
     ) -> None:
         self._argv = list(argv)
         self._outbox = bytearray(request)
-        self._feeder = None if stdin is None else _InputFeeder(stdin)
+        self._feeder = None if stdin is None else _InputFeeder(stdin, fail_on_error=fail_on_input_error)
         self._sinks = {"out": on_stdout, "err": on_stderr}
         self._pending: dict[str, bytes | None] = {"out": None, "err": None}
         self._deadline = deadline or Deadline(None)
@@ -271,6 +286,12 @@ class PipeSession:
             except OutputLimitExceeded:
                 return self._stopped(StopReason.OUTPUT_LIMIT)
             progressed |= self._write()
+            if self._feeder is not None and self._feeder.error is not None:
+                # The input could not be read: end the client and raise the read error instead of
+                # reporting an outcome. The payload sees its input end here when sshd closes its pipes.
+                self._killed = True
+                self._cleanup()
+                raise self._feeder.error
             waiting = any(held is not None for held in self._pending.values())
             if self.stdout.done and self.stderr.done and not waiting:
                 return StopReason.DONE

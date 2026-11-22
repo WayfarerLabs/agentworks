@@ -128,15 +128,9 @@ def test_an_agentworks_prefixed_key_is_warned_about() -> None:
     ]
 
 
-def test_a_newline_in_a_plaintext_value_is_warned_about() -> None:
-    """ADR 0014: it would corrupt the SSH ``-o SetEnv=KEY=VALUE`` argument
-    shape."""
-    issues = decode_issues("workspace-template", "web", {"env": {"NOTE": "one\ntwo"}})
-
-    assert issues == [
-        "res.yaml:7: workspace-template/web.env.NOTE: value contains a newline; "
-        "SSH SetEnv cannot transport it cleanly. Strip the newline at the source."
-    ]
+def test_line_breaks_in_a_plaintext_value_earn_no_advisory() -> None:
+    """A value travels in the request, so its line breaks reach the guest intact."""
+    assert decode_issues("workspace-template", "web", {"env": {"NOTE": "one\ntwo\r\nthree"}}) == []
 
 
 def test_a_non_conforming_secret_name_is_warned_about() -> None:
@@ -148,7 +142,7 @@ def test_a_non_conforming_secret_name_is_warned_about() -> None:
 
 
 def test_a_clean_document_earns_no_advisories() -> None:
-    """Non-vacuity for the three above: an advisory pass that returned
-    nothing would satisfy none of them, but one that returned everything
-    would satisfy all three."""
+    """Non-vacuity for the two advisories above: an advisory pass that
+    returned nothing would satisfy neither, but one that returned
+    everything would satisfy both."""
     assert decode_issues("workspace-template", "web", dict(_FULL)) == []

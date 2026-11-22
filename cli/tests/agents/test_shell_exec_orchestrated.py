@@ -20,7 +20,7 @@ from agentworks.agents import manager as agent_manager
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, ValidationError
 from agentworks.execution.access import Agent
-from agentworks.execution.requests import LoginShell, Script, Shell
+from agentworks.execution.requests import Script, Shell
 from agentworks.instance_specs import parse_instance_spec
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -30,6 +30,7 @@ from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
+    from agentworks.execution.requests import TerminalRequest
     from tests.vm_access_support import AccessRecorder
 
 AGENT = Agent("a1", "agt-a1")
@@ -529,9 +530,9 @@ def test_shell_interactive_runs_inside_the_held_active_span(
     agent_access = vm_access_recorder.access(AGENT)
     attach = agent_access.attach
 
-    def _tracking(request: LoginShell) -> int:
+    def _tracking(request: TerminalRequest, *, clear_screen_on_exit: bool = False) -> int:
         events.append("interactive")
-        return attach(request)
+        return attach(request, clear_screen_on_exit=clear_screen_on_exit)
 
     agent_access.attach = _tracking  # type: ignore[method-assign]
 

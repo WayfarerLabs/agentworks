@@ -35,6 +35,7 @@ from tests._gcp_platform_fakes import (
     gce_platform,
     gce_request,
 )
+from tests._root_channel_fakes import logged_payloads
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +88,8 @@ def test_full_create_retains_secret_free_request_and_joins_once(
     assert request.request_id
     assert [b"AGW_SECRET=" in script for script in guest.scripts] == [False, False, True, False]
     assert guest.payloads == ["true", GCE_READINESS_COMMAND, JOIN_FRAGMENT, "tailscale ip -4"]
+    # Everything after the SSH wait is recorded in the create's operation log.
+    assert logged_payloads(progress) == [GCE_READINESS_COMMAND, JOIN_FRAGMENT, "tailscale ip -4"]
     assert all(TAILSCALE_SENTINEL not in arg for argv in guest.argvs for arg in argv)
     assert result.tailnet_address == "100.64.0.9"
     assert "203.0.113.19" not in repr(result.platform_metadata)
@@ -145,7 +148,7 @@ def test_close_reconstructs_stable_allow_from_original_normalized_prefixes(
 
 @pytest.mark.parametrize(
     "failure_stage",
-    ("deny-insert", "allow-insert", "instance-insert", "readiness"),
+    ("deny-insert", "allow-insert", "readiness"),
 )
 def test_create_failures_clean_every_partial_resource_set(
     monkeypatch: pytest.MonkeyPatch,
@@ -159,8 +162,6 @@ def test_create_failures_clean_every_partial_resource_set(
         cache.firewalls.insert_failures = [provider_failure, provider_failure]
     elif failure_stage == "allow-insert":
         cache.firewalls.insert_failures = [None, provider_failure, provider_failure]
-    elif failure_stage == "instance-insert":
-        cache.instances.insert_failures = [provider_failure, provider_failure]
     else:
         transport_failures[GCE_READINESS_COMMAND] = [ConnectivityError("startup marker unavailable")]
 
@@ -211,7 +212,7 @@ def test_ordinary_failure_cleanup_interrupt_reenters_idempotent_platform_rollbac
     platform, cache = gce_platform(monkeypatch, guest)
     rollback_calls = 0
 
-    def partial_then_complete_rollback(**kwargs: object) -> RollbackReport:
+    def partial_then_complete_rollback(_target: object, **kwargs: object) -> RollbackReport:
         nonlocal rollback_calls
         rollback_calls += 1
         if rollback_calls == 1:
@@ -243,7 +244,7 @@ def test_second_interrupt_abandons_platform_rollback_without_mutating_survivors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     warnings: list[str] = []
-    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    monkeypatch.setattr("agentworks.plugins.gcp.recovery.output.warn", warnings.append)
     platform, cache = gce_platform(
         monkeypatch, gce_guest(failures={GCE_READINESS_COMMAND: [KeyboardInterrupt("first")]})
     )

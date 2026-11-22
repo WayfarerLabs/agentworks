@@ -18,8 +18,13 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient
 from agentworks.db import VMStatus
-from agentworks.errors import AgentworksError, ConnectivityError, StateError
+from agentworks.errors import (
+    AgentworksError,
+    ConnectivityError,
+    StateError,
+)
 from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
@@ -29,13 +34,13 @@ from agentworks.plugins.gcp.bootstrap import (
 )
 from agentworks.plugins.gcp.cleanup import (
     CleanupCoordinates,
+    CleanupTarget,
     InstanceOwnership,
     InstanceState,
     RollbackReport,
-    manual_cleanup_guidance,
-    rollback_after_interrupt,
+    UnresolvedInsert,
+    UnresolvedInserts,
     rollback_partial_create,
-    rollback_then_raise,
 )
 from agentworks.plugins.gcp.compute import (
     EXTERNAL_ACCESS_CONFIG_NAME,
@@ -74,6 +79,13 @@ from agentworks.plugins.gcp.network import (
     require_firewall_name_available,
     resolve_network,
 )
+from agentworks.plugins.gcp.recovery import (
+    GcloudResource,
+    manual_cleanup_guidance,
+    resource_guidance,
+    rollback_after_interrupt,
+    rollback_then_raise,
+)
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -81,6 +93,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
+    from agentworks.plugins.gcp.auth import GcpClientKind
 
 
 _OPERATION_TIMEOUT_SECONDS = 300.0
@@ -173,6 +186,16 @@ class _VMIdentity:
             deny_rule=self.deny_rule,
         )
 
+    @property
+    def cleanup_target(self) -> CleanupTarget:
+        """The recorded resources, each by its persisted provider ID, with no insert outstanding."""
+        return CleanupTarget(
+            self.coordinates,
+            InstanceOwnership(self.instance_id),
+            FirewallOwnership(self.allow_rule, self.allow_rule_id),
+            FirewallOwnership(self.deny_rule, self.deny_rule_id),
+        )
+
 
 class GCEPlatform(PublicAddressPlatform):
     """Runs VMs on Google Compute Engine with provider-ID-owned cleanup."""
@@ -234,8 +257,7 @@ class GCEPlatform(PublicAddressPlatform):
         get_zone(self._clients, ctx, self.config.project_id, self.config.zone)
         network = resolve_network(self._clients, ctx, self.config)
         live_network = get_network(
-            self._clients,
-            ctx,
+            self._clients.client("networks", ctx),
             project_id=self.config.project_id,
             network_url=network.network_url,
         )
@@ -266,8 +288,7 @@ class GCEPlatform(PublicAddressPlatform):
         get_zone(self._clients, ctx, self.config.project_id, self.config.zone)
         network = resolve_network(self._clients, ctx, self.config)
         live_network = get_network(
-            self._clients,
-            ctx,
+            self._clients.client("networks", ctx),
             project_id=self.config.project_id,
             network_url=network.network_url,
         )
@@ -345,16 +366,23 @@ class GCEPlatform(PublicAddressPlatform):
         ordinary_failure: Exception | None = None
         operator_interrupt: KeyboardInterrupt | None = None
 
+        def cleanup_target() -> CleanupTarget:
+            """What the attempts know when cleanup starts."""
+            return CleanupTarget(
+                coordinates,
+                instance_attempt.ownership,
+                allow_attempt.ownership,
+                deny_attempt.ownership,
+                UnresolvedInserts.from_attempts(instance=instance_attempt, allow=allow_attempt, deny=deny_attempt),
+            )
+
         def rollback() -> RollbackReport:
             return rollback_partial_create(
+                cleanup_target(),
                 instances=instances,
                 firewalls=firewalls,
-                coordinates=coordinates,
                 expected_allow=allow,
                 expected_deny=deny,
-                allow_ownership=allow_attempt.ownership,
-                deny_ownership=deny_attempt.ownership,
-                instance_ownership=instance_attempt.ownership,
                 instance_possible=instance_possible,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
             )
@@ -412,6 +440,7 @@ class GCEPlatform(PublicAddressPlatform):
                 node=request.hostname,
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
+                log=request.progress.record,
             )
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
@@ -420,24 +449,10 @@ class GCEPlatform(PublicAddressPlatform):
             ordinary_failure = primary
 
         if operator_interrupt is not None:
-            rollback_after_interrupt(
-                operator_interrupt,
-                rollback,
-                coordinates,
-                instance_ownership=instance_attempt.ownership,
-                allow_ownership=allow_attempt.ownership,
-                deny_ownership=deny_attempt.ownership,
-            )
+            rollback_after_interrupt(operator_interrupt, rollback, cleanup_target())
         if ordinary_failure is not None:
             request.progress.log_error("GCE create failed; attempting provider-ID-owned rollback")
-            rollback_then_raise(
-                ordinary_failure,
-                rollback,
-                coordinates,
-                instance_ownership=instance_attempt.ownership,
-                allow_ownership=allow_attempt.ownership,
-                deny_ownership=deny_attempt.ownership,
-            )
+            rollback_then_raise(ordinary_failure, rollback, cleanup_target())
 
         if tailnet_address is None:  # pragma: no cover - both failure arms re-raise
             raise AssertionError("successful GCE create has no tailnet address")
@@ -522,25 +537,17 @@ class GCEPlatform(PublicAddressPlatform):
             network_url=identity.network_url,
             network_tag=identity.network_tag,
         )
+        target = identity.cleanup_target
         report = rollback_partial_create(
+            target,
             instances=instances,
             firewalls=firewalls,
-            coordinates=identity.coordinates,
             expected_allow=expected_allow,
             expected_deny=expected_deny,
-            allow_ownership=FirewallOwnership(identity.allow_rule, identity.allow_rule_id),
-            deny_ownership=FirewallOwnership(identity.deny_rule, identity.deny_rule_id),
-            instance_ownership=InstanceOwnership(identity.instance_id),
             instance_possible=True,
             timeout=_OPERATION_TIMEOUT_SECONDS,
         )
-        guidance = manual_cleanup_guidance(
-            identity.coordinates,
-            report,
-            instance_ownership=InstanceOwnership(identity.instance_id),
-            allow_ownership=FirewallOwnership(identity.allow_rule, identity.allow_rule_id),
-            deny_ownership=FirewallOwnership(identity.deny_rule, identity.deny_rule_id),
-        )
+        guidance = manual_cleanup_guidance(target, report)
         if report.instance is not InstanceState.ABSENT:
             raise GCEOperationError(
                 f"GCE instance '{identity.instance_name}' was not proven absent; its database row is retained",
@@ -579,7 +586,7 @@ class GCEPlatform(PublicAddressPlatform):
         only covers the shared base's check.
         """
         identity = _VMIdentity.from_row(vm)
-        instances = self._clients.client("instances", ctx)
+        instances = self._route_client("instances", ctx)
         current = self._owned_instance(instances, identity)
         if current is None:
             raise StateError(
@@ -595,22 +602,31 @@ class GCEPlatform(PublicAddressPlatform):
 
     @contextlib.contextmanager
     def _transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
+        """Open this call's own SSH allow, removed with interrupts held on every exit.
+
+        Each provider call that opens it goes through :meth:`_route_client`,
+        and each operation wait is bounded by ``wait_for_extended_operation``;
+        the removal shares one bound across its calls (see
+        ``delete_matching_firewall``). An insert whose outcome stayed unknown
+        (``FirewallInsertAttempt.outcome_unknown``) may still land after a
+        removal that found nothing, so that removal warns naming the rule's
+        identity and its sources, while interrupts are still held.
+        """
         identity = _VMIdentity.from_row(vm)
-        instances = self._clients.client("instances", ctx)
+        instances = self._route_client("instances", ctx)
         current = self._owned_instance(instances, identity)
         if current is None:
             raise StateError(f"GCE instance '{identity.instance_name}' no longer exists")
         verify_instance_network(current, network_url=identity.network_url, subnet_url=identity.subnet_url)
 
         live_network = get_network(
-            self._clients,
-            ctx,
+            self._route_client("networks", ctx),
             project_id=identity.project_id,
             network_url=identity.network_url,
         )
         require_classic_first(live_network, project_id=identity.project_id)
         prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
-        firewalls = self._clients.client("firewalls", ctx)
+        firewalls = self._route_client("firewalls", ctx)
         route_name = transient_route_name(vm.hostname)
         require_firewall_name_available(firewalls, project_id=identity.project_id, rule_name=route_name)
         route = build_ssh_allow_firewall(
@@ -638,12 +654,37 @@ class GCEPlatform(PublicAddressPlatform):
                     ownership=attempt.ownership,
                     timeout=_OPERATION_TIMEOUT_SECONDS,
                 )
-            if result.state is not FirewallState.ABSENT:
-                output.warn(
+                not_absent = (
                     f"GCE transient SSH rule '{route_name}' was not proven absent in project "
                     f"'{identity.project_id}'; inspect provider ID "
                     f"'{result.observed_resource_id or 'unknown'}' and do not delete a mismatched rule by name"
                 )
+                may_appear = attempt.outcome_unknown and not result.seen_owned
+                for warning in resource_guidance(
+                    subject=(
+                        f"GCE transient SSH rule '{route_name}' (project '{identity.project_id}', open to "
+                        f"source(s) {', '.join(prefixes)})"
+                    ),
+                    resource=GcloudResource("firewall rule", identity.project_id, route_name),
+                    state=None if result.state is FirewallState.ABSENT else not_absent,
+                    uncertain=result.state is FirewallState.INDETERMINATE,
+                    observed_id=result.observed_resource_id,
+                    insert=UnresolvedInsert(attempt.operation_name) if may_appear else None,
+                    expected_id=attempt.ownership.resource_id if attempt.ownership is not None else None,
+                ):
+                    output.warn(warning)
+
+    def _route_client(self, kind: GcpClientKind, ctx: RunContext) -> Any:
+        """The ``kind`` client, each call through it bounded by ``_OPERATION_TIMEOUT_SECONDS`` on the wall clock.
+
+        The route's calls come before the script's deadline starts, and its
+        removal holds interrupts, so each needs a bound of its own (see
+        :mod:`~agentworks.capabilities.vm_platform.wall_bound`). A timed-out
+        call raises ``ConnectivityError``, as an unreachable one does, so the
+        insert's same-``requestId`` retry treats an insert given up on as one
+        whose answer was lost.
+        """
+        return BoundedClient(self._clients.client(kind, ctx), _OPERATION_TIMEOUT_SECONDS)
 
     def _owned_instance(
         self,

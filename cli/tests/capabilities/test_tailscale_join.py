@@ -24,6 +24,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
 )
 from agentworks.errors import ConnectivityError, ProvisioningError
 from agentworks.execution.errors import TrustMismatch
+from agentworks.execution.requests import Script
 from agentworks.execution.root_script import ChannelUnreachable, RawRun
 from agentworks.execution.trust import TrustBinding, TrustMode
 from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payload
@@ -31,6 +32,7 @@ from tests._root_channel_fakes import ADDRESS, Answer, FakeGuest, answer_by_payl
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.execution.requests import RunRequest
     from tests.conftest import CapturedOutput
 
 KEY = "tskey-auth-join-'swordfish"
@@ -133,14 +135,14 @@ def test_anything_but_one_assignable_ipv4_address_is_refused(value: object) -> N
 def test_the_first_read_that_parses_is_the_address() -> None:
     guest = FakeGuest()
 
-    assert read_tailnet_address(guest.run_as_root, node=NODE) == ADDRESS
+    assert read_tailnet_address(guest.run_as_root, node=NODE, log=None) == ADDRESS
     assert guest.payloads == [READ]
 
 
 def test_the_last_read_can_still_succeed() -> None:
     guest = reads_failing(Answer(status=1), succeed_on=ADDRESS_READS)
 
-    assert read_tailnet_address(guest.run_as_root, node=NODE) == ADDRESS
+    assert read_tailnet_address(guest.run_as_root, node=NODE, log=None) == ADDRESS
     assert guest.payloads == [READ] * ADDRESS_READS
 
 
@@ -158,7 +160,7 @@ def test_each_failed_read_is_retried_then_exhaustion_names_the_node(failure: Ans
     guest = reads_failing(failure)
 
     with pytest.raises(ConnectivityError, match=NODE):
-        read_tailnet_address(guest.run_as_root, node=NODE)
+        read_tailnet_address(guest.run_as_root, node=NODE, log=None)
 
     assert guest.payloads == [READ] * ADDRESS_READS  # never a logout
 
@@ -167,7 +169,7 @@ def test_a_host_key_mismatch_propagates_from_the_first_read() -> None:
     guest = reads_failing(Answer(raises=TrustMismatch("vm1")))
 
     with pytest.raises(TrustMismatch):
-        read_tailnet_address(guest.run_as_root, node=NODE)
+        read_tailnet_address(guest.run_as_root, node=NODE, log=None)
 
     assert guest.payloads == [READ]
 
@@ -178,7 +180,7 @@ def test_a_host_key_mismatch_propagates_from_the_first_read() -> None:
 def test_a_settle_that_reads_the_address_never_logs_out() -> None:
     guest = reads_failing(Answer(status=1), succeed_on=2)
 
-    assert settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT) == ADDRESS
+    assert settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT, log=None) == ADDRESS
     assert guest.count(LOGOUT) == 0
 
 
@@ -186,7 +188,7 @@ def test_exhaustion_logs_out_once_and_gives_the_rerun_hint() -> None:
     guest = reads_failing(Answer(status=1))
 
     with pytest.raises(ConnectivityError) as caught:
-        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT, log=None)
 
     assert guest.payloads == [READ] * ADDRESS_READS + [LOGOUT]
     assert caught.value.hint == HINT
@@ -209,7 +211,7 @@ def test_a_logout_that_ran_and_failed_names_the_node_for_the_admin_console() -> 
     guest = reads_failing(Answer(status=1), logout=Answer(status=1))
 
     with pytest.raises(ConnectivityError) as caught:
-        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT, log=None)
 
     assert guest.count(LOGOUT) == 1
     assert caught.value.hint != HINT
@@ -224,7 +226,7 @@ def test_a_logout_that_did_not_run_to_an_outcome_does_not_advise_removing_the_no
     guest = reads_failing(Answer(status=1), logout=logout)
 
     with pytest.raises(ConnectivityError) as caught:
-        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT, log=None)
 
     assert guest.count(LOGOUT) == 1
     assert caught.value.hint == HINT
@@ -235,7 +237,7 @@ def test_an_unreachable_channel_ends_the_reads_at_once() -> None:
     guest = reads_failing(Answer(raises=ChannelUnreachable("VM 'vm1' did not answer")))
 
     with pytest.raises(ChannelUnreachable):
-        read_tailnet_address(guest.run_as_root, node=NODE)
+        read_tailnet_address(guest.run_as_root, node=NODE, log=None)
 
     assert guest.payloads == [READ]
 
@@ -244,7 +246,7 @@ def test_a_settle_over_an_unreachable_channel_neither_logs_out_nor_advises_remov
     guest = reads_failing(Answer(raises=ChannelUnreachable("VM 'vm1' did not answer")))
 
     with pytest.raises(ChannelUnreachable) as caught:
-        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT)
+        settle_tailnet_address(guest.run_as_root, node=NODE, rerun_hint=HINT, log=None)
 
     assert guest.payloads == [READ]
     assert caught.value.hint == HINT
@@ -259,7 +261,7 @@ def test_a_join_whose_channel_never_reached_the_vm_did_not_join() -> None:
     guest = FakeGuest(lambda payload, seen: Answer(raises=unreachable))
 
     with pytest.raises(ProvisioningError) as caught:
-        join_tailscale(guest.run_as_root, KEY, node=NODE)
+        join_tailscale(guest.run_as_root, KEY, node=NODE, log=None)
 
     assert caught.value.__cause__ is unreachable
     assert caught.value.hint == unreachable.hint
@@ -270,7 +272,7 @@ def test_a_join_whose_channel_failed_after_dispatch_may_have_joined() -> None:
     guest = FakeGuest(lambda payload, seen: Answer(raises=ConnectivityError("the connection dropped")))
 
     with pytest.raises(ProvisioningError) as caught:
-        join_tailscale(guest.run_as_root, KEY, node=NODE)
+        join_tailscale(guest.run_as_root, KEY, node=NODE, log=None)
 
     assert NODE in (caught.value.hint or "")
     assert_key_free(caught.value)
@@ -279,7 +281,7 @@ def test_a_join_whose_channel_failed_after_dispatch_may_have_joined() -> None:
 def test_the_key_reaches_only_the_join_script() -> None:
     guest = FakeGuest()
 
-    join_tailscale(guest.run_as_root, KEY, node=NODE)
+    join_tailscale(guest.run_as_root, KEY, node=NODE, log=None)
 
     (script,) = guest.scripts
     assert guest.payloads == [JOIN_FRAGMENT]
@@ -295,7 +297,7 @@ def test_a_failed_join_raises_once_without_the_key(answer: Answer) -> None:
     guest = FakeGuest(lambda payload, seen: answer)
 
     with pytest.raises(ProvisioningError) as caught:
-        join_tailscale(guest.run_as_root, KEY, node=NODE)
+        join_tailscale(guest.run_as_root, KEY, node=NODE, log=None)
 
     assert guest.payloads == [JOIN_FRAGMENT]
     assert NODE in str(caught.value)
@@ -308,7 +310,7 @@ def test_a_refused_join_quotes_tailscale_s_reason_with_the_key_redacted() -> Non
     guest = FakeGuest(lambda payload, seen: Answer(status=1, stderr=f"\x1b[31m{reason}\n".encode()))
 
     with pytest.raises(ProvisioningError) as caught:
-        join_tailscale(guest.run_as_root, KEY, node=NODE)
+        join_tailscale(guest.run_as_root, KEY, node=NODE, log=None)
 
     message = str(caught.value)
     assert "backend error: invalid key: unable to validate API key [REDACTED]" in message
@@ -316,17 +318,43 @@ def test_a_refused_join_quotes_tailscale_s_reason_with_the_key_redacted() -> Non
     assert_key_free(caught.value)
 
 
+def test_a_logged_join_records_tailscale_s_reason_with_the_key_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The join redacts its own key, so the record holds none even in a log that registered no secret."""
+    from agentworks.execution.oplog import OperationLogFile
+
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    log = OperationLogFile("vm1", "vm-create")
+    reason = f"backend error: invalid key: unable to validate API key {KEY}"
+    guest = FakeGuest(lambda payload, seen: Answer(status=1, stderr=f"{reason}\n".encode()))
+
+    with pytest.raises(ProvisioningError):
+        join_tailscale(guest.run_as_root, KEY, node=NODE, log=log.record)
+
+    text = log.path.read_text()
+    assert "backend error: invalid key: unable to validate API key [REDACTED]" in text
+    assert KEY not in text
+    assert shlex.quote(KEY) not in text
+
+
 # -- The cloud bootstrap ---------------------------------------------------------------------
 
 
 def test_the_bootstrap_waits_joins_once_and_settles(cloud: Callable[[FakeGuest], PublicSSH]) -> None:
     guest = FakeGuest()
+    logged: list[RunRequest] = []
 
-    address = complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
+    address = complete_cloud_bootstrap(
+        cloud(guest), KEY, node=NODE, readiness_command="ready", log=lambda request, result: logged.append(request)
+    )
 
     assert address == ADDRESS
     assert guest.payloads == ["true", "ready", JOIN_FRAGMENT, READ]
     assert [holds_key(script) for script in guest.scripts] == [False, False, True, False]
+    # Every root script after the SSH wait is recorded in the caller's log.
+    assert [request.source for request in logged if isinstance(request, Script)] == ["ready", JOIN_FRAGMENT, READ]
+    assert len(logged) == 3
 
 
 def test_the_readiness_wait_retries_a_refused_key_and_any_probe_that_does_not_complete(
@@ -341,7 +369,7 @@ def test_the_readiness_wait_retries_a_refused_key_and_any_probe_that_does_not_co
 
     guest = FakeGuest(respond)
 
-    complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+    complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, log=None)
 
     assert guest.count("true") == len(refusals) + 1
     assert guest.joins == 1
@@ -354,7 +382,7 @@ def test_readiness_stops_at_its_bound_without_sending_the_key_and_keeps_the_refu
     guest = FakeGuest(lambda payload, seen: Answer(raises=refused))
 
     with pytest.raises(ProvisioningError) as caught:
-        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, log=None)
 
     assert set(guest.payloads) == {"true"}
     assert clock.now >= READINESS_WAIT_SECONDS
@@ -368,7 +396,7 @@ def test_a_readiness_command_whose_channel_fails_keeps_the_channel_hint(
     guest = FakeGuest(lambda payload, seen: Answer(raises=dropped) if payload == "ready" else Answer())
 
     with pytest.raises(ProvisioningError) as caught:
-        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready", log=None)
 
     assert caught.value.hint == dropped.hint
     assert guest.joins == 0
@@ -388,7 +416,7 @@ def test_an_admin_without_passwordless_sudo_fails_the_create_with_create_s_own_g
     monkeypatch.setattr(target, "run_as_root", refused)
 
     with pytest.raises(ProvisioningError) as caught:
-        complete_cloud_bootstrap(target, KEY, node=NODE)
+        complete_cloud_bootstrap(target, KEY, node=NODE, log=None)
 
     assert len(probes) == 1
     assert caught.value.__cause__ is None
@@ -399,7 +427,7 @@ def test_a_host_key_mismatch_ends_readiness_at_once(cloud: Callable[[FakeGuest],
     guest = FakeGuest(lambda payload, seen: Answer(raises=TrustMismatch("vm1")))
 
     with pytest.raises(TrustMismatch):
-        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, log=None)
 
     assert guest.payloads == ["true"]
 
@@ -411,7 +439,7 @@ def test_a_failed_readiness_command_raises_before_the_join(
     guest = FakeGuest(lambda payload, seen: answer if payload == "ready" else Answer())
 
     with pytest.raises(ProvisioningError):
-        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready", log=None)
 
     assert guest.payloads == ["true", "ready"]
 
@@ -423,7 +451,7 @@ def test_a_failed_cloud_init_s_reason_reaches_the_error(cloud: Callable[[FakeGue
     guest = FakeGuest(answer_by_payload(answers={DEFAULT_READINESS_COMMAND: failed}))
 
     with pytest.raises(ProvisioningError) as caught:
-        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, log=None)
 
     assert "(scripts_user) failed" in str(caught.value)
     assert JOIN_FRAGMENT not in guest.payloads
@@ -436,7 +464,7 @@ def test_cloud_init_s_recoverable_status_warns_and_the_bootstrap_carries_on(
     recoverable = Answer(status=CLOUD_INIT_RECOVERABLE_STATUS)
     guest = FakeGuest(answer_by_payload(answers={DEFAULT_READINESS_COMMAND: recoverable}))
 
-    address = complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+    address = complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, log=None)
 
     assert address == ADDRESS
     assert guest.payloads == ["true", DEFAULT_READINESS_COMMAND, JOIN_FRAGMENT, READ]
@@ -450,7 +478,7 @@ def test_another_readiness_command_s_status_2_is_a_failure(cloud: Callable[[Fake
     )
 
     with pytest.raises(ProvisioningError):
-        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready")
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, readiness_command="ready", log=None)
 
     assert guest.payloads == ["true", "ready"]
 
@@ -461,7 +489,7 @@ def test_exhausted_reads_after_the_join_log_out_without_joining_again(
     guest = reads_failing(Answer(status=None))
 
     with pytest.raises(ConnectivityError) as caught:
-        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE)
+        complete_cloud_bootstrap(cloud(guest), KEY, node=NODE, log=None)
 
     assert guest.joins == 1
     assert guest.count(LOGOUT) == 1

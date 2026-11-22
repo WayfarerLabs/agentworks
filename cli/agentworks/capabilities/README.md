@@ -221,13 +221,15 @@ runtime world the service-layer operation assembles and hands to `preflight`, `r
 shapes converge) ops (how and when the orchestrator assembles and populates it is the orchestration
 layer's concern, see [`../orchestration/README.md`](../orchestration/README.md)). It carries the
 operation's config and operation scope as plain fields, and the power-granting world behind plain
-accessor methods: the execution targets (`ctx.admin_target()` / `ctx.agent_target()`: transports to
-run as those users on a VM) and resolved secrets (`ctx.secret(name)`). Everything is optional, and
-the timing is what populates it: **preflight gets it as of command start** (targets that _already_
-exist, no resolved secrets), **runup gets it as of op start** (current targets, resolved secrets).
-It is the same object minus the secrets, differing only by when it is built. A `vm create` preflight
-is handed a context with no VM target, so it cannot reach the thing the command has not created yet.
-Pre-resolve concerns read `self` (config bound at construct); runup and ops read the context.
+accessor methods: the execution accesses (`ctx.admin_access()` / `ctx.agent_access()`: each a
+`VMAccess` from `agentworks.execution` that runs requests as that user on the VM) and resolved
+secrets (`ctx.secret(name)`). Holding an access connects to nothing; each request on it does.
+Everything is optional, and the timing is what populates it: **preflight gets it as of command
+start** (accesses for users that _already_ exist, no resolved secrets), **runup gets it as of op
+start** (current accesses, resolved secrets). It is the same object minus the secrets, differing
+only by when it is built. A `vm create` preflight is handed a context with no VM access, so it
+cannot reach the thing the command has not created yet. Pre-resolve concerns read `self` (config
+bound at construct); runup and ops read the context.
 
 #### Stage 1: Declare
 

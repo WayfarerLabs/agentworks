@@ -149,7 +149,7 @@ class _PromptContext(AbstractContextManager[SecretSourceClient]):
 class PromptBackend(SecretBackend):
     """Resolve secrets through a caller-authorized terminal prompt."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = PromptSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = PromptMapping
     name: ClassVar[str] = "prompt"

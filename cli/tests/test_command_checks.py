@@ -1,115 +1,153 @@
-"""Shared target-user command checks."""
+"""Read-only probes in the target user's own shell: presence, a command's status, and nothing else leaving the guest."""
 
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.command_checks import check_required_commands
-from agentworks.ssh import SSHError, SSHResult
+from agentworks.command_checks import check_required_commands, run_user_shell_command
+from agentworks.errors import ExternalError
+from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from tests.conftest import requires_posix_shell
+from tests.vm_access_support import Admin, RecordingVMAccess, account_shell, check_result, local_vm_access
 
 if TYPE_CHECKING:
-    from agentworks.transports import Transport
+    from collections.abc import Callable
+
+    from agentworks.execution.access import VMAccess
+    from agentworks.execution.requests import RunRequest, Script
+
+MARKER = "untrusted-output-6d2f"
 
 
-class _LoginShellTarget:
-    def __init__(self, tmp_path: Path, *, startup_status: int = 0) -> None:
-        self.bin_dir = tmp_path / "login-bin"
-        self.bin_dir.mkdir()
-        self.shell = tmp_path / "login-shell"
-        self.shell.write_text(
-            "#!/bin/sh\n"
-            "printf 'untrusted shell stdout\\n'\n"
-            "printf 'untrusted shell stderr\\n' >&2\n"
-            'test "$AGW_TEST_STARTUP_STATUS" -eq 0 || exit "$AGW_TEST_STARTUP_STATUS"\n'
-            'test "$1" = -lic || exit 90\n'
-            'PATH="$AGW_TEST_LOGIN_PATH" exec /bin/sh -c "$2"\n'
-        )
-        self.shell.chmod(0o755)
-        self.results: list[SSHResult] = []
-        self.startup_status = startup_status
+def _account(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str = "") -> tuple[VMAccess, Path, list[Result]]:
+    """A local account whose login startup prints and puts its own ``bin`` on ``PATH``, and the results it returns."""
+    home = tmp_path / "home"
+    bin_dir = tmp_path / "login-bin"
+    home.mkdir()
+    bin_dir.mkdir()
+    (home / ".profile").write_text(
+        f"printf '{MARKER} startup stdout\\n'\nprintf '{MARKER} startup stderr\\n' >&2\n"
+        f'export PATH="{bin_dir}:$PATH"\n{profile}'
+    )
+    results: list[Result] = []
 
-    def run(self, command: str, **kwargs: object) -> SSHResult:
-        assert kwargs["check"] is False
-        assert kwargs["discard_output"] is True
-        result = subprocess.run(
-            ["/bin/sh", "-c", command],
-            check=False,
-            capture_output=True,
-            text=True,
-            env={
-                "PATH": "/usr/bin:/bin",
-                "SHELL": str(self.shell),
-                "AGW_TEST_LOGIN_PATH": str(self.bin_dir),
-                "AGW_TEST_STARTUP_STATUS": str(self.startup_status),
-            },
-        )
-        ssh_result = SSHResult(result.returncode, result.stdout, result.stderr)
-        self.results.append(ssh_result)
-        return ssh_result
+    def log(request: RunRequest, result: Result) -> None:
+        results.append(result)
+
+    access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path), log=log)
+    return access, bin_dir, results
 
 
 @requires_posix_shell
-def test_required_command_uses_target_user_login_environment(tmp_path: Path) -> None:
-    target = _LoginShellTarget(tmp_path)
-    command = target.bin_dir / "login-only-command"
+def test_required_command_uses_the_login_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    access, bin_dir, _ = _account(tmp_path, monkeypatch)
+    command = bin_dir / "login-only-command"
     command.write_text("#!/bin/sh\nexit 0\n")
     command.chmod(0o755)
 
-    assert check_required_commands((command.name,), cast("Transport", target)) == ()
-    assert check_required_commands(("absent-command",), cast("Transport", target)) == ("absent-command",)
-    assert all(not result.stdout and not result.stderr for result in target.results)
-
-
-def test_required_command_check_fails_value_safely_when_indeterminate() -> None:
-    class _IndeterminateTarget:
-        def run(self, *_args: object, **kwargs: object) -> SSHResult:
-            assert kwargs["discard_output"] is True
-            return SSHResult(255, "secret", "hostile")
-
-    target = cast("Transport", _IndeterminateTarget())
-
-    with pytest.raises(SSHError) as exc_info:
-        check_required_commands(("gh",), target)
-
-    assert "secret" not in str(exc_info.value)
-    assert "hostile" not in str(exc_info.value)
+    assert check_required_commands((command.name,), access) == ()
+    assert check_required_commands(("absent-command-agw",), access) == ("absent-command-agw",)
 
 
 @requires_posix_shell
-def test_required_command_does_not_confuse_shell_startup_status_with_absence(tmp_path: Path) -> None:
-    target = cast("Transport", _LoginShellTarget(tmp_path, startup_status=20))
+def test_a_probe_reports_its_commands_status_and_none_of_its_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access, _, results = _account(tmp_path, monkeypatch)
 
-    with pytest.raises(SSHError):
-        check_required_commands(("sh",), target)
+    status = run_user_shell_command(
+        f"echo '{MARKER} command stdout'; echo '{MARKER} command stderr' >&2; exit 21", access
+    )
+
+    assert status == 21
+    assert all(f"{MARKER} command".encode() not in result.stdout + result.stderr for result in results)
+    assert results and all(not result.stderr for result in results)
 
 
-def test_required_command_runs_in_real_zsh(tmp_path: Path) -> None:
+@requires_posix_shell
+def test_a_startup_file_that_exits_first_is_indeterminate_not_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access, _, _ = _account(tmp_path, monkeypatch, profile="exit 0\n")
+
+    with pytest.raises(ExternalError):
+        check_required_commands(("sh",), access)
+
+
+@requires_posix_shell
+def test_startup_output_cannot_forge_a_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    access, _, _ = _account(tmp_path, monkeypatch, profile="printf 'agentworks-command-status:0\\n'\n")
+
+    assert run_user_shell_command("exit 20", access) == 20
+
+
+@requires_posix_shell
+def test_startup_output_without_a_final_newline_leaves_the_status_readable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access, _, _ = _account(tmp_path, monkeypatch, profile="printf hello\n")
+
+    assert run_user_shell_command("exit 3", access) == 3
+
+
+@pytest.mark.parametrize("shell", ["bash", "zsh", "dash"])
+def test_a_startup_exit_trap_cannot_forge_a_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str) -> None:
+    path = shutil.which(shell)
+    if path is None:
+        pytest.skip(f"{shell} is not installed")
+    # bash and dash read .profile as login shells; zsh reads .zshrc as an interactive one.
+    for startup in (".profile", ".zshrc"):
+        (tmp_path / startup).write_text("trap 'echo agentworks-command-status:0' EXIT\n")
+    access = local_vm_access(monkeypatch, home=tmp_path, shell=Path(path))
+
+    assert run_user_shell_command("exit 7", access) == 7
+
+
+def test_required_command_sees_interactive_startup_in_real_zsh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     zsh = shutil.which("zsh")
     if zsh is None:
         pytest.skip("zsh is not installed")
+    bin_dir = tmp_path / "interactive-bin"
+    bin_dir.mkdir()
+    command = bin_dir / "interactive-only-command"
+    command.write_text("#!/bin/sh\nexit 0\n")
+    command.chmod(0o755)
+    # Only an interactive zsh reads .zshrc.
+    (tmp_path / ".zshrc").write_text(f'export PATH="{bin_dir}:$PATH"\n')
+    access = local_vm_access(monkeypatch, home=tmp_path, shell=Path(zsh))
 
-    class _ZshTarget:
-        def run(self, command: str, **kwargs: object) -> SSHResult:
-            assert kwargs["check"] is False
-            assert kwargs["discard_output"] is True
-            result = subprocess.run(
-                ["/bin/sh", "-c", command],
-                check=False,
-                capture_output=True,
-                text=True,
-                env={
-                    "HOME": str(tmp_path),
-                    "PATH": "/usr/bin:/bin",
-                    "SHELL": zsh,
-                    "ZDOTDIR": str(tmp_path),
-                },
-            )
-            return SSHResult(result.returncode, result.stdout, result.stderr)
+    assert check_required_commands((command.name, "sh"), access) == ()
+    assert check_required_commands(("absent-command-agw",), access) == ("absent-command-agw",)
 
-    assert check_required_commands(("sh",), cast("Transport", _ZshTarget())) == ()
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        lambda request: Result(Completed(0), b"secret-stdout\n", b""),
+        lambda request: Result(Completed(0), b"agentworks-command-status:0\n", b""),
+        lambda request: check_result(request, 256),
+        lambda request: check_result(request, 7),
+    ],
+    ids=["no-status", "status-without-the-nonce", "out-of-range", "neither-present-nor-absent"],
+)
+def test_an_indeterminate_check_fails_without_quoting_what_it_read(outcome: Callable[[Script], Result]) -> None:
+    access = RecordingVMAccess([], Admin())
+    access.answer = lambda call: outcome(call.request)
+
+    with pytest.raises(ExternalError) as raised:
+        check_required_commands(("gh",), access)
+
+    assert "secret" not in str(raised.value)
+
+
+def test_a_check_that_may_not_have_run_raises_its_execution_error() -> None:
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Unknown(UnknownReason.CONNECTION))
+
+    with pytest.raises(ExecutionIncomplete):
+        check_required_commands(("gh",), access)

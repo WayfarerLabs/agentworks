@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING
+
+from agentworks.execution.requests import Command
+
+if TYPE_CHECKING:
+    from agentworks.execution.files import Files
 
 
-class _CommandTarget(Protocol):
-    def run(self, command: str) -> object: ...
+def ensure_safe_directory_wildcard(files: Files) -> None:
+    """Reconcile the global safe-directory wildcard of ``files``' identity to one exact value.
 
-
-def ensure_safe_directory_wildcard(target: _CommandTarget) -> None:
-    """Reconcile the global safe-directory wildcard to one exact value."""
-    target.run("git config --global --fixed-value --replace-all safe.directory '*' '*'")
+    Every ``safe.directory`` value that is exactly ``*`` is replaced by one,
+    and any other value is kept.
+    """
+    argv = ("git", "config", "--global", "--fixed-value", "--replace-all", "safe.directory", "*", "*")
+    files.access.run(Command(argv, deadline=files.deadline), check=True)

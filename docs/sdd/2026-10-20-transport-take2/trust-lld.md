@@ -230,32 +230,107 @@ through the platform.
 
 ## Managed SSH entries
 
-`_format_entry` (`ssh_config.py:258`) takes an optional trust block. Its callers pass the VM name,
-so the admin and agent entries for a VM with a store record get these lines, indented like the
-existing ones:
+The admin and agent entries for a VM (`ssh_config._vm_entries`) carry these lines, indented like the
+existing ones (`ssh_config._verification_lines`):
 
 ```text
     HostKeyAlias agentworks-vm-<name>
-    UserKnownHostsFile <store file>
+    GlobalKnownHostsFile <store file>
+    UserKnownHostsFile /dev/null
     StrictHostKeyChecking yes
-    GlobalKnownHostsFile /dev/null
-    CheckHostIP no
     UpdateHostKeys no
     HashKnownHosts no
+    CheckHostIP no
 ```
 
-The store path is written bare, and quoted only when it holds whitespace or an apostrophe
-(`trust.option_value`).
+(`NUL` replaces `/dev/null` on Windows.) The store is the entry's global known-hosts file, which ssh
+reads and never writes: `accept-new` and `StrictHostKeyChecking no` write only to the first user
+file, which is the null device, and ssh disables `UpdateHostKeys` for a key it found in a global
+file (`-vv` logs `host key found in GlobalKnownHostsFile; disabling UpdateHostkeys`). So no host-key
+checking or update setting of the operator's can write into the store, even one read before the
+entry (an earlier `Host *`, which the legacy layout's trailing managed section always follows, or
+`-o` from a tool such as Ansible), and the store can neither gain a first-use key, which
+`trust.stored_keys` would read as a record that import can never replace, nor a union of verified
+keys, which import deliberately refuses (`vms/manager/host_keys.py:139-142`). A known-hosts file
+setting of the operator's read first is another matter: it takes precedence over the entry's. A
+read-first `UserKnownHostsFile` with `accept-new` writes a record-less VM's key into the operator's
+own file, and later strict connections through the entry trust it; a read-first
+`GlobalKnownHostsFile` makes ssh skip the store, so a recorded VM fails closed. Neither touches the
+store, so R8's store property holds; the operator guides say so. The other pins match `ssh_options`
+(`trust.pinned_options`). The execution core's own `-o` arguments are unchanged: they pin
+`GlobalKnownHostsFile` to the null device and name the store, or create's provisioning file, as the
+user file, and `-o` takes precedence over any configuration. Every change to a record is followed by
+`sync_ssh_config`: import, enrollment's post-create sync (`vms/initializer/driver.py:141-143`, right
+after Phase A, reached even when Phase B fails), delete (`vms/manager/power.py:323`), rekey
+(`power.py:485`) and recovery (`vms/manager/recover.py:142`).
 
-(`NUL` replaces `/dev/null` on Windows.) An unreadable record for one VM warns and omits that VM's
-trust lines; an unsafe store directory does the same for every VM. Neither aborts the rebuild.
+Slices 1 to 7 wrote the block only for a VM with a record, so the operator's own `ssh` kept working
+against their `known_hosts` until they imported. Slice 8 makes it unconditional, as D9 decided, so
+R8's end state does not depend on every operator importing (`ssh_config._vm_entries`):
 
-The pins match `ssh_options`: the operator's own `ssh` consults only the store for the alias, never
-writes to it, and never hashes it. Entries for a VM without a record stay unchanged until slice 8
-makes the block unconditional, as D9 decided: the operator's own `ssh` keeps working until they
-import. Every change to a record is followed by `sync_ssh_config`: import, enrollment's existing
-post-create sync (`vms/initializer/driver.py:235-237`, right after Phase A, reached even when Phase
-B fails), delete (`power.py:340`), and, in slice 4, recovery.
+- **No record.** The entries are the same lines. The store holds no key for the alias, so the
+  operator's own `ssh` refuses the VM
+  (`No ED25519 host key is known for agentworks-vm-<name> and you have requested strict checking`,
+  then `Host key verification failed`, with no prompt) rather than reading `known_hosts` or
+  accepting a key on first use. Each such entry carries one comment naming
+  `agw vm import-host-keys <vm>` and `agw vm recover <vm>`; a record that cannot be read gets no
+  comment, since `ssh` reports the read failure itself. A host-key checking setting of the
+  operator's own can let `ssh` connect without verifying, and what it accepts goes to the null
+  device unless a known-hosts file setting of theirs is read first (above). The upgrade guide
+  carries the breaking-change note.
+- **Evidence.** Against OpenSSH 9.2p1, with a private sshd offering ed25519, ECDSA and RSA keys, a
+  key accepted for login, and only the RSA key recorded under the alias in a store directory whose
+  name holds a space:
+  - a recorded VM verified (`Found key in <store>:1`, the alias line, then the command ran);
+  - a record-less VM, whose store file is absent or empty, was refused as above;
+  - `-o StrictHostKeyChecking=accept-new` with `-o HostKeyAlgorithms=ssh-ed25519` failed with
+    `Host key for agentworks-vm-<name> has changed`; `-o UpdateHostKeys=yes` after a successful
+    login left the store alone; a `Host *` block carrying both `StrictHostKeyChecking accept-new`
+    and `UpdateHostKeys yes`, read before the entry, did the same for the recorded VM and, for the
+    record-less one, logged in after `Permanently added ... to the list of known hosts`, which went
+    to the null device;
+  - afterwards the recorded store file was byte-identical and the record-less one still absent or
+    empty;
+  - with the store as `UserKnownHostsFile` instead, the layout this replaces, the same
+    `-o UpdateHostKeys=yes` login grew the store from the one RSA line to RSA, ed25519 and ECDSA.
+
+  `GlobalKnownHostsFile` takes the same value `_entry_value` writes: ssh parses its quoted arguments
+  as it does `UserKnownHostsFile`'s (the run above used a quoted path with a space). It gets no `%`
+  or `${}` expansion, which `literal_path` already refuses. The two Windows clients do not read
+  every value alike: the ssh shipped with Git for Windows rejects a quoted value with no whitespace
+  (`invalid quotes`), so `option_value` quotes only a value ssh would split or unquote, while the
+  installed Win32-OpenSSH client may accept one
+  (`test_the_installed_client_reads_the_store_path_as_written` reads a quoted `o'brien` store path
+  through it). So a value with an apostrophe and no whitespace may have a form native ssh reads, and
+  has none Git for Windows' ssh reads. The entries cannot know which client reads them, and
+  `_GIT_FOR_WINDOWS_MAY_READ` is simply `win32`, so on Windows such a value is refused for both: a
+  native-ssh user under such a profile loses the managed entries to protect Git Bash's ssh.
+
+- **Persisted values are checked.** The tailnet address and the admin and agent account names each
+  become a token of a line ssh parses, so they must pass the execution core's own rule for the same
+  rows (`ssh_process.Destination`), and an agent's name, which becomes its alias, must be a plain
+  token. A value that fails leaves that VM's entries out with a warning.
+- **A store path that cannot be written** (`literal_path` refuses it, or the Windows apostrophe rule
+  below) leaves out every VM's entries, with one warning, rather than writing entries that would
+  trust whatever answers. `_host_entries` checks `trust.STORE_DIR` once, beside the key: a VM name
+  adds no character either rule refuses (`trust._SAFE_NAME`), so every store file is refused exactly
+  when the directory is. A key path that cannot be written still only drops `IdentityFile`, with a
+  warning, since the operator's own `ssh` then offers its default keys and trust is unaffected.
+- **Paths are written absolute**, as Agentworks itself uses them (`ssh_config._entry_value`): the
+  configured key path, not its symbolic link's target, exactly what the execution core passes, and
+  the store path as `trust.store_file` gives it. Never `~`-relative, because ssh expands `~` from
+  the account's home in the password database, which need not be the `$HOME` Agentworks reads, so
+  the entries and the execution core always name the same files.
+- **An apostrophe and no whitespace** is refused on Windows before it reaches an entry, with a
+  message naming the character and the path and a hint to rename it. When the apostrophe is in the
+  home directory, the message names that directory in full, since `~` would hide the apostrophe, and
+  gives no rename hint. The `ssh` shipped with Git for Windows may read the entries there and
+  rejects both the quoted and the bare form of such a value; the execution core never runs that
+  client, so `option_value` still double-quotes the value for the `-o` arguments. On Linux and macOS
+  every client reads the quoted form, so nothing is refused there. The store directory is under the
+  home directory (`CONFIG_DIR`), so a Windows profile named with an apostrophe and no space
+  (`C:/Users/O'Brien`) gets no managed entries at all, and a key under it drops `IdentityFile`: two
+  warnings per sync, whatever the VM count.
 
 ## Errors
 
@@ -304,8 +379,13 @@ Each test guards behavior, per the development principles and the no-prose-polic
 
 - **Lifecycle:** create begins enrollment after the row is realized; delete removes the record
   whenever it removes the row.
-- **Managed entries:** the trust block appears exactly when a record exists, the installed client
-  resolves it against the store, and one bad record never aborts the rebuild.
+- **Managed entries:** every entry carries the trust block, record or not, naming the store exactly
+  when the VM has a record and the null device with the missing-record comment otherwise; the
+  installed client resolves both, and a preceding `Host *` with `accept-new` still leaves the
+  record-less entry's known-hosts file the null device; an unreadable record keeps the block; an
+  unwritable store path leaves every VM's entries out with one warning; on Windows an apostrophe
+  path without whitespace is refused, a key under a profile named that way dropping only
+  `IdentityFile` and a store under it leaving the entries out (`tests/test_ssh_config.py`).
 - **ENROLL only from create** holds by construction: `enrollment_access` is a distinct factory whose
   only caller is Phase A (`vms/initializer/phase_a.py`), reached only from create, and every other
   factory binds `VM`. The enrollment tests cover both; nothing pins the call graph.

@@ -873,7 +873,8 @@ def test_ordinary_command_migrates_before_publishing_live_resources(
     from agentworks.cli import app
 
     path = tmp_path / "state.db"
-    build_schema(path, LATEST_VERSION - 1)
+    # v38 is the last schema this witness row fits; every later migration then runs.
+    build_schema(path, 38)
     connection = sqlite3.connect(path)
     connection.execute(
         "INSERT INTO vms (name, site, hostname, template) VALUES (?, ?, ?, ?)",

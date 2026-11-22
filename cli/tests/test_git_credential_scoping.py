@@ -40,7 +40,10 @@ from agentworks.capabilities.git_credential.github import (
     GitHubCredentialProvider,
     GitHubSecretSource,
 )
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ExternalError
+from agentworks.execution.errors import ExecutionIncomplete
+from agentworks.execution.requests import Bytes, DiscardOutput, NoInput, Script, Shell
+from agentworks.execution.results import Completed, Result, Unknown, UnknownReason
 from agentworks.git_credentials.reconcile import (
     _RECONCILE_SCRIPT,
     _state_archive,
@@ -57,7 +60,7 @@ from agentworks.plugins.azure.azdo import (
     AzDOSecretSource,
     AzureCliSource,
 )
-from agentworks.ssh import SSHError, SSHResult
+from tests.vm_access_support import Admin, Agent, RecordingVMAccess
 
 
 def _ctx(values: dict[str, str], allowed: tuple[str, ...]) -> RunContext:
@@ -83,16 +86,19 @@ def _wait_until(condition: Callable[[], bool]) -> None:
 
 
 def _install(home: Path, state: UserCredentialState) -> subprocess.CompletedProcess[str]:
+    """Run the reconcile script under bash on ``home`` with the gzip archive on stdin, as the request sends it."""
     desired = "present" if state.has_credentials else "empty"
-    payload = _state_archive(state) if state.has_credentials else ""
+    payload = _state_archive(state) if state.has_credentials else b""
     env = os.environ | {"HOME": str(home)}
-    return subprocess.run(
+    completed = subprocess.run(
         ["bash", "-c", _RECONCILE_SCRIPT.replace("@DESIRED@", desired)],
         input=payload,
-        text=True,
         env=env,
         capture_output=True,
         check=False,
+    )
+    return subprocess.CompletedProcess(
+        completed.args, completed.returncode, completed.stdout.decode(), completed.stderr.decode()
     )
 
 
@@ -537,7 +543,6 @@ def test_reconciliation_failure_after_disable_is_unreachable_and_retry_converges
     failed = subprocess.run(
         ["bash", "-c", failed_script.replace("@DESIRED@", "present")],
         input=_state_archive(new),
-        text=True,
         env=os.environ | {"HOME": str(tmp_path)},
         capture_output=True,
         check=False,
@@ -734,7 +739,6 @@ def test_helper_and_reconciler_share_repaired_lock_identity(tmp_path: Path) -> N
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
         env=os.environ | {"HOME": str(tmp_path)},
     )
     assert reconcile.stdin is not None
@@ -785,7 +789,6 @@ def test_concurrent_reconcilers_share_repaired_lock_identity(tmp_path: Path) -> 
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
         env=os.environ | {"HOME": str(tmp_path)},
     )
     assert first.stdin is not None
@@ -795,7 +798,6 @@ def test_concurrent_reconcilers_share_repaired_lock_identity(tmp_path: Path) -> 
     second = subprocess.run(
         ["bash", "-c", instrument(_RECONCILE_SCRIPT, delay=False).replace("@DESIRED@", "present")],
         input=_state_archive(second_state),
-        text=True,
         env=os.environ | {"HOME": str(tmp_path)},
         capture_output=True,
         check=False,
@@ -1141,39 +1143,56 @@ def test_reconciliation_preserves_unwitnessed_git_credentials_path(
     assert stat.S_IMODE(content.stat().st_mode) == 0o640
 
 
+def _material_state() -> UserCredentialState:
+    return build_user_credential_state(
+        [("one", (HttpsCredentialScope("example.com"),), StoredCredential("user", "reflected-secret"))]
+    )
+
+
+def test_reconcile_sends_the_archive_as_bytes_under_bash_and_discards_both_streams() -> None:
+    access = RecordingVMAccess([], Agent("worker", "agt-worker"))
+    state = _material_state()
+
+    reconcile_user_git_credentials(access, state)
+
+    (call,) = access.calls
+    request = call.request
+    assert isinstance(request, Script) and request.shell is Shell.BASH
+    assert (request.login, request.interactive, request.elevated, request.deadline) == (False, False, False, 90)
+    assert request.stdin == Bytes(_state_archive(state))
+    assert isinstance(call.options["stdout"], DiscardOutput) and isinstance(call.options["stderr"], DiscardOutput)
+    assert call.options["check"] is False
+
+
+def test_reconcile_with_nothing_declared_sends_no_input() -> None:
+    access = RecordingVMAccess([], Admin())
+
+    reconcile_user_git_credentials(access, build_user_credential_state([]))
+
+    assert access.requests()[0].stdin == NoInput()
+
+
 @pytest.mark.parametrize("returncode", [20, 21, 22, 23, 24, 25, 29, 97])
 def test_reconcile_maps_remote_failures_without_exposing_remote_data(returncode: int) -> None:
-    sentinel = "remote-reflected-sensitive-payload"
+    sentinel = b"remote-reflected-sensitive-payload"
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(returncode), sentinel, sentinel)
 
-    class _Target:
-        kwargs: dict[str, object] | None = None
+    with pytest.raises(ExternalError) as caught:
+        reconcile_user_git_credentials(access, _material_state())
 
-        def run(self, command: str, **kwargs: object) -> SSHResult:
-            self.kwargs = kwargs
-            return SSHResult(returncode, sentinel, sentinel)
-
-    target = _Target()
-    with pytest.raises(SSHError) as caught:
-        reconcile_user_git_credentials(target, build_user_credential_state([]))  # type: ignore[arg-type]
-
-    assert sentinel not in str(caught.value)
-    assert target.kwargs is not None
-    assert target.kwargs["check"] is False
-    assert target.kwargs["timeout"] == 90
-    assert target.kwargs["input_text"] == ""
+    assert sentinel.decode() not in str(caught.value)
+    assert "reflected-secret" not in str(caught.value)
 
 
-def test_reconcile_sanitizes_transport_failure() -> None:
-    sentinel = "transport-reflected-sensitive-payload"
+def test_a_reconcile_that_does_not_complete_raises_its_typed_error_holding_no_input() -> None:
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Unknown(UnknownReason.CONNECTION))
 
-    class _Target:
-        def run(self, command: str, **kwargs: object) -> SSHResult:
-            raise SSHError(f"{sentinel}: {command}: {kwargs['input_text']}")
+    with pytest.raises(ExecutionIncomplete) as caught:
+        reconcile_user_git_credentials(access, _material_state())
 
-    with pytest.raises(SSHError) as caught:
-        reconcile_user_git_credentials(_Target(), build_user_credential_state([]))  # type: ignore[arg-type]
-
-    assert sentinel not in str(caught.value)
+    assert "reflected-secret" not in str(caught.value)
     assert _RECONCILE_SCRIPT not in str(caught.value)
 
 
@@ -1291,17 +1310,16 @@ def test_escaped_helper_descendant_cannot_hold_response_capture_open(tmp_path: P
         result = _query(tmp_path, _request("example.com"))
         elapsed = time.monotonic() - started
     finally:
-        # On a loaded host the descendant can start late or not at all under the shortened timeout,
-        # or take SIGPIPE writing to the closed capture and be gone already; clean up what is left.
-        pid = ""
+        # The escaped descendant is this test's own. On a loaded host it can start late or not at all under
+        # the shortened timeout, may not have written its whole pid yet, or may have exited already.
+        pid_text = ""
         deadline = time.monotonic() + 1
-        while not pid and time.monotonic() < deadline:
-            with contextlib.suppress(FileNotFoundError):
-                pid = escaped_pid.read_text().strip()
+        while not pid_text.endswith("\n") and time.monotonic() < deadline:
             time.sleep(0.01)
-        if pid:
+            pid_text = escaped_pid.read_text() if escaped_pid.exists() else ""
+        if pid_text.endswith("\n"):
             with contextlib.suppress(ProcessLookupError):
-                os.killpg(int(pid), signal.SIGKILL)
+                os.killpg(int(pid_text), signal.SIGKILL)
     assert elapsed < SHORTENED_WAIT_BOUND_SECONDS
     assert result.returncode != 0
     assert result.stdout == ""

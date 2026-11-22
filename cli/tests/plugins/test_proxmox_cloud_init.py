@@ -8,7 +8,13 @@ import pytest
 
 from agentworks.capabilities.vm_platform.tailscale_join import DEFAULT_READINESS_COMMAND
 from agentworks.errors import ConnectivityError, ProvisioningError
-from agentworks.plugins.proxmox.platform import CLOUD_INIT_DEADLINE_SECONDS, _wait_for_cloud_init
+from agentworks.execution.root_script import ChannelUnreachable
+from agentworks.plugins.proxmox import guest_agent
+from agentworks.plugins.proxmox.platform import (
+    CLOUD_INIT_DEADLINE_SECONDS,
+    CLOUD_INIT_RETRY_MIN_SECONDS,
+    _wait_for_cloud_init,
+)
 from tests._root_channel_fakes import Answer, FakeGuest
 
 if TYPE_CHECKING:
@@ -22,7 +28,7 @@ def _guest(answer: Answer) -> FakeGuest:
 def test_cloud_init_success_returns_without_warning(captured_output: CapturedOutput) -> None:
     guest = _guest(Answer(status=0))
 
-    _wait_for_cloud_init(guest.run_as_root, 101)
+    _wait_for_cloud_init(guest.run_as_root, 101, log=None)
 
     assert guest.payloads == [DEFAULT_READINESS_COMMAND]
     assert captured_output.warnings == []
@@ -31,7 +37,7 @@ def test_cloud_init_success_returns_without_warning(captured_output: CapturedOut
 def test_cloud_init_degraded_completion_returns_with_warning(captured_output: CapturedOutput) -> None:
     guest = _guest(Answer(status=2))
 
-    _wait_for_cloud_init(guest.run_as_root, 101)
+    _wait_for_cloud_init(guest.run_as_root, 101, log=None)
 
     assert len(captured_output.warnings) == 1
 
@@ -41,7 +47,7 @@ def test_cloud_init_that_does_not_complete_raises_after_one_run(status: int | No
     guest = _guest(Answer(status=status))
 
     with pytest.raises(ProvisioningError):
-        _wait_for_cloud_init(guest.run_as_root, 101)
+        _wait_for_cloud_init(guest.run_as_root, 101, log=None)
 
     assert len(guest.scripts) == 1
 
@@ -51,7 +57,7 @@ def test_a_failed_cloud_init_s_reason_reaches_the_error() -> None:
     guest = _guest(Answer(status=1, stdout=b"status: error\nerrors:\n\t- (scripts_user) failed\n"))
 
     with pytest.raises(ProvisioningError) as caught:
-        _wait_for_cloud_init(guest.run_as_root, 101)
+        _wait_for_cloud_init(guest.run_as_root, 101, log=None)
 
     assert "(scripts_user) failed" in str(caught.value)
 
@@ -64,7 +70,7 @@ def test_a_channel_failure_is_asked_again_until_cloud_init_answers(
     restarted = ConnectivityError("Proxmox QGA status failed for VM 101; the script may still be running")
     guest = FakeGuest(respond=lambda payload, seen: Answer(raises=restarted) if seen == 0 else Answer(status=0))
 
-    _wait_for_cloud_init(guest.run_as_root, 101)
+    _wait_for_cloud_init(guest.run_as_root, 101, log=None)
 
     assert guest.payloads == [DEFAULT_READINESS_COMMAND] * 2
     assert captured_output.warnings == []
@@ -79,6 +85,20 @@ def test_a_channel_that_keeps_failing_raises_at_the_deadline(monkeypatch: pytest
     guest = _guest(Answer(raises=ConnectivityError("the guest agent is gone")))
 
     with pytest.raises(ConnectivityError):
-        _wait_for_cloud_init(guest.run_as_root, 101)
+        _wait_for_cloud_init(guest.run_as_root, 101, log=None)
 
-    assert now[0] >= CLOUD_INIT_DEADLINE_SECONDS
+    assert now[0] >= CLOUD_INIT_DEADLINE_SECONDS - CLOUD_INIT_RETRY_MIN_SECONDS
+    assert guest.deadlines[0] == CLOUD_INIT_DEADLINE_SECONDS
+    # No attempt is dispatched with too little of the budget to finish.
+    assert min(guest.deadlines) >= CLOUD_INIT_RETRY_MIN_SECONDS - guest_agent.POLL_INTERVAL_SECONDS
+
+
+def test_an_unreachable_channel_is_not_asked_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guest agent's own bounded wait found no agent, so another attempt would only wait again."""
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.time.sleep", lambda seconds: pytest.fail("retried"))
+    guest = _guest(Answer(raises=ChannelUnreachable("the guest agent never answered")))
+
+    with pytest.raises(ChannelUnreachable):
+        _wait_for_cloud_init(guest.run_as_root, 101, log=None)
+
+    assert len(guest.deadlines) == 1

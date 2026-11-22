@@ -208,6 +208,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.import-host-keys", "names"): "vms",
     ("vm.import-host-keys", "known_hosts"): "files",
     ("vm.reinit", "name"): "vms",
+    ("vm.reinit", "admin_template"): "admin_templates",
     ("vm.exec", "name"): "vms",
     ("vm.exec", "workspace"): "workspaces",
     ("vm.shell", "name"): "vms",
