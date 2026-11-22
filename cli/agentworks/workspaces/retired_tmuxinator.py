@@ -160,7 +160,9 @@ def _run(access: VMAccess, script: str, *arguments: str) -> tuple[bool, bytes]:
 
 def _judgeable(workspace_path: str) -> bool:
     """Whether the projects command can judge this path: absolute, and an argument a
-    request can carry (``checked_argv``, which refuses a NUL byte)."""
+    request can carry (``checked_argv``, which refuses one holding a NUL byte, one that
+    cannot be encoded, and one longer than ``MAX_STRING_BYTES``). A path read from the
+    database is always encodable, so the skip message names only the other causes."""
     if not workspace_path.startswith("/"):
         return False
     try:
@@ -182,7 +184,8 @@ def retire_tmuxinator_projects(access: VMAccess, workspace_paths: Sequence[str])
     failures: list[str] = []
     if skipped := len(workspace_paths) - len(judgeable):
         failures.append(
-            f"{output.count(skipped, 'workspace path')} skipped as not absolute or not carryable in a request"
+            f"{output.count(skipped, 'workspace path')} skipped as not absolute, holding a NUL byte, "
+            "or too long to send"
         )
     try:
         if not _run(access, _LINKS_SCRIPT)[0]:
