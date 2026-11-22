@@ -20,7 +20,7 @@ from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, NotDelivered, NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.vms.initializer.driver import _retire_workspace_tmuxinator_projects
 from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
-from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.native_setup_fixtures import LocalFixtureAccount, fixture_access
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 if TYPE_CHECKING:
@@ -152,6 +152,25 @@ def _workspace(db: Database, root: Path, name: str, content: str | None = _GENER
         (path / ".tmuxinator.yml").write_text(content)
     db.insert_workspace(name, vm_name="box", workspace_path=str(path), template="default", linux_group=f"ws-{name}")
     return path
+
+
+@requires_guest_shell
+def test_reinit_through_a_real_request_cleans_a_non_ascii_workspace(
+    db: Database,
+    guest: tuple[_Guest, Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    target, _proj, entries = guest
+    workspace = _workspace(db, tmp_path / "guest" / "workspaces", "prøj-ü")
+    link = entries / "ws-prøj-ü-console.yml"
+    link.symlink_to(workspace / ".tmuxinator.yml")
+
+    _retire_workspace_tmuxinator_projects(db, "box", fixture_access(monkeypatch, target).files(), Mock())
+
+    assert not (workspace / ".tmuxinator.yml").exists() and not link.is_symlink()
+    assert captured_output.warnings == []
 
 
 _PATH_MAX = 4096
