@@ -972,7 +972,9 @@ def test_the_sync_checks_out_into_the_normalized_destination(value: str, path: s
     assert guest.commands()[0] == Command(("test", "-d", f"{path}/.git"), deadline=60)
 
 
-@pytest.mark.parametrize("value", ["~/.config/mise", "~/.config/mise/dots", "~/.config/nvim", "~/.agentworks-dots"])
+@pytest.mark.parametrize(
+    "value", ["~/.config", "~/.config/mise", "~/.config/mise/dots", "~/.config/nvim", "~/.agentworks-dots"]
+)
 def test_a_destination_beside_or_over_the_mise_config_is_accepted(value: str) -> None:
     assert normalize_destination(value) == value
 
