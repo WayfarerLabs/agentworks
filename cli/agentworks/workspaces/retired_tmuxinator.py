@@ -99,18 +99,18 @@ exit "$rc"
 )
 
 # Workspace paths arrive as arguments. Each workspace is entered in the script's own
-# shell and its project handled by name, as rehome and copy write it there: a
+# shell and its project handled by name, as 0.19's copy and rehome carried it there: a
 # workspace path within ``PATH_MAX`` can hold a project whose absolute path is past
-# it, which the kernel would refuse to resolve. Every other path the loop resolves is
-# absolute, so the directory one workspace leaves the shell in affects no other, and
-# nothing is resolved by name in a workspace that could not be entered. ``[ -f ]`` and
-# ``[ ! -L ]`` keep a FIFO, a directory or a link away from ``cmp``, which exits 1 on
-# a difference and 2 when it cannot read. Each workspace the script could not finish
-# is reported by its argument position on a marker line of its own, so the caller
-# names it from the path it sent rather than from output, which a path holding a line
-# break would split. A last marker line says the loop reached the end of its
-# arguments, so a run that died partway is not taken to have failed only where it
-# reported.
+# it, which the kernel would refuse to resolve. Every lookup by name happens in a
+# directory just entered from an absolute path, so the directory one workspace leaves
+# the shell in affects no other, and nothing is looked up in a workspace that could
+# not be entered. ``[ -f ]`` and ``[ ! -L ]`` keep a FIFO, a directory or a link away
+# from ``cmp``, which exits 1 on a difference and 2 when it cannot read. Each
+# workspace the script could not finish is reported by its argument position on a
+# marker line of its own, so the caller names it from the path it sent rather than
+# from output, which a path holding a line break would split. A last marker line says
+# the loop reached the end of its arguments, so a run that died partway is not taken
+# to have failed only where it reported.
 _PROJECTS_SCRIPT = (
     _VACANT_FUNCTION
     + f"""\
@@ -159,10 +159,10 @@ def _run(access: VMAccess, script: str, *arguments: str) -> tuple[bool, bytes]:
 
 
 def _judgeable(workspace_path: str) -> bool:
-    """Whether the projects command can judge this path: absolute, and an argument a
-    request can carry (``checked_argv``, which refuses one holding a NUL byte, one that
-    cannot be encoded, and one longer than ``MAX_STRING_BYTES``). A path read from the
-    database is always encodable, so the skip message names only the other causes."""
+    """Whether the projects command can judge this path: absolute, and an argument
+    ``checked_argv`` accepts. A path read from the database always encodes, since
+    sqlite3 neither stores nor returns a lone surrogate, so the skip message names only
+    a NUL byte and length."""
     if not workspace_path.startswith("/"):
         return False
     try:
