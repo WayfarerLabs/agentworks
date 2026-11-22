@@ -36,6 +36,7 @@ def test_vm_plans_apply_supported_types_without_descendant_context(monkeypatch, 
             request_environment=lambda local=None: {},
             secrets={},
             redactor=Redactor(),
+            prior=None,
         )
     )
     applied = {origin for file in result.files for origin in file.origins}

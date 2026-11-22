@@ -298,7 +298,9 @@ def run_setup(
             )
             call = replace(
                 invocation,
-                prior=previous,
+                prior=None
+                if previous is None
+                else previous.model_copy(update={"artifact_files": current.artifact_files}),
                 checkpoint=checkpoint,
                 report_incomplete=report_incomplete,
                 secrets=scoped_secrets,
