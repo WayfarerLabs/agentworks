@@ -87,7 +87,9 @@ nor `LockFileEx` converts one safely). Every command therefore runs the same seq
 1. **Probe** its whole set without waiting and release it at once, so a conflict fails before any
    prompt or boot (R3).
 2. **Ask and read:** resolve gate secrets, run its read-only probes, and ask its confirmations (R6).
-3. **Boot** if the VM is not confirmed active, holding the vm exclusive only for the boot.
+3. **Boot** if the operation needs the VM running and it is not confirmed active, holding the vm
+   exclusive only for the boot. Stop paths never boot. A runtime family that must boot records its
+   intent under that brief exclusive, so the intent survives a failed boot as it does today.
 4. **Acquire** the real set, with the vm shared.
 5. **Re-check** the identity, intent and state it read in step 2, refusing if any changed.
 6. **Run.**
@@ -216,9 +218,10 @@ VM.
 ## Where each operation lands
 
 The LLD carries the full table, one row per command with its lock set, its call sites at HEAD and
-the prompts it moves; the line-level inventory at HEAD goes into the implementation PR's checklist.
-Its spine, where every row also holds each ancestor of what it names shared (a console's ancestors
-being the vm and each member session with its workspace and account):
+the prompts it moves; the line-level inventory at HEAD is the LLD's appendix, which the
+implementation PR works through. Its spine, where every row also holds each ancestor of what it
+names shared (a console's ancestors being the vm and each member session with its workspace and
+account):
 
 | Operation                                                                               | Exclusive                                            |
 | --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
