@@ -1,4 +1,4 @@
-"""Owning VM reinit budgets both the current and replacement Codex catalogs."""
+"""Owning reinit budgets current and replacement native catalogs."""
 
 from __future__ import annotations
 
@@ -13,8 +13,10 @@ import pytest
 
 from agentworks.artifacts import publication
 from agentworks.artifacts.application import ArtifactApplication, ArtifactFile, OwnedArtifactFile
-from agentworks.artifacts.declarations import ArtifactDefinitions, ArtifactsConfig, RuleArtifactSpec
-from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.bundle import ArtifactBundle
+from agentworks.artifacts.capture import capture_artifacts
+from agentworks.artifacts.declarations import ArtifactDefinitions, ArtifactsConfig, RuleArtifactSpec, SkillArtifactSpec
+from agentworks.artifacts.model import ArtifactInputs, ArtifactOrigin
 from agentworks.artifacts.native import probe
 from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
@@ -31,9 +33,12 @@ from agentworks.origin import Origin
 from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS
 from agentworks.plugins.codex import harness_integration as codex
 from agentworks.plugins.codex.artifacts import vm_artifacts as render_vm_artifacts
+from agentworks.plugins.grok import artifacts as grok
+from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from agentworks.schema import CapabilityConfig
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import ResolvedVMTemplate
+from tests.artifacts.test_native_delivery import owned
 from tests.conftest import registry_with_shell
 from tests.native_setup_fixtures import LocalFixtureAccount, invocation
 
@@ -292,3 +297,57 @@ def test_user_probe_budgets_selectively_renamed_personas(tmp_path, monkeypatch, 
     desired.extend(persona(f"additional-{index}", ("f" * 64,)) for index in range(count))
     with pytest.raises(StateError):
         check(call)
+
+
+def test_grok_skill_upgrade_budgets_distinct_physical_members(tmp_path):
+    account = LocalFixtureAccount(tmp_path / "native")
+    binary = account.root / "bin/grok"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\nexit 97\n")
+    binary.chmod(0o700)
+    native = account.home / ".grok"
+    source = native / "skills/review"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: review\ndescription: Review fixture\n---\nReview.\n")
+    for index in range(2048):
+        (source / f"note-{index}").touch()
+    for path in source.iterdir():
+        path.chmod(0o600)
+    captured = capture_artifacts(
+        [("team", ArtifactBundle(name="team", skills={"review": SkillArtifactSpec(source=str(source))}))],
+        ArtifactOrigin("vm", "vm", "fixture"),
+    )
+    old = grok.outer_artifacts(ArtifactInputs(local=captured), str(native)).files
+    assert len(old) == 2049
+    prior = SetupRecord(
+        component="agent",
+        integration="grok",
+        destination_id="a" * 64,
+        declaration={},
+        artifact_files=tuple(owned(file) for file in old),
+    )
+    inputs = ArtifactInputs(deferred={captured.owner: captured})
+    call = replace(invocation(account, []), artifacts=inputs, prior=prior)
+    integration = GrokBuildIntegration.for_setup(owner_kind="agent", owner_name="fixture", facet="user", config={})
+    expected = grok.outer_artifacts(inputs, str(native)).files
+    receiver = native / "skills/vm-review"
+    assert not receiver.exists() and integration.user_init(call).files == expected
+    assert {Path(file.path).parent for file in expected} == {receiver}
+
+    # Matching pre-existing receiving members also need fingerprints. The old
+    # package's files are visited again while looking for newly exposed children.
+    receiver.mkdir()
+    marker = receiver / "SKILL.md"
+    marker.write_bytes(next(file.data for file in expected if file.path == str(marker)))
+    for index in range(2046):
+        (receiver / f"note-{index}").touch()
+    assert integration.user_init(call).files == expected  # 2,049 old + 2,047 receiving files.
+    extra_receiver = receiver / "note-2046"
+    extra_receiver.touch()
+    with pytest.raises(StateError):
+        integration.user_init(call)
+    extra_receiver.unlink()
+    (source / "foreign-note").write_bytes(b"Retain me.")
+    with pytest.raises(StateError):
+        integration.user_init(call)
+    assert (source / "foreign-note").read_bytes() == b"Retain me." and (source / "SKILL.md").is_file()

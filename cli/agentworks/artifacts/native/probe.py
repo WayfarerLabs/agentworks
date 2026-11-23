@@ -61,7 +61,6 @@ agent_names = {name[6:] for name in request['identities'] if name.startswith('ag
 previous = {path: Placement(*row) for path, row in request.get('previous', {}).items()}
 desired = {path: Placement(*row) for path, row in request.get('desired', {}).items()}
 held = held_placements(previous, desired, frozenset(request.get('retain', ())))
-direct_skills = any(':' not in name for name in skill_names)
 def reserved_package(name):
     return tool == 'claude' and (name.casefold() in ('synced', 'anthropic-skills')
                                  or name == '.trash' or name.casefold().startswith('anthropic-skills:'))
@@ -90,6 +89,20 @@ if machine_root is not None:
 if not request['check_policy']:
     roots = []
 
+def skill_directory(root):
+    if tool != 'codex' or root == machine_root:
+        return root / 'skills'
+    scope = pathlib.Path(home) if root == pathlib.Path(native_home) else root.parent
+    return scope / '.agents' / 'skills'
+
+skill_directories = {root: skill_directory(root) for root in roots}
+agent_directories = {root: root / 'agents' for root in roots if tool != 'codex' or root != machine_root}
+# A prior placement in an applicable catalog selects its kind across the same
+# discovery roots as a desired placement, even if the last declaration is withdrawn.
+scan_skills = (any(':' not in name for name in skill_names) or
+               not prior_skill_roots.isdisjoint(skill_directories.values()))
+scan_agents = bool(agent_names) or not prior_agent_roots.isdisjoint(agent_directories.values())
+
 def check_discovery_path(path, anchor):
     # Do not inspect native metadata through links beneath the actual owning root.
     relative = path.relative_to(anchor)
@@ -110,9 +123,8 @@ for root in roots:
         # outer user publication applies its own stricter containment rule.
         root_anchor = pathlib.Path(root.anchor) if user_root and not root.is_relative_to(anchor) else anchor
         check_discovery_path(root, root_anchor)
-        codex_skills = anchor / '.agents' / 'skills'
-        if tool == 'codex' and root != machine_root and (direct_skills or codex_skills in prior_skill_roots):
-            check_discovery_path(codex_skills, anchor)
+        if tool == 'codex' and root != machine_root and scan_skills:
+            check_discovery_path(skill_directories[root], anchor)
         safe_roots.append(root)
     except Exception:
         problems.append('unreadable-native-inventory')
@@ -219,10 +231,14 @@ def publication_projection(previous, desired, held, retiring_markers):
     # Only an owning setup can spend a physical removal or a decrease in metadata.
     # Fingerprint bounded declared/recorded members; foreign descendants need only a directory entry.
     paths = dict.fromkeys(path for path in (*desired, *previous) if path not in held)
-    inspected = set(paths)
+    inspected = set()
     available = request['inventory_bytes']
-    if len(inspected) > request['proof_members']:
-        raise ValueError()
+
+    def charge(spelling):
+        inspected.add(spelling)
+        if len(inspected) > request['proof_members']:
+            raise ValueError()
+
     observed = {}
     invalid_sections = {}
     for spelling in paths:
@@ -250,6 +266,7 @@ def publication_projection(previous, desired, held, retiring_markers):
             info = os.fstat(source.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size > available:
                 raise ValueError()
+            charge(spelling)
             available -= info.st_size
             raw = source.read(info.st_size + 1)
             if len(raw) != info.st_size:
@@ -263,9 +280,7 @@ def publication_projection(previous, desired, held, retiring_markers):
         pending = [package]
         while pending:
             for path in pending.pop().iterdir():
-                inspected.add(str(path))
-                if len(inspected) > request['proof_members']:
-                    raise ValueError()
+                charge(str(path))
                 if str(path) in retired:
                     continue
                 if path.is_symlink() or path.name == 'SKILL.md':
@@ -321,12 +336,7 @@ try:
     inspecting = None
     for root in roots:
         inspecting = root
-        skill_root = (root.parent / '.agents' / 'skills') if tool == 'codex' else root / 'skills'
-        if tool == 'codex' and root == machine_root:
-            skill_root = root / 'skills'
-        elif tool == 'codex' and root == pathlib.Path(native_home):
-            skill_root = pathlib.Path(home) / '.agents' / 'skills'
-        scan_skills = direct_skills or skill_root in prior_skill_roots
+        skill_root = skill_directories[root]
         if scan_skills:
             discovery_roots.append(('skill', skill_root))
         inspecting = skill_root
@@ -372,12 +382,11 @@ try:
                 candidates.append(('skill', marker, directory.name))
                 if len(candidates) > 512:
                     raise ValueError()
-        agent_root = root / 'agents'
-        discover_agents = (agent_names or agent_root in prior_agent_roots) and not (
-            tool == 'codex' and root == machine_root)
-        if discover_agents:
-            discovery_roots.append(('agent', agent_root))
-        if discover_agents and agent_root.exists():
+        agent_root = agent_directories.get(root)
+        if not scan_agents or agent_root is None:
+            continue
+        discovery_roots.append(('agent', agent_root))
+        if agent_root.exists():
             inspecting = agent_root
             if agent_root.is_symlink():
                 raise ValueError()

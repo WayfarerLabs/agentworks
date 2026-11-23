@@ -22,7 +22,7 @@ from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.codex import artifacts as codex
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import group, received
-from tests.artifacts.test_native_delivery import artifact
+from tests.artifacts.test_native_delivery import artifact, owned
 from tests.native_setup_fixtures import LocalFixtureAccount, invocation
 
 if TYPE_CHECKING:
@@ -316,6 +316,46 @@ def _persona(catalog: Path, name: str, origin: str, size: int, tool: str) -> Art
         data = f"---\n{header}---\nReview.\n".encode()
         suffix = ".md"
     return ArtifactFile(str(catalog / (name + suffix)), data, (origin * 64,), native_identity=f"agent:{name}")
+
+
+@pytest.mark.parametrize("kind", ["skill", "agent"])
+def test_withdrawing_a_kind_budgets_all_applicable_claude_roots(tmp_path, monkeypatch, kind):
+    account = _account(tmp_path, monkeypatch, "claude")
+    user = account.home / ".claude"
+    machine = account.root / "etc/claude-code/.claude" / ("skills" if kind == "skill" else "agents")
+    if kind == "skill":
+        old = _skill(user / "skills", "review", "a")
+        sibling = _skill(machine, "machine-entry", "b")[0]
+        wanted: tuple[ArtifactFile, ...] = ()
+    else:
+        old = (_persona(user / "agents", "review", "a", 100, "claude"),)
+        sibling = _persona(machine, "machine-entry", "b", 100, "claude")
+        wanted = tuple(_skill(user / "skills", f"new-{index}", "c")[0] for index in range(4))
+    previous = publish_artifacts(account.files(), old, (), lambda _: None, roots=(str(account.home),)).files
+    if kind == "skill":
+        for index in range(3):
+            (user / "skills/review" / f"note-{index}").touch()
+    path = Path(sibling.path)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(sibling.data)
+    for index in range(508):
+        (machine / f"unrelated-{index}").touch()
+
+    def check_sibling(files: tuple[OwnedArtifactFile, ...]) -> None:
+        probe.probe_native(
+            account.access(), tool="claude", environment={}, home=str(account.home), files=(owned(sibling), *files)
+        )
+
+    check_sibling(previous)
+    with pytest.raises(StateError):
+        _preflight(account, "claude", wanted, previous)
+    assert Path(old[0].path).read_bytes() == old[0].data
+    (machine / "unrelated-507").unlink()
+    _preflight(account, "claude", wanted, previous)
+    final = publish_artifacts(account.files(), wanted, previous, lambda _: None, roots=(str(account.home),))
+    assert not final.skipped and not Path(old[0].path).exists()
+    assert path.read_bytes() == sibling.data
+    check_sibling(final.files)
 
 
 def _fill_persona_bytes(catalog: Path, remaining: int, tool: str) -> None:
