@@ -170,7 +170,7 @@ def publish_artifacts(
         for path, prior in current.items()
         if path not in held_paths
         and observed[path] is not None
-        and observed[path] != (prior.sha256, _mode(prior.executable, group, root))
+        and observed[path] != (prior.sha256, artifact_file_mode(prior.executable, group, root))
     }
     for path, item in planned.items():
         if path in held_paths:
@@ -263,7 +263,7 @@ def publish_artifacts(
                     path,
                     replacement,
                     expected=hashlib.sha256(existing).hexdigest(),
-                    mode=_mode(False, "", root),
+                    mode=artifact_file_mode(False, "", root),
                     parent_mode=_directory_mode("", root),
                     preserve_metadata=True,
                     elevated=root,
@@ -324,7 +324,7 @@ def publish_artifacts(
                     path,
                     replacement,
                     expected=None if existing is None else hashlib.sha256(existing).hexdigest(),
-                    mode=_mode(item.executable, group, root),
+                    mode=artifact_file_mode(item.executable, group, root),
                     parent_mode=_directory_mode(group, root),
                     group=group or None,
                     preserve_metadata=True,
@@ -332,12 +332,12 @@ def publish_artifacts(
                 )
                 if prior is not None:
                     updated_sections.append(path)
-        elif observed_file != (digest, _mode(item.executable, group, root)):
+        elif observed_file != (digest, artifact_file_mode(item.executable, group, root)):
             files.write_if(
                 path,
                 item.data,
                 expected=None if observed_file is None else observed_file[0],
-                mode=_mode(item.executable, group, root),
+                mode=artifact_file_mode(item.executable, group, root),
                 parent_mode=_directory_mode(group, root),
                 group=group or None,
                 elevated=root,
@@ -370,7 +370,8 @@ def _observe(files: Files, path: str, *, elevated: bool) -> tuple[str, int] | No
     return (state.digest, state.mode) if isinstance(state, RegularFile) else None
 
 
-def _mode(executable: bool, group: str, root: bool) -> int:
+def artifact_file_mode(executable: bool, group: str, root: bool) -> int:
+    """The exact mode used to publish and recognize an unchanged owned file."""
     if root:
         return 0o755 if executable else 0o644
     return (0o770 if executable else 0o660) if group else (0o700 if executable else 0o600)

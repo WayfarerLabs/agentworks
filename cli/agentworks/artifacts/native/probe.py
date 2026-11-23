@@ -12,15 +12,18 @@ from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
+from agentworks.artifacts.publication import artifact_file_mode
+from agentworks.capabilities.harness_integration.setup import VMSetupInvocation, WorkspaceSetupInvocation
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.execution.requests import Bytes, CaptureOutput, PythonProgram
 from agentworks.harness_setup.outcomes import Redactor
-from agentworks.package_sources import CaptureLimits
+from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS
 from agentworks.sources import SourceRefError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from agentworks.capabilities.harness_integration.setup import SetupInvocation
     from agentworks.execution.access import VMAccess
 
 
@@ -36,7 +39,7 @@ class NativeArtifactConflictError(StateError):
 # selected bounded artifact frontmatter and discovery facts return for local identity
 # checks. Settings bodies and artifact instruction bodies are not returned.
 _PROBE = r"""
-import fnmatch, json, os, pathlib, shutil, subprocess, sys, tomllib
+import fnmatch, hashlib, json, os, pathlib, shutil, stat, subprocess, sys, tomllib
 request = json.load(sys.stdin)
 tool = request['tool']
 vm_only = request['vm_only']
@@ -157,6 +160,77 @@ for path in paths:
     except Exception:
         problems.append('unreadable-native-policy')
         problem_paths.append(str(path))
+
+def replacements_fit(excess, existing, additions, observed, proposed):
+    # Bound the additional read even for skill layouts whose supporting files
+    # are invisible to ordinary discovery. The probe leaves all bytes in place.
+    remaining_members = request.get('replacement_members', 0)
+    remaining_bytes = request['inventory_bytes']
+    for old, new, members in request.get('replacements', ()):
+        if old not in existing:
+            continue
+        old_count = sum(path == old or path.startswith(old + '/') for path in existing)
+        new_count = sum(path == new or path.startswith(new + '/') for path in additions)
+        suffix = '' if old in members else '/SKILL.md'
+        byte_budget = 'codex-personas' if tool == 'codex' and not suffix else 'metadata'
+        old_size = observed.get(old + suffix, ('', 0))[1]
+        new_size = proposed.get(new + suffix, ('', 0))[1] - observed.get(new + suffix, ('', 0))[1]
+        count_credit = min(old_count, new_count)
+        byte_credit = min(old_size, max(0, new_size))
+        if not ((excess['entries'] > 0 and count_credit) or (excess[byte_budget] > 0 and byte_credit)):
+            continue
+        old_root = pathlib.Path(old)
+        parents = {parent for name in members for parent in pathlib.Path(name).parents if
+                   parent == old_root or parent.is_relative_to(old_root)}
+        pending = [old_root]
+        seen_dirs = set()
+        pruned_dirs = set()
+        try:
+            while pending:
+                path = pending.pop()
+                mode = path.lstat().st_mode
+                if stat.S_ISDIR(mode) and path in parents:
+                    # Publication can leave a busy or non-removable package root in place.
+                    parent = path.parent.stat()
+                    if path.is_mount() or os.statvfs(path).f_flag & os.ST_RDONLY or (not vm_only and (
+                        not os.access(path.parent, os.W_OK | os.X_OK) or parent.st_mode & stat.S_ISVTX
+                    )):
+                        break
+                    seen_dirs.add(path)
+                    for child in path.iterdir():
+                        remaining_members -= 1
+                        if remaining_members < 0:
+                            return False
+                        pending.append(child)
+                elif stat.S_ISREG(mode) and str(path) in members:
+                    digest, expected_mode = members[str(path)]
+                    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
+                        observed_file = os.fstat(source.fileno())
+                        actual_mode = observed_file.st_mode
+                        if not stat.S_ISREG(actual_mode) or stat.S_IMODE(actual_mode) != expected_mode:
+                            break
+                        size = observed_file.st_size
+                        remaining_bytes -= size
+                        if remaining_bytes < 0:
+                            return False
+                        raw = source.read(size + 1)
+                    if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
+                        break
+                    pruned_dirs.update(parent for parent in path.parents if parent in parents)
+                else:
+                    break
+            else:
+                if seen_dirs <= pruned_dirs:
+                    # A publication conflict can retain the old placement and
+                    # skip the same origins' replacement. Budget for either.
+                    excess['entries'] -= count_credit
+                    excess[byte_budget] -= byte_credit
+                    if max(excess.values()) <= 0:
+                        return True
+        except OSError:
+            continue
+    return False
+
 try:
     candidates = []
     scanned = 0
@@ -259,8 +333,7 @@ try:
                     raise ValueError()
                 proposed[spelling] = (kind, size)
                 proposed_entries.add(str(path.parent) if kind == 'skill' else spelling)
-    if scanned + len(proposed_entries - existing_entries) > 512:
-        raise ValueError()
+    additions = proposed_entries - existing_entries
     total = 0
     codex_total = 0
     observed_sizes = {}
@@ -297,9 +370,13 @@ try:
                 raise ValueError()
             inventory.append({'kind': kind, 'path': str(path), 'fallback_name': fallback, 'frontmatter': frontmatter})
     future = {**observed_sizes, **proposed}
-    if sum(size for kind, size in future.values() if tool == 'codex' and kind == 'agent') > request['inventory_bytes']:
-        raise ValueError()
-    if sum(size for kind, size in future.values() if tool != 'codex' or kind != 'agent') > 1048576:
+    excess = {
+        'entries': scanned + len(additions) - 512,
+        'metadata': sum(size for kind, size in future.values() if tool != 'codex' or kind != 'agent') - 1048576,
+        'codex-personas': sum(size for kind, size in future.values() if tool == 'codex' and kind == 'agent')
+                          - request['inventory_bytes'],
+    }
+    if max(excess.values()) > 0 and not replacements_fit(excess, existing_entries, additions, observed_sizes, proposed):
         raise ValueError()
 except Exception as error:
     problems.append('unreadable-native-inventory')
@@ -406,6 +483,61 @@ def _is_reserved_claude_skill(identity: str | None) -> bool:
     )
 
 
+def _native_entrypoints(
+    files: Sequence[ArtifactFile | OwnedArtifactFile],
+) -> dict[tuple[str, str, frozenset[str]], list[str]]:
+    placements: dict[tuple[str, str, frozenset[str]], list[str]] = {}
+    for file in files:
+        kind = (file.native_identity or "").partition(":")[0]
+        if kind == "agent":
+            root = file.path
+        elif kind == "skill" and file.package_root is not None and file.path == file.package_root + "/SKILL.md":
+            root = file.package_root
+        else:
+            continue
+        key = (str(PurePosixPath(root).parent), kind, frozenset(file.origins))
+        placements.setdefault(key, []).append(root)
+    return placements
+
+
+def _owned_replacements(
+    files: Sequence[ArtifactFile | OwnedArtifactFile], setup: SetupInvocation | None
+) -> list[tuple[str, str, dict[str, tuple[str, int]]]]:
+    """Describe unique same-origin renames for the guest to verify without mutating."""
+    if setup is None or setup.prior is None:
+        return []
+    prior = setup.prior.artifact_files
+    previous = _native_entrypoints(prior)
+    root_owned = isinstance(setup, VMSetupInvocation)
+    group = setup.linux_group if isinstance(setup, WorkspaceSetupInvocation) else ""
+    replacements = []
+    for key, wanted in _native_entrypoints(files).items():
+        old = previous.get(key, ())
+        if len(old) != 1 or len(wanted) != 1 or old == wanted:
+            continue
+        old_root, new_root = old[0], wanted[0]
+        prefix = old_root + "/"
+        if any(file.path == old_root or file.path.startswith(prefix) for file in files):
+            continue
+        members = [file for file in prior if file.path == old_root or file.path.startswith(prefix)]
+        _, kind, origins = key
+        if origins & setup.retain_artifact_origins or any(
+            file.generated_section
+            or frozenset(file.origins) != origins
+            or file.package_root != (old_root if kind == "skill" else None)
+            for file in members
+        ):
+            continue
+        replacements.append(
+            (
+                old_root,
+                new_root,
+                {file.path: (file.sha256, artifact_file_mode(file.executable, group, root_owned)) for file in members},
+            )
+        )
+    return replacements
+
+
 # What the probe's stdout may hold: up to 1 MiB of frontmatter, which JSON can grow
 # sixfold, and 512 paths of up to 4096 bytes, with room for login-shell noise.
 _PROBE_OUTPUT_LIMIT = 16 * 1024 * 1024
@@ -425,13 +557,15 @@ def probe_native(
     workspace_only: bool = False,
     vm_only: bool = False,
     check_policy: bool = True,
+    setup: SetupInvocation | None = None,
 ) -> str:
     """Check proposed delivery in its native scope and scan applicable native policy.
 
     The probe is a Python program run by the system ``python3`` after the
     account's login and interactive startup, so it sees the environment the
     native workload gets. The request travels on its stdin, so a large
-    package needs no argument.
+    package needs no argument. An owning setup can supply its prior ownership
+    as evidence for budgeting replacements. Launch checks have no such authority.
     """
     if tool == "claude":
         # Old placements under Claude-owned names must not select native inventory.
@@ -454,7 +588,8 @@ def probe_native(
     request = {
         "tool": tool,
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
-        "inventory_bytes": CaptureLimits().total_bytes,
+        "inventory_bytes": DEFAULT_CAPTURE_LIMITS.total_bytes,
+        "replacement_members": DEFAULT_CAPTURE_LIMITS.members,
         "home": home,
         "native_directory": NATIVE_USER_DIRECTORIES[tool],
         "native_root": native_root,
@@ -462,6 +597,7 @@ def probe_native(
         "paths": tuple(file.path for file in files),
         "entries": entries,
         "proposed": _proposed_sizes(files, tool),
+        "replacements": _owned_replacements(files, setup),
         "session_plugin": session_plugin,
         "plugin_names": tuple(
             dict.fromkeys(identity.split(":")[1] for identity in identities if identity.count(":") > 1)

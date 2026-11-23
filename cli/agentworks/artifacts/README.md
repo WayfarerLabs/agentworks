@@ -864,7 +864,10 @@ placements or `agw agent reinit` for agent placements. Setup uses recorded owner
 unchanged old placements and apply the requested names. Modified owned files and differing unowned
 files are preserved. Private session carriers adopt current names on managed restart. Existing
 workspace placements keep their prior names. New workspace creation uses the current naming rules.
-VM/agent reinit and session restart leave workspace setup in place.
+VM/agent reinit and session restart leave workspace setup in place. Artifact declarations keep their
+canonical names. If a native persona selector refers to a renamed persona, update it to the
+delivered name. For example, set Claude's session `agent` to `vm-review` to select a
+session-delivered VM persona named `review`.
 
 ## Inspect before changing state
 

@@ -117,17 +117,22 @@ def test_codex_combined_carrier_limit_defers_all_mcp_inputs_and_keeps_persona(mo
 
 
 @pytest.mark.parametrize("flag", ["-c", "--config"])
-def test_codex_raw_literal_override_defers_all_equal_inputs_and_keeps_independent_server(flag):
+@pytest.mark.parametrize("override_key", ["vm-inventory", "inventory"])
+def test_codex_raw_literal_override_matches_the_delivered_key(flag, override_key):
     first, second = vm_server(), mcp(name="vm-inventory")
     independent = mcp(name="independent")
     result = codex.session_artifacts(
         context(first, second, independent),
-        extra_args=[flag, 'mcp_servers.vm-inventory.command="operator"'],
+        extra_args=[flag, f'mcp_servers.{override_key}.command="operator"'],
         enabled_workarounds=["session-mcp-overrides"],
     )
-    assert {entry.input_id for entry in result.application.deferred} == {first.identity, second.identity}
-    assert len(result.argv) == 2
-    assert set(tomllib.loads(result.argv[1])["mcp_servers"]) == {independent.content.name}
+    collides = override_key == "vm-inventory"
+    assert {entry.input_id for entry in result.application.deferred} == (
+        {first.identity, second.identity} if collides else set()
+    )
+    requested = {independent.content.name} if collides else {independent.content.name, "vm-inventory"}
+    assert result.argv[::2] == ("-c",) * len(requested)
+    assert {name for value in result.argv[1::2] for name in tomllib.loads(value)["mcp_servers"]} == requested
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex"])

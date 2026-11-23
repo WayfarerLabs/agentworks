@@ -223,24 +223,46 @@ def test_inspection_projects_only_registration_metadata_without_io_or_secret_res
 
 
 @pytest.mark.parametrize(
-    "case", ["missing-source", "bad-origin", "bad-identity", "url-destination", "traversal", "withdrawn"]
+    "case",
+    [
+        "missing-source",
+        "bad-origin",
+        "bad-identity",
+        "control-character",
+        "overlong-canonical",
+        "unknown-prefix",
+        "url-destination",
+        "traversal",
+        "withdrawn",
+        "long-receiving-name",
+    ],
 )
-def test_claim_projection_omits_malformed_metadata_but_retains_withdrawn_registration(db, case):
+def test_claim_projection_shows_safe_receiving_names_and_omits_malformed_metadata(db, case, capsys):
     registry, _, record = recorded_mcp(db)
     claim = record.claims[0]
     changes = {
         "missing-source": {"source": None},
         "bad-origin": {"source": "private-value"},
         "bad-identity": {"identifier": "https://private-value.invalid"},
+        "control-character": {"identifier": "vm-private-value\x1b"},
+        "overlong-canonical": {"identifier": "vm-" + "v" * 65},
+        "unknown-prefix": {"identifier": "unknown-" + "v" * 64},
         "url-destination": {"destination": "https://private-value.invalid"},
         "traversal": {"destination": "/home/user/../private-value"},
         "withdrawn": {"source": "f" * 64, "identifier": "agentworks-withdrawn-" + "f" * 20},
+        "long-receiving-name": {"identifier": "vm-" + "v" * 64},
     }
-    changed = record.model_copy(update={"claims": (claim.model_copy(update=changes[case]),)})
+    claim = claim.model_copy(update=changes[case])
+    changed = record.model_copy(update={"claims": (claim,)})
     write_native_setup(db, "vm", "vm", NativeSetupState(records=(changed,)), operation="fixture")
     result = inspect_artifacts(db, registry, vm_name="vm")
-    placements = result.owners[0].integrations[0].placements
-    assert len(placements) == (1 if case == "withdrawn" else 0)
-    assert "private-value" not in json.dumps(inspection_data(result))
-    if placements:
-        assert placements[0].origins == ("f" * 64,)
+    render_artifacts(result)
+    human = capsys.readouterr().out
+    machine = json.loads(json.dumps(inspection_data(result)))["owners"][0]["integrations"][0]["placements"]
+    if case in {"withdrawn", "long-receiving-name"}:
+        assert claim.identifier in human
+        assert machine == [{"path": claim.destination, "native_identity": claim.identifier, "origins": [claim.source]}]
+    else:
+        assert machine == []
+        assert "/home/user/config.json" not in human
+    assert "private-value" not in human + json.dumps(machine)

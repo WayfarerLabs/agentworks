@@ -33,6 +33,7 @@ from pydantic import Field
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import delivery_name
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     defer_setup_conflicts,
@@ -130,8 +131,11 @@ class ClaudeCodeConfig(AgwModel):
     replayed on resume."""
 
     agent: str | None = None
-    """Forwarded as ``--agent`` on every process launch, including resume.
-    Claude Code owns agent discovery and validation."""
+    """Select a Claude agent on every process launch, including resume.
+
+    Use the delivered name for a session artifact, such as ``vm-review``.
+    Agentworks qualifies that name with the session plugin when it supplies
+    the persona. Claude Code owns discovery and validation."""
 
     append_system_prompt: str | None = None
     """Forwarded as ``--append-system-prompt`` on every process launch,
@@ -240,6 +244,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     environment=invocation.request_environment(),
                     redactor=invocation.redactor,
                     files=files,
+                    setup=invocation,
                     vm_only=True,
                 ),
             )
@@ -322,6 +327,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     home=invocation.home,
                     native_root=root,
                     files=files,
+                    setup=invocation,
                 ),
             )
         return replace(
@@ -353,6 +359,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
+                    setup=invocation,
                     workspace_only=True,
                 ),
             )
@@ -556,19 +563,21 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 {
                     item.origin_identity
                     for item in context.inputs.items()
-                    if item.content.type is ArtifactType.AGENT and item.content.name == selected_agent
+                    if item.content.type is ArtifactType.AGENT and delivery_name(context.inputs, item) == selected_agent
                 }
                 if context is not None
                 else set()
             )
-            delivered = {
-                file.native_identity.removeprefix("agent:")
-                for file in self._artifact_plan.application.files
-                if file.native_identity is not None
-                and file.native_identity.startswith("agent:")
-                and selected_origins.intersection(file.origins)
-            }
-            selected_agent = next(iter(delivered), selected_agent)
+            selected_agent = next(
+                (
+                    file.native_identity.removeprefix("agent:")
+                    for file in self._artifact_plan.application.files
+                    if file.native_identity is not None
+                    and file.native_identity.startswith("agent:")
+                    and selected_origins.intersection(file.origins)
+                ),
+                selected_agent,
+            )
             parts += ["--agent", shlex.quote(selected_agent)]
         if self.config.append_system_prompt is not None:
             parts += ["--append-system-prompt", shlex.quote(self.config.append_system_prompt)]

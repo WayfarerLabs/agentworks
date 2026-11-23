@@ -387,6 +387,52 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
         assert all(item.content.text not in value for value in argv)
 
 
+@pytest.mark.parametrize("selection", ["review", "vm-review", "native-external"])
+def test_claude_launch_selects_the_delivered_persona_name(monkeypatch, selection):
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+
+    local = artifact(ArtifactType.AGENT)
+    vm = replace(
+        local,
+        content=replace(local.content, text="VM review instructions.\n"),
+        origin=ArtifactOrigin("vm", "vm", "box", entry="review"),
+    )
+    prepared = context(vm, local)
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.claude")
+    integration = ClaudeCodeIntegration(
+        "claude-code",
+        {"agent": selection, "enabled_workarounds": ["session-agent-definitions"]},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    result = integration.start(
+        RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE
+    )
+    assert isinstance(result, HarnessStart)
+    personas = {
+        file.native_identity.removeprefix("agent:"): file.data.decode()
+        for file in result.artifacts.files
+        if file.native_identity is not None and file.native_identity.startswith("agent:")
+    }
+    assert len(personas) == 2
+    for name, item in (("review", local), ("vm-review", vm)):
+        contents = next(contents for identity, contents in personas.items() if identity.endswith(f":{name}"))
+        assert contents.endswith(item.content.text)
+    argv = shlex.split(shlex.split(result.command)[2])
+    selected = argv[argv.index("--agent") + 1]
+    if selection == "native-external":
+        assert selected == selection
+    else:
+        assert selected in personas
+        assert selected.partition(":")[2] == selection
+
+
 @pytest.mark.parametrize("fresh", [False, True])
 @pytest.mark.parametrize("name", ["reviewer", "review-2", "123", "r" * 64])
 @pytest.mark.parametrize("include_rule", [False, True])

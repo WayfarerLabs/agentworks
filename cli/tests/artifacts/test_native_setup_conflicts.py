@@ -308,8 +308,45 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     validate_application(result, inputs, "workspace", integration="codex")
 
 
+def test_plain_rule_path_collision_defers_both_origins_and_keeps_an_independent_rule(db):
+    from agentworks.artifacts.native.common import render_setup_artifacts
+    from agentworks.plugins.claude.artifacts import outer_artifacts
+
+    inherited = replace(
+        artifact(ArtifactType.RULE, name="foo"),
+        origin=ArtifactOrigin("vm", "vm", "vm", entry="foo"),
+    )
+    local = replace(
+        artifact(ArtifactType.RULE, name="vm-foo"),
+        origin=ArtifactOrigin("agent", "agent", "alice", entry="vm-foo"),
+    )
+    independent = replace(artifact(ArtifactType.RULE, name="bar"), origin=replace(local.origin, entry="bar"))
+    access = RecordingVMAccess([], Admin())
+    incomplete = Mock()
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "site", "host"),
+        access=access,
+        files=access.files(),
+        prior=None,
+        checkpoint=lambda claims: None,
+        report_incomplete=incomplete,
+        artifacts=received(inherited, local, independent),
+        username="alice",
+        home="/home/alice",
+    )
+    plan = render_setup_artifacts(invocation, lambda inputs: outer_artifacts(inputs, "/home/alice/.claude"))
+    assert {(item.input_id, item.destination) for item in plan.deferred} == {
+        (inherited.identity, "session"),
+        (local.identity, "session"),
+    }
+    assert [(file.path, file.origins) for file in plan.files] == [
+        ("/home/alice/.claude/rules/bar.md", (independent.origin_identity,))
+    ]
+    incomplete.assert_called_once()
+
+
 @pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.RULE])
-def test_overlong_native_skill_delivery_defers_the_origin_without_truncating(db, monkeypatch, kind):
+def test_overlong_native_skill_delivery_defers_the_origin(db, monkeypatch, kind):
     from agentworks.artifacts.native.common import prepare_session_delivery, render_setup_artifacts
     from agentworks.plugins.claude import artifacts as claude
 

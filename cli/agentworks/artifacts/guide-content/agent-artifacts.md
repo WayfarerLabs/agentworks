@@ -48,7 +48,10 @@ private run directory and, when explicitly enabled, narrowly owned native helper
 
 Equal native names can coexist in separate scopes, where harness precedence applies. A deferred
 artifact gets the original scope prefix, such as `vm-review`. Existing workspace placements keep
-their prior names and new workspaces use the current naming rules.
+their prior names and new workspaces use the current naming rules. After an upgrade, check native
+persona selectors for renamed placements. The Claude session `agent` selector uses the delivered
+name, such as `vm-review` for a session-delivered VM persona. Artifact declarations keep their
+canonical names.
 
 Native preflight conservatively refuses relevant restrictions for new delivery in the configuration
 files it inspects. Restrictions affecting existing ancestor placement warn without blocking session

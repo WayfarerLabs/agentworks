@@ -541,6 +541,7 @@ class CodexIntegration(HarnessIntegration):
                     environment=invocation.request_environment(),
                     redactor=invocation.redactor,
                     files=files,
+                    setup=invocation,
                     vm_only=True,
                 ),
             )
@@ -608,6 +609,7 @@ class CodexIntegration(HarnessIntegration):
                     home=invocation.home,
                     native_root=root,
                     files=files,
+                    setup=invocation,
                 ),
             )
         return replace(
@@ -644,6 +646,7 @@ class CodexIntegration(HarnessIntegration):
                     redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
+                    setup=invocation,
                     workspace_only=True,
                 ),
             )

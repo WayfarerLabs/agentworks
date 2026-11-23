@@ -253,6 +253,7 @@ class GrokBuildIntegration(HarnessIntegration):
                     home=invocation.home,
                     native_root=root,
                     files=files,
+                    setup=invocation,
                 ),
             )
         return replace(
@@ -286,6 +287,7 @@ class GrokBuildIntegration(HarnessIntegration):
                     redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
+                    setup=invocation,
                     workspace_only=True,
                 ),
             )
