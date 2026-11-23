@@ -20,8 +20,6 @@ if TYPE_CHECKING:
 GID = "1003"
 HOME_PROBE = Script(f"test -e {HOME} || test -L {HOME}", Shell.SH, elevated=True)
 STAT = Command(("stat", "-c", "%f:%g", "--", HOME), elevated=True)
-GID_PROBE = Command(("getent", "group", GID))
-NAME_PROBE = Command(("getent", "group", LINUX_USER))
 GROUPADD = ("groupadd", "-g", GID, LINUX_USER)
 USERADD = ("useradd", "-m", "-g", GID, "-s", "/bin/bash", LINUX_USER)
 
@@ -32,8 +30,6 @@ def _retained_home(recorder: AccessRecorder, overrides: list[tuple[object, Resul
         *(overrides or []),
         (HOME_PROBE, Result(Completed(0))),
         (STAT, Result(Completed(0), f"41e8:{GID}\n".encode())),
-        (GID_PROBE, Result(Completed(2))),
-        (NAME_PROBE, Result(Completed(2))),
     ]
 
     def scripted(call: Call) -> Result | BaseException | None:
@@ -62,36 +58,32 @@ def test_recreation_uses_the_retained_numeric_gid_without_reowning_files(
     assert commands.index(GROUPADD) < commands.index(USERADD) < commands.index(("chmod", "0750", HOME))
     assert [argv for argv in commands if argv[0] == "useradd"] == [USERADD]
     assert _ownership_changes(recorder) == []
-    assert GID_PROBE in recorder.requests("run")  # NSS lookup needs no sudo.
 
 
 @pytest.mark.parametrize(
-    "collision",
-    [
-        [(GID_PROBE, Result(Completed(0), f"unrelated:x:{GID}:someone\n".encode()))],
-        [(GID_PROBE, Result(Completed(0), f"{LINUX_USER}:x:{GID}:\n".encode()))],
-        [(NAME_PROBE, Result(Completed(0), f"{LINUX_USER}:x:1006:\n".encode()))],
-    ],
-    ids=["unrelated-gid", "remaining-named-group", "name-with-other-gid"],
+    "status",
+    [4, 9],
+    ids=["gid-in-use", "name-in-use"],
 )
-def test_collisions_stop_before_any_mutation(
-    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, collision: list[tuple[object, Result]]
+def test_group_collisions_stop_before_account_or_home_changes(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     recorders = []
 
     def configure(recorder: AccessRecorder) -> None:
         recorders.append(recorder)
-        _retained_home(recorder, collision)
+        _retained_home(recorder, [(Command(GROUPADD, elevated=True), Result(Completed(status)))])
 
-    with pytest.raises(StateError):
+    with pytest.raises(CommandFailed):
         _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=configure)
 
     commands = _commands(recorders[0])
-    assert all(argv[0] in ("getent", "stat") for argv in commands)
+    assert [argv for argv in commands if argv[0] == "groupadd"] == [GROUPADD]
+    assert all(argv[0] in ("getent", "stat", "groupadd") for argv in commands)
     assert _ownership_changes(recorders[0]) == []
 
 
-@pytest.mark.parametrize("probe", [HOME_PROBE, STAT, GID_PROBE, NAME_PROBE], ids=["home", "stat", "gid", "name"])
+@pytest.mark.parametrize("probe", [HOME_PROBE, STAT], ids=["home", "stat"])
 @pytest.mark.parametrize("failure", ["connection", "deadline", "exit"])
 def test_an_unanswered_recovery_probe_never_creates_or_changes_ownership(
     db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, probe: object, failure: str
@@ -161,7 +153,6 @@ def test_a_missing_home_keeps_ordinary_private_group_creation(
     assert not any(argv[0] == "groupadd" for argv in commands)
     assert STAT not in recorder.requests("run")
     assert _ownership_changes(recorder) == []
-    assert GID_PROBE not in recorder.requests("run")
 
 
 def test_an_existing_account_preserves_its_shared_group_and_home_ownership(

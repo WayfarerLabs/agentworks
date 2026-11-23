@@ -106,16 +106,6 @@ def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shel
             f"cannot recreate agent '{linux_user}': could not read retained home directory GID at '{home}'"
         )
 
-    for key in (gid, linux_user):
-        if probe_presence(admin, Command(("getent", "group", key)), absent_status=GETENT_NOT_FOUND_STATUS) is not None:
-            raise StateError(
-                f"cannot recreate agent '{linux_user}': retained home '{home}' uses GID {gid}, "
-                f"but group key '{key}' is already in use",
-                entity_kind="agent",
-                entity_name=linux_user,
-                hint="Resolve the group collision on the VM before retrying; retained ownership has not been changed.",
-            )
-
     # Both creations are exclusive: a concurrent collision fails without
     # choosing another GID or changing ownership of the retained tree.
     try:
