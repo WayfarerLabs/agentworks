@@ -39,6 +39,7 @@ graph TD
   ACCT --> SESS
   WS --> GRANT[grant/workspace+account]
   ACCT --> GRANT
+  VM --> GALL[grant-all]
   SESS --> CON
 ```
 
@@ -49,6 +50,9 @@ graph TD
 - **session**: one session, below both its workspace and its account.
 - **grant**: one agent's membership in one workspace's group, below both. Grant and revoke, the
   implicit grant of session create, and grant-all materialization lock it.
+- **grant-all**: the set of agents granted every workspace. Workspace create reads it, to grant
+  those agents the new workspace, so it holds it shared; agent create with grant-all and grant or
+  revoke `--all` change it, so they hold it exclusive.
 - **console**: a named console. It holds sessions from anywhere on the VM, so a console operation
   locks the console and marks each member session in use.
 
@@ -71,10 +75,20 @@ grants and console windows) takes each of them exclusive too, and with them ever
 not already hold, shared. Workspace delete then needs the session's account shared, which a
 concurrent agent delete holds exclusive, so one of the two is refused.
 
-An access or observe command (R4) takes the **vm** shared and nothing else. Only a VM-wide
-operation, which takes the vm exclusive, refuses it. Starting a stopped VM is a VM-wide change, so
-an access command that must boot the VM takes the vm exclusive for the boot and drops to shared for
-its body.
+An access or observe command (R4) takes the **vm** shared for its admission only, as `hold_active`
+does today, and runs its body (the shell, the attach, the forward) unlocked. Only a VM-wide
+operation, which takes the vm exclusive, refuses it. Holding the vm shared for the body would refuse
+`vm stop`, `reinit` and `delete` for as long as any shell stayed open.
+
+Booting a stopped VM is a VM-wide change, and a held shared lock cannot be upgraded (neither `flock`
+nor `LockFileEx` converts one safely), so activation follows one of two patterns:
+
+- **Gate first:** commands built on the activation gate run the gate and their secret resolution
+  before acquiring their own set. The boot takes the vm exclusive briefly and admission takes it
+  shared briefly; the command then acquires its set and re-checks the VM's identity and intent.
+- **Runtime first:** commands that record intent before activation (`runtime_state` families, the
+  console runtime commands, `session start --spec`) choose the vm mode up front: exclusive when the
+  VM is not confirmed active, shared otherwise, held for the run.
 
 The two modes map onto primitives every workstation has: `flock` `LOCK_SH` and `LOCK_EX` on POSIX,
 and `LockFileEx` with and without `LOCKFILE_EXCLUSIVE_LOCK` on Windows (through `ctypes`, since
@@ -117,7 +131,7 @@ removes the record on release. A refused operation reads the records, keeps thos
 and whose set conflicts with what it asked for, and names one:
 
 ```text
-Error: session/build-42 cannot start: `agw workspace rehome` has held workspace/api for 3m12s.
+Error: session/build-42 is blocked: `agw workspace rehome` has held workspace/api for 3m12s.
 Hint: Retry when that operation finishes.
 ```
 
@@ -131,18 +145,23 @@ them.
 Some writes reach state no single entity owns. Each gets an explicit home:
 
 - **The VM's account and group files.** Concurrent `useradd`, `groupadd`, `usermod -aG`,
-  `gpasswd -d` and `userdel` from different subtrees would contend for shadow-utils' own lock, which
-  gives up after a short retry. Every account or group edit runs inside a guest-side
-  `flock /run/agentworks/accounts.lock` with a bounded wait of a few seconds. This is an internal
-  critical section around one short command, not an operation conflict, so it waits briefly rather
-  than failing fast, and it also covers processes from other workstations.
+  `gpasswd -d` and `userdel` from different subtrees edit the same files. Debian 12's shadow-utils
+  serializes its own tools through `lckpwdf`, but not every supported guest release has been
+  checked, and the tools do not cover each other's read-modify sequences in Agentworks' scripts. So
+  every account or group edit runs inside a guest-side `flock` on a file in a root-only directory (a
+  lock file other accounts can open could be held by any of them), with a bounded wait. This is an
+  internal critical section around one short command, not an operation conflict, so it waits briefly
+  rather than failing fast, and it also covers processes from other workstations. A home removal is
+  not an account-file edit and runs outside it, under the account's own lock.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
-  roots). These writes are idempotent; the LLD confirms each is an atomic replace or an
-  ensure-if-missing, and makes it one where it is not, so concurrent launches cannot tear them.
-- **The operator's SSH config and other workstation files rebuilt from the database.** A rebuild
+  roots). The configuration is written by an atomic replace, and the socket directories end in the
+  same state however two setups interleave, so concurrent launches cannot tear them.
+- **The operator's SSH config, VS Code workspace files and the per-VM host-key store.** A rebuild
   that read the database before another operation committed could write stale entries. Rebuilds take
   a workstation-wide internal mutex with a short bounded wait, and each rebuild reads the database
-  inside it.
+  inside it. Host-key records change only under the vm exclusive.
+- **Workspace directory paths.** A target path is reserved with a plain `mkdir`, which fails when
+  the path exists, so two creates or rehome operations cannot claim one directory.
 - **Stale socket cleanup across one agent's sessions** runs under that account's exclusive lock
   (agent create and reinit) or the vm exclusive (vm reinit and create), so no session of that agent
   is starting meanwhile.
@@ -157,10 +176,16 @@ workspace), and `vm import-host-keys` (the vm).
 
 Secret resolution and confirmations move before acquisition. Where the answer depends on state the
 lock keeps stable, the operation reads, asks, then acquires and re-checks the state it showed; if it
-changed, it refuses and the operator runs the command again. Two exceptions stay inside the lock,
-because the question is about what the operation is doing: recover's host-key confirmation, which
-confirms a key the locked recovery just observed, and rekey's `--wait-for-share` pause. Both hold
-only the vm, which a VM-wide operation holds anyway.
+changed, it refuses and the operator runs the command again. Three exceptions stay inside the lock,
+because the question is about what the locked operation is doing:
+
+- recover's host-key confirmation, which confirms a key the locked recovery just observed;
+- rekey's `--wait-for-share` pause;
+- workload and console pane secrets in `runtime_state` and console runtime commands, which secrets
+  are needed depends on definitions and observations made inside the lock.
+
+The first two hold only the vm, which a VM-wide operation holds anyway. The third holds only its
+family's set. Each says so with one notice line before it asks.
 
 ### Many VMs
 
@@ -184,7 +209,8 @@ console's ancestors being the vm and each member session with its workspace and 
 | agent grant-workspaces, revoke-workspaces                                     | one grant per pair                                   |
 | workspace create, delete, repair, rehome; copy (destination)                  | workspace, plus the grants, sessions, consoles found |
 | session create                                                                | session, plus its implicit grant                     |
-| session start, stop, restart, reconcile, delete, set-desired-state            | session                                              |
+| session start, stop, restart, reconcile, set-desired-state                    | session                                              |
+| session delete                                                                | session, plus each console holding it                |
 | console create, start, stop, restart, delete, membership, add-shell, restore  | console                                              |
 
 `session create --new-workspace` or `--new-agent` takes that workspace or account exclusive in place
@@ -198,8 +224,11 @@ lock stays per workstation and per database. Dry runs still take no lock.
 ## Delivery
 
 One implementation PR, after the LLD. It replaces `native_mutation_guard` and its token in one step
-(no old and new lock paths side by side on `main`), updates every call site, and updates
-`cli/command-reference.md` (the busy paragraph), `cli/agentworks/orchestration/README.md` and the
+(no old and new lock paths side by side on `main`), updates every call site, and updates every doc
+that describes the single guard: `cli/command-reference.md` (the busy paragraph),
+`cli/agentworks/orchestration/README.md`, `cli/agentworks/db/README.md`,
+`cli/agentworks/capabilities/harness_integration/README.md`, the guides on desired runtime state,
+native harness setup, harness facets and idempotency, the troubleshooting guide topic, and the
 upgrade guide. Tests cover the conflict matrix at the primitive, each mode on both platforms, a
 crashed holder, the old-version interlock, holder naming, and one concurrent pair per FRD story
 driven through real services.
