@@ -114,8 +114,10 @@ Filed during the effort and open at the lock:
 - #938: the migration-safety handshake test is flaky under load.
 - #941: git credential timeout hardening.
 - #946: `session create` and `agent exec` on a copied workspace fail on an unknown template.
-- #947: the legacy SSH transport raised `UnicodeEncodeError` rather than `SSHError`, filed against a
-  base before PR C, which deleted that transport.
 - #950: Windows config loading reads the TOML file in the locale encoding (`config/load.py`).
 - #951: Python 3.13's strict certificate checks reject the PVE 8.4 CA, which needs a durable
   compatibility decision.
+
+Issue #947 (the legacy SSH transport raised `UnicodeEncodeError` rather than `SSHError`) was filed
+against a base before PR C and closed at the lock as resolved by it: that transport is gone, and the
+request envelope encodes every argument as UTF-8.
