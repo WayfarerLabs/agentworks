@@ -21,9 +21,10 @@ Two acquisitions do most of the damage the FRD describes:
   clone or rehome for up to ten, agent create for a minute.
 
 Some mutators take no lock on their body (agent grant and revoke, workspace repair, workspace copy,
-`vm import-host-keys`). Several prompts run while the lock is held (rekey's auth key and its share
-pause, recover's host-key confirmation, rehome's confirmation, session delete's confirmation,
-console delete's confirmation and the empty-console offer, spec restart consent).
+`vm import-host-keys`, `vm confirm-release`). Several prompts run while the lock is held (rekey's
+auth key and its share pause, recover's host-key confirmation, rehome's confirmation, session
+delete's confirmation, console delete's confirmation and the empty-console offer, spec restart
+consent).
 
 ## Shape
 
@@ -82,19 +83,29 @@ operation, which takes the vm exclusive, refuses it. Holding the vm shared for t
 `vm stop`, `reinit` and `delete` for as long as any shell stayed open.
 
 Booting a stopped VM is a VM-wide change, and a held shared lock cannot be upgraded (neither `flock`
-nor `LockFileEx` converts one safely). Every command therefore runs the same sequence:
+nor `LockFileEx` converts one safely). Every command keeps today's activation order (ADR 0019) and
+changes only where its lock is taken:
 
-1. **Probe** its whole set without waiting and release it at once, so a conflict fails before any
-   prompt or boot (R3).
-2. **Ask and read:** resolve gate secrets, run its read-only probes, and ask its confirmations (R6).
-3. **Boot** if the operation needs the VM running and it is not confirmed active, holding the vm
-   exclusive only for the boot. Stop paths never boot. A runtime family that must boot records its
-   intent under that brief exclusive, so the intent survives a failed boot as it does today.
-4. **Acquire** the real set, with the vm shared.
-5. **Re-check** the identity, intent and state it read in step 2, refusing if any changed.
-6. **Run.**
+1. **Read:** the database reads that build its lock set, including any chooser that picks the
+   target.
+2. **Probe:** try the whole set without waiting and release it at once, so a conflict fails before
+   any later prompt or boot (R3).
+3. **Confirm early:** the confirmations that today precede the gate (workspace, agent and vm
+   delete).
+4. **Gate:** gate secrets just in time, skipped when the VM is confirmed active; a boot, only when
+   the operation needs the VM running and the provider reports it stopped, holding the vm exclusive
+   for the boot alone; then the availability hold (a keepalive, not a lock) to the end. A runtime
+   family that must boot records its intent under that brief exclusive, so the intent survives a
+   failed boot as it does today.
+5. **Prepare:** the preflight sweep, guest probes, boundary secrets, and the confirmations that show
+   what the probes found. Nothing is locked yet.
+6. **Acquire** the set, with the vm shared.
+7. **Re-check** the identity, intent and state read before, refusing if any changed.
+8. **Run.**
 
-So no vm exclusive outlives a boot, and R4 holds while a long operation runs on a VM it started.
+An operation needs the VM running when it opens the activation gate today; stop paths do not. So no
+vm exclusive outlives a boot, a transient reachability miss on a running VM never takes it, and R4
+holds while a long operation runs on a VM it started.
 
 The two modes map onto primitives every workstation has: `flock` `LOCK_SH` and `LOCK_EX` on POSIX,
 and `LockFileEx` with and without `LOCKFILE_EXCLUSIVE_LOCK` on Windows (through `ctypes`, since
@@ -169,7 +180,7 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   now run together. Rebuilds take a per-user workstation mutex with a short bounded wait, and each
   reads the database inside it. Host-key records change only under the vm exclusive. VS Code
   workspace files are written per workspace under that workspace's lock; their bulk regeneration
-  already races today and is tracked separately.
+  already races today and is tracked as #954.
 - **The guest package database.** Workspace repair's `apt-get` fallback waits on the package-manager
   lock for a bounded time, as recovery's does, since two repairs can now run together.
 - **Workspace directory paths.** A target path is reserved with a plain `mkdir`, which fails when
@@ -184,7 +195,7 @@ Some writes reach state no single entity owns. Each gets an explicit home:
 
 The mutators that take no lock today take the lock for what they change: grant and revoke (the
 grant, with its workspace and account shared), workspace repair and copy's destination (the
-workspace), and `vm import-host-keys` (the vm).
+workspace), and `vm import-host-keys` and `vm confirm-release` (the vm).
 
 ### Prompts before locks (R6)
 
@@ -200,8 +211,8 @@ because the question is about what the locked operation is doing:
   not, and resolve before acquisition like every other command's.
 
 The first two hold only the vm, which a VM-wide operation holds anyway. The third holds only its
-family's set. Each says so with one notice line before it asks, and tests fail any prompt asked
-under a held set without that notice.
+family's set. Each says so with one notice line before it asks. Only those acquisitions are marked
+as prompting; a prompt under any other held set is a programming error and raises.
 
 Moving a confirmation earlier keeps the order in which a command refuses: the read-only probes that
 today run before a confirmation (session delete's status and access checks, rehome's directory
@@ -223,19 +234,19 @@ implementation PR works through. Its spine, where every row also holds each ance
 names shared (a console's ancestors being the vm and each member session with its workspace and
 account):
 
-| Operation                                                                               | Exclusive                                            |
-| --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| vm create, reinit, start, stop, delete, rekey, recover, set-desired-state               | vm                                                   |
-| vm import-host-keys, confirm-release                                                    | vm                                                   |
-| vm shell, exec, port-forward, backup; agent shell, exec; session attach, logs           | nothing (vm shared)                                  |
-| agent create, reinit, delete                                                            | account, plus the grants, sessions, consoles found   |
-| agent grant-workspaces, revoke-workspaces                                               | one grant per pair                                   |
-| workspace create, delete, repair, rehome; copy (destination)                            | workspace, plus the grants, sessions, consoles found |
-| session create                                                                          | session, plus its implicit grant                     |
-| session start, stop, restart, reconcile, set-desired-state                              | session                                              |
-| session delete                                                                          | session, each console holding it, its implicit grant |
-| console create, start, stop, restart, reconcile, delete, membership, add-shell, restore | console                                              |
-| console attach                                                                          | nothing (vm shared, admission only)                  |
+| Operation                                                                                                  | Exclusive                                            |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| vm create, reinit, start, stop, delete, rekey, recover, reconcile, set-desired-state                       | vm                                                   |
+| vm import-host-keys, confirm-release                                                                       | vm                                                   |
+| vm shell, exec, port-forward, backup; agent shell, exec; session attach, logs                              | nothing (vm shared)                                  |
+| agent create, reinit, delete                                                                               | account, plus the grants, sessions, consoles found   |
+| agent grant-workspaces, revoke-workspaces                                                                  | one grant per pair                                   |
+| workspace create, delete, repair, rehome; copy (destination)                                               | workspace, plus the grants, sessions, consoles found |
+| session create                                                                                             | session, plus its implicit grant                     |
+| session start, stop, restart, reconcile, set-desired-state                                                 | session                                              |
+| session delete                                                                                             | session, each console holding it, its implicit grant |
+| console create, start, stop, restart, reconcile, set-desired-state, delete, membership, add-shell, restore | console                                              |
+| console attach                                                                                             | nothing (vm shared, admission only)                  |
 
 `session create --new-workspace` or `--new-agent` takes that workspace or account exclusive in place
 of shared.

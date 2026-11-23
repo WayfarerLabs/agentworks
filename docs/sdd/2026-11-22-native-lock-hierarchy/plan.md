@@ -26,14 +26,15 @@ is left undisposed, and #949 is merged.
 - [ ] Shared state: `groupadd -f` in the workspace-group helper, `userdel` split from the home
       removal, the per-user rebuild mutex for the SSH config, and the bounded package-manager wait
       in workspace repair.
-- [ ] Activation: the one sequence (probe, ask and read, boot under a brief vm exclusive, acquire,
-      re-check, run) in the activation gate and `LiveVMNode`, with admission-only shared locks for
-      access commands.
+- [ ] Activation: the eight-step sequence (read, probe, confirm early, gate with a boot under a
+      brief vm exclusive only when the provider reports the VM stopped, prepare, acquire with the vm
+      shared, re-check, run), with admission-only shared locks for access commands and cold runtime
+      families recording intent under the boot exclusive.
 - [ ] Every call site in the LLD's per-command table moved to its lock set, the unguarded mutators
       (grant and revoke, workspace repair, workspace copy, `vm import-host-keys`,
       `vm confirm-release`) guarded, and each identity re-check in place.
-- [ ] Prompts moved before acquisition per the LLD's R6 table, with the three exceptions announcing
-      themselves.
+- [ ] Prompts moved before acquisition per the LLD's rules and appendix, with the three sanctioned
+      acquisitions marked as prompting and any other prompt under a held set raising.
 - [ ] Confirm that every harness integration writes only inside the entity that owns it.
 - [ ] Tests: the conflict matrix at the primitive on POSIX and Windows, a crashed holder, the
       older-version interlock, holder naming, the probe, nested reuse, the prompt-notice check, and
