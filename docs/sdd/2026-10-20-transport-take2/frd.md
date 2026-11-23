@@ -467,6 +467,20 @@ PR before the lock or filing it and locking now, the operator chose:]
 
 > Small PR before lock (Recommended)
 
+### 2026-11-23
+
+[Told that the closeout report said its testing session had skipped signal, interruption, outage,
+identity-mismatch, privilege-boundary, decoy and fault-injection experiments under an operator stop
+direction that no artifact of this effort records, and asked whether the operator had given it, the
+operator answered:]
+
+> No
+
+[Asked whether the roughly 21 rows those experiments would reach on the existing beds should be
+recorded as open gaps at the lock or run first, the operator chose:]
+
+> Run them first
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.

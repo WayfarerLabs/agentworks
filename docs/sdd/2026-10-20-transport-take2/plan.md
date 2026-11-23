@@ -804,6 +804,10 @@ module, and `remote_exec.py` is deleted.
     Server 2025 standing in for Windows 11 ([2026-11-22](./frd.md#2026-11-22)).
 - [x] Run that last tester pass and fold its results into the matrix, recording each cell it cannot
       reach as a gap.
+- [ ] Run the experiments the last pass skipped, on the existing beds, under the operator's
+      [2026-11-23 ruling](./frd.md#2026-11-23), and fold their results into the matrix and
+      `locked.md`: the rows in `locked.md`'s first open-evidence group, plus the forced-fault
+      remainders of S2, S6, S7, S8 and I8.
 - [x] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
       and the operator guides) describe the end state, then write `locked.md`.
   - The docs half is done (`d84924c12`, `f138a6cdc`, `3741269b0`, `c328bd1f5`, `bfa173d2d`): the
