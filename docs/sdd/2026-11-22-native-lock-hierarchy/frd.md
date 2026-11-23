@@ -1,6 +1,6 @@
 # Native lock hierarchy
 
-Status: draft for the operator's acceptance.
+Status: accepted by the operator on 2026-11-23.
 
 ## Purpose
 
@@ -106,3 +106,11 @@ naming the holder, or waiting indefinitely, the operator chose:]
 [Asked whether to run this as its own small SDD or as a direct change, the operator chose:]
 
 > Own small SDD (Recommended)
+
+### 2026-11-23
+
+[Asked whether to accept requirements R1 to R7 as drafted, with R4 (access not blocked by changes
+below the VM), R5 (no new races) and R6 (no lock held across a prompt) named as the lead's
+additions, and offered accepting without R4, without R6, or changing something, the operator chose:]
+
+> Accept as drafted
