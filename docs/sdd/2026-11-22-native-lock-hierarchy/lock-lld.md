@@ -316,9 +316,10 @@ sanctioned acquisitions below):
    confirmations that render probe results. Nothing is locked.
 6. **Acquire** the request once, with the vm shared.
 7. **Re-check** under the set: the VM row's vm_uuid, desired runtime state and Tailscale host
-   against what step 4 admitted (a `vm stop`, `delete`, `rekey` or `recover` that ran in between),
-   the command's step-1 rows, and its step-5 probes. Any difference refuses with
-   `StateConflictError` ("changed since this command read it", hint "Run the command again.").
+   against what step 4 admitted (or what step 1 read, for a command that skips step 4) (a `vm stop`,
+   `delete`, `rekey` or `recover` that ran in between), the command's step-1 rows, and its step-5
+   probes. Any difference refuses with `StateConflictError` ("changed since this command read it",
+   hint "Run the command again.").
 8. **Run** the body; nested operations call `held.require`.
 
 **Needs the VM running** means every command that opens the activation gate today
@@ -327,67 +328,98 @@ sanctioned acquisitions below):
 which never boot and skip the hold (`orchestration/README.md:193-194`). The lock-set table marks it
 per command. A command that does not need it skips step 4.
 
-`gated_vm_boundary` and `activation_gate` become this sequence: the boundary takes the request, runs
-steps 2 to 5 on entry, and yields an object whose `locked()` runs steps 6 and 7 and yields the held
-set, so a command renders its probe-backed confirmations inside the boundary before locking.
+`gated_vm_boundary` and `activation_gate` become this sequence. The probe (step 2) is a separate
+call the command makes after its step-1 reads and before any step-3 confirmation. The boundary then
+takes the request, runs steps 4 and 5 on entry, and yields an object whose `locked()` runs steps 6
+and 7 and yields the held set, so a command renders its probe-backed confirmations inside the
+boundary before locking.
 
 **Access and observe commands** (`vm shell`, `vm exec`, `vm port-forward`, `vm backup`,
-`agent shell`, `agent exec`, `session attach`, `session logs`, `console attach`) run steps 2, 4 and
-5 with the admission request. Step 4's brief shared admission is their whole lock: they acquire
+`agent shell`, `agent exec`, `session attach`, `session logs`, `console attach`) run steps 1, 2, 4
+and 5 with the admission request. Step 4's brief shared admission is their whole lock: they acquire
 nothing more and run their body unlocked under the `vm_active` hold, as today
-(`cli/command-reference.md:690-691`).
+(`cli/command-reference.md:690-691`). One edge of R4 stays as it is today: an access command that
+must cold-boot the VM needs the vm exclusive for the boot, so an operation holding anything below
+the VM refuses that boot; once the VM is up, nothing below the VM refuses access.
 
 **VM-wide commands** run the same sequence and take `{vm: exclusive}` at step 6. `vm reinit` gates
-at step 4 like any other command; `vm rekey`, like the batch, resolves its boundary before its gate
-(ADR 0019), so its step 5 precedes step 4. Under the held exclusive, `auto_start` may run again if
-the VM went down meanwhile, since the set covers it. `vm start` and `vm recover` power the VM as
-their operation and never gate, as ADR 0019 says of commands whose op is the power change.
+at step 4 like any other command; `vm rekey` resolves its boundary before its gate, which serves the
+boundary's cache (`vms/manager/power.py:457`, as ADR 0019 describes), so its step 5 precedes step 4.
+Under the held exclusive, `auto_start` may run again if the VM went down meanwhile, since the set
+covers it. `vm start` and `vm recover` power the VM as their operation and never gate, as ADR 0019
+says of commands whose op is the power change.
 
 ### Runtime families
 
 The batch commands (`runtime_state` for `session start`, `stop`, `restart`, `reconcile`,
 `vm reconcile` and `console reconcile`) and the console runtime commands (`console start`,
-`restart`, `stop`) run the sequence per family, in VM name order:
+`restart`, `stop`) keep the runtime path's order at HEAD, which differs from the gate path's, and
+run it per family in VM name order (lettered here so as not to read as the eight steps above):
 
-- **Boundary before gates.** As ADR 0019 describes for the batch session ops, the batch resolves its
-  infrastructure secrets in one pass before the per-family gates, which serve that cache. The
-  workload and pane secrets resolve at step 8, under the family's set, which is a sanctioned
-  prompting acquisition ([Prompts under a set](#prompts-under-a-set)).
-- **Intent before activation.** Today a start's intent survives a failed activation
-  (`tests/sessions/test_console_preparation.py:307`; `:326` records a child's intent under a stopped
-  parent without activating). A family whose gate boots (a cold family) records intent at step 4,
-  under the boot's `{vm: exclusive}`, which covers every entity on the VM, then activates and
-  releases. Every other family records intent at step 8, under its set, before anything activates.
-- **Refusal after recorded intent is acceptable.** A cold family whose step-6 acquisition is refused
-  keeps the intent it recorded. That is the same contract as a failed activation today: intent is
-  the desired state, and the next start or reconcile converges it.
-- **Per-family failure.** A refusal or failure at any step, step 7's `StateConflictError` included,
-  fails and blocks that family's targets alone, as `runtime_state/_selection.py:122-128` does for a
-  busy family today; it is recorded on the family, never raised through `run_selected` to the whole
-  invocation. Step 7 re-runs the existing selection checks (`_selection.py:103-149`) and confirms
-  the recorded intent still stands.
+- **(a) Read** the selection (`runtime_state/_selection.py:28-76`).
+- **(b) Probe** each family's set.
+- **(c) Confirm early**: restart consent, after its status observation, as today
+  (`sessions/manager/_lifecycle.py:404-411`).
+- **(d) Record intent** under a brief acquisition of the family's own set (vm shared, targets
+  exclusive), released at once. The existing acceptance runs under it: the guest status probes it
+  reads (`_prepare.py:68-90`, unlocked just before, a failure counting as uncertainty), the
+  unauthorized-running-restart refusal, and the stopped-parent refusal (`_prepare.py:113`,
+  `:130-131`). Console runtime commands record their intent (`multi_console/lifecycle.py:86`) the
+  same way.
+- **(e) Infrastructure**, unlocked, in the runtime path's order: the preflight per node
+  (`vms/manager/runtime.py:68-69`); gate secrets just in time through `invocation.gate_value` and
+  `resolver.resolve_gate` (`runtime_state/_models.py:100-104`); the provider observation
+  (`runtime.py:74-79`), with no `confirmed_active` fast path on this path; and the boot, under a
+  brief `{vm: exclusive}` when the family needs its VM running and the provider reports it stopped
+  (`_prepare.py:247`).
+- **(f) Acquire** the family's set, with the vm shared.
+- **(g) Re-check** the existing selection checks (`_selection.py:103-149`), the VM row, and that the
+  recorded intent still stands.
+- **(h) Run**: guest workload preparation, then the workload boundary
+  (`runtime_state/_execute.py:45`; the console commands' pane resolve,
+  `multi_console/lifecycle.py:117-118` and `:191`), then execution. The boundary comes last because
+  the resolver forbids a gate secret after it (`secrets/resolver.py:200-201`), and it resolves while
+  every selected family's set is held, each set showing its own notice.
+
+Consequences:
+
+- **Intent survives infrastructure failure.** Intent is recorded before the gate secrets, the
+  observation and the boot, so a failure in any of them leaves it recorded, which keeps
+  `test_start_acceptance_survives_infrastructure_failure`
+  (`tests/sessions/test_console_preparation.py:306-322`) and the stopped-parent contract
+  (`:325-341`).
+- **Refusal after recorded intent is acceptable.** A family whose acquisition at (f) is refused
+  keeps the intent it recorded at (d). That is the same contract as a failed activation today:
+  intent is the desired state, and the next start or reconcile converges it.
+- **Per-family failure.** A refusal or failure at any step, the `StateConflictError` of (g)
+  included, fails and blocks that family's targets alone, as `_selection.py:122-128` does for a busy
+  family today; it is recorded on the family, never raised through `run_selected` to the whole
+  invocation.
 - **No boot under shared.** A power action found necessary under a family's shared vm (the VM went
-  down after step 4) refuses with
+  down after (e)) refuses with
   `StateError("VM '<name>' stopped after this command checked it", hint="Run the command again.")`;
   activation calls `held.require({vm: exclusive})` first.
 - **Explicit VM selections are VM-wide.** `vm reconcile`'s family requests the vm exclusive.
 
-`session start --spec` (`sessions/manager/_spec.py:103`) runs the family sequence itself for its one
-session. Its restart consent (today under the guard, `:135`) moves to step 5. It persists the spec
-overlay where intent is recorded (under the boot exclusive when cold, under its set when warm) and
-hands the held set to the batch (`run_session_batch(held=)`, `:149`), which then calls
-`held.require` instead of acquiring its own.
+`session start --spec` (`sessions/manager/_spec.py:103`) acquires nothing itself. It runs its
+consent probe and confirmation unlocked (step 5; today under its guard, `:133-135`), then passes the
+overlay and `running_restart_authorized` into the batch, which persists the overlay at its own (d)
+alongside the intent and runs the normal family sequence. `run_session_batch(held=)` (`:149`) goes
+away.
 
 ### Prompts under a set
 
 Three acquisitions are sanctioned to prompt, because the questions are about what the locked
 operation is doing: `vm recover`, for its host-key confirmation (`vms/manager/recover.py:240`);
-`vm rekey`, for `--wait-for-share` (`vms/manager/power.py:490`); and a runtime family or console
-runtime command's set, for workload and pane secrets, which depend on definitions and observations
-made under the lock (`runtime_state/_execute.py:45`, `sessions/multi_console/lifecycle.py:117-118`,
-`crud.py:379`, `:696`, `restore.py:353`). The first two hold only the vm, exclusive anyway; the
-third holds only its family's or console's set. These call sites acquire with
-`native_locks(db, request, prompts=True)`.
+`vm rekey`, for `--wait-for-share` (`vms/manager/power.py:490`); and the step-6 set of a
+`runtime_state` family or console runtime command, for workload and pane secrets, which depend on
+definitions and observations made under it (`runtime_state/_execute.py:45`,
+`sessions/multi_console/lifecycle.py:117-118`, `:191`). The first two hold only the vm, exclusive
+anyway; the third holds only its family's or console's set. These call sites acquire with
+`native_locks(db, request, prompts=True)`. Every other console command that resolves pane secrets
+(`console create`, `add-sessions`, `add-shell`, `restore-session`: `multi_console/attach.py:495`,
+`crud.py:379`, `:696`, `restore.py:353`) resolves them at step 5 and re-checks its console and
+members at step 7.
 
 The notice is structural. `native_locks` keeps the sets this process holds, and the prompt helpers
 (`output.confirm`, `choose`, `pause`, `prompt`, `prompt_secret`, `output.py:618-640`, which the
@@ -658,27 +690,28 @@ New tests live beside the package (`tests/native_locks/`); every primitive test 
 read the error's fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_for`),
 never its wording.
 
-| Test                  | Proves                                                                                                                                                                                                                                                                                          |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| conflict matrix       | the four mode pairs on one entity, within a process (two sets) and across processes (a subprocess holder), on both platforms                                                                                                                                                                    |
-| tree                  | a session change refuses a workspace change and the vm exclusive, and is refused by them; sessions in different workspaces and accounts coexist; workspace delete and agent delete on a shared session refuse one another                                                                       |
-| ordering              | two contending acquisitions never both fail                                                                                                                                                                                                                                                     |
-| probe                 | a conflicting probe raises naming the holder and writes no record; a free probe leaves nothing held                                                                                                                                                                                             |
-| crashed holder        | a killed subprocess holder frees every entity (bounded poll on Windows) and its record is removed by the next reader                                                                                                                                                                            |
-| old-version interlock | a subprocess running today's algorithm inline (`flock` exclusive, or `msvcrt.locking` after `seek(0)`) refuses new shared and exclusive acquisitions with the fallback, and a new shared holder makes the old algorithm fail with its busy errno                                                |
-| holder naming         | the earliest conflicting live holder is named with its command, entity and age; a stale record is skipped and deleted; a malformed one falls back; non-conflicting records are ignored                                                                                                          |
-| operation label       | a command invoked through the CLI runner with a distinctive argument value records its command path and no part of that value; outside the CLI the label is `agw`                                                                                                                               |
-| nested reuse          | `require` acquires nothing; an uncovered or weaker entity, a different VM or database, and a released set each raise `StateError`; a console whose members changed still matches by key                                                                                                         |
-| prompt notice         | under a set acquired with `prompts=True`, every prompt helper and a resolver prompt show its notice exactly once, before the first prompt; under any other held set they raise `StateError`; with no set held they show nothing                                                                 |
-| activation            | a cold VM boots under a transient vm exclusive and the body holds the vm shared; `auto_start` under a shared set refuses; step 7 refuses a changed vm_uuid, intent or host; no boot on a Tailscale miss when the provider reports the VM running; a cold family's intent survives a failed boot |
-| account removal       | against a scripted guest: plain `userdel`, then the home and spool removed only when owned by the probed uid; a home owned by someone else is kept                                                                                                                                              |
-| ensure_group          | two concurrent grants of different agents to one workspace whose group is missing both succeed, each creating or finding the group                                                                                                                                                              |
-| rebuild lock          | a second SSH config rebuild waits for the first and then reads the newer database state; a lock held past the bound raises the typed error                                                                                                                                                      |
-| grant-all             | a workspace create and a grant-all agent create on one VM: one is refused before native work, and after a retry every grant-all agent has a grant for every workspace                                                                                                                           |
-| rollback              | a failing `session create --new-workspace --new-agent` unwinds without a refusal while unrelated holders exist on the VM                                                                                                                                                                        |
-| family failure        | a step-7 conflict or a busy step 6 in one family blocks that family's targets only, the invocation reports the others normally, and a refused cold family keeps the intent it recorded                                                                                                          |
-| spec start            | `session start --spec` persists its overlay with the intent and the batch it hands the set to acquires nothing                                                                                                                                                                                  |
-| rehome re-check       | a session started between rehome's confirmation and its acquisition refuses the rehome                                                                                                                                                                                                          |
+| Test                  | Proves                                                                                                                                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| conflict matrix       | the four mode pairs on one entity, within a process (two sets) and across processes (a subprocess holder), on both platforms                                                                                                                     |
+| tree                  | a session change refuses a workspace change and the vm exclusive, and is refused by them; sessions in different workspaces and accounts coexist; workspace delete and agent delete on a shared session refuse one another                        |
+| ordering              | two contending acquisitions never both fail                                                                                                                                                                                                      |
+| probe                 | a conflicting probe raises naming the holder and writes no record; a free probe leaves nothing held                                                                                                                                              |
+| crashed holder        | a killed subprocess holder frees every entity (bounded poll on Windows) and its record is removed by the next reader                                                                                                                             |
+| old-version interlock | a subprocess running today's algorithm inline (`flock` exclusive, or `msvcrt.locking` after `seek(0)`) refuses new shared and exclusive acquisitions with the fallback, and a new shared holder makes the old algorithm fail with its busy errno |
+| holder naming         | the earliest conflicting live holder is named with its command, entity and age; a stale record is skipped and deleted; a malformed one falls back; non-conflicting records are ignored                                                           |
+| operation label       | a command invoked through the CLI runner with a distinctive argument value records its command path and no part of that value; outside the CLI the label is `agw`                                                                                |
+| nested reuse          | `require` acquires nothing; an uncovered or weaker entity, a different VM or database, and a released set each raise `StateError`; a console whose members changed still matches by key                                                          |
+| prompt notice         | under a set acquired with `prompts=True`, every prompt helper and a resolver prompt show its notice exactly once, before the first prompt; under any other held set they raise `StateError`; with no set held they show nothing                  |
+| activation            | a cold VM boots under a transient vm exclusive and the body holds the vm shared; no boot on a Tailscale miss when the provider reports the VM running; `auto_start` under a shared set refuses; step 7 refuses a changed vm_uuid, intent or host |
+| recorded intent       | a family's or console's recorded intent survives a failure in its gate secrets, its provider observation and its boot; a start below a stopped-intent parent records intent and never prepares the VM                                            |
+| account removal       | against a scripted guest: plain `userdel`, then the home and spool removed only when owned by the probed uid; a home owned by someone else is kept                                                                                               |
+| ensure_group          | two concurrent grants of different agents to one workspace whose group is missing both succeed, each creating or finding the group                                                                                                               |
+| rebuild lock          | a second SSH config rebuild waits for the first and then reads the newer database state; a lock held past the bound raises the typed error                                                                                                       |
+| grant-all             | a workspace create and a grant-all agent create on one VM: one is refused before native work, and after a retry every grant-all agent has a grant for every workspace                                                                            |
+| rollback              | a failing `session create --new-workspace --new-agent` unwinds without a refusal while unrelated holders exist on the VM                                                                                                                         |
+| family failure        | a conflict at the re-check (g) or a busy acquisition (f) in one family blocks that family's targets only, the invocation reports the others normally, and the refused family keeps the intent it recorded at (d)                                 |
+| spec start            | `session start --spec` makes no acquisition of its own: the batch persists its overlay with the intent, and the acquisitions are exactly those of a plain `session start`                                                                        |
+| rehome re-check       | a session started between rehome's confirmation and its acquisition refuses the rehome                                                                                                                                                           |
 
 One concurrent pair per FRD story, plus the session-delete pairs, driven through the real manager
 functions with the scripted guest: the first operation is paused at a known guest command (an event
@@ -785,6 +818,6 @@ lists what steps 3 to 5 take out of the lock.
 | `console start`, `restart`, `stop`                 | `multi_console/lifecycle.py:69`, `:149`                                                                                                                                                                                                   | gate secrets (`:96`, `:167`); pane secrets stay (`:117-118`, `:191`)                                   |
 | `console delete`                                   | `multi_console/attach.py:854`                                                                                                                                                                                                             | confirm (`:856`)                                                                                       |
 | `console set-desired-state`                        | `multi_console/runtime.py:132`                                                                                                                                                                                                            | none                                                                                                   |
-| `console add-sessions`, `add-shell`                | `crud.py:325`, `:648`                                                                                                                                                                                                                     | pane secrets stay (`:379`, `:696`)                                                                     |
+| `console add-sessions`, `add-shell`                | `crud.py:325`, `:648`                                                                                                                                                                                                                     | pane secrets move to step 5 (`:379`, `:696`)                                                           |
 | `console remove-sessions`, `reorder-sessions`      | `crud.py:466`, `:525`                                                                                                                                                                                                                     | empty-console offer (`:494`)                                                                           |
-| `console restore-session`                          | `multi_console/restore.py:293`                                                                                                                                                                                                            | gate secrets; pane secrets stay (`:353`)                                                               |
+| `console restore-session`                          | `multi_console/restore.py:293`                                                                                                                                                                                                            | gate secrets; pane secrets move to step 5 (`:353`)                                                     |
