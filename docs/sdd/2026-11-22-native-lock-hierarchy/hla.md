@@ -42,6 +42,7 @@ graph TD
   WS --> GRANT[grant/workspace+account]
   ACCT --> GRANT
   VM --> GALL[grant-all]
+  VM --> PATH[path/directory]
   SESS --> CON
 ```
 
@@ -57,6 +58,8 @@ graph TD
   revoke `--all` change it, so they hold it exclusive, together with a grant for every existing
   workspace and the account shared even when there are none: revoke `--all` deletes every grant row
   of the account, so it must exclude a named grant that lands meanwhile.
+- **path**: a workspace directory tree on the guest, by its resolved path, with each ancestor
+  directory as its parent (see Workspace directory paths below).
 - **console**: a named console. It holds sessions from anywhere on the VM, so a console operation
   locks the console and marks each member session in use.
 
@@ -198,13 +201,15 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   kept apart, would share one file. Each name gains a unique part and is created exclusively.
 - **The guest package database.** Workspace repair's `apt-get` fallback waits on the package-manager
   lock for a bounded time, as recovery's does, since two repairs can now run together.
-- **Workspace directory paths.** No two workspaces' paths may nest. A target path is reserved with a
-  plain `mkdir`, which fails when the path exists, but that reserves only the directory, not the
-  tree around it: one rehome could move a workspace inside another that a second rehome is about to
-  remove. So workspace create, copy's destination and rehome read every workspace whose path
-  overlaps their source or target, hold those workspaces shared, re-check their paths under the set,
-  and refuse a target that sits inside or contains another workspace, published or still being
-  reserved.
+- **Workspace directory paths.** A target path is reserved with a plain `mkdir`, which reserves only
+  that directory, not the tree around it: one rehome could move a workspace inside another that a
+  second rehome is about to remove. So directory trees are locked like entities, with a `path` kind
+  under the vm. An operation that creates, fills or removes a workspace tree takes its root
+  exclusive and every ancestor directory shared: workspace create and copy's destination take their
+  target, rehome its target and its source, workspace delete its path. The rehome that would move a
+  workspace into `/data/B/new` holds `/data/B` shared, so a removal of `/data/B` is refused while it
+  runs, and creates in disjoint trees still run together. A nested layout that already exists keeps
+  today's behavior, including what a later `--remove-old` does to it.
 - **Stale socket cleanup across one agent's sessions** runs under that account's exclusive lock
   (agent create and reinit) or the vm exclusive (vm reinit and create), so no session of that agent
   is starting meanwhile.
