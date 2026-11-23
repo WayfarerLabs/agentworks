@@ -210,13 +210,13 @@ def verify_retirement(root, members, remaining):
 
 def replacements_fit(excess, existing, additions, observed, proposed):
     remaining = {'members': request.get('replacement_members', 0), 'bytes': request['inventory_bytes']}
-    for old, (new, members) in request.get('retirements', {}).items():
+    for old, (new, members, incumbent) in request.get('retirements', {}).items():
         if old not in existing:
             continue
         # Direct-marker discovery can hide descendants that a later scan
         # would count after retirement. Verify every disappearing marker.
         required = tool != 'codex' and old + '/SKILL.md' in observed
-        count_credit = byte_credit = 0
+        old_count = old_size = count_credit = byte_credit = 0
         byte_budget = 'metadata'
         if new is not None:
             old_count = sum(path == old or path.startswith(old + '/') for path in existing)
@@ -228,14 +228,21 @@ def replacements_fit(excess, existing, additions, observed, proposed):
             count_credit = min(old_count, new_count)
             byte_credit = min(old_size, max(0, new_size))
         needed = (count_credit and excess['entries'] > 0) or (byte_credit and excess[byte_budget] > 0)
-        if not (required or needed):
+        overlap = incumbent and new in existing and (
+            count_credit < min(old_count, excess['entries']) or byte_credit < min(old_size, excess[byte_budget])
+        )
+        if not (required or needed or overlap):
             continue
         if not verify_retirement(pathlib.Path(old), members, remaining):
             if required:
                 return False
             continue
-        # Publication can retain the old placement and skip the same origins'
-        # replacement. Budget for either outcome.
+        if overlap and verify_retirement(pathlib.Path(new), incumbent, remaining):
+            # Every path that could block retirement of the old origins is
+            # now verified. The receiving placement remains fully charged.
+            count_credit, byte_credit = old_count, old_size
+        # Otherwise budget for publication retaining the old placement and
+        # skipping its same-origin replacement.
         excess['entries'] -= count_credit
         excess[byte_budget] -= byte_credit
     return max(excess.values()) <= 0
@@ -515,13 +522,21 @@ def _native_entrypoints(
     return placements
 
 
+type _FileFingerprints = dict[str, tuple[str, int]]
+
+
+def _at_placement(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + "/")
+
+
 def _owned_retirements(
     files: Sequence[ArtifactFile | OwnedArtifactFile], setup: SetupInvocation | None, tool: str
-) -> dict[str, tuple[str | None, dict[str, tuple[str, int]]]]:
+) -> dict[str, tuple[str | None, _FileFingerprints, _FileFingerprints]]:
     """Send evidence for rename credits and retiring direct-marker packages."""
     if setup is None or setup.prior is None:
         return {}
     prior = setup.prior.artifact_files
+    prior_by_path = {file.path: file for file in prior}
     previous = _native_entrypoints(prior)
     paths = {file.path for file in files}
     candidates: dict[str, tuple[str | None, str, frozenset[str]]] = {}
@@ -538,26 +553,43 @@ def _owned_retirements(
 
     root_owned = isinstance(setup, VMSetupInvocation)
     group = setup.linux_group if isinstance(setup, WorkspaceSetupInvocation) else ""
+
+    def fingerprints(entries: Sequence[OwnedArtifactFile]) -> _FileFingerprints:
+        return {file.path: (file.sha256, artifact_file_mode(file.executable, group, root_owned)) for file in entries}
+
     retirements = {}
     for old_root, (new_root, kind, origins) in candidates.items():
         if setup.retain_artifact_origins.intersection(origins):
             continue
-        prefix = old_root + "/"
-        members = [file for file in prior if file.path == old_root or file.path.startswith(prefix)]
+        members = [file for file in prior if _at_placement(file.path, old_root)]
         package = old_root if kind == "skill" else None
-        ineligible = any(path == old_root or path.startswith(prefix) for path in paths) or any(
+        ineligible = any(_at_placement(path, old_root) for path in paths) or any(
             file.generated_section
             or file.package_root != package
             or setup.retain_artifact_origins.intersection(file.origins)
             or (new_root is not None and frozenset(file.origins) != origins)
             for file in members
         )
-        evidence = (
-            {}
-            if ineligible
-            else {file.path: (file.sha256, artifact_file_mode(file.executable, group, root_owned)) for file in members}
-        )
-        retirements[old_root] = (new_root, evidence)
+        evidence = {} if ineligible else fingerprints(members)
+        incumbent: _FileFingerprints = {}
+        if new_root is not None and evidence:
+            entrypoint = new_root + "/SKILL.md" if kind == "skill" else new_root
+            receiver = prior_by_path.get(entrypoint)
+            if (
+                receiver is not None
+                and (receiver.native_identity or "").startswith(kind + ":")
+                and all(_at_placement(file.path, old_root) for file in prior if origins.intersection(file.origins))
+                and all(_at_placement(file.path, new_root) for file in files if origins.intersection(file.origins))
+            ):
+                previous_receiver = [file for file in prior if _at_placement(file.path, new_root)]
+                wanted_receiver = [file for file in files if _at_placement(file.path, new_root)]
+                expected_package = new_root if kind == "skill" else None
+                if all(
+                    not file.generated_section and file.package_root == expected_package
+                    for file in (*previous_receiver, *wanted_receiver)
+                ):
+                    incumbent = fingerprints(previous_receiver)
+        retirements[old_root] = (new_root, evidence, incumbent)
     return retirements
 
 

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
+from agentworks.artifacts.model import ArtifactInputs, ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native import probe
 from agentworks.artifacts.publication import publish_artifacts
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
@@ -17,10 +18,15 @@ from agentworks.errors import StateError
 from agentworks.execution.files import Files
 from agentworks.harness_setup.model import SetupRecord
 from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS
+from agentworks.plugins.claude import artifacts as claude
+from agentworks.plugins.codex import artifacts as codex
+from tests.artifacts._fixtures import group
+from tests.artifacts.test_native_delivery import artifact
 from tests.native_setup_fixtures import LocalFixtureAccount
 
 if TYPE_CHECKING:
     from agentworks.artifacts.application import ArtifactPublication
+    from agentworks.artifacts.model import ArtifactInput
     from agentworks.db import VMRow
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
@@ -272,4 +278,97 @@ def test_owned_persona_can_shrink_in_place_without_replacement_credit(tmp_path, 
     _preflight(account, "claude", wanted, previous)
     final = publish_artifacts(account.files(), wanted, previous, lambda _: None, roots=(str(account.home),))
     assert not final.skipped and Path(old[0].path).read_bytes() == wanted[0].data
+    _preflight(account, "claude", wanted, final.files)
+
+
+def _vm_artifact(kind: ArtifactType, name: str) -> ArtifactInput:
+    item = artifact(kind, name=name)
+    content = replace(item.content, text=f"Instructions for {name}.\n") if kind is ArtifactType.AGENT else item.content
+    return replace(item, content=content, origin=ArtifactOrigin("vm", "vm", "fixture", entry=name))
+
+
+@pytest.mark.parametrize(
+    ("kind", "scenario"),
+    [
+        (ArtifactType.AGENT, "clean-chain"),
+        (ArtifactType.SKILL, "clean-chain"),
+        (ArtifactType.SKILL, "modified-receiver"),
+        (ArtifactType.AGENT, "foreign-tail"),
+        (ArtifactType.AGENT, "extra-origin-path"),
+    ],
+)
+def test_codex_catalog_credits_only_proven_retirement_at_the_head_of_a_chain(tmp_path, monkeypatch, kind, scenario):
+    account = _account(tmp_path, monkeypatch, "codex")
+    skills = account.home / ".agents/skills"
+    agents = account.home / ".codex/agents"
+    catalog = skills if kind is ArtifactType.SKILL else agents
+    owner = group(*(_vm_artifact(kind, name) for name in ("review", "vm-review", "vm-vm-review")))
+
+    def project(inputs: ArtifactInputs) -> tuple[ArtifactFile, ...]:
+        return codex.outer_artifacts(inputs, skills_root=str(skills), agents_root=str(agents)).files
+
+    old = project(ArtifactInputs(local=owner))
+    changed_path = None
+    operator_bytes = b"Operator edit.\n"
+    if scenario == "extra-origin-path":
+        changed_path = agents / "older-side-file.txt"
+        old += (ArtifactFile(str(changed_path), b"Previous instructions.\n", old[0].origins),)
+    local = group(artifact(ArtifactType.AGENT, name="independent")) if scenario == "foreign-tail" else None
+    wanted = project(ArtifactInputs(local=local, deferred={owner.owner: owner}))
+    previous = publish_artifacts(account.files(), old, (), lambda _: None, roots=(str(account.home),)).files
+    if scenario == "foreign-tail":
+        changed_path = agents / "vm-vm-vm-review.toml"
+        operator_bytes = b'name = "vm-vm-vm-review"\ndeveloper_instructions = "Operator edits."\n'
+    elif scenario == "modified-receiver":
+        changed_path = skills / "vm-review/scripts/check.sh"
+    if changed_path is not None:
+        changed_path.write_bytes(operator_bytes)
+    for index in range(512 - sum(1 for _ in catalog.rglob("*"))):
+        (catalog / f"unrelated-{index}").touch()
+    assert sum(1 for _ in catalog.rglob("*")) == 512
+
+    if scenario in {"modified-receiver", "extra-origin-path"}:
+        with pytest.raises(StateError):
+            _preflight(account, "codex", wanted, previous)
+        assert changed_path is not None and changed_path.read_bytes() == operator_bytes
+        assert Path(old[0].path).is_file()
+        assert not Path(wanted[-1].path).exists()
+        return
+
+    _preflight(account, "codex", wanted, previous)
+    final = publish_artifacts(account.files(), wanted, previous, lambda _: None, roots=(str(account.home),))
+    assert not Path(old[0].path).exists()
+    if changed_path is None:
+        assert not final.skipped
+        assert all(Path(file.path).read_bytes() == file.data for file in wanted)
+        assert all(bool(Path(file.path).stat().st_mode & 0o111) == file.executable for file in wanted)
+    else:
+        assert {item.path for item in final.skipped} == {str(changed_path)}
+        assert changed_path.read_bytes() == operator_bytes
+        assert (agents / "independent.toml").is_file()
+    assert sum(1 for _ in catalog.rglob("*")) == 512
+    _preflight(account, "codex", wanted, final.files)
+
+
+def test_claude_catalog_credits_observed_bytes_at_a_verified_overlapping_destination(tmp_path, monkeypatch):
+    account = _account(tmp_path, monkeypatch, "claude")
+    native = account.home / ".claude"
+    catalog = native / "agents"
+    owner = group(*(_vm_artifact(ArtifactType.AGENT, name) for name in ("review", "vm-review")))
+    old = claude.outer_artifacts(ArtifactInputs(local=owner), str(native)).files
+    wanted = claude.outer_artifacts(ArtifactInputs(deferred={owner.owner: owner}), str(native)).files
+    previous = publish_artifacts(account.files(), old, (), lambda _: None, roots=(str(account.home),)).files
+
+    def header_bytes(data: bytes) -> int:
+        return len(data.split(b"---\n", 2)[1])
+
+    limit = 1_048_576
+    _fill_persona_bytes(catalog, limit - sum(header_bytes(file.data) for file in wanted), "claude")
+    assert sum(header_bytes(path.read_bytes()) for path in catalog.iterdir()) < limit
+    assert len(list(catalog.iterdir())) < 512
+    _preflight(account, "claude", old, previous)
+    _preflight(account, "claude", wanted, previous)
+    final = publish_artifacts(account.files(), wanted, previous, lambda _: None, roots=(str(account.home),))
+    assert not final.skipped
+    assert sum(header_bytes(path.read_bytes()) for path in catalog.iterdir()) == limit
     _preflight(account, "claude", wanted, final.files)
