@@ -6,8 +6,10 @@ Status: draft. Builds on the accepted [FRD](./frd.md) and the draft [HLA](./hla.
 are `file:line` under `cli/agentworks/` at 27b215e9b unless a path says otherwise.
 
 This document fixes the primitive, the holder records, the lock set of every command, the mechanism
-for each piece of shared state, the tests and the collateral. Where it departs from or adds to the
-HLA, the section says so and [HLA findings](#hla-findings) collects the cases for the HLA's owner.
+for each piece of shared state, the tests and the collateral. [Decisions](#7-decisions) records the
+lead's rulings on the questions the first draft left open, and
+[Remaining differences from the HLA](#remaining-differences-from-the-hla) lists where this LLD and
+the HLA still disagree.
 
 ## 1. The primitive
 
@@ -67,13 +69,13 @@ Accounts are keyed by Linux user rather than agent name because the account is t
 (`agents/manager/_common.py:109` derives `agt-<name>` at create; legacy rows keep their stored
 user), and the admin and every agent are distinct users on one VM, so no key collides.
 
-The `grant-all` entity is an addition to the HLA's tree. A grant-all agent must hold a grant for
+The `grant-all` entity names a set no other entity owns. A grant-all agent must hold a grant for
 every workspace on its VM (`agents/grants.py:296`). Workspace create reads the set of grant-all
 agents (`workspaces/realize.py:209`), and agent create with `--grant-all-workspaces`, grant `--all`
 and revoke `--all` change that set and then read the set of workspaces (`agents/realize.py:225-230`,
-`agents/grants.py:104-110`, `:176-185`). Neither set belongs to any entity of the HLA's tree, so a
-workspace create and a grant-all agent create on one VM could each miss the other. The `grant-all`
-entity names that set: readers hold it shared, writers exclusive.
+`agents/grants.py:104-110`, `:176-185`). Without an entity for that set, a workspace create and a
+grant-all agent create on one VM could each miss the other. Readers hold `grant-all` shared, writers
+exclusive.
 
 ### Modes and requests
 
@@ -298,8 +300,9 @@ fall in two patterns:
 
 Admission (`hold_active`) never holds the native lock across the body of any command. An access
 command's admission set is released before its interactive body, as today (`nodes.py:285`,
-`cli/command-reference.md:690-691`); [HLA findings](#hla-findings) item 1 explains why this LLD does
-not hold the vm shared for the body.
+`cli/command-reference.md:690-691`). Holding the vm shared across an interactive body would refuse
+`vm stop`, `reinit`, `rekey`, `recover` and `delete` for as long as any shell, attach, `logs -f` or
+port forward stays open, a refusal by an operation that changes nothing.
 
 ## 2. Holder records
 
@@ -365,10 +368,9 @@ Error: session/build-42 on VM 'dev' is blocked: another operation holds workspac
   Hint: Retry when that operation finishes.
 ```
 
-Durations print as `41s`, `3m12s` or `1h05m`. The HLA's example names the refused verb ("cannot
-start"); the primitive does not know the verb, and the subject plus the holder already tell the
-operator what to wait for, so this LLD uses "is blocked" rather than threading a verb through every
-call site.
+Durations print as `41s`, `3m12s` or `1h05m`. The message says "is blocked" rather than naming the
+refused verb: the primitive does not know the verb, and the subject plus the holder already tell the
+operator what to wait for.
 
 ### What a record never contains
 
@@ -469,27 +471,32 @@ if either changed.
 
 ### Prompts (R6)
 
-| Prompt                                                                                                 | Today                                                                                                                                     | New                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Boundary and gate secrets, every gate-first command                                                    | inside the guard where it precedes the gate (`boundary.py:180`, `:187`)                                                                   | before acquisition; the operation re-reads what it acts on after acquiring                                                                                                                                                                                                                                                                       |
-| `vm start`, `stop` gate secrets                                                                        | `vms/manager/runtime.py:73`, under `power.py:73`, `:117`                                                                                  | resolved first; `prepare_vm_runtime` serves the cache (`resolve_gate`)                                                                                                                                                                                                                                                                           |
-| `vm reinit`, `vm delete` secrets                                                                       | under `reinit.py:71`, `power.py:218`                                                                                                      | before acquisition; reload and compare vm_uuid                                                                                                                                                                                                                                                                                                   |
-| `vm rekey` auth key and `--prompt`                                                                     | under `power.py:412` (`boundary.py:346`, `:361`)                                                                                          | before acquisition; existing checks after                                                                                                                                                                                                                                                                                                        |
-| `vm rekey --wait-for-share` pause                                                                      | `power.py:490`                                                                                                                            | stays inside: it pauses the rekey itself; holds only the vm, exclusive anyway                                                                                                                                                                                                                                                                    |
-| `vm recover` host-key confirm                                                                          | `recover.py:240`                                                                                                                          | stays inside: it confirms a key the locked recovery just observed; holds only the vm                                                                                                                                                                                                                                                             |
-| `vm delete` confirm                                                                                    | before, `power.py:213`                                                                                                                    | unchanged                                                                                                                                                                                                                                                                                                                                        |
-| `vm confirm-release` confirm                                                                           | unlocked, `release.py:79`                                                                                                                 | before acquisition; reload the row and the observed release after                                                                                                                                                                                                                                                                                |
-| `agent delete`, `workspace delete` confirm                                                             | before, `lifecycle.py:324`, `delete.py:101`                                                                                               | before; after acquiring, the session set must equal the one the confirm counted, else `StateConflictError`                                                                                                                                                                                                                                       |
-| `workspace rehome` confirm                                                                             | under `rehome.py:96`, at `:217`                                                                                                           | before; it shows only the stored and new paths; re-read the path and re-run the probes after acquiring                                                                                                                                                                                                                                           |
-| `session delete` confirm                                                                               | under `_queries.py:154`, at `:227`                                                                                                        | before; re-read the session uuid after                                                                                                                                                                                                                                                                                                           |
-| empty-console offer (session delete, remove-sessions)                                                  | under the guard (`_queries.py:295`, `crud.py:494`, `_resource_cleanup.py:97`)                                                             | before, phrased as "will be empty"; under the console's lock a consented console is deleted only if still empty; a console that became empty without an offer is kept with a note                                                                                                                                                                |
-| session delete's workspace and agent offers                                                            | unlocked (`_queries.py:159-160`)                                                                                                          | unchanged; the deletes they run take their own sets and re-check emptiness under them                                                                                                                                                                                                                                                            |
-| `console delete` confirm                                                                               | under `attach.py:854`, at `:856`                                                                                                          | before; re-read the console after                                                                                                                                                                                                                                                                                                                |
-| restart consent (`session restart`)                                                                    | before, `_lifecycle.py:411`; refusal under the guard `_runtime.py:229-234`                                                                | unchanged                                                                                                                                                                                                                                                                                                                                        |
-| restart consent (`session start --spec`)                                                               | under `_spec.py:128`, at `:135`                                                                                                           | before, as `session restart` does; the same refusal under the set if the session became running without consent                                                                                                                                                                                                                                  |
-| `runtime_state` gate (infrastructure) secrets                                                          | under the families (`_prepare.py:213-221`)                                                                                                | per family before `acquire_families`; a failure still blocks only that family                                                                                                                                                                                                                                                                    |
-| `runtime_state` workload union; console pane secrets (start, create, add-shell, add-sessions, restore) | under the families or the console guard (`runtime_state/_execute.py:45`, `lifecycle.py:117-118`, `crud.py:379`, `:696`, `restore.py:353`) | stays inside: which secrets are needed depends on definitions and observations the locked phase prepares ("healthy no-ops do not request unused launch inputs"). The set holds only the targets with their shared ancestors. Before the first prompt under a set the command prints one line naming the locked entities, which is R6's "says so" |
-| VM, workspace, agent choice prompts                                                                    | before (`cli/_helpers.py:196`, `_create_plan.py:175`, `:349`, `:404`, `copy.py:140`)                                                      | unchanged                                                                                                                                                                                                                                                                                                                                        |
+| Prompt                                                                                                 | Today                                                                                                                                     | New                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Boundary and gate secrets, every gate-first command                                                    | inside the guard where it precedes the gate (`boundary.py:180`, `:187`)                                                                   | before acquisition; the operation re-reads what it acts on after acquiring                                                                                                                                                                                                                               |
+| `vm start`, `stop` gate secrets                                                                        | `vms/manager/runtime.py:73`, under `power.py:73`, `:117`                                                                                  | resolved first; `prepare_vm_runtime` serves the cache (`resolve_gate`)                                                                                                                                                                                                                                   |
+| `vm reinit`, `vm delete` secrets                                                                       | under `reinit.py:71`, `power.py:218`                                                                                                      | before acquisition; reload and compare vm_uuid                                                                                                                                                                                                                                                           |
+| `vm rekey` auth key and `--prompt`                                                                     | under `power.py:412` (`boundary.py:346`, `:361`)                                                                                          | before acquisition; existing checks after                                                                                                                                                                                                                                                                |
+| `vm rekey --wait-for-share` pause                                                                      | `power.py:490`                                                                                                                            | stays inside, after the notice line: it pauses the rekey itself; holds only the vm, exclusive anyway                                                                                                                                                                                                     |
+| `vm recover` host-key confirm                                                                          | `recover.py:240`                                                                                                                          | stays inside, after the notice line: it confirms a key the locked recovery just observed; holds only the vm                                                                                                                                                                                              |
+| `vm delete` confirm                                                                                    | before, `power.py:213`                                                                                                                    | unchanged                                                                                                                                                                                                                                                                                                |
+| `vm confirm-release` confirm                                                                           | unlocked, `release.py:79`                                                                                                                 | before acquisition; reload the row and the observed release after                                                                                                                                                                                                                                        |
+| `agent delete`, `workspace delete` confirm                                                             | before, `lifecycle.py:324`, `delete.py:101`                                                                                               | before; after acquiring, the session set must equal the one the confirm counted, else `StateConflictError`                                                                                                                                                                                               |
+| `workspace rehome` confirm                                                                             | under `rehome.py:96`, at `:217`                                                                                                           | before; it shows only the stored and new paths; re-read the path and re-run the probes after acquiring                                                                                                                                                                                                   |
+| `session delete` confirm                                                                               | under `_queries.py:154`, at `:227`                                                                                                        | before; re-read the session uuid after                                                                                                                                                                                                                                                                   |
+| empty-console offer (session delete, remove-sessions)                                                  | under the guard (`_queries.py:295`, `crud.py:494`, `_resource_cleanup.py:97`)                                                             | before, phrased as "will be empty"; under the console's lock a consented console is deleted only if still empty; a console that became empty without an offer is kept with a note                                                                                                                        |
+| session delete's workspace and agent offers                                                            | unlocked (`_queries.py:159-160`)                                                                                                          | unchanged; the deletes they run take their own sets and re-check emptiness under them                                                                                                                                                                                                                    |
+| `console delete` confirm                                                                               | under `attach.py:854`, at `:856`                                                                                                          | before; re-read the console after                                                                                                                                                                                                                                                                        |
+| restart consent (`session restart`)                                                                    | before, `_lifecycle.py:411`; refusal under the guard `_runtime.py:229-234`                                                                | unchanged                                                                                                                                                                                                                                                                                                |
+| restart consent (`session start --spec`)                                                               | under `_spec.py:128`, at `:135`                                                                                                           | before, as `session restart` does; the same refusal under the set if the session became running without consent                                                                                                                                                                                          |
+| `runtime_state` gate (infrastructure) secrets                                                          | under the families (`_prepare.py:213-221`)                                                                                                | per family before `acquire_families`; a failure still blocks only that family                                                                                                                                                                                                                            |
+| `runtime_state` workload union; console pane secrets (start, create, add-shell, add-sessions, restore) | under the families or the console guard (`runtime_state/_execute.py:45`, `lifecycle.py:117-118`, `crud.py:379`, `:696`, `restore.py:353`) | stays inside: which secrets are needed depends on definitions and observations the locked phase prepares ("healthy no-ops do not request unused launch inputs"). The set is only the family's (or the console's) own: the targets with their shared ancestors. The notice line precedes the first prompt |
+| VM, workspace, agent choice prompts                                                                    | before (`cli/_helpers.py:196`, `_create_plan.py:175`, `:349`, `:404`, `copy.py:140`)                                                      | unchanged                                                                                                                                                                                                                                                                                                |
+
+The notice line is `NativeLockSet.announce_prompt()`: before the first prompt asked while a set is
+held, it prints one `output.info` line naming the held entities and saying they stay locked until
+the answer is given. It prints once per set, and only when the command is about to prompt (a
+resolver whose pending names all come from non-interactive sources prints nothing).
 
 ### Flows that need more than a row
 
@@ -531,8 +538,10 @@ resolver, recording a failure against that family exactly as `_prepare.py:213-22
 refused family is failed and blocked as today (`_selection.py:122-128`), now carrying the R3
 message; the others proceed. Under a shared vm a family whose VM turns out stopped is blocked with
 the "stopped after this command checked it" error instead of activating (`_prepare.py:247` calls
-`held.require` first). A cold VM's family holds the vm exclusive for the whole run, which costs no
-concurrency today has (nothing else runs on a stopped VM) and avoids an upgrade.
+`held.require` first). A family whose VM was not confirmed active holds the vm exclusive for its
+whole run, by decision: a held shared lock cannot be upgraded to boot, and dropping the exclusive
+after the boot would mean releasing, reacquiring shared and re-validating the whole selection for a
+case where concurrent work is rare, since little else runs on a VM that was stopped.
 
 ### Access commands that boot
 
@@ -542,19 +551,19 @@ holding no native lock, with the `vm_active` keepalive held for the span as toda
 
 ## 4. Shared state across entities
 
-| State                                      | Mechanism                                                                                                      | Call sites                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| VM account and group files                 | guest `flock` wrapper, below                                                                                   | `agents/initializer.py:83`, `:172`, `:181`, `:421`; `agents/grants.py:257`, `:278`; `workspaces/guest.py:107`; `workspaces/backends/vm.py:139`, `:321`; `workspaces/manager/repair.py:187`, `:322`, `:329`; `workspaces/manager/copy.py:216`; `vms/initializer/shell_env.py:256`; `sessions/tmux.py:542`                         |
-| `/opt/agentworks/tmux-session.conf`        | already an atomic replace: no change                                                                           | `sessions/tmux.py:711-722` writes through `Files.write`, which writes an `O_EXCL` temporary with a fresh name and renames it over the file (`execution/file_program.py:298-328`); parents tolerate a concurrent `mkdir` (`:126-129`). Callers `_create_roll.py:390`, `_execute.py:279`                                           |
-| socket roots and per-account socket dirs   | already convergent: no change                                                                                  | `ensure_agent_socket_root`, `ensure_agent_socket_dir`, `ensure_admin_socket_root` (`tmux.py:456-511`, `:607-632`): each step is `mkdir -p` or an absolute `chown`/`chmod`, so any interleaving of two runs ends in the same state. Called from `create_session` (`tmux.py:1042-1048`) under the session's set                    |
-| stale socket cleanup                       | runs only under the account exclusive or the vm exclusive                                                      | `cleanup_stale_sockets` (`tmux.py:546`) from `create_agent_on_vm` (`agents/initializer.py:227`: agent create, reinit, `session create --new-agent`) and `_converge_agent_sockets` (`vms/initializer/driver.py:349`: vm create, reinit). No session of that account can launch meanwhile, since a launch holds the account shared |
-| workspace group membership                 | the grant entity                                                                                               | every `add_to_workspace_group` / `remove_from_workspace_group` caller holds the grant exclusive                                                                                                                                                                                                                                  |
-| set of grant-all agents, set of workspaces | the grant-all entity                                                                                           | [section 1](#entities)                                                                                                                                                                                                                                                                                                           |
-| a workspace directory path                 | already reserved by an exclusive `mkdir`: no change                                                            | create (`workspaces/backends/vm.py:127`), rehome (`rehome.py:228`): two operations aiming at one path cannot both reserve it                                                                                                                                                                                                     |
-| console membership                         | the console entity, with members as parents                                                                    | every membership change holds the console exclusive; deletes that cascade it extend with it                                                                                                                                                                                                                                      |
-| operator SSH config                        | workstation rebuild mutex, below                                                                               | `ssh_config.py:157` (`sync_ssh_config`) and so every caller (`vms/manager/lifecycle.py:699`, `host_keys.py:190`, `driver.py:143`, `recover.py:142`, `:243`, `reinit.py:414`, `power.py:323`, `:485`, `agents/realize.py:236`, `agents/manager/lifecycle.py:442`, `:850`, `cli/commands/config.py:112`)                           |
-| VS Code workspace files                    | the same mutex under its own name for the full regeneration; per-file writes under their workspace's exclusive | `cli/commands/config.py:80` (regeneration); `workspaces/backends/vm.py:350`, `delete.py:263`, `power.py:308`                                                                                                                                                                                                                     |
-| host-key store                             | per-VM file written atomically under the vm exclusive: no change                                               | `execution/trust.py:242-261`                                                                                                                                                                                                                                                                                                     |
+| State                                      | Mechanism                                                                                                                                                                                                                                                                                                 | Call sites                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM account and group files                 | guest `flock` wrapper, below                                                                                                                                                                                                                                                                              | `agents/initializer.py:83`, `:172`, `:181`, `:421`; `agents/grants.py:257`, `:278`; `workspaces/guest.py:107`; `workspaces/backends/vm.py:139`, `:321`; `workspaces/manager/repair.py:187`, `:322`, `:329`; `workspaces/manager/copy.py:216`; `vms/initializer/shell_env.py:256`; `sessions/tmux.py:542`                         |
+| `/opt/agentworks/tmux-session.conf`        | already an atomic replace: no change                                                                                                                                                                                                                                                                      | `sessions/tmux.py:711-722` writes through `Files.write`, which writes an `O_EXCL` temporary with a fresh name and renames it over the file (`execution/file_program.py:298-328`); parents tolerate a concurrent `mkdir` (`:126-129`). Callers `_create_roll.py:390`, `_execute.py:279`                                           |
+| socket roots and per-account socket dirs   | already convergent: no change                                                                                                                                                                                                                                                                             | `ensure_agent_socket_root`, `ensure_agent_socket_dir`, `ensure_admin_socket_root` (`tmux.py:456-511`, `:607-632`): each step is `mkdir -p` or an absolute `chown`/`chmod`, so any interleaving of two runs ends in the same state. Called from `create_session` (`tmux.py:1042-1048`) under the session's set                    |
+| stale socket cleanup                       | runs only under the account exclusive or the vm exclusive                                                                                                                                                                                                                                                 | `cleanup_stale_sockets` (`tmux.py:546`) from `create_agent_on_vm` (`agents/initializer.py:227`: agent create, reinit, `session create --new-agent`) and `_converge_agent_sockets` (`vms/initializer/driver.py:349`: vm create, reinit). No session of that account can launch meanwhile, since a launch holds the account shared |
+| workspace group membership                 | the grant entity                                                                                                                                                                                                                                                                                          | every `add_to_workspace_group` / `remove_from_workspace_group` caller holds the grant exclusive                                                                                                                                                                                                                                  |
+| set of grant-all agents, set of workspaces | the grant-all entity                                                                                                                                                                                                                                                                                      | [section 1](#entities)                                                                                                                                                                                                                                                                                                           |
+| a workspace directory path                 | already reserved by an exclusive `mkdir`: no change                                                                                                                                                                                                                                                       | create (`workspaces/backends/vm.py:127`), rehome (`rehome.py:228`): two operations aiming at one path cannot both reserve it                                                                                                                                                                                                     |
+| console membership                         | the console entity, with members as parents                                                                                                                                                                                                                                                               | every membership change holds the console exclusive; deletes that cascade it extend with it                                                                                                                                                                                                                                      |
+| operator SSH config                        | workstation rebuild mutex, below                                                                                                                                                                                                                                                                          | `ssh_config.py:157` (`sync_ssh_config`) and so every caller (`vms/manager/lifecycle.py:699`, `host_keys.py:190`, `driver.py:143`, `recover.py:142`, `:243`, `reinit.py:414`, `power.py:323`, `:485`, `agents/realize.py:236`, `agents/manager/lifecycle.py:442`, `:850`, `cli/commands/config.py:112`)                           |
+| VS Code workspace files                    | the same mutex under its own name, `rebuild_mutex("vscode-workspaces")`, around the full regeneration and around each per-file write or removal (which also run under their workspace's or the vm's exclusive), so a regeneration that read the database first cannot recreate a deleted workspace's file | `cli/commands/config.py:80` (regeneration); `workspaces/backends/vm.py:350`, `delete.py:263`, `power.py:308`                                                                                                                                                                                                                     |
+| host-key store                             | per-VM file written atomically under the vm exclusive: no change                                                                                                                                                                                                                                          | `execution/trust.py:242-261`                                                                                                                                                                                                                                                                                                     |
 
 ### Guest accounts lock
 
@@ -578,21 +587,43 @@ status, set by `-E`; no shadow tool uses 75) raises
 through one `require_account_edit` check; the edit itself never ran. `flock` is util-linux, which
 Debian marks essential.
 
-- The lock lives in a root-only directory, not `/run/agentworks/accounts.lock` as the HLA writes:
-  `flock` locks through a read-only descriptor, so a world-readable lock file would let any agent
-  account hold it and stall every account edit on the VM. `/run` is tmpfs, so the wrapper creates
-  the directory each time.
+- The lock lives in a root-only directory: `flock` locks through a read-only descriptor, so a
+  world-readable lock file would let any agent account hold it and stall every account edit on the
+  VM. `/run` is tmpfs, so the wrapper creates the directory each time.
 - The wait is bounded rather than fail-fast because this is a critical section around one short
   command, not an operation conflict, and it covers processes from other workstations too.
-- Evidence the HLA should note: Debian 12's `useradd` (shadow 4.13, checked on this host) links
-  glibc's `lckpwdf`, which itself waits up to 15 s, so shadow already serializes its own tools
-  there. The wrapper makes the guarantee agentworks's own across guest releases and gives a typed
-  timeout; [open question 3](#7-open-questions) asks whether to keep it.
-- `userdel -r` (`agents/initializer.py:421`) holds the lock while it removes the home; the 30 s wait
-  covers a typical home, and [open question 2](#7-open-questions) covers large ones.
+- Debian 12's `useradd` (shadow 4.13, checked on this host) links glibc's `lckpwdf`, which itself
+  waits up to 15 s, so shadow already serializes its own tools there. The wrapper stays (decision
+  3): it makes the guarantee agentworks's own across guest releases, covers the check-then-act
+  scripts such as `getent group || groupadd` (`workspaces/guest.py:107`), and gives a typed timeout.
 - Not wrapped: the platform bootstrap script and WSL2's create
   (`capabilities/vm_platform/bootstrap_script.py:107-111`, `wsl2.py:902`, `:909`), which run before
   the VM can be reached by any other operation, under `vm create`'s exclusive.
+
+### Agent account removal
+
+`delete_agent_on_vm` (`agents/initializer.py:390-425`, called from agent delete at
+`agents/manager/lifecycle.py:435` and from agent create's rollback at `agents/realize.py:108`) runs
+`userdel -r`, which would hold the accounts lock for as long as the home takes to delete. It splits
+instead (decision 2), keeping its order of `pkill` and socket-directory removal first and its
+warn-on-step-failure handling:
+
+1. Probe, as root: the account's uid and home from `getent passwd` (`passwd_lookup`,
+   `agents/initializer.py:44`), and the mail spool directory from `MAIL_DIR` in `/etc/login.defs`
+   (default `/var/mail`).
+2. `account_edit(("userdel", linux_user))` under the accounts lock. Without `-r`, `userdel` still
+   removes the account's user-private group (`USERGROUPS_ENAB`) and the passwd, shadow and group
+   entries; what `-r` adds is only the home and the mail spool, which the next step removes.
+3. Outside the accounts lock, still under the account's exclusive lock that agent delete (and the
+   creating operation, on rollback) holds: one root script removes the home with
+   `rm -rf --one-file-system --` only when it is a directory still owned by the probed uid, and the
+   spool `<MAIL_DIR>/<user>` only when it is a regular file owned by that uid. That keeps
+   `userdel -r`'s rule of not removing a home the user does not own, and never follows into another
+   file system. The account's lock is what makes the freed name safe meanwhile: no create of the
+   same account can start until it is released.
+
+A failure in step 3 warns through the existing `STEP_FAILURES` handler, as a `userdel -r` exit 12
+(home or spool removal failed) does today.
 
 ### SSH config and other workstation rebuilds
 
@@ -603,10 +634,10 @@ most 10 s. A timeout raises `StateError` naming the rebuild, with the hint
 `agw config sync-ssh-config` (or `sync-vscode-workspaces`). `sync_ssh_config` takes
 `rebuild_mutex("ssh-config")` around its whole body, so its database reads (`ssh_config.py:436`,
 `:460`) and its writes (`:247`, `:363-381`) are one critical section and the last rebuild always
-reads the latest committed state. It is per OS user rather than per database because every database
-of that user writes the same `~/.ssh/config`. Callers keep their current failure handling;
-`sync_ssh_config_or_warn` turns a timeout into its warning. The mutex is a leaf: nothing inside it
-acquires a native lock.
+reads the latest committed state. It is per OS user rather than per database (decision 6) because
+the SSH config is the OS user's file whatever the database. Callers keep their current failure
+handling; `sync_ssh_config_or_warn` turns a timeout into its warning. The mutex is a leaf: nothing
+inside it acquires a native lock.
 
 ## 5. Tests
 
@@ -631,6 +662,8 @@ never its wording.
 | rebuild mutex         | a second rebuild waits for the first and then reads the newer database state; a held mutex past the bound raises the typed error                                                                                                                             |
 | grant-all             | workspace create and grant-all agent create on one VM: one is refused before native work, and after both finish (retry included) every grant-all agent has a grant for every workspace                                                                       |
 | rollback              | a failing `session create --new-workspace --new-agent` unwinds without any refusal while unrelated holders exist on the VM                                                                                                                                   |
+| account removal       | on Linux CI against a scripted guest: `userdel` runs through the accounts wrapper without `-r`, then the home and spool are removed only when owned by the probed uid, and a home owned by someone else is kept                                              |
+| VS Code regeneration  | a regeneration that read the database before a workspace delete committed does not recreate the deleted workspace's file                                                                                                                                     |
 
 One concurrent pair per FRD story, driven through the real manager functions with the scripted
 guest: the first operation is paused at a known guest command (an event the fake guest waits on)
@@ -644,6 +677,16 @@ while the second runs on another thread.
 | access during changes                         | `agent create` paused; `vm exec`, `session attach` and `session logs` admission | admitted                              |
 | VM-wide refused while something below changes | `session start` paused; `vm stop`                                               | `vm stop` refused, holder named       |
 | refusal names the holder                      | `workspace rehome` paused; `session start` in that workspace                    | refused naming rehome, workspace, age |
+
+### Implementation-time check: harness setup confinement
+
+The map assumes `apply_workspace_setup` and `apply_agent_setup` write only inside their owner (the
+workspace tree, the account home); `apply_vm_setup` runs under the vm exclusive and is covered
+whatever it writes. The implementation PR confirms this for every harness integration's writers
+(decision 5), for each one either with a test that a setup applied for one owner leaves another
+owner's tree untouched, or with a review cited in the PR naming the writer and the paths it can
+reach. I checked only the cleanup paths (`harness_setup/cleanup.py:25-42`). A writer that crosses
+owners adds the other owner to its request, exclusive, before the PR merges.
 
 ### Existing tests that change
 
@@ -660,8 +703,8 @@ while the second runs on another thread.
 
 ## 6. Collateral for the implementation PR
 
-The HLA names the first three; the rest state the current single-guard behavior too and go stale
-with this change.
+Every item states the current single-guard behavior and goes stale with this change; the HLA's
+delivery list names the same set.
 
 - `cli/command-reference.md:687-692`, the busy paragraph: hierarchical sets, what refuses what, the
   holder message, prompts before locks with their exceptions, admission still not spanning a body.
@@ -682,54 +725,37 @@ with this change.
 
 No sample-config or completion change: the waits are constants and the command tree is unchanged.
 
-## 7. Open questions
+## 7. Decisions
 
-1. **Workload and pane secrets under the set.** This LLD keeps them inside, with a notice line,
-   because computing the union needs the locked phase's definitions and observations. The
-   alternative computes the union read-only before locking and re-validates after, at the cost of a
-   second round of guest observations per command. Which does the lead want, and is a one-line
-   notice the right reading of R6's "says so"?
-2. **`userdel -r` under the accounts lock.** Keep it whole with the 30 s wait (a concurrent edit
-   during a very large home removal times out and asks for a retry), or split it into `userdel`
-   under the lock and the home removal outside it, which changes how a failed home removal is
-   reported?
-3. **Keep the guest wrapper?** Debian 12's shadow already serializes through `lckpwdf`. I could not
-   check every supported guest release; I recommend keeping the wrapper.
-4. **Cold runtime families hold the vm exclusive throughout.** Acceptable, or should a family boot
-   under a transient exclusive and reacquire shared, re-validating its selection?
-5. **Harness setup confinement.** The map assumes `apply_workspace_setup` and `apply_agent_setup`
-   write only inside their owner (workspace tree, account home). I checked the rehome and delete
-   cleanup paths (`harness_setup/cleanup.py:25-42`) but not every integration's writers; the
-   implementation should confirm it, since a writer that crosses owners needs the other owner in its
-   request.
-6. **Rebuild mutex scope.** Per OS user under `CONFIG_DIR` (this LLD) or per database beside the
-   lock directory?
+The lead ruled on the first draft's open questions (2026-11-23); each is folded in above.
 
-## HLA findings
+1. Workload and pane secrets stay inside the lock, after one notice line naming the locked entities,
+   which is R6's "says so"; the set held is only the family's ([Prompts](#prompts-r6)).
+2. `userdel -r` splits: `userdel` under the accounts lock, then the home and mail spool removed
+   outside it under the account's exclusive lock ([Agent account removal](#agent-account-removal)).
+3. The guest `flock` wrapper stays ([Guest accounts lock](#guest-accounts-lock)).
+4. A runtime family on a VM not confirmed active holds the vm exclusive for its whole run
+   ([runtime_state families](#runtime_state-families)).
+5. Harness setup confinement is an implementation-time check with a test or cited review per writer
+   ([section 5](#implementation-time-check-harness-setup-confinement)).
+6. The rebuild mutex is per OS user
+   ([SSH config and other workstation rebuilds](#ssh-config-and-other-workstation-rebuilds)).
 
-For the HLA's owner; this LLD designs around each where the HLA leaves room.
+No question is open.
 
-1. **Access bodies.** The HLA has a booting access command "drop to shared for its body". Holding
-   the vm shared across an interactive body would refuse `vm stop`, `reinit`, `rekey`, `recover` and
-   `delete` for as long as any shell, attach, `logs -f` or port forward stays open, a refusal by an
-   operation that changes nothing, against the FRD's purpose ("refused only by an operation that
-   changes something it depends on") and today's documented behavior
-   (`cli/command-reference.md:690-691`). This LLD keeps admission transient.
-2. **Grant-all sets.** The HLA's tree gives no entity to the set of grant-all agents or the set of
-   workspaces that grant-all materialization reads, so workspace create and grant-all agent create
-   can miss each other. This LLD adds the `grant-all` entity; the HLA's entity list and diagram need
-   it.
-3. **Booting under a shared vm.** The HLA does not say how a sub-VM operation boots a stopped VM,
-   which needs the vm exclusive its own shared vm cannot be upgraded to. This LLD's two activation
-   patterns answer it; the HLA should name them.
-4. **Accounts lock path and shadow behavior.** `/run/agentworks/accounts.lock` would be lockable by
-   agent accounts; and Debian 12's shadow waits up to 15 s in `lckpwdf` rather than "giving up after
-   a short retry".
-5. **A third prompt exception.** The HLA allows two prompts inside a lock; the definition-dependent
-   workload and pane secret unions are a third (open question 1).
-6. **Session delete and consoles.** The HLA's spine row for session delete names only the session;
-   removing a console member changes the console, so session delete also takes each containing
-   console exclusive.
-7. **Collateral.** The delivery list misses the six further docs and the guide topic of section 6.
-8. **Shared state not listed.** Workspace directory paths (safe through exclusive `mkdir`), VS Code
-   workspace files and the host-key store belong in the HLA's shared-state list.
+## Remaining differences from the HLA
+
+Read against the amended HLA (4e4880d32). For the HLA's owner; this LLD follows the behavior it
+states.
+
+1. **Holder liveness.** The HLA's naming section keeps records "whose pid is alive" and deletes one
+   "whose process is gone". This LLD decides liveness by the record's own lock instead
+   ([Stale records](#stale-records)), which the OS releases at exit, so a reused pid cannot make a
+   dead holder look alive and no platform-specific process probe is needed. The pid stays in the
+   record for diagnosis only.
+2. **Order.** The HLA's global order (vm, workspaces, accounts, grants, sessions, consoles) omits
+   `grant-all`. This LLD places it after accounts and before grants; anywhere after vm keeps the
+   property that ancestors precede descendants.
+3. **Error example.** The HLA's example omits the VM and ends in a period; this LLD's message names
+   the VM (`session/build-42 on VM 'dev' is blocked: ...`), since one name can be locked on several
+   VMs and an operator may run commands against more than one.
