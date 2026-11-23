@@ -440,8 +440,8 @@ inspect declarations with `agw artifact show` instead.
 Native-home overrides follow the actual user's native conventions. In particular, an explicit
 `CLAUDE_CONFIG_DIR` places user MCP config at `<CLAUDE_CONFIG_DIR>/.claude.json`; the default is
 `~/.claude.json`, separate from Claude's `settings.json`. Native VM facets defer MCP to user; Shell
-publishes canonical `mcp_servers/<name>.json` files beneath its normal scope directory, including
-`/opt/agentworks/artifacts/` at VM scope. Shell does not connect or launch servers.
+publishes canonical `mcp_servers/<delivered-name>.json` files beneath its normal scope directory,
+including `/opt/agentworks/artifacts/` at VM scope. Shell does not connect or launch servers.
 
 Local `mcp_servers.github` registers `github`. The same declaration deferred from VM scope registers
 `vm-github`. Separate native user/project configurations follow the harness's normal loading and
