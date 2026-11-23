@@ -803,9 +803,8 @@ module, and `remote_exec.py` is deleted.
     line (done).
   - At lock: the underscore item is open. The closeout pass's live check found an underscore
     hostname misbehaving off WSL2 (the matrix's Closeout findings), and the operator ruled on
-    2026-11-22 that the rule moves into core before the lock; that move ships in its own PR, from
-    branch `fix/core-hostname-underscore`, where `vm create` refuses an underscore hostname on every
-    platform.
+    2026-11-22 that the rule moves into core before the lock; that move ships in #953, where
+    `vm create` refuses an underscore hostname on every platform.
 - [x] Complete the evidence matrix, sending any gap to the operator.
   - The [evidence matrix](./evidence-matrix.md) is compiled from every tester report at `main`
     `2b1d69dac`, and its gaps went to the operator, who ruled one last tester pass over every cell

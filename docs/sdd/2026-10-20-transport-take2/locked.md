@@ -29,9 +29,9 @@ live evidence the operator ruled recorded here rather than closed (see
   follow-ups, which PR C merged and finished (plan, slice 8).
 - [#916](https://github.com/WayfarerLabs/agentworks/pull/916): the generated workspace tmuxinator
   projects removed, with reinit retiring those earlier releases wrote.
-- [#HOSTNAME-PR](https://github.com/WayfarerLabs/agentworks/pull/HOSTNAME-PR), in this closeout:
-  `vm create` refuses a hostname with an underscore on every platform, moving the rule from WSL2
-  into core (operator ruling 2026-11-22).
+- [#953](https://github.com/WayfarerLabs/agentworks/pull/953), in this closeout: `vm create` refuses
+  a hostname with an underscore on every platform, moving the rule from WSL2 into core (operator
+  ruling 2026-11-22).
 
 ## Where the design lives now
 
