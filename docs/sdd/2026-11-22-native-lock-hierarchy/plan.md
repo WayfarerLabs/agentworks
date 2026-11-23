@@ -21,9 +21,10 @@ is left undisposed, and #949 is merged.
 
 ## Implementation, PR 1: under today's single lock
 
-- [ ] Shared state: `groupadd -f` in the workspace-group helper, `userdel` split from the home
-      removal, the per-user rebuild mutex for the SSH config, the bounded package-manager wait in
-      workspace repair, and unique operation log names created exclusively.
+- [ ] Shared state: `groupadd -f` in the workspace-group helper, agent deletion removing the home
+      and spool before `userdel`, nested workspace paths refused, the per-user rebuild mutex for the
+      SSH config, the bounded package-manager wait in workspace repair, and unique operation log
+      names created exclusively.
 - [ ] The unguarded mutators (grant and revoke, workspace repair, workspace copy,
       `vm import-host-keys`, `vm confirm-release`) take the single lock.
 - [ ] Prompts moved before acquisition per the LLD's rules and appendix, with re-checks after

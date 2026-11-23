@@ -54,7 +54,9 @@ graph TD
   implicit grant of session create, and grant-all materialization lock it.
 - **grant-all**: the set of agents granted every workspace. Workspace create reads it, to grant
   those agents the new workspace, so it holds it shared; agent create with grant-all and grant or
-  revoke `--all` change it, so they hold it exclusive.
+  revoke `--all` change it, so they hold it exclusive, together with a grant for every existing
+  workspace and the account shared even when there are none: revoke `--all` deletes every grant row
+  of the account, so it must exclude a named grant that lands meanwhile.
 - **console**: a named console. It holds sessions from anywhere on the VM, so a console operation
   locks the console and marks each member session in use.
 
@@ -174,10 +176,13 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   shadow-utils command (`useradd`, `usermod -aG`, `gpasswd -d`, `userdel`, `groupadd`, `groupdel`),
   and shadow-utils serializes its own tools through `lckpwdf` on both supported guest releases
   (Debian 12 and 13). The one check-then-create sequence that can now run twice at once, creating a
-  workspace's group during a grant, becomes `groupadd -f`. Agent deletion runs `userdel` without
-  `-r` and removes the home afterwards under the account's own lock, because `userdel -r` keeps
-  shadow's locks through the home removal and would stall, then fail, every other account edit on
-  the VM meanwhile.
+  workspace's group during a grant, becomes `groupadd -f`. Agent deletion removes the home and mail
+  spool first, under the account's exclusive lock while the account still exists, and runs plain
+  `userdel` last. Running `userdel -r` would keep shadow's locks through the home removal and stall,
+  then fail, every other account edit on the VM; removing the account first would free its numeric
+  user ID while its files remain, and the next account created could be allocated that ID and own
+  them. In this order the ID stays owned until its files are gone, and an interrupted deletion
+  reruns cleanly.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
@@ -193,8 +198,13 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   kept apart, would share one file. Each name gains a unique part and is created exclusively.
 - **The guest package database.** Workspace repair's `apt-get` fallback waits on the package-manager
   lock for a bounded time, as recovery's does, since two repairs can now run together.
-- **Workspace directory paths.** A target path is reserved with a plain `mkdir`, which fails when
-  the path exists, so two creates or rehome operations cannot claim one directory.
+- **Workspace directory paths.** No two workspaces' paths may nest. A target path is reserved with a
+  plain `mkdir`, which fails when the path exists, but that reserves only the directory, not the
+  tree around it: one rehome could move a workspace inside another that a second rehome is about to
+  remove. So workspace create, copy's destination and rehome read every workspace whose path
+  overlaps their source or target, hold those workspaces shared, re-check their paths under the set,
+  and refuse a target that sits inside or contains another workspace, published or still being
+  reserved.
 - **Stale socket cleanup across one agent's sessions** runs under that account's exclusive lock
   (agent create and reinit) or the vm exclusive (vm reinit and create), so no session of that agent
   is starting meanwhile.
