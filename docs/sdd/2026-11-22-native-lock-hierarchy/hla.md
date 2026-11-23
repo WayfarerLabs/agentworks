@@ -140,10 +140,10 @@ workspace and agent), as today's callers re-check `vm_uuid`.
 ### One acquisition per operation
 
 An operation names its whole lock set up front: a list of (entity, mode), built from what it read
-before locking. The guard sorts it into one global order (vm, then workspaces, accounts, grant-all,
-grants, sessions, consoles, each by name) and takes each lock without waiting. The first refusal
-releases what was taken and raises. Because nothing waits, there is no deadlock, and the fixed order
-keeps a refusal deterministic.
+before locking. The guard sorts it into one global order (vm, then paths, workspaces, accounts,
+grant-all, grants, sessions, consoles, each by name) and takes each lock without waiting. The first
+refusal releases what was taken and raises. Because nothing waits, there is no deadlock, and the
+fixed order keeps a refusal deterministic.
 
 An operation whose set depends on state (agent delete removes its sessions, grants and console
 windows; workspace create grants the grant-all agents) reads that state before locking, includes
