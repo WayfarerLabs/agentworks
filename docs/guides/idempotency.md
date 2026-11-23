@@ -117,7 +117,12 @@ These add things on reinit but do not remove them when removed from config:
 
 `agent reinit` re-runs the full agent setup using the stored template. The user step converges
 rather than blindly creating: an existing user is left in place (with its shell corrected if the
-template changed), and a missing user is created.
+template changed), and a missing user is created. If its home remains, reinit reuses the home's
+numeric GID only when both that GID and the agent's group name are free. An occupied GID, including
+a remaining group with the agent's name, stops recovery without changing retained ownership. Resolve
+the collision on the VM before retrying. Reinit does not migrate retained files to another group.
+If group creation succeeds but account creation fails, the new group may remain and needs inspection
+before another recovery attempt.
 
 The user step is detection-based and reports the true outcome (it is verifying, not blindly
 creating): it probes the agent user with `getent passwd` first, then reports `Created agent user`

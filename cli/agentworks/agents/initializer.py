@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
+from agentworks.errors import AgentworksError, StateError
 from agentworks.execution.access import Admin, Agent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.requests import AccountShell
     from agentworks.git_credentials import CredentialRequest
     from agentworks.resources import Registry
@@ -64,8 +66,6 @@ def create_new_agent_user(
     """
     import shlex
 
-    from agentworks.errors import StateError
-
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
     home = managed_home(linux_user)
     account = passwd_lookup(linux_user)
@@ -81,6 +81,54 @@ def create_new_agent_user(
             hint="Choose another agent name or remove the unowned native account and home first.",
         )
     admin.run(Command(("useradd", "-m", "-U", "-s", f"/bin/{shell}", linux_user), elevated=True), check=True)
+
+
+def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shell_path: str) -> None:
+    """Recreate a DB-owned account, preserving a retained home's numeric group ownership."""
+    import shlex
+    import stat
+
+    home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
+    if probe_presence(admin, home_entry, absent_status=TEST_FALSE_STATUS) is None:
+        admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
+        return
+
+    # GNU stat does not follow the final symlink. Refuse a retained entry
+    # that is not a directory rather than assigning its group to an account.
+    retained = admin.run(Command(("stat", "-c", "%f:%g", "--", home), elevated=True), check=True)
+    mode, _, gid = retained.stdout.decode("utf-8", "replace").strip().partition(":")
+    try:
+        is_directory = stat.S_ISDIR(int(mode, 16))
+    except ValueError:
+        is_directory = False
+    if not is_directory or not gid.isascii() or not gid.isdecimal():
+        raise StateError(
+            f"cannot recreate agent '{linux_user}': could not read retained home directory GID at '{home}'"
+        )
+
+    for key in (gid, linux_user):
+        if probe_presence(admin, Command(("getent", "group", key)), absent_status=GETENT_NOT_FOUND_STATUS) is not None:
+            raise StateError(
+                f"cannot recreate agent '{linux_user}': retained home '{home}' uses GID {gid}, "
+                f"but group key '{key}' is already in use",
+                entity_kind="agent",
+                entity_name=linux_user,
+                hint="Resolve the group collision on the VM before retrying; retained ownership has not been changed.",
+            )
+
+    # Both creations are exclusive: a concurrent collision fails without
+    # choosing another GID or changing ownership of the retained tree.
+    try:
+        admin.run(Command(("groupadd", "-g", gid, linux_user), elevated=True), check=True)
+        admin.run(Command(("useradd", "-m", "-g", gid, "-s", shell_path, linux_user), elevated=True), check=True)
+    except AgentworksError as exc:
+        exc.add_hint(
+            f"Recreation over retained home '{home}' requires GID {gid}. "
+            f"Group '{linux_user}' may remain after a partial failure; inspect it on the VM before retrying. "
+            "Retained ownership has not been changed."
+        )
+        raise
+    output.info(f"Reused retained home GID {gid} for agent user '{linux_user}'")
 
 
 def create_agent_on_vm(
@@ -169,7 +217,7 @@ def create_agent_on_vm(
     # not assume a clean Debian image (see capabilities/vm_platform/README).
     passwd_entry = probe_presence(admin, passwd_lookup(linux_user), absent_status=GETENT_NOT_FOUND_STATUS)
     if passwd_entry is None:
-        admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
+        _create_missing_agent_user(admin, linux_user, home, shell_path)
         output.info(f"Created agent user '{linux_user}' on VM '{vm.name}'")
     else:
         # ``getent passwd`` line is colon-delimited with the login shell
