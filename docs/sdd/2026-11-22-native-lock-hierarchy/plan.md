@@ -20,14 +20,15 @@ is left undisposed, and #949 is merged.
 
 ## Implementation
 
-- [ ] The primitive: the `native_locks` package (entities, modes, ordered fail-fast acquisition,
-      extension, nested reuse), POSIX `flock` and Windows `LockFileEx`, holder records and the busy
-      error naming its holder, replacing `harness_setup/locking.py`.
-- [ ] Guest and workstation critical sections: the account-edit helper with its root-only guest
-      `flock` and typed timeout, `userdel` split from the home removal, and the per-user rebuild
-      mutex for the SSH config and VS Code workspace files.
-- [ ] Activation: gate-first and runtime-first patterns in the activation gate and `LiveVMNode`,
-      with admission-only shared locks for access commands.
+- [ ] The primitive: the `native_locks` package (entities, modes, a probe, ordered fail-fast
+      acquisition, nested reuse), POSIX `flock` and Windows `LockFileEx`, holder records and the
+      busy error naming its holder, replacing `harness_setup/locking.py`.
+- [ ] Shared state: `groupadd -f` in the workspace-group helper, `userdel` split from the home
+      removal, the per-user rebuild mutex for the SSH config, and the bounded package-manager wait
+      in workspace repair.
+- [ ] Activation: the one sequence (probe, ask and read, boot under a brief vm exclusive, acquire,
+      re-check, run) in the activation gate and `LiveVMNode`, with admission-only shared locks for
+      access commands.
 - [ ] Every call site in the LLD's per-command table moved to its lock set, the unguarded mutators
       (grant and revoke, workspace repair, workspace copy, `vm import-host-keys`,
       `vm confirm-release`) guarded, and each identity re-check in place.
@@ -35,15 +36,16 @@ is left undisposed, and #949 is merged.
       themselves.
 - [ ] Confirm that every harness integration writes only inside the entity that owns it.
 - [ ] Tests: the conflict matrix at the primitive on POSIX and Windows, a crashed holder, the
-      older-version interlock, holder naming, extension failure unwinding, nested reuse, and one
-      concurrent pair per FRD story through real services; existing lock tests updated.
+      older-version interlock, holder naming, the probe, nested reuse, the prompt-notice check, and
+      one concurrent pair per FRD story through real services; existing lock tests updated.
 - [ ] Collateral: every doc the HLA's Delivery section lists, and the upgrade guide entry.
 - [ ] Private review loop, integration test on Linux, macOS and Windows workstations against at
       least one VM, and published feedback addressed.
 
 Done when the implementation PR is merged with green CI on all platforms, the tester has driven each
-FRD story concurrently on a live VM (two unrelated operations succeed together, a conflicting one
-fails at once naming its holder), and no doc describes the single guard.
+FRD story concurrently on a live VM from Linux, macOS and Windows workstations (two unrelated
+operations succeed together, a conflicting one fails at once naming its holder), and no doc
+describes the single guard.
 
 ## Closeout
 
