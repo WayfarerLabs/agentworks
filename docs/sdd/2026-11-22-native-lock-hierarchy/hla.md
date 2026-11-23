@@ -179,13 +179,14 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   shadow-utils command (`useradd`, `usermod -aG`, `gpasswd -d`, `userdel`, `groupadd`, `groupdel`),
   and shadow-utils serializes its own tools through `lckpwdf` on both supported guest releases
   (Debian 12 and 13). The one check-then-create sequence that can now run twice at once, creating a
-  workspace's group during a grant, becomes `groupadd -f`. Agent deletion removes the home and mail
-  spool first, under the account's exclusive lock while the account still exists, and runs plain
-  `userdel` last. Running `userdel -r` would keep shadow's locks through the home removal and stall,
-  then fail, every other account edit on the VM; removing the account first would free its numeric
-  user ID while its files remain, and the next account created could be allocated that ID and own
-  them. In this order the ID stays owned until its files are gone, and an interrupted deletion
-  reruns cleanly.
+  workspace's group during a grant, becomes `groupadd -f`. Agent deletion, under the account's
+  exclusive lock, stops the account's processes and refuses if any remain, then removes the home and
+  mail spool while the account still exists, and runs plain `userdel` last. Running `userdel -r`
+  would keep shadow's locks through the home removal and stall, then fail, every other account edit
+  on the VM; removing the account first would free its numeric user ID while its home remains, and
+  the next account created could be allocated that ID and own it. In this order a busy account is
+  refused before any data is lost, the ID stays owned until its home and spool are gone, and an
+  interrupted deletion reruns cleanly.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
@@ -204,12 +205,14 @@ Some writes reach state no single entity owns. Each gets an explicit home:
 - **Workspace directory paths.** A target path is reserved with a plain `mkdir`, which reserves only
   that directory, not the tree around it: one rehome could move a workspace inside another that a
   second rehome is about to remove. So directory trees are locked like entities, with a `path` kind
-  under the vm. An operation that creates, fills or removes a workspace tree takes its root
-  exclusive and every ancestor directory shared: workspace create and copy's destination take their
-  target, rehome its target and its source, workspace delete its path. The rehome that would move a
-  workspace into `/data/B/new` holds `/data/B` shared, so a removal of `/data/B` is refused while it
-  runs, and creates in disjoint trees still run together. A nested layout that already exists keeps
-  today's behavior, including what a later `--remove-old` does to it.
+  under the vm. An operation that creates, fills, reads whole or removes a workspace tree takes its
+  root exclusive and every directory its path traverses shared, both as stored and as resolved, so a
+  link on the way is a dependency too: workspace create and copy's destination take their target,
+  rehome and copy's source take their source, rehome its target, workspace delete its path. The
+  rehome that would move a workspace into `/data/B/new` holds `/data/B` shared, so a removal of
+  `/data/B` is refused while it runs, and work in disjoint trees still runs together. A nested
+  layout that already exists keeps today's behavior, including what a later `--remove-old` does to
+  it (#957).
 - **Stale socket cleanup across one agent's sessions** runs under that account's exclusive lock
   (agent create and reinit) or the vm exclusive (vm reinit and create), so no session of that agent
   is starting meanwhile.
