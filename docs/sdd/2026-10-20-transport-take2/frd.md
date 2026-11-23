@@ -460,6 +460,13 @@ closeout, and offered one cloud from each, out of scope, or every pairing, the o
 > And note that my personal Win 11 workspace is now running this. I'll feed back any issues I run
 > into.
 
+[Told that the last tester pass found an underscore hostname misbehaving off WSL2 (local Lima stored
+`p948m_local` while the guest carried `p948mlocal`; Azure refused it after validation), which the
+plan's condition says moves the underscore refusal into core for every platform, and offered a small
+PR before the lock or filing it and locking now, the operator chose:]
+
+> Small PR before lock (Recommended)
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.
