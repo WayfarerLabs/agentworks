@@ -24,7 +24,7 @@ Some mutators take no lock on their body (agent grant and revoke, workspace repa
 `vm import-host-keys`, `vm confirm-release`). Several prompts run while the lock is held (rekey's
 auth key and its share pause, recover's host-key confirmation, rehome's confirmation, session
 delete's confirmation, console delete's confirmation and the empty-console offer, spec restart
-consent).
+consent, and console attach's gate secrets).
 
 ## Shape
 
@@ -182,11 +182,15 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
 - **The operator's SSH config and the per-VM host-key store.** An SSH config rebuild that read the
-  database before another operation committed could write stale entries, and agent creates on one VM
-  now run together. Rebuilds take a per-user workstation mutex with a short bounded wait, and each
-  reads the database inside it. Host-key records change only under the vm exclusive. VS Code
-  workspace files are written per workspace under that workspace's lock; their bulk regeneration
-  already races today and is tracked as #954.
+  database before another operation committed could write stale entries. This already happens today
+  across VMs, since the rebuild takes no lock, and agent creates on one VM now run together too.
+  Rebuilds take a per-user workstation mutex with a short bounded wait, and each reads the database
+  inside it. Host-key records change only under the vm exclusive. VS Code workspace files are
+  written per workspace under that workspace's lock; their bulk regeneration already races today and
+  is tracked as #954.
+- **Operation logs.** A log is named by VM, start time to the second and command, and opened for
+  appending; two operations with the same command starting in the same second, which the single lock
+  kept apart, would share one file. Each name gains a unique part and is created exclusively.
 - **The guest package database.** Workspace repair's `apt-get` fallback waits on the package-manager
   lock for a bounded time, as recovery's does, since two repairs can now run together.
 - **Workspace directory paths.** A target path is reserved with a plain `mkdir`, which fails when
@@ -235,28 +239,16 @@ VM.
 
 ## Where each operation lands
 
-The LLD carries the full table, one row per command with its lock set, its call sites at HEAD and
-the prompts it moves; the line-level inventory at HEAD is the LLD's appendix, which the
-implementation PR works through. Its spine, where every row also holds each ancestor of what it
-names shared (a console's ancestors being the vm and each member session with its workspace and
-account):
+Each operation takes exclusive what it changes and shared every ancestor of it, as above. The LLD's
+lock-set table gives every command's set, and its appendix is the line-level inventory at HEAD the
+implementation works through; the HLA keeps no second copy of either.
 
-| Operation                                                                                                  | Exclusive                                            |
-| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| vm create, reinit, start, stop, delete, rekey, recover, reconcile, set-desired-state                       | vm                                                   |
-| vm import-host-keys, confirm-release                                                                       | vm                                                   |
-| vm shell, exec, port-forward, backup; agent shell, exec; session attach, logs                              | nothing (vm shared)                                  |
-| agent create, reinit, delete                                                                               | account, plus the grants, sessions, consoles found   |
-| agent grant-workspaces, revoke-workspaces                                                                  | one grant per pair                                   |
-| workspace create, delete, repair, rehome; copy (destination)                                               | workspace, plus the grants, sessions, consoles found |
-| session create                                                                                             | session, plus its implicit grant                     |
-| session start, stop, restart, reconcile, set-desired-state                                                 | session                                              |
-| session delete                                                                                             | session, each console holding it, its implicit grant |
-| console create, start, stop, restart, reconcile, set-desired-state, delete, membership, add-shell, restore | console                                              |
-| console attach                                                                                             | nothing (vm shared, admission only)                  |
-
+A few cases are worth naming here. Access commands and console attach take the vm shared for
+admission only. `vm reconcile` takes what its session and console children need, and the vm
+exclusive only when the VM's own target is stopped, which is a stop.
 `session create --new-workspace` or `--new-agent` takes that workspace or account exclusive in place
-of shared.
+of shared. A runtime command refused at acquisition after it recorded its intent says so and names
+`set-desired-state` to undo it.
 
 ## What does not change
 
@@ -265,12 +257,19 @@ lock stays per workstation and per database. Dry runs still take no lock.
 
 ## Delivery
 
-One implementation PR, after the LLD. It replaces `native_mutation_guard` and its token in one step
-(no old and new lock paths side by side on `main`), updates every call site, and updates every doc
-that describes the single guard: `cli/command-reference.md` (the busy paragraph),
-`cli/agentworks/orchestration/README.md`, `cli/agentworks/db/README.md`,
-`cli/agentworks/capabilities/harness_integration/README.md`, the guides on desired runtime state,
-native harness setup, harness facets and idempotency, the troubleshooting guide topic, and the
-upgrade guide. Tests cover the conflict matrix at the primitive, each mode on both platforms, a
-crashed holder, the old-version interlock, holder naming, and one concurrent pair per FRD story
-driven through real services.
+Two implementation PRs after the design, stacked and each green on its own:
+
+1. **Under today's single lock:** the shared-state fixes (`groupadd -f`, `userdel` split from the
+   home removal, the SSH config rebuild mutex, the bounded package-manager wait, unique operation
+   log names), guards on the mutators that take no lock today, and the prompts moved before
+   acquisition. Each is correct with the single lock in place, and the first two fix races that
+   exist today.
+2. **The hierarchy:** the new primitive replacing `native_mutation_guard` and its token in one step
+   (no old and new lock paths side by side on `main`), every call site moved to its lock set, and
+   every doc that describes the single guard updated: `cli/command-reference.md` (the busy
+   paragraph), `cli/agentworks/orchestration/README.md`, `cli/agentworks/db/README.md`,
+   `cli/agentworks/capabilities/harness_integration/README.md`, the guides on desired runtime state,
+   native harness setup, harness facets and idempotency, the troubleshooting guide topic, and the
+   upgrade guide. Its tests cover the conflict matrix at the primitive, each mode on both platforms,
+   a crashed holder, the old-version interlock, holder naming, and one concurrent pair per FRD story
+   driven through real services.
