@@ -1,15 +1,15 @@
 # Native lock hierarchy: low-level design
 
 <!-- cspell:ignore contextmanager contextvar ctypes wintypes inodes -->
-<!-- cspell:ignore argtypes restype LPOVERLAPPED dpkg -->
+<!-- cspell:ignore argtypes restype LPOVERLAPPED dpkg Putzolu Traiger pids -->
 
 Status: draft. Builds on the accepted [FRD](./frd.md) and the [HLA](./hla.md). Code citations are
 `file:line` under `cli/agentworks/` at 27b215e9b unless a path says otherwise.
 
 This document fixes the primitive, the one sequence every operation follows, the holder records, the
 lock set of every command, the mechanism for each piece of shared state, the tests and the
-collateral. [Appendix A](#appendix-a-implementation-checklist) maps each command's current
-acquisition site to its change.
+collateral, and [section 8](#8-delivery-two-stacked-prs) splits the implementation into two stacked
+PRs. [Appendix A](#appendix-a-implementation-checklist) maps each current site to its change, by PR.
 
 ## 1. The primitive
 
@@ -171,7 +171,7 @@ those fields; the message is for people.
         grant-<sha256(workspace + "\0" + account)>
         session-<sha256(name)>
         console-<sha256(name)>
-        holders/<pid>-<16 hex>.json            holder records
+        holders/<16 hex>.json                  holder records
 ```
 
 Every lock file is opened as today (`harness_setup/locking.py:55-60`: `a+b`, write one `\0` when
@@ -286,6 +286,23 @@ file program's lock (`execution/file_program.py:41`) lives on the guest and wait
 makes one file operation consistent among identities on one VM, not one workstation operation
 exclusive against another, and it cannot fail fast or name a holder.
 
+### Prior art: multi-granularity locking
+
+The tree is Gray's multi-granularity locking (Gray, Lorie, Putzolu and Traiger, "Granularity of
+Locks and Degrees of Consistency in a Shared Data Base", 1976). There, an operation locks a node S
+or X after holding an intention mode (IS or IX) on every ancestor, and on a DAG it takes the
+intention on every parent, which is this design's rule for a session's two parents. Intention modes
+are compatible with each other and conflict with X, which is exactly what shared on an ancestor does
+here, so shared plays the intention role. Gray also needs a real S on an inner node, which locks a
+whole subtree for reading and conflicts with IX below it. Nothing here needs that: no operation
+reads a subtree whole and needs it frozen. The readers either change their own targets (held
+exclusive) or need only that an ancestor not change, which shared gives; copy's source workspace is
+held shared so it cannot be deleted or rehomed, and sessions in it keep starting and stopping by
+design. If an operation ever needed a frozen subtree (a workspace snapshot that no session start may
+interleave with), shared on the workspace would not give it, since every session change also holds
+the workspace shared. That operation would take the workspace exclusive, or the design would add
+Gray's S beside separate intention modes.
+
 ## 2. The operation sequence
 
 Every command that changes native state runs one sequence. It keeps ADR 0019's gate-first shape
@@ -315,11 +332,11 @@ sanctioned acquisitions below):
 5. **Prepare**: the preflight sweep, read-only guest probes, the boundary resolve, and the
    confirmations that render probe results. Nothing is locked.
 6. **Acquire** the request once, with the vm shared.
-7. **Re-check** under the set: the VM row's vm_uuid, desired runtime state and Tailscale host
-   against what step 4 admitted (or what step 1 read, for a command that skips step 4) (a `vm stop`,
-   `delete`, `rekey` or `recover` that ran in between), the command's step-1 rows, and its step-5
-   probes. Any difference refuses with `StateConflictError` ("changed since this command read it",
-   hint "Run the command again.").
+7. **Re-check** under the set the fields of [What step 7 compares](#what-step-7-compares), against
+   what step 4 admitted for the VM row (or what step 1 read, for a command that skips step 4) and
+   what steps 1 and 5 read for everything else. A `vm stop`, `delete`, `rekey` or `recover` that ran
+   in between shows here. Any difference refuses with `StateConflictError` ("changed since this
+   command read it", hint "Run the command again.").
 8. **Run** the body; nested operations call `held.require`.
 
 **Needs the VM running** means every command that opens the activation gate today
@@ -388,9 +405,13 @@ Consequences:
   `test_start_acceptance_survives_infrastructure_failure`
   (`tests/sessions/test_console_preparation.py:306-322`) and the stopped-parent contract
   (`:325-341`).
-- **Refusal after recorded intent is acceptable.** A family whose acquisition at (f) is refused
-  keeps the intent it recorded at (d). That is the same contract as a failed activation today:
-  intent is the desired state, and the next start or reconcile converges it.
+- **Refusal after recorded intent is acceptable, and says so.** A family whose acquisition at (f) is
+  refused keeps the intent it recorded at (d). That is the same contract as a failed activation
+  today: intent is the desired state, and the next start or reconcile converges it. The refusal
+  tells the operator: each blocked target's `RuntimeResult` gains `restore_intent`, the command
+  words that put back the intent it replaced (for example
+  `("agw", "session", "set-desired-state", <name>, <previous>)`, or the console's), and the rendered
+  result says the intent was recorded and shows that command.
 - **Per-family failure.** A refusal or failure at any step, the `StateConflictError` of (g)
   included, fails and blocks that family's targets alone, as `_selection.py:122-128` does for a busy
   family today; it is recorded on the family, never raised through `run_selected` to the whole
@@ -399,7 +420,9 @@ Consequences:
   down after (e)) refuses with
   `StateError("VM '<name>' stopped after this command checked it", hint="Run the command again.")`;
   activation calls `held.require({vm: exclusive})` first.
-- **Explicit VM selections are VM-wide.** `vm reconcile`'s family requests the vm exclusive.
+- **`vm reconcile`.** Its family requests what its children need: each selected session and console
+  exclusive, the vm shared. It takes the vm exclusive in place of shared only when the VM's own
+  target is stopped, since that family then stops the VM.
 
 `session start --spec` (`sessions/manager/_spec.py:103`) acquires nothing itself. It runs its
 consent probe and confirmation unlocked (step 5; today under its guard, `:133-135`), then passes the
@@ -415,7 +438,8 @@ operation is doing: `vm recover`, for its host-key confirmation (`vms/manager/re
 `runtime_state` family or console runtime command, for workload and pane secrets, which depend on
 definitions and observations made under it (`runtime_state/_execute.py:45`,
 `sessions/multi_console/lifecycle.py:117-118`, `:191`). The first two hold only the vm, exclusive
-anyway; the third holds only its family's or console's set. These call sites acquire with
+anyway; the third holds only its family's or console's set (for `vm reconcile`, its children with
+the vm shared, or the vm exclusive when the VM's target is stopped). These call sites acquire with
 `native_locks(db, request, prompts=True)`. Every other console command that resolves pane secrets
 (`console create`, `add-sessions`, `add-shell`, `restore-session`: `multi_console/attach.py:495`,
 `crud.py:379`, `:696`, `restore.py:353`) resolves them at step 5 and re-checks its console and
@@ -434,11 +458,10 @@ catches.
 
 ### Format and location
 
-One JSON file per held set, `<sha256(vm)>.d/holders/<pid>-<16 hex>.json`, mode 0600:
+One JSON file per held set, `<sha256(vm)>.d/holders/<16 hex>.json`, mode 0600, its name random:
 
 ```json
 {
-  "version": 1,
   "pid": 4242,
   "command": ["agw", "workspace", "rehome"],
   "acquired": 1795400000.25,
@@ -459,8 +482,11 @@ values. `acquired` is wall-clock acquisition time; `pid` is for diagnosis only.
 
 - After acquisition succeeds, the holder creates the file with `O_CREAT | O_EXCL`, takes an
   exclusive lock on it (POSIX `flock`; Windows `LockFileEx` exclusive at offset `1 << 62`, past the
-  content, so readers can still read it), and writes the JSON. The handle and its lock live as long
-  as the set.
+  content, so readers can still read it), and writes the JSON. It takes that lock waiting, since a
+  reader's liveness probe holds the record for an instant. On POSIX it then checks the file is still
+  linked (`os.fstat(fd).st_nlink`): a reader that probed between the create and the lock found it
+  free and removed it, so the holder creates a fresh one. On Windows a reader cannot remove a file
+  the holder has open. The handle and its lock live as long as the set.
 - On release the holder releases every entity lock, then unlocks, closes and unlinks the record. On
   Windows the unlink can fail while a reader has the file open; that failure is ignored, and the
   next reader finds the record unlocked and removes it.
@@ -469,12 +495,11 @@ values. `acquired` is wall-clock acquisition time; `pid` is for diagnosis only.
 
 A record is live exactly while its own lock is held, which the OS releases when the holder dies. A
 reader tests liveness by trying a shared lock on the record without waiting (same offset on
-Windows). Success on a record that parses means the holder is gone: the reader unlocks, closes the
-file and only then unlinks it (Windows cannot remove a file the reader holds open), ignoring a
-failed unlink. A record that does not parse is neither named nor deleted while locked; unlocked, a
-holder may be between creating the file and locking it, so it is deleted only once its modification
-time is more than a minute old. No pid is probed, so a reused pid cannot make a dead holder look
-alive.
+Windows). If it gets the lock, the holder is gone (or has not locked it yet, which the holder's link
+check covers): the reader unlocks, closes the file and only then unlinks it (Windows cannot remove a
+file the reader holds open), ignoring a failed unlink. A record that is locked but does not parse (a
+reader raced the holder's write) is skipped. No pid is probed, so a reused pid cannot make a dead
+holder look alive.
 
 ### Naming the holder
 
@@ -521,6 +546,21 @@ it, under the same 0700 directory and the same OS user. The only fields are the 
   caller's request covers.
 - Dry runs take no lock, as today.
 
+### What step 7 compares
+
+A command compares only what it read, and only these fields, never whole rows (timestamps and
+recorded pids change under ordinary use):
+
+| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`; `confirm-release` adds `debian_release`                                                                                                                                                              |
+| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                       |
+| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`                                                                                                                                                                                                             |
+| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded                                                                                                                      |
+| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names                                                                                                                                                                                       |
+| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes |
+| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status                                                 |
+
 ### Lock sets
 
 X is taken exclusive; every ancestor of an X entity is taken shared and not listed; S lists further
@@ -533,7 +573,7 @@ accounts. Gate says whether the command needs the VM running and so runs step 4.
 | `vm reinit`, `rekey`                                                                              | vm                                                                                                                                                             |                                                     | yes                                           |
 | `vm import-host-keys`                                                                             | vm, per VM                                                                                                                                                     |                                                     | no                                            |
 | `vm confirm-release`                                                                              | vm                                                                                                                                                             |                                                     | yes                                           |
-| `vm reconcile`                                                                                    | vm, per family                                                                                                                                                 |                                                     | per family, from intent                       |
+| `vm reconcile`                                                                                    | each session and console on the VM, per family; the vm when its own target is stopped                                                                          |                                                     | per family, from intent                       |
 | access and observe commands                                                                       | none: admission only                                                                                                                                           | vm                                                  | yes                                           |
 | `agent create`                                                                                    | account; with `--grant-all-workspaces` also grant-all and a grant per workspace on the VM                                                                      |                                                     | yes                                           |
 | `agent reinit`                                                                                    | account, a grant per recorded grant it replays (`agents/manager/lifecycle.py:783`)                                                                             |                                                     | yes                                           |
@@ -625,6 +665,7 @@ start between the two; the target is then reserved with the exclusive `mkdir` it
 | a workspace directory path               | already reserved by an exclusive `mkdir` in create (`workspaces/backends/vm.py:127`) and rehome (`rehome.py:228`)                                                                                                                                                              |
 | console membership                       | the console entity, with its members as parents                                                                                                                                                                                                                                |
 | the dpkg lock                            | workspace repair's `acl` install (`workspaces/manager/repair.py:158`) gains `-o DPkg::Lock::Timeout=120`, as `vms/recovery.py:117-118` uses, since two repairs of different workspaces can now run at once                                                                     |
+| operation logs                           | each log gets a unique name created with an exclusive open ([Operation logs](#operation-logs))                                                                                                                                                                                 |
 | operator SSH config                      | the SSH config rebuild mutex ([below](#ssh-config-rebuild))                                                                                                                                                                                                                    |
 | host-key store                           | per-VM file written atomically (`execution/trust.py:242-261`) under the vm exclusive                                                                                                                                                                                           |
 
@@ -639,10 +680,10 @@ No agentworks lock wraps the account and group edits. Both supported guests (`de
 bookworm and trixie) ship shadow-utils that serializes its own tools: in the shadow sources for 4.13
 (bookworm) and 4.17.4 (trixie), `commonio_lock` calls glibc's `lckpwdf`, which waits up to 15 s (and
 on a bookworm host `useradd` links `lckpwdf`). An integration run confirms it on a trixie guest
-([Implementation-time checks](#implementation-time-checks)). The one check-then-act that can now run
-concurrently, `ensure_group`'s `getent group || groupadd` (`workspaces/guest.py:107`, run by
-workspace create, grants and repair), becomes `groupadd -f`, which succeeds when the group exists,
-as `capabilities/vm_platform/bootstrap_script.py:107` already does. `retire_agent_socket_group`'s
+([section 6](#6-tests)). The one check-then-act that can now run concurrently, `ensure_group`'s
+`getent group || groupadd` (`workspaces/guest.py:107`, run by workspace create, grants and repair),
+becomes `groupadd -f`, which succeeds when the group exists, as
+`capabilities/vm_platform/bootstrap_script.py:107` already does. `retire_agent_socket_group`'s
 check-then-delete (`sessions/tmux.py:542`) runs only under the vm exclusive and stays.
 
 ### Agent account removal
@@ -670,6 +711,17 @@ handling:
 A failure in step 3 warns through the existing `STEP_FAILURES` handler, as a `userdel -r` exit 12
 (home or spool removal failed) does today.
 
+### Operation logs
+
+`OperationLog` names its file `<vm>-<timestamp>-<stem>.log` with a one-second timestamp
+(`execution/oplog.py:90`) and appends to it on every write (`:208-209`). Two operations with the
+same stem on one VM that start in the same second, which the hierarchy now lets run together (two
+`session-start` families, two `workspace-create`s of different workspaces), would interleave in one
+file. The name gains a unique part, `<vm>-<timestamp>-<pid>-<6 hex>-<stem>.log`. The first write
+creates the file with an exclusive open (`open(path, "x")`), drawing a new random suffix if the name
+is taken, and later writes append as today. `vm_logs` (`oplog.py:46`) matches the new shape and
+still the old one, so `vm delete` and `vm logs` find logs written before the change.
+
 ### SSH config rebuild
 
 `agentworks/ssh_config_lock.py` holds `ssh_config_rebuild_lock()`, a per-OS-user exclusive file lock
@@ -685,33 +737,45 @@ rebuild always reads the latest committed state. A timeout raises `StateError` w
 
 ## 6. Tests
 
-New tests live beside the package (`tests/native_locks/`); every primitive test is marked
+New primitive tests live beside the package (`tests/native_locks/`), each marked
 `pytest.mark.windows` so the Windows job (`.github/workflows/ci.yml:97-115`) runs it. Assertions
-read the error's fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_for`),
-never its wording.
+read fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_for`,
+`RuntimeResult.restore_intent`), never wording.
 
-| Test                  | Proves                                                                                                                                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| conflict matrix       | the four mode pairs on one entity, within a process (two sets) and across processes (a subprocess holder), on both platforms                                                                                                                     |
-| tree                  | a session change refuses a workspace change and the vm exclusive, and is refused by them; sessions in different workspaces and accounts coexist; workspace delete and agent delete on a shared session refuse one another                        |
-| ordering              | two contending acquisitions never both fail                                                                                                                                                                                                      |
-| probe                 | a conflicting probe raises naming the holder and writes no record; a free probe leaves nothing held                                                                                                                                              |
-| crashed holder        | a killed subprocess holder frees every entity (bounded poll on Windows) and its record is removed by the next reader                                                                                                                             |
-| old-version interlock | a subprocess running today's algorithm inline (`flock` exclusive, or `msvcrt.locking` after `seek(0)`) refuses new shared and exclusive acquisitions with the fallback, and a new shared holder makes the old algorithm fail with its busy errno |
-| holder naming         | the earliest conflicting live holder is named with its command, entity and age; a stale record is skipped and deleted; a malformed one falls back; non-conflicting records are ignored                                                           |
-| operation label       | a command invoked through the CLI runner with a distinctive argument value records its command path and no part of that value; outside the CLI the label is `agw`                                                                                |
-| nested reuse          | `require` acquires nothing; an uncovered or weaker entity, a different VM or database, and a released set each raise `StateError`; a console whose members changed still matches by key                                                          |
-| prompt notice         | under a set acquired with `prompts=True`, every prompt helper and a resolver prompt show its notice exactly once, before the first prompt; under any other held set they raise `StateError`; with no set held they show nothing                  |
-| activation            | a cold VM boots under a transient vm exclusive and the body holds the vm shared; no boot on a Tailscale miss when the provider reports the VM running; `auto_start` under a shared set refuses; step 7 refuses a changed vm_uuid, intent or host |
-| recorded intent       | a family's or console's recorded intent survives a failure in its gate secrets, its provider observation and its boot; a start below a stopped-intent parent records intent and never prepares the VM                                            |
-| account removal       | against a scripted guest: plain `userdel`, then the home and spool removed only when owned by the probed uid; a home owned by someone else is kept                                                                                               |
-| ensure_group          | two concurrent grants of different agents to one workspace whose group is missing both succeed, each creating or finding the group                                                                                                               |
-| rebuild lock          | a second SSH config rebuild waits for the first and then reads the newer database state; a lock held past the bound raises the typed error                                                                                                       |
-| grant-all             | a workspace create and a grant-all agent create on one VM: one is refused before native work, and after a retry every grant-all agent has a grant for every workspace                                                                            |
-| rollback              | a failing `session create --new-workspace --new-agent` unwinds without a refusal while unrelated holders exist on the VM                                                                                                                         |
-| family failure        | a conflict at the re-check (g) or a busy acquisition (f) in one family blocks that family's targets only, the invocation reports the others normally, and the refused family keeps the intent it recorded at (d)                                 |
-| spec start            | `session start --spec` makes no acquisition of its own: the batch persists its overlay with the intent, and the acquisitions are exactly those of a plain `session start`                                                                        |
-| rehome re-check       | a session started between rehome's confirmation and its acquisition refuses the rehome                                                                                                                                                           |
+### PR 1, under today's lock
+
+| Test                | Proves                                                                                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| account removal     | against a scripted guest: plain `userdel`, then the home and spool removed only when owned by the probed uid; a home owned by someone else is kept         |
+| ensure_group        | two concurrent grants of different agents to one workspace whose group is missing both succeed, each creating or finding the group                         |
+| rebuild lock        | a second SSH config rebuild waits for the first and then reads the newer database state; a lock held past the bound raises the typed error                 |
+| operation logs      | two logs for one VM and stem opened in the same second write separate files; a taken name draws another suffix; `vm_logs` finds the new and the old shapes |
+| formerly unguarded  | grant, revoke, repair, copy (both VMs), `import-host-keys` (a per-VM `BUSY` outcome) and `confirm-release` each refuse while the VM's guard is held        |
+| prompts before lock | each moved prompt (the rows of Appendix A.1) is answered with no guard held, and its re-check refuses when the state it showed changed before acquisition  |
+| rehome re-check     | a session started between rehome's confirmation and its acquisition refuses the rehome                                                                     |
+| spec start          | `session start --spec` asks its consent unlocked and hands the overlay to the batch, which persists it with the intent; spec takes no guard of its own     |
+
+### PR 2, the hierarchy
+
+| Test                  | Proves                                                                                                                                                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| conflict matrix       | the four mode pairs on one entity, within a process (two sets) and across processes (a subprocess holder), on both platforms                                                                                                                        |
+| tree                  | a session change refuses a workspace change and the vm exclusive, and is refused by them; sessions in different workspaces and accounts coexist; workspace delete and agent delete on a shared session refuse one another                           |
+| ordering              | two contending acquisitions never both fail                                                                                                                                                                                                         |
+| probe                 | a conflicting probe raises naming the holder and writes no record; a free probe leaves nothing held                                                                                                                                                 |
+| crashed holder        | a killed subprocess holder frees every entity (bounded poll on Windows) and its record is removed by the next reader                                                                                                                                |
+| old-version interlock | a subprocess running today's algorithm inline (`flock` exclusive, or `msvcrt.locking` after `seek(0)`) refuses new shared and exclusive acquisitions with the fallback, and a new shared holder makes the old algorithm fail with its busy errno    |
+| holder naming         | the earliest conflicting live holder is named with its command, entity and age; a record with a free lock is deleted; a locked malformed one is skipped; non-conflicting records are ignored; a record removed between create and lock is recreated |
+| operation label       | a command invoked through the CLI runner with a distinctive argument value records its command path and no part of that value; outside the CLI the label is `agw`                                                                                   |
+| nested reuse          | `require` acquires nothing; an uncovered or weaker entity, a different VM or database, and a released set each raise `StateError`; a console whose members changed still matches by key                                                             |
+| prompt notice         | under a set acquired with `prompts=True`, every prompt helper and a resolver prompt show its notice exactly once, before the first prompt; under any other held set they raise `StateError`; with no set held they show nothing                     |
+| activation            | a cold VM boots under a transient vm exclusive and the body holds the vm shared; no boot on a Tailscale miss when the provider reports the VM running; `auto_start` under a shared set refuses; step 7 refuses each compared field's change         |
+| recorded intent       | a family's or console's recorded intent survives a failure in its gate secrets, its provider observation and its boot; a start below a stopped-intent parent records intent and never prepares the VM                                               |
+| intent restore        | a family refused at (f) after recording intent reports blocked targets whose `restore_intent` is the `set-desired-state` command with the previous state                                                                                            |
+| family failure        | a conflict at the re-check (g) or a busy acquisition (f) in one family blocks that family's targets only, and the invocation reports the others normally                                                                                            |
+| vm reconcile          | a `vm reconcile` whose VM target is running holds the vm shared, so an unrelated workspace create on that VM proceeds; with a stopped target it holds the vm exclusive                                                                              |
+| grant-all             | a workspace create and a grant-all agent create on one VM: one is refused before native work, and after a retry every grant-all agent has a grant for every workspace                                                                               |
+| rollback              | a failing `session create --new-workspace --new-agent` unwinds without a refusal while unrelated holders exist on the VM                                                                                                                            |
 
 One concurrent pair per FRD story, plus the session-delete pairs, driven through the real manager
 functions with the scripted guest: the first operation is paused at a known guest command (an event
@@ -728,96 +792,146 @@ the fake guest waits on) while the second runs on another thread.
 | session delete and its grant                  | `session delete` (agent mode) paused; `session create` for the same workspace and agent | create refused                        |
 | session delete and revoke                     | `session delete` (agent mode) paused; `agent revoke-workspaces` of that workspace       | revoke refused                        |
 
-### Implementation-time checks
+PR 2's integration run also drives two account-editing operations at once on a trixie guest (for
+example an agent create beside a workspace create, which run `useradd` and `groupadd`/`usermod -aG`
+together) and confirms both succeed, proving the reliance on shadow's own serialization on the
+release this LLD could not check on a host.
 
-**Harness setup confinement.** The lock sets assume `apply_workspace_setup` and `apply_agent_setup`
-write only inside their owner (the workspace tree, the account home); `apply_vm_setup` runs under
-the vm exclusive and is covered whatever it writes. The implementation PR confirms this for every
-harness integration's writers, for each one either with a test that a setup applied for one owner
-leaves another owner's tree untouched, or with a review cited in the PR naming the writer and the
-paths it can reach. Only the cleanup paths (`harness_setup/cleanup.py:25-42`) were checked for this
-LLD. A writer that crosses owners adds the other owner to its request, exclusive, before the PR
-merges.
+### Harness setup confinement
 
-**Concurrent account edits on trixie.** The integration run drives two account-editing operations at
-once on a trixie guest (for example an agent create beside a workspace create, which run `useradd`
-and `groupadd`/`usermod -aG` together) and confirms both succeed, so the reliance on shadow's own
-serialization is proved on the release this LLD could not check on a host.
+Every harness integration's setup writes only inside its owner entity, read at HEAD:
+
+- The vm facet publishes only under `ROOT_FILE_DIRECTORIES` (`/etc/claude-code`, `/etc/codex`,
+  `/opt/agentworks/artifacts`; `artifacts/publication.py:30`, applied at
+  `harness_setup/dispatch.py:318`), under the vm exclusive.
+- The user facet's artifact files are confined twice: `validate_user_placement` refuses any file
+  outside the account's HOME (`artifacts/native/common.py:85-91`, called by Claude, Codex and Grok
+  at `plugins/claude/harness_integration.py:290`, `plugins/codex/harness_integration.py:576`,
+  `plugins/grok/harness_integration.py:219`), and `publish_artifacts` takes the home as its only
+  root (`dispatch.py:318-327`). Native settings and MCP entries resolve under the user layout's root
+  in HOME (`plugins/_harness_native/native.py:287-330`, `artifacts/native/layout.py:91-99`), and
+  plugin installs run the native CLI as that account against sources it resolves under HOME
+  (`plugins/_harness_native/native_cli.py:470-473`, `:521`).
+- The workspace facet publishes under the workspace root alone (`dispatch.py:318`): Claude's
+  `.claude` and `.mcp.json` (`plugins/claude/harness_integration.py:341`,
+  `plugins/_harness_native/native.py:200-214`), Codex's `.agents/skills` and `.codex/agents`
+  (`plugins/codex/harness_integration.py:630-631`), Grok's `.grok`
+  (`plugins/grok/harness_integration.py:270-276`), and the workspace's Git exclusions
+  (`dispatch.py:330-331`).
+- Every native settings, MCP and exclusion write is a compare-and-swap
+  (`artifacts/config_files.py:13-50` through `Files.update`), so even a writer outside these rules
+  could fail but never silently lose another's write.
+
+Two session-time writes reach the account's HOME under the account shared, and both are safe when
+two sessions of one account launch at once: session artifacts go to a per-session directory
+(`<home>/<AGENTWORKS_ARTIFACTS>/session/<session uuid>`, `artifacts/session.py:161-176`), and
+Codex's notify recorder is one byte-identical atomic replace per launch
+(`plugins/codex/recorder.py:170-194`). No setup or launch writer crosses owners, so no request gains
+another owner.
 
 ### Existing tests that change
 
-| File                                                                                                                                                                                                                                                                                                                                                    | Why                                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `tests/capabilities/test_native_setup_locking.py`                                                                                                                                                                                                                                                                                                       | replaced by `tests/native_locks/`                                                                                     |
-| `tests/vms/test_vm_nodes.py` (`:436-511`)                                                                                                                                                                                                                                                                                                               | `auto_start` and admission tests move to the sequence of section 2                                                    |
-| `tests/sessions/test_console_preparation.py` (`:139`, `:363`)                                                                                                                                                                                                                                                                                           | delete consent now precedes the lock; the monkeypatched guard target moves                                            |
-| `tests/sessions/test_session_spec_launch.py`, `tests/vms/test_rekey_key_selection.py`, `tests/vms/test_recover.py`                                                                                                                                                                                                                                      | consent and auth-key prompts move before acquisition; recover's confirm stays inside                                  |
-| `tests/runtime_state/test_failures.py`, `test_composition.py`, `test_preview_trust.py`                                                                                                                                                                                                                                                                  | per-family probe and busy reporting, held-set reuse, dry run still takes no lock                                      |
-| `tests/test_session_ephemeral_guard_unwind.py`, `tests/sessions/test_create_start_restart_orchestrated.py`, `tests/agents/test_create_reinit_orchestrated.py`, `tests/vms/test_lifecycle_orchestrated.py`                                                                                                                                               | held set instead of the guard token; acquisition after the gate                                                       |
-| `tests/capabilities/test_native_setup_lifecycle.py`, `test_native_setup_deletion.py`, `test_native_setup_state.py`                                                                                                                                                                                                                                      | `held=` becomes `held.require` with the owner's request                                                               |
-| `tests/test_consoles_orchestration.py` (`:704`)                                                                                                                                                                                                                                                                                                         | `delete_console_record` (`sessions/multi_console/crud.py:609`), dead outside this test, is deleted rather than ported |
-| `tests/sessions/test_prepared_runtime.py`, `test_console_value_barrier.py`, `test_console_attach_orchestrated.py`, `tests/artifacts/test_session_lifecycle.py`, `tests/test_wsl2_keepalive.py`, `tests/vms/test_reinit_admin_options.py`, `tests/vms/test_delete_vm_gating.py`, `tests/test_legacy_claude.py`, `tests/orchestration/test_activation.py` | construct or patch the old guard; mechanical port                                                                     |
+| PR  | File                                                                                                                                                                                                                                                                                                                                                    | Why                                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 1   | `tests/sessions/test_console_preparation.py` (`:139`), `tests/sessions/test_session_spec_launch.py`, `tests/vms/test_rekey_key_selection.py`, `tests/vms/test_recover.py`                                                                                                                                                                               | consent, delete confirmation and auth-key prompts move before the guard; recover's host-key confirm stays inside      |
+| 1   | `tests/test_consoles_orchestration.py` (`:704`)                                                                                                                                                                                                                                                                                                         | `delete_console_record` (`sessions/multi_console/crud.py:609`), dead outside this test, is deleted rather than ported |
+| 2   | `tests/capabilities/test_native_setup_locking.py`                                                                                                                                                                                                                                                                                                       | replaced by `tests/native_locks/`                                                                                     |
+| 2   | `tests/vms/test_vm_nodes.py` (`:436-511`)                                                                                                                                                                                                                                                                                                               | `auto_start` and admission tests move to the sequence of section 2                                                    |
+| 2   | `tests/sessions/test_console_preparation.py` (`:363`), `tests/runtime_state/test_failures.py`, `test_composition.py`, `test_preview_trust.py`                                                                                                                                                                                                           | the monkeypatched guard target moves; per-family probe and busy reporting; dry run still takes no lock                |
+| 2   | `tests/test_session_ephemeral_guard_unwind.py`, `tests/sessions/test_create_start_restart_orchestrated.py`, `tests/agents/test_create_reinit_orchestrated.py`, `tests/vms/test_lifecycle_orchestrated.py`                                                                                                                                               | held set instead of the guard token; acquisition after the gate                                                       |
+| 2   | `tests/capabilities/test_native_setup_lifecycle.py`, `test_native_setup_deletion.py`, `test_native_setup_state.py`                                                                                                                                                                                                                                      | `held=` becomes `held.require` with the owner's request                                                               |
+| 2   | `tests/sessions/test_prepared_runtime.py`, `test_console_value_barrier.py`, `test_console_attach_orchestrated.py`, `tests/artifacts/test_session_lifecycle.py`, `tests/test_wsl2_keepalive.py`, `tests/vms/test_reinit_admin_options.py`, `tests/vms/test_delete_vm_gating.py`, `tests/test_legacy_claude.py`, `tests/orchestration/test_activation.py` | construct or patch the old guard; mechanical port                                                                     |
 
-## 7. Collateral for the implementation PR
+## 7. Collateral
 
-Every item states the current single-guard behavior and goes stale with this change; the HLA's
+Every item states the current single-guard behavior. Each PR updates what it outdates; the HLA's
 delivery list names the same set.
 
-- `cli/command-reference.md:687-692`, the busy paragraph: hierarchical sets, what refuses what, the
-  holder message, prompts before locks with their three exceptions and the notice line, admission
-  still not spanning a body.
-- `cli/agentworks/orchestration/README.md:166-170`: held sets replace the family guard and token;
-  the operation sequence.
-- `docs/guides/upgrading-to-0.20.md`: operations below the VM now run concurrently, a refusal names
-  its holder, and an older agw still running during the upgrade interlocks safely but reports busy
-  without naming holders.
-- `docs/guides/desired-runtime-state.md:154`, `:161-165`.
-- `docs/guides/native-harness-setup.md:336-340`, `docs/guides/harness-facets.md:400`,
-  `docs/guides/idempotency.md:298`, `cli/agentworks/db/README.md:138`,
-  `cli/agentworks/capabilities/harness_integration/README.md:376`: "VM-family mutation guard"
-  becomes the owner's lock.
-- `cli/agentworks/guide/guide-content/troubleshooting.md:55-77`, a guide topic: busy causes and the
-  holder message.
-- The `native_locks` package docstring carries the durable rules (tree, modes, order, no upgrade,
-  read and lock once, records advisory) so they outlive this SDD.
+- PR 1: the sentences saying secret prompts and console delete confirmation keep a family busy
+  (`cli/command-reference.md:689-690`, `docs/guides/desired-runtime-state.md:161-163`,
+  `cli/agentworks/guide/guide-content/troubleshooting.md:75-76`), and the operation-log name in
+  `execution/oplog.py`'s module docstring.
+- PR 2, everything else:
+  - `cli/command-reference.md:687-692`, the busy paragraph: hierarchical sets, what refuses what,
+    the holder message, the three prompting exceptions and the notice line, admission still not
+    spanning a body.
+  - `cli/agentworks/orchestration/README.md:166-170`: held sets replace the family guard and token;
+    the operation sequence.
+  - `docs/guides/upgrading-to-0.20.md`: operations below the VM now run concurrently, a refusal
+    names its holder, and an older agw still running during the upgrade interlocks safely but
+    reports busy without naming holders.
+  - `docs/guides/desired-runtime-state.md:154`, `:163-165`.
+  - `docs/guides/native-harness-setup.md:336-340`, `docs/guides/harness-facets.md:400`,
+    `docs/guides/idempotency.md:298`, `cli/agentworks/db/README.md:138`,
+    `cli/agentworks/capabilities/harness_integration/README.md:376`: "VM-family mutation guard"
+    becomes the owner's lock.
+  - `cli/agentworks/guide/guide-content/troubleshooting.md:55-77`, a guide topic: busy causes and
+    the holder message.
+  - The `native_locks` package docstring carries the durable rules (tree, modes, order, no upgrade,
+    read and lock once, records advisory) so they outlive this SDD.
 
 No sample-config or completion change: the waits are constants and the command tree is unchanged.
 
+## 8. Delivery: two stacked PRs
+
+**PR 1, under today's lock.** Everything that is right whatever the lock's shape, landed while
+`native_mutation_guard` still serializes each VM, so each change is reviewed and proved on its own:
+
+- `ensure_group` uses `groupadd -f`; agent removal splits `userdel` from the home and spool removal.
+- The SSH config rebuild lock, and the bounded dpkg wait in workspace repair.
+- Unique operation-log names.
+- Today's guard on the unguarded mutators: grant and revoke, workspace repair, workspace copy (both
+  VMs, in name order), `vm import-host-keys` (with its `BUSY` outcome) and `vm confirm-release`.
+- Prompts before acquisition: every row of Appendix A.1, with the step-7 re-checks of what each
+  prompt showed, `session start --spec`'s consent and overlay hand-off, and the deletion of
+  `delete_console_record`.
+
+**PR 2, the hierarchy.** The `native_locks` package replaces `harness_setup/locking.py` in one step:
+entities and requests at every site of Appendix A.2, the probe, the brief boot exclusive and shared
+admission, the runtime families' intent acquisition and per-family failure with `restore_intent`,
+holder records and the R3 message, and the structural prompt notice with `prompts=True`.
+
 ## Appendix A: implementation checklist
 
-Each row is a current acquisition site to move into the sequence of section 2. "Prompts under it"
-lists what steps 3 to 5 take out of the lock.
+### A.1 PR 1: prompts to move before the guard
 
-| Command                                            | Acquires today                                                                                                                                                                                                                            | Prompts under it today                                                                                 |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `vm create`                                        | `vms/manager/lifecycle.py:383` (by name)                                                                                                                                                                                                  | none (site, slug and secrets come first)                                                               |
-| `vm reinit`                                        | `vms/manager/reinit.py:71`, before every read                                                                                                                                                                                             | gate and boundary secrets (`reinit.py:315`, `:331`)                                                    |
-| `vm start`, `stop`                                 | `vms/manager/power.py:73`, `:117`                                                                                                                                                                                                         | gate secrets (`vms/manager/runtime.py:73`)                                                             |
-| `vm delete`                                        | `power.py:218`, after its confirm (`:213`)                                                                                                                                                                                                | boundary secrets (`boundary.py:289`)                                                                   |
-| `vm rekey`                                         | `power.py:412`                                                                                                                                                                                                                            | auth key and `--prompt` (`boundary.py:346`, `:361`); `--wait-for-share` stays (`:490`)                 |
-| `vm recover`                                       | `vms/manager/recover.py:84`                                                                                                                                                                                                               | secrets (`boundary.py:361`); host-key confirm stays (`recover.py:240`)                                 |
-| `vm set-desired-state`                             | `power.py:36`                                                                                                                                                                                                                             | none                                                                                                   |
-| `vm reconcile`, session batch, `console reconcile` | `runtime_state/_selection.py:101`, families in VM name order                                                                                                                                                                              | gate secrets (`runtime_state/_prepare.py:213-221`); workload union stays (`_execute.py:45`)            |
-| `vm import-host-keys`                              | none (`vms/manager/host_keys.py:126-149`)                                                                                                                                                                                                 | none                                                                                                   |
-| `vm confirm-release`                               | none (`vms/manager/release.py:67`, writes `:86-89`)                                                                                                                                                                                       | confirm after the boundary (`:79`)                                                                     |
-| access commands                                    | admission only: `vms/manager/exec.py:121`, `:193`, `:278`; `port_forward.py:80`; `vms/backup.py:81`; `agents/manager/access.py:143`, `:244`; `sessions/manager/_queries.py:938`; `_logs.py:44`; `sessions/multi_console/lifecycle.py:257` | gate secrets come first already                                                                        |
-| `agent create`                                     | `agents/realize.py:119`, after the gate (`agents/manager/lifecycle.py:192`)                                                                                                                                                               | none                                                                                                   |
-| `agent reinit`                                     | `agents/manager/lifecycle.py:504`, before the gate (`:646`)                                                                                                                                                                               | gate and boundary secrets (`:658`, `:666`)                                                             |
-| `agent delete`                                     | `lifecycle.py:331`, after its confirm (`:324`), before the boundary (`:347`)                                                                                                                                                              | boundary secrets; the session list it uses is read before the guard (`:307`)                           |
-| `agent grant-workspaces`, `revoke`                 | none (`agents/grants.py:95`, `:162`)                                                                                                                                                                                                      | none                                                                                                   |
-| `workspace create`                                 | `workspaces/realize.py:124`, after the gate (`workspaces/manager/create.py:283`)                                                                                                                                                          | none                                                                                                   |
-| `workspace delete`                                 | `workspaces/manager/delete.py:106`, after its confirm (`:101`)                                                                                                                                                                            | boundary secrets (`:134-142`)                                                                          |
-| `workspace repair`                                 | none (`workspaces/manager/repair.py:132`)                                                                                                                                                                                                 | none                                                                                                   |
-| `workspace rehome`                                 | `workspaces/manager/rehome.py:96`                                                                                                                                                                                                         | confirm (`:217`), secrets (`:181-189`)                                                                 |
-| `workspace copy`                                   | none (`workspaces/manager/copy.py:107`, `:144`)                                                                                                                                                                                           | none (destination choice `:140` is unlocked)                                                           |
-| `session create`                                   | `sessions/manager/_create.py:377`, before the gate (`:414`)                                                                                                                                                                               | gate and boundary secrets (`:414-417`)                                                                 |
-| `session start --spec`                             | `sessions/manager/_spec.py:128`                                                                                                                                                                                                           | restart consent (`:135`)                                                                               |
-| `session set-desired-state`                        | `sessions/manager/_intent.py:59`                                                                                                                                                                                                          | none                                                                                                   |
-| `session delete`                                   | `sessions/manager/_queries.py:154`, before the boundary (`sessions/manager/_scope.py:114`)                                                                                                                                                | confirm (`_queries.py:227`), empty-console offer (`:295`, `sessions/_resource_cleanup.py:97`), secrets |
-| `console create`                                   | `sessions/multi_console/crud.py:163`                                                                                                                                                                                                      | gate and pane secrets (`attach.py:453`, `:495`)                                                        |
-| `console start`, `restart`, `stop`                 | `multi_console/lifecycle.py:69`, `:149`                                                                                                                                                                                                   | gate secrets (`:96`, `:167`); pane secrets stay (`:117-118`, `:191`)                                   |
-| `console delete`                                   | `multi_console/attach.py:854`                                                                                                                                                                                                             | confirm (`:856`)                                                                                       |
-| `console set-desired-state`                        | `multi_console/runtime.py:132`                                                                                                                                                                                                            | none                                                                                                   |
-| `console add-sessions`, `add-shell`                | `crud.py:325`, `:648`                                                                                                                                                                                                                     | pane secrets move to step 5 (`:379`, `:696`)                                                           |
-| `console remove-sessions`, `reorder-sessions`      | `crud.py:466`, `:525`                                                                                                                                                                                                                     | empty-console offer (`:494`)                                                                           |
-| `console restore-session`                          | `multi_console/restore.py:293`                                                                                                                                                                                                            | gate secrets; pane secrets move to step 5 (`:353`)                                                     |
+| Command                                            | Under the guard today                                                                                                                                                                                                  | Moves to                                                        |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `vm reinit`                                        | gate and boundary secrets (`vms/manager/reinit.py:315`, `:331`), guard `:71`                                                                                                                                           | steps 4 and 5                                                   |
+| `vm start`, `stop`                                 | gate secrets (`vms/manager/runtime.py:73`), guard `vms/manager/power.py:73`, `:117`                                                                                                                                    | step 5                                                          |
+| `vm delete`                                        | boundary secrets (`vms/manager/boundary.py:289`), guard `power.py:218`                                                                                                                                                 | step 5                                                          |
+| `vm rekey`                                         | auth key and `--prompt` (`boundary.py:346`, `:361`), guard `power.py:412`; `--wait-for-share` stays (`:490`)                                                                                                           | step 5                                                          |
+| `vm recover`                                       | secrets (`boundary.py:361`), guard `vms/manager/recover.py:84`; host-key confirm stays (`recover.py:240`)                                                                                                              | step 5                                                          |
+| `vm confirm-release`                               | none; its confirm (`vms/manager/release.py:79`) precedes the new guard                                                                                                                                                 | step 5                                                          |
+| `console attach`                                   | `require_vm_ssh_boundary`, gate secrets (`prepare_vm_runtime`) and a possible boot (`activate_vm_runtime`), all under the guard at `sessions/multi_console/lifecycle.py:257` until `:303`, before the attach at `:304` | gate secrets to step 4; the boot moves out of the guard in PR 2 |
+| `agent reinit`                                     | gate and boundary secrets (`agents/manager/lifecycle.py:658`, `:666`), guard `:504`                                                                                                                                    | steps 4 and 5                                                   |
+| `agent delete`                                     | boundary secrets, guard `lifecycle.py:331`; its session list is read before the guard (`:307`)                                                                                                                         | step 5; step 7 compares the session names                       |
+| `workspace delete`                                 | boundary secrets (`workspaces/manager/delete.py:134-142`), guard `:106`                                                                                                                                                | step 5                                                          |
+| `workspace rehome`                                 | sessions check (`workspaces/manager/rehome.py:101-123`), confirm (`:217`), secrets (`:181-189`), guard `:96`                                                                                                           | step 5, re-run at step 7                                        |
+| `session create`                                   | gate and boundary secrets (`sessions/manager/_create.py:414-417`), guard `:377`                                                                                                                                        | steps 4 and 5                                                   |
+| `session start --spec`                             | restart consent (`sessions/manager/_spec.py:133-135`), guard `:128`                                                                                                                                                    | step 5; overlay handed to the batch                             |
+| `session delete`                                   | confirm (`sessions/manager/_queries.py:227`), empty-console offer (`:295`, `sessions/_resource_cleanup.py:97`), secrets, guard `:154`                                                                                  | step 5                                                          |
+| `console create`                                   | gate and pane secrets (`sessions/multi_console/attach.py:453`, `:495`), guard `multi_console/crud.py:163`                                                                                                              | steps 4 and 5                                                   |
+| `console start`, `restart`, `stop`                 | gate secrets (`multi_console/lifecycle.py:96`, `:167`), guard `:69`, `:149`; pane secrets stay (`:117-118`, `:191`)                                                                                                    | runtime path (e)                                                |
+| `console delete`                                   | confirm (`multi_console/attach.py:856`), guard `:854`                                                                                                                                                                  | step 5                                                          |
+| `console add-sessions`, `add-shell`                | pane secrets (`crud.py:379`, `:696`), guards `:325`, `:648`                                                                                                                                                            | step 5; members re-checked at step 7                            |
+| `console remove-sessions`                          | empty-console offer (`crud.py:494`), guard `:466`                                                                                                                                                                      | step 5                                                          |
+| `console restore-session`                          | gate and pane secrets (`multi_console/restore.py:353`), guard `:293`                                                                                                                                                   | steps 4 and 5                                                   |
+| `vm reconcile`, session batch, `console reconcile` | gate secrets (`runtime_state/_prepare.py:213-221`), guard `runtime_state/_selection.py:101`; workload union stays (`_execute.py:45`)                                                                                   | runtime path (e)                                                |
+
+### A.2 PR 2: acquisition sites
+
+| Command                                                                         | Acquires today                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vm create`                                                                     | `vms/manager/lifecycle.py:383` (by name)                                                                                                                                                                                                                 |
+| `vm reinit`, `start`, `stop`, `delete`, `rekey`, `recover`, `set-desired-state` | `reinit.py:71`; `power.py:73`, `:117`, `:218`, `:412`, `:36`; `recover.py:84`                                                                                                                                                                            |
+| `vm reconcile`, session batch, `console reconcile`                              | `runtime_state/_selection.py:101`, families in VM name order                                                                                                                                                                                             |
+| `vm import-host-keys`, `vm confirm-release`                                     | PR 1's new guards (`vms/manager/host_keys.py:126-149`, `vms/manager/release.py:86-89`)                                                                                                                                                                   |
+| access commands                                                                 | admission only: `vms/manager/exec.py:121`, `:193`, `:278`; `port_forward.py:80`; `vms/backup.py:81`; `agents/manager/access.py:143`, `:244`; `sessions/manager/_queries.py:938`; `_logs.py:44`; `sessions/multi_console/lifecycle.py:257` (until `:303`) |
+| `agent create`, `reinit`, `delete`                                              | `agents/realize.py:119`; `agents/manager/lifecycle.py:504`, `:331`                                                                                                                                                                                       |
+| `agent grant-workspaces`, `revoke`                                              | PR 1's new guards (`agents/grants.py:95`, `:162`)                                                                                                                                                                                                        |
+| `workspace create`, `delete`, `rehome`                                          | `workspaces/realize.py:124`; `workspaces/manager/delete.py:106`; `rehome.py:96`                                                                                                                                                                          |
+| `workspace repair`, `copy`                                                      | PR 1's new guards (`workspaces/manager/repair.py:132`; `copy.py:107`, `:144`)                                                                                                                                                                            |
+| `session create`, `set-desired-state`, `delete`                                 | `sessions/manager/_create.py:377` (and the slice `_create_roll.py:248`); `_intent.py:59`; `_queries.py:154`                                                                                                                                              |
+| consoles                                                                        | `multi_console/crud.py:163`; `guarded_console_selection` (`multi_console/_helpers.py:221-240`) at `lifecycle.py:69`, `:149`, `:257`, `attach.py:854`, `runtime.py:132`, `crud.py:325`, `:466`, `:525`, `:648`, `restore.py:293`                          |
+| nested                                                                          | `harness_setup/dispatch.py:116`; `harness_setup/lifecycle.py:262`, `:312`, `:365`; `vms/initializer/driver.py:187`; `vms/nodes.py:242`, `:279`                                                                                                           |
