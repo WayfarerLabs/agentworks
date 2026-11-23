@@ -35,7 +35,7 @@ class EntityKind(StrEnum):  # declaration order is the global lock order
     WORKSPACE = "workspace"
     ACCOUNT = "account"
     GRANT_ALL = "grant-all"
-    WORKSPACE_PATHS = "workspace-paths"
+    PATH = "path"
     GRANT = "grant"
     SESSION = "session"
     CONSOLE = "console"
@@ -50,21 +50,22 @@ class Entity:
 ```
 
 Identity is `(vm, kind, name)`. Entities are built only through constructors, and `__post_init__`
-enforces the tree: a vm has no parents and its name equals `vm`; a workspace, account, grant-all,
-workspace-paths or console has the vm among its parents; a session's parents are exactly one
-workspace and one account; a grant's are one workspace and one account; a console's are the vm and
-its member sessions; every parent belongs to the same vm.
+enforces the tree: a vm has no parents and its name equals `vm`; a workspace, account, grant-all or
+console has the vm among its parents; a path's parent is the path of its parent directory, or the vm
+for a top-level directory; a session's parents are exactly one workspace and one account; a grant's
+are one workspace and one account; a console's are the vm and its member sessions; every parent
+belongs to the same vm.
 
-| Constructor                                  | Display key                   | Notes                                                             |
-| -------------------------------------------- | ----------------------------- | ----------------------------------------------------------------- |
-| `vm_entity(vm)`                              | `vm/<vm>`                     | the existing vm file                                              |
-| `workspace_entity(vm, name)`                 | `workspace/<name>`            |                                                                   |
-| `account_entity(vm, linux_user)`             | `account/<linux user>`        | `AgentRow.linux_user` or `VMRow.admin_username`                   |
-| `grant_all_entity(vm)`                       | `grant-all`                   | the VM's set of grant-all agents                                  |
-| `workspace_paths_entity(vm)`                 | `workspace-paths`             | the VM's set of workspace directory paths, in flight or published |
-| `grant_entity(workspace, account)`           | `grant/<workspace>+<account>` | one account's membership in one workspace group                   |
-| `session_entity(name, workspace=, account=)` | `session/<name>`              |                                                                   |
-| `console_entity(vm, name, members=)`         | `console/<name>`              | members are session entities                                      |
+| Constructor                                  | Display key                     | Notes                                              |
+| -------------------------------------------- | ------------------------------- | -------------------------------------------------- |
+| `vm_entity(vm)`                              | `vm/<vm>`                       | the existing vm file                               |
+| `workspace_entity(vm, name)`                 | `workspace/<name>`              |                                                    |
+| `account_entity(vm, linux_user)`             | `account/<linux user>`          | `AgentRow.linux_user` or `VMRow.admin_username`    |
+| `grant_all_entity(vm)`                       | `grant-all`                     | the VM's set of grant-all agents                   |
+| `path_entity(vm, resolved_path)`             | `path/<resolved absolute path>` | one directory tree on the VM, by its resolved path |
+| `grant_entity(workspace, account)`           | `grant/<workspace>+<account>`   | one account's membership in one workspace group    |
+| `session_entity(name, workspace=, account=)` | `session/<name>`                |                                                    |
+| `console_entity(vm, name, members=)`         | `console/<name>`                | members are session entities                       |
 
 Accounts are keyed by Linux user rather than agent name because the account is the thing on the VM
 (`agents/manager/_common.py:109` derives `agt-<name>` at create; legacy rows keep their stored
@@ -78,15 +79,18 @@ revoke `--all` change that set and then read the set of workspaces (`agents/real
 grant-all agent create on one VM could each miss the other. Readers hold `grant-all` shared, writers
 exclusive.
 
-`workspace-paths` names another such set: the directory paths of the VM's workspaces, including a
-target an operation has reserved but not yet published in a row. Workspace paths may not nest: no
-workspace's path may lie inside or contain another's. The three operations that claim a path
-(workspace create, copy's destination, rehome) hold `workspace-paths` exclusive, so two claims on
-one VM never run at once and an in-flight target is protected without any pending-path record: until
-its operation releases the entity, no other claim can start, and once it releases, its row is
-published and every later claim reads it
-([Workspace paths, section 4](#rows-that-need-more-than-a-line)). The cost is that those three
-operations serialize per VM; nothing else does.
+A `path` entity names a directory tree on the VM by its resolved absolute path (symbolic links
+resolved, normalized by `guest_path`), so path locks follow the same two-mode rule as everything
+else. An operation that creates, fills or removes a workspace directory tree takes its tree root
+exclusive, and every ancestor directory path shared, component by component. `/` is excluded: every
+path operation would hold it shared and none can hold it exclusive (a workspace path of `/` is
+refused at config validation), so it would never decide anything; a top-level directory's parent is
+the vm. Because a path's ancestors are its string prefixes, the `(kind, name)` order still takes
+them before it. Two operations on disjoint trees share only shared ancestors and proceed together;
+an operation inside a tree holds the tree's root shared, so an operation removing or filling that
+root is refused, and the reverse. An in-flight target is covered by its own exclusive lock until its
+operation ends; no pending record is needed
+([Workspace paths, section 4](#rows-that-need-more-than-a-line)).
 
 ### Modes and requests
 
@@ -613,15 +617,16 @@ it, under the same 0700 directory and the same OS user. The only fields are the 
 A command compares only what it read, and only these fields, never whole rows (timestamps and
 recorded pids change under ordinary use):
 
-| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                                                                                                  |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`; `confirm-release` adds `debian_release`                                                                                                                                                                                                                                    |
-| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                                                                                             |
-| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                                                                                             |
-| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded and the desired overlay digest (`db.instance_state.get_desired_overlay`) they accepted                                                                                                     |
-| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names                                                                                                                                                                                                                                                             |
-| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes; the workspaces overlapping a claimed path, with their resolved paths |
-| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status                                                                                                                       |
+| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`; `confirm-release` adds `debian_release`                                                                                                                                                              |
+| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                       |
+| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                       |
+| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded and the desired overlay digest (`db.instance_state.get_desired_overlay`) they accepted                               |
+| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names                                                                                                                                                                                       |
+| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes |
+| path entities                     | the resolved path of each `path` entity in the request, resolved again on the guest                                                                                                                                                                        |
+| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status                                                 |
 
 ### Lock sets
 
@@ -629,33 +634,33 @@ X is taken exclusive; every ancestor of an X entity is taken shared and not list
 shared entities. A console's ancestors are the vm and its member sessions with their workspaces and
 accounts. Gate says whether the command needs the VM running and so runs step 4.
 
-| Command                                                                                           | X                                                                                                                                                                               | S                                                                                                     | Gate                                          |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `vm create` (by name), `start`, `stop`, `delete`, `recover`, `set-desired-state`                  | vm                                                                                                                                                                              |                                                                                                       | no                                            |
-| `vm reinit`, `rekey`                                                                              | vm                                                                                                                                                                              |                                                                                                       | yes                                           |
-| `vm import-host-keys`                                                                             | vm, per VM                                                                                                                                                                      |                                                                                                       | no                                            |
-| `vm confirm-release`                                                                              | vm                                                                                                                                                                              |                                                                                                       | yes                                           |
-| `vm reconcile`                                                                                    | each session and console on the VM, per family; the vm when its own target is stopped                                                                                           |                                                                                                       | per family, from intent                       |
-| access and observe commands                                                                       | none: admission only                                                                                                                                                            | vm                                                                                                    | yes                                           |
-| `agent create`                                                                                    | account; with `--grant-all-workspaces` also grant-all and a grant per workspace on the VM                                                                                       |                                                                                                       | yes                                           |
-| `agent reinit`                                                                                    | account, a grant per recorded grant it replays (`agents/manager/lifecycle.py:783`)                                                                                              |                                                                                                       | yes                                           |
-| `agent delete`                                                                                    | account, each of its sessions, grants and consoles holding them; grant-all when the agent is grant-all                                                                          |                                                                                                       | yes                                           |
-| `agent grant-workspaces`, `revoke-workspaces`                                                     | a grant per named workspace; `--all`: grant-all and a grant for every workspace on the VM, for both commands                                                                    | account (always, even with no workspace)                                                              | yes                                           |
-| `workspace create`                                                                                | workspace, workspace-paths, grant(workspace, admin), grant(workspace, agent) per grant-all agent                                                                                | grant-all; each workspace whose path overlaps the target                                              | yes                                           |
-| `workspace delete`                                                                                | workspace, each of its sessions, grants and consoles holding them                                                                                                               |                                                                                                       | yes                                           |
-| `workspace repair`                                                                                | workspace, grant(workspace, admin), a grant per agent holding one on it                                                                                                         |                                                                                                       | yes                                           |
-| `workspace rehome`                                                                                | workspace, workspace-paths                                                                                                                                                      | each workspace whose path overlaps the source or the target                                           | yes                                           |
-| `workspace copy`                                                                                  | destination VM: workspace, workspace-paths, grant(workspace, admin), grant per grant-all agent                                                                                  | destination: grant-all and each workspace whose path overlaps the target; source VM: source workspace | yes, both VMs                                 |
-| `session create`                                                                                  | session; grant(workspace, agent) in agent mode; `--new-workspace` adds workspace, workspace-paths, grant(workspace, admin) and the grant-all grants; `--new-agent` adds account | `--new-workspace`: grant-all and each workspace whose path overlaps the target                        | yes                                           |
-| `session start`, `restart`, `reconcile`                                                           | each selected session, per family                                                                                                                                               |                                                                                                       | yes (reconcile: unless its targets only stop) |
-| `session stop`                                                                                    | each selected session, per family                                                                                                                                               |                                                                                                       | no                                            |
-| `session set-desired-state`                                                                       | session                                                                                                                                                                         |                                                                                                       | no                                            |
-| `session delete`                                                                                  | session; grant(workspace, agent) in agent mode; each console holding it                                                                                                         |                                                                                                       | yes                                           |
-| `console create`, `start`, `restart`, `restore-session`                                           | console                                                                                                                                                                         |                                                                                                       | yes                                           |
-| `console reconcile`                                                                               | console                                                                                                                                                                         |                                                                                                       | unless it only stops                          |
-| `console stop`, `set-desired-state`, `delete`, `remove-sessions`, `reorder-sessions`, `add-shell` | console                                                                                                                                                                         |                                                                                                       | no                                            |
-| `console add-sessions`                                                                            | console                                                                                                                                                                         | each added session                                                                                    | no                                            |
-| `vm describe`, `vm verify-connection`, `vm logs`, every `describe` and `list`                     | none                                                                                                                                                                            |                                                                                                       | no                                            |
+| Command                                                                                           | X                                                                                                                                                                            | S                                                                    | Gate                                          |
+| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------- |
+| `vm create` (by name), `start`, `stop`, `delete`, `recover`, `set-desired-state`                  | vm                                                                                                                                                                           |                                                                      | no                                            |
+| `vm reinit`, `rekey`                                                                              | vm                                                                                                                                                                           |                                                                      | yes                                           |
+| `vm import-host-keys`                                                                             | vm, per VM                                                                                                                                                                   |                                                                      | no                                            |
+| `vm confirm-release`                                                                              | vm                                                                                                                                                                           |                                                                      | yes                                           |
+| `vm reconcile`                                                                                    | each session and console on the VM, per family; the vm when its own target is stopped                                                                                        |                                                                      | per family, from intent                       |
+| access and observe commands                                                                       | none: admission only                                                                                                                                                         | vm                                                                   | yes                                           |
+| `agent create`                                                                                    | account; with `--grant-all-workspaces` also grant-all and a grant per workspace on the VM                                                                                    |                                                                      | yes                                           |
+| `agent reinit`                                                                                    | account, a grant per recorded grant it replays (`agents/manager/lifecycle.py:783`)                                                                                           |                                                                      | yes                                           |
+| `agent delete`                                                                                    | account, each of its sessions, grants and consoles holding them; grant-all when the agent is grant-all                                                                       |                                                                      | yes                                           |
+| `agent grant-workspaces`, `revoke-workspaces`                                                     | a grant per named workspace; `--all`: grant-all and a grant for every workspace on the VM, for both commands                                                                 | account (always, even with no workspace)                             | yes                                           |
+| `workspace create`                                                                                | workspace, path(target), grant(workspace, admin), grant(workspace, agent) per grant-all agent                                                                                | grant-all                                                            | yes                                           |
+| `workspace delete`                                                                                | workspace, path(its stored path, when it removes the files), each of its sessions, grants and consoles holding them                                                          |                                                                      | yes                                           |
+| `workspace repair`                                                                                | workspace, grant(workspace, admin), a grant per agent holding one on it                                                                                                      |                                                                      | yes                                           |
+| `workspace rehome`                                                                                | workspace, path(target); path(source) with `--remove-old`                                                                                                                    | path(source) without `--remove-old`                                  | yes                                           |
+| `workspace copy`                                                                                  | destination VM: workspace, path(target), grant(workspace, admin), grant per grant-all agent                                                                                  | destination: grant-all; source VM: source workspace and path(source) | yes, both VMs                                 |
+| `session create`                                                                                  | session; grant(workspace, agent) in agent mode; `--new-workspace` adds workspace, path(target), grant(workspace, admin) and the grant-all grants; `--new-agent` adds account | `--new-workspace`: grant-all                                         | yes                                           |
+| `session start`, `restart`, `reconcile`                                                           | each selected session, per family                                                                                                                                            |                                                                      | yes (reconcile: unless its targets only stop) |
+| `session stop`                                                                                    | each selected session, per family                                                                                                                                            |                                                                      | no                                            |
+| `session set-desired-state`                                                                       | session                                                                                                                                                                      |                                                                      | no                                            |
+| `session delete`                                                                                  | session; grant(workspace, agent) in agent mode; each console holding it                                                                                                      |                                                                      | yes                                           |
+| `console create`, `start`, `restart`, `restore-session`                                           | console                                                                                                                                                                      |                                                                      | yes                                           |
+| `console reconcile`                                                                               | console                                                                                                                                                                      |                                                                      | unless it only stops                          |
+| `console stop`, `set-desired-state`, `delete`, `remove-sessions`, `reorder-sessions`, `add-shell` | console                                                                                                                                                                      |                                                                      | no                                            |
+| `console add-sessions`                                                                            | console                                                                                                                                                                      | each added session                                                   | no                                            |
+| `vm describe`, `vm verify-connection`, `vm logs`, every `describe` and `list`                     | none                                                                                                                                                                         |                                                                      | no                                            |
 
 ### Rows that need more than a line
 
@@ -717,47 +722,52 @@ never refused.
 without persisting anything (today it runs `ensure_pids_batch`, which can write a PID repair, under
 the guard and before any gate, `workspaces/manager/rehome.py:101-123`), then its directory probes
 (`:191-206`) and its confirmation (`:217`), which shows only the stored and new paths. Under the
-workspace exclusive, step 7 re-reads the stored path and the overlapping workspaces' paths, runs
+workspace exclusive, step 7 re-reads the stored path, resolves the source and target again, runs
 `ensure_pids_batch` and the sessions check (a session can start between the two) and the probes
 again; the target is then reserved with the exclusive `mkdir` it uses today (`:228`). Workspace
 repair keeps its writes under its own lock.
 
-**Workspace paths.** No two workspaces' paths may nest. Workspace create, copy's destination,
-`session create --new-workspace` and rehome:
+**Workspace paths.** Every operation that creates, fills or removes a workspace tree locks it as a
+`path` entity: workspace create, copy's destination and `session create --new-workspace` take the
+target exclusive; rehome takes the target exclusive and the source exclusive with `--remove-old` (it
+removes it) or shared without (it reads it); workspace delete takes its stored path exclusive when
+it removes the files; copy takes its source shared. Each also takes every ancestor directory path
+shared. Paths are resolved on the guest (`_resolved_paths`, `rehome.py:356`, which create and copy
+reuse) at step 5, join the request at step 6 (the probe at step 2 tries the lexical paths), and are
+resolved again and compared at step 7, so a link cannot hide an overlap.
 
-- read at step 1 every workspace on the VM whose path is the target, lies inside it or contains it
-  (rehome: or the source), and add each to the request shared, so none of them can be deleted,
-  rehomed or repaired while the claim runs;
-- refuse a target that lies inside or contains another workspace's path, and refuse rehome's
-  `--remove-old` when another workspace lies inside its source, since removing the source would
-  remove that workspace too;
-- hold `workspace-paths` exclusive, so no other claim on the VM is in flight: an in-flight target
-  (reserved by `mkdir`, not yet in a row) cannot be nested by a concurrent claim, and once its
-  operation releases, its row is published (or its directory unwound) and the next claim reads it;
-- compare at step 7 the overlapping workspaces' paths and the set of overlapping workspaces, both
-  compared by resolved path (`_resolved_paths`, `rehome.py:356`), so a link cannot hide an overlap.
+- The tester's case: A's rehome to `/data/B/new` holds `/data/B` shared, and B's `--remove-old` of
+  `/data/B` needs it exclusive, so whichever acquires second is refused. Two creates of disjoint
+  paths proceed together.
+- No overlapping-workspace reads are needed. Any operation that could destroy another workspace's
+  tree holds that tree's root or an ancestor exclusive, and any operation working inside it holds
+  the root shared, so the path locks already refuse every concurrent overlap; an idle workspace
+  whose tree is not being changed constrains nothing, exactly as today.
+- Nothing about what is allowed changes. A target inside or containing another workspace's tree is
+  still accepted, as today, and the exact-target `mkdir` (`:228`) still reserves it.
 
-The tester's case (`/data/A` rehomed to `/data/B/new` while B is rehomed out of `/data/B` with
-`--remove-old`) is refused either way: A's target lies inside B, and B's claim holds
-`workspace-paths`.
+A nested legacy layout can still lose a workspace sequentially: a rehome of A with `--remove-old`
+removes any workspace whose tree lies inside A's source, today and under this design alike, since
+the two operations do not overlap in time. That is not a locking question; the lead is filing it as
+an issue.
 
 ## 5. Shared state across entities
 
-| State                                    | Mechanism                                                                                                                                                                                                                                                                      |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| VM account and group files               | shadow-utils' own serialization, below; `ensure_group` made idempotent                                                                                                                                                                                                         |
-| an agent's home and mail spool           | removed before `userdel`, while the account still holds its uid, under the account's exclusive and outside shadow's locks ([Agent account removal](#agent-account-removal))                                                                                                    |
-| `/opt/agentworks/tmux-session.conf`      | already an atomic replace: `deploy_restricted_config` (`sessions/tmux.py:711-722`) writes through `Files.write`, an `O_EXCL` temporary with a fresh name renamed over the file (`execution/file_program.py:298-328`), whose parents tolerate a concurrent `mkdir` (`:126-129`) |
-| socket roots and per-account socket dirs | already convergent: each step of `ensure_agent_socket_root`, `ensure_agent_socket_dir` and `ensure_admin_socket_root` (`tmux.py:456-511`, `:607-632`) is `mkdir -p` or an absolute `chown`/`chmod`, so any interleaving ends in the same state                                 |
-| stale socket cleanup                     | `cleanup_stale_sockets` (`tmux.py:546`) runs only from agent create and reinit (`agents/initializer.py:227`, under the account exclusive) and vm create and reinit (`vms/initializer/driver.py:349`, under the vm exclusive); a launch holds its account shared                |
-| workspace group membership               | the grant entity                                                                                                                                                                                                                                                               |
-| the grant-all agents and the workspaces  | the grant-all entity                                                                                                                                                                                                                                                           |
-| workspace directory paths                | the `workspace-paths` entity and the overlapping workspaces held shared ([Workspace paths, section 4](#rows-that-need-more-than-a-line)); the exclusive `mkdir` in create (`workspaces/backends/vm.py:127`) and rehome (`rehome.py:228`) still reserves the exact target       |
-| console membership                       | the console entity, with its members as parents                                                                                                                                                                                                                                |
-| the dpkg lock                            | workspace repair's `acl` install (`workspaces/manager/repair.py:158`) gains `-o DPkg::Lock::Timeout=120`, as `vms/recovery.py:117-118` uses, since two repairs of different workspaces can now run at once                                                                     |
-| operation logs                           | each log gets a unique name created with an exclusive open ([Operation logs](#operation-logs))                                                                                                                                                                                 |
-| operator SSH config                      | the SSH config rebuild mutex ([below](#ssh-config-rebuild))                                                                                                                                                                                                                    |
-| host-key store                           | per-VM file written atomically (`execution/trust.py:242-261`) under the vm exclusive                                                                                                                                                                                           |
+| State                                    | Mechanism                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM account and group files               | shadow-utils' own serialization, below; `ensure_group` made idempotent                                                                                                                                                                                                                                   |
+| an agent's home and mail spool           | removed before `userdel`, while the account still holds its uid, under the account's exclusive and outside shadow's locks ([Agent account removal](#agent-account-removal))                                                                                                                              |
+| `/opt/agentworks/tmux-session.conf`      | already an atomic replace: `deploy_restricted_config` (`sessions/tmux.py:711-722`) writes through `Files.write`, an `O_EXCL` temporary with a fresh name renamed over the file (`execution/file_program.py:298-328`), whose parents tolerate a concurrent `mkdir` (`:126-129`)                           |
+| socket roots and per-account socket dirs | already convergent: each step of `ensure_agent_socket_root`, `ensure_agent_socket_dir` and `ensure_admin_socket_root` (`tmux.py:456-511`, `:607-632`) is `mkdir -p` or an absolute `chown`/`chmod`, so any interleaving ends in the same state                                                           |
+| stale socket cleanup                     | `cleanup_stale_sockets` (`tmux.py:546`) runs only from agent create and reinit (`agents/initializer.py:227`, under the account exclusive) and vm create and reinit (`vms/initializer/driver.py:349`, under the vm exclusive); a launch holds its account shared                                          |
+| workspace group membership               | the grant entity                                                                                                                                                                                                                                                                                         |
+| the grant-all agents and the workspaces  | the grant-all entity                                                                                                                                                                                                                                                                                     |
+| workspace directory trees                | `path` entities: the tree root exclusive and its ancestors shared for whoever creates, fills or removes it ([Workspace paths, section 4](#rows-that-need-more-than-a-line)); the exact-target `mkdir` in create (`workspaces/backends/vm.py:127`) and rehome (`rehome.py:228`) still reserves the target |
+| console membership                       | the console entity, with its members as parents                                                                                                                                                                                                                                                          |
+| the dpkg lock                            | workspace repair's `acl` install (`workspaces/manager/repair.py:158`) gains `-o DPkg::Lock::Timeout=120`, as `vms/recovery.py:117-118` uses, since two repairs of different workspaces can now run at once                                                                                               |
+| operation logs                           | each log gets a unique name created with an exclusive open ([Operation logs](#operation-logs))                                                                                                                                                                                                           |
+| operator SSH config                      | the SSH config rebuild mutex ([below](#ssh-config-rebuild))                                                                                                                                                                                                                                              |
+| host-key store                           | per-VM file written atomically (`execution/trust.py:242-261`) under the vm exclusive                                                                                                                                                                                                                     |
 
 VS Code workspace files are written and removed per workspace inside workspace create and delete
 (`workspaces/backends/vm.py:350`, `workspaces/manager/delete.py:263`), under that workspace's
@@ -798,16 +808,16 @@ warn-on-step-failure handling, all under the account exclusive:
    (`USERGROUPS_ENAB`).
 
 The order is what keeps the files private. Shadow 4.13 gives a new account the next uid above the
-highest one in use (`libmisc/find_new_uid.c`), so deleting the highest-numbered account frees its
-uid for the very next `useradd` (`agents/initializer.py:83`), whatever its name; a removal that ran
-`userdel` first and cleaned up after would leave a window in which a different account numerically
-owns the old 0700 home and spool. With the files removed while the account still holds its uid, no
-other account can receive that uid until nothing of the old one remains; `userdel -r` itself cleans
-the home before publishing the account change for the same reason. A per-name lock cannot reserve a
-uid, which is why the order matters rather than the lock. An interrupted removal reruns cleanly: the
-account still exists, the probe finds it, an already removed home or spool is skipped, and `userdel`
-runs. A failure in step 2 or 3 warns through the existing `STEP_FAILURES` handler, as a `userdel -r`
-failure does today.
+highest one in use (`libmisc/find_new_uid.c`, shadow 4.13), so deleting the highest-numbered account
+frees its uid for the very next `useradd` (`agents/initializer.py:83`), whatever its name; a removal
+that ran `userdel` first and cleaned up after would leave a window in which a different account
+numerically owns the old 0700 home and spool. With the files removed while the account still holds
+its uid, no other account can receive that uid until nothing of the old one remains; `userdel -r`
+itself cleans the home before publishing the account change for the same reason. A per-name lock
+cannot reserve a uid, which is why the order matters rather than the lock. An interrupted removal
+reruns cleanly: the account still exists, the probe finds it, an already removed home or spool is
+skipped, and `userdel` runs. A failure in step 2 or 3 warns through the existing `STEP_FAILURES`
+handler, as a `userdel -r` failure does today.
 
 ### Operation logs
 
@@ -874,7 +884,7 @@ read fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_
 | vm reconcile             | a `vm reconcile` whose VM target is running holds the vm shared, so an unrelated workspace create on that VM proceeds; with a stopped target it holds the vm exclusive                                                                                                                                                                                                                                                 |
 | grant-all                | a workspace create and a grant-all agent create on one VM: one is refused before native work, and after a retry every grant-all agent has a grant for every workspace                                                                                                                                                                                                                                                  |
 | bulk grant and revoke    | during `revoke-workspaces --all`, a named grant of a workspace the agent was not granted is refused; with no workspace on the VM, `--all` still holds the account shared, so an agent delete refuses it                                                                                                                                                                                                                |
-| workspace paths          | a target inside or containing another workspace's path is refused, as is `--remove-old` with a workspace inside the source; two nested claims in flight on one VM refuse one another; a workspace overlapping a claim cannot be deleted or rehomed until the claim ends; the two-rehome case keeps a copy of both workspaces                                                                                           |
+| workspace paths          | a rehome into `/data/B/new` and B's `--remove-old` of `/data/B` refuse one another; two creates of disjoint paths proceed together; a delete of a workspace refuses a concurrent create inside its tree; a target behind a link is locked by its resolved path, and a resolution that changes by step 7 refuses                                                                                                        |
 | console lists            | two concurrent `console add-shell` calls on one member keep both shells; a restore whose pane plan changed under the final set and needs an unresolved secret refuses                                                                                                                                                                                                                                                  |
 | restart declaration      | two restarts accepting overlays X then Y: the one whose accepted overlay was replaced refuses that target at (g)                                                                                                                                                                                                                                                                                                       |
 | agent reinit declaration | a template or overlay changed after reinit's early save refuses it at step 7                                                                                                                                                                                                                                                                                                                                           |
@@ -936,11 +946,11 @@ exception:
 Session-time writes reach the account's HOME under the account shared, and each is safe when two
 sessions of one account launch at once: session artifacts go to a per-session directory
 (`<home>/<AGENTWORKS_ARTIFACTS>/session/<session uuid>`, `artifacts/session.py:161-176`); Codex's
-`session-home-skills` (`plugins/codex/artifacts.py:43-45`) publishes into the shared user skill
-catalog under package names derived from the session's uuid and run, which keep sessions apart; and
-Codex's notify recorder is one byte-identical atomic replace per launch
-(`plugins/codex/recorder.py:170-194`). No setup or launch writer inside these rules crosses owners,
-so no request gains another owner.
+`session-home-skills` (`plugins/codex/artifacts.py:43-45`, `:164-169`) publishes into the shared
+user skill catalog under package names derived from the session's uuid and run id
+(`artifacts/native/guidance.py:53-56`), which keep sessions apart; and Codex's notify recorder is
+one byte-identical atomic replace per launch (`plugins/codex/recorder.py:170-194`). No setup or
+launch writer inside these rules crosses owners, so no request gains another owner.
 
 ### Existing tests that change
 
@@ -1003,11 +1013,11 @@ No sample-config or completion change: the waits are constants and the command t
   `delete_console_record`.
 
 **PR 2, the hierarchy.** The `native_locks` package replaces `harness_setup/locking.py` in one step:
-entities and requests at every site of Appendix A.2 (with the bulk grant pairs, the
-`workspace-paths` entity and its overlap reads, and the console list rule), the probe, the brief
-boot exclusive and shared admission, the runtime families' intent acquisition and per-family failure
-with `restore_intent`, holder records and the R3 message, the per-invocation structural prompt
-notice with `prompts=True`, the restart and agent reinit declaration checks, and the family barrier.
+entities and requests at every site of Appendix A.2 (with the bulk grant pairs, the `path` entities,
+and the console list rule), the probe, the brief boot exclusive and shared admission, the runtime
+families' intent acquisition and per-family failure with `restore_intent`, holder records and the R3
+message, the per-invocation structural prompt notice with `prompts=True`, the restart and agent
+reinit declaration checks, and the family barrier.
 
 ## Appendix A: implementation checklist
 
