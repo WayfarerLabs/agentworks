@@ -47,6 +47,7 @@ from agentworks.vms.initializer.shell_env import (
     SKEL_ZSHRC_PATH,
 )
 from agentworks.vms.templates import ResolvedVMTemplate
+from agentworks.workspaces.retired_tmuxinator import _LINKS_SCRIPT, _PROJECTS_SCRIPT
 from tests.phase_b_support import StepGuest, is_file_operation
 from tests.test_tailscale_dns import DNS_PROBE, READ_RESOLV, RESOLVED_ACTIVE
 
@@ -86,9 +87,22 @@ ADMIN_GROUP = Command(("id", "-gn", "agentworks"), deadline=60)
 
 ABSENT = Result(Completed(0), json.dumps({"kind": "absent", "mode": None, "digest": None}).encode())
 
+RETIREMENT_FINISHED = Result(Completed(0), b"AGW_TMUXINATOR_FINISHED\n")
+"""What reinit's workspace tmuxinator project removal reports when it reaches every workspace."""
+
+
+def _retirement_scripts(guest: StepGuest) -> list[str]:
+    """The scripts of the workspace tmuxinator project removal's commands, in order."""
+    return [
+        request.argv[2]
+        for request in guest.commands()
+        if isinstance(request, Command) and request.argv[:2] == ("sh", "-c") and len(request.argv) > 2
+    ]
+
 
 class Guest(StepGuest):
-    """A steady guest: a hardened ``/etc/fstab``, a private admin group, empty files and no retired sshd fragment.
+    """A steady guest: a hardened ``/etc/fstab``, a private admin group, empty files, no retired sshd fragment
+    and no workspace tmuxinator project left to remove.
 
     All else succeeds.
     """
@@ -114,6 +128,8 @@ class Guest(StepGuest):
             ("stat", RETIRED_SSHD_ACCEPT_ENV_RELOAD_PENDING_PATH),
         ):
             return ABSENT
+        if isinstance(call.request, Command) and call.request.argv[:3] == ("sh", "-c", _PROJECTS_SCRIPT):
+            return RETIREMENT_FINISHED
         return None
 
 
@@ -180,6 +196,34 @@ def test_a_steady_section_runs_every_step_without_a_warning(run_section: Callabl
     root = commands.index(Command(("chmod", "00711", "--", AGENT_SOCKET_ROOT), elevated=True, deadline=60))
     [retirement] = _retirements(guest)
     assert root < commands.index(retirement)
+
+
+@pytest.mark.parametrize(
+    ("operation", "scripts"),
+    [
+        (driver.VMInitializationOperation.VM_REINIT, [_LINKS_SCRIPT, _PROJECTS_SCRIPT]),
+        (driver.VMInitializationOperation.VM_CREATE, []),
+    ],
+    ids=["reinit", "create"],
+)
+def test_only_reinit_removes_the_workspace_tmuxinator_projects(
+    db: Database, run_section: Callable[..., None], operation: driver.VMInitializationOperation, scripts: list[str]
+) -> None:
+    """A new VM has none; reinit removes them for every workspace on the VM, after the install commands."""
+    db.insert_workspace("proj", vm_name="box", workspace_path="/srv/proj", template="default", linux_group="ws-proj")
+    guest = Guest()
+
+    run_section(guest, operation=operation)
+
+    assert _retirement_scripts(guest) == scripts
+    assert guest.log.warned == []
+    if scripts:
+        commands = guest.commands()
+        [projects] = [
+            request for request in commands if isinstance(request, Command) and _PROJECTS_SCRIPT in request.argv
+        ]
+        assert projects.argv[4:] == ("/srv/proj",)
+        assert commands.index(install_run("bash", "install-user-tool")) < commands.index(projects)
 
 
 def _retirements(guest: Guest) -> list[RunRequest]:
@@ -271,21 +315,6 @@ def _local_dotfiles(tmp_path: Path) -> AdminConfig:
     (tmp_path / "dots").mkdir()
     (tmp_path / "dots" / "install.sh").write_text("#!/bin/sh\n")
     return AdminConfig(user_install_commands=["user-tool"], dotfiles_source=str(tmp_path / "dots"))
-
-
-def test_the_admin_s_dotfiles_are_not_synced_over_its_workspace_tmuxinator_links(
-    run_section: Callable[..., None], tmp_path: Path
-) -> None:
-    """The admin's set refuses an absolute destination over the links when initialization checks it."""
-    guest = Guest()
-    admin = _local_dotfiles(tmp_path).model_copy(update={"dotfiles_destination": f"{HOME}/.config"})
-
-    run_section(guest, admin)
-
-    assert not any(
-        isinstance(request, Script) and "AGW_TREE_DEST" in request.env for request in guest.access.requests()
-    )
-    assert len(guest.log.warned) == 1
 
 
 def test_no_request_carries_an_environment_but_apts_and_the_tree_upload_s(

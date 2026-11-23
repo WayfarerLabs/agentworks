@@ -273,7 +273,7 @@ def as_socket_owner_line(
 def as_socket_owner_from_admin(command: str, *, socket_path: str, owner: str, terminal: bool = False) -> str:
     """A shell line the admin runs that runs ``command`` as ``owner`` behind the socket guard, through ``sudo -n``.
 
-    For the admin's own shells (a console window, a tmuxinator pane), which
+    For the admin's own shells (a console window), which
     must never be a tmux client of a server another account controls.
     ``terminal`` is ``as_socket_owner_line``'s, for an attach.
     """

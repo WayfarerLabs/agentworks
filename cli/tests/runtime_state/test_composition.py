@@ -122,7 +122,6 @@ def runtime(monkeypatch):
 
     route_vm_access_to_guest(monkeypatch, guest)
     monkeypatch.setattr(manager, "_get_boot_id", lambda run_command: BOOT)
-    monkeypatch.setattr(manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr(tmux, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux, "finalize_session_start", lambda *a, **k: None)
 

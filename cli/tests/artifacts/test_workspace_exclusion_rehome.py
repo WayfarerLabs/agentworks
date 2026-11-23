@@ -77,12 +77,11 @@ def move_case(db, deletion, tmp_path, monkeypatch):
     db._conn.commit()
     monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
     monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", lambda *a, **k: nullcontext())
-    monkeypatch.setattr("agentworks.workspaces.templates.resolve_live_tmuxinator", lambda *a, **k: False)
     monkeypatch.setattr("agentworks.workspaces.acls.apply_workspace_acls", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", lambda *a, **k: tmp_path / "x")
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace",
-        lambda vm, config, name, path, group, **kwargs: shutil.rmtree(path),
+        lambda vm, config, path, group, **kwargs: shutil.rmtree(path),
     )
     return target, group
 

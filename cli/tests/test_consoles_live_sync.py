@@ -601,8 +601,6 @@ def test_delete_session_kills_console_windows(
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
     create_console(db, name="gamma", vm_name="vm1", session_specs=["other"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
-
     captured: list[list[tuple[str, str]]] = []
 
     def spy(_admin: object, *, pairs: list[tuple[str, str]]) -> None:
@@ -631,8 +629,6 @@ def test_delete_session_skips_kill_when_no_member_consoles(
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["lonely"])
     _mark_stopped(db, "lonely", scripted_guest, monkeypatch)
-
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
 
     called = False
 
@@ -668,7 +664,6 @@ def test_delete_session_reports_affected_consoles(
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
     create_console(db, name="gamma", vm_name="vm1", session_specs=["other"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -695,7 +690,6 @@ def test_delete_session_offers_and_deletes_now_empty_console(
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
     # Route the two interactive confirms (the session delete itself, then the
@@ -735,7 +729,6 @@ def test_delete_session_declined_offer_keeps_empty_console(
     _mark_stopped(db, "s", scripted_guest, monkeypatch)
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
     # Accept only the session-delete confirm; decline the empty-console offer
@@ -769,7 +762,6 @@ def test_delete_session_does_not_offer_console_with_remaining_sessions(
     _mark_stopped(db, "s", scripted_guest, monkeypatch)
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
     prompts: list[str] = []
@@ -807,7 +799,6 @@ def test_delete_session_leaves_no_dangling_console_reference(
     _mark_stopped(db, "s", scripted_guest, monkeypatch)
     create_console(db, name="alpha", vm_name="vm1", session_specs=["s", "other"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -834,7 +825,6 @@ def test_delete_session_yes_reports_but_keeps_empty_console(
     _mark_stopped(db, "s", scripted_guest, monkeypatch)
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
     manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -866,7 +856,6 @@ def test_delete_session_warns_when_offered_console_delete_raises(
     _mark_stopped(db, "s", scripted_guest, monkeypatch)
     create_console(db, name="beta", vm_name="vm1", session_specs=["s"])
 
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
     def _boom(*a: object, **k: object) -> None:
@@ -1085,7 +1074,7 @@ def test_delete_workspace_kills_console_windows(
     create_console(db, name="con1", vm_name="vm1", session_specs=["s1", "s2"])
     create_console(db, name="con2", vm_name="vm1", session_specs=["s1"])
 
-    # delete_workspace shells out to delete_vm_workspace + tmuxinator regen;
+    # delete_workspace shells out to delete_vm_workspace and revokes grants;
     # stub both so we don't need a live VM filesystem.
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace",

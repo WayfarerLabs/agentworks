@@ -210,6 +210,8 @@ def load_request_registry(
         _warned_request_configs.set(_warned_request_configs.get() | {request_key})
         for issue in resolved.issues:
             output.warn(f"Manifest: {issue}")
+        for deprecation in resolved.deprecations:
+            output.deprecation(f"Manifest: {deprecation}")
     return registry
 
 

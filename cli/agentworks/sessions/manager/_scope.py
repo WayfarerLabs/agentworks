@@ -15,7 +15,6 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary, operation_log
-from agentworks.workspaces.guest import FILE_WRITE_FAILURES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -135,64 +134,6 @@ def _require_session(db: Database, name: str) -> SessionRow:
             entity_name=name,
         )
     return session
-
-
-def _regenerate_tmuxinator(
-    db: Database,
-    config: Config,
-    admin: VMAccess,
-    vm: VMRow,
-    ws: WorkspaceRow,
-) -> None:
-    """Regenerate the workspace tmuxinator config from current session state, on the operation's ``admin`` access.
-
-    Best effort: the config is a convenience, so a request or file operation
-    that fails, a link in its path included, warns naming the workspace and
-    leaves the session command's result as it is. A stored path the file
-    operations cannot address (``guest.addressable_workspace_path``) warns
-    with its next step before anything runs.
-    """
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.linux_users import managed_home
-    from agentworks.vms.initializer.steps import describe_failure
-    from agentworks.workspaces.guest import addressable_workspace_path
-    from agentworks.workspaces.templates import resolve_live_tmuxinator
-    from agentworks.workspaces.tmuxinator import generate_config, remove_config, write_config
-
-    try:
-        addressable_workspace_path(ws.workspace_path)
-    except ValidationError as error:
-        output.warn(f"The tmuxinator config of workspace '{ws.name}' was not updated: {error}. {error.hint}")
-        return
-
-    registry = load_request_registry(config, live_database=db)
-    try:
-        if not resolve_live_tmuxinator(db, registry, ws.name, ws.template):
-            remove_config(
-                admin, home=managed_home(vm.admin_username), ws_name=ws.name, workspace_path=ws.workspace_path
-            )
-            return
-
-        from agentworks.sessions.manager import resolve_session_tmux_server
-
-        sessions, agent_owners = [], {}
-        for session in db.list_sessions(workspace_name=ws.name):
-            try:
-                server = resolve_session_tmux_server(db, session)
-            except StateError as error:
-                output.warn(f"The tmuxinator config of workspace '{ws.name}' leaves out a session: {error}.")
-                continue
-            if server is not None and server.owner is not None:
-                agent_owners[session.name] = server.owner
-            sessions.append(session)
-        config_text = generate_config(ws.name, ws.workspace_path, sessions=sessions, agent_owners=agent_owners)
-        write_config(admin, ws.workspace_path, config_text)
-    except FILE_WRITE_FAILURES as error:
-        # Its requests carry no secret, so the stderr tail needs no redaction.
-        output.warn(
-            f"The tmuxinator config of workspace '{ws.name}' was not updated: "
-            f"{describe_failure(error, lambda text: text)}"
-        )
 
 
 def filter_sessions(

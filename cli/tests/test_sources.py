@@ -34,7 +34,7 @@ from agentworks.sources import (
     upload_tree,
 )
 from agentworks.vms.admin import AdminConfig
-from agentworks.vms.home_layout import ADMIN_MANAGED, MANAGED
+from agentworks.vms.home_layout import MANAGED
 from tests.phase_b_support import StepGuest, requires_file_program
 from tests.vm_access_support import account_shell, local_vm_access
 
@@ -435,7 +435,6 @@ def test_a_credential_in_an_existing_clone_s_origin_reaches_neither_the_warning_
         install_cmd="./install.sh",
         shell="bash",
         home="/home/a",
-        managed=ADMIN_MANAGED,
         log=guest.log,
     )
 
@@ -879,7 +878,7 @@ def test_workstation_snapshot_error_identifies_declared_source_without_io_cause(
     ],
 )
 def test_normalize_destination_accepts_a_path_in_the_home_or_an_absolute_path(value: str, normalized: str) -> None:
-    assert normalize_destination(value, managed=MANAGED) == normalized
+    assert normalize_destination(value) == normalized
 
 
 @pytest.mark.parametrize(
@@ -887,19 +886,19 @@ def test_normalize_destination_accepts_a_path_in_the_home_or_an_absolute_path(va
 )
 def test_normalize_destination_refuses_the_home_another_users_home_and_unnormalized_components(value: str) -> None:
     with pytest.raises(DestinationError):
-        normalize_destination(value, managed=MANAGED)
+        normalize_destination(value)
 
 
-@pytest.mark.parametrize("managed", ADMIN_MANAGED)
+@pytest.mark.parametrize("managed", MANAGED)
 def test_a_destination_that_is_holds_or_lies_inside_a_managed_path_is_refused(managed: str) -> None:
     parts = [*managed.split("/"), "inside"]
     for depth in range(1, len(parts) + 1):
         relative = "/".join(parts[:depth])
         for value in (f"~/{relative}", relative):
             with pytest.raises(DestinationError):
-                normalize_destination(value, managed=ADMIN_MANAGED)
+                normalize_destination(value)
         with pytest.raises(SourceRefError):
-            expand_destination(f"/home/admin/{relative}", "/home/admin", managed=ADMIN_MANAGED)
+            expand_destination(f"/home/admin/{relative}", "/home/admin")
 
 
 @pytest.mark.parametrize(
@@ -916,24 +915,13 @@ def test_a_destination_that_is_holds_or_lies_inside_a_managed_path_is_refused(ma
         "~/.agentworks/codex",
     ],
 )
-def test_the_paths_initialization_writes_in_every_home_are_refused_for_both_accounts(value: str) -> None:
-    for managed in (MANAGED, ADMIN_MANAGED):
-        with pytest.raises(DestinationError):
-            normalize_destination(value, managed=managed)
-
-
-@pytest.mark.parametrize("value", ["~/.config", "~/.config/tmuxinator", "~/.config/tmuxinator/dots"])
-def test_the_workspace_tmuxinator_links_are_refused_for_the_admin_and_not_an_agent(value: str) -> None:
+def test_the_paths_initialization_writes_in_every_home_are_refused(value: str) -> None:
     with pytest.raises(DestinationError):
-        normalize_destination(value, managed=ADMIN_MANAGED)
-    with pytest.raises(SourceRefError):
-        expand_destination(f"/home/admin/{value[2:]}", "/home/admin", managed=ADMIN_MANAGED)
-    assert normalize_destination(value, managed=MANAGED) == value
-    assert expand_destination(f"/home/agent/{value[2:]}", "/home/agent", managed=MANAGED)
+        normalize_destination(value)
 
 
-def _sync_dotfiles(destination: str, managed: tuple[str, ...], *, home: str = "/home/a") -> StepGuest:
-    """Sync dotfiles from a git source to ``destination``, as an account whose home is ``home`` and set ``managed``."""
+def _sync_dotfiles(destination: str, *, home: str = "/home/a") -> StepGuest:
+    """Sync dotfiles from a git source to ``destination``, as an account whose home is ``home``."""
     from agentworks.vms.initializer.dotfiles import sync_dotfiles
 
     guest = StepGuest(local_files=False)
@@ -944,23 +932,14 @@ def _sync_dotfiles(destination: str, managed: tuple[str, ...], *, home: str = "/
         install_cmd="./install.sh",
         shell="bash",
         home=home,
-        managed=managed,
         log=guest.log,
     )
     return guest
 
 
-def test_each_account_s_sync_applies_its_set() -> None:
-    refused = _sync_dotfiles("~/.config", ADMIN_MANAGED)
-    assert refused.access.requests() == [] and len(refused.log.warned) == 1
-
-    accepted = _sync_dotfiles("~/.config", MANAGED)
-    assert accepted.commands()[0] == Command(("test", "-d", "/home/a/.config/.git"), deadline=60)
-
-
 @pytest.mark.parametrize("value", ["~/", ".ssh", "dots/../x", ".agentworks-artifacts/user"])
 def test_the_sync_refuses_an_unsuitable_destination_before_any_request(value: str) -> None:
-    guest = _sync_dotfiles(value, MANAGED)
+    guest = _sync_dotfiles(value)
 
     assert guest.access.requests() == []
     assert len(guest.log.warned) == 1
@@ -977,7 +956,7 @@ def test_the_sync_refuses_an_unsuitable_destination_before_any_request(value: st
     ids=["form", "managed", "home", "parent"],
 )
 def test_a_refused_destination_never_reaches_the_warning(value: str, home: str) -> None:
-    guest = _sync_dotfiles(value, MANAGED, home=home)
+    guest = _sync_dotfiles(value, home=home)
 
     assert guest.access.requests() == []
     assert len(guest.log.warned) == 1
@@ -988,20 +967,22 @@ def test_a_refused_destination_never_reaches_the_warning(value: str, home: str) 
     ("value", "path"), [("dots/", "/home/a/dots"), ("~/dots", "/home/a/dots"), ("/srv/d/", "/srv/d")]
 )
 def test_the_sync_checks_out_into_the_normalized_destination(value: str, path: str) -> None:
-    guest = _sync_dotfiles(value, MANAGED)
+    guest = _sync_dotfiles(value)
 
     assert guest.commands()[0] == Command(("test", "-d", f"{path}/.git"), deadline=60)
 
 
-@pytest.mark.parametrize("value", ["~/.config/mise", "~/.config/mise/dots", "~/.config/nvim", "~/.agentworks-dots"])
+@pytest.mark.parametrize(
+    "value", ["~/.config", "~/.config/mise", "~/.config/mise/dots", "~/.config/nvim", "~/.agentworks-dots"]
+)
 def test_a_destination_beside_or_over_the_mise_config_is_accepted(value: str) -> None:
-    assert normalize_destination(value, managed=MANAGED) == value
+    assert normalize_destination(value) == value
 
 
 def test_a_refused_destination_names_no_part_of_the_value() -> None:
     for value in ("~/secret-name/../x", "secret-name//x", "~secret-name"):
         with pytest.raises(DestinationError) as refused:
-            normalize_destination(value, managed=MANAGED)
+            normalize_destination(value)
         assert "secret-name" not in str(refused.value)
         assert value not in str(refused.value)
 
@@ -1059,16 +1040,16 @@ def test_a_stored_relative_destination_keeps_meaning_a_path_in_the_home() -> Non
     for decode in (decode_overlay, decode_admin_overlay):
         stored = decode({"dotfiles_destination": "dotfiles"})
         assert stored.dotfiles_destination == "dotfiles"
-        normalized = normalize_destination(stored.dotfiles_destination, managed=MANAGED)
-        assert expand_destination(normalized, "/home/agent", managed=MANAGED) == "/home/agent/dotfiles"
+        normalized = normalize_destination(stored.dotfiles_destination)
+        assert expand_destination(normalized, "/home/agent") == "/home/agent/dotfiles"
 
 
 def test_expand_destination_replaces_only_the_leading_tilde() -> None:
-    assert expand_destination("~/dots~1/a~b", "/home/agent", managed=MANAGED) == "/home/agent/dots~1/a~b"
-    assert expand_destination("/srv/dots~", "/home/agent", managed=MANAGED) == "/srv/dots~"
+    assert expand_destination("~/dots~1/a~b", "/home/agent") == "/home/agent/dots~1/a~b"
+    assert expand_destination("/srv/dots~", "/home/agent") == "/srv/dots~"
 
 
 @pytest.mark.parametrize("value", ["/home/agent", "/home", "/"])
 def test_expand_destination_refuses_the_home_and_its_parents(value: str) -> None:
     with pytest.raises(SourceRefError):
-        expand_destination(value, "/home/agent", managed=MANAGED)
+        expand_destination(value, "/home/agent")

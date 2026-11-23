@@ -10,10 +10,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import InitStatus
 from agentworks.errors import AlreadyExistsError, ExternalError
-from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, PathRefusal, PathRefused
-from agentworks.execution.requests import Command, PythonProgram
+from agentworks.execution.errors import CommandFailed, ExecutionIncomplete
+from agentworks.execution.requests import Command
 from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces import manager as workspace_manager
@@ -198,29 +197,6 @@ def test_copy_refuses_an_occupied_destination_before_extracting(
     assert db.get_workspace("ws2") is None
 
 
-def test_copy_refused_at_its_tmuxinator_config_records_no_workspace(
-    db: Database,
-    make_config,
-    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
-) -> None:
-    _ready(db, monkeypatch)
-    guest = FailingGuest()
-    recorder = route(monkeypatch, guest)
-
-    def answer(call: Call) -> Result | None:
-        request = call.request
-        if isinstance(request, PythonProgram) and request.args[:1] == ("write",):
-            raise PathRefused("box", "write", "/opt/agentworks/workspaces/ws2/.tmuxinator.yml", PathRefusal.UNSUITABLE)
-        return guest.answer(call)
-
-    recorder.answer = answer
-
-    with pytest.raises(PathRefused):
-        _copy(db, make_config())
-
-    assert db.get_workspace("ws2") is None
-
-
 def test_copy_restores_the_workspace_mode_after_extraction(
     db: Database,
     make_config,
@@ -236,40 +212,6 @@ def test_copy_restores_the_workspace_mode_after_extraction(
     path = default_workspace_path(config, "ws2")
     extracted = guest.index(starts("tar", "xzf"))
     assert ("chmod", "2770", path) in [argv(request) for request in guest.requests[extracted:]]
-
-
-# -- The tmuxinator link ---------------------------------------------------------------------------
-
-
-def _links(recorder: object) -> list[tuple[str, ...]]:
-    return [
-        request.argv
-        for request in recorder.requests("run")  # type: ignore[attr-defined]
-        if isinstance(request, Command) and request.argv[0] == "ln"
-    ]
-
-
-def test_create_never_replaces_an_existing_link_and_copy_and_rehome_replace_theirs(
-    db: Database,
-    make_config,
-    monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
-) -> None:
-    config = make_config()
-    seed_vm_only(db)
-    db.update_vm_init_status("box", InitStatus.COMPLETE)
-    reachable(monkeypatch, True)
-    created = route(monkeypatch, FailingGuest())
-    workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
-    copied = route(monkeypatch, FailingGuest())
-    _copy(db, config)
-    rehomed = route(monkeypatch, RehomeGuest())
-    workspace_manager.rehome_workspace(
-        db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE
-    )
-
-    assert [argv[1] for argv in _links(created)] == ["-s"]
-    assert [argv[1] for argv in _links(copied)] == ["-sf"]
-    assert [argv[1] for argv in _links(rehomed)] == ["-sf"]
 
 
 # -- Repair's bounded output ----------------------------------------------------------------------
