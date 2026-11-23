@@ -1,6 +1,7 @@
 # Native lock hierarchy: high-level architecture
 
-Status: draft. The [FRD](./frd.md) is accepted (2026-11-23).
+Status: draft. The [FRD](./frd.md) is accepted (2026-11-23); the [LLD](./lock-lld.md) carries the
+detail.
 
 ## Today
 
@@ -112,9 +113,9 @@ workspace and agent), as today's callers re-check `vm_uuid`.
 ### One acquisition per operation
 
 An operation names its whole lock set up front: a list of (entity, mode). The guard sorts it into
-one global order (vm, then workspaces, accounts, grants, sessions, consoles, each by name) and takes
-each lock without waiting. The first refusal releases what was taken and raises. Because nothing
-waits, there is no deadlock, and the fixed order keeps a refusal deterministic.
+one global order (vm, then workspaces, accounts, grant-all, grants, sessions, consoles, each by
+name) and takes each lock without waiting. The first refusal releases what was taken and raises.
+Because nothing waits, there is no deadlock, and the fixed order keeps a refusal deterministic.
 
 An operation whose set is only known after reading state (agent delete finds its sessions and
 consoles; workspace delete finds its sessions and grants) first takes its primary entity, reads,
@@ -125,20 +126,22 @@ only entities the set already covers in a mode at least as strong, or extend it.
 
 ### Naming the holder (R3)
 
-Each holding process writes a small record beside the lock files: its pid, a start time, the command
-(`agw` and its subcommand words, never argument values) and the entities and modes it holds. It
-removes the record on release. A refused operation reads the records, keeps those whose pid is alive
+Each held set writes a small record beside the lock files, and holds a lock on the record itself for
+as long as it holds the set: a start time, the command (`agw` and its subcommand words, never
+argument values), the entities and modes it holds, and its pid for diagnosis only. It removes the
+record on release. A refused operation reads the records, keeps those whose own lock is still held
 and whose set conflicts with what it asked for, and names one:
 
 ```text
-Error: session/build-42 is blocked: `agw workspace rehome` has held workspace/api for 3m12s.
+Error: session/build-42 on VM 'dev' is blocked: `agw workspace rehome` has held workspace/api for 3m12s
 Hint: Retry when that operation finishes.
 ```
 
-A record whose process is gone is ignored and deleted by the next reader. The record is advisory:
-the OS lock decides, so a missing or stale record only weakens the message (to today's generic one),
-never the exclusion. Records carry no secret values or arguments, since other local processes read
-them.
+A record whose lock is free belongs to a holder that has exited, since the OS releases its locks
+then; the next reader ignores and deletes it. Liveness never rests on a pid, which can be reused.
+The record is advisory: the OS lock decides, so a missing or stale record only weakens the message
+(to today's generic one), never the exclusion. Records carry no secret values or arguments, since
+other local processes read them.
 
 ### Shared state across entities (R5)
 
