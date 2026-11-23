@@ -387,7 +387,7 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
         assert all(item.content.text not in value for value in argv)
 
 
-@pytest.mark.parametrize("selection", ["review", "vm-review", "native-external"])
+@pytest.mark.parametrize("selection", ["review", "vm-review", "native-external", "other-plugin:review"])
 def test_claude_launch_selects_the_delivered_persona_name(monkeypatch, selection):
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 
@@ -426,7 +426,7 @@ def test_claude_launch_selects_the_delivered_persona_name(monkeypatch, selection
         assert contents.endswith(item.content.text)
     argv = shlex.split(shlex.split(result.command)[2])
     selected = argv[argv.index("--agent") + 1]
-    if selection == "native-external":
+    if selection not in {"review", "vm-review"}:
         assert selected == selection
     else:
         assert selected in personas

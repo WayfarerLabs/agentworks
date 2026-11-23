@@ -161,75 +161,84 @@ for path in paths:
         problems.append('unreadable-native-policy')
         problem_paths.append(str(path))
 
+def size_budget(kind):
+    return 'codex-personas' if tool == 'codex' and kind == 'agent' else 'metadata'
+
+def verify_retirement(root, members, remaining):
+    if not members:
+        return False
+    # Publication prunes parents of recorded members even if their files are
+    # already gone after an interrupted removal.
+    parents = {parent for name in members for parent in pathlib.Path(name).parents if
+               parent == root or parent.is_relative_to(root)}
+    pending = [root]
+    try:
+        while pending:
+            path = pending.pop()
+            mode = path.lstat().st_mode
+            if stat.S_ISDIR(mode) and path in parents:
+                # Publication can leave a busy or non-removable package root in place.
+                parent = path.parent.stat()
+                if path.is_mount() or os.statvfs(path).f_flag & os.ST_RDONLY or (not vm_only and (
+                    not os.access(path.parent, os.W_OK | os.X_OK) or parent.st_mode & stat.S_ISVTX
+                )):
+                    return False
+                for child in path.iterdir():
+                    remaining['members'] -= 1
+                    if remaining['members'] < 0:
+                        return False
+                    pending.append(child)
+            elif stat.S_ISREG(mode) and str(path) in members:
+                digest, expected_mode = members[str(path)]
+                with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
+                    observed_file = os.fstat(source.fileno())
+                    actual_mode = observed_file.st_mode
+                    if not stat.S_ISREG(actual_mode) or stat.S_IMODE(actual_mode) != expected_mode:
+                        return False
+                    size = observed_file.st_size
+                    remaining['bytes'] -= size
+                    if remaining['bytes'] < 0:
+                        return False
+                    raw = source.read(size + 1)
+                if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
+                    return False
+            else:
+                return False
+    except OSError:
+        return False
+    return True
+
 def replacements_fit(excess, existing, additions, observed, proposed):
-    # Bound the additional read even for skill layouts whose supporting files
-    # are invisible to ordinary discovery. The probe leaves all bytes in place.
-    remaining_members = request.get('replacement_members', 0)
-    remaining_bytes = request['inventory_bytes']
-    for old, new, members in request.get('replacements', ()):
+    remaining = {'members': request.get('replacement_members', 0), 'bytes': request['inventory_bytes']}
+    for old, (new, members) in request.get('retirements', {}).items():
         if old not in existing:
             continue
-        old_count = sum(path == old or path.startswith(old + '/') for path in existing)
-        new_count = sum(path == new or path.startswith(new + '/') for path in additions)
-        suffix = '' if old in members else '/SKILL.md'
-        byte_budget = 'codex-personas' if tool == 'codex' and not suffix else 'metadata'
-        old_size = observed.get(old + suffix, ('', 0))[1]
-        new_size = proposed.get(new + suffix, ('', 0))[1] - observed.get(new + suffix, ('', 0))[1]
-        count_credit = min(old_count, new_count)
-        byte_credit = min(old_size, max(0, new_size))
-        if not ((excess['entries'] > 0 and count_credit) or (excess[byte_budget] > 0 and byte_credit)):
+        # Direct-marker discovery can hide descendants that a later scan
+        # would count after retirement. Verify every disappearing marker.
+        required = tool != 'codex' and old + '/SKILL.md' in observed
+        count_credit = byte_credit = 0
+        byte_budget = 'metadata'
+        if new is not None:
+            old_count = sum(path == old or path.startswith(old + '/') for path in existing)
+            new_count = sum(path == new or path.startswith(new + '/') for path in additions)
+            suffix = '' if old in members else '/SKILL.md'
+            kind, old_size = observed.get(old + suffix, ('', 0))
+            byte_budget = size_budget(kind)
+            new_size = proposed.get(new + suffix, ('', 0))[1] - observed.get(new + suffix, ('', 0))[1]
+            count_credit = min(old_count, new_count)
+            byte_credit = min(old_size, max(0, new_size))
+        needed = (count_credit and excess['entries'] > 0) or (byte_credit and excess[byte_budget] > 0)
+        if not (required or needed):
             continue
-        old_root = pathlib.Path(old)
-        parents = {parent for name in members for parent in pathlib.Path(name).parents if
-                   parent == old_root or parent.is_relative_to(old_root)}
-        pending = [old_root]
-        seen_dirs = set()
-        pruned_dirs = set()
-        try:
-            while pending:
-                path = pending.pop()
-                mode = path.lstat().st_mode
-                if stat.S_ISDIR(mode) and path in parents:
-                    # Publication can leave a busy or non-removable package root in place.
-                    parent = path.parent.stat()
-                    if path.is_mount() or os.statvfs(path).f_flag & os.ST_RDONLY or (not vm_only and (
-                        not os.access(path.parent, os.W_OK | os.X_OK) or parent.st_mode & stat.S_ISVTX
-                    )):
-                        break
-                    seen_dirs.add(path)
-                    for child in path.iterdir():
-                        remaining_members -= 1
-                        if remaining_members < 0:
-                            return False
-                        pending.append(child)
-                elif stat.S_ISREG(mode) and str(path) in members:
-                    digest, expected_mode = members[str(path)]
-                    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
-                        observed_file = os.fstat(source.fileno())
-                        actual_mode = observed_file.st_mode
-                        if not stat.S_ISREG(actual_mode) or stat.S_IMODE(actual_mode) != expected_mode:
-                            break
-                        size = observed_file.st_size
-                        remaining_bytes -= size
-                        if remaining_bytes < 0:
-                            return False
-                        raw = source.read(size + 1)
-                    if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
-                        break
-                    pruned_dirs.update(parent for parent in path.parents if parent in parents)
-                else:
-                    break
-            else:
-                if seen_dirs <= pruned_dirs:
-                    # A publication conflict can retain the old placement and
-                    # skip the same origins' replacement. Budget for either.
-                    excess['entries'] -= count_credit
-                    excess[byte_budget] -= byte_credit
-                    if max(excess.values()) <= 0:
-                        return True
-        except OSError:
+        if not verify_retirement(pathlib.Path(old), members, remaining):
+            if required:
+                return False
             continue
-    return False
+        # Publication can retain the old placement and skip the same origins'
+        # replacement. Budget for either outcome.
+        excess['entries'] -= count_credit
+        excess[byte_budget] -= byte_credit
+    return max(excess.values()) <= 0
 
 try:
     candidates = []
@@ -372,12 +381,18 @@ try:
     future = {**observed_sizes, **proposed}
     excess = {
         'entries': scanned + len(additions) - 512,
-        'metadata': sum(size for kind, size in future.values() if tool != 'codex' or kind != 'agent') - 1048576,
-        'codex-personas': sum(size for kind, size in future.values() if tool == 'codex' and kind == 'agent')
-                          - request['inventory_bytes'],
+        'metadata': -1048576,
+        'codex-personas': -request['inventory_bytes'],
     }
-    if max(excess.values()) > 0 and not replacements_fit(excess, existing_entries, additions, observed_sizes, proposed):
-        raise ValueError()
+    for kind, size in future.values():
+        excess[size_budget(kind)] += size
+    if max(excess.values()) > 0:
+        # A skipped update can leave the larger observed value at the destination.
+        for path in observed_sizes.keys() & proposed.keys():
+            kind, size = observed_sizes[path]
+            excess[size_budget(kind)] += max(0, size - proposed[path][1])
+        if not replacements_fit(excess, existing_entries, additions, observed_sizes, proposed):
+            raise ValueError()
 except Exception as error:
     problems.append('unreadable-native-inventory')
     failed_path = getattr(error, 'filename', None) or inspecting
@@ -500,42 +515,48 @@ def _native_entrypoints(
     return placements
 
 
-def _owned_replacements(
-    files: Sequence[ArtifactFile | OwnedArtifactFile], setup: SetupInvocation | None
-) -> list[tuple[str, str, dict[str, tuple[str, int]]]]:
-    """Describe unique same-origin renames for the guest to verify without mutating."""
+def _owned_retirements(
+    files: Sequence[ArtifactFile | OwnedArtifactFile], setup: SetupInvocation | None, tool: str
+) -> dict[str, tuple[str | None, dict[str, tuple[str, int]]]]:
+    """Send evidence for rename credits and retiring direct-marker packages."""
     if setup is None or setup.prior is None:
-        return []
+        return {}
     prior = setup.prior.artifact_files
     previous = _native_entrypoints(prior)
-    root_owned = isinstance(setup, VMSetupInvocation)
-    group = setup.linux_group if isinstance(setup, WorkspaceSetupInvocation) else ""
-    replacements = []
+    paths = {file.path for file in files}
+    candidates: dict[str, tuple[str | None, str, frozenset[str]]] = {}
     for key, wanted in _native_entrypoints(files).items():
         old = previous.get(key, ())
-        if len(old) != 1 or len(wanted) != 1 or old == wanted:
-            continue
-        old_root, new_root = old[0], wanted[0]
+        if len(old) == 1 and len(wanted) == 1 and old != wanted:
+            _, kind, origins = key
+            candidates[old[0]] = (wanted[0], kind, origins)
+    if tool != "codex":
+        for file in prior:
+            if file.path.endswith("/SKILL.md") and file.path not in paths:
+                root = file.path.removesuffix("/SKILL.md")
+                candidates.setdefault(root, (None, "skill", frozenset(file.origins)))
+
+    root_owned = isinstance(setup, VMSetupInvocation)
+    group = setup.linux_group if isinstance(setup, WorkspaceSetupInvocation) else ""
+    retirements = {}
+    for old_root, (new_root, kind, origins) in candidates.items():
         prefix = old_root + "/"
-        if any(file.path == old_root or file.path.startswith(prefix) for file in files):
-            continue
         members = [file for file in prior if file.path == old_root or file.path.startswith(prefix)]
-        _, kind, origins = key
-        if origins & setup.retain_artifact_origins or any(
+        package = old_root if kind == "skill" else None
+        ineligible = any(path == old_root or path.startswith(prefix) for path in paths) or any(
             file.generated_section
-            or frozenset(file.origins) != origins
-            or file.package_root != (old_root if kind == "skill" else None)
+            or file.package_root != package
+            or setup.retain_artifact_origins.intersection(file.origins)
+            or (new_root is not None and frozenset(file.origins) != origins)
             for file in members
-        ):
-            continue
-        replacements.append(
-            (
-                old_root,
-                new_root,
-                {file.path: (file.sha256, artifact_file_mode(file.executable, group, root_owned)) for file in members},
-            )
         )
-    return replacements
+        evidence = (
+            {}
+            if ineligible
+            else {file.path: (file.sha256, artifact_file_mode(file.executable, group, root_owned)) for file in members}
+        )
+        retirements[old_root] = (new_root, evidence)
+    return retirements
 
 
 # What the probe's stdout may hold: up to 1 MiB of frontmatter, which JSON can grow
@@ -597,7 +618,7 @@ def probe_native(
         "paths": tuple(file.path for file in files),
         "entries": entries,
         "proposed": _proposed_sizes(files, tool),
-        "replacements": _owned_replacements(files, setup),
+        "retirements": _owned_retirements(files, setup, tool),
         "session_plugin": session_plugin,
         "plugin_names": tuple(
             dict.fromkeys(identity.split(":")[1] for identity in identities if identity.count(":") > 1)
