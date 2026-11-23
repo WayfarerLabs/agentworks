@@ -35,7 +35,6 @@ from typing import TYPE_CHECKING
 from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import StateError
 from agentworks.execution import trust
-from agentworks.naming import validate_vm_hostname
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -407,8 +406,6 @@ class PendingVMNode:
 
     def preflight(self, ctx: RunContext) -> None:
         self._site.platform.validate_create_release(self._debian_release)
-        # Core's rule holds on every platform, so it runs before the platform's own.
-        validate_vm_hostname(self._hostname)
         self._site.platform.validate_create_hostname(self._hostname)
 
     def runup(self, ctx: RunContext) -> None: ...

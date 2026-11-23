@@ -274,11 +274,10 @@ class VMPlatform(Capability):
         """Refuse a create-time ``hostname`` the platform cannot give the VM, before secret resolution.
 
         Pure and offline, called beside :meth:`validate_create_release` before
-        the create boundary resolves anything or writes the VM's row, and
-        after core has refused a hostname holding an underscore on every
-        platform. Raise ``ValidationError`` for a hostname the backend would
-        change (WSL2 collapses consecutive hyphens). The default accepts
-        every hostname core composes.
+        the create boundary resolves anything or writes the VM's row. Raise
+        ``ValidationError`` for a hostname the backend would change (WSL2
+        keeps only alphanumerics joined by single hyphens). The default
+        accepts every hostname core composes.
         """
 
     @abstractmethod

@@ -581,9 +581,9 @@ the VM once no backup is running.
 - **`vm create` refuses a VM name with an underscore, on every platform.** The name becomes the VM's
   hostname (`{slug}-{name}`), and no DNS hostname allows an underscore: a Lima guest drops it, so
   the guest's hostname disagrees with the one Agentworks recorded, and a cloud provider such as
-  Azure refuses the create. `vm create` now refuses such a name before it resolves a secret or
-  touches the platform. Existing VMs are unaffected; recreate one under a name without underscores
-  if its hostname has drifted.
+  Azure refuses the create. `vm create` now refuses such a name before it asks anything, resolves a
+  secret or touches the platform. Existing VMs are unaffected; recreate one under a name without
+  underscores if its hostname has drifted.
 - **Reinit** starts with the same checks on the VM as it is. A live release that differs from the
   recorded one refuses first, as before. A failed check stops reinit before it changes anything and
   names recreation. The pam_env settings and an unsupported login shell only warn.
@@ -848,9 +848,9 @@ new connection layer, so they need what [What these commands need](#what-these-c
   since it keeps only letters, digits and single hyphens, so such a VM keeps drifting until it is
   recreated under a name without underscores. `vm create` now refuses such a name on every platform
   ([Create, reinit and the VM contract](#create-reinit-and-the-vm-contract)), and on WSL2 it also
-  refuses a hostname with consecutive hyphens from the system slug before it does anything. A slug
-  cannot be changed, so an install whose slug has consecutive hyphens cannot create WSL2 VMs, and
-  its existing ones keep drifting.
+  refuses a hostname with consecutive hyphens from the system slug before it resolves a secret or
+  touches the platform. A slug cannot be changed, so an install whose slug has consecutive hyphens
+  cannot create WSL2 VMs, and its existing ones keep drifting.
 - **Output nobody reads no longer fails a command.** When the reader of `agw`'s output has gone (a
   pipe into `head` that has exited, `2>&1 | tee create.log` in a closed window, or the closed
   terminal itself), the rest of that output is dropped and the command carries on to the end, a
@@ -954,9 +954,8 @@ state the full contract, and the
 [vm-platform README](../../cli/agentworks/capabilities/vm_platform/README.md) its obligations.
 
 An optional hook is new as well: core calls `validate_create_hostname(hostname)` with the hostname
-it composed for a new VM before any secret resolves, once core itself has refused one holding an
-underscore. Override it to refuse a hostname your backend would change; the default accepts every
-hostname.
+it composed for a new VM before any secret resolves. Override it to refuse a hostname your backend
+would change; the default accepts every hostname.
 
 ### A root channel replaces the native transport
 

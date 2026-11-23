@@ -141,23 +141,3 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: i
             "with hyphens or underscores, must start and end with a letter or "
             f"digit{suffix}."
         )
-
-
-def validate_vm_hostname(hostname: str) -> None:
-    """Refuse a composed VM hostname (``{slug}-{vm}``, or the bare name) holding an underscore.
-
-    ``NAME_RE`` lets every kind's name hold underscores, but a DNS hostname
-    label cannot: guests drop the character (so the guest disagrees with
-    ``vms.hostname``) and cloud providers refuse it. The slug's own format
-    and ``MAX_VM_NAME_LENGTH`` keep the rest of the composed hostname a
-    valid label, so an underscore, which only the VM name can supply, is
-    what this refuses. Create calls it before any secret resolves.
-    """
-    from agentworks.output import ValidationError
-
-    if "_" in hostname:
-        raise ValidationError(
-            f"the VM's hostname '{hostname}' holds an underscore, which a DNS hostname cannot",
-            entity_kind="vm",
-            hint="Pick a VM name without underscores.",
-        )
