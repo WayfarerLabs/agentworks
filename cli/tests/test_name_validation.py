@@ -17,6 +17,7 @@ from agentworks.naming import (
     MAX_SYSTEM_SLUG_LENGTH,
     MAX_VM_NAME_LENGTH,
     validate_name,
+    validate_vm_hostname,
 )
 from agentworks.output import ValidationError
 from agentworks.plugins.azure.network import VNET_NAME_SUFFIX
@@ -283,3 +284,22 @@ def test_forgotten_cap_defaults_to_freeform_not_a_username_cap() -> None:
     name = "a" * 40
     assert MAX_AGENT_NAME_LENGTH < len(name) < MAX_FREEFORM_NAME_LENGTH
     assert _is_valid(name)  # uses the default cap
+
+
+# -- Composed VM hostnames ---------------------------------------------------
+#
+# A VM name may hold underscores (NAME_RE is shared across kinds), but the
+# hostname composed from it is a DNS label, which cannot.
+
+
+@pytest.mark.parametrize("hostname", ["vm1", "dev-vm", "team-dev-vm"])
+def test_a_dns_label_hostname_is_accepted(hostname: str) -> None:
+    validate_vm_hostname(hostname)
+
+
+@pytest.mark.parametrize("hostname", ["dev_vm", "team-dev_vm"])
+def test_a_hostname_with_an_underscore_is_refused(hostname: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        validate_vm_hostname(hostname)
+    assert caught.value.entity_kind == "vm"
+    assert caught.value.hint

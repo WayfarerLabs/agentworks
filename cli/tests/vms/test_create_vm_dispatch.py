@@ -371,9 +371,31 @@ def test_create_vm_refuses_a_platform_refused_hostname_before_anything_resolves(
     monkeypatch.setattr(LimaPlatform, "create", lambda *args, **kwargs: pytest.fail("create ran"))
 
     with pytest.raises(ValidationError):
+        vm_manager.create_vm(db, make_config(), name="host-fail", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert seen == ["host-fail"]
+    assert db.get_vm("host-fail") is None
+    assert not trust.store_file("host-fail").exists()
+
+
+def test_create_vm_refuses_an_underscore_hostname_on_every_platform_before_anything_resolves(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """Core refuses ahead of the platform's own hook (Lima accepts every hostname): nothing resolves or persists."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.secrets.resolver import Resolver
+
+    monkeypatch.setattr(LimaPlatform, "validate_create_hostname", lambda *args: pytest.fail("platform hook ran"))
+    monkeypatch.setattr(Resolver, "resolve", lambda self: pytest.fail("a secret resolved"))
+    monkeypatch.setattr(LimaPlatform, "create", lambda *args, **kwargs: pytest.fail("create ran"))
+
+    with pytest.raises(ValidationError) as caught:
         vm_manager.create_vm(db, make_config(), name="host_fail", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert seen == ["host_fail"]
+    assert caught.value.entity_kind == "vm"
     assert db.get_vm("host_fail") is None
     assert not trust.store_file("host_fail").exists()
 

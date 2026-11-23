@@ -299,8 +299,8 @@ def create_vm(
     # (not 42) because the tighter sink is Azure's virtual-network name
     # {slug}-{name}-vnet, capped at 64: 20 + 1 + 38 + 5 = 64. See
     # naming.py MAX_VM_NAME_LENGTH for the MIN-over-sinks derivation. The
-    # pending node's preflight hands it to the platform before any secret
-    # resolves.
+    # pending node's preflight refuses an underscore (validate_vm_hostname)
+    # and then hands it to the platform, before any secret resolves.
     hostname = f"{slug}-{vm_name}" if slug else vm_name
 
     template_node = vm_template_node(vm_tmpl)
