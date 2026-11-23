@@ -29,9 +29,9 @@ live evidence the operator ruled recorded here rather than closed (see
   follow-ups, which PR C merged and finished (plan, slice 8).
 - [#916](https://github.com/WayfarerLabs/agentworks/pull/916): the generated workspace tmuxinator
   projects removed, with reinit retiring those earlier releases wrote.
-- [#953](https://github.com/WayfarerLabs/agentworks/pull/953), in this closeout: `vm create` refuses
-  a hostname with an underscore on every platform, moving the rule from WSL2 into core (operator
-  ruling 2026-11-22).
+- [#953](https://github.com/WayfarerLabs/agentworks/pull/953), merged before this lock: `vm create`
+  refuses a hostname with an underscore on every platform, moving the rule from WSL2 into core
+  (operator ruling 2026-11-22).
 
 ## Where the design lives now
 
@@ -40,9 +40,10 @@ live evidence the operator ruled recorded here rather than closed (see
 - `cli/agentworks/capabilities/vm_platform/README.md`: the vm-platform contract for platform
   authors, and `cli/agentworks/capabilities/README.md` for the `admin_access()` and `agent_access()`
   accessors.
-- ADR 0027 (one SSH execution channel), and ADR 0026 (environment travels inside the request), which
-  supersedes ADRs 0014 and 0017. ADRs 0003, 0013, 0015, 0016, 0019, 0020 (closing SSH stdin) and
-  0025 carry amendments.
+- ADR 0027 (one SSH execution channel), and ADR 0026 (environment travels inside the request),
+  superseding ADRs 0014 and 0017. ADRs 0003, 0011, 0013, 0019, 0020 (closing SSH stdin) and 0025
+  carry amendments for the mechanisms this design replaced, and ADRs 0015 and 0016 note where
+  `SetEnv` was replaced.
 - Operator guidance: `cli/command-reference.md`, `docs/guides/upgrading-to-0.20.md`, the guides
   under `docs/guides/` and the built-in guide topics.
 
@@ -50,9 +51,11 @@ No permanent artifact cites this directory.
 
 ## Evidence
 
-[evidence-matrix.md](./evidence-matrix.md) is the record. Its historical status column holds 33
-covered, 31 partial and 32 gap across 96 regular rows, plus two extras covered beyond their boxes (a
-real OpenSSH 8.5 client on Linux, and managed SSH entries through `Include` on Windows).
+[evidence-matrix.md](./evidence-matrix.md) is the record. Its historical status column holds 30
+covered, 34 partial and 32 gap across 96 regular rows, plus two extras covered beyond their boxes (a
+real OpenSSH 8.5 client on Linux, and managed SSH entries through `Include` on Windows). The figures
+given to the operator at the 2026-11-22 ruling, 33 covered, 31 partial and 32 gap, counted the three
+R11 pairing rows as covered, although every workstation row has gap cells.
 
 At the operator's [2026-11-22 ruling](./frd.md#2026-11-22) one last tester pass ran at `main` (#948,
 comment 7078499829, head `39df75ab2`, whose package is byte-identical to `main` at `2b1d69dac`),
@@ -60,28 +63,35 @@ with one cloud driven from Windows (GCP) and one from macOS (AWS), and Windows S
 in for Windows 11. It classified each row without replacing its status: 29 qualified subsets (the
 three R11 rows among them), 10 current positives (one of them the underscore hostname failure), 49
 not retested, 8 unavailable bed, GUI or console or conditionally unobserved, and the two extras kept
-as history. Every protected gate passed and the pass found no runtime regression.
+as history. Every protected gate passed and the pass found no runtime regression. The pass predates
+the merges of PRs #916, #944, #945 and #953 to `main`; #916 had its own live pass (PR comment
+7078408324), and #953 has its own.
 
-The pass also found that Python 3.13 rejects the PVE 8.4 CA while 3.12 verifies it (#951), that the
-Windows bed's route to Proxmox needed pinned loopback forwards for short-name DNS (a bed
-qualification), and that AWS ENI absence after teardown is unproved because
-`ec2:DescribeNetworkInterfaces` was denied.
+The pass also found that Python 3.13 rejects the PVE 8.4 CA while 3.12 verifies it (see
+[Follow-up issues](#follow-up-issues)), that the Windows bed's route to Proxmox needed pinned
+loopback forwards for short-name DNS (a bed qualification), and that AWS ENI absence after teardown
+is unproved because `ec2:DescribeNetworkInterfaces` was denied.
 
 ## Open live evidence
 
-Under R11 missing coverage never counts as passing. Under the 2026-11-22 ruling, every row still
-partial or gap after the closeout pass is recorded here as open live evidence. The groups are the
-matrix's "Gaps after the closeout pass", with what would close each:
+Under R11 missing coverage never counts as passing. Under the 2026-11-22 ruling, every row whose
+historical status is partial or gap is recorded here as open live evidence, whatever the closeout
+pass added; the matrix's Closeout pass cells give each row's detail. The groups, with what would
+close each:
 
-1. **Excluded experiments:** 389c, 389n, 389t; 415a to c; 423a to d; 427a, 427c; 432; 434d; 451;
-   460a, 460b; delete of a cloud VM with no record; I18; N6, N8; I6a, S4; I48. The testing session
-   ran under an operator stop direction excluding signal, forced interruption, outage,
-   identity-mismatch, privilege-boundary and fault-injection experiments, which this effort's
-   artifacts record only through the tester's report. Closes with: authorization for those
-   experiments on the existing beds.
-2. **Conditions not set up:** pre-python3 WSL2 recovery then reinit; I44; N5; N10; S9, S11. Closes
-   with: those fixtures on existing beds (a WSL2 VM without python3, a transcript resume with a
-   model call, a credential-bearing HTTPS clone, a DNS outage probe, a VM from an earlier release).
+1. **Excluded under the stop direction the closeout report cites:** 389c, 389n, 389t; 415a to c;
+   423a to d; 427a, 427c; 432; 434d; 451; 460a, 460b; delete of a cloud VM with no record; I18; N6,
+   N8, N10; I6a, S4; I48. The closeout report says the testing session ran under an operator stop
+   direction excluding signal, forced interruption, outage, identity-mismatch, privilege-boundary,
+   fault-injection, custom descriptor, secret-decoy and authentication-bypass experiments, and the
+   authentication experiments I48 needs. Closes with: authorization for those experiments on the
+   existing beds.
+
+   OPERATOR-EXCLUSION-RULING
+
+2. **Conditions not set up:** pre-python3 WSL2 recovery then reinit; I44; N5; S9, S11. Closes with:
+   those fixtures on existing beds (a WSL2 VM without python3, a transcript resume with authorized
+   model calls, a credential-bearing HTTPS clone, a VM from an earlier release).
 3. **Local Lima from Linux (216):** closes with a prepared Linux KVM bed.
 4. **I21 round 2 Windows Terminal retest and I90 live:** close with an interactive Windows desktop
    and Windows Terminal lane.
@@ -89,14 +99,36 @@ matrix's "Gaps after the closeout pass", with what would close each:
    Tailscale admin console access.
 6. **Conditional cells:** 389s needs a WSL release that prints `WSL_E_DEFAULT_DISTRO_NOT_FOUND`;
    434c needs a supported fixture that advertises SVE.
-7. **R11 pairings at end-state code:** Linux to local Lima is group 3. macOS to Azure and GCP, and
-   Windows to AWS and Azure, fall outside the ruling's one cloud from each workstation, which the
-   pass met.
+7. **R11 pairing rows (all three partial):** Linux to local Lima is group 3. macOS to Azure and GCP,
+   and Windows to AWS and Azure, fall outside the ruling's one cloud from each workstation, which
+   the pass met.
+8. **Moved in part, remainder open:**
+   - 101: Azure and GCP from a non-Windows workstation; existing beds.
+   - 389a: the bootstrap output size on WSL2 and Proxmox; existing beds.
+   - 434a: the replaced key and the power cycle; macOS to local Lima.
+   - 434f: the GCP startup marker, not read; any workstation to GCP.
+   - Lima create on Apple VZ after an SVE restart: the restart never triggered; as 434c.
+   - `vm shell --platform`: Proxmox's refusal; an existing PVE bed.
+   - 519: Remote Lima from macOS, and a session start with model calls; existing beds with
+     authorized model calls.
+   - I47 on every harness, I40 and I38's conditions, F4 and F6 itemized on the V lane, and I35 to
+     I53 itemized as live cells; existing beds.
+   - N2: only uv's skip was observed, and the second reinit refreshed the `authorized_keys` mtime;
+     existing beds.
+   - N12: a forced idle shutdown during a WSL2 create; Windows to WSL2.
+   - I8, S6 and S7 (disconnect and interrupt stages), S2 (a killed pane) and S8 (a clone failure):
+     group 1's authorization.
+   - 638: attach from every workstation to Remote Lima, whose Windows credential route was held, and
+     backup interruption; that route and group 1's authorization.
 
-Direct proof of AWS ENI absence needs ENI and quota read permissions. Out of scope by ruling or by
-nature: WSL2 from Linux or macOS; an agent-served encrypted key on Windows, whose agent refuses from
-a key-authenticated session; local Lima on Windows (2026-10-31, 2026-11-01); Debian 12 guests
-(2026-11-05); a real OpenSSH 8.5 client on macOS and Windows (shim accepted, 2026-11-05).
+The rows the pass observed directly at `main`'s code (N1, N3, N4, N7, N9, N11, S1, S3 and S5) keep
+their historical status, so they stay open too, with the fresh observation recorded in the matrix.
+Direct proof of AWS ENI absence needs ENI and quota read permissions.
+
+Out of scope by ruling or by nature: WSL2 from Linux or macOS; an agent-served encrypted key on
+Windows, whose agent refuses from a key-authenticated session; local Lima on Windows (2026-10-31,
+2026-11-01); Debian 12 guests (2026-11-05); a real OpenSSH 8.5 client on macOS and Windows (shim
+accepted, 2026-11-05).
 
 ## Superseded design text
 
@@ -109,9 +141,17 @@ records its other supersessions in place.
 
 Filed during the effort and open at the lock:
 
+- #931: agent and workspace delete should refuse a misplaced session row before the confirmation
+  prompt.
+- #933: permanent artifacts cite SDD-internal identifiers from other efforts.
+- #935: the SSH config's legacy managed-section removal drops everything after the first marker
+  match.
 - #936: a console member server lost across `console stop` on WSL2 and Lima, unattributed (matrix
   row S2).
+- #937: the git credentials reconcile can remove the active generation when a link target ends in a
+  newline.
 - #938: the migration-safety handshake test is flaky under load.
+- #940: SSH config sync crashes on a non-UTF-8 path in the managed file.
 - #941: git credential timeout hardening.
 - #946: `session create` and `agent exec` on a copied workspace fail on an unknown template.
 - #950: Windows config loading reads the TOML file in the locale encoding (`config/load.py`).
