@@ -540,6 +540,8 @@ def _owned_retirements(
     group = setup.linux_group if isinstance(setup, WorkspaceSetupInvocation) else ""
     retirements = {}
     for old_root, (new_root, kind, origins) in candidates.items():
+        if setup.retain_artifact_origins.intersection(origins):
+            continue
         prefix = old_root + "/"
         members = [file for file in prior if file.path == old_root or file.path.startswith(prefix)]
         package = old_root if kind == "skill" else None

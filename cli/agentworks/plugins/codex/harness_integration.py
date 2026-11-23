@@ -134,7 +134,13 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import defer_session_mcp, outer_artifacts, session_artifacts, vm_artifacts
+from agentworks.plugins.codex.artifacts import (
+    defer_session_mcp,
+    limit_session_argv,
+    outer_artifacts,
+    session_artifacts,
+    vm_artifacts,
+)
 from agentworks.plugins.codex.recorder import home_word, install_recorder, notify_value_word, thread_tail
 from agentworks.schema import AgwModel, Interpolated, MergeStrategy
 from agentworks.topics import TopicProse
@@ -728,6 +734,8 @@ class CodexIntegration(HarnessIntegration):
             ),
             workspace=self._workspace_path,
         )
+        if artifact_context is not None:
+            self._artifact_plan = limit_session_argv(self._artifact_plan, artifact_context.inputs)
         if artifact_context is not None and native_root is not None:
             validate_discovery_paths(
                 artifact_context,

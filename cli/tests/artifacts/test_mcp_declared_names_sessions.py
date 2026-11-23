@@ -102,11 +102,11 @@ def test_codex_combined_carrier_limit_defers_all_mcp_inputs_and_keeps_persona(mo
     )
     budget = max(sum(len(token.encode()) + 1 for token in plan.argv) for plan in (mcp_plan, persona_plan))
     monkeypatch.setattr(common, "_NATIVE_COMMAND_BYTES", budget)
-    result = codex.session_artifacts(
-        context(first, second, independent, persona),
-        extra_args=[],
-        enabled_workarounds=["session-mcp-overrides", "session-agent-config"],
+    current = context(first, second, independent, persona)
+    plan = codex.session_artifacts(
+        current, extra_args=[], enabled_workarounds=["session-mcp-overrides", "session-agent-config"]
     )
+    result = codex.limit_session_argv(plan, current.inputs)
     assert result.argv == persona_plan.argv
     assert result.application.files == persona_plan.application.files
     assert {entry.input_id for entry in result.application.deferred} == {

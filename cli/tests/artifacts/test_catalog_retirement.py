@@ -40,7 +40,12 @@ def _account(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool: str) -> Loca
 
 
 def _preflight(
-    account: LocalFixtureAccount, tool: str, files: tuple[ArtifactFile, ...], previous: tuple[OwnedArtifactFile, ...]
+    account: LocalFixtureAccount,
+    tool: str,
+    files: tuple[ArtifactFile, ...],
+    previous: tuple[OwnedArtifactFile, ...],
+    *,
+    retain_origins: frozenset[str] = frozenset(),
 ) -> None:
     prior = SetupRecord(
         component="agent", integration=tool, destination_id="a" * 64, declaration={}, artifact_files=previous
@@ -54,6 +59,7 @@ def _preflight(
         checkpoint=lambda _: None,
         username="fixture",
         home=str(account.home),
+        retain_artifact_origins=retain_origins,
     )
     probe.probe_native(access, tool=tool, environment={}, home=call.home, files=files, setup=call)
 
@@ -141,6 +147,8 @@ def test_codex_catalog_retry_credits_empty_recorded_directories(tmp_path, monkey
         ("grok", "rootless"),
         ("claude", "clean-withdrawal"),
         ("grok", "untouched"),
+        ("claude", "retained"),
+        ("grok", "retained"),
     ],
 )
 def test_direct_marker_catalog_allowance_checks_disappearing_packages(tmp_path, monkeypatch, tool, scenario):
@@ -154,7 +162,7 @@ def test_direct_marker_catalog_allowance_checks_disappearing_packages(tmp_path, 
     for index in range(509):
         (catalog / f"unrelated-{index}").touch()
     hidden = tuple(catalog / "other" / f"operator-{index}" for index in range(3))
-    if scenario.endswith("-hidden") or scenario == "untouched":
+    if scenario.endswith("-hidden") or scenario in {"retained", "untouched"}:
         for member in hidden:
             member.write_bytes(b"Operator bytes.")
     if scenario == "rootless":
@@ -176,13 +184,19 @@ def test_direct_marker_catalog_allowance_checks_disappearing_packages(tmp_path, 
             assert all(path.read_bytes() == b"Operator bytes." for path in hidden)
         return
 
-    _preflight(account, tool, wanted, previous)
-    final = publish_artifacts(account.files(), wanted, previous, lambda _: None, roots=(str(account.home),))
-    assert not final.skipped and {file.path for file in final.files} == {file.path for file in wanted}
+    retain_origins = frozenset(second[0].origins) if scenario == "retained" else frozenset()
+    _preflight(account, tool, wanted, previous, retain_origins=retain_origins)
+    final = publish_artifacts(
+        account.files(), wanted, previous, lambda _: None, roots=(str(account.home),), retain_origins=retain_origins
+    )
+    held_paths = {second[0].path} if retain_origins else set()
+    assert {item.path for item in final.skipped} == held_paths
+    assert {file.path for file in final.files} == {file.path for file in wanted} | held_paths
     assert not Path(first[0].path).exists()
-    if scenario == "untouched":
+    if scenario in {"retained", "untouched"}:
+        assert Path(second[0].path).read_bytes() == second[0].data
         assert all(path.read_bytes() == b"Operator bytes." for path in hidden)
-    _preflight(account, tool, wanted, final.files)
+    _preflight(account, tool, wanted, final.files, retain_origins=retain_origins)
 
 
 def _persona(catalog: Path, name: str, origin: str, size: int, tool: str) -> ArtifactFile:

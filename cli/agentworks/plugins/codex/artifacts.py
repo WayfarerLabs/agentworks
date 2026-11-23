@@ -183,27 +183,19 @@ def session_artifacts(
                 "-c",
                 f"{key}.description={json.dumps(item.content.description, ensure_ascii=False)}",
             ]
+    application = ArtifactApplication(tuple(files), deferred)
+    return NativeSessionArtifacts(application, (*argv, *mcp.argv))
+
+
+def limit_session_argv(plan: NativeSessionArtifacts, inputs: ArtifactInputs) -> NativeSessionArtifacts:
+    """Budget the selected artifact overrides after resolving native placement conflicts."""
     try:
-        validate_native_argv((*argv, *mcp.argv))
+        validate_native_argv(plan.argv)
     except ConfigError:
         # Optional MCP must not prevent an otherwise-valid legacy launch.
-        validate_native_argv(tuple(argv))
-        deferred = (
-            *deferred,
-            *(
-                ArtifactDeferral(
-                    input_id=item.identity,
-                    destination="session",
-                    reason="session-mcp-overrides exceeds the native command carrier limit",
-                )
-                for item in mcp_inputs.items()
-                if item.identity not in {entry.input_id for entry in mcp.application.deferred}
-            ),
-        )
-    else:
-        argv.extend(mcp.argv)
-    application = ArtifactApplication(tuple(files), deferred)
-    return NativeSessionArtifacts(application, tuple(argv))
+        plan = defer_session_mcp(plan, inputs, "session-mcp-overrides exceeds the native command carrier limit")
+        validate_native_argv(plan.argv)
+    return plan
 
 
 def defer_session_mcp(plan: NativeSessionArtifacts, inputs: ArtifactInputs, reason: str) -> NativeSessionArtifacts:
