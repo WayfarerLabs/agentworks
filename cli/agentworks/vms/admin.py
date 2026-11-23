@@ -133,10 +133,9 @@ class AdminConfig(DeclaredResource):
     substitution. The rendered value is checked before the sync: it may not be
     the home itself or one of its parents, be, hold or lie inside a path
     Agentworks manages in the home (`~/.ssh`, `~/.agentworks`,
-    `~/.agentworks-artifacts`, the workspaces' `~/.config/tmuxinator` and the
-    `~/.agentworks-*.sh` fragments), or have an empty, `.` or `..` component,
-    and a trailing `/` is dropped. A refused destination warns and syncs
-    nothing."""
+    `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments), or have
+    an empty, `.` or `..` component, and a trailing `/` is dropped. A refused
+    destination warns and syncs nothing."""
 
     dotfiles_install_cmd: Annotated[str, Interpolated()] = "./install.sh"
     """The command run inside the checkout to install the dotfiles."""

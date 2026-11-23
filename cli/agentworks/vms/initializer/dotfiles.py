@@ -31,13 +31,11 @@ def sync_dotfiles(
     install_cmd: str,
     shell: str,
     home: str,
-    managed: tuple[str, ...],
     log: InitLog,
 ) -> None:
     """Sync the dotfiles ``source`` names to ``destination``, then run ``install_cmd`` in the checkout.
 
-    Everything runs as the account ``files`` acts as, whose home is ``home``
-    and whose managed paths (``vms.home_layout``) are ``managed``.
+    Everything runs as the account ``files`` acts as, whose home is ``home``.
     ``destination`` is the operator's value as rendered for this account. It
     is normalized and checked here (``sources.normalize_destination``, then
     ``sources.expand_destination``) before any request; a refused one warns
@@ -52,7 +50,7 @@ def sync_dotfiles(
     """
     log.step("Dotfiles")
     try:
-        dest = expand_destination(normalize_destination(destination, managed=managed), home, managed=managed)
+        dest = expand_destination(normalize_destination(destination), home)
     except DestinationError as error:
         warn_step(log, f"dotfiles destination refused, so nothing synced and '{install_cmd}' did not run", error)
         return

@@ -16,7 +16,6 @@ from agentworks.errors import (
 )
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Command
-from agentworks.linux_users import managed_home
 from agentworks.path_rendering import format_host_path
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
@@ -33,7 +32,6 @@ from agentworks.workspaces.guest import (
 )
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
-from agentworks.workspaces.tmuxinator import generate_config, publish_tmuxinator_config, remove_config
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -180,9 +178,6 @@ def _rehome_vm(
 
     _guard_vm_status(vm)
     registry = load_request_registry(config, live_database=db)
-    from agentworks.workspaces.templates import resolve_live_tmuxinator
-
-    tmuxinator_enabled = resolve_live_tmuxinator(db, registry, ws_name, ws.template)
     with gated_vm_boundary(
         db,
         config,
@@ -296,21 +291,6 @@ def _rehome_vm(
                 # Only true ancestors of the new path get a+x; its own mode is
                 # the canonical 2770 set above.
                 admin.run(open_parent_traversal(new_path), check=True)
-
-                # Regenerate the tmuxinator config at the new path, replacing the
-                # link to the old one.
-                home = managed_home(vm.admin_username)
-                if tmuxinator_enabled:
-                    publish_tmuxinator_config(
-                        admin,
-                        home=home,
-                        ws_name=ws_name,
-                        workspace_path=new_path,
-                        text=generate_config(ws_name, new_path),
-                        replace_link=True,
-                    )
-                else:
-                    remove_config(admin, home=home, ws_name=ws_name, workspace_path=new_path)
 
                 # Retire old-location and copied Git pairs while the old row
                 # still authorizes their source, then establish the new pairs.

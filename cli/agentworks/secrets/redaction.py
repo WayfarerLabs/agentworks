@@ -26,19 +26,25 @@ def secret_redaction_forms(value: str) -> tuple[str, ...]:
     """
     if not value:
         return ()
+    trimmed = value.strip("\r\n")
+    extra = (trimmed,) if trimmed and trimmed != value else ()
     quoted = shlex.quote(value)
     interior = quoted[1:-1] if quoted.startswith("'") and quoted.endswith("'") else quoted
     forms = (value, quoted, interior)
-    represented = tuple(repr(form) for form in forms)
-    trimmed = value.strip("\r\n")
-    extra = (trimmed,) if trimmed and trimmed != value else ()
+    represented = tuple(repr(form) for form in (*forms, *extra))
+    # A larger value can make repr escape apostrophes that repr(secret) leaves raw.
+    single_quote_interiors = tuple(form[1:-1].replace("'", "\\'") for form in represented if form.startswith('"'))
     ansi_c = tuple(
         spelling
         for text in (value, *extra)
         for utf8 in (False, True)
         if (spelling := _bash_ansi_c_quote(text, utf8=utf8)) is not None
     )
-    return tuple(dict.fromkeys((*forms, *represented, *(form[1:-1] for form in represented), *extra, *ansi_c)))
+    return tuple(
+        dict.fromkeys(
+            (*forms, *represented, *(form[1:-1] for form in represented), *single_quote_interiors, *extra, *ansi_c)
+        )
+    )
 
 
 def _bash_ansi_c_quote(text: str, *, utf8: bool) -> str | None:

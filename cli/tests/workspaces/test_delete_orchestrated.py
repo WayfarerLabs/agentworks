@@ -242,62 +242,46 @@ def test_delete_group_removal_failure_does_not_break_the_delete(
 # -- stored paths the file operations cannot address --------------------------
 
 
-def test_delete_of_a_stored_path_that_is_not_absolute_removes_the_row_and_link_and_leaves_the_vm_files(
+def test_delete_of_a_stored_path_that_is_not_absolute_removes_the_row_and_group_and_leaves_the_vm_files(
     db: Database,
     make_config,  # noqa: ANN001
     guest: Guest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    """A '~' row names no one directory: nothing it names is touched, and the
-    console link goes, so a new create of the name can link its config
-    without replacing."""
-    from agentworks.linux_users import managed_home
-    from agentworks.workspaces.tmuxinator import remove_link
-
+    """A '~' row names no one directory: nothing it names is touched, and its group still goes."""
     config = make_config()
     seed(db)
     db._conn.execute("UPDATE workspaces SET workspace_path = '~/ws/ws1' WHERE name = 'ws1'")
     db._conn.commit()
     reachable(monkeypatch, True)
-    vm = db.get_vm("box")
-    assert vm is not None
-    link_removal = remove_link(managed_home(vm.admin_username), "ws1")
 
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_workspace("ws1") is None
-    assert link_removal in guest.requests
-    others = [request for request in guest.requests if request != link_removal]
-    assert not any("ws/ws1" in argument or "tmuxinator" in argument for r in others for argument in arguments(r))
+    assert not any("ws/ws1" in argument for r in guest.requests for argument in arguments(r))
     assert REMOVE_GROUP in guest.argvs()
     assert len(captured_output.warnings) == 1
     assert "~/ws/ws1" in captured_output.warnings[0]
 
 
-def test_delete_of_a_stored_path_with_a_dotdot_removes_its_directory_and_link_as_the_vm_resolves_them(
+def test_delete_of_a_stored_path_with_a_dotdot_removes_its_directory_as_the_vm_resolves_it(
     db: Database,
     make_config,  # noqa: ANN001
     guest: Guest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    from agentworks.linux_users import managed_home
-    from agentworks.workspaces.tmuxinator import remove_link_to
-
     config = make_config()
     seed(db)
     db._conn.execute("UPDATE workspaces SET workspace_path = '/home/admin/../srv/ws1' WHERE name = 'ws1'")
     db._conn.commit()
     reachable(monkeypatch, True)
-    vm = db.get_vm("box")
-    assert vm is not None
 
     workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_workspace("ws1") is None
     assert ("rm", "-rf", "--", "/home/admin/../srv/ws1") in guest.argvs()
-    assert remove_link_to(managed_home(vm.admin_username), "ws1", "/home/admin/../srv/ws1") in guest.requests
     assert captured_output.warnings == []
 
 

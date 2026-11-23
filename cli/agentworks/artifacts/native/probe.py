@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from agentworks.artifacts.application import ArtifactFile
+from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
@@ -22,7 +22,6 @@ from agentworks.sources import SourceRefError
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from agentworks.artifacts.application import OwnedArtifactFile
     from agentworks.execution.access import VMAccess
 
 
@@ -179,6 +178,12 @@ try:
             if skill_root.is_symlink():
                 raise ValueError()
             for directory in skill_root.iterdir():
+                # Keep direct-name casing aligned with _is_reserved_claude_skill on the host.
+                if tool == 'claude' and (directory.name.casefold() in ('synced', 'anthropic-skills') or
+                        directory.name == '.trash' or directory.name.casefold().startswith('anthropic-skills:')):
+                    # These names do not expose ordinary native skills. Do not inspect
+                    # account sync, retired skills, or other reserved namespace contents.
+                    continue
                 inspecting = directory
                 existing_entries.add(str(directory))
                 scanned += 1
@@ -393,6 +398,15 @@ def _proposed_sizes(files: Sequence[ArtifactFile | OwnedArtifactFile], tool: str
     return result
 
 
+def _is_reserved_claude_skill(identity: str | None) -> bool:
+    """Direct-name counterpart to _PROBE; plugin-qualified identities keep their namespace."""
+    return (
+        identity is not None
+        and identity.startswith("skill:")
+        and identity[6:].casefold() in ("synced", "anthropic-skills")
+    )
+
+
 # What the probe's stdout may hold: up to 1 MiB of frontmatter, which JSON can grow
 # sixfold, and 512 paths of up to 4096 bytes, with room for login-shell noise.
 _PROBE_OUTPUT_LIMIT = 16 * 1024 * 1024
@@ -423,9 +437,25 @@ def probe_native(
     native workload gets. The request travels on its stdin, so a large
     package needs no argument.
     """
+    if tool == "claude":
+        # Old placements under Claude-owned names must not select native inventory.
+        files = tuple(
+            file
+            for file in files
+            if not isinstance(file, OwnedArtifactFile) or not _is_reserved_claude_skill(file.native_identity)
+        )
     entries = {file.path: file.native_identity for file in files if file.native_identity}
-    recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
     identities = tuple(entries.values())
+    reserved = tuple(
+        dict.fromkeys(identity for identity in identities if tool == "claude" and _is_reserved_claude_skill(identity))
+    )
+    if reserved:
+        raise NativeArtifactConflictError(
+            redactor.sanitize(f"Claude Code reserves these supplied native skill names: {', '.join(reserved)}"),
+            reserved,
+            hint="Rename the supplied skills, or use namespaced session plugin delivery.",
+        )
+    recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
     request = {
         "tool": tool,
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,

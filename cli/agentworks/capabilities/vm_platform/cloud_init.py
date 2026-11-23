@@ -31,7 +31,6 @@ INIT_SYSTEM_PACKAGES = [
     "git",
     "unzip",
     "tmux",
-    "tmuxinator",
     "acl",
     "jq",
     "mise",

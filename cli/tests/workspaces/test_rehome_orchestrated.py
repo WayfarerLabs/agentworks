@@ -396,7 +396,7 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
 
-# -- the canonical ACL, the tmuxinator config and the first repair after ------
+# -- the canonical ACL and the first repair after ------
 
 
 def test_rehome_routes_through_the_canonical_acl_helper(
@@ -420,32 +420,6 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     assert fake.index(COPY) < fake.requests.index(acls[0]) < fake.requests.index(open_parent_traversal("/dst/ws1"))
     row = db.get_workspace("ws1")
     assert row is not None and row.workspace_path == "/dst/ws1"
-
-
-def test_rehome_removes_tmuxinator_projections_when_live_overlay_disables_them(
-    db: Database,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks.instance_specs import parse_instance_spec
-
-    config = make_config()
-    seed(db)
-    db._conn.execute("UPDATE workspaces SET template = 'copied' WHERE name = 'ws1'")
-    db._conn.commit()
-    overlay = parse_instance_spec("workspace", '{"tmuxinator":false}')
-    db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    reachable(monkeypatch, True)
-    fake = RehomeGuest()
-    route(monkeypatch, fake)
-
-    _rehome(db, config, yes=True)
-
-    assert not any(path.endswith("/.tmuxinator.yml") for path in fake.written)
-    assert any(
-        command[:2] == ("rm", "-f") and any(argument.endswith(".tmuxinator.yml") for argument in command)
-        for command in fake.argvs()
-    )
 
 
 def test_first_repair_after_rehome_is_a_noop(

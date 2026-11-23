@@ -33,7 +33,6 @@ from agentworks.git_credentials import configure_user_git_credentials
 from agentworks.interpolation import context_values
 from agentworks.interpolation_fields import render_scalar_field
 from agentworks.linux_users import managed_home
-from agentworks.vms.home_layout import ADMIN_MANAGED
 
 from . import phase_a
 from .dotfiles import sync_dotfiles
@@ -292,6 +291,24 @@ def run_initialization(
                     vm_name,
                     AppliedStateKey.SSH_IDENTITY,
                 )
+
+
+def _retire_workspace_tmuxinator_projects(db: Database, vm_name: str, files: Files, log: InitLog) -> None:
+    """Remove the workspace tmuxinator projects and admin discovery links earlier
+    releases generated, for every workspace on this VM. Non-fatal: a failure
+    warns once and reinit continues."""
+    from agentworks.workspaces.retired_tmuxinator import retire_tmuxinator_projects
+
+    log.step("Remove leftover workspace tmuxinator projects")
+    failures = retire_tmuxinator_projects(
+        files.access, [workspace.workspace_path for workspace in db.list_workspaces(vm_name=vm_name)]
+    )
+    if failures:
+        warn(
+            log,
+            f"Leftover workspace tmuxinator projects were not all removed ({'; '.join(failures)}); what "
+            f"could not be checked or removed stays in place. Inspect it, then rerun 'agw vm reinit {vm_name}'.",
+        )
 
 
 def _converge_agent_sockets(files: Files, linux_users: list[str], log: InitLog, *, warn_if_missing: bool) -> None:
@@ -640,7 +657,6 @@ def _phase_b_setup(
                 ),
                 shell=admin_shell,
                 home=home,
-                managed=ADMIN_MANAGED,
                 log=logger,
             )
 
@@ -675,6 +691,11 @@ def _phase_b_setup(
         if failed_user:
             # A failed install command keeps no PATH entry in the profile.
             _write_agentworks_profile(files, profile_paths(failed_user), logger, home=home, shell=admin_shell)
+
+        # Non-fatal, reinit only (a new VM has none): runs after dotfiles and the
+        # install commands so nothing installed above can restore a link.
+        if operation is VMInitializationOperation.VM_REINIT:
+            _retire_workspace_tmuxinator_projects(db, vm_name, files, logger)
 
         # An install command can replace an rc file too.
         _ensure_agentworks_files_sourced(files, logger, home=home, shell=admin_shell)

@@ -69,7 +69,24 @@ def refused(code: str) -> NotDelivered:
 
 
 def literal_argv(lane: Lane) -> None:
-    items = ["", " ", "a b", "$HOME", "`id`", "'", '"', "\\", "*", "-n", "--", "-c", "; echo injected", "-", "\t\n"]
+    items = [
+        "",
+        " ",
+        "a b",
+        "$HOME",
+        "`id`",
+        "'",
+        '"',
+        "\\",
+        "*",
+        "-n",
+        "--",
+        "-c",
+        "; echo injected",
+        "-",
+        "\t\n",
+        "prøj-ü",
+    ]
 
     result = lane.run(cmd("python3", "-c", "import sys; sys.stdout.write(repr(sys.argv[1:]))", *items))
 

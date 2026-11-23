@@ -47,7 +47,6 @@ def test_init_system_packages() -> None:
     """INIT_SYSTEM_PACKAGES contains the packages installed during init."""
     assert "git" in INIT_SYSTEM_PACKAGES
     assert "tmux" in INIT_SYSTEM_PACKAGES
-    assert "tmuxinator" in INIT_SYSTEM_PACKAGES
     assert "acl" in INIT_SYSTEM_PACKAGES
     assert "jq" in INIT_SYSTEM_PACKAGES
     assert "mise" in INIT_SYSTEM_PACKAGES

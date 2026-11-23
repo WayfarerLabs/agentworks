@@ -230,6 +230,17 @@ session routing; it never becomes part of the receiver's local group. The same t
 different scopes remain separate contributions. Integrations must preserve them through supported
 native placement or aggregation, or refuse ambiguous delivery explicitly.
 
+When native setup receives same-name skills or agents from multiple owners, it keeps a uniquely
+identified previously applied owner at that receiving facet and defers the newcomers. It renders
+that owner's current captured content, including content and bundle changes. The decision uses the
+receiving facet's recorded file origins and does not depend on input order. If no current owner or
+multiple current owners have prior placements, all colliders are deferred; a withdrawn owner cannot
+choose a replacement. Independent artifacts still apply.
+
+Same-key rules and hints from different owners warn during native setup or enabled session delivery.
+They retain their separate owner contributions, using the integration's existing native files,
+helper skills or aggregate carrier. These advisory warnings do not make setup incomplete.
+
 ## Artifact formats
 
 Hints are plain UTF-8 text. Skills use the standard
@@ -658,6 +669,10 @@ arguments; independent delivery and launch continue. A non-conflicting native na
 later facet to handle a previously deferred input. Problems solely in existing ancestor placement
 also warn without blocking launch.
 
+Conflicts found only in existing native inventory are separate from declared-input collisions. An
+unmanaged same-name entry can still defer a previously managed declaration; its unchanged previous
+files then follow ordinary retirement. Modified and unowned files remain protected.
+
 Local setup completion records the known inputs actually supplied to its invocation. Unknown
 incoming-route health is calculated lazily from the ancestor records, rather than saved as a
 permanent local failure. A workspace created while its upstream routing is unknown can become
@@ -685,6 +700,16 @@ configurations. The inventory does not claim to cover additional ancestor reposi
 third-party plugin locations, Codex system-configuration policy, or changes after preflight. Unknown
 native discovery extensions require separate verification; a successful preflight is not an
 exhaustive native inventory.
+
+Claude's
+[reserved skill locations](https://code.claude.com/docs/en/skills#names-reserved-for-synced-skills)
+include `synced`, `anthropic-skills`, and names beginning with `anthropic-skills:`, ignoring case.
+The exact `.trash` directory holds retired synced skills. Inventory treats these containers as
+opaque: it skips their contents and excludes them from metadata and entry budgets. Direct Claude
+skill names `synced` and `anthropic-skills` are reserved and deferred rather than reported as
+applied. Stored deferrals retain the conflict cause and repair guidance. Native plugin namespaces
+retain their own name rules. Ordinary skill candidates and their native discovery roots still
+receive the bounds and path checks above.
 
 There is no separate session filesystem. Private session files use the actual user's
 `~/.agentworks-artifacts/session/<session_uuid>/<run_id>/` directory. The opt-in Codex/Grok

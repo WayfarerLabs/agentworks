@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from agentworks.execution.oplog import OperationLogFile
+from agentworks.harness_setup.outcomes import Redactor
 
 
 @pytest.mark.parametrize("value_shape", ["quoted", "spaced", "multiline"])
@@ -51,3 +52,27 @@ def test_python_diagnostic_representation_cannot_leak_a_registered_secret(
 
     assert marker not in logger.path.read_text()
     assert "/home/agent/native.json" in logger.path.read_text()
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("surrounding_quote", [False, True])
+@pytest.mark.parametrize("suffix", ["", "'quoted", "'back\\slash\nnext", "'quoted\n"])
+def test_enclosing_python_repr_keeps_registered_secrets_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surrounding_quote: bool, suffix: str
+) -> None:
+    marker = uuid4().hex
+    value = marker + suffix
+    prefix = 'fixture-prefix-"' if surrounding_quote else "fixture-prefix-"
+    shown = value.strip("\r\n")
+    rendered = repr(f"/home/worker/{prefix}{shown}/native.json")
+    diagnostic = Redactor((value,)).sanitize(rendered)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    logger = OperationLogFile("redaction", "quoted-path", redactions=(value,))
+    try:
+        logger.log_error(rendered)
+    finally:
+        logger.close()
+
+    for surface in (diagnostic, logger.path.read_text()):
+        assert marker not in surface
+        assert "fixture-prefix-" in surface and "/native.json" in surface

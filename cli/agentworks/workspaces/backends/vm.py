@@ -1,8 +1,7 @@
-"""VM workspace backend: a workspace's directory, group, clone and tmuxinator projection on its VM."""
+"""VM workspace backend: a workspace's directory, group and clone on its VM."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import replace
 from pathlib import PurePosixPath
@@ -13,16 +12,7 @@ import agentworks.execution as execution
 from agentworks import output
 from agentworks.errors import AlreadyExistsError
 from agentworks.execution.access import Admin
-from agentworks.execution.errors import (
-    CommandFailed,
-    ExecutionIncomplete,
-    FileContentMismatch,
-    FileLockTimeout,
-    PathRefused,
-    RequestRefused,
-)
 from agentworks.execution.requests import Command
-from agentworks.linux_users import managed_home
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.guest import (
@@ -33,14 +23,6 @@ from agentworks.workspaces.guest import (
     path_occupied,
     script,
 )
-from agentworks.workspaces.tmuxinator import (
-    config_path,
-    generate_config,
-    link_config,
-    remove_link,
-    remove_link_to,
-    write_config,
-)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,6 +30,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.access import VMAccess
+    from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
     from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.initializer.steps import InitLog
     from agentworks.workspaces.templates import ResolvedTemplate
@@ -150,7 +133,6 @@ def create_vm_workspace(
         raise
     attempt: str | None = None
     clone_published = False
-    generated_config: tuple[str, str] | None = None
     try:
         # Create workspace group (idempotent), add admin, and set up directory with setgid
         admin.run(ensure_group(ws_group), check=True)
@@ -218,29 +200,10 @@ def create_vm_workspace(
                     # ~/.gitconfig (git config defaults to global outside a repo).
                     admin.run(Command(("git", "-C", workspace_path, "config", "--local", git_key, value)), check=True)
 
-        # Tmuxinator config (no tasks yet at workspace creation time), linked
-        # so tmuxinator can find it by console session name.
-        if template.tmuxinator:
-            tmux_config = generate_config(ws_name, workspace_path)
-            generated_config = (config_path(workspace_path), hashlib.sha256(tmux_config.encode()).hexdigest())
-            try:
-                write_config(admin, workspace_path, tmux_config)
-            except (PathRefused, FileLockTimeout, FileContentMismatch):
-                # Nothing was written, so there is nothing of this create's to remove.
-                generated_config = None
-                raise
-            link_config(
-                admin,
-                home=managed_home(vm.admin_username),
-                ws_name=ws_name,
-                workspace_path=workspace_path,
-                replace_link=False,
-            )
-
         # Canonical workspace ACL, applied last so every entry written above (a
-        # clone, the tmuxinator config) is covered, and future entries inherit via
-        # the default ACL. Shared with workspace repair so the two never drift and
-        # a first repair of this workspace is a no-op.
+        # clone) is covered, and future entries inherit via the default ACL.
+        # Shared with workspace repair so the two never drift and a first
+        # repair of this workspace is a no-op.
         apply_workspace_acls(admin.files(), workspace_path)
     except BaseException:
         # A guest clone may survive the controller's cancellation or timeout.
@@ -256,19 +219,10 @@ def create_vm_workspace(
                 )
         # Cleanup steps are independent: an unreachable private attempt must not
         # prevent reclaiming an empty final reservation and its group.
-        if not clone_published and generated_config is not None:
-            try:
-                admin.files().remove_if(generated_config[0], expected=generated_config[1])
-            except BaseException:
-                output.warn(
-                    f"Generated workspace config {generated_config[0]!r} could not be safely removed. "
-                    "Any changed content was retained."
-                )
         try:
             delete_vm_workspace(
                 vm,
                 config,
-                ws_name,
                 workspace_path,
                 ws_group,
                 logger=logger,
@@ -287,7 +241,6 @@ def create_vm_workspace(
 def delete_vm_workspace(
     vm: VMRow,
     config: Config,
-    ws_name: str,
     workspace_path: str,
     linux_group: str,
     *,
@@ -296,13 +249,12 @@ def delete_vm_workspace(
 ) -> None:
     """Delete a workspace from a VM.
 
-    Tears down what :func:`create_vm_workspace` set up: the directory,
-    the tmuxinator symlink, and the workspace's Linux group. ``groupadd``
-    at create time has a symmetric ``groupdel`` here, so a deleted
-    workspace leaves no residual group on the VM (issue #249). Callers
-    pass the recorded ``linux_group`` rather than re-deriving it, so
-    legacy workspaces (older ``ws--`` prefix) drop the group they
-    actually own.
+    Tears down what :func:`create_vm_workspace` set up: the directory and
+    the workspace's Linux group. ``groupadd`` at create time has a symmetric
+    ``groupdel`` here, so a deleted workspace leaves no residual group on
+    the VM (issue #249). Callers pass the recorded ``linux_group`` rather
+    than re-deriving it, so legacy workspaces (older ``ws--`` prefix) drop
+    the group they actually own.
 
     ``empty_only`` removes only a failed create's empty reservation; an occupied
     or unconfirmed directory and its group stay available for inspection.
@@ -334,8 +286,6 @@ def delete_vm_workspace(
             admin.run(
                 Command(("rm", "-rf", "--", workspace_path), elevated=True, deadline=CLEANUP_DEADLINE), check=True
             )
-        # The link only while it still points at this workspace's config.
-        admin.run(remove_link_to(managed_home(vm.admin_username), ws_name, workspace_path)).require_completed(vm.name)
         admin.run(_group_removal(linux_group)).require_completed(vm.name)
     except REQUEST_FAILURES:
         output.warn(
@@ -345,25 +295,19 @@ def delete_vm_workspace(
 
 
 def delete_vm_workspace_keeping_files(
-    vm: VMRow, config: Config, ws_name: str, linux_group: str, *, logger: InitLog | None = None
+    vm: VMRow, config: Config, linux_group: str, *, logger: InitLog | None = None
 ) -> None:
-    """Delete's VM step when the stored path names no one directory: the console link and the group, no files.
+    """Delete's VM step when the stored path names no one directory: the group, no files.
 
-    The link's path and the group's name are known without the stored path,
-    and both are this workspace's own; the directory and the config in it are
-    left for the operator. Removing the link lets the name be recreated, since
-    create links without replacing.
+    The group's name is known without the stored path and is this workspace's
+    own; the directory is left for the operator.
     """
     assert vm.tailscale_host is not None
     admin = admin_access(vm, config, logger)
     try:
-        admin.run(remove_link(managed_home(vm.admin_username), ws_name)).require_completed(vm.name)
         admin.run(_group_removal(linux_group)).require_completed(vm.name)
     except REQUEST_FAILURES:
-        output.warn(
-            f"Removal of the tmuxinator link of workspace '{ws_name}' and group {linux_group!r} was not confirmed. "
-            "Inspect them before retrying."
-        )
+        output.warn(f"Removal of workspace group {linux_group!r} was not confirmed. Inspect it before retrying.")
 
 
 def _group_removal(linux_group: str) -> Command:
