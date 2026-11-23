@@ -134,7 +134,11 @@ def defer_setup_conflicts(
     """
     from agentworks.artifacts.native.probe import NativeArtifactConflictError
 
-    while application.files:
+    previous = invocation.prior.artifact_files if invocation.prior else ()
+    prior_catalog = any(
+        file.path.endswith("/SKILL.md") or (file.native_identity or "").startswith("agent:") for file in previous
+    )
+    while application.files or prior_catalog:
         try:
             probe(application.files)
             return application

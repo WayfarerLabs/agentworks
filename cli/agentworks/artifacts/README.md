@@ -688,20 +688,23 @@ to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Co
 MiB each and 64 MiB combined. The TOML budget is an Agentworks limit, not a native Codex product
 limit. For Codex, Agentworks recursively checks package contents and accepts skill entrypoints only
 at `<skill-root>/<package>/SKILL.md`. Its 512-entry budget includes supporting files and
-directories, including proposed members and their implied directories. The Claude and Grok adapters
-do not scan beneath a present package entrypoint. These native support limits do not restrict the
+directories, including proposed members and their implied directories. The initial Claude and Grok
+inventory stops at a present package entrypoint. These native support limits do not restrict the
 generic capture format. Before publication, preflight checks existing and proposed entries together,
-counting a replaced path once, so an accepted plan fits the next inventory. Generated Codex persona
-files obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting deeper than
-32 levels before constructing values. Directories without a root `SKILL.md` are walked within the
-same entry budget: ordinary files are ignored, while nested `SKILL.md` candidates, symlinks and
-special files are refused. This permits unowned notes to survive skill retirement without keeping
-the removed skill active. Symlinked or nested candidate layouts are explicitly unsupported. These
-are conservative Agentworks support limits, not claims that those layouts are invalid native
-configurations. The inventory does not claim to cover additional ancestor repository roots,
-third-party plugin locations, Codex system-configuration policy, or changes after preflight. Unknown
-native discovery extensions require separate verification; a successful preflight is not an
-exhaustive native inventory.
+counting a replaced path once. Owning setup uses the same file decisions as publication when
+shrinkage or retirement matters to a limit. A skipped receiver keeps its observed metadata size.
+When a Claude or Grok skill entrypoint retires, surviving files and directories beneath it count
+toward the next inventory, including when setup withdraws the last declared skill. Generated Codex
+persona files obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting
+deeper than 32 levels before constructing values. Directories without a root `SKILL.md` are walked
+within the same entry budget: ordinary files count toward that budget, while nested `SKILL.md`
+candidates, symlinks and special files are refused. This permits unowned notes to survive skill
+retirement without keeping the removed skill active. Symlinked or nested candidate layouts are
+explicitly unsupported. These are conservative Agentworks support limits, not claims that those
+layouts are invalid native configurations. The inventory does not claim to cover additional ancestor
+repository roots, third-party plugin locations, Codex system-configuration policy, or changes after
+preflight. Unknown native discovery extensions require separate verification; a successful preflight
+is not an exhaustive native inventory.
 
 Claude's
 [reserved skill locations](https://code.claude.com/docs/en/skills#names-reserved-for-synced-skills)

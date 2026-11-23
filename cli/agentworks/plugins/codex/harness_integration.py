@@ -537,7 +537,7 @@ class CodexIntegration(HarnessIntegration):
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
         plan = ArtifactApplication() if self.retiring else render_setup_artifacts(invocation, vm_artifacts)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -603,7 +603,7 @@ class CodexIntegration(HarnessIntegration):
             skip_mcp=skip_mcp,
         )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -641,7 +641,7 @@ class CodexIntegration(HarnessIntegration):
             )
         )
         mcp = setup_workspace("codex", config, invocation)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,

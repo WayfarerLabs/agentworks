@@ -233,7 +233,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 lambda inputs: outer_artifacts(inputs, "/etc/claude-code/.claude", guidance_as_skills=True),
             )
         )
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -314,7 +314,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             skip_mcp=skip_mcp,
         )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -347,7 +347,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             )
         )
         mcp = setup_workspace("claude", config, invocation)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,

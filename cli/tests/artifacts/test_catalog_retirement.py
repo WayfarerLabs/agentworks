@@ -20,9 +20,10 @@ from agentworks.harness_setup.model import SetupRecord
 from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS
 from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.codex import artifacts as codex
-from tests.artifacts._fixtures import group
+from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
+from tests.artifacts._fixtures import group, received
 from tests.artifacts.test_native_delivery import artifact
-from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.native_setup_fixtures import LocalFixtureAccount, invocation
 
 if TYPE_CHECKING:
     from agentworks.artifacts.application import ArtifactPublication
@@ -160,7 +161,8 @@ def test_codex_catalog_retry_credits_empty_recorded_directories(tmp_path, monkey
 def test_direct_marker_catalog_allowance_checks_disappearing_packages(tmp_path, monkeypatch, tool, scenario):
     account = _account(tmp_path, monkeypatch, tool)
     catalog = account.home / f".{tool}/skills"
-    first = _skill(catalog, "review", "a")
+    supporting = "nested/SKILL.md" if scenario == "clean-withdrawal" else ""
+    first = _skill(catalog, "review", "a", supporting)
     second = _skill(catalog, "other", "b")
     previous = publish_artifacts(
         account.files(), (*first, *second), (), lambda _: None, roots=(str(account.home),)
@@ -175,13 +177,13 @@ def test_direct_marker_catalog_allowance_checks_disappearing_packages(tmp_path, 
         previous = tuple(
             file.model_copy(update={"package_root": None}) if file.path == second[0].path else file for file in previous
         )
-    replacement = _skill(catalog, "vm-review", "a")
+    replacement = _skill(catalog, "vm-review", "a", supporting)
     addition = _skill(catalog, "vm-other", "b" if scenario == "paired-hidden" else "c")
     wanted = (*replacement, *addition, *(second if scenario == "untouched" else ()))
 
     with pytest.raises(StateError):
         _preflight(account, tool, wanted, ())
-    if scenario in {"paired-hidden", "withdrawn-hidden", "rootless"}:
+    if scenario in {"paired-hidden", "withdrawn-hidden"}:
         with pytest.raises(StateError):
             _preflight(account, tool, wanted, previous)
         assert all(Path(file.path).is_file() for file in (*first, *second))
@@ -195,6 +197,11 @@ def test_direct_marker_catalog_allowance_checks_disappearing_packages(tmp_path, 
     final = publish_artifacts(
         account.files(), wanted, previous, lambda _: None, roots=(str(account.home),), retain_origins=retain_origins
     )
+    if supporting:
+        assert Path(replacement[1].path).read_bytes() == first[1].data
+    if scenario == "rootless":
+        assert (catalog / "other").is_dir() and not list((catalog / "other").iterdir())
+        assert len(list(catalog.iterdir())) == 512
     held_paths = {second[0].path} if retain_origins else set()
     assert {item.path for item in final.skipped} == held_paths
     assert {file.path for file in final.files} == {file.path for file in wanted} | held_paths
@@ -203,6 +210,96 @@ def test_direct_marker_catalog_allowance_checks_disappearing_packages(tmp_path, 
         assert Path(second[0].path).read_bytes() == second[0].data
         assert all(path.read_bytes() == b"Operator bytes." for path in hidden)
     _preflight(account, tool, wanted, final.files, retain_origins=retain_origins)
+
+
+@pytest.mark.parametrize("unrelated", [495, 509])
+@pytest.mark.parametrize("rename", [False, True], ids=["withdraw", "upgrade"])
+def test_direct_marker_retirement_counts_surviving_notes(tmp_path, monkeypatch, unrelated, rename):
+    account = _account(tmp_path, monkeypatch, "grok")
+    catalog = account.home / ".grok/skills"
+    old = _skill(catalog, "review", "a")
+    wanted = _skill(catalog, "vm-review" if rename else "independent", "a" if rename else "b")
+    previous = publish_artifacts(account.files(), old, (), lambda _: None, roots=(str(account.home),)).files
+    for index in range(unrelated):
+        (catalog / f"unrelated-{index}").touch()
+    notes = [catalog / "review" / f"note-{index}" for index in range(3)]
+    for note in notes:
+        note.write_bytes(b"Preserved notes.\n")
+        note.chmod(0o640)
+
+    if unrelated == 509:
+        with pytest.raises(StateError):
+            _preflight(account, "grok", wanted, previous)
+        assert Path(old[0].path).is_file()
+        assert not Path(wanted[0].path).exists()
+    else:
+        _preflight(account, "grok", wanted, previous)
+        final = publish_artifacts(account.files(), wanted, previous, lambda _: None, roots=(str(account.home),))
+        assert not final.skipped and not Path(old[0].path).exists()
+        _preflight(account, "grok", wanted, final.files)
+        checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+        assert (
+            publish_artifacts(account.files(), wanted, final.files, checkpoints.append, roots=(str(account.home),))
+            == final
+        )
+        assert not checkpoints
+    for note in notes:
+        assert note.read_bytes() == b"Preserved notes.\n" and note.stat().st_mode & 0o777 == 0o640
+
+
+@pytest.mark.parametrize("scenario", ["no-desired", "persona-only", "last-deferred"])
+def test_grok_user_reinit_checks_withdrawn_skill_kinds(tmp_path, monkeypatch, scenario):
+    account = _account(tmp_path, monkeypatch, "grok")
+    catalog = account.home / ".grok/skills"
+    integration = GrokBuildIntegration.for_setup(owner_kind="agent", owner_name="fixture", facet="user", config={})
+    initial = replace(invocation(account, []), artifacts=received(artifact(ArtifactType.SKILL)))
+    old = integration.user_init(initial).files
+    previous = publish_artifacts(account.files(), old, (), lambda _: None, roots=(str(account.home),)).files
+    prior = SetupRecord(
+        component="agent", integration="grok", destination_id="a" * 64, declaration={}, artifact_files=previous
+    )
+    inputs = ArtifactInputs()
+    if scenario == "persona-only":
+        inputs = received(artifact(ArtifactType.AGENT, name="independent"))
+    elif scenario == "last-deferred":
+        inputs = initial.artifacts
+        alias = catalog / "external"
+        alias.mkdir()
+        (alias / "SKILL.md").write_bytes(b"---\nname: review\n---\nExternal skill.\n")
+    for index in range(509):
+        (catalog / f"unrelated-{index}").touch()
+    for index in range(3):
+        (catalog / "review" / f"note-{index}").touch()
+    reasons: list[str] = []
+    with pytest.raises(StateError):
+        integration.user_init(replace(initial, prior=prior, artifacts=inputs, report_incomplete=reasons.append))
+    assert bool(reasons) == (scenario == "last-deferred")
+    assert all(Path(file.path).read_bytes() == file.data for file in old)
+    assert not (account.home / ".grok/agents/independent.md").exists()
+
+
+def test_held_absent_legacy_marker_cannot_hide_independent_new_support(tmp_path, monkeypatch):
+    account = _account(tmp_path, monkeypatch, "grok")
+    catalog = account.home / ".grok/skills"
+    old = tuple(replace(file, native_identity=None, package_root=None) for file in _skill(catalog, "review", "a"))
+    previous = publish_artifacts(account.files(), old, (), lambda _: None, roots=(str(account.home),)).files
+    Path(old[0].path).unlink()
+    for index in range(510):
+        (catalog / f"unrelated-{index}").touch()
+    wanted = _skill(catalog, "review", "b", supporting="support/notes.txt")
+    retained = frozenset(old[0].origins)
+    with pytest.raises(StateError):
+        _preflight(account, "grok", wanted, previous, retain_origins=retained)
+    assert not Path(wanted[1].path).exists()
+    (catalog / "unrelated-509").unlink()
+    _preflight(account, "grok", wanted, previous, retain_origins=retained)
+    final = publish_artifacts(
+        account.files(), wanted, previous, lambda _: None, roots=(str(account.home),), retain_origins=retained
+    )
+    assert [item.path for item in final.skipped] == [old[0].path]
+    assert not Path(old[0].path).exists() and Path(wanted[1].path).read_bytes() == wanted[1].data
+    assert len(list(catalog.rglob("*"))) == 512
+    _preflight(account, "grok", wanted, final.files, retain_origins=retained)
 
 
 def _persona(catalog: Path, name: str, origin: str, size: int, tool: str) -> ArtifactFile:
@@ -238,17 +335,16 @@ def test_catalog_allowance_keeps_bytes_at_a_conflicting_destination(tmp_path, mo
     catalog = account.home / f".{tool}/agents"
     old = (_persona(catalog, "review", "a", 160, tool), _persona(catalog, "other", "b", 100, tool))
     previous = publish_artifacts(account.files(), old, (), lambda _: None, roots=(str(account.home),)).files
-    foreign = _persona(catalog, "vm-other", "c", 115, tool)
+    foreign = _persona(catalog, "vm-other", "c", 300, tool)
     Path(foreign.path).write_bytes(foreign.data)
+    Path(foreign.path).chmod(0o640)
     limit = 1_048_576 if tool == "grok" else 1_024
     if tool == "codex":
         monkeypatch.setattr(probe, "DEFAULT_CAPTURE_LIMITS", replace(DEFAULT_CAPTURE_LIMITS, total_bytes=limit))
-    _fill_persona_bytes(catalog, limit - 1 - 160 - 100 - 115, tool)
+    _fill_persona_bytes(catalog, limit - 1 - 160 - 100 - 300, tool)
     replacement = _persona(catalog, "vm-review", "a", 158 if fits else 163, tool)
     wanted = (replacement, _persona(catalog, "vm-other", "b", 103, tool))
 
-    with pytest.raises(StateError):
-        _preflight(account, tool, wanted, ())
     if not fits:
         with pytest.raises(StateError):
             _preflight(account, tool, wanted, previous)
@@ -261,9 +357,11 @@ def test_catalog_allowance_keeps_bytes_at_a_conflicting_destination(tmp_path, mo
         assert not Path(old[0].path).exists() and Path(replacement.path).read_bytes() == replacement.data
         _preflight(account, tool, wanted, final.files)
     assert Path(foreign.path).read_bytes() == foreign.data
+    assert Path(foreign.path).stat().st_mode & 0o777 == 0o640
 
 
-def test_owned_persona_can_shrink_in_place_without_replacement_credit(tmp_path, monkeypatch):
+@pytest.mark.parametrize("changed_mode", [False, True])
+def test_catalog_spends_only_verified_owned_persona_shrinkage(tmp_path, monkeypatch, changed_mode):
     account = _account(tmp_path, monkeypatch, "claude")
     catalog = account.home / ".claude/agents"
     old = (_persona(catalog, "review", "a", 30_000, "claude"),)
@@ -274,6 +372,14 @@ def test_owned_persona_can_shrink_in_place_without_replacement_credit(tmp_path, 
         _persona(catalog, "new-one", "b", 25_000, "claude"),
         _persona(catalog, "new-two", "c", 25_000, "claude"),
     )
+
+    if changed_mode:
+        Path(old[0].path).chmod(0o640)
+        with pytest.raises(StateError):
+            _preflight(account, "claude", wanted, previous)
+        assert Path(old[0].path).read_bytes() == old[0].data and Path(old[0].path).stat().st_mode & 0o777 == 0o640
+        assert not any(Path(file.path).exists() for file in wanted[1:])
+        return
 
     _preflight(account, "claude", wanted, previous)
     final = publish_artifacts(account.files(), wanted, previous, lambda _: None, roots=(str(account.home),))

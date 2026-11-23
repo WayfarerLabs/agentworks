@@ -241,7 +241,7 @@ class GrokBuildIntegration(HarnessIntegration):
             )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
 
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -276,7 +276,7 @@ class GrokBuildIntegration(HarnessIntegration):
             replace(invocation, artifacts=ArtifactInputs()) if self.retiring else invocation,
             destination=f"{invocation.root}/.grok/config.toml",
         )
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,

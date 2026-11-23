@@ -5,15 +5,20 @@ from __future__ import annotations
 import json
 import tomllib
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from agentworks.artifacts import publication
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES
-from agentworks.artifacts.publication import artifact_file_mode
-from agentworks.capabilities.harness_integration.setup import VMSetupInvocation, WorkspaceSetupInvocation
+from agentworks.capabilities.harness_integration.setup import (
+    UserSetupInvocation,
+    VMSetupInvocation,
+    WorkspaceSetupInvocation,
+)
 from agentworks.errors import AgentworksError, ExternalError, StateError
 from agentworks.execution.requests import Bytes, CaptureOutput, PythonProgram
 from agentworks.harness_setup.outcomes import Redactor
@@ -38,8 +43,11 @@ class NativeArtifactConflictError(StateError):
 # Executed in the same login and interactive environment as the native workload. Only
 # selected bounded artifact frontmatter and discovery facts return for local identity
 # checks. Settings bodies and artifact instruction bodies are not returned.
-_PROBE = r"""
+_PROBE = (
+    resources.files("agentworks.artifacts").joinpath("publication_plan.py").read_text(encoding="utf-8")
+    + r"""
 import fnmatch, hashlib, json, os, pathlib, shutil, stat, subprocess, sys, tomllib
+from collections import Counter
 request = json.load(sys.stdin)
 tool = request['tool']
 vm_only = request['vm_only']
@@ -50,12 +58,24 @@ problems = []
 problem_paths = []
 skill_names = {name[6:] for name in request['identities'] if name.startswith('skill:')}
 agent_names = {name[6:] for name in request['identities'] if name.startswith('agent:')}
+previous = {path: Placement(*row) for path, row in request.get('previous', {}).items()}
+desired = {path: Placement(*row) for path, row in request.get('desired', {}).items()}
+held = held_placements(previous, desired, frozenset(request.get('retain', ())))
+direct_skills = any(':' not in name for name in skill_names)
+def reserved_package(name):
+    return tool == 'claude' and (name.casefold() in ('synced', 'anthropic-skills')
+                                 or name == '.trash' or name.casefold().startswith('anthropic-skills:'))
+
+prior_skill_roots = {pathlib.Path(path).parent.parent for path in previous
+                     if path.endswith('/SKILL.md') and not reserved_package(pathlib.Path(path).parent.name)}
+prior_agent_roots = {pathlib.Path(path).parent for path, item in previous.items()
+                     if (item.native_identity or '').startswith('agent:')}
 if not vm_only and request['home'] is not None and home != request['home']:
     problems.append('home-mismatch')
 if not vm_only and (not native_home.startswith('/') or any(p in ('', '.', '..') for p in native_home.split('/')[1:])):
     problems.append('invalid-native-home')
 executable = shutil.which(tool)
-if request['workspace_only'] or vm_only:
+if request['workspace_only'] or vm_only or (previous and not request['paths']):
     pass
 elif executable is None:
     problems.append('missing-command')
@@ -90,8 +110,9 @@ for root in roots:
         # outer user publication applies its own stricter containment rule.
         root_anchor = pathlib.Path(root.anchor) if user_root and not root.is_relative_to(anchor) else anchor
         check_discovery_path(root, root_anchor)
-        if tool == 'codex' and root != machine_root and any(':' not in name for name in skill_names):
-            check_discovery_path(anchor / '.agents' / 'skills', anchor)
+        codex_skills = anchor / '.agents' / 'skills'
+        if tool == 'codex' and root != machine_root and (direct_skills or codex_skills in prior_skill_roots):
+            check_discovery_path(codex_skills, anchor)
         safe_roots.append(root)
     except Exception:
         problems.append('unreadable-native-inventory')
@@ -161,97 +182,142 @@ for path in paths:
         problems.append('unreadable-native-policy')
         problem_paths.append(str(path))
 
-def size_budget(kind):
-    return 'codex-personas' if tool == 'codex' and kind == 'agent' else 'metadata'
+def planned_entries(paths, markers):
+    # Direct-marker adapters hide descendants only while a marker will be present.
+    result = set()
+    for spelling in paths:
+        path = pathlib.Path(spelling)
+        for kind, root in discovery_roots:
+            if not path.is_relative_to(root) or path == root:
+                continue
+            if kind == 'agent':
+                if path.parent != root:
+                    return None
+                result.add(spelling)
+                continue
+            package = root / path.relative_to(root).parts[0]
+            result.add(str(package))
+            if tool == 'codex' or str(package / 'SKILL.md') not in markers:
+                for member in (path, *path.parents):
+                    if member == root:
+                        break
+                    if member.name == 'SKILL.md' and (member != path or member.parent.parent != root):
+                        return None
+                    result.add(str(member))
+    return result
 
-def verify_retirement(root, members, remaining):
-    if not members:
-        return False
-    # Publication prunes parents of recorded members even if their files are
-    # already gone after an interrupted removal.
-    parents = {parent for name in members for parent in pathlib.Path(name).parents if
-               parent == root or parent.is_relative_to(root)}
-    pending = [root]
-    try:
+def fits(entries, sizes):
+    metadata = personas = 0
+    for kind, size in sizes.values():
+        if tool == 'codex' and kind == 'agent':
+            personas += size
+        else:
+            metadata += size
+    return len(entries) <= 512 and metadata <= 1048576 and personas <= request['inventory_bytes']
+
+def publication_projection(previous, desired, held, retiring_markers):
+    # Only an owning setup can spend a physical removal or a decrease in metadata.
+    # Fingerprint bounded declared/recorded members; foreign descendants need only a directory entry.
+    paths = dict.fromkeys(path for path in (*desired, *previous) if path not in held)
+    inspected = set(paths)
+    available = request['inventory_bytes']
+    if len(inspected) > request['proof_members']:
+        raise ValueError()
+    observed = {}
+    invalid_sections = {}
+    for spelling in paths:
+        path = pathlib.Path(spelling)
+        item = desired.get(spelling) or previous[spelling]
+        if item.section or (spelling in previous and previous[spelling].section):
+            if any(path.is_relative_to(root) for kind, root in discovery_roots):
+                raise ValueError()
+            # A malformed section can skip only its own destination. It cannot
+            # create a whole-file conflict for other members of its origin.
+            invalid_sections[spelling] = ''
+            observed[spelling] = None
+            continue
+        if any(path.is_relative_to(root) for root in opaque_packages):
+            raise ValueError()
+        check_discovery_path(path, pathlib.Path('/'))
+        try:
+            if not stat.S_ISREG(path.lstat().st_mode):
+                raise ValueError()
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            observed[spelling] = None
+            continue
+        with os.fdopen(fd, 'rb') as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > available:
+                raise ValueError()
+            available -= info.st_size
+            raw = source.read(info.st_size + 1)
+            if len(raw) != info.st_size:
+                raise ValueError()
+            observed[spelling] = (hashlib.sha256(raw).hexdigest(), stat.S_IMODE(info.st_mode))
+    plan = plan_files(previous, desired, observed, held, invalid_sections)
+    retired = set(plan.retire)
+    physical = existing_entries.copy()
+    for spelling in retiring_markers & retired:
+        package = pathlib.Path(spelling).parent
+        pending = [package]
         while pending:
-            path = pending.pop()
-            mode = path.lstat().st_mode
-            if stat.S_ISDIR(mode) and path in parents:
-                # Publication can leave a busy or non-removable package root in place.
-                parent = path.parent.stat()
-                if path.is_mount() or os.statvfs(path).f_flag & os.ST_RDONLY or (not vm_only and (
-                    not os.access(path.parent, os.W_OK | os.X_OK) or parent.st_mode & stat.S_ISVTX
-                )):
-                    return False
-                for child in path.iterdir():
-                    remaining['members'] -= 1
-                    if remaining['members'] < 0:
-                        return False
-                    pending.append(child)
-            elif stat.S_ISREG(mode) and str(path) in members:
-                digest, expected_mode = members[str(path)]
-                with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
-                    observed_file = os.fstat(source.fileno())
-                    actual_mode = observed_file.st_mode
-                    if not stat.S_ISREG(actual_mode) or stat.S_IMODE(actual_mode) != expected_mode:
-                        return False
-                    size = observed_file.st_size
-                    remaining['bytes'] -= size
-                    if remaining['bytes'] < 0:
-                        return False
-                    raw = source.read(size + 1)
-                if len(raw) != size or hashlib.sha256(raw).hexdigest() != digest:
-                    return False
-            else:
-                return False
-    except OSError:
+            for path in pending.pop().iterdir():
+                inspected.add(str(path))
+                if len(inspected) > request['proof_members']:
+                    raise ValueError()
+                if str(path) in retired:
+                    continue
+                if path.is_symlink() or path.name == 'SKILL.md':
+                    raise ValueError()
+                if path.is_dir():
+                    pending.append(path)
+                elif not path.is_file():
+                    raise ValueError()
+                physical.add(str(path))
+    physical.difference_update(retired)
+    directories = set()
+    package_roots = set()
+    for spelling in retired:
+        package = previous[spelling].package_root
+        if package is not None:
+            package_roots.add(package)
+            directories.update(parent for parent in pathlib.Path(spelling).parents if parent.is_relative_to(package))
+    # Only recorded cleanup boundaries authorize pruning, even when a file
+    # disappeared before its removal checkpoint.
+    markers = {path for path, (kind, size) in observed_sizes.items() if kind == 'skill' and path not in retired}
+    children = Counter(pathlib.Path(path).parent for path in physical | markers)
+    for path in sorted(directories, key=lambda directory: len(directory.parts), reverse=True):
+        if str(path) not in physical or children[path] or path.is_mount():
+            continue
+        # A permission failure can leave an empty package root after successful
+        # retirement. Below that boundary it aborts publication before the marker retires.
+        if str(path) in package_roots and (os.statvfs(path).f_flag & os.ST_RDONLY or (not vm_only and (
+            not os.access(path.parent, os.W_OK | os.X_OK) or path.parent.stat().st_mode & stat.S_ISVTX
+        ))):
+            continue
+        physical.remove(str(path))
+        children[path.parent] -= 1
+    sizes = {path: size for path, size in observed_sizes.items() if path not in retired}
+    for spelling in plan.publish:
+        if spelling in proposed:
+            sizes[spelling] = proposed[spelling]
+    markers.update(path for path in plan.publish if path in proposed and proposed[path][0] == 'skill')
+    additions = planned_entries(plan.publish, markers)
+    if additions is None:
         return False
-    return True
-
-def replacements_fit(excess, existing, additions, observed, proposed):
-    remaining = {'members': request.get('replacement_members', 0), 'bytes': request['inventory_bytes']}
-    for old, (new, members, incumbent) in request.get('retirements', {}).items():
-        if old not in existing:
-            continue
-        # Direct-marker discovery can hide descendants that a later scan
-        # would count after retirement. Verify every disappearing marker.
-        required = tool != 'codex' and old + '/SKILL.md' in observed
-        old_count = old_size = count_credit = byte_credit = 0
-        byte_budget = 'metadata'
-        if new is not None:
-            old_count = sum(path == old or path.startswith(old + '/') for path in existing)
-            new_count = sum(path == new or path.startswith(new + '/') for path in additions)
-            suffix = '' if old in members else '/SKILL.md'
-            kind, old_size = observed.get(old + suffix, ('', 0))
-            byte_budget = size_budget(kind)
-            new_size = proposed.get(new + suffix, ('', 0))[1] - observed.get(new + suffix, ('', 0))[1]
-            count_credit = min(old_count, new_count)
-            byte_credit = min(old_size, max(0, new_size))
-        needed = (count_credit and excess['entries'] > 0) or (byte_credit and excess[byte_budget] > 0)
-        overlap = incumbent and new in existing and (
-            count_credit < min(old_count, excess['entries']) or byte_credit < min(old_size, excess[byte_budget])
-        )
-        if not (required or needed or overlap):
-            continue
-        if not verify_retirement(pathlib.Path(old), members, remaining):
-            if required:
-                return False
-            continue
-        if overlap and verify_retirement(pathlib.Path(new), incumbent, remaining):
-            # Every path that could block retirement of the old origins is
-            # now verified. The receiving placement remains fully charged.
-            count_credit, byte_credit = old_count, old_size
-        # Otherwise budget for publication retaining the old placement and
-        # skipping its same-origin replacement.
-        excess['entries'] -= count_credit
-        excess[byte_budget] -= byte_credit
-    return max(excess.values()) <= 0
+    physical.update(additions)
+    if tool != 'codex':
+        opaque = {pathlib.Path(marker).parent for marker in markers}
+        physical = {path for path in physical if opaque.isdisjoint(pathlib.Path(path).parents)}
+    return fits(physical, sizes)
 
 try:
     candidates = []
     scanned = 0
     existing_entries = set()
     discovery_roots = []
+    opaque_packages = set()
     inspecting = None
     for root in roots:
         inspecting = root
@@ -260,16 +326,17 @@ try:
             skill_root = root / 'skills'
         elif tool == 'codex' and root == pathlib.Path(native_home):
             skill_root = pathlib.Path(home) / '.agents' / 'skills'
-        if any(':' not in name for name in skill_names):
+        scan_skills = direct_skills or skill_root in prior_skill_roots
+        if scan_skills:
             discovery_roots.append(('skill', skill_root))
         inspecting = skill_root
-        if any(':' not in name for name in skill_names) and skill_root.exists():
+        if scan_skills and skill_root.exists():
             if skill_root.is_symlink():
                 raise ValueError()
             for directory in skill_root.iterdir():
                 # Keep direct-name casing aligned with _is_reserved_claude_skill on the host.
-                if tool == 'claude' and (directory.name.casefold() in ('synced', 'anthropic-skills') or
-                        directory.name == '.trash' or directory.name.casefold().startswith('anthropic-skills:')):
+                if reserved_package(directory.name):
+                    opaque_packages.add(directory)
                     # These names do not expose ordinary native skills. Do not inspect
                     # account sync, retired skills, or other reserved namespace contents.
                     continue
@@ -306,7 +373,8 @@ try:
                 if len(candidates) > 512:
                     raise ValueError()
         agent_root = root / 'agents'
-        discover_agents = agent_names and not (tool == 'codex' and root == machine_root)
+        discover_agents = (agent_names or agent_root in prior_agent_roots) and not (
+            tool == 'codex' and root == machine_root)
         if discover_agents:
             discovery_roots.append(('agent', agent_root))
         if discover_agents and agent_root.exists():
@@ -324,20 +392,6 @@ try:
                 if len(candidates) > 512:
                     raise ValueError()
     proposed = {}
-    proposed_entries = set()
-    if tool == 'codex':
-        # Count every future package member and implied directory, as the recursive scan will.
-        for spelling in dict.fromkeys((*request['paths'], *request['proposed'])):
-            path = pathlib.Path(spelling)
-            for kind, root in discovery_roots:
-                if kind != 'skill' or path == root or not path.is_relative_to(root):
-                    continue
-                for member in (path, *path.parents):
-                    if member == root:
-                        break
-                    if member.name == 'SKILL.md' and (member != path or path.parent.parent != root):
-                        raise ValueError()
-                    proposed_entries.add(str(member))
     for spelling, size in request['proposed'].items():
         path = pathlib.Path(spelling)
         for kind, root in discovery_roots:
@@ -348,8 +402,6 @@ try:
                 if size < 0 or size > limit:
                     raise ValueError()
                 proposed[spelling] = (kind, size)
-                proposed_entries.add(str(path.parent) if kind == 'skill' else spelling)
-    additions = proposed_entries - existing_entries
     total = 0
     codex_total = 0
     observed_sizes = {}
@@ -385,20 +437,18 @@ try:
             if total > 1048576:
                 raise ValueError()
             inventory.append({'kind': kind, 'path': str(path), 'fallback_name': fallback, 'frontmatter': frontmatter})
-    future = {**observed_sizes, **proposed}
-    excess = {
-        'entries': scanned + len(additions) - 512,
-        'metadata': -1048576,
-        'codex-personas': -request['inventory_bytes'],
-    }
-    for kind, size in future.values():
-        excess[size_budget(kind)] += size
-    if max(excess.values()) > 0:
-        # A skipped update can leave the larger observed value at the destination.
-        for path in observed_sizes.keys() & proposed.keys():
-            kind, size = observed_sizes[path]
-            excess[size_budget(kind)] += max(0, size - proposed[path][1])
-        if not replacements_fit(excess, existing_entries, additions, observed_sizes, proposed):
+    future = observed_sizes.copy()
+    for spelling, (kind, size) in proposed.items():
+        future[spelling] = (kind, max(size, observed_sizes.get(spelling, (kind, 0))[1]))
+    all_paths = dict.fromkeys((*request['paths'], *proposed))
+    # With earlier ownership, a held marker can stay absent even while a
+    # separately attributable support file is writable. Only existing markers
+    # hide descendants in the upper bound. The exact plan can prove new ones.
+    additions = planned_entries(all_paths, observed_sizes if previous else future)
+    retiring_markers = {path for path in observed_sizes if tool != 'codex' and path.endswith('/SKILL.md')
+                        and path in previous and path not in desired and path not in held}
+    if retiring_markers or additions is None or not fits(existing_entries | additions, future):
+        if not previous or not publication_projection(previous, desired, held, retiring_markers):
             raise ValueError()
 except Exception as error:
     problems.append('unreadable-native-inventory')
@@ -435,6 +485,7 @@ print('\nAGW_ARTIFACT_PROBE=' + json.dumps({
     'problems': sorted(set(problems)), 'inventory': inventory, 'problem_paths': list(dict.fromkeys(problem_paths))
 }))
 """
+)
 
 
 _PROBLEM_MESSAGES = {
@@ -505,92 +556,27 @@ def _is_reserved_claude_skill(identity: str | None) -> bool:
     )
 
 
-def _native_entrypoints(
-    files: Sequence[ArtifactFile | OwnedArtifactFile],
-) -> dict[tuple[str, str, frozenset[str]], list[str]]:
-    placements: dict[tuple[str, str, frozenset[str]], list[str]] = {}
-    for file in files:
-        kind = (file.native_identity or "").partition(":")[0]
-        if kind == "agent":
-            root = file.path
-        elif kind == "skill" and file.package_root is not None and file.path == file.package_root + "/SKILL.md":
-            root = file.package_root
-        else:
-            continue
-        key = (str(PurePosixPath(root).parent), kind, frozenset(file.origins))
-        placements.setdefault(key, []).append(root)
-    return placements
-
-
-type _FileFingerprints = dict[str, tuple[str, int]]
-
-
-def _at_placement(path: str, root: str) -> bool:
-    return path == root or path.startswith(root + "/")
-
-
-def _owned_retirements(
-    files: Sequence[ArtifactFile | OwnedArtifactFile], setup: SetupInvocation | None, tool: str
-) -> dict[str, tuple[str | None, _FileFingerprints, _FileFingerprints]]:
-    """Send evidence for rename credits and retiring direct-marker packages."""
-    if setup is None or setup.prior is None:
+def _setup_evidence(
+    setup: SetupInvocation | None, files: Sequence[ArtifactFile | OwnedArtifactFile]
+) -> dict[str, object]:
+    if setup is None or setup.prior is None or not setup.prior.artifact_files:
         return {}
-    prior = setup.prior.artifact_files
-    prior_by_path = {file.path: file for file in prior}
-    previous = _native_entrypoints(prior)
-    paths = {file.path for file in files}
-    candidates: dict[str, tuple[str | None, str, frozenset[str]]] = {}
-    for key, wanted in _native_entrypoints(files).items():
-        old = previous.get(key, ())
-        if len(old) == 1 and len(wanted) == 1 and old != wanted:
-            _, kind, origins = key
-            candidates[old[0]] = (wanted[0], kind, origins)
-    if tool != "codex":
-        for file in prior:
-            if file.path.endswith("/SKILL.md") and file.path not in paths:
-                root = file.path.removesuffix("/SKILL.md")
-                candidates.setdefault(root, (None, "skill", frozenset(file.origins)))
-
-    root_owned = isinstance(setup, VMSetupInvocation)
-    group = setup.linux_group if isinstance(setup, WorkspaceSetupInvocation) else ""
-
-    def fingerprints(entries: Sequence[OwnedArtifactFile]) -> _FileFingerprints:
-        return {file.path: (file.sha256, artifact_file_mode(file.executable, group, root_owned)) for file in entries}
-
-    retirements = {}
-    for old_root, (new_root, kind, origins) in candidates.items():
-        if setup.retain_artifact_origins.intersection(origins):
-            continue
-        members = [file for file in prior if _at_placement(file.path, old_root)]
-        package = old_root if kind == "skill" else None
-        ineligible = any(_at_placement(path, old_root) for path in paths) or any(
-            file.generated_section
-            or file.package_root != package
-            or setup.retain_artifact_origins.intersection(file.origins)
-            or (new_root is not None and frozenset(file.origins) != origins)
-            for file in members
-        )
-        evidence = {} if ineligible else fingerprints(members)
-        incumbent: _FileFingerprints = {}
-        if new_root is not None and evidence:
-            entrypoint = new_root + "/SKILL.md" if kind == "skill" else new_root
-            receiver = prior_by_path.get(entrypoint)
-            if (
-                receiver is not None
-                and (receiver.native_identity or "").startswith(kind + ":")
-                and all(_at_placement(file.path, old_root) for file in prior if origins.intersection(file.origins))
-                and all(_at_placement(file.path, new_root) for file in files if origins.intersection(file.origins))
-            ):
-                previous_receiver = [file for file in prior if _at_placement(file.path, new_root)]
-                wanted_receiver = [file for file in files if _at_placement(file.path, new_root)]
-                expected_package = new_root if kind == "skill" else None
-                if all(
-                    not file.generated_section and file.package_root == expected_package
-                    for file in (*previous_receiver, *wanted_receiver)
-                ):
-                    incumbent = fingerprints(previous_receiver)
-        retirements[old_root] = (new_root, evidence, incumbent)
-    return retirements
+    roots: tuple[str, ...]
+    vm = isinstance(setup, VMSetupInvocation)
+    if isinstance(setup, WorkspaceSetupInvocation):
+        roots, group = (setup.root,), setup.linux_group
+    elif isinstance(setup, UserSetupInvocation):
+        roots, group = (setup.home,), ""
+    else:
+        roots, group = publication.ROOT_FILE_DIRECTORIES, ""
+    previous = publication.publication_placements(setup.prior.artifact_files, roots=roots, group=group, root=vm)
+    desired = publication.publication_placements(files, roots=roots, group=group, root=vm)
+    return {
+        "previous": previous,
+        "desired": desired,
+        "retain": sorted(setup.retain_artifact_origins),
+        "proof_members": DEFAULT_CAPTURE_LIMITS.members,
+    }
 
 
 # What the probe's stdout may hold: up to 1 MiB of frontmatter, which JSON can grow
@@ -644,7 +630,6 @@ def probe_native(
         "tool": tool,
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
         "inventory_bytes": DEFAULT_CAPTURE_LIMITS.total_bytes,
-        "replacement_members": DEFAULT_CAPTURE_LIMITS.members,
         "home": home,
         "native_directory": NATIVE_USER_DIRECTORIES[tool],
         "native_root": native_root,
@@ -652,7 +637,7 @@ def probe_native(
         "paths": tuple(file.path for file in files),
         "entries": entries,
         "proposed": _proposed_sizes(files, tool),
-        "retirements": _owned_retirements(files, setup, tool),
+        **_setup_evidence(setup, files),
         "session_plugin": session_plugin,
         "plugin_names": tuple(
             dict.fromkeys(identity.split(":")[1] for identity in identities if identity.count(":") > 1)

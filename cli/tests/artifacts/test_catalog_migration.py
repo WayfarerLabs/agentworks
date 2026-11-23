@@ -45,9 +45,9 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux gue
     [
         (86, "retry"),
         (170, "near-limit"),
-        (170, "modified"),
-        (170, "unowned"),
-        (170, "legacy"),
+        (3, "modified"),
+        (3, "unowned"),
+        (3, "legacy"),
         (170, "actual-over-limit"),
         (170, "future-over-limit"),
     ],
@@ -141,6 +141,9 @@ def test_vm_reinit_replaces_a_same_declaration_codex_catalog(db, monkeypatch, tm
         assert application.files == expected and not application.deferred
         return
 
+    if scenario in {"modified", "unowned", "legacy"}:
+        for index in range(510 - 3 * count):
+            (catalog / f"unrelated-{index}").touch()
     first_package = Path(records[0].path).parent
     if scenario == "modified":
         (first_package / "guidance.md").write_text("Operator edit.")
@@ -156,6 +159,24 @@ def test_vm_reinit_replaces_a_same_declaration_codex_catalog(db, monkeypatch, tm
 
     def reinit() -> SetupRecord:
         return dispatch.run_setup(db, registry, prepared(), call, failures=failures, operation="vm-reinit").records[0]
+
+    if scenario in {"modified", "unowned", "legacy"}:
+        after = reinit()
+        assert not failures and after.complete == (scenario != "modified")
+        if scenario == "modified":
+            assert after.skipped and (first_package / "guidance.md").read_text() == "Operator edit."
+            assert len(list(catalog.rglob("*"))) == 510
+        elif scenario == "unowned":
+            assert not after.skipped and (first_package / "operator.md").read_text() == "Operator file."
+            assert len(list(catalog.rglob("*"))) == 512
+        else:
+            assert len(list(catalog.rglob("*"))) == 511
+        unchanged = Mock(side_effect=AssertionError("unchanged reinit must preserve the catalog"))
+        monkeypatch.setattr(Files, "write_if", unchanged)
+        monkeypatch.setattr(Files, "remove_if", unchanged)
+        assert reinit().artifact_files == after.artifact_files
+        unchanged.assert_not_called()
+        return
 
     if scenario != "retry":
         before = {path: path.read_bytes() for path in catalog.rglob("*") if path.is_file()}
@@ -261,8 +282,13 @@ def test_user_probe_budgets_selectively_renamed_personas(tmp_path, monkeypatch, 
     with pytest.raises(StateError):
         check()
     held = frozenset(origin for file in previous for origin in file.origins)
-    with pytest.raises(StateError):
-        check(replace(call, retain_artifact_origins=held))
+    assert check(replace(call, retain_artifact_origins=held)) == str(native)
+    checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+    retained = publication.publish_artifacts(
+        target.files(), desired, tuple(previous), checkpoints.append, roots=(str(target.home),), retain_origins=held
+    )
+    assert not checkpoints and retained.files == tuple(previous) and len(retained.skipped) == 2 * count
+    assert check(replace(call, retain_artifact_origins=held)) == str(native)
     desired.extend(persona(f"additional-{index}", ("f" * 64,)) for index in range(count))
     with pytest.raises(StateError):
         check(call)

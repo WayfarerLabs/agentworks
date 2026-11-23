@@ -15,6 +15,7 @@ from agentworks.artifacts.application import (
     OwnedArtifactFile,
 )
 from agentworks.artifacts.model import ALLOWED_DEFERRALS
+from agentworks.artifacts.publication_plan import Placement, held_placements, plan_files
 from agentworks.artifacts.sections import MalformedSectionError, replace_section
 from agentworks.errors import StateError
 from agentworks.execution.errors import PathRefusal, PathRefused
@@ -94,6 +95,37 @@ def validate_application(
     return application
 
 
+def publication_placements(
+    files: Sequence[ArtifactFile | OwnedArtifactFile], *, roots: tuple[str, ...], group: str, root: bool
+) -> dict[str, Placement]:
+    """Validate destinations before either the publisher or the probe observes them."""
+    boundaries = tuple(guest_path(boundary) + "/" for boundary in roots)
+    result = {}
+    for entry in files:
+        path = root_path(entry.path) if root else guest_path(entry.path)
+        if not path.startswith(boundaries):
+            raise StateError("artifact destination is outside its owning scope")
+        package_root = _validate_package_root(entry)
+        if package_root is not None:
+            if root:
+                root_path(package_root)
+            if not package_root.startswith(boundaries):
+                raise StateError("artifact package root is outside its owning scope")
+        if path in result:
+            raise StateError("artifact publication contains duplicate destinations")
+        digest = hashlib.sha256(entry.data).hexdigest() if isinstance(entry, ArtifactFile) else entry.sha256
+        result[path] = Placement(
+            digest,
+            artifact_file_mode(entry.executable, group, root),
+            entry.origins,
+            entry.native_identity,
+            package_root,
+            _skill_entrypoint_directory(entry),
+            entry.generated_section,
+        )
+    return result
+
+
 def publish_artifacts(
     files: Files,
     desired: Sequence[ArtifactFile],
@@ -115,74 +147,23 @@ def publish_artifacts(
     """
     if not desired and not previous:
         return ArtifactPublication()
-    boundaries = tuple(guest_path(boundary) + "/" for boundary in roots)
-    entries: tuple[ArtifactFile | OwnedArtifactFile, ...] = (*desired, *previous)
-    for entry in entries:
-        path = root_path(entry.path) if root else guest_path(entry.path)
-        if not path.startswith(boundaries):
-            raise StateError("artifact destination is outside its owning scope")
-        package_root = _validate_package_root(entry)
-        if package_root is not None:
-            if root:
-                root_path(package_root)
-            if not package_root.startswith(boundaries):
-                raise StateError("artifact package root is outside its owning scope")
+    wanted = publication_placements(desired, roots=roots, group=group, root=root)
+    owned = publication_placements(previous, roots=roots, group=group, root=root)
     current = {item.path: item for item in previous}
     planned = {item.path: item for item in desired}
-    if len(planned) != len(desired) or len(current) != len(previous):
-        raise StateError("artifact publication contains duplicate destinations")
-    skipped: list[ArtifactSkip] = []
-    held_paths = {path for path, item in current.items() if retain_origins.intersection(item.origins)}
-    if held_paths:
-        retained = tuple(current[path] for path in held_paths)
-        prior_origins = {origin for prior in retained for origin in prior.origins}
-        prior_identities = {prior.native_identity for prior in retained if prior.native_identity is not None}
-        package_roots = {
-            package
-            for prior in retained
-            if (package := prior.package_root or _skill_entrypoint_directory(prior)) is not None
-        }
-        for item in desired:
-            if (
-                prior_origins.intersection(item.origins)
-                or item.native_identity in prior_identities
-                or any(item.path.startswith(package + "/") for package in package_roots)
-            ):
-                held_paths.add(item.path)
-        for path in dict.fromkeys((*current, *planned)):
-            if path not in held_paths:
-                continue
-            origins = (current.get(path) or planned[path]).origins
-            if path in planned:
-                origins = tuple(dict.fromkeys((*origins, *planned[path].origins)))
-            reason = (
-                "inherited artifact routes are unresolved; "
-                "existing placement is retained until ancestor setup is repaired"
-            )
-            skipped.append(ArtifactSkip(path=path, origins=origins, reason=reason))
-        output.warn("Retaining existing artifact placement while inherited routes are unresolved.")
-    paths = tuple(path for path in dict.fromkeys((*planned, *current)) if path not in held_paths)
-    if not paths:
-        return ArtifactPublication(tuple(current.values()), tuple(skipped))
+    held = held_placements(owned, wanted, retain_origins)
+    paths = (path for path in dict.fromkeys((*planned, *current)) if path not in held)
     observed = {path: _observe(files, path, elevated=root) for path in paths}
-    modified = {
-        path
-        for path, prior in current.items()
-        if path not in held_paths
-        and observed[path] is not None
-        and observed[path] != (prior.sha256, artifact_file_mode(prior.executable, group, root))
-    }
-    for path, item in planned.items():
-        if path in held_paths:
+    for path in observed:
+        if path not in planned or path not in current:
             continue
-        prior = current.get(path)
-        if observed[path] is not None and prior is not None and prior.generated_section != item.generated_section:
+        if observed[path] is not None and current[path].generated_section != planned[path].generated_section:
             raise StateError(
                 f"Artifact destination '{path}' cannot change between whole-file and generated-section ownership",
                 hint="Retire the old placement and use a separate destination for the new artifact.",
             )
     sections: dict[str, tuple[bytes | None, bytes]] = {}
-    skipped_paths = set(held_paths)
+    invalid_sections: dict[str, str] = {}
     for path in observed:
         entry = planned.get(path) or current[path]
         if not entry.generated_section:
@@ -192,70 +173,19 @@ def publish_artifacts(
         try:
             replacement = replace_section(existing or b"", body)
         except MalformedSectionError as error:
-            reason = f"{error}; repair the delimiters and retry setup"
-            skipped.append(ArtifactSkip(path=path, origins=entry.origins, reason=reason))
-            skipped_paths.add(path)
-            output.warn(f"Skipping artifact destination '{path}': {reason}.")
+            invalid_sections[path] = f"{error}; repair the delimiters and retry setup"
             continue
         sections[path] = (existing, replacement)
-    conflicts: dict[str, str] = {}
-    for path, item in planned.items():
-        if path in sections or path in skipped_paths:
-            continue
-        data = observed[path]
-        prior = current.get(path)
-        differences = []
-        if data is not None:
-            if data[0] != hashlib.sha256(item.data).hexdigest():
-                differences.append("content")
-            if bool(data[1] & 0o111) != item.executable:
-                differences.append("executable intent")
-        if differences and (prior is None or path in modified):
-            reason = (
-                f"existing artifact at '{path}' has different {' and '.join(differences)} from the declaration; "
-                "resolve that difference before retrying owning setup"
-            )
-            for origin in (*item.origins, *(prior.origins if prior is not None else ())):
-                conflicts.setdefault(origin, reason)
-            output.warn(f"Skipping artifact destination '{path}': {reason}; existing content was retained.")
-    requested_origins = {origin for item in planned.values() for origin in item.origins}
-    for path, prior in current.items():
-        if path in planned or path in sections or path in skipped_paths:
-            continue
-        if path in modified and requested_origins.intersection(prior.origins):
-            reason = (
-                f"obsolete member at '{path}' was modified and must be retained; "
-                "resolve that difference before retrying owning setup"
-            )
-            for origin in prior.origins:
-                if origin in requested_origins:
-                    conflicts.setdefault(origin, reason)
-            output.warn(f"Skipping artifact containing '{path}': {reason}.")
-    # A skill's supporting files and entrypoint are one artifact. Never
-    # publish part of a package when another member must be preserved.
-    for path in observed:
-        entry = planned.get(path) or current[path]
-        conflict_reason = next((conflicts[origin] for origin in entry.origins if origin in conflicts), None)
-        if conflict_reason is not None and path not in skipped_paths:
-            skipped.append(ArtifactSkip(path=path, origins=entry.origins, reason=conflict_reason))
-            skipped_paths.add(path)
-    retirement = sorted(
-        current.items(),
-        key=lambda item: (
-            _skill_entrypoint_directory(item[1]) is not None,
-            -item[0].count("/") if _skill_entrypoint_directory(item[1]) is not None else 0,
-        ),
+    decisions = plan_files(owned, wanted, observed, held, invalid_sections)
+    for warning in decisions.warnings:
+        output.warn(warning)
+    skipped = tuple(
+        ArtifactSkip(path=path, origins=origins, reason=reason) for path, origins, reason in decisions.skipped
     )
     removed: list[str] = []
     removed_sections: list[str] = []
-    for path, prior in retirement:
-        if path in planned or path in skipped_paths:
-            continue
-        entrypoint_directory = _skill_entrypoint_directory(prior)
-        if entrypoint_directory is not None and any(
-            item.path != path and item.path.startswith(entrypoint_directory + "/") for item in current.values()
-        ):
-            continue  # Keep native discovery valid until every owned supporting member retires.
+    for path in decisions.retire:
+        retired = current[path]
         if path in sections:
             existing, replacement = sections[path]
             if existing is not None and existing != replacement:
@@ -273,39 +203,28 @@ def publish_artifacts(
             checkpoint(tuple(current.values()))
             continue
         data = observed[path]
-        if path in modified:
-            output.warn(f"Obsolete owned artifact '{path}' was modified; its file and cleanup evidence were retained.")
-            continue
         if data is not None:
-            files.remove_if(path, expected=prior.sha256, elevated=root)
+            files.remove_if(path, expected=retired.sha256, elevated=root)
             removed.append(path)
         if (
-            prior.package_root is not None
-            and files.prune_empty_parents(path, root=prior.package_root, elevated=root) is Pruned.ROOT_RETAINED
+            retired.package_root is not None
+            and files.prune_empty_parents(path, root=retired.package_root, elevated=root) is Pruned.ROOT_RETAINED
         ):
             output.warn(
-                f"Empty retired package root '{prior.package_root}' was retained "
+                f"Empty retired package root '{retired.package_root}' was retained "
                 "because its parent denies directory removal."
             )
         del current[path]
         checkpoint(tuple(current.values()))
     _report_file_changes("Removed", removed)
     _report_file_changes("Removed", removed_sections, noun="managed artifact section body")
-    publication = sorted(
-        planned.items(),
-        key=lambda item: (
-            _skill_entrypoint_directory(item[1]) is None,
-            item[0].count("/") if _skill_entrypoint_directory(item[1]) is not None else 0,
-        ),
-    )
     adopted: list[str] = []
     updated: list[str] = []
     updated_sections: list[str] = []
-    for path, item in publication:
-        if path in skipped_paths:
-            continue
+    for path in decisions.publish:
+        item = planned[path]
         content = sections[path][1] if path in sections else item.data
-        digest = hashlib.sha256(content).hexdigest()
+        digest = hashlib.sha256(content).hexdigest() if path in sections else wanted[path].digest
         record = OwnedArtifactFile(
             path=path,
             sha256=digest,
@@ -347,12 +266,12 @@ def publish_artifacts(
         if prior != record:
             current[path] = record
             checkpoint(tuple(current.values()))
-            if path not in sections and observed_file is not None and (prior is None or path in modified):
+            if path not in sections and observed_file is not None and (prior is None or path in decisions.modified):
                 adopted.append(path)
     _report_file_changes("Updated", updated)
     _report_file_changes("Updated", updated_sections, noun="managed artifact section")
     _report_file_changes("Adopting", adopted, noun="matching artifact file")
-    return ArtifactPublication(tuple(current.values()), tuple(skipped))
+    return ArtifactPublication(tuple(current.values()), skipped)
 
 
 def _report_file_changes(action: str, paths: Sequence[str], *, noun: str = "artifact file") -> None:
