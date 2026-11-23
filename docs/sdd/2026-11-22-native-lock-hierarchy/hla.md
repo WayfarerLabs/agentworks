@@ -147,10 +147,11 @@ fixed order keeps a refusal deterministic.
 
 An operation whose set depends on state (agent delete removes its sessions, grants and console
 windows; workspace create grants the grant-all agents) reads that state before locking, includes
-what it found, acquires once, and re-reads under the set: anything different refuses the operation
-and the operator runs it again. A set never grows after it is acquired. A nested operation receives
-the held set (today's `held=`) and may only use entities the set already covers in a mode at least
-as strong.
+what it found, acquires, and re-reads under the set: anything different refuses the operation and
+the operator runs it again. Each acquisition takes its whole request, and a set never grows after it
+is acquired; a multi-target command may retry without the targets a refusal named, never adding one.
+A nested operation receives the held set (today's `held=`) and may only use entities the set already
+covers in a mode at least as strong.
 
 ### Naming the holder (R3)
 
@@ -180,13 +181,14 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   and shadow-utils serializes its own tools through `lckpwdf` on both supported guest releases
   (Debian 12 and 13). The one check-then-create sequence that can now run twice at once, creating a
   workspace's group during a grant, becomes `groupadd -f`. Agent deletion, under the account's
-  exclusive lock, stops the account's processes and refuses if any remain, then removes the home and
-  mail spool while the account still exists, and runs plain `userdel` last. Running `userdel -r`
+  exclusive lock, stops the account's processes and skips the removal with a warning if any remain,
+  as today. It then fences the home and mail spool (owned by root, closed to everyone else) so that
+  no account that reuses the numeric ID could reach them, and runs plain `userdel`. If `userdel`
+  refuses, for instance through a configured pre-deletion hook, the fence is lifted and nothing is
+  lost; only after it succeeds are the fenced home and spool removed. Running `userdel -r` instead
   would keep shadow's locks through the home removal and stall, then fail, every other account edit
-  on the VM; removing the account first would free its numeric user ID while its home remains, and
-  the next account created could be allocated that ID and own it. In this order a busy account is
-  refused before any data is lost, the ID stays owned until its home and spool are gone, and an
-  interrupted deletion reruns cleanly.
+  on the VM, and removing the home before `userdel` would lose it to a veto. An interrupted deletion
+  reruns cleanly.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
@@ -206,13 +208,14 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   that directory, not the tree around it: one rehome could move a workspace inside another that a
   second rehome is about to remove. So directory trees are locked like entities, with a `path` kind
   under the vm. An operation that creates, fills, reads whole or removes a workspace tree takes its
-  root exclusive and every directory its path traverses shared, both as stored and as resolved, so a
-  link on the way is a dependency too: workspace create and copy's destination take their target,
-  rehome and copy's source take their source, rehome its target, workspace delete its path. The
-  rehome that would move a workspace into `/data/B/new` holds `/data/B` shared, so a removal of
-  `/data/B` is refused while it runs, and work in disjoint trees still runs together. A nested
-  layout that already exists keeps today's behavior, including what a later `--remove-old` does to
-  it (#957).
+  root exclusive and shared every directory the guest looks a name up in to reach it, found by one
+  lookup walk on the guest that follows each link as the kernel does, so links on the way and the
+  directories they lead through are dependencies too. Workspace create and copy's destination take
+  their target, rehome and copy's source take their source, rehome its target, workspace delete its
+  path; the walk runs again under the set to confirm nothing moved. The rehome that would move a
+  workspace into `/data/B/new` holds `/data/B` shared, so a removal of `/data/B` is refused while it
+  runs, and work in disjoint trees still runs together. A nested layout that already exists keeps
+  today's behavior, including what a later `--remove-old` does to it (#957).
 - **Stale socket cleanup across one agent's sessions** runs under that account's exclusive lock
   (agent create and reinit) or the vm exclusive (vm reinit and create), so no session of that agent
   is starting meanwhile.
