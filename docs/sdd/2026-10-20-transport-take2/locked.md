@@ -1,9 +1,10 @@
 # Transport take 2: locked
 
-**Locked:** 2026-11-23
+**Locked:** set when this file merges, which waits for #953, the excluded experiments and a soak
+after the 0.20.0 release (operator, 2026-11-23).
 
-This effort is complete. Core reaches every managed VM through one platform-agnostic channel, the
-installed OpenSSH client at the VM's tailnet address, with every request on the client's stdin.
+The implementation is complete. Core reaches every managed VM through one platform-agnostic channel,
+the installed OpenSSH client at the VM's tailnet address, with every request on the client's stdin.
 Platforms keep lifecycle, provider networking, availability holds, one root channel for recovery
 (`run_as_root`) and an optional native shell. The legacy transports are deleted. What stays open is
 live evidence the operator ruled recorded here rather than closed (see
@@ -28,10 +29,12 @@ live evidence the operator ruled recorded here rather than closed (see
 - [#910](https://github.com/WayfarerLabs/agentworks/pull/910): the SSH config and Remote Lima upload
   follow-ups, which PR C merged and finished (plan, slice 8).
 - [#916](https://github.com/WayfarerLabs/agentworks/pull/916): the generated workspace tmuxinator
-  projects removed, with reinit retiring those earlier releases wrote.
-- [#953](https://github.com/WayfarerLabs/agentworks/pull/953), merged before this lock: `vm create`
-  refuses a hostname with an underscore on every platform, moving the rule from WSL2 into core
-  (operator ruling 2026-11-22).
+  projects removed, with reinit retiring those earlier releases wrote;
+  [#961](https://github.com/WayfarerLabs/agentworks/pull/961), which merges before this lock, says
+  so in the built-in migration topic.
+- [#953](https://github.com/WayfarerLabs/agentworks/pull/953), which merges before this lock:
+  `vm create` refuses a hostname with an underscore on every platform, moving the rule from WSL2
+  into core (operator ruling 2026-11-22).
 
 ## Where the design lives now
 
@@ -51,11 +54,9 @@ No permanent artifact cites this directory.
 
 ## Evidence
 
-[evidence-matrix.md](./evidence-matrix.md) is the record. Its historical status column holds 30
-covered, 34 partial and 32 gap across 96 regular rows, plus two extras covered beyond their boxes (a
-real OpenSSH 8.5 client on Linux, and managed SSH entries through `Include` on Windows). The figures
-given to the operator at the 2026-11-22 ruling, 33 covered, 31 partial and 32 gap, counted the three
-R11 pairing rows as covered, although every workstation row has gap cells.
+[evidence-matrix.md](./evidence-matrix.md) is the record. Its introduction gives the historical
+status tallies, including the correction to the figures given to the operator at the 2026-11-22
+ruling.
 
 At the operator's [2026-11-22 ruling](./frd.md#2026-11-22) one last tester pass ran at `main` (#948,
 comment 7078499829, head `39df75ab2`, whose package is byte-identical to `main` at `2b1d69dac`),
@@ -64,8 +65,8 @@ in for Windows 11. It classified each row without replacing its status: 29 quali
 three R11 rows among them), 10 current positives (one of them the underscore hostname failure), 49
 not retested, 8 unavailable bed, GUI or console or conditionally unobserved, and the two extras kept
 as history. Every protected gate passed and the pass found no runtime regression. The pass predates
-the merges of PRs #916, #944, #945 and #953 to `main`; #916 had its own live pass (PR comment
-7078408324), and #953 has its own.
+`main`'s merges of PRs #916, #944 and #945, and #953, which merges before this lock; #916 had its
+own live pass (PR comment 7078408324), and #953 has its own.
 
 The pass also found that Python 3.13 rejects the PVE 8.4 CA while 3.12 verifies it (see
 [Follow-up issues](#follow-up-issues)), that the Windows bed's route to Proxmox needed pinned
@@ -79,30 +80,24 @@ historical status is partial or gap is recorded here as open live evidence, what
 pass added; the matrix's Closeout pass cells give each row's detail. The groups, with what would
 close each:
 
-1. **Excluded under the stop direction the closeout report cites:** 389c, 389n, 389t; 415a to c;
-   423a to d; 427a, 427c; 432; 434d; 451; 460a, 460b; delete of a cloud VM with no record; I18; N6,
-   N8, N10; I6a, S4; I48. The closeout report says the testing session ran under an operator stop
-   direction excluding signal, forced interruption, outage, identity-mismatch, privilege-boundary,
-   fault-injection, custom descriptor, secret-decoy and authentication-bypass experiments, and the
-   authentication experiments I48 needs. Closes with: authorization for those experiments on the
-   existing beds.
-
-   OPERATOR-EXCLUSION-RULING
+1. **Excluded from the closeout pass:** 389c, 389n, 389t; 415a to c; 423a to d; 427a, 427c; 432;
+   434d; 451; 460a, 460b; delete of a cloud VM with no record; I18; N6, N8, N10; I6a, S4; I48. The
+   matrix says why they were excluded. The operator gave no such direction and ruled that these
+   experiments run before the lock ([2026-11-23](./frd.md#2026-11-23)). Closes with: their results
+   on the existing beds.
 
 2. **Conditions not set up:** pre-python3 WSL2 recovery then reinit; I44; N5; S9, S11. Closes with:
    those fixtures on existing beds (a WSL2 VM without python3, a transcript resume with authorized
    model calls, a credential-bearing HTTPS clone, a VM from an earlier release).
-3. **Local Lima from Linux (216):** closes with a prepared Linux KVM bed.
+3. **Local Lima from Linux (216, and the R11 Linux pairing row):** closes with a prepared Linux KVM
+   bed.
 4. **I21 round 2 Windows Terminal retest and I90 live:** close with an interactive Windows desktop
    and Windows Terminal lane.
 5. **389f node removal and ephemeral key expiry, and I10's console view:** close with scoped
    Tailscale admin console access.
 6. **Conditional cells:** 389s needs a WSL release that prints `WSL_E_DEFAULT_DISTRO_NOT_FOUND`;
    434c needs a supported fixture that advertises SVE.
-7. **R11 pairing rows (all three partial):** Linux to local Lima is group 3. macOS to Azure and GCP,
-   and Windows to AWS and Azure, fall outside the ruling's one cloud from each workstation, which
-   the pass met.
-8. **Moved in part, remainder open:**
+7. **Moved in part, remainder open:**
    - 101: Azure and GCP from a non-Windows workstation; existing beds.
    - 389a: the bootstrap output size on WSL2 and Proxmox; existing beds.
    - 434a: the replaced key and the power cycle; macOS to local Lima.
@@ -116,10 +111,10 @@ close each:
    - N2: only uv's skip was observed, and the second reinit refreshed the `authorized_keys` mtime;
      existing beds.
    - N12: a forced idle shutdown during a WSL2 create; Windows to WSL2.
-   - I8, S6 and S7 (disconnect and interrupt stages), S2 (a killed pane) and S8 (a clone failure):
-     group 1's authorization.
-   - 638: attach from every workstation to Remote Lima, whose Windows credential route was held, and
-     backup interruption; that route and group 1's authorization.
+     - I8, S6 and S7 (disconnect and interrupt stages), S2 (a killed pane) and S8 (a clone failure):
+       group 1's experiments.
+     - 638: attach from every workstation to Remote Lima, whose Windows credential route was held,
+       and backup interruption; that route, and group 1's experiments.
 
 The rows the pass observed directly at `main`'s code (N1, N3, N4, N7, N9, N11, S1, S3 and S5) keep
 their historical status, so they stay open too, with the fresh observation recorded in the matrix.
@@ -128,7 +123,8 @@ Direct proof of AWS ENI absence needs ENI and quota read permissions.
 Out of scope by ruling or by nature: WSL2 from Linux or macOS; an agent-served encrypted key on
 Windows, whose agent refuses from a key-authenticated session; local Lima on Windows (2026-10-31,
 2026-11-01); Debian 12 guests (2026-11-05); a real OpenSSH 8.5 client on macOS and Windows (shim
-accepted, 2026-11-05).
+accepted, 2026-11-05); the R11 pairings of macOS with Azure and GCP and of Windows with AWS and
+Azure, beyond the one cloud from each workstation the 2026-11-22 ruling set, which the pass met.
 
 ## Superseded design text
 

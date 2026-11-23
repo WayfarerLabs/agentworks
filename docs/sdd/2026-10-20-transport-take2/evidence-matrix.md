@@ -30,9 +30,10 @@ never replaces a status or counts as a whole-row pass:
 The closeout report says the testing session ran under an operator stop direction that excluded
 signal, forced interruption, outage, identity-mismatch, privilege-boundary, fault-injection, custom
 descriptor, secret-decoy and authentication-bypass experiments, and the authentication experiments
-I48 needs. That direction went to the testing session, and this effort's artifacts hold no record of
-it. The rows that need such an experiment read **not retested: excluded**. They stay gaps or
-partials, which the 2026-11-22 ruling says are recorded in `locked.md`.
+I48 needs. The operator gave no such direction and ruled that the experiments run before the lock
+([2026-11-23](./frd.md#2026-11-23)). The rows that need such an experiment read **not retested:
+excluded**. They stay gaps or partials, which the 2026-11-22 ruling says are recorded in
+`locked.md`.
 
 Every report is signed `agw-test-claude` or `agw-test-codex (agentworks integration-test session)`.
 Windows beds were Windows Server 2022 (PR B rounds 1 and 2) and Windows Server 2025 (later). No
@@ -62,9 +63,10 @@ stands in for the Windows 11 cells.
 | #876 R10      | 7067082289                                                | 334a45823 (merged head)                    | Linux to Remote Lima workspaces and harness; Windows config sync, no VM |
 | #948 closeout | 7078499829                                                | 39df75ab2 (protected main 2b1d69dac)       | closeout pass; no package change, wheel byte-identical to main          |
 
-PRs #910 and #916 have heads that contain PR B but not PR C (bases `1e26eda66`, `ccb0e08c5`,
-`2a7f6d1a7`), so they can credit slices 1 to 4 only; they add Remote Lima, WSL2 and GCP creates but
-no new item.
+PR #910's heads, and #916's heads before its final report, contain PR B but not PR C (bases
+`1e26eda66`, `ccb0e08c5`, `2a7f6d1a7`), so they can credit slices 1 to 4 only; they add Remote Lima,
+WSL2 and GCP creates but no new item. #916's final report (7078408324, head `dcf90f816` on `main`
+`2b1d69dac`) postdates PR C and covers the tmuxinator retirement, which no row tracks.
 
 ## Slice 1: Trust (PR A)
 
@@ -201,7 +203,7 @@ Incident rows (platform-lld, contract-lld):
 | Session and console on Remote Lima from three workstations and WSL2; backup on WSL2 and Remote Lima (638) | partial | see rows                                                            | PTY attach covered from Windows and macOS to Remote Lima and on WSL2; Linux to Remote Lima attach not stated; backup not on WSL2.          | qualified subset: Linux PTY, add-shell, WSL2 backup; no all-workstation attach |
 | S1. Session lifecycle, newline secret (I21, I85, decision 3)                                              | partial | #876 R1, R2, R4, R5                                                 | Newline value shown only in exec env.                                                                                                      | current positive: newline value in Shell and add-shell, Remote Lima            |
 | S2. Console lifecycle, restore, add-shell with agent secrets (I6a, I6, I19)                               | partial | #876 R2 to R9                                                       | add-shell and killed pane not run. Console stop lost the member server at R7, R9 (Remote Lima) and R8 (WSL2), unattributed (matches #936). | qualified subset: add-shell with agent secret; no killed pane                  |
-| S3. Agent pane interactive with `TERM` (T2)                                                               | gap     | none                                                                |                                                                                                                                            | current positive: agent PTY, `TERM=xterm-256color`                             |
+| S3. Agent pane interactive with `TERM` (T2)                                                               | gap     | none                                                                |                                                                                                                                            | current positive: managed agent pane, `TERM=tmux-256color`                     |
 | S4. Kill console attach `ssh`, re-attach (I6a)                                                            | gap     | none                                                                |                                                                                                                                            | not retested: excluded                                                         |
 | S5. `session list` with a stopped VM within the bound (I88)                                               | gap     | none                                                                |                                                                                                                                            | current positive: natural WSL2 stop listed, 1.961 s                            |
 | S6. Backup forced disconnect, archive and download (I8, I81, I25)                                         | partial | #876 R2                                                             | Compression stage only, cell not named.                                                                                                    | qualified subset: ordinary WSL2 backup; no disconnect                          |
