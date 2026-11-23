@@ -9,6 +9,7 @@ import yaml
 
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import delivery_name
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
@@ -20,7 +21,6 @@ from agentworks.artifacts.native.common import (
     select_inputs,
     select_session_artifacts,
     skill_files,
-    validate_names,
     validate_native_argv,
 )
 from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
@@ -53,28 +53,27 @@ def _persona(item: ArtifactInput) -> dict[str, object]:
     }
 
 
-def _persona_file(root: str, item: ArtifactInput, *, namespace: str = "") -> ArtifactFile:
+def _persona_file(root: str, item: ArtifactInput, name: str, *, namespace: str = "") -> ArtifactFile:
     options = _persona(item)
     del options["prompt"]
-    header = yaml.safe_dump({"name": item.content.name, **options}, sort_keys=False)
+    header = yaml.safe_dump({"name": name, **options}, sort_keys=False)
     return artifact_file(
-        f"{root}/{item.content.name}.md",
+        f"{root}/{name}.md",
         f"---\n{header}---\n{item.content.text}",
         (item,),
-        identity=f"agent:{namespace}{item.content.name}",
+        identity=f"agent:{namespace}{name}",
     )
 
 
 def outer_artifacts(inputs: ArtifactInputs, root: str, *, guidance_as_skills: bool = False) -> ArtifactApplication:
-    validate_names(inputs)
     files = list(
         guidance_skills(f"{root}/skills", inputs) if guidance_as_skills else guidance_rules(f"{root}/rules", inputs)
     )
     for item in inputs.items():
         if item.content.type is ArtifactType.SKILL:
-            files.extend(skill_files(f"{root}/skills", item))
+            files.extend(skill_files(f"{root}/skills", item, delivery_name(inputs, item)))
         elif item.content.type is ArtifactType.AGENT:
-            files.append(_persona_file(f"{root}/agents", item))
+            files.append(_persona_file(f"{root}/agents", item, delivery_name(inputs, item)))
     return ArtifactApplication(tuple(files))
 
 
@@ -98,7 +97,6 @@ def session_artifacts(
     deferred = (*deferred, *mcp.application.deferred)
     if not inputs and not context.ancestor_files:
         return NativeSessionArtifacts(ArtifactApplication(mcp.application.files, deferred), mcp.argv)
-    validate_names(inputs)
     if inputs:
         reject_flags(
             extra_args,
@@ -127,10 +125,11 @@ def session_artifacts(
     ]
     files.extend(guidance_skills(f"{plugin}/skills", inputs, namespace=plugin_name + ":"))
     for item in items:
+        name = delivery_name(inputs, item)
         if item.content.type is ArtifactType.SKILL:
-            files.extend(skill_files(f"{plugin}/skills", item, namespace=plugin_name + ":"))
+            files.extend(skill_files(f"{plugin}/skills", item, name, namespace=plugin_name + ":"))
         elif item.content.type is ArtifactType.AGENT:
-            files.append(_persona_file(f"{plugin}/agents", item, namespace=plugin_name + ":"))
+            files.append(_persona_file(f"{plugin}/agents", item, name, namespace=plugin_name + ":"))
     application = ArtifactApplication((*files, *mcp.application.files), deferred)
     argv = ("--plugin-dir", plugin, *mcp.argv)
     validate_native_argv(argv)
@@ -176,7 +175,7 @@ def _session_mcp(
                 ArtifactDeferral(input_id=item.identity, destination="session", reason=native_conflicts[item.identity])
             )
             continue
-        servers[item.content.name] = render_mcp(item, "claude")
+        servers[delivery_name(inputs, item)] = render_mcp(item, "claude")
         selected.append(item)
     if not selected:
         return NativeSessionArtifacts(ArtifactApplication(deferred=tuple(deferred)))

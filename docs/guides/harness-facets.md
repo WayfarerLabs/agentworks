@@ -285,12 +285,13 @@ and inspection. `agw artifact show` includes upstream handling even when handled
 flow to a descendant.
 
 Claude Code, Codex and Grok register MCP at user/workspace scope in their actual native config
-roles, preserving unrelated settings and entries unless an explicit mapping changes them. Managed
-names include the original owner, so equal keys at different scopes do not shadow one another. An
-identical unowned entry can be adopted; conflicting entries are retained and deferred individually.
-The optional session carriers are Claude `session-mcp-config` and Codex `session-mcp-overrides`.
-Grok has no supported session MCP carrier; unhandled MCP warns and launch continues. Shell publishes
-canonical files at every scope without running servers. See
+roles, preserving unrelated settings and entries unless an explicit mapping changes them. Artifacts
+use canonical keys in their owning native scope. Deferred inputs add their original scope prefix,
+for example `vm-github`. Equal native names across scopes follow the harness's loading and
+precedence rules. An identical unowned entry can be adopted. Conflicting entries are retained and
+deferred individually. The optional session carriers are Claude `session-mcp-config` and Codex
+`session-mcp-overrides`. Grok has no supported session MCP carrier; unhandled MCP warns and launch
+continues. Shell publishes canonical files at every scope without running servers. See
 [MCP setup](native-harness-setup.md#mcp-registrations) for paths, merge interaction and the separate
 native authentication/credential-removal workflow. OAuth configuration is planned for a later phase;
 the initial artifact profile rejects OAuth and tool-filter fields explicitly.

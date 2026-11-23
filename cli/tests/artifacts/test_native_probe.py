@@ -94,9 +94,7 @@ def probe(
     )
     observed = json.loads(result.stdout.strip().removeprefix("AGW_ARTIFACT_PROBE="))
     assert isinstance(observed, dict)
-    observed["problems"].extend(
-        problem.code for problem in _inventory_problems(observed["inventory"], identities, entries or {})
-    )
+    observed["problems"].extend(problem.code for problem in _inventory_problems(observed["inventory"], entries or {}))
     return observed
 
 
@@ -187,7 +185,8 @@ def test_claude_plugin_policy_is_independent_of_carrier_certification(tmp_path):
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
 @pytest.mark.parametrize("kind", ["skill", "agent"])
-def test_inventory_uses_native_metadata_name_instead_of_unmanaged_filename(tmp_path, tool, kind):
+@pytest.mark.parametrize("same_scope", [False, True])
+def test_inventory_compares_native_metadata_names_within_the_receiving_scope(tmp_path, tool, kind, same_scope):
     native = ".claude" if tool == "claude" else ".codex" if tool == "codex" else ".grok"
     if kind == "skill":
         path = (
@@ -206,11 +205,13 @@ def test_inventory_uses_native_metadata_name_instead_of_unmanaged_filename(tmp_p
         if tool == "codex" and kind == "agent"
         else "---\nname: 'review'\ndescription: Unmanaged\n---\nbody\n"
     )
-    result = probe(tmp_path, tool=tool, identities=(f"{kind}:review",))
-    assert "native-artifact-collision" in result["problems"]
+    requested = path.parent.parent / "review/SKILL.md" if kind == "skill" else path.with_stem("review")
+    if not same_scope:
+        requested = tmp_path / "home" / requested.relative_to(tmp_path / "workspace")
+    identity = f"{kind}:review"
+    result = probe(tmp_path, tool=tool, identities=(identity,), entries={str(requested): identity})
+    assert ("native-artifact-collision" in result["problems"]) is same_scope
     assert "body" not in json.dumps(result["inventory"])
-    unrelated = probe(tmp_path, tool=tool, identities=(f"{kind}:unrelated",))
-    assert unrelated["problems"] == []
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
@@ -233,7 +234,15 @@ def test_owned_entry_is_exempt_only_when_its_current_native_name_matches(tmp_pat
 
 def test_config_registered_codex_role_cannot_override_selected_persona(tmp_path):
     configured = {"agents": {"review": {"config_file": "/unmanaged/review.toml"}}}
-    assert "native-artifact-collision" in probe(tmp_path, settings=configured, identities=("agent:review",))["problems"]
+    assert (
+        "native-artifact-collision"
+        in probe(
+            tmp_path,
+            settings=configured,
+            identities=("agent:review",),
+            entries={str(tmp_path / "home/.codex/agents/review.toml"): "agent:review"},
+        )["problems"]
+    )
     assert (
         probe(
             tmp_path,
@@ -264,7 +273,7 @@ def test_ambiguous_native_inventory_refuses_instead_of_skipping_candidates(tmp_p
 
 
 @pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.AGENT])
-def test_existing_ancestor_collision_is_diagnosed_without_blocking_launch(tmp_path, monkeypatch, kind):
+def test_existing_entries_in_separate_native_scopes_remain_visible_to_session_probe(tmp_path, monkeypatch, kind):
 
     from agentworks.artifacts.application import SessionArtifactContext
     from agentworks.artifacts.model import ArtifactInputs
@@ -342,7 +351,15 @@ def test_codex_registered_role_layer_without_name_is_valid_inventory(tmp_path):
         ]
         == []
     )
-    assert "native-artifact-collision" in probe(tmp_path, settings=settings, identities=("agent:review",))["problems"]
+    assert (
+        "native-artifact-collision"
+        in probe(
+            tmp_path,
+            settings=settings,
+            identities=("agent:review",),
+            entries={str(path.with_stem("review")): "agent:review"},
+        )["problems"]
+    )
 
 
 def test_codex_generated_outer_persona_above_header_limit_remains_discoverable(tmp_path):
@@ -370,8 +387,7 @@ def test_inventory_collision_retains_native_identity_and_competing_path():
     path = "/workspace/.claude/agents/alternate.md"
     problems = _inventory_problems(
         [{"kind": "agent", "path": path, "frontmatter": "name: review"}],
-        ("agent:review",),
-        {"/home/alice/.claude/agents/review.md": "agent:review"},
+        {"/workspace/.claude/agents/review.md": "agent:review"},
     )
     assert len(problems) == 1
     assert (problems[0].identity, problems[0].path) == ("agent:review", path)
@@ -385,8 +401,7 @@ def test_inventory_returns_all_conflicting_native_names():
             {"kind": "agent", "path": path, "frontmatter": f"name: {name}"}
             for path, name in zip(paths, names, strict=True)
         ],
-        tuple(f"agent:{name}" for name in names),
-        {},
+        {f"/workspace/.claude/agents/{name}.md": f"agent:{name}" for name in names},
     )
     assert [(problem.identity, problem.path) for problem in problems] == list(
         zip((f"agent:{name}" for name in names), paths, strict=True)
@@ -530,7 +545,6 @@ def test_native_metadata_rejects_expansion_and_depth_before_constructing_yaml(he
     monkeypatch.setattr(yaml, "safe_load", lambda text: pytest.fail("unsafe metadata reached YAML construction"))
     problems = _inventory_problems(
         [{"kind": "agent", "path": "/workspace/.claude/agents/other.md", "frontmatter": header}],
-        ("agent:review",),
         {},
     )
     assert [problem.code for problem in problems] == ["unreadable-native-inventory"]

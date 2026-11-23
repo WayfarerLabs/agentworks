@@ -99,7 +99,7 @@ def test_malformed_native_persona_metadata_keeps_its_path():
     from agentworks.artifacts.native.probe import _inventory_problems
 
     path = "/fixture/.grok/agents/operator.md"
-    problems = _inventory_problems([{"kind": "agent", "path": path, "frontmatter": ""}], (), {})
+    problems = _inventory_problems([{"kind": "agent", "path": path, "frontmatter": ""}], {})
     assert len(problems) == 1 and problems[0].path == path
 
 

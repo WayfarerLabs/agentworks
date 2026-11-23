@@ -6,7 +6,6 @@ import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from agentworks.artifacts.application import ArtifactFile, OwnedArtifactFile
@@ -130,7 +129,7 @@ for path in paths:
                     selected_path = os.path.normpath(os.path.join(str(path.parent), agent['config_file']))
                     registered_agents.setdefault(selected_path, []).append(name)
                 if name in agent_names and known_entries.get(selected_path) != 'agent:' + name:
-                    inventory.append({'kind': 'agent', 'path': str(path), 'name': name})
+                    inventory.append({'kind': 'agent', 'path': str(path), 'name': name, 'registered': True})
             skills = document.get('skills', {})
             if skill_names and skills.get('include_instructions') is False:
                 problems.append('native-skill-policy')
@@ -422,16 +421,13 @@ def probe_native(
     native_root: str | None = None,
     workspace: str = "",
     files: Sequence[ArtifactFile | OwnedArtifactFile] = (),
-    recognized_files: Sequence[OwnedArtifactFile] = (),
     session_plugin: bool = False,
     workspace_only: bool = False,
     vm_only: bool = False,
     check_policy: bool = True,
 ) -> str:
-    """Check proposed delivery while recognizing earlier placements as inventory hints.
+    """Check proposed delivery in its native scope and scan applicable native policy.
 
-    Recognized files do not widen the proposed paths, selected identities or policy
-    checks. Their actual native name must still agree before inventory accepts them.
     The probe is a Python program run by the system ``python3`` after the
     account's login and interactive startup, so it sees the environment the
     native workload gets. The request travels on its stdin, so a large
@@ -455,7 +451,6 @@ def probe_native(
             reserved,
             hint="Rename the supplied skills, or use namespaced session plugin delivery.",
         )
-    recognized_entries = {file.path: file.native_identity for file in recognized_files if file.native_identity}
     request = {
         "tool": tool,
         "codex_persona_bytes": MAX_CODEX_PERSONA_BYTES,
@@ -465,7 +460,7 @@ def probe_native(
         "native_root": native_root,
         "workspace": workspace,
         "paths": tuple(file.path for file in files),
-        "entries": {**recognized_entries, **entries},
+        "entries": entries,
         "proposed": _proposed_sizes(files, tool),
         "session_plugin": session_plugin,
         "plugin_names": tuple(
@@ -525,9 +520,7 @@ def probe_native(
             f"{tool} artifact discovery probe returned an invalid response",
             hint=redactor.sanitize(stderr) or None,
         ) from None
-    inventory_problems = _inventory_problems(
-        observed.get("inventory"), identities, entries, recognized_entries=recognized_entries
-    )
+    inventory_problems = _inventory_problems(observed.get("inventory"), entries)
     problems.extend(problem.code for problem in inventory_problems)
     details: list[str] = []
     details.extend(f"Native path: {path!r}" for path in problem_paths)
@@ -567,19 +560,21 @@ class _InventoryProblem:
     path: str = ""
 
 
-def _inventory_problems(
-    inventory: object,
-    identities: tuple[str, ...],
-    entries: Mapping[str, str],
-    *,
-    recognized_entries: Mapping[str, str] = MappingProxyType({}),
-) -> list[_InventoryProblem]:
+def _inventory_problems(inventory: object, entries: Mapping[str, str]) -> list[_InventoryProblem]:
     """Interpret bounded target metadata without requiring a YAML parser on the guest."""
     current_path = ""
     try:
         if not isinstance(inventory, list) or len(inventory) > 512:
             raise ValueError
-        selected = set(identities)
+        # Direct entries share a native namespace only within a discovery
+        # directory. Codex config aliases select its sibling agents directory.
+        selected = set()
+        for spelling, identity in entries.items():
+            path = PurePosixPath(spelling)
+            if identity.startswith("skill:") and path.name == "SKILL.md":
+                selected.add((path.parent.parent, identity))
+            elif identity.startswith("agent:"):
+                selected.add((path.parent, identity))
         total = 0
         problems: list[_InventoryProblem] = []
         for row in inventory:
@@ -590,6 +585,10 @@ def _inventory_problems(
             ):
                 raise ValueError
             current_path = row["path"]
+            path = PurePosixPath(current_path)
+            registered = row.get("registered", False)
+            if type(registered) is not bool or (registered and row["kind"] != "agent"):
+                raise ValueError
             name = row.get("name")
             if name is None:
                 header = row.get("frontmatter")
@@ -610,9 +609,13 @@ def _inventory_problems(
                 if native_identity != expected:
                     problems.append(_InventoryProblem("native-artifact-identity-mismatch", expected, row["path"]))
                 continue
-            if native_identity == recognized_entries.get(row["path"]):
-                continue
-            if native_identity in selected:
+            if row["kind"] == "skill":
+                directory = path.parent.parent
+            elif registered:
+                directory = path.parent / "agents"
+            else:
+                directory = path.parent
+            if (directory, native_identity) in selected:
                 problems.append(_InventoryProblem("native-artifact-collision", native_identity, row["path"]))
         return problems
     except (ValueError, TypeError, SourceRefError, RecursionError):

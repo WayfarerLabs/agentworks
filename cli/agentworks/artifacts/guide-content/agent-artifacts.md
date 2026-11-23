@@ -46,6 +46,10 @@ role leaves those MCP entries unhandled while independent setup continues. Sessi
 private run directory and, when explicitly enabled, narrowly owned native helper packages beneath
 `HOME`. Codex/Grok home-skill discovery is shared with other sessions of that user.
 
+Equal native names can coexist in separate scopes, where harness precedence applies. A deferred
+artifact gets the original scope prefix, such as `vm-review`. Existing workspace placements keep
+their prior names and new workspaces use the current naming rules.
+
 Native preflight conservatively refuses relevant restrictions for new delivery in the configuration
 files it inspects. Restrictions affecting existing ancestor placement warn without blocking session
 launch, including when the session also supplies new artifacts. The check cannot verify that a later

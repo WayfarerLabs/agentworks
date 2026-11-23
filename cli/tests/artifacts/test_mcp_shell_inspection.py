@@ -111,8 +111,13 @@ def test_shell_publishes_canonical_mcp_json_at_every_facet_without_execution(fac
 def test_shell_keeps_same_named_mcp_servers_from_different_owners_separate():
     first, second = mcp(owner="outer"), mcp(owner="inner", definition=HTTP)
     application = filesystem_artifacts(received(first, second), "/private", session=True)
-    definitions = [file for file in application.files if file.path.endswith("/inventory.json")]
-    assert len({file.path for file in definitions}) == 2
+    definitions = [file for file in application.files if not file.path.endswith("/index.json")]
+    assert {file.path for file in definitions} == {
+        "/private/scopes/session/outer/mcp_servers/session-inventory.json",
+        "/private/scopes/session/inner/mcp_servers/inventory.json",
+    }
+    index = json.loads(next(file.data for file in application.files if file.path.endswith("/index.json")))
+    assert all(set(owner["mcp_servers"]) == {"inventory"} for owner in index["groups"])
     assert {file.origins for file in definitions} == {(first.origin_identity,), (second.origin_identity,)}
     assert [json.loads(file.data) for file in definitions] == [first.content.metadata, second.content.metadata]
 

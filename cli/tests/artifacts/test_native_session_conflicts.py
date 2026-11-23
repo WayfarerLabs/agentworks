@@ -183,19 +183,13 @@ def test_setup_operator_collision_is_reconsidered_at_session_without_blocking_ot
         assert not plan.argv
         return
     assert any(good.origin_identity in file.origins for file in plan.application.files)
-    if tool == "claude" or artifact_type is ArtifactType.SKILL:
+    if tool in {"claude", "codex"}:
         assert not plan.application.deferred
         assert any(bad.origin_identity in file.origins for file in plan.application.files)
-    else:
-        assert {item.input_id for item in plan.application.deferred} == {bad.identity}
-        assert all(item.destination == "session" for item in plan.application.deferred)
-        assert not any(bad.origin_identity in file.origins for file in plan.application.files)
-        assert_persona_carriers(tool, plan, {good.content.name})
-        assert warnings.called
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)
-@pytest.mark.parametrize("conflict", ["input-owners", "ancestor"])
+@pytest.mark.parametrize("conflict", ["input-owners", "same-canonical", "ancestor"])
 def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidance(
     tmp_path, monkeypatch, tool, class_name, conflict
 ):
@@ -224,10 +218,14 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
             path.write_bytes(file.data)
         ancestors = tuple(owned(file) for file in files)
         inputs = received(bad, good, guidance)
-        rejected = set() if tool == "claude" else {bad.identity}
+        rejected = set()
+        expected_names = {good.content.name, bad.content.name}
     else:
+        if conflict == "input-owners":
+            bad = artifact(ArtifactType.AGENT, name="agent-review")
         inputs = received(outer, bad, good, guidance)
-        rejected = {outer.identity, bad.identity}
+        rejected = {outer.identity, bad.identity} if conflict == "input-owners" else set()
+        expected_names = {good.content.name} if rejected else {good.content.name, bad.content.name, "agent-review"}
     result, plan = launch(
         implementation, adapter, access, home, workspace, environment, inputs, monkeypatch, ancestors=ancestors
     )
@@ -240,13 +238,7 @@ def test_session_persona_delivery_keeps_unhandled_origins_and_independent_guidan
     assert all(item.destination == "session" for item in result.artifacts.deferred)
     if tool != "grok":
         assert any(good.origin_identity in file.origins for file in result.artifacts.files)
-        assert_persona_carriers(
-            tool,
-            plan,
-            {good.content.name, bad.content.name}
-            if tool == "claude" and conflict == "ancestor"
-            else {good.content.name},
-        )
+        assert_persona_carriers(tool, plan, expected_names)
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS)
