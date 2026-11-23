@@ -18,15 +18,14 @@ still lacks a record. `agw vm import-host-keys --help` covers a VM with no match
 Once a VM has a record, one `agw vm reinit NAME` removes sshd and sudoers grants and the admin's
 group access to agent tmux servers, none of which is used any more. That changes the VM: afterwards
 the operator's own `ssh -o SetEnv` and `sudo` no longer pass `AGENTWORKS_*` or arbitrary variables.
-Reinit also removes the workspace tmuxinator projects earlier releases generated: each workspace's
-`.tmuxinator.yml` that still starts with the generated header, including one a repository committed
-with that header, and the admin's `~/.config/tmuxinator/ws-WORKSPACE-console.yml` links to them.
-Named consoles replace those projects; do not start an old one by hand before reinit. Then
-`agw console restart NAME` rebuilds each running named console, whose shells and agent-session
-windows change only when rebuilt; restarting replaces the console's tmux windows. Skipping a VM's
-reinit keeps the unused grants and the old project files in place, and a console that is not
-restarted keeps its old windows, which cannot reconnect to agent sessions once the VM is
-reinitialized. The 0.20 upgrade guide in the repository's `docs/guides/` has the full sequence.
+Reinit also deletes the workspace tmuxinator projects earlier releases generated and the admin's
+links to them, even a generated `.tmuxinator.yml` a repository committed. Named consoles replace
+those projects; do not start an old one by hand before reinit. Then `agw console restart NAME`
+rebuilds each running named console, whose shells and agent-session windows change only when
+rebuilt; restarting replaces the console's tmux windows. Skipping a VM's reinit keeps the unused
+grants and the old project files in place, and a console that is not restarted keeps its old
+windows, which cannot reconnect to agent sessions once the VM is reinitialized. The 0.20 upgrade
+guide in the repository's `docs/guides/` has the full sequence.
 
 ## Adopt desired runtime intent
 
