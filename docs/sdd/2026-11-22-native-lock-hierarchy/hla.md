@@ -94,18 +94,24 @@ changes only where its lock is taken:
    delete).
 4. **Gate:** gate secrets just in time, skipped when the VM is confirmed active; a boot, only when
    the operation needs the VM running and the provider reports it stopped, holding the vm exclusive
-   for the boot alone; then the availability hold (a keepalive, not a lock) to the end. A runtime
-   family that must boot records its intent under that brief exclusive, so the intent survives a
-   failed boot as it does today.
+   for the boot alone; then the availability hold (a keepalive, not a lock) to the end.
 5. **Prepare:** the preflight sweep, guest probes, boundary secrets, and the confirmations that show
    what the probes found. Nothing is locked yet.
 6. **Acquire** the set, with the vm shared.
 7. **Re-check** the identity, intent and state read before, refusing if any changed.
 8. **Run.**
 
+Commands built on the activation gate run steps 4 and 5 inside it, as today; the probe is a separate
+call made after step 1, ahead of any early confirmation. Runtime families keep their own order
+within step 4 and 5 (preflight, gate secrets just in time, provider observation and guest status,
+boot) and resolve the workload boundary at step 8. A runtime family records its intent under a brief
+acquisition of its own set (the vm shared, its targets exclusive) after the probe and before the
+gate, then releases it, so the intent survives any later failure as it does today.
+
 An operation needs the VM running when it opens the activation gate today; stop paths do not. So no
 vm exclusive outlives a boot, a transient reachability miss on a running VM never takes it, and R4
-holds while a long operation runs on a VM it started.
+holds while a long operation runs on a VM it started. A cold boot for an access command still needs
+the vm exclusive, so any operation below the VM refuses it, as the single guard does today.
 
 The two modes map onto primitives every workstation has: `flock` `LOCK_SH` and `LOCK_EX` on POSIX,
 and `LockFileEx` with and without `LOCKFILE_EXCLUSIVE_LOCK` on Windows (through `ctypes`, since
@@ -210,9 +216,10 @@ because the question is about what the locked operation is doing:
   are needed depends on definitions and observations made inside the lock. Their gate secrets do
   not, and resolve before acquisition like every other command's.
 
-The first two hold only the vm, which a VM-wide operation holds anyway. The third holds only its
-family's set. Each says so with one notice line before it asks. Only those acquisitions are marked
-as prompting; a prompt under any other held set is a programming error and raises.
+The first two hold only the vm, which a VM-wide operation holds anyway. The third holds only the
+selected families' sets, one notice per set. Each says so with one notice line before it asks. Only
+those acquisitions are marked as prompting; a prompt under any other held set is a programming error
+and raises.
 
 Moving a confirmation earlier keeps the order in which a command refuses: the read-only probes that
 today run before a confirmation (session delete's status and access checks, rehome's directory

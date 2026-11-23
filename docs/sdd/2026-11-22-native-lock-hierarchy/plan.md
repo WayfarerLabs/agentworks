@@ -28,8 +28,8 @@ is left undisposed, and #949 is merged.
       in workspace repair.
 - [ ] Activation: the eight-step sequence (read, probe, confirm early, gate with a boot under a
       brief vm exclusive only when the provider reports the VM stopped, prepare, acquire with the vm
-      shared, re-check, run), with admission-only shared locks for access commands and cold runtime
-      families recording intent under the boot exclusive.
+      shared, re-check, run), with admission-only shared locks for access commands and runtime
+      families recording intent under a brief acquisition of their own set before the gate.
 - [ ] Every call site in the LLD's per-command table moved to its lock set, the unguarded mutators
       (grant and revoke, workspace repair, workspace copy, `vm import-host-keys`,
       `vm confirm-release`) guarded, and each identity re-check in place.
