@@ -581,9 +581,9 @@ the VM once no backup is running.
 - **`vm create` refuses a VM name with an underscore, on every platform.** The name becomes the VM's
   hostname (`{slug}-{name}`), and no DNS hostname allows an underscore: a Lima guest drops it, so
   the guest's hostname disagrees with the one Agentworks recorded, and a cloud provider such as
-  Azure refuses the create. `vm create` now refuses such a name before it asks anything, resolves a
-  secret or touches the platform. Existing VMs are unaffected; recreate one under a name without
-  underscores if its hostname has drifted.
+  Azure refuses the create. `vm create` now refuses such a name before the site, system-slug and
+  secret prompts, and before it touches the platform. Existing VMs are unaffected; recreate one
+  under a name without underscores if its hostname has drifted.
 - **Reinit** starts with the same checks on the VM as it is. A live release that differs from the
   recorded one refuses first, as before. A failed check stops reinit before it changes anything and
   names recreation. The pam_env settings and an unsupported login shell only warn.
