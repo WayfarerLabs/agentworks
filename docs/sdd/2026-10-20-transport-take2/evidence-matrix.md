@@ -25,9 +25,11 @@ classes, and never replaces a status or counts as a whole-row pass:
   not permitted.
 - **extra historical:** one of the two extras, kept as history with no new run.
 
-The operator's direction for that pass excluded signal, forced interruption, outage,
-identity-mismatch, privilege-boundary and fault-injection experiments, so the rows that need one
-read **not retested: excluded** by design, not for want of a bed.
+The closeout report says the testing session ran under an operator stop direction that excluded
+signal, forced interruption, outage, identity-mismatch, privilege-boundary and fault-injection
+experiments. That direction went to the testing session, and this effort's artifacts hold no record
+of it. The rows that need such an experiment read **not retested: excluded**. They stay gaps or
+partials, which the 2026-11-22 ruling says are recorded in `locked.md`.
 
 Every report is signed `agw-test-claude` or `agw-test-codex (agentworks integration-test session)`.
 Windows beds were Windows Server 2022 (PR B rounds 1 and 2) and Windows Server 2025 (later). No
