@@ -47,7 +47,7 @@ _PROBE = (
     resources.files("agentworks.artifacts").joinpath("publication_plan.py").read_text(encoding="utf-8")
     + r"""
 import fnmatch, hashlib, json, os, pathlib, shutil, stat, subprocess, sys, tomllib
-from collections import Counter
+from collections import Counter, namedtuple
 request = json.load(sys.stdin)
 tool = request['tool']
 vm_only = request['vm_only']
@@ -80,28 +80,27 @@ elif executable is None:
     problems.append('missing-command')
 machine_root = {'claude': pathlib.Path('/etc/claude-code/.claude'),
                 'codex': pathlib.Path('/etc/codex')}.get(tool)
-roots = [] if request['workspace_only'] or vm_only else [pathlib.Path(native_home)]
+Location = namedtuple('Location', 'scope root anchor skills agents')
+def location(scope, root, anchor):
+    skills = anchor / '.agents' / 'skills' if tool == 'codex' and scope != 'machine' else root / 'skills'
+    agents = None if tool == 'codex' and root == machine_root else root / 'agents'
+    return Location(scope, root, anchor, skills, agents)
+
 workspace = request['workspace']
-if workspace and not vm_only:
-    roots.append(pathlib.Path(workspace) / default)
-if machine_root is not None:
-    roots.append(machine_root)
-if not request['check_policy']:
-    roots = []
-
-def skill_directory(root):
-    if tool != 'codex' or root == machine_root:
-        return root / 'skills'
-    scope = pathlib.Path(home) if root == pathlib.Path(native_home) else root.parent
-    return scope / '.agents' / 'skills'
-
-skill_directories = {root: skill_directory(root) for root in roots}
-agent_directories = {root: root / 'agents' for root in roots if tool != 'codex' or root != machine_root}
+locations = []
+if request['check_policy']:
+    if not request['workspace_only'] and not vm_only:
+        locations.append(location('user', pathlib.Path(native_home), pathlib.Path(home)))
+    if workspace and not vm_only:
+        project = pathlib.Path(workspace)
+        locations.append(location('workspace', project / default, project))
+    if machine_root is not None:
+        locations.append(location('machine', machine_root, pathlib.Path('/')))
 # A prior placement in an applicable catalog selects its kind across the same
 # discovery roots as a desired placement, even if the last declaration is withdrawn.
 scan_skills = (any(':' not in name for name in skill_names) or
-               not prior_skill_roots.isdisjoint(skill_directories.values()))
-scan_agents = bool(agent_names) or not prior_agent_roots.isdisjoint(agent_directories.values())
+               not prior_skill_roots.isdisjoint(loc.skills for loc in locations))
+scan_agents = bool(agent_names) or not prior_agent_roots.isdisjoint(loc.agents for loc in locations)
 
 def check_discovery_path(path, anchor):
     # Do not inspect native metadata through links beneath the actual owning root.
@@ -113,34 +112,42 @@ def check_discovery_path(path, anchor):
         if anchor.is_symlink():
             raise ValueError()
 
-safe_roots = []
-for root in roots:
+unsafe_location = False
+for loc in locations:
     try:
-        user_root = root == pathlib.Path(native_home) and root != machine_root
-        anchor = (pathlib.Path('/') if root == machine_root else
-                  pathlib.Path(home) if user_root else pathlib.Path(workspace))
-        # Session configuration may select an explicit native home outside HOME;
-        # outer user publication applies its own stricter containment rule.
-        root_anchor = pathlib.Path(root.anchor) if user_root and not root.is_relative_to(anchor) else anchor
-        check_discovery_path(root, root_anchor)
-        if tool == 'codex' and root != machine_root and scan_skills:
-            check_discovery_path(skill_directories[root], anchor)
-        safe_roots.append(root)
+        # A session may select a user configuration directory outside HOME. Its
+        # Codex skills still belong to HOME, even if its config is the project's.
+        anchor = loc.anchor
+        if loc.scope == 'user' and not loc.root.is_relative_to(anchor):
+            anchor = pathlib.Path('/')
+        check_discovery_path(loc.root, anchor)
+        if tool == 'codex' and loc.scope != 'machine' and scan_skills:
+            check_discovery_path(loc.skills, loc.anchor)
     except Exception:
         problems.append('unreadable-native-inventory')
-        problem_paths.append(str(root))
-roots = safe_roots
+        problem_paths.append(str(loc.root))
+        unsafe_location = True
+# Every logical anchor must be safe before reading any aliased physical catalog.
+if unsafe_location:
+    locations = []
+discovery_roots = {}
+for loc in locations:
+    if scan_skills:
+        discovery_roots['skill', loc.skills] = None
+    if scan_agents and loc.agents is not None:
+        discovery_roots['agent', loc.agents] = None
 inventory = []
 known_entries = request['entries']
 registered_agents = {}
 paths = []
-for root in roots:
+for loc in locations:
+    root = loc.root
     if root == machine_root:
         continue
     paths.extend([root / 'settings.json', root / 'settings.local.json'] if tool == 'claude' else [root / 'config.toml'])
 if tool == 'claude' and request['check_policy']:
     paths.append(pathlib.Path('/etc/claude-code/managed-settings.json'))
-for path in paths:
+for path in dict.fromkeys(paths):
     try:
         raw = path.read_bytes()
         document = json.loads(raw) if path.suffix == '.json' else tomllib.loads(raw.decode())
@@ -329,21 +336,17 @@ def publication_projection(previous, desired, held, retiring_markers):
 
 try:
     candidates = []
-    scanned = 0
     existing_entries = set()
-    discovery_roots = []
     opaque_packages = set()
     inspecting = None
-    for root in roots:
-        inspecting = root
-        skill_root = skill_directories[root]
-        if scan_skills:
-            discovery_roots.append(('skill', skill_root))
-        inspecting = skill_root
-        if scan_skills and skill_root.exists():
-            if skill_root.is_symlink():
-                raise ValueError()
-            for directory in skill_root.iterdir():
+    for kind, catalog in discovery_roots:
+        inspecting = catalog
+        if catalog.is_symlink():
+            raise ValueError()
+        if not catalog.exists():
+            continue
+        if kind == 'skill':
+            for directory in catalog.iterdir():
                 # Keep direct-name casing aligned with _is_reserved_claude_skill on the host.
                 if reserved_package(directory.name):
                     opaque_packages.add(directory)
@@ -352,8 +355,8 @@ try:
                     continue
                 inspecting = directory
                 existing_entries.add(str(directory))
-                scanned += 1
-                if scanned > 512 or directory.is_symlink() or (tool == 'codex' and directory.name == 'SKILL.md'):
+                if (len(existing_entries) > 512 or directory.is_symlink() or
+                        (tool == 'codex' and directory.name == 'SKILL.md')):
                     raise ValueError()
                 if not directory.is_dir():
                     continue
@@ -369,8 +372,7 @@ try:
                         for leftover in pending.pop().iterdir():
                             inspecting = leftover
                             existing_entries.add(str(leftover))
-                            scanned += 1
-                            if (scanned > 512 or leftover.is_symlink() or
+                            if (len(existing_entries) > 512 or leftover.is_symlink() or
                                     (leftover.name == 'SKILL.md' and leftover != marker)):
                                 raise ValueError()
                             if leftover.is_dir():
@@ -382,19 +384,11 @@ try:
                 candidates.append(('skill', marker, directory.name))
                 if len(candidates) > 512:
                     raise ValueError()
-        agent_root = agent_directories.get(root)
-        if not scan_agents or agent_root is None:
-            continue
-        discovery_roots.append(('agent', agent_root))
-        if agent_root.exists():
-            inspecting = agent_root
-            if agent_root.is_symlink():
-                raise ValueError()
-            for path in agent_root.iterdir():
+        else:
+            for path in catalog.iterdir():
                 inspecting = path
                 existing_entries.add(str(path))
-                scanned += 1
-                if scanned > 512 or path.is_symlink() or path.is_dir():
+                if len(existing_entries) > 512 or path.is_symlink() or path.is_dir():
                     raise ValueError()
                 if path.suffix == ('.toml' if tool == 'codex' else '.md') and path.is_file():
                     candidates.append(('agent', path, path.stem))
@@ -449,11 +443,10 @@ try:
     future = observed_sizes.copy()
     for spelling, (kind, size) in proposed.items():
         future[spelling] = (kind, max(size, observed_sizes.get(spelling, (kind, 0))[1]))
-    all_paths = dict.fromkeys((*request['paths'], *proposed))
     # With earlier ownership, a held marker can stay absent even while a
     # separately attributable support file is writable. Only existing markers
     # hide descendants in the upper bound. The exact plan can prove new ones.
-    additions = planned_entries(all_paths, observed_sizes if previous else future)
+    additions = planned_entries(request['paths'], observed_sizes if previous else future)
     retiring_markers = {path for path in observed_sizes if tool != 'codex' and path.endswith('/SKILL.md')
                         and path in previous and path not in desired and path not in held}
     if retiring_markers or additions is None or not fits(existing_entries | additions, future):

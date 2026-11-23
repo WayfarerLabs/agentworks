@@ -16,8 +16,10 @@ from agentworks.artifacts.application import ArtifactApplication, ArtifactFile, 
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.declarations import ArtifactDefinitions, ArtifactsConfig, RuleArtifactSpec, SkillArtifactSpec
-from agentworks.artifacts.model import ArtifactInputs, ArtifactOrigin
+from agentworks.artifacts.model import ArtifactInputs, ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native import probe
+from agentworks.artifacts.native.common import prepare_session_delivery
+from agentworks.artifacts.session_paths import session_publication_roots
 from agentworks.artifacts.state import write_capture
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
@@ -32,13 +34,15 @@ from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.origin import Origin
 from agentworks.package_sources import DEFAULT_CAPTURE_LIMITS
 from agentworks.plugins.codex import harness_integration as codex
+from agentworks.plugins.codex.artifacts import session_artifacts
 from agentworks.plugins.codex.artifacts import vm_artifacts as render_vm_artifacts
 from agentworks.plugins.grok import artifacts as grok
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from agentworks.schema import CapabilityConfig
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import ResolvedVMTemplate
-from tests.artifacts.test_native_delivery import owned
+from tests.artifacts.test_catalog_retirement import _account, _persona
+from tests.artifacts.test_native_delivery import artifact, context, owned
 from tests.conftest import registry_with_shell
 from tests.native_setup_fixtures import LocalFixtureAccount, invocation
 
@@ -351,3 +355,73 @@ def test_grok_skill_upgrade_budgets_distinct_physical_members(tmp_path):
     with pytest.raises(StateError):
         integration.user_init(call)
     assert (source / "foreign-note").read_bytes() == b"Retain me." and (source / "SKILL.md").is_file()
+
+
+def test_codex_session_with_workspace_config_home_preserves_both_skill_catalogs(tmp_path, monkeypatch):
+    account = _account(tmp_path, monkeypatch, "codex")
+    workspace = account.root / "workspace"
+    native = workspace / ".codex"
+    native.mkdir(parents=True)
+    user_skills = account.home / ".agents/skills"
+    project_skills = workspace / ".agents/skills"
+    for directory, count in ((user_skills, 256), (project_skills, 253)):
+        directory.mkdir(parents=True)
+        for index in range(count):
+            (directory / str(index)).touch()
+    call = replace(
+        context(artifact(ArtifactType.RULE)),
+        home=str(account.home),
+        directory=str(account.home / "private/session/run"),
+        environment={"CODEX_HOME": str(native)},
+    )
+
+    def prepare() -> ArtifactApplication:
+        plan, _ = prepare_session_delivery(
+            account.access(),
+            tool="codex",
+            integration="codex",
+            context=call,
+            workspace=str(workspace),
+            render=lambda prepared: session_artifacts(
+                prepared, extra_args=[], enabled_workarounds=["session-home-skills"]
+            ),
+        )
+        return plan.application
+
+    plan = prepare()
+    assert len(plan.files) == 2
+    roots = session_publication_roots(
+        plan.files, home=call.home, session_uuid=call.session_uuid, run_id=call.run_id, directory=call.directory
+    )
+    saved = publication.publish_artifacts(account.files(), plan.files, (), lambda _: None, roots=roots)
+    assert not saved.skipped and len(list(user_skills.rglob("*"))) == 259
+    assert prepare() == plan
+    (project_skills / "extra").touch()
+    with pytest.raises(StateError):
+        prepare()
+
+
+def test_codex_workspace_config_alias_counts_persona_metadata_once(tmp_path, monkeypatch):
+    account = _account(tmp_path, monkeypatch, "codex")
+    workspace = account.root / "workspace"
+    native = workspace / ".codex"
+    agents = native / "agents"
+    agents.mkdir(parents=True)
+    persona = _persona(agents, "review", "a", 500, "codex")
+    Path(persona.path).write_bytes(persona.data)
+    monkeypatch.setattr(probe, "DEFAULT_CAPTURE_LIMITS", replace(DEFAULT_CAPTURE_LIMITS, total_bytes=500))
+
+    def check() -> str:
+        return probe.probe_native(
+            account.access(),
+            tool="codex",
+            environment={"CODEX_HOME": str(native)},
+            home=str(account.home),
+            workspace=str(workspace),
+            files=(owned(persona),),
+        )
+
+    assert check() == str(native)
+    Path(persona.path).write_bytes(persona.data + b"\n")
+    with pytest.raises(StateError):
+        check()

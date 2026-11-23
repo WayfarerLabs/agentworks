@@ -30,7 +30,7 @@ def probe(
     tool: str = "codex",
     settings: dict | None = None,
     identities: tuple[str, ...] = ("skill:review",),
-    paths: tuple[str, ...] = (),
+    paths: tuple[str, ...] | None = None,
     proposed: dict[str, int] | None = None,
     entries: dict[str, str] | None = None,
     inventory_bytes: int = CaptureLimits().total_bytes,
@@ -66,7 +66,7 @@ def probe(
         "inventory_bytes": inventory_bytes,
         "home": str(home),
         "workspace": str(workspace),
-        "paths": paths,
+        "paths": tuple(proposed or ()) if paths is None else paths,
         "entries": entries or {},
         "proposed": proposed or {},
         "session_plugin": session_plugin,
@@ -252,6 +252,29 @@ def test_config_registered_codex_role_cannot_override_selected_persona(tmp_path)
         )["problems"]
         == []
     )
+
+
+def test_shared_codex_config_requires_both_scope_anchors_and_reports_a_registration_once(tmp_path):
+    workspace = tmp_path / "workspace"
+    native = workspace / ".codex"
+    native.mkdir(parents=True)
+    config = native / "config.toml"
+    config.write_text('[agents.review]\nconfig_file = "roles/external.toml"\n')
+
+    def inspect() -> dict:
+        return probe(
+            tmp_path,
+            environment={"CODEX_HOME": str(native)},
+            identities=("skill:review", "agent:review"),
+            entries={str(native / "agents/review.toml"): "agent:review"},
+        )
+
+    result = inspect()
+    assert result["problems"] == ["native-artifact-collision"]
+    assert [row["path"] for row in result["inventory"] if row.get("registered")] == [str(config)]
+    (workspace / ".agents").symlink_to(tmp_path / "outside", target_is_directory=True)
+    result = inspect()
+    assert "unreadable-native-inventory" in result["problems"] and not result["inventory"]
 
 
 @pytest.mark.parametrize("layout", ["nested", "symlink", "bad-yaml"])
