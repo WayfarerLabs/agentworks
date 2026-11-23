@@ -131,7 +131,6 @@ class NativeLockSet:
 
     def covers(self, entity: Entity, mode: LockMode) -> bool: ...
     def require(self, request: LockRequest) -> None: ...
-    def announce_prompt(self) -> None: ...
 ```
 
 - **Acquire** once: open each file of `request.modes()` in order and try its mode without waiting.
@@ -356,12 +355,13 @@ definitions and observations made under the lock (`runtime_state/_execute.py:45`
 `sessions/multi_console/lifecycle.py:117-118`, `crud.py:379`, `:696`, `restore.py:353`). The first
 two hold only the vm, exclusive anyway; the third holds only its family's or console's set.
 
-Before such a prompt the command calls `held.announce_prompt()`, which prints one `output.info` line
-naming the held entities and saying they stay locked until the answer is given, once per set. The
-prompt helpers (`output.confirm`, `choose`, `pause`, `prompt`, `prompt_secret`, `output.py:618-640`,
-which the resolver's terminal entry uses) call `native_locks.check_prompt()`, which raises
-`StateError` when any set this process holds has not announced. That is an interior contract, so a
-prompt path that forgot the notice fails the test suite rather than silently prompting under a lock.
+The notice is structural, so no call site can forget it. `native_locks` keeps the sets this process
+holds, and the prompt helpers (`output.confirm`, `choose`, `pause`, `prompt`, `prompt_secret`,
+`output.py:618-640`, which the resolver's terminal entry uses) call `native_locks.prompt_notice()`
+before they prompt. It prints one `output.info` line for each held set that has not yet shown it,
+naming the set's entities and saying they stay locked until the answer is given, and marks the set,
+so each set's notice appears once, before its first prompt. Nothing fails at runtime, and call sites
+do nothing extra.
 
 ## 3. Holder records
 
@@ -557,22 +557,24 @@ regeneration (`cli/commands/config.py:80`) already races today and is tracked as
 ### Account files
 
 No agentworks lock wraps the account and group edits. Both supported guests (`debian.py:26-27`:
-bookworm and trixie) ship shadow-utils that serializes its own tools through glibc's `lckpwdf`,
-which waits up to 15 s: bookworm's shadow 4.13 (on this host, `useradd` links `lckpwdf`) and
-trixie's 4.17.4. The one check-then-act that can now run concurrently, `ensure_group`'s
-`getent group || groupadd` (`workspaces/guest.py:107`, run by workspace create, grants and repair),
-becomes `groupadd -f`, which succeeds when the group exists, as `bootstrap_script.py:107` already
-does. `retire_agent_socket_group`'s check-then-delete (`sessions/tmux.py:542`) runs only under the
-vm exclusive and stays.
+bookworm and trixie) ship shadow-utils that serializes its own tools: in the shadow sources for 4.13
+(bookworm) and 4.17.4 (trixie), `commonio_lock` calls glibc's `lckpwdf`, which waits up to 15 s (and
+on a bookworm host `useradd` links `lckpwdf`). An integration run confirms it on a trixie guest
+([Implementation-time checks](#implementation-time-checks)). The one check-then-act that can now run
+concurrently, `ensure_group`'s `getent group || groupadd` (`workspaces/guest.py:107`, run by
+workspace create, grants and repair), becomes `groupadd -f`, which succeeds when the group exists,
+as `bootstrap_script.py:107` already does. `retire_agent_socket_group`'s check-then-delete
+(`sessions/tmux.py:542`) runs only under the vm exclusive and stays.
 
 ### Agent account removal
 
 `delete_agent_on_vm` (`agents/initializer.py:390-425`, reached from agent delete at
 `agents/manager/lifecycle.py:435` and from agent create's rollback at `agents/realize.py:108`) runs
-`userdel -r`, which keeps shadow's passwd and group locks while it removes the home and the mail
-spool. A long home removal would then stall every other account edit on the VM past `lckpwdf`'s 15
-s, and they would fail. So it splits, keeping its `pkill` and socket-directory removal first and its
-warn-on-step-failure handling:
+`userdel -r`. In the shadow 4.13 sources, `userdel` holds the passwd and group locks through
+`remove_mailbox` and `remove_tree` and releases them only in `close_files`. A long home removal
+would then stall every other account edit on the VM past `lckpwdf`'s 15 s, and they would fail. So
+it splits, keeping its `pkill` and socket-directory removal first and its warn-on-step-failure
+handling:
 
 1. Probe, as root: the account's uid and home from `getent passwd` (`passwd_lookup`,
    `agents/initializer.py:44`), and the spool directory from `MAIL_DIR` in `/etc/login.defs`
@@ -620,7 +622,7 @@ never its wording.
 | holder naming         | the earliest conflicting live holder is named with its command, entity and age; a stale record is skipped and deleted; an malformed one falls back; non-conflicting records are ignored                                                          |
 | operation label       | a command invoked through the CLI runner with a distinctive argument value records its command path and no part of that value; outside the CLI the label is `agw`                                                                                |
 | nested reuse          | `require` acquires nothing; an uncovered or weaker entity, a different VM or database, and a released set each raise `StateError`; a console whose members changed still matches by key                                                          |
-| prompt notice         | a prompt helper or resolver prompt raised under a set that has not announced fails with `StateError`; after `announce_prompt` it prompts                                                                                                         |
+| prompt notice         | every prompt helper and a resolver prompt, raised while a set is held, show that set's notice exactly once before the first prompt and not again for later prompts under it; with no set held they show none                                     |
 | activation            | a cold VM boots under a transient vm exclusive and the body holds the vm shared; `auto_start` under a shared set refuses; step 6 refuses a changed vm_uuid, intent or host; a cold family's intent survives a failed boot                        |
 | account removal       | against a scripted guest: plain `userdel`, then the home and spool removed only when owned by the probed uid; a home owned by someone else is kept                                                                                               |
 | ensure_group          | two concurrent workspace creates whose group already exists both succeed                                                                                                                                                                         |
@@ -644,15 +646,21 @@ the fake guest waits on) while the second runs on another thread.
 | session delete and its grant                  | `session delete` (agent mode) paused; `session create` for the same workspace and agent | create refused                        |
 | session delete and revoke                     | `session delete` (agent mode) paused; `agent revoke-workspaces` of that workspace       | revoke refused                        |
 
-### Implementation-time check: harness setup confinement
+### Implementation-time checks
 
-The lock sets assume `apply_workspace_setup` and `apply_agent_setup` write only inside their owner
-(the workspace tree, the account home); `apply_vm_setup` runs under the vm exclusive and is covered
-whatever it writes. The implementation PR confirms this for every harness integration's writers, for
-each one either with a test that a setup applied for one owner leaves another owner's tree
-untouched, or with a review cited in the PR naming the writer and the paths it can reach. Only the
-cleanup paths (`harness_setup/cleanup.py:25-42`) were checked for this LLD. A writer that crosses
-owners adds the other owner to its request, exclusive, before the PR merges.
+**Harness setup confinement.** The lock sets assume `apply_workspace_setup` and `apply_agent_setup`
+write only inside their owner (the workspace tree, the account home); `apply_vm_setup` runs under
+the vm exclusive and is covered whatever it writes. The implementation PR confirms this for every
+harness integration's writers, for each one either with a test that a setup applied for one owner
+leaves another owner's tree untouched, or with a review cited in the PR naming the writer and the
+paths it can reach. Only the cleanup paths (`harness_setup/cleanup.py:25-42`) were checked for this
+LLD. A writer that crosses owners adds the other owner to its request, exclusive, before the PR
+merges.
+
+**Concurrent account edits on trixie.** The integration run drives two account-editing operations at
+once on a trixie guest (for example an agent create beside a workspace create, which run `useradd`
+and `groupadd`/`usermod -aG` together) and confirms both succeed, so the reliance on shadow's own
+serialization is proved on the release this LLD could not check on a host.
 
 ### Existing tests that change
 
