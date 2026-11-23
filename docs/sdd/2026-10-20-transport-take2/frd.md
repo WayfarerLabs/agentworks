@@ -436,9 +436,9 @@ and resolves only the missing panes' secrets), the operator answered:]
 
 ### 2026-11-22
 
-[Told at closeout that the evidence matrix had 96 open live-evidence items (33 covered, 31 partial,
-32 gaps), and offered one last tester pass at `main` over every cell the existing beds can reach
-with the rest recorded as gaps in `locked.md`, locking now with every gap recorded, or standing up
+[Told at closeout that the evidence matrix had 96 live-evidence items (33 covered, 31 partial, 32
+gaps), and offered one last tester pass at `main` over every cell the existing beds can reach with
+the rest recorded as gaps in `locked.md`, locking now with every gap recorded, or standing up
 missing beds first, the operator chose:]
 
 > One last tester pass
