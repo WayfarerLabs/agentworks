@@ -184,10 +184,11 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   exclusive lock, stops the account's processes and skips the removal with a warning if any remain,
   as today, then runs `userdel -r` as today. That keeps today's behavior exactly: a configured
   pre-deletion hook can still veto before anything is removed, a mailbox owned by someone else is
-  kept, and the numeric user ID is never free while the home exists. Its cost under finer locks is
-  that `userdel -r` holds shadow's lock while it removes the home, so a concurrent account edit
-  elsewhere on the VM waits on it, and past `lckpwdf`'s 15 seconds fails with a typed error the
-  operator can retry; nothing is lost.
+  kept, and the numeric user ID stays reserved while `userdel` removes the home (a removal that
+  fails partway leaves what it leaves today). Its cost under finer locks is that `userdel -r` holds
+  shadow's lock while it removes the home, so a concurrent account edit elsewhere on the VM waits on
+  it, and past `lckpwdf`'s 15 seconds fails with a typed error the operator can retry; nothing is
+  lost.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
@@ -281,11 +282,11 @@ lock stays per workstation and per database. Dry runs still take no lock.
 
 Two implementation PRs after the design, stacked and each green on its own:
 
-1. **Under today's single lock:** the shared-state fixes (`groupadd -f`, `userdel` split from the
-   home removal, the SSH config rebuild mutex, the bounded package-manager wait, unique operation
-   log names), guards on the mutators that take no lock today, and the prompts moved before
-   acquisition. Each is correct with the single lock in place, and the first two fix races that
-   exist today.
+1. **Under today's single lock:** the shared-state fixes (`groupadd -f`, the agent-removal process
+   check before `userdel -r`, the SSH config rebuild mutex, the bounded package-manager wait, unique
+   operation log names), guards on the mutators that take no lock today, and the prompts moved
+   before acquisition. Each is correct with the single lock in place, and the SSH config rebuild
+   mutex and the new guards fix races that exist today.
 2. **The hierarchy:** the new primitive replacing `native_mutation_guard` and its token in one step
    (no old and new lock paths side by side on `main`), every call site moved to its lock set, and
    every doc that describes the single guard updated: `cli/command-reference.md` (the busy
