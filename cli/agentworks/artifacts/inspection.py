@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 from agentworks import output
 from agentworks.artifacts.bundle import resolve_bundle
+from agentworks.artifacts.model import ArtifactComponent
 from agentworks.artifacts.names import is_artifact_name
 from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.harness_setup.inputs import SetupInputs
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
     from agentworks.artifacts.application import ArtifactSkip
     from agentworks.artifacts.declarations import ArtifactsConfig
     from agentworks.artifacts.model import (
-        ArtifactComponent,
         ArtifactFacet,
         ArtifactGroup,
         ArtifactOwner,
@@ -423,6 +423,13 @@ def _integration_metadata(owner: SetupInputs, name: str, view: ArtifactOwnerView
     )
 
 
+def _is_mcp_receiving_name(name: str) -> bool:
+    if is_artifact_name(name):
+        return True
+    component, _, canonical = name.partition("-")
+    return component in get_args(ArtifactComponent) and is_artifact_name(canonical)
+
+
 def _mcp_placements(claims: tuple[NativeClaim, ...]) -> tuple[PlacementMetadata, ...]:
     """Project registration metadata only, including retained withdrawn entries."""
     return tuple(
@@ -431,7 +438,7 @@ def _mcp_placements(claims: tuple[NativeClaim, ...]) -> tuple[PlacementMetadata,
         if claim.role == "artifact-mcp-server"
         and claim.source is not None
         and re.fullmatch(r"[0-9a-f]{64}", claim.source) is not None
-        and is_artifact_name(claim.identifier)
+        and _is_mcp_receiving_name(claim.identifier)
         and claim.destination.startswith("/")
         and claim.destination.isprintable()
         and all(part not in {"", ".", ".."} for part in claim.destination.split("/")[1:])

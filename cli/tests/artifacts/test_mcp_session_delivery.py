@@ -123,15 +123,16 @@ def test_codex_unrelated_raw_config_does_not_block_mcp():
     assert result.argv and not result.application.deferred
 
 
-@pytest.mark.parametrize("payload", ["x" * 40000])
-def test_codex_large_optional_mcp_does_not_gate_legacy_artifacts(payload):
-    server = mcp(metadata={"type": "stdio", "command": "server", "args": [payload], "env": {}})
+def test_codex_large_optional_mcp_does_not_gate_legacy_artifacts():
+    server = mcp(metadata={"type": "stdio", "command": "server", "args": ["x" * 40000], "env": {}})
     skill = artifact(ArtifactType.SKILL)
+    current = context(server, skill)
     result = codex.session_artifacts(
-        context(server, skill),
+        current,
         extra_args=[],
         enabled_workarounds=["session-mcp-overrides", "session-home-skills"],
     )
+    result = codex.limit_session_argv(result, current.inputs)
     assert result.application.files and not result.argv
     assert {entry.input_id for entry in result.application.deferred} == {server.identity}
 

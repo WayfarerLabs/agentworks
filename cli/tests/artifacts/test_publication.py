@@ -68,6 +68,23 @@ def test_conflicting_artifact_does_not_block_an_independent_artifact(target):
     assert tuple(file.path for file in result.skipped) == (str(second),)
 
 
+def test_conflict_on_reassigned_destination_keeps_members_of_both_origins(target):
+    shared, obsolete, added = (target.home / name for name in ("shared", "obsolete", "added"))
+    previous = publish_artifacts(
+        target.files(), (artifact(shared), artifact(obsolete)), (), lambda _: None, roots=(str(target.home),)
+    ).files
+    shared.write_bytes(b"operator edit")
+    desired = tuple(replace(artifact(path), origins=("b" * 64,)) for path in (shared, added))
+    result = publish_artifacts(target.files(), desired, previous, lambda _: None, roots=(str(target.home),))
+    assert result.files == previous
+    assert {item.path: item.origins for item in result.skipped} == {
+        str(shared): ("b" * 64,),
+        str(added): ("b" * 64,),
+        str(obsolete): ("a" * 64,),
+    }
+    assert shared.read_bytes() == b"operator edit" and obsolete.read_bytes() == b"content" and not added.exists()
+
+
 def test_matching_unclaimed_file_is_adopted_and_retired(target, monkeypatch):
     path = target.home / "matching"
     path.write_bytes(b"content")
@@ -125,12 +142,14 @@ def test_generated_section_retirement_reports_without_removing_operator_content(
     path.write_bytes(original)
     desired = (replace(artifact(path), generated_section=True),)
     previous = publish_artifacts(target.files(), desired, (), lambda files: None, roots=(str(target.home),)).files
+    path.write_bytes(b"New prefix.\n" + path.read_bytes())
+    replacement = artifact(target.home / "guidance.md")
     reports: list[str] = []
     monkeypatch.setattr("agentworks.artifacts.publication.output.info", reports.append)
-    result = publish_artifacts(target.files(), (), previous, lambda files: None, roots=(str(target.home),))
+    result = publish_artifacts(target.files(), (replacement,), previous, lambda files: None, roots=(str(target.home),))
     remaining = path.read_bytes()
-    assert not result.files and remaining.startswith(original)
-    assert remaining[len(original) :] == b"\n"
+    assert not result.skipped and [file.path for file in result.files] == [replacement.path]
+    assert Path(replacement.path).read_bytes() == replacement.data and remaining == b"New prefix.\n" + original + b"\n"
     assert len(reports) == 1 and str(path) in reports[0]
 
 

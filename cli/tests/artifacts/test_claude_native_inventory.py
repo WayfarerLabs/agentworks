@@ -167,7 +167,12 @@ def test_claude_reserved_names_remain_ordinary_skills_for_other_harnesses(tmp_pa
     marker.parent.mkdir(parents=True)
     marker.write_text(f"---\nname: {name}\ndescription: Existing skill\n---\nbody\n")
 
-    result = probe(tmp_path, tool=tool, identities=(f"skill:{name}",))
+    result = probe(
+        tmp_path,
+        tool=tool,
+        identities=(f"skill:{name}",),
+        entries={str(marker.parent.with_name("proposal") / "SKILL.md"): f"skill:{name}"},
+    )
 
     assert result["problems"] == ["native-artifact-collision"]
     assert [row["path"] for row in result["inventory"]] == [str(marker)]

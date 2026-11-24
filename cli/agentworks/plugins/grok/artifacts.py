@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import yaml
@@ -10,6 +9,7 @@ import yaml
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import delivery_name
 from agentworks.artifacts.native.common import (
     NativeSessionArtifacts,
     ancestor_diagnostics,
@@ -21,7 +21,6 @@ from agentworks.artifacts.native.common import (
     select_inputs,
     select_session_artifacts,
     skill_files,
-    validate_names,
 )
 from agentworks.artifacts.native.guidance import guidance_rules, guidance_skills
 from agentworks.artifacts.native.shell import filesystem_artifacts
@@ -54,22 +53,22 @@ def _persona(item: ArtifactInput) -> dict[str, object]:
 
 
 def outer_artifacts(inputs: ArtifactInputs, root: str, *, workspace: bool = False) -> ArtifactApplication:
-    validate_names(inputs)
     files = list(guidance_skills(f"{root}/skills", inputs) if workspace else guidance_rules(f"{root}/rules", inputs))
     for item in inputs.items():
         content = item.content
+        name = delivery_name(inputs, item)
         if content.type is ArtifactType.SKILL:
-            files.extend(skill_files(f"{root}/skills", item))
+            files.extend(skill_files(f"{root}/skills", item, name))
         elif content.type is ArtifactType.AGENT:
             options = _persona(item)
             del options["prompt"]
-            header = yaml.safe_dump({"name": content.name, **options}, sort_keys=False)
+            header = yaml.safe_dump({"name": name, **options}, sort_keys=False)
             files.append(
                 artifact_file(
-                    f"{root}/agents/{content.name}.md",
+                    f"{root}/agents/{name}.md",
                     f"---\n{header}---\n{content.text}",
                     (item,),
-                    identity=f"agent:{content.name}",
+                    identity=f"agent:{name}",
                 )
             )
     return ArtifactApplication(tuple(files))
@@ -123,7 +122,7 @@ def session_artifacts(
     environment = context.environment if resolve_home is None else {"GROK_HOME": resolve_home(context)}
     root = native_home(context.home, environment, "GROK_HOME", ".grok")
     private = filesystem_artifacts(inputs, context.directory, session=True, aggregate_hints=True)
-    files = [replace(file, native_identity=None) for file in private.files]
+    files = list(private.files)
     name = session_package_prefix(context.session_uuid) + "entry"
     description = (
         f"Use only when AGENTWORKS_SESSION_UUID={context.session_uuid}. "
