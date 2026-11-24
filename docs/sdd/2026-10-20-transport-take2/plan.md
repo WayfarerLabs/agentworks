@@ -780,7 +780,7 @@ module, and `remote_exec.py` is deleted.
       value, and the mise setup test carries its own `file` marker.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
-- [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
+- [x] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
   - hold interrupts inside each cloud's `remove_ssh_allow` instead of at its call sites, keeping
     create's rollback on its two-Ctrl-C protocol (done for AWS and Azure; GCP has no such function,
     platform-lld);
@@ -794,9 +794,9 @@ module, and `remote_exec.py` is deleted.
     platform-lld, for the tester);
   - make the bootstrap's swap step recover from an interruption between `fallocate` and the fstab
     line (done).
-  - The underscore item is settled by #953, which merges before the lock; this box closes when it
-    does. The closeout pass found an underscore hostname misbehaving off WSL2 (the matrix's Closeout
-    findings), and with #953 `vm create` refuses one on every platform (operator ruling 2026-11-22).
+  - The underscore item is settled by #953 (merged 2026-11-24). The closeout pass found an
+    underscore hostname misbehaving off WSL2 (the matrix's Closeout findings), and with #953
+    `vm create` refuses one on every platform (operator ruling 2026-11-22).
 - [x] Complete the evidence matrix, sending any gap to the operator.
   - The [evidence matrix](./evidence-matrix.md) is compiled from every tester report at `main`
     `2b1d69dac`, and its gaps went to the operator, who ruled one last tester pass over every cell
@@ -808,14 +808,14 @@ module, and `remote_exec.py` is deleted.
       [2026-11-23 ruling](./frd.md#2026-11-23), and fold their results into the matrix and
       `locked.md`: the rows in `locked.md`'s first open-evidence group, plus the forced-fault
       remainders of S2, S6, S7, S8 and I8, and 638's backup interruption.
-- [ ] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
+- [x] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
       and the operator guides) describe the end state, then write `locked.md`.
   - The docs half is done (`d84924c12`, `f138a6cdc`, `3741269b0`, `c328bd1f5`, `bfa173d2d`): the
     permanent docs describe the end state, no permanent artifact cites this SDD, and ADR 0027
     carries the design's load-bearing decisions. Rechecked at the closeout, with `main` past #916,
     before [`locked.md`](./locked.md) was written. The closeout report then found the built-in
-    migration topic silent on reinit retiring the tmuxinator projects; #961 fixes it. This box
-    closes when #961 and #953 merge.
+    migration topic silent on reinit retiring the tmuxinator projects; #961 fixed it, and #961 and
+    #953 merged on 2026-11-24.
 
 Definition of done: R10's end state holds, every matrix cell has evidence or an operator
 disposition, and the SDD is locked.

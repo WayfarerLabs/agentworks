@@ -1,7 +1,7 @@
 # Transport take 2: locked
 
-**Locked:** set when this file merges, which waits for #953, the excluded experiments and a soak
-after the 0.20.0 release (operator, 2026-11-23).
+**Locked:** set when this file merges, which waits for the excluded experiments and a soak after the
+0.20.0 release (operator, 2026-11-23).
 
 The implementation is complete. Core reaches every managed VM through one platform-agnostic channel,
 the installed OpenSSH client at the VM's tailnet address, with every request on the client's stdin.
@@ -30,11 +30,10 @@ live evidence the operator ruled recorded here rather than closed (see
   follow-ups, which PR C merged and finished (plan, slice 8).
 - [#916](https://github.com/WayfarerLabs/agentworks/pull/916): the generated workspace tmuxinator
   projects removed, with reinit retiring those earlier releases wrote;
-  [#961](https://github.com/WayfarerLabs/agentworks/pull/961), which merges before this lock, says
-  so in the built-in migration topic.
-- [#953](https://github.com/WayfarerLabs/agentworks/pull/953), which merges before this lock:
-  `vm create` refuses a hostname with an underscore on every platform, moving the rule from WSL2
-  into core (operator ruling 2026-11-22).
+  [#961](https://github.com/WayfarerLabs/agentworks/pull/961) says so in the built-in migration
+  topic.
+- [#953](https://github.com/WayfarerLabs/agentworks/pull/953): `vm create` refuses a hostname with
+  an underscore on every platform, moving the rule from WSL2 into core (operator ruling 2026-11-22).
 
 ## Where the design lives now
 
@@ -65,8 +64,8 @@ in for Windows 11. It classified each row without replacing its status: 29 quali
 three R11 rows among them), 10 current positives (one of them the underscore hostname failure), 49
 not retested, 8 unavailable bed, GUI or console or conditionally unobserved, and the two extras kept
 as history. Every protected gate passed and the pass found no runtime regression. The pass predates
-`main`'s merges of PRs #916, #944 and #945, and #953, which merges before this lock; #916 had its
-own live pass (PR comment 7078408324), and #953 has its own.
+`main`'s merges of PRs #916, #944, #945 and #953; #916 had its own live pass (PR comment
+7078408324), and #953 has its own.
 
 The pass also found that Python 3.13 rejects the PVE 8.4 CA while 3.12 verifies it (see
 [Follow-up issues](#follow-up-issues)), that the Windows bed's route to Proxmox needed pinned
