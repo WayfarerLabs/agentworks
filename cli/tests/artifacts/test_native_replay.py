@@ -199,34 +199,28 @@ def test_inactive_facet_replays_known_persona_without_reusing_old_policy_paths(
         assert set(request["identities"]) == {file.native_identity for file in all_files if file.native_identity}
         assert request["proposed"] == {}
         return
-    if prior_state == "competing" and tool == "codex":
-        assert inputs.local is not None
-        assert {item.input_id for item in result.artifacts.deferred} == {
-            item.identity for item in inputs.items() if item.identity != persona.identity
-        }
-        assert any(persona.origin_identity in file.origins for file in result.artifacts.files)
+    assert {item.input_id for item in result.artifacts.deferred}.isdisjoint(
+        item.identity for item in inputs.items() if item.content.type is ArtifactType.AGENT
+    )
+    assert any(persona.origin_identity in file.origins for file in result.artifacts.files)
     proposed = integration._artifact_plan.application.files
     selected_request = next(
         request for request in reversed(requests) if set(request["paths"]) == {file.path for file in proposed}
     )
-    assert set(selected_request["entries"]) == {
-        file.path for file in ((*earlier.files, *proposed) if tool == "codex" else proposed) if file.native_identity
-    }
+    assert set(selected_request["entries"]) == {file.path for file in proposed if file.native_identity}
     assert set(selected_request["paths"]) == {file.path for file in proposed}
     assert set(selected_request["identities"]) == {file.native_identity for file in proposed if file.native_identity}
     assert not any(file.path in selected_request["proposed"] for file in earlier.files)
     assert not any(file.path in selected_request["paths"] for file in unrelated_files)
 
 
-def test_recognition_hint_cannot_acknowledge_a_mismatched_proposed_entry():
+def test_existing_entry_at_the_proposed_path_must_have_the_proposed_native_name():
     from agentworks.artifacts.native.probe import _inventory_problems
 
     path = "/native/review.md"
     result = _inventory_problems(
         [{"kind": "agent", "path": path, "name": "previous"}],
-        ("agent:review",),
         {path: "agent:review"},
-        recognized_entries={path: "agent:previous"},
     )
     assert [(problem.code, problem.identity, problem.path) for problem in result] == [
         ("native-artifact-identity-mismatch", "agent:review", path)

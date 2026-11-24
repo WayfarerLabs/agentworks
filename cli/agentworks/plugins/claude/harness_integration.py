@@ -130,8 +130,11 @@ class ClaudeCodeConfig(AgwModel):
     replayed on resume."""
 
     agent: str | None = None
-    """Forwarded as ``--agent`` on every process launch, including resume.
-    Claude Code owns agent discovery and validation."""
+    """Select a Claude agent on every process launch, including resume.
+
+    Use the delivered name for a session artifact, such as ``vm-review``.
+    Agentworks qualifies that name with the session plugin when it supplies
+    the persona. Claude Code owns discovery and validation."""
 
     append_system_prompt: str | None = None
     """Forwarded as ``--append-system-prompt`` on every process launch,
@@ -230,7 +233,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 lambda inputs: outer_artifacts(inputs, "/etc/claude-code/.claude", guidance_as_skills=True),
             )
         )
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -240,6 +243,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     environment=invocation.request_environment(),
                     redactor=invocation.redactor,
                     files=files,
+                    setup=invocation,
                     vm_only=True,
                 ),
             )
@@ -310,7 +314,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             skip_mcp=skip_mcp,
         )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -322,6 +326,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     home=invocation.home,
                     native_root=root,
                     files=files,
+                    setup=invocation,
                 ),
             )
         return replace(
@@ -342,7 +347,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             )
         )
         mcp = setup_workspace("claude", config, invocation)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -353,6 +358,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
+                    setup=invocation,
                     workspace_only=True,
                 ),
             )
@@ -551,24 +557,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
         parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
         if self.config.agent is not None:
             selected_agent = self.config.agent
-            context = self._session_binding.artifact_context
-            selected_origins = (
-                {
-                    item.origin_identity
-                    for item in context.inputs.items()
-                    if item.content.type is ArtifactType.AGENT and item.content.name == selected_agent
-                }
-                if context is not None
-                else set()
-            )
-            delivered = {
-                file.native_identity.removeprefix("agent:")
-                for file in self._artifact_plan.application.files
-                if file.native_identity is not None
-                and file.native_identity.startswith("agent:")
-                and selected_origins.intersection(file.origins)
-            }
-            selected_agent = next(iter(delivered), selected_agent)
+            for file in self._artifact_plan.application.files:
+                kind, _, qualified = (file.native_identity or "").partition(":")
+                plugin, _, delivered = qualified.partition(":")
+                if kind == "agent" and plugin and delivered and delivered == selected_agent:
+                    selected_agent = qualified
+                    break
             parts += ["--agent", shlex.quote(selected_agent)]
         if self.config.append_system_prompt is not None:
             parts += ["--append-system-prompt", shlex.quote(self.config.append_system_prompt)]

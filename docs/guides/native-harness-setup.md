@@ -96,12 +96,13 @@ override, Claude's role is `~/.claude.json`, not `~/.claude/settings.json`. Code
 VM facets defer MCP to user; Shell publishes canonical JSON and an index at each scope without
 running clients or servers.
 
-The declared artifact key is the native server name, unchanged: `github` registers as `github`.
-Original-owner hashes remain internal provenance and do not rename the server. Separate native
-user/project configurations retain the harness's normal loading and precedence rules; use distinct
-names to address separate connections. Within one destination, equal same-name inputs share one
-entry; different definitions are all deferred with a warning. Use `agw artifact show` for recorded
-names and destinations without querying a native MCP inventory or exposing connection values.
+An artifact placed at its owning scope uses its declared key. A server named `github` deferred from
+VM scope registers as `vm-github`. The original scope prefix stays the same through later routing.
+Separate native user/project configurations follow the harness's loading and precedence rules. Use
+distinct names to address separate connections. Within one destination, equal definitions for the
+same receiving key share an entry. Different definitions for that key are all deferred. Use
+`agw artifact show` for recorded names and destinations without querying a native MCP inventory or
+exposing connection values.
 
 Application owns an entry, not the whole shared file. Missing entries are created; identical unowned
 entries can be adopted and become managed, with a notice after ownership is saved. Matching the
@@ -116,13 +117,12 @@ When ancestor routing is unresolved, its existing entry and ownership are retain
 declaration keeps that ownership; a different local definition is deferred until ancestor setup is
 repaired. Withdrawing only the local declaration does not remove the retained ancestor entry.
 
-When upgrading from generated MCP names, the next owning setup retires unchanged recorded aliases
-and creates or adopts the declared name. Modified aliases remain recorded with a warning; unclaimed
-entries remain foreign regardless of their spelling. A conflicting literal entry stays in place and
-leaves the requested artifact unhandled, while an unchanged obsolete alias still retires. Native
-credentials are retained, although native clients can bind credentials or approvals to a server name
-and require operator review after a rename. Private session carriers change on the next managed
-start/restart. This adds no automatic ancestor repair or workspace reinit operation.
+On upgrade, the owning VM/admin or agent reinit retires unchanged recorded MCP keys and creates or
+adopts the current name. Modified entries retain their claims and warn. A differing unowned entry
+stays in place and leaves the requested artifact unhandled, while an unchanged obsolete key still
+retires. Native credentials are retained. The harness may bind credentials or approvals to a server
+name and require operator review after a rename. Private session carriers change on managed restart.
+Existing workspace placements keep their names, and new workspaces use the current rules.
 
 Codex settings mappings share `config.toml` with MCP. Setup computes safe obsolete-entry removal,
 the selected mapping policy and desired MCP entries in one document plan. An actual surviving mapped

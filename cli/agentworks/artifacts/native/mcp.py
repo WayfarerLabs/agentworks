@@ -12,6 +12,7 @@ from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.config_files import publish_config
 from agentworks.artifacts.model import ArtifactInput, ArtifactInputs, ArtifactType
+from agentworks.artifacts.names import delivery_name
 from agentworks.artifacts.native.layout import NativeUserLayout, resolve_user_layout
 from agentworks.capabilities.harness_integration.settings import (
     SettingsFormat,
@@ -91,23 +92,21 @@ def render_mcp(item: ArtifactInput, tool: MCPTool) -> SettingsObject:
 
 
 def mcp_input_conflicts(inputs: ArtifactInputs, tool: MCPTool) -> dict[str, str]:
-    """Defer every original input when one declared name has different native definitions."""
+    """Defer every original input when one receiving key has different native definitions."""
     items = tuple(item for item in inputs.items() if item.content.type is ArtifactType.MCP_SERVER)
     definitions: dict[str, SettingsObject] = {}
     conflicting_names: set[str] = set()
     for item in items:
-        name = item.content.name
+        name = delivery_name(inputs, item)
         entry = render_mcp(item, tool)
         if name in definitions and definitions[name] != entry:
             conflicting_names.add(name)
         else:
             definitions[name] = entry
     return {
-        item.identity: (
-            f"MCP server '{item.content.name}' has different requested native definitions; delivery is deferred."
-        )
+        item.identity: f"MCP server '{name}' has different requested native definitions; delivery is deferred."
         for item in items
-        if item.content.name in conflicting_names
+        if (name := delivery_name(inputs, item)) in conflicting_names
     }
 
 
@@ -198,7 +197,7 @@ def session_mcp_conflicts(
                     raise ConfigError("native MCP project config must use an object")
                 tables.append(_table(local, key))
             for item in items:
-                name = item.content.name
+                name = delivery_name(inputs, item)
                 expected = render_mcp(item, tool)
                 if any(name in table and table[name] != expected for table in tables):
                     conflicts[item.identity] = (
@@ -265,7 +264,7 @@ def apply_mcp(
     grouped: dict[str, list[ArtifactInput]] = {}
     for item in invocation.artifacts.items():
         if item.content.type is ArtifactType.MCP_SERVER:
-            grouped.setdefault(item.content.name, []).append(item)
+            grouped.setdefault(delivery_name(invocation.artifacts, item), []).append(item)
     conflicts = mcp_input_conflicts(invocation.artifacts, tool)
     ambiguous = {name for name, items in grouped.items() if items[0].identity in conflicts}
     desired = {name: items for name, items in grouped.items() if name not in ambiguous}

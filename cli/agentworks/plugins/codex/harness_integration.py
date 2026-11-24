@@ -134,7 +134,13 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import defer_session_mcp, outer_artifacts, session_artifacts, vm_artifacts
+from agentworks.plugins.codex.artifacts import (
+    defer_session_mcp,
+    limit_session_argv,
+    outer_artifacts,
+    session_artifacts,
+    vm_artifacts,
+)
 from agentworks.plugins.codex.recorder import home_word, install_recorder, notify_value_word, thread_tail
 from agentworks.schema import AgwModel, Interpolated, MergeStrategy
 from agentworks.topics import TopicProse
@@ -531,7 +537,7 @@ class CodexIntegration(HarnessIntegration):
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
         plan = ArtifactApplication() if self.retiring else render_setup_artifacts(invocation, vm_artifacts)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -541,6 +547,7 @@ class CodexIntegration(HarnessIntegration):
                     environment=invocation.request_environment(),
                     redactor=invocation.redactor,
                     files=files,
+                    setup=invocation,
                     vm_only=True,
                 ),
             )
@@ -596,7 +603,7 @@ class CodexIntegration(HarnessIntegration):
             skip_mcp=skip_mcp,
         )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -608,6 +615,7 @@ class CodexIntegration(HarnessIntegration):
                     home=invocation.home,
                     native_root=root,
                     files=files,
+                    setup=invocation,
                 ),
             )
         return replace(
@@ -633,7 +641,7 @@ class CodexIntegration(HarnessIntegration):
             )
         )
         mcp = setup_workspace("codex", config, invocation)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
@@ -644,6 +652,7 @@ class CodexIntegration(HarnessIntegration):
                     redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
+                    setup=invocation,
                     workspace_only=True,
                 ),
             )
@@ -725,6 +734,8 @@ class CodexIntegration(HarnessIntegration):
             ),
             workspace=self._workspace_path,
         )
+        if artifact_context is not None:
+            self._artifact_plan = limit_session_argv(self._artifact_plan, artifact_context.inputs)
         if artifact_context is not None and native_root is not None:
             validate_discovery_paths(
                 artifact_context,

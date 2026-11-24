@@ -8,12 +8,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.model import ArtifactInputs, ArtifactType
 from agentworks.artifacts.native.common import render_setup_artifacts
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.harness_setup.model import SetupRecord
 from agentworks.plugins.claude import artifacts as claude
-from tests.artifacts._fixtures import received
+from tests.artifacts._fixtures import group, received
 from tests.artifacts.test_native_delivery import artifact, context, enabled, owned
 from tests.vm_access_support import Admin, RecordingVMAccess
 
@@ -21,16 +21,19 @@ from tests.vm_access_support import Admin, RecordingVMAccess
 @pytest.mark.parametrize("prior_owner", ["withdrawn", "ambiguous", "different-type", "changed-scope"])
 @pytest.mark.parametrize("artifact_type", [ArtifactType.SKILL, ArtifactType.AGENT])
 def test_setup_requires_unique_current_owner_evidence(db, prior_owner, artifact_type):
-    first, second = (artifact(artifact_type, owner=owner) for owner in ("first", "second"))
+    first = artifact(artifact_type, owner="first")
+    first = replace(first, origin=replace(first.origin, component="vm", resource_kind="vm"))
+    second = replace(first, origin=replace(first.origin, resource_name="second"))
     other_type = ArtifactType.AGENT if artifact_type is ArtifactType.SKILL else ArtifactType.SKILL
-    independent = artifact(other_type, owner="second")
+    independent = artifact(other_type, owner="local")
     old = {
-        "withdrawn": artifact(artifact_type, owner="withdrawn"),
+        "withdrawn": replace(first, origin=replace(first.origin, resource_name="withdrawn")),
         "ambiguous": first,
-        "different-type": artifact(other_type, owner="first"),
+        "different-type": replace(artifact(other_type, owner="first"), origin=first.origin),
         "changed-scope": replace(first, origin=replace(first.origin, component="agent", resource_kind="agent")),
     }[prior_owner]
-    old_file = claude.outer_artifacts(received(old), "/native").files[0]
+    old_group = group(old)
+    old_file = claude.outer_artifacts(ArtifactInputs(deferred={old_group.owner: old_group}), "/native").files[0]
     origins = (first.origin_identity, second.origin_identity) if prior_owner == "ambiguous" else None
     prior = SetupRecord(
         component="agent",
@@ -61,11 +64,10 @@ def test_setup_requires_unique_current_owner_evidence(db, prior_owner, artifact_
 
 @pytest.mark.parametrize("tool", ["claude", "codex", "grok"])
 @pytest.mark.parametrize("artifact_type", [ArtifactType.RULE, ArtifactType.HINT])
-def test_cross_owner_guidance_names_warn_and_coexist_in_setup_and_session(db, monkeypatch, tool, artifact_type):
+def test_cross_owner_guidance_coexists_under_distinct_delivery_names(db, tool, artifact_type):
     adapter = import_module(f"agentworks.plugins.{tool}.artifacts")
     first, second = (artifact(artifact_type, owner=owner) for owner in ("first-owner", "second-owner"))
-    warnings: list[str] = []
-    monkeypatch.setattr("agentworks.artifacts.native.common.output.warn", warnings.append)
+    first = replace(first, origin=replace(first.origin, component="vm", resource_kind="vm"))
     incomplete = Mock()
     access = RecordingVMAccess([], Admin())
     invocation = UserSetupInvocation(
@@ -91,9 +93,21 @@ def test_cross_owner_guidance_names_warn_and_coexist_in_setup_and_session(db, mo
         first.origin_identity,
         second.origin_identity,
     }
-    assert len(warnings) == 1 and all(item.origin.resource_name in warnings[0] for item in (first, second))
+    base = (
+        "agentworks-hints"
+        if artifact_type is ArtifactType.HINT
+        else "agentworks-rule-review"
+        if tool == "codex"
+        else "review"
+    )
+    from pathlib import PurePosixPath
+
+    if tool == "codex":
+        delivered = {PurePosixPath(file.package_root).name for file in setup.files}
+    else:
+        delivered = {PurePosixPath(file.path).stem for file in setup.files}
+    assert delivered == {base, f"vm-{base}"}
     incomplete.assert_not_called()
-    warnings.clear()
     session = adapter.session_artifacts(
         context=context(first, second), extra_args=[], enabled_workarounds=enabled(adapter.session_artifacts)
     )
@@ -102,4 +116,3 @@ def test_cross_owner_guidance_names_warn_and_coexist_in_setup_and_session(db, mo
         first.origin_identity,
         second.origin_identity,
     }
-    assert any(all(item.origin.resource_name in warning for item in (first, second)) for warning in warnings)

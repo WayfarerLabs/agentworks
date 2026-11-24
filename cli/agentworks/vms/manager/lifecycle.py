@@ -39,6 +39,7 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
     UserAbort,
+    ValidationError,
 )
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing, VMNotReady
@@ -161,6 +162,27 @@ def create_vm(
     # pending-plus-durable registry built below is authoritative for mutation.
     registry = load_request_registry(config, include_live_resources=False)
 
+    # The name's own checks come next, before anything uses the name or can
+    # prompt (site selection, the Tailscale and SSH checks, the slug prompt).
+    # Existence goes first so an existing VM, even one named before the
+    # underscore rule, reports that it exists.
+    vm_name = name
+    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
+    if db.get_vm(vm_name) is not None:
+        raise AlreadyExistsError(
+            f"VM '{vm_name}' already exists",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
+    # The name becomes the DNS hostname {slug}-{name}, which cannot hold an underscore.
+    if "_" in vm_name:
+        raise ValidationError(
+            f"VM name '{vm_name}' holds an underscore, which its hostname cannot",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="Pick a VM name without underscores.",
+        )
+
     from agentworks.instance_specs import parse_vm_instance_specs
 
     desired_overlays = parse_vm_instance_specs(spec, admin_spec)
@@ -214,28 +236,17 @@ def create_vm(
         layered_vm=layered_vm_tmpl,
         layered_admin=layered_admin,
     )
-    existing_vm = db.get_vm(name)
-    if existing_vm is None:
-        registry = load_request_registry(
-            config,
-            live_database=db,
-            pending_publishers=(lambda target: target.add_live(pending),),
-        )
-        from agentworks.instance_specs import ensure_effective_references_enabled
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(lambda target: target.add_live(pending),),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
 
-        ensure_effective_references_enabled(registry, pending.outbound)
+    ensure_effective_references_enabled(registry, pending.outbound)
     site_decl = lookup_site(site, registry)
     ensure_site_ready(site_decl, registry)
 
-    vm_name = name
-    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
-
-    if existing_vm is not None:
-        raise AlreadyExistsError(
-            f"VM '{vm_name}' already exists",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
     from agentworks.instance_specs import refuse_orphan_creation_state
 
     refuse_orphan_creation_state(db, "vm", vm_name)
