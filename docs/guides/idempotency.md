@@ -126,10 +126,10 @@ UID/GID or recursively changes retained ownership. Named and numeric identity lo
 before the recreated account receives home permissions or SSH setup.
 
 Native account/group writers in agent create/reinit, workspace create/repair/copy, and explicit
-workspace grants share a nonblocking local guard keyed by the state database path and VM name.
-Contention aborts the operation with retry guidance. This coordinates cooperating commands using
-that database; guest administrators and commands from another control-plane database remain outside
-this guard. Identity lookups do not establish global NSS uniqueness.
+workspace grants share a local guard keyed by the state database path and VM name. Contention aborts
+the operation with retry guidance. This coordinates cooperating commands using that database; guest
+administrators and commands from another control-plane database remain outside this guard. Identity
+lookups do not establish global NSS uniqueness.
 
 The user step is detection-based and reports the true outcome (it is verifying, not blindly
 creating): it probes the agent user with `getent passwd` first, then reports `Created agent user`

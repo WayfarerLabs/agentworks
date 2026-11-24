@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
     from agentworks.execution.results import Result
 
-pytestmark = pytest.mark.usefixtures("stub_ssh_identity")
+pytestmark = [pytest.mark.windows, pytest.mark.usefixtures("stub_ssh_identity")]
 
 
 def _run(operation: str, db: Database, config: Any, vm_name: str) -> None:
