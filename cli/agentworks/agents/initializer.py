@@ -83,8 +83,17 @@ def create_new_agent_user(
     admin.run(Command(("useradd", "-m", "-U", "-s", f"/bin/{shell}", linux_user), elevated=True), check=True)
 
 
+def _require_retained_group(admin: VMAccess, linux_user: str, gid: str) -> None:
+    """Require the guest's named and numeric group lookups to identify the retained group."""
+    for key in (linux_user, gid):
+        result = admin.run(Command(("getent", "group", key)), check=True)
+        fields = result.stdout.decode("utf-8", "replace").strip().split(":")
+        if len(fields) != 4 or fields[0] != linux_user or fields[2] != gid:
+            raise StateError(f"retained home group identity mismatch for '{linux_user}' at GID {gid}")
+
+
 def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shell_path: str) -> None:
-    """Recreate a DB-owned account, preserving a retained home's numeric group ownership."""
+    """Recreate a DB-owned account with the retained home's numeric UID and GID."""
     import shlex
     import stat
 
@@ -93,32 +102,48 @@ def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shel
         admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
         return
 
-    # GNU stat does not follow the final symlink. Refuse a retained entry
-    # that is not a directory rather than assigning its group to an account.
-    retained = admin.run(Command(("stat", "-c", "%f:%g", "--", home), elevated=True), check=True)
-    mode, _, gid = retained.stdout.decode("utf-8", "replace").strip().partition(":")
+    # GNU stat does not follow the final symlink. Refuse retained entries
+    # other than directories, without changing ownership of their contents.
+    retained = admin.run(Command(("stat", "-c", "%f:%u:%g", "--", home), elevated=True), check=True)
+    fields = retained.stdout.decode("utf-8", "replace").strip().split(":")
     try:
-        is_directory = stat.S_ISDIR(int(mode, 16))
+        mode, uid, gid = fields
+        usable = stat.S_ISDIR(int(mode, 16)) and all(value.isascii() and value.isdecimal() for value in (uid, gid))
     except ValueError:
-        is_directory = False
-    if not is_directory or not gid.isascii() or not gid.isdecimal():
+        usable = False
+    if not usable:
         raise StateError(
-            f"cannot recreate agent '{linux_user}': could not read retained home directory GID at '{home}'"
+            f"cannot recreate agent '{linux_user}': could not read retained home directory UID/GID at '{home}'"
         )
 
-    # Both creations are exclusive: a concurrent collision fails without
-    # choosing another GID or changing ownership of the retained tree.
+    # Cooperating writers hold the VM mutation guard. Exclusive native
+    # creation refuses occupied IDs; NSS checks establish the identity used
+    # by numeric useradd and by later home/SSH setup, without enumerating NSS.
     try:
         admin.run(Command(("groupadd", "-g", gid, linux_user), elevated=True), check=True)
-        admin.run(Command(("useradd", "-m", "-g", gid, "-s", shell_path, linux_user), elevated=True), check=True)
+        _require_retained_group(admin, linux_user, gid)
+        admin.run(
+            Command(("useradd", "-m", "-u", uid, "-g", gid, "-s", shell_path, linux_user), elevated=True), check=True
+        )
+        for key in (linux_user, uid):
+            account = admin.run(passwd_lookup(key), check=True)
+            entry = account.stdout.decode("utf-8", "replace").strip().split(":")
+            if len(entry) != 7 or (entry[0], entry[2], entry[3], entry[5], entry[6]) != (
+                linux_user,
+                uid,
+                gid,
+                home,
+                shell_path,
+            ):
+                raise StateError(f"retained home account identity mismatch for '{linux_user}' at UID {uid}/GID {gid}")
     except AgentworksError as exc:
         exc.add_hint(
-            f"Recreation over retained home '{home}' requires GID {gid}. "
-            f"Group '{linux_user}' may remain after a partial failure; inspect it on the VM before retrying. "
-            "Retained ownership has not been changed."
+            f"Recreation over retained home '{home}' requires UID {uid} and GID {gid}. "
+            f"Account '{linux_user}' and group '{linux_user}' may remain after a failed or uncertain creation; "
+            "inspect both on the VM before retrying. Retained ownership has not been changed."
         )
         raise
-    output.info(f"Reused retained home GID {gid} for agent user '{linux_user}'")
+    output.info(f"Reused retained home UID {uid} and GID {gid} for agent user '{linux_user}'")
 
 
 def create_agent_on_vm(

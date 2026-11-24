@@ -1,4 +1,4 @@
-"""Missing DB-owned accounts reuse only a free retained-home GID, without migrating files."""
+"""Missing DB-owned accounts reuse only free retained-home IDs, without migrating files."""
 
 from __future__ import annotations
 
@@ -17,11 +17,12 @@ from tests.vm_access_support import AccessRecorder, Call
 if TYPE_CHECKING:
     from agentworks.db import Database
 
+UID = "1001"
 GID = "1003"
 HOME_PROBE = Script(f"test -e {HOME} || test -L {HOME}", Shell.SH, elevated=True)
-STAT = Command(("stat", "-c", "%f:%g", "--", HOME), elevated=True)
+STAT = Command(("stat", "-c", "%f:%u:%g", "--", HOME), elevated=True)
 GROUPADD = ("groupadd", "-g", GID, LINUX_USER)
-USERADD = ("useradd", "-m", "-g", GID, "-s", "/bin/bash", LINUX_USER)
+USERADD = ("useradd", "-m", "-u", UID, "-g", GID, "-s", "/bin/bash", LINUX_USER)
 
 
 def _retained_home(recorder: AccessRecorder, overrides: list[tuple[object, Result]] | None = None) -> None:
@@ -29,12 +30,22 @@ def _retained_home(recorder: AccessRecorder, overrides: list[tuple[object, Resul
     responses = [
         *(overrides or []),
         (HOME_PROBE, Result(Completed(0))),
-        (STAT, Result(Completed(0), f"41e8:{GID}\n".encode())),
+        (STAT, Result(Completed(0), f"41e8:{UID}:{GID}\n".encode())),
     ]
 
     def scripted(call: Call) -> Result | BaseException | None:
         response = next((result for request, result in responses if request == call.request), None)
-        return response if response is not None else answer(call) if answer is not None else None
+        if response is not None:
+            return response
+        if isinstance(call.request, Command):
+            if call.request.argv in (("getent", "group", LINUX_USER), ("getent", "group", GID)):
+                return Result(Completed(0), f"{LINUX_USER}:x:{GID}:\n".encode())
+            if call.request.argv in (
+                ("getent", "passwd", LINUX_USER),
+                ("getent", "passwd", UID),
+            ) and USERADD in _commands(recorder):
+                return Result(Completed(0), f"{LINUX_USER}:x:{UID}:{GID}::{HOME}:/bin/bash\n".encode())
+        return answer(call) if answer is not None else None
 
     recorder.answer = scripted
 
@@ -47,7 +58,7 @@ def _ownership_changes(recorder: AccessRecorder) -> list[tuple[str, ...]]:
     ]
 
 
-def test_recreation_uses_the_retained_numeric_gid_without_reowning_files(
+def test_recreation_uses_the_retained_numeric_ids_without_reowning_files(
     db: Database, config: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=_retained_home)
@@ -108,7 +119,9 @@ def test_an_unanswered_recovery_probe_never_creates_or_changes_ownership(
     assert all(argv[0] in ("getent", "stat") for argv in _commands(recorders[0]))
 
 
-@pytest.mark.parametrize("entry", [b"", b"41e8:garbled\n", b"a1ff:1003\n", b"81a4:1003\n"])
+@pytest.mark.parametrize(
+    "entry", [b"", b"41e8:1001:garbled\n", b"41e8:garbled:1003\n", b"a1ff:1001:1003\n", b"81a4:1001:1003\n"]
+)
 def test_an_unusable_home_stat_stops_recovery(
     db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, entry: bytes
 ) -> None:
@@ -163,3 +176,122 @@ def test_an_existing_account_preserves_its_shared_group_and_home_ownership(
     assert STAT not in recorder.requests("run")
     assert HOME_PROBE not in recorder.requests("run")
     assert _ownership_changes(recorder) == []
+
+
+@pytest.mark.parametrize("key", [LINUX_USER, GID], ids=["name", "gid"])
+@pytest.mark.parametrize(
+    "entry", [b"ws-other:x:1003:\n", b"agt-dev:x:9999:\n", b"", b"agt-dev:x:1003:\nother:x:1003:\n"]
+)
+def test_inconsistent_group_identity_stops_before_useradd(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, key: str, entry: bytes
+) -> None:
+    recorders = []
+
+    def configure(recorder: AccessRecorder) -> None:
+        recorders.append(recorder)
+        _retained_home(recorder, [(Command(("getent", "group", key)), Result(Completed(0), entry))])
+
+    with pytest.raises(StateError):
+        _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=configure)
+
+    assert GROUPADD in _commands(recorders[0])
+    assert not any(argv[0] in ("useradd", "chmod", "chown", "chgrp") for argv in _commands(recorders[0]))
+
+
+@pytest.mark.parametrize("key", [LINUX_USER, UID], ids=["name", "uid"])
+@pytest.mark.parametrize("field,value", [(0, "other"), (2, "9999"), (3, "9999"), (5, "/home/other"), (6, "/bin/sh")])
+def test_inconsistent_account_identity_stops_before_home_or_ssh_setup(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, key: str, field: int, value: str
+) -> None:
+    recorders = []
+
+    def configure(recorder: AccessRecorder) -> None:
+        recorders.append(recorder)
+        _retained_home(recorder)
+        answer = recorder.answer
+
+        def changed_identity(call: Call) -> Result | BaseException | None:
+            if call.request == Command(("getent", "passwd", key)) and USERADD in _commands(recorder):
+                fields = [LINUX_USER, "x", UID, GID, "", HOME, "/bin/bash"]
+                fields[field] = value
+                return Result(Completed(0), (":".join(fields) + "\n").encode())
+            return answer(call) if answer is not None else None
+
+        recorder.answer = changed_identity
+
+    with pytest.raises(StateError):
+        _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=configure)
+
+    assert USERADD in _commands(recorders[0])
+    assert not any(argv[0] in ("chmod", "chown", "chgrp") for argv in _commands(recorders[0]))
+    assert all(isinstance(request, (Command, Script)) for request in recorders[0].requests("run"))
+
+
+@pytest.mark.parametrize(
+    "outcome,error",
+    [
+        (Result(Completed(4)), CommandFailed),
+        (Result(Unknown(UnknownReason.CONNECTION)), ExecutionIncomplete),
+    ],
+)
+def test_uid_collision_or_uncertain_useradd_preserves_retained_tree_and_leaves_residue_for_inspection(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, outcome: Result, error: type[Exception]
+) -> None:
+    recorders = []
+
+    def configure(recorder: AccessRecorder) -> None:
+        recorders.append(recorder)
+        _retained_home(recorder, [(Command(USERADD, elevated=True), outcome)])
+
+    with pytest.raises(error) as caught:
+        _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=configure)
+
+    commands = _commands(recorders[0])
+    assert [argv for argv in commands if argv[0] == "groupadd"] == [GROUPADD]
+    assert [argv for argv in commands if argv[0] == "useradd"] == [USERADD]
+    assert not any(argv[0] in ("chmod", "chown", "chgrp", "groupdel", "userdel") for argv in commands)
+    assert getattr(caught.value, "hint", None) is not None
+
+
+@pytest.mark.parametrize(
+    "database,key", [("group", LINUX_USER), ("group", GID), ("passwd", LINUX_USER), ("passwd", UID)]
+)
+@pytest.mark.parametrize(
+    "completion,error",
+    [
+        (Completed(2), CommandFailed),
+        (Unknown(UnknownReason.DEADLINE), ExecutionIncomplete),
+    ],
+)
+def test_failed_identity_lookups_refuse_further_account_setup(
+    db: Database,
+    config: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    database: str,
+    key: str,
+    completion: Completed | Unknown,
+    error: type[Exception],
+) -> None:
+    recorders = []
+
+    def configure(recorder: AccessRecorder) -> None:
+        recorders.append(recorder)
+        _retained_home(recorder)
+        answer = recorder.answer
+
+        def failed_lookup(call: Call) -> Result | BaseException | None:
+            if call.request == Command(("getent", database, key)) and (
+                database == "group" or USERADD in _commands(recorder)
+            ):
+                return Result(completion)
+            return answer(call) if answer is not None else None
+
+        recorder.answer = failed_lookup
+
+    with pytest.raises(error):
+        _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=configure)
+
+    commands = _commands(recorders[0])
+    if database == "group":
+        assert USERADD not in commands
+    assert not any(argv[0] in ("chmod", "chown", "chgrp", "groupdel", "userdel") for argv in commands)

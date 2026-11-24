@@ -13,6 +13,7 @@ from agentworks import output
 from agentworks.errors import NotFoundError
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, CaptureOutput, Command
 from agentworks.execution.results import Completed
+from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
@@ -129,6 +130,7 @@ def repair_workspace(
     ws_path = stored_workspace_path(ws.workspace_path)
 
     with (
+        native_mutation_guard(db.path, vm.name) as guard,
         gated_vm_boundary(
             db,
             config,
@@ -136,6 +138,7 @@ def repair_workspace(
             vm,
             scope=_workspace_scope(db, vm, name),
             interaction=interaction,
+            held_native_guard=guard,
         ),
         operation_log(vm.name, "workspace-repair") as log,
     ):

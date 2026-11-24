@@ -9,6 +9,7 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AgentworksError, AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.execution.requests import Command, FromFile, ToFile
+from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
@@ -164,7 +165,10 @@ def copy_workspace(
             # sanctioned KeyboardInterrupt re-raise out of
             # materialize_grant_all_agents, or an error from any request), so
             # the footer and the in-flight traceback land in the per-VM log.
-            with operation_log(dest_vm.name, "workspace-copy") as lg:
+            with (
+                native_mutation_guard(db.path, dest_vm.name),
+                operation_log(dest_vm.name, "workspace-copy") as lg,
+            ):
                 try:
                     _unpack(db, config, dest_vm, dest_name, archive, lg)
                 except AgentworksError as error:

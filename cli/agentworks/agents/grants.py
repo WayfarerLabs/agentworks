@@ -21,6 +21,7 @@ from agentworks import output
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.execution.requests import Command
+from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.guest import ensure_group
@@ -92,13 +93,17 @@ def grant_workspaces(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config, live_database=db)
-    with gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        scope=agent_scope(db, vm.name, agent_name),
-        interaction=interaction,
+    with (
+        native_mutation_guard(db.path, vm.name) as guard,
+        gated_vm_boundary(
+            db,
+            config,
+            registry,
+            vm,
+            scope=agent_scope(db, vm.name, agent_name),
+            interaction=interaction,
+            held_native_guard=guard,
+        ),
     ):
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
