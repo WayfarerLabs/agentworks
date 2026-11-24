@@ -12,7 +12,7 @@ from unittest.mock import Mock
 import pytest
 
 from agentworks.artifacts import publication
-from agentworks.artifacts.application import ArtifactApplication, ArtifactFile, OwnedArtifactFile
+from agentworks.artifacts.application import ArtifactApplication, ArtifactFile, ArtifactPublication, OwnedArtifactFile
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.capture import capture_artifacts
 from agentworks.artifacts.declarations import ArtifactDefinitions, ArtifactsConfig, RuleArtifactSpec, SkillArtifactSpec
@@ -41,6 +41,7 @@ from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from agentworks.schema import CapabilityConfig
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import ResolvedVMTemplate
+from tests.artifacts._fixtures import group
 from tests.artifacts.test_catalog_retirement import _account, _persona
 from tests.artifacts.test_native_delivery import artifact, context, owned
 from tests.conftest import registry_with_shell
@@ -357,6 +358,61 @@ def test_grok_skill_upgrade_budgets_distinct_physical_members(tmp_path):
     assert (source / "foreign-note").read_bytes() == b"Retain me." and (source / "SKILL.md").is_file()
 
 
+def test_grok_withdraws_owned_skill_after_command_is_removed(tmp_path, monkeypatch):
+    account = _account(tmp_path, monkeypatch, "grok")
+    source = tmp_path / "source/review"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: review\ndescription: Review fixture\n---\nReview.\n")
+    (source / "guide.txt").write_bytes(b"Captured guide.\n")
+    captured = capture_artifacts(
+        [("team", ArtifactBundle(name="team", skills={"review": SkillArtifactSpec(source=str(source))}))],
+        ArtifactOrigin("agent", "agent", "fixture"),
+    )
+    access = account.access()
+    call = replace(
+        invocation(account, [], env={"PATH": str(account.root / "bin")}, access=access),
+        artifacts=ArtifactInputs(local=captured),
+    )
+    integration = GrokBuildIntegration.for_setup(owner_kind="agent", owner_name="fixture", facet="user", config={})
+    checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
+
+    def apply(current: UserSetupInvocation) -> ArtifactPublication:
+        desired = integration.user_init(current).files
+        previous = current.prior.artifact_files if current.prior else ()
+        return publication.publish_artifacts(
+            current.files, desired, previous, checkpoints.append, roots=(current.home,)
+        )
+
+    old = apply(call)
+    package = account.home / ".grok/skills/review"
+    assert not old.skipped and {Path(file.path) for file in old.files} == {package / "SKILL.md", package / "guide.txt"}
+    prior = SetupRecord(
+        component="agent", integration="grok", destination_id="a" * 64, declaration={}, artifact_files=old.files
+    )
+    note = package / "foreign-note"
+    note.write_bytes(b"Operator note.\n")
+    note.chmod(0o640)
+
+    def snapshot() -> dict[Path, tuple[bytes, int, int]]:
+        return {path: (path.read_bytes(), path.stat().st_mode, path.stat().st_mtime_ns) for path in package.iterdir()}
+
+    before = snapshot()
+    checkpoints.clear()
+    (account.root / "bin/grok").unlink()
+    with pytest.raises(StateError):
+        apply(replace(call, prior=prior))
+    assert snapshot() == before and not checkpoints
+
+    empty = replace(call, artifacts=ArtifactInputs(), prior=prior)
+    retired = apply(empty)
+    assert not retired.files and not retired.skipped and checkpoints[-1] == ()
+    assert snapshot() == {note: before[note]}
+    checkpoints.clear()
+    calls = len(access.calls)
+    assert apply(replace(empty, prior=prior.model_copy(update={"artifact_files": retired.files}))) == retired
+    assert len(access.calls) == calls and not checkpoints and snapshot() == {note: before[note]}
+
+
 def test_codex_session_with_workspace_config_home_preserves_both_skill_catalogs(tmp_path, monkeypatch):
     account = _account(tmp_path, monkeypatch, "codex")
     workspace = account.root / "workspace"
@@ -425,3 +481,53 @@ def test_codex_workspace_config_alias_counts_persona_metadata_once(tmp_path, mon
     Path(persona.path).write_bytes(persona.data + b"\n")
     with pytest.raises(StateError):
         check()
+
+
+def test_codex_session_persona_at_catalog_limit_with_matching_registration(tmp_path, monkeypatch):
+    account = _account(tmp_path, monkeypatch, "codex")
+    native = account.home / ".codex"
+    agents = native / "agents"
+    agents.mkdir(parents=True)
+    for index in range(511):
+        (agents / f"other-{index}.toml").write_text(f'name = "other-{index}"\n')
+    existing = agents / "existing.toml"
+    existing.write_text('name = "vm-review"\n')
+    config = native / "config.toml"
+    config.write_text('[agents.vm-review]\nconfig_file = "roles/review.toml"\n')
+    role = native / "roles/review.toml"
+    role.parent.mkdir()
+    role.write_text('developer_instructions = "Registered role."\n')
+    item = replace(
+        artifact(ArtifactType.AGENT), origin=ArtifactOrigin("vm", "vm", "fixture", bundle="team", entry="review")
+    )
+    call = replace(
+        context(),
+        inputs=ArtifactInputs(deferred={item.origin.owner: group(item)}),
+        home=str(account.home),
+        directory=str(account.home / "private/session/run"),
+    )
+
+    def prepare() -> ArtifactApplication:
+        plan, _ = prepare_session_delivery(
+            account.access(),
+            tool="codex",
+            integration="codex",
+            context=call,
+            workspace=str(account.root / "workspace"),
+            render=lambda prepared: session_artifacts(
+                prepared, extra_args=[], enabled_workarounds=["session-agent-config"]
+            ),
+        )
+        return plan.application
+
+    plan = prepare()
+    (persona,) = plan.files
+    assert not plan.deferred and persona.native_identity == "agent:vm-review"
+    assert persona.path == f"{call.directory}/agents/vm-review.toml"
+    catalog_persona = replace(persona, path=str(existing), data=existing.read_bytes())
+    with pytest.raises(probe.NativeArtifactConflictError) as caught:
+        probe.probe_native(account.access(), tool="codex", home=call.home, environment={}, files=(catalog_persona,))
+    assert caught.value.identities == ("agent:vm-review",) and str(config) in str(caught.value.hint)
+    (agents / "extra.toml").write_text('name = "extra"\n')
+    with pytest.raises(StateError):
+        prepare()

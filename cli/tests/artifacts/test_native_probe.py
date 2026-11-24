@@ -431,6 +431,25 @@ def test_inventory_returns_all_conflicting_native_names():
     )
 
 
+def test_host_validates_registration_and_physical_row_budgets_independently():
+    entries = {f"/private/agents/{name}.toml": f"agent:{name}" for name in ("review", "audit")}
+    rows = [{"kind": "agent", "path": f"/native/agents/{i}.toml", "name": f"person-{i}"} for i in range(512)]
+    registrations = [
+        {"kind": "agent", "path": f"/{scope}/config.toml", "name": "review", "registered": True}
+        for scope in ("user", "workspace")
+    ]
+    assert _inventory_problems(rows + registrations, entries) == []
+    for extra in (
+        {"kind": "agent", "path": "/native/agents/extra.toml", "name": "extra"},
+        {**registrations[0], "path": "/third/config.toml"},
+        {**registrations[0], "name": "unrequested"},
+    ):
+        problems = _inventory_problems([*rows, *registrations, extra], entries)
+        assert [(problem.code, problem.path) for problem in problems] == [
+            ("unreadable-native-inventory", extra["path"])
+        ]
+
+
 def test_codex_inventory_bounds_combined_toml_bytes(tmp_path):
     root = tmp_path / "home/.codex/agents"
     root.mkdir(parents=True)

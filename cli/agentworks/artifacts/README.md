@@ -687,7 +687,8 @@ Inventory covers selected skill/persona types, with at most 512 directory entrie
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32
 MiB each and 64 MiB combined. The TOML budget is an Agentworks limit, not a native Codex product
 limit. For Codex, Agentworks recursively checks package contents and accepts skill entrypoints only
-at `<skill-root>/<package>/SKILL.md`. Its 512-entry budget includes supporting files and
+at `<skill-root>/<package>/SKILL.md`. Matching persona registrations in the user and workspace
+configurations are checked separately. The 512-entry budget includes supporting files and
 directories, including proposed members and their implied directories. The initial Claude and Grok
 inventory stops at a present package entrypoint. These native support limits do not restrict the
 generic capture format. Before publication, preflight checks existing and proposed entries together,

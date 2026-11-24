@@ -40,11 +40,15 @@ class NativeArtifactConflictError(StateError):
         self.identities = identities
 
 
+_MAX_CATALOG_ENTRIES = 512
+
+
 # Executed in the same login and interactive environment as the native workload. Only
 # selected bounded artifact frontmatter and discovery facts return for local identity
 # checks. Settings bodies and artifact instruction bodies are not returned.
 _PROBE = (
     resources.files("agentworks.artifacts").joinpath("publication_plan.py").read_text(encoding="utf-8")
+    + f"\nMAX_CATALOG_ENTRIES = {_MAX_CATALOG_ENTRIES}\n"
     + r"""
 import fnmatch, hashlib, json, os, pathlib, shutil, stat, subprocess, sys, tomllib
 from collections import Counter, namedtuple
@@ -232,7 +236,7 @@ def fits(entries, sizes):
             personas += size
         else:
             metadata += size
-    return len(entries) <= 512 and metadata <= 1048576 and personas <= request['inventory_bytes']
+    return len(entries) <= MAX_CATALOG_ENTRIES and metadata <= 1048576 and personas <= request['inventory_bytes']
 
 def publication_projection(previous, desired, held, retiring_markers):
     # Only an owning setup can spend a physical removal or a decrease in metadata.
@@ -355,7 +359,7 @@ try:
                     continue
                 inspecting = directory
                 existing_entries.add(str(directory))
-                if (len(existing_entries) > 512 or directory.is_symlink() or
+                if (len(existing_entries) > MAX_CATALOG_ENTRIES or directory.is_symlink() or
                         (tool == 'codex' and directory.name == 'SKILL.md')):
                     raise ValueError()
                 if not directory.is_dir():
@@ -372,7 +376,7 @@ try:
                         for leftover in pending.pop().iterdir():
                             inspecting = leftover
                             existing_entries.add(str(leftover))
-                            if (len(existing_entries) > 512 or leftover.is_symlink() or
+                            if (len(existing_entries) > MAX_CATALOG_ENTRIES or leftover.is_symlink() or
                                     (leftover.name == 'SKILL.md' and leftover != marker)):
                                 raise ValueError()
                             if leftover.is_dir():
@@ -382,17 +386,17 @@ try:
                 if not marker.exists():
                     continue
                 candidates.append(('skill', marker, directory.name))
-                if len(candidates) > 512:
+                if len(candidates) > MAX_CATALOG_ENTRIES:
                     raise ValueError()
         else:
             for path in catalog.iterdir():
                 inspecting = path
                 existing_entries.add(str(path))
-                if len(existing_entries) > 512 or path.is_symlink() or path.is_dir():
+                if len(existing_entries) > MAX_CATALOG_ENTRIES or path.is_symlink() or path.is_dir():
                     raise ValueError()
                 if path.suffix == ('.toml' if tool == 'codex' else '.md') and path.is_file():
                     candidates.append(('agent', path, path.stem))
-                if len(candidates) > 512:
+                if len(candidates) > MAX_CATALOG_ENTRIES:
                     raise ValueError()
     proposed = {}
     for spelling, size in request['proposed'].items():
@@ -581,8 +585,8 @@ def _setup_evidence(
     }
 
 
-# What the probe's stdout may hold: up to 1 MiB of frontmatter, which JSON can grow
-# sixfold, and 512 paths of up to 4096 bytes, with room for login-shell noise.
+# Bound the complete response, including JSON-escaped frontmatter, catalog paths,
+# matching Codex registrations and login-shell noise.
 _PROBE_OUTPUT_LIMIT = 16 * 1024 * 1024
 
 
@@ -742,7 +746,10 @@ def _inventory_problems(inventory: object, entries: Mapping[str, str]) -> list[_
     """Interpret bounded target metadata without requiring a YAML parser on the guest."""
     current_path = ""
     try:
-        if not isinstance(inventory, list) or len(inventory) > 512:
+        # Each requested persona can have one registration in the user config
+        # and one in the workspace config, independent of physical catalog entries.
+        registration_slots = {identity[6:]: 2 for identity in entries.values() if identity.startswith("agent:")}
+        if not isinstance(inventory, list) or len(inventory) > _MAX_CATALOG_ENTRIES + sum(registration_slots.values()):
             raise ValueError
         # Direct entries share a native namespace only within a discovery
         # directory. Codex config aliases select its sibling agents directory.
@@ -754,6 +761,7 @@ def _inventory_problems(inventory: object, entries: Mapping[str, str]) -> list[_
             elif identity.startswith("agent:"):
                 selected.add((path.parent, identity))
         total = 0
+        physical = 0
         problems: list[_InventoryProblem] = []
         for row in inventory:
             if (
@@ -768,6 +776,14 @@ def _inventory_problems(inventory: object, entries: Mapping[str, str]) -> list[_
             if type(registered) is not bool or (registered and row["kind"] != "agent"):
                 raise ValueError
             name = row.get("name")
+            if registered:
+                if not isinstance(name, str) or not registration_slots.get(name):
+                    raise ValueError
+                registration_slots[name] -= 1
+            else:
+                physical += 1
+                if physical > _MAX_CATALOG_ENTRIES:
+                    raise ValueError
             if name is None:
                 header = row.get("frontmatter")
                 if not isinstance(header, str) or len(header.encode()) > 32768:
