@@ -163,8 +163,8 @@ def create_vm(
 
     # The name's own checks come next, before anything uses the name or can
     # prompt (site selection, the Tailscale and SSH checks, the slug prompt).
-    # Existence goes first so an existing VM, even one named before the
-    # underscore rule, reports that it exists.
+    # Existence goes first so an existing VM, even one named before a
+    # current naming rule, reports that it exists.
     vm_name = name
     if db.get_vm(vm_name) is not None:
         raise AlreadyExistsError(

@@ -119,7 +119,7 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: i
     The default is ``MAX_FREEFORM_NAME_LENGTH`` (64): a caller that forgets to
     pass a cap gets the generous freeform bound, never a silently-wrong OS cap.
     Callers whose name feeds a bounded downstream identifier (agent, workspace,
-    vm, session) MUST pass their derived cap so an over-limit identifier is
+    session) MUST pass their derived cap so an over-limit identifier is
     rejected at the CLI boundary rather than failing opaquely downstream.
 
     Consecutive hyphens (``--``) are rejected by default because they are
@@ -167,5 +167,5 @@ def validate_vm_name(name: str) -> None:
             "starting and ending with a letter or digit.",
             entity_kind="vm",
             entity_name=name,
-            hint="Pick a VM name without underscores." if "_" in name else None,
+            hint="A VM name becomes part of its DNS hostname, which cannot hold an underscore.",
         )
