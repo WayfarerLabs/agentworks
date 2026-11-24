@@ -7,7 +7,6 @@ import functools
 import json
 import os
 import platform
-import re
 import shlex
 import subprocess
 import sys
@@ -305,12 +304,6 @@ _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 class WSLCommandFailed(ExternalError):
     """A ``wsl.exe`` command exited non-zero; the message quotes what it printed."""
-
-
-# The hostnames WSL keeps as given: its init cleans ``network.hostname`` to
-# alphanumerics joined by single hyphens (dropping underscores and collapsing
-# repeated hyphens), and the guest would then disagree with ``vms.hostname``.
-_WSL_HOSTNAME_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 
 
 def _wsl_conf(admin_username: str, hostname: str) -> str:
@@ -754,23 +747,19 @@ class WSL2Platform(VMPlatform):
         return _keepalive(self._distro_name(vm))
 
     def validate_create_hostname(self, hostname: str) -> None:
-        """Refuse a hostname WSL would rename (``_WSL_HOSTNAME_RE``), which the guest would then not carry.
+        """Refuse a hostname with consecutive hyphens, which WSL would rename and the guest would then not carry.
 
-        A VM name may hold underscores and a system slug consecutive hyphens;
-        core composes the hostname from both, and no command changes the slug.
+        WSL's init cleans ``network.hostname`` to alphanumerics joined by single
+        hyphens, so the guest would disagree with ``vms.hostname``. Core has
+        already refused an underscore; a VM name cannot hold ``--``, but a
+        system slug can, and no command changes the slug.
         """
-        if _WSL_HOSTNAME_RE.fullmatch(hostname):
-            return
-        if "_" in hostname:
-            hint = "Pick a VM name without underscores."
-        else:
-            hint = "This install's system slug has consecutive hyphens, so it cannot be part of a WSL2 hostname."
-        raise ValidationError(
-            f"WSL2 would rename the VM's hostname '{hostname}': it keeps only lowercase letters and digits "
-            "joined by single hyphens",
-            entity_kind="vm",
-            hint=hint,
-        )
+        if "--" in hostname:
+            raise ValidationError(
+                f"WSL2 would rename the VM's hostname '{hostname}': it collapses consecutive hyphens",
+                entity_kind="vm",
+                hint="This install's system slug has consecutive hyphens, so it cannot be part of a WSL2 hostname.",
+            )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         image_tag = code_owned_release_value(
