@@ -20,7 +20,7 @@ Two acquisitions do most of the damage the FRD describes:
 - Every long mutation holds the whole VM: `vm reinit` and `vm create` for many minutes, a workspace
   clone or rehome for up to ten, agent create for a minute.
 
-Some mutators take no lock on their body (agent grant and revoke, workspace repair, workspace copy,
+Some mutators take no lock on their body (agent revoke, workspace copy's source,
 `vm import-host-keys`, `vm confirm-release`). Several prompts run while the lock is held (rekey's
 auth key and its share pause, recover's host-key confirmation, rehome's confirmation, session
 delete's confirmation, console delete's confirmation and the empty-console offer, spec restart
@@ -77,11 +77,10 @@ entities. That is all of R2:
 
 Because a session has two parents, exclusive on one parent does not cover it: a workspace change and
 an agent change could otherwise both reach a session in that workspace for that agent. So an
-operation that changes descendants it finds (workspace delete removes sessions, grants and console
-windows) takes each of them exclusive too, and with them every ancestor it does not already hold,
-shared. Workspace delete then needs the session's account shared, which a concurrent agent reinit
-holds exclusive, so one of the two is refused. Agent delete holds the vm exclusive instead, as today
-([Shared state across entities](#shared-state-across-entities-r5)).
+operation that changes descendants it finds (workspace delete and agent delete remove sessions,
+grants and console windows) takes each of them exclusive too, and with them every ancestor it does
+not already hold, shared. Workspace delete then needs the session's account shared, which a
+concurrent agent delete holds exclusive, so one of the two is refused.
 
 An access or observe command (R4) takes the **vm** shared for its admission only, as `hold_active`
 does today, and runs its body (the shell, the attach, the forward) unlocked. Only a VM-wide
@@ -146,7 +145,7 @@ paths, grants, sessions, consoles, each by name) and takes each lock without wai
 refusal releases what was taken and raises. Because nothing waits, there is no deadlock, and the
 fixed order keeps a refusal deterministic.
 
-An operation whose set depends on state (workspace delete removes its sessions, grants and console
+An operation whose set depends on state (agent delete removes its sessions, grants and console
 windows; workspace create grants the grant-all agents) reads that state before locking, includes
 what it found, acquires, and re-reads under the set: anything different refuses the operation and
 the operator runs it again. Each acquisition takes its whole request, and a set never grows after it
@@ -184,19 +183,20 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   group cannot undo each other. `gpasswd -d`, which removes a membership today, reads the group
   before it locks and writes its stale copy back whole, so two removals from one group could restore
   each other's member; removal moves to `usermod -rG`, the tool additions already use, and its
-  status is checked. A command that drops an agent's last grant on a workspace removes the
-  membership first and deletes the grant row only once that succeeds, so a failure leaves the row to
-  retry from. The one check-then-create sequence that can now run twice at once, creating a
-  workspace's group during a grant, becomes `groupadd -f`. Agent deletion stops the account's
-  processes and skips the removal with a warning if any remain, as today, then runs `userdel -r` as
-  today. That keeps today's behavior exactly: a configured pre-deletion hook can still veto before
+  status is checked, a missing user or group counting as removed. A command that drops an agent's
+  last grant on a workspace removes the membership first and deletes the grant row only once that
+  succeeds, so a failure leaves the row to retry from. The one check-then-create sequence that can
+  now run twice at once, creating a workspace's group during a grant, becomes `groupadd -f`. Agent
+  deletion, under the account's exclusive lock, stops the account's processes and refuses if any
+  remain, then runs `userdel -r` as today: a configured pre-deletion hook can still veto before
   anything is removed, a mailbox owned by someone else is kept, and the numeric user ID stays
   reserved while `userdel` removes the home (a removal that fails partway leaves what it leaves
-  today). Because `userdel -r` holds shadow's lock while it removes the home, agent delete keeps the
-  vm exclusive, as today: under the account alone, account edits elsewhere on the VM would wait
-  behind it and fail past `lckpwdf`'s 15 seconds, and a second agent delete that failed that way
-  would drop its row and strand its account. A rollback that removes an account its own command just
-  created keeps that command's set, since the home is new.
+  today). One outcome changes: a removal that fails now raises and keeps the agent's row, where
+  today it warns and drops the row, so the delete can be rerun. The cost under finer locks is that
+  `userdel -r` holds shadow's lock while it removes the home, so a concurrent account edit elsewhere
+  on the VM waits on it, and past `lckpwdf`'s 15 seconds fails with a typed error the operator can
+  retry; nothing is lost. Holding the vm exclusive instead would refuse access and unrelated
+  sessions for the whole removal, against R2 and R4.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
@@ -237,9 +237,10 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   and removes the membership before deleting the last grant row. Grant-all materialization reads the
   grant-all agents (or the workspaces) before locking and takes one grant per pair.
 
-The mutators that take no lock today take the lock for what they change: grant and revoke (the
-grant, with its workspace and account shared), workspace repair and copy's destination (the
-workspace), and `vm import-host-keys` and `vm confirm-release` (the vm).
+Every mutator takes the lock for what it changes, including those the single guard still misses:
+grant and revoke (the grant, with its workspace and account shared), workspace repair and copy's
+destination (the workspace), copy's source (its path), and `vm import-host-keys` and
+`vm confirm-release` (the vm).
 
 ### Prompts before locks (R6)
 
@@ -293,11 +294,13 @@ lock stays per workstation and per database. Dry runs still take no lock.
 
 Two implementation PRs after the design, stacked and each green on its own:
 
-1. **Under today's single lock:** the shared-state fixes (`groupadd -f`, the agent-removal process
-   check before `userdel -r`, the SSH config rebuild mutex, the bounded package-manager wait, unique
-   operation log names), guards on the mutators that take no lock today, and the prompts moved
-   before acquisition. Each is correct with the single lock in place, and the SSH config rebuild
-   mutex and the new guards fix races that exist today.
+1. **Under today's single lock:** the shared-state fixes (`groupadd -f`, membership removal through
+   `usermod -rG` before the last grant row is deleted, the agent-removal process check before
+   `userdel -r` with the row kept when removal fails, workspace delete's normalized path, the SSH
+   config rebuild mutex, the bounded package-manager wait, unique operation log names), guards on
+   the mutators that take no lock today, and the prompts moved before acquisition. Each is correct
+   with the single lock in place, and the SSH config rebuild mutex and the new guards fix races that
+   exist today.
 2. **The hierarchy:** the new primitive replacing `native_mutation_guard` and its token in one step
    (no old and new lock paths side by side on `main`), every call site moved to its lock set, and
    every doc that describes the single guard updated: `cli/command-reference.md` (the busy

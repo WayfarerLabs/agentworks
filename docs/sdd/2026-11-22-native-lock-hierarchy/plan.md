@@ -24,10 +24,11 @@ is left undisposed, and #949 is merged.
 - [ ] Shared state: `groupadd -f` in the workspace-group helper, membership removal through
       `usermod -rG` with its status checked, the membership removed before the last grant row is
       deleted, workspace delete removing its normalized path, agent deletion stopping processes
-      before `userdel -r`, the per-user rebuild mutex for the SSH config, the bounded
-      package-manager wait in workspace repair, and unique operation log names created exclusively.
-- [ ] The unguarded mutators (grant and revoke, workspace repair, workspace copy,
-      `vm import-host-keys`, `vm confirm-release`) take the single lock.
+      before `userdel -r` and keeping the agent's row when the removal fails, the per-user rebuild
+      mutex for the SSH config, the bounded package-manager wait in workspace repair, and unique
+      operation log names created exclusively.
+- [ ] The mutators still unguarded at HEAD (revoke, workspace copy's source, `vm import-host-keys`,
+      `vm confirm-release`) take the single lock; grant, repair and copy's destination already do.
 - [ ] Prompts moved before acquisition per the LLD's rules and appendix, with re-checks after
       acquiring.
 - [ ] Tests for each, collateral where behavior changes, private review loop, integration test, and
