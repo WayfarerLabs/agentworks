@@ -210,9 +210,11 @@ class AzureKeyVaultBackend(SecretBackend):
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Azure Key Vault",
         overview="""
-        Reads declared secrets from a configured vault. Each mapping selects an
-        Azure secret name and optionally a version. Authentication belongs to
-        the source. Preview never returns the secret value.
+        Reads declared secrets from a configured vault. In
+        `backend_mappings.<source-name>`, a bare string selects the Azure secret
+        name at its latest version. A table with `name` and `version` pins one
+        version. Authentication belongs to the source. Preview never returns
+        the secret value.
 
         See Microsoft's Azure Key Vault and Azure Identity documentation for
         vault permissions and provider authentication setup.
