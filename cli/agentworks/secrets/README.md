@@ -134,10 +134,12 @@ backend only reads the selected secret version; it does not list the vault, crea
 values, or grant access. Confirmed secret absence permits lookup in the next source; denied access
 or failed authentication stops lookup for that secret.
 
-Preview may read and discard a value inside the backend. No-impact preview excludes authentication
-paths that can request operator action. Allowing interaction, or performing actual resolution, may
-initiate browser authentication for ambient credentials. `--non-interactive` controls terminal input
-independently and does not suppress browser authentication.
+Preview may read and discard a value inside the backend. Ambient no-impact preview uses environment,
+workload, and managed identities. Desktop caches and developer tools, including Azure CLI, are
+deferred because their credential stores may request operator action. Allowing interaction, or
+performing actual resolution, uses the default credential chain with an explicit browser fallback if
+ambient authentication fails. `--non-interactive` controls terminal input independently and does not
+suppress browser authentication. Explicit service principals never use this fallback.
 
 Follow Microsoft's documentation for
 [Azure authentication](https://learn.microsoft.com/en-us/azure/developer/python/sdk/authentication/overview),
