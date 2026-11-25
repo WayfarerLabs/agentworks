@@ -1,7 +1,7 @@
 # Files config
 
-Status: draft, awaiting the operator's acceptance. R5 and R8 are drafted under the lead's
-recommended answers to the 2026-11-25 asks, which are still open.
+Status: draft, awaiting the operator's acceptance. R3 and R5 follow the operator's 2026-11-25
+rulings; R8 is drafted under the lead's recommended answer to an ask that is still open.
 
 ## Purpose
 
@@ -129,5 +129,27 @@ file under the per-agent `/run/agentworks/...` area, the operator answered:]
 [The lead's reading: applying files at their scope replaces per-launch delivery, so the
 `/run/agentworks` tmpfs placement, which served per-launch session files, does not apply. VM files
 are written as root through the admin's access, since system paths need it. R4 is the lead's
-addition. Asks are open on R5 (secret files at rest), R8 (the contribution model) and the R3
-placement table.]
+addition.]
+
+[Asked whether to seed the containment follow-up split into two phases, the operator chose:]
+
+> Not yet
+
+[Asked whether to allow secret files at rest at their scope, as an opt-in with ADR 0013 amended and
+rotation on re-apply, the operator chose:]
+
+> Yes, at rest at scope
+
+[Asked whether to accept the scope and path table as the FRD's starting shape (VM paths absolute
+but outside homes and workspaces; workspace and user paths relative; no session files), the operator
+chose:]
+
+> Accept
+
+[Asked whether to design files as owner-attributed contributions with templates as the only
+producer in this effort, the operator asked:]
+
+> How much bigger is the full emitter model?
+
+[The lead sized the full model at roughly two to three times this effort, almost all of it in
+moving `env` and its producers onto the model, and asked again. That ask is open.]
