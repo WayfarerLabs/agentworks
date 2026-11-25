@@ -5,8 +5,9 @@
 Draft for operator review. The operator requested directory discovery, local/Git source parity,
 remote bundle definitions and references resolved relative to their bundle. This proposal also
 contains the previously requested Agent Plugins import. It does not claim approval of the additional
-design choices below or shipped behavior. Implementation follows the direct-declaration effort in
-[PR 908](https://github.com/WayfarerLabs/agentworks/pull/908), then approval of this design.
+design choices below or shipped behavior. Direct owner declarations are already available. The
+remaining import, migration and external-profile contracts below still need operator disposition
+before ingestion implementation.
 
 Operators should maintain an artifact collection in one place, reference it once and pick up newly
 added artifacts during ordinary supported setup without editing an inventory of artifact names. An

@@ -4,9 +4,9 @@
 
 Start with a compact design checkpoint on its own branch and draft PR. Its FRD is proposed
 requirements; authenticated operator review accepts the scope and settles the HLA's open decisions.
-Implementation follows the direct-declaration effort, not a change to its handed-off head. The
-default implementation vehicle is the same feature branch/PR after design review. If another effort
-needs the design on main, request promotion through the standard SDD process first.
+Direct declarations have merged. The default implementation vehicle is this feature branch/PR after
+design review. If another effort needs the design on main, request promotion through the standard
+SDD process first.
 
 The phases below are working cut points, not an automatic PR series or separate approval gates.
 Accept the overall requirements/design, including the open decisions, before phase 1 starts.
@@ -18,10 +18,10 @@ checkpoint evidence lives in its handoffs.
 
 - [ ] Review and accept the FRD, including an explicit initial Agent Plugins import profile.
 - [ ] Settle relative-reference containment, imported inheritance and ordinary local-path migration.
-- [ ] Write the small schema/discovery LLD: one whole-source selector, its inheritance/null
-      clearing, candidate naming, explicit-map precedence, definition depth, invalid files and
-      bounded expansion. Include parent-explicit/child-source precedence and all requested source
-      forms, plus missing/stale collection inventory in inspection.
+- [ ] Complete the [source ingestion LLD](source-ingestion-lld.md): one whole-source selector, its
+      inheritance/null clearing, candidate naming, explicit-map precedence, definition depth,
+      invalid files and bounded expansion. Include parent-explicit/child-source precedence and all
+      requested source forms, plus missing/stale collection inventory in inspection.
 - [ ] Review the frozen design with the project reviewer and Muntz; record dispositions and obtain
       authenticated direction for any requirements changes.
 
@@ -39,8 +39,9 @@ checkpoint evidence lives in its handoffs.
       successful capture without inventing a second inheritance fold.
 - [ ] Reuse member provenance and supported capture reads. Make captured versus unknown collection
       membership clear in offline inspection. Preserve unchanged explicit-only fingerprints and
-      native identities; omit an unset selector from declaration hashing and do not bump the codec
-      solely for directory discovery.
+      native identities; omit an unset selector from declaration hashing and do not change the
+      normalized group codec solely for discovery. Persist collection evidence in the versioned core
+      capture envelope when needed.
 - [ ] Ship the phase's permanent guide/reference/examples with its code and validate the working
       directory-only increment before adding definition imports.
 
@@ -82,8 +83,8 @@ checkpoint evidence lives in its handoffs.
       reject links/submodules anywhere in a selected type directory and malformed selected
       artifacts.
 - [ ] Verify inspection performs no source acquisition and exposes metadata rather than content or
-      credential values. Exercise existing bundles, direct declarations if landed, multiple scopes
-      and bundle-to-source transitions without native identity churn.
+      credential values. Exercise existing bundles, direct declarations, multiple scopes and
+      bundle-to-source transitions without native identity churn.
 - [ ] Run required gates, package/install and guide/schema checks. Run independent project and Muntz
       reviews, plus the generic correctness lane for code-heavy work, at the exact handoff head.
 - [ ] Hand off ready with exact-head evidence and a scoped integration charter through the standard

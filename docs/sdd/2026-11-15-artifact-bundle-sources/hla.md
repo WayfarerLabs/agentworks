@@ -30,10 +30,12 @@ select a named bundle; no source is intrinsically VM-, user-, workspace- or sess
 ## Relative references
 
 A relative reference retains the base of the document that declared it, including through
-inheritance. Normalize references once when that document is interpreted: local paths become
-file-relative source addresses; Git members retain their repository, document directory and
-requested ref. Normalization is lexical and does not read artifact content or follow filesystem
-links. Never flatten raw relative strings and then resolve them against the last child document.
+inheritance. Project relative artifact references from each declaring layer before the existing
+inheritance fold: local paths become file-relative source addresses; Git members retain their
+repository, document directory and requested ref. Keep the authored registry row and its spelling
+for declaration views. Projection is lexical and does not read artifact content or follow filesystem
+links. Never flatten raw relative strings and then resolve them against the last child document. A
+temporary extracted package path is not a durable workstation declaration base.
 
 Use the existing workstation capture boundary and Git object reader. Git ingestion does not need a
 working checkout or execute repository code. Resolve each repository/ref once per operation and read
@@ -51,7 +53,7 @@ contract below. Source text is data: loading it grants no commands, resource reg
 integration activation.
 
 Phase 2 applies the same file-relative interpretation to artifact references in bundles and owner
-templates, including `artifacts.declare` after PR 908. Their shared `ArtifactDefinitions` remains
+templates, including the existing `artifacts.declare`. Their shared `ArtifactDefinitions` remains
 explicit maps; only `ArtifactBundle` gains collection-source selection. Define the transition for
 existing relative strings, stored instance overlays and declarations without a file base before
 implementation. Preserve authored/reference provenance where normalization changes the resolved
@@ -75,12 +77,12 @@ proposed layout into the same per-type discovery path:
 | `agents/*.md`             | One persona per immediate file; filename stem and metadata name agree                         |
 | `mcp.json` or `mcp.jsonc` | All named canonical MCP entries; both present is an ambiguity error                           |
 
-Select those fixed locations before content capture, then capture each selected type directory once
-with the existing reader and split its captured members by the table's patterns. The reader rejects
-`.git`, links and submodules and counts every selected blob, including non-artifact neighbors inside
-that directory. Unrelated mixed-root locations are not captured. A repository-root capture followed
-by filtering cannot implement this layout; do not loosen package path or link checks to make it
-work.
+Use bounded reader metadata to validate the explicit root and distinguish proven absence of optional
+fixed children. Select those locations before content capture, then capture each selected type
+directory once and split its captured members by the table's patterns. Preserve link, submodule and
+unsafe-member-path rejection, including `.git` members. Every selected blob counts, including
+non-artifact neighbors inside that directory. Unrelated mixed-root locations are not captured. The
+[LLD](source-ingestion-lld.md) specifies that metadata/absence boundary.
 
 For text/persona files, discovery considers the documented extension and canonical filename shape;
 ordinary neighbors such as `README.md` and `.gitkeep` are not candidates. A skill candidate is an
@@ -112,14 +114,16 @@ source-leaf exception. The existing map contract cannot clear a single inherited
 reveal discovery; a child must replace that entry. The LLD must include this worked precedence case
 and the exact source schema.
 
-An imported document has the same five explicit maps and at most one directory selector, selecting
-one type or the mixed layout. Its discovered entries are overlaid by its own explicit entries, then
-by the importing wrapper's effective explicit maps. It cannot contain a list of source selectors.
-Imported registry inheritance and further definition imports remain decisions below. Changed-content
-overrides retain the existing warning and replacement provenance, including intentional explicit
-overrides of discovery; no second collision policy is added.
+An imported document has the same five explicit maps and at most one directory profile: one type,
+the mixed layout or the accepted Agent Plugins profile. Its discovered entries are overlaid by its
+own explicit entries, then by the importing wrapper's effective explicit maps. It cannot contain a
+list of source selectors. Imported registry inheritance and further definition imports remain
+decisions below. Changed-content overrides retain the existing warning and replacement provenance,
+including intentional explicit overrides of discovery; no second collision policy is added.
 
-Later selected bundles replace earlier entries, then owner direct declarations apply after PR 908.
+Owner bundle selections append and deduplicate across inheritance; omission or an empty list
+inherits, and null clears the inherited selection. Later selected bundles replace earlier entries,
+then owner direct declarations apply. Clearing the direct maps is independent of clearing bundles.
 Preserve complete-entry replacement, diagnostics and each reference's declaring base. Reject
 ambiguous discovery rather than using traversal order as precedence. The local wrapper's resource
 name remains authoritative; imported names do not add native prefixes or per-resource namespaces.
@@ -145,16 +149,22 @@ identity without acquisition. Omit an unset source selector from the hashed payl
 fingerprints for unchanged inline and absolute declarations; the relative-path transition must
 specify its identity changes explicitly.
 
-Record each discovered member's own subpath through existing `ArtifactProvenance`. Discovery alone
-does not require a codec change. The LLD must establish how imported-definition provenance is
-retained after staging is removed; version persisted structures only for a genuine interpretation
-change and retain supported older reads.
+Record each discovered member's own subpath through existing `ArtifactProvenance`. The normalized
+artifact-group format need not change for discovery. Complete capture evidence also has to represent
+empty or wholly shadowed collections and imported definitions, which winning artifact entries cannot
+express. The [LLD](source-ingestion-lld.md) separates that core capture evidence from runtime
+artifact inputs and specifies the corresponding envelope-version transition. Retain supported older
+capture reads.
 
 Inspection explains current selectors and recorded members without fetching or walking sources. A
 missing capture has unknown inventory, not a known empty collection. A recorded member absent from
 the explicit maps is not automatically a removed declaration. Report the collection's captured
 membership and whether selection changed without claiming the current remote inventory is known. No
 new strict ancestor-freshness gate is introduced.
+
+Collection ingestion is not a requirement for producing an artifact. Direct declarations and future
+feature emitters can use the same normalized maps without creating synthetic bundle resources.
+Feature execution and dependencies remain outside this effort.
 
 ## Refresh
 

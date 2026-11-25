@@ -1,6 +1,6 @@
 # Artifact bundle sources: prior art
 
-Research snapshot: 2026-11-15. These findings inform the draft; they do not authenticate
+Research refreshed: 2026-11-25. These findings inform the draft; they do not authenticate
 requirements.
 
 ## Findings and consequences
@@ -18,7 +18,7 @@ requirements.
   translated for multiple agents. Retain our normalized pipeline; directory ingestion does not
   require a Rulesync process or accepting its full schema.
 
-## Current repository, main 432766fa
+## Current repository, main fb0f3c43
 
 | Existing boundary                                | Evidence                                 | Design consequence                                                               |
 | ------------------------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------------- |
@@ -29,13 +29,16 @@ requirements.
 | MCP file source selects one named server         | `cli/agentworks/artifacts/mcp.py:165`    | Discovery needs all-server selection while keeping the same definition validator |
 | Local relative source currently uses process cwd | `cli/agentworks/package_sources.py:177`  | Define migration for declaration-relative bases explicitly                       |
 
-PR 908 adds direct owner declarations separately. This design can be reviewed on current main;
-implementation must refresh to the merged result before relying on its shared declaration schema.
+Direct owner declarations have merged. Their shared `ArtifactDefinitions` remains explicit maps, and
+collection selection belongs only to `ArtifactBundle`. Bundle selections append and deduplicate
+across owner inheritance; null clears them independently of direct definitions.
 
-The root reader is deliberately strict: local `.git` paths and links are rejected, and the Git
-reader rejects links/submodules throughout its selected tree. Select known type locations, capture
-each with that reader, then discover from its captured members. Non-artifact neighbors count toward
-the selected directory's limits. Whole-root capture cannot be fixed by filtering afterward. Current
+The reader rejects links and unsafe captured member paths, including `.git` members; the Git reader
+also rejects submodules in its selected tree. These checks must not be described as validation of
+every local selected root and ancestor. A selected workstation submodule is a directory containing a
+`.git` marker, not a Git tree entry with mode 160000. Select known type locations, capture each with
+that reader, then discover from its captured members. Non-artifact neighbors count toward the
+selected directory's limits. Whole-root capture cannot be fixed by filtering afterward. Current
 bundle inheritance is already flattened offline before capture, so discovery should use one
 effective selector and the existing explicit-map result instead of adding a second inheritance fold.
 Definition contents and membership cannot enter offline fingerprints without reading a source.
@@ -54,3 +57,19 @@ Measure the minimum useful Agent Plugins MCP profile against current native adap
 support. Establish whether preserving package files/data fits this effort or should follow an
 explicitly limited first profile. Check source-origin metadata through resource inheritance before
 specifying the local-relative-path transition.
+
+## Refresh findings
+
+The current reader exposes captured files and a directory flag, but generic failures do not
+distinguish proven missing optional locations from permission, acquisition or unsafe-path failures.
+The new reader boundary must supply that distinction; generic failure cannot mean an empty map.
+
+Declaration locations exist before inheritance, while the current folds discard file bases from the
+resolved value. Projecting copied artifact fields at the existing fold boundary preserves raw
+registry declarations and avoids a second fold. Stored instance overlays have no recorded write-time
+cwd. Packaged manifests may be decoded from temporary extracted files, so a physical decode path
+alone cannot establish a durable operator file base.
+
+Current v4 winning-entry captures cannot express every empty or fully shadowed collection or retain
+all definition provenance. Preserve the normalized maps and keep additional evidence in the core
+capture envelope. The [LLD](source-ingestion-lld.md) records the implementation response.
