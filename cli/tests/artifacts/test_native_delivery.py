@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
@@ -24,7 +25,7 @@ from agentworks.artifacts.model import (
     ArtifactProvenance,
     ArtifactType,
 )
-from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
+from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home
 from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.native.shell import filesystem_artifacts
@@ -57,9 +58,15 @@ def artifact(
     type: ArtifactType, *, name: str = "review", owner: str = "s1", options: dict | None = None
 ) -> ArtifactInput:
     members: tuple[ArtifactMember, ...] = ()
+    body = "before ${agw:session_name} after\n"
+    description = "Review changes"
+    metadata = {}
     if type is ArtifactType.SKILL:
+        body = "Use this skill.\n"
+        metadata = {"name": name, "description": description}
+        header = yaml.safe_dump(metadata, sort_keys=False)
         members = (
-            ArtifactMember("SKILL.md", b"---\nname: review\ndescription: Review changes\n---\nUse this skill.\n"),
+            ArtifactMember("SKILL.md", f"---\n{header}---\n{body}".encode(), text=True),
             ArtifactMember("scripts/check.sh", b"#!/bin/sh\nexit 0\n", executable=True),
             ArtifactMember("data/logo.bin", bytes(range(256))),
         )
@@ -67,13 +74,13 @@ def artifact(
         ArtifactContent(
             type,
             name,
-            description="Review changes",
-            text="" if type is ArtifactType.MCP_SERVER else "before ${agw:session_name} after\n",
+            description=description,
+            text="" if type is ArtifactType.MCP_SERVER else body,
             members=members,
             metadata_json=json.dumps(
                 {"type": "stdio", "command": "fixture-server", "args": [], "env": {}, "description": "Review changes"}
                 if type is ArtifactType.MCP_SERVER
-                else {}
+                else metadata
             ),
             native_options_json=json.dumps({} if type is ArtifactType.MCP_SERVER else options or {}),
         ),
@@ -378,6 +385,52 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
         assert argv[argv.index(flag) + 1] == "configured guidance"
         assert any(item.content.text.encode() in file.data for file in result.artifacts.files)
         assert all(item.content.text not in value for value in argv)
+
+
+@pytest.mark.parametrize("selection", ["review", "vm-review", "native-external", "other-plugin:review"])
+def test_claude_launch_selects_the_delivered_persona_name(monkeypatch, selection):
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+
+    local = artifact(ArtifactType.AGENT)
+    vm = replace(
+        local,
+        content=replace(local.content, text="VM review instructions.\n"),
+        origin=ArtifactOrigin("vm", "vm", "box", entry="review"),
+    )
+    prepared = context(vm, local)
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.claude")
+    integration = ClaudeCodeIntegration(
+        "claude-code",
+        {"agent": selection, "enabled_workarounds": ["session-agent-definitions"]},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    result = integration.start(
+        RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE
+    )
+    assert isinstance(result, HarnessStart)
+    personas = {
+        file.native_identity.removeprefix("agent:"): file.data.decode()
+        for file in result.artifacts.files
+        if file.native_identity is not None and file.native_identity.startswith("agent:")
+    }
+    assert len(personas) == 2
+    for name, item in (("review", local), ("vm-review", vm)):
+        contents = next(contents for identity, contents in personas.items() if identity.endswith(f":{name}"))
+        assert contents.endswith(item.content.text)
+    argv = shlex.split(shlex.split(result.command)[2])
+    selected = argv[argv.index("--agent") + 1]
+    if selection not in {"review", "vm-review"}:
+        assert selected == selection
+    else:
+        assert selected in personas
+        assert selected.partition(":")[2] == selection
 
 
 @pytest.mark.parametrize("fresh", [False, True])
@@ -856,7 +909,6 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
 def test_setup_native_name_conflict_defers_only_affected_artifact(implementation, facet, db, monkeypatch):
     from importlib import import_module
 
-    from agentworks.artifacts.native.probe import NativeArtifactConflictError
     from agentworks.capabilities.harness_integration.setup import (
         SetupInvocation,
         UserSetupInvocation,
@@ -914,7 +966,6 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
 @pytest.mark.parametrize("modified", [False, True])
 def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, modified):
     from agentworks.artifacts.native.common import defer_setup_conflicts
-    from agentworks.artifacts.native.probe import NativeArtifactConflictError
     from agentworks.artifacts.publication import publish_artifacts
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
     from tests.native_setup_fixtures import LocalFixtureAccount
@@ -955,19 +1006,3 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     assert any(file.path == str(entrypoint) for file in result.files) is modified
     assert all(Path(file.path).exists() for file in result.files)
     assert any(good.origin_identity in file.origins for file in result.files)
-
-
-@pytest.mark.parametrize("render", [codex.session_artifacts])
-@pytest.mark.parametrize("matching_owner", ["user", "workspace"])
-def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, matching_owner):
-    first = artifact(ArtifactType.AGENT, owner="user")
-    second = artifact(ArtifactType.AGENT, owner="workspace")
-    earlier = (
-        *claude.outer_artifacts(received(first), "/home/alice/.claude").files,
-        *claude.outer_artifacts(received(second), "/workspace/.claude").files,
-    )
-    selected = first if matching_owner == "user" else second
-    with pytest.raises(NativeArtifactConflictError):
-        prepared = context(selected, ancestors=tuple(owned(file) for file in earlier))
-        plan = render(prepared, extra_args=[], enabled_workarounds=enabled(render))
-        validate_ancestor_names(prepared, plan.application)

@@ -19,6 +19,7 @@ from agentworks.config import load_config
 from agentworks.db import DesiredRuntimeState as Target
 from agentworks.debian import DebianRelease
 from agentworks.errors import (
+    AlreadyExistsError,
     AuthorizationError,
     ConfigError,
     ConnectivityError,
@@ -371,11 +372,35 @@ def test_create_vm_refuses_a_platform_refused_hostname_before_anything_resolves(
     monkeypatch.setattr(LimaPlatform, "create", lambda *args, **kwargs: pytest.fail("create ran"))
 
     with pytest.raises(ValidationError):
-        vm_manager.create_vm(db, make_config(), name="host_fail", interaction=TtyInteractionPolicy.REFUSE)
+        vm_manager.create_vm(db, make_config(), name="host-fail", interaction=TtyInteractionPolicy.REFUSE)
 
-    assert seen == ["host_fail"]
-    assert db.get_vm("host_fail") is None
-    assert not trust.store_file("host_fail").exists()
+    assert seen == ["host-fail"]
+    assert db.get_vm("host-fail") is None
+    assert not trust.store_file("host-fail").exists()
+
+
+@pytest.mark.parametrize("name", ["host_fail", "Host-Fail"], ids=("underscore", "malformed"))
+def test_create_vm_refuses_bad_names(db: Database, make_config, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """On every platform the name refuses before site selection or the slug prompt can ask, so nothing persists."""
+    from agentworks.vms import sites
+
+    monkeypatch.setattr(sites, "select_site", lambda *args: pytest.fail("site selection ran"))
+    monkeypatch.setattr(vm_manager, "_resolve_system_slug", lambda *args: pytest.fail("the slug prompt ran"))
+
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.create_vm(db, make_config(), name=name, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert (caught.value.entity_kind, caught.value.entity_name) == ("vm", name)
+    assert db.get_vm(name) is None
+    assert not trust.store_file(name).exists()
+
+
+def test_create_vm_reports_an_existing_underscore_vm(db: Database, make_config, captured_output: object) -> None:
+    """A VM named before the underscore rule still exists, so create says so rather than refusing its name."""
+    db.insert_vm("old_vm", site="lima-local", hostname="old_vm")
+
+    with pytest.raises(AlreadyExistsError):
+        vm_manager.create_vm(db, make_config(), name="old_vm", interaction=TtyInteractionPolicy.REFUSE)
 
 
 @pytest.mark.parametrize(
@@ -862,13 +887,13 @@ def test_r11_hostname_and_vnet_bound_by_construction() -> None:
     (inside the 63-char DNS-label limit), and the tighter {slug}-{name}-vnet
     Azure virtual-network name is exactly 64 (its cap). The vnet sink is what
     binds the cap at 38."""
-    from agentworks.naming import AZURE_VNET_NAME_MAX_LENGTH, DNS_LABEL_MAX_LENGTH, MAX_VM_NAME_LENGTH, validate_name
+    from agentworks.naming import AZURE_VNET_NAME_MAX_LENGTH, DNS_LABEL_MAX_LENGTH, MAX_VM_NAME_LENGTH, validate_vm_name
     from agentworks.plugins.azure.network import VNET_NAME_SUFFIX
 
     slug = "a" * 20
     vm_manager.validate_slug(slug)
     name = "b" * MAX_VM_NAME_LENGTH
-    validate_name(name, max_length=MAX_VM_NAME_LENGTH)
+    validate_vm_name(name)
     hostname = f"{slug}-{name}"
     assert len(hostname) == 59
     assert len(hostname) <= DNS_LABEL_MAX_LENGTH == 63

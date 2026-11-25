@@ -58,6 +58,7 @@ def test_session_probe_sanitizes_raised_and_returned_guest_failures(stage, repre
         assert_safe(caught.value.hint, secret)
     if stage.endswith("exception"):
         assert caught.value is failure
+        assert secret not in "".join(traceback.format_exception(caught.value))
 
 
 @pytest.mark.windows
@@ -99,8 +100,17 @@ def test_malformed_native_persona_metadata_keeps_its_path():
     from agentworks.artifacts.native.probe import _inventory_problems
 
     path = "/fixture/.grok/agents/operator.md"
-    problems = _inventory_problems([{"kind": "agent", "path": path, "frontmatter": ""}], (), {})
+    problems = _inventory_problems([{"kind": "agent", "path": path, "frontmatter": ""}], {})
     assert len(problems) == 1 and problems[0].path == path
+
+
+@pytest.mark.parametrize("kind,registered", [("agent", 1), ("skill", True)])
+def test_native_inventory_rejects_invalid_registration_rows(kind, registered):
+    from agentworks.artifacts.native.probe import _inventory_problems
+
+    path = "/fixture/native/config.toml"
+    problems = _inventory_problems([{"kind": kind, "path": path, "name": "review", "registered": registered}], {})
+    assert [(problem.code, problem.path) for problem in problems] == [("unreadable-native-inventory", path)]
 
 
 def test_safe_domain_causes_survive_without_unsafe_implicit_context():

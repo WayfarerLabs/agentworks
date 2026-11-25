@@ -225,21 +225,24 @@ emits a warning; identical content stays quiet and still records the winning sou
 hints, rules, skills, agents, then MCP servers, preserving key insertion order within each map.
 Replacement keeps that key's position. Different artifact types do not compete.
 
-Each actual owner keeps its own group. A deferred VM group remains a VM group through user and
-session routing; it never becomes part of the receiver's local group. The same type and key from
-different scopes remain separate contributions. Integrations must preserve them through supported
-native placement or aggregation, or refuse ambiguous delivery explicitly.
+An artifact placed in its owning native scope keeps its canonical name. Separate native scopes can
+use the same name, and the harness decides how to load or prioritize them. Use different canonical
+names when you need both entries to be independently addressable.
 
-When native setup receives same-name skills or agents from multiple owners, it keeps a uniquely
-identified previously applied owner at that receiving facet and defers the newcomers. It renders
-that owner's current captured content, including content and bundle changes. The decision uses the
-receiving facet's recorded file origins and does not depend on input order. If no current owner or
-multiple current owners have prior placements, all colliders are deferred; a withdrawn owner cannot
-choose a replacement. Independent artifacts still apply.
+A deferred artifact adds its original scope component once. A VM rule named `foo` becomes `vm-foo`
+at a later facet, including when routed through user setup to a session. A VM rule declared as
+`vm-foo` becomes `vm-vm-foo` when deferred. Agent, admin and workspace artifacts use `agent-`,
+`admin-` and `workspace-` respectively. Canonical names and origin records stay unchanged. Shell
+keeps its original-owner directories and canonical index keys, with the scope prefix in the deferred
+artifact's published filename or skill directory.
 
-Same-key rules and hints from different owners warn during native setup or enabled session delivery.
-They retain their separate owner contributions, using the integration's existing native files,
-helper skills or aggregate carrier. These advisory warnings do not make setup incomplete.
+File collisions are evaluated at the receiving native placement. A local `foo` and a deferred VM
+`foo` can coexist as `foo` and `vm-foo`. A local `vm-foo` competes with the deferred VM `foo` when
+both target the same placement. Setup keeps a uniquely identified current owner of that placement
+and defers the other contributions. It renders the retained owner's current captured content,
+including content and bundle changes. If no current owner or multiple current owners have prior
+ownership of the placement, all colliders are deferred. Independent artifacts still apply. MCP
+registrations use their shared-document collision rules.
 
 ## Artifact formats
 
@@ -437,16 +440,15 @@ inspect declarations with `agw artifact show` instead.
 Native-home overrides follow the actual user's native conventions. In particular, an explicit
 `CLAUDE_CONFIG_DIR` places user MCP config at `<CLAUDE_CONFIG_DIR>/.claude.json`; the default is
 `~/.claude.json`, separate from Claude's `settings.json`. Native VM facets defer MCP to user; Shell
-publishes canonical `mcp_servers/<name>.json` files beneath its normal scope directory, including
-`/opt/agentworks/artifacts/` at VM scope. Shell does not connect or launch servers.
+publishes canonical `mcp_servers/<delivered-name>.json` files beneath its normal scope directory,
+including `/opt/agentworks/artifacts/` at VM scope. Shell does not connect or launch servers.
 
-The declared map key is the native server name: `mcp_servers.github` registers `github`, with no
-prefix, truncation or suffix. Original-owner identities remain internal provenance. Separate native
-user/project configurations follow the harness's normal loading and precedence rules; use different
-names when both connections must remain independently addressable. If multiple original scopes
-deliver the same name to one destination, equal native definitions share one entry. Different
-definitions are all deferred with a warning while independent names continue. Native policy can
-still affect discovery; registration alone makes no availability guarantee.
+Local `mcp_servers.github` registers `github`. The same declaration deferred from VM scope registers
+`vm-github`. Separate native user/project configurations follow the harness's normal loading and
+precedence rules. Use different names when both connections must remain independently addressable.
+When multiple inputs deliver the same key to one destination, equal native definitions share one
+entry. Different definitions are all deferred with a warning while independent names continue.
+Native policy can still affect discovery; registration alone makes no availability guarantee.
 
 User/workspace application manages an entry inside a shared document. An absent entry is created; an
 identical unowned entry is adopted, with a notice after ownership is saved. A matching recorded
@@ -572,14 +574,15 @@ connection registration and its separate session opt-ins.
 | Codex       | Machine guidance skills and skills; personas defer | Guidance skills, standard skills and native personas                 | Opt-in shared-home guidance/skills or private persona configuration               |
 | Grok Build  | Defer to user                                      | User native rules; workspace guidance skills; native skills/personas | Opt-in shared-home entry with private indexed content; session personas unhandled |
 
-Each rule has its own native file or generated skill. Hints aggregate once per original owning
-scope. Generated helper names include an owner qualifier, preserving equal keys from distinct
-scopes. The source declarations and their digests retain their original artifact types; projecting a
-rule into a skill does not merge its key into the source `skills` map. Generated helpers use the
-same native collision checks as authored skills. Standard skills retain complete package members.
-Native invocation names may acquire a session qualifier or plugin namespace; inspection reports
-recorded native identities and destinations. Literal invocation names inside imported skill bodies
-are not rewritten.
+Each rule has its own native file or generated skill. When a rule named `foo` is delivered as a
+skill, its helper is named `agentworks-rule-foo`. When hints aggregate, the helper is named
+`agentworks-hints`. A deferred helper adds the original scope prefix, for example
+`vm-agentworks-rule-foo`. Generated helpers share a namespace with authored skills and can collide
+with them. Harness-native skill names have a 64-character limit, including any scope prefix. Shorten
+the declaration if the rendered name exceeds that limit. Standard skills retain complete package
+members. Session workarounds may qualify native invocation names. Inspection reports recorded native
+identities and destinations. Literal invocation names inside imported skill bodies are kept as
+authored.
 
 Generated guidance skills contain a fixed `SKILL.md` entrypoint that directs the reader to sibling
 `guidance.md`. That supporting file holds the literal rule body or owner hints aggregate. The
@@ -651,23 +654,22 @@ names are shown in full; larger groups show the first two and `...`. Deferral ou
 the affected artifacts, destination and reason. A later setup or restart reconsiders those inputs;
 delivery still depends on the receiving integration and any required workaround.
 
-The native adapters check skill and persona identities across scopes. Before new delivery, a bounded
-inventory checks existing entries in known machine, user and direct workspace discovery roots. It
-reads native metadata names, including Codex configuration registrations, rather than assuming
-filenames are names. Conflicts identify the native name and competing paths. During setup,
-conflicting artifacts are deferred individually to the next supported facet while independent
-artifacts continue. During VM, user and workspace setup, missing, unreadable or stale ancestor
-captures cannot authorize retirement. Unresolved inherited origins protect affected prior placements
-and related packages against replacement and removal until their source evidence is current.
-Independently attributable local updates, removals and additions still converge. Attribution uses
-the prior and current local captures; shared files and old placements whose origins can no longer be
-classified remain held. Repairing the upstream owner and retrying the receiving owner's supported
-setup removes that hold. Ordinary safe retirement removes prior owned placements no longer in that
-plan; modified or unowned files remain protected. If session delivery still has a native-name
-conflict, the affected inputs are reported as unhandled and excluded from both files and launch
-arguments; independent delivery and launch continue. A non-conflicting native namespace can allow a
-later facet to handle a previously deferred input. Problems solely in existing ancestor placement
-also warn without blocking launch.
+Before new delivery, a bounded inventory checks existing entries in known machine, user and direct
+workspace discovery roots. It reads native metadata names, including Codex configuration
+registrations. Collision checks apply within the receiving native namespace. Conflicts identify the
+name and competing paths. During setup, conflicting artifacts are deferred individually to the next
+supported facet while independent artifacts continue. During VM, user and workspace setup, missing,
+unreadable or stale ancestor captures cannot authorize retirement. Unresolved inherited origins
+protect affected prior placements and related packages against replacement and removal until their
+source evidence is current. Independently attributable local updates, removals and additions still
+converge. Attribution uses the prior and current local captures; shared files and old placements
+whose origins can no longer be classified remain held. Repairing the upstream owner and retrying the
+receiving owner's supported setup removes that hold. Ordinary safe retirement removes prior owned
+placements no longer in that plan; modified or unowned files remain protected. If session delivery
+still has a native-name conflict, the affected inputs are reported as unhandled and excluded from
+both files and launch arguments; independent delivery and launch continue. A non-conflicting native
+namespace can allow a later facet to handle a previously deferred input. Problems solely in existing
+ancestor placement also warn without blocking launch.
 
 Conflicts found only in existing native inventory are separate from declared-input collisions. An
 unmanaged same-name entry can still defer a previously managed declaration; its unchanged previous
@@ -685,21 +687,25 @@ Inventory covers selected skill/persona types, with at most 512 directory entrie
 to 32 KiB each and 1 MiB combined, and an Agentworks rendered-TOML budget for Codex personas of 32
 MiB each and 64 MiB combined. The TOML budget is an Agentworks limit, not a native Codex product
 limit. For Codex, Agentworks recursively checks package contents and accepts skill entrypoints only
-at `<skill-root>/<package>/SKILL.md`. Its 512-entry budget includes supporting files and
-directories, including proposed members and their implied directories. The Claude and Grok adapters
-do not scan beneath a present package entrypoint. These native support limits do not restrict the
+at `<skill-root>/<package>/SKILL.md`. Matching persona registrations in the user and workspace
+configurations are checked separately. The 512-entry budget includes supporting files and
+directories, including proposed members and their implied directories. The initial Claude and Grok
+inventory stops at a present package entrypoint. These native support limits do not restrict the
 generic capture format. Before publication, preflight checks existing and proposed entries together,
-counting a replaced path once, so an accepted plan fits the next inventory. Generated Codex persona
-files obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting deeper than
-32 levels before constructing values. Directories without a root `SKILL.md` are walked within the
-same entry budget: ordinary files are ignored, while nested `SKILL.md` candidates, symlinks and
-special files are refused. This permits unowned notes to survive skill retirement without keeping
-the removed skill active. Symlinked or nested candidate layouts are explicitly unsupported. These
-are conservative Agentworks support limits, not claims that those layouts are invalid native
-configurations. The inventory does not claim to cover additional ancestor repository roots,
-third-party plugin locations, Codex system-configuration policy, or changes after preflight. Unknown
-native discovery extensions require separate verification; a successful preflight is not an
-exhaustive native inventory.
+counting a replaced path once. Owning setup uses the same file decisions as publication when
+shrinkage or retirement matters to a limit. A skipped receiver keeps its observed metadata size.
+When a Claude or Grok skill entrypoint retires, surviving files and directories beneath it count
+toward the next inventory, including when setup withdraws the last declared skill. Generated Codex
+persona files obey the same per-file bound. YAML metadata rejects aliases, anchors and nesting
+deeper than 32 levels before constructing values. Directories without a root `SKILL.md` are walked
+within the same entry budget: ordinary files count toward that budget, while nested `SKILL.md`
+candidates, symlinks and special files are refused. This permits unowned notes to survive skill
+retirement without keeping the removed skill active. Symlinked or nested candidate layouts are
+explicitly unsupported. These are conservative Agentworks support limits, not claims that those
+layouts are invalid native configurations. The inventory does not claim to cover additional ancestor
+repository roots, third-party plugin locations, Codex system-configuration policy, or changes after
+preflight. Unknown native discovery extensions require separate verification; a successful preflight
+is not an exhaustive native inventory.
 
 Claude's
 [reserved skill locations](https://code.claude.com/docs/en/skills#names-reserved-for-synced-skills)
@@ -788,13 +794,13 @@ appends to inherited opt-ins and deduplicates them. Omission and `[]` preserve i
 
 The home-skill methods warn that the native catalog is shared and matching is best effort. They
 never toggle shared native enablement settings or rebuild unrelated operator selector arrays. Codex
-registers qualified individual skill entries. Grok instead registers one immutable session-specific
-entry: its body reads the current run's index and accesses canonical skills through listed files.
-Those skills have no individual native slash commands, activation or tool controls. Skills
-explicitly using Grok activation fields `paths`, `disable-model-invocation` or `user-invocable`
-remain unhandled because indexed access cannot preserve those controls. Grok's `allowed-tools`
-metadata does not itself grant or restrict tools. Session personas remain unhandled; explicit native
-`agent` selection is separate.
+registers individual skill entries with compact names based on session, run and original ownership.
+Grok registers one session-specific entry whose body reads the current run's index and accesses
+skills through listed files. Those skills have no individual native slash commands, activation or
+tool controls. Skills explicitly using Grok activation fields `paths`, `disable-model-invocation` or
+`user-invocable` remain unhandled because indexed access cannot preserve those controls. Grok's
+`allowed-tools` metadata does not itself grant or restrict tools. Session personas remain unhandled;
+explicit native `agent` selection is separate.
 
 MCP workarounds register connections for that invocation, not a shared home/project catalog. They
 retain native consent and authentication requirements. A conflicting native registration can leave
@@ -855,11 +861,17 @@ Update selected session declarations when upgrading from the older prompt carrie
 | Grok `session-agent-definitions`       | Remove it; session personas remain unhandled            |
 
 The removed spellings are configuration errors. Claude `session-agent-definitions` and Codex
-`session-agent-config` retain native persona delivery. Existing ancestor output changes through its
-own supported lifecycle: VM/user reinit can retire recorded old instruction sections and publish new
-guidance files. Existing workspaces have no reinit; preserve work and use the supported workspace
-replacement lifecycle when changing their owned setup. Session restart does not repair ancestors. A
-session's own supported restart reconciles its recorded files and current workarounds.
+`session-agent-config` retain native persona delivery.
+
+To adopt current native names on existing installs, run the owning `agw vm reinit` for VM/admin
+placements or `agw agent reinit` for agent placements. Setup uses recorded ownership to retire
+unchanged old placements and apply the requested names. Modified owned files and differing unowned
+files are preserved. Private session carriers adopt current names on managed restart. Existing
+workspace placements keep their prior names. New workspace creation uses the current naming rules.
+VM/agent reinit and session restart leave workspace setup in place. Artifact declarations keep their
+canonical names. If a native persona selector refers to a renamed persona, update it to the
+delivered name. For example, set Claude's session `agent` to `vm-review` to select a
+session-delivered VM persona named `review`.
 
 ## Inspect before changing state
 

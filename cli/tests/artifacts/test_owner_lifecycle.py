@@ -16,9 +16,9 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.artifacts.bundle import ArtifactBundle
 from agentworks.artifacts.declarations import ArtifactsConfig, HintArtifactSpec
-from agentworks.artifacts.model import ArtifactGroup, ArtifactOwner
+from agentworks.artifacts.model import ArtifactGroup, ArtifactInputs, ArtifactOwner
 from agentworks.artifacts.routing import inspect_owner_artifacts, session_artifacts
-from agentworks.artifacts.state import read_captures
+from agentworks.artifacts.state import read_captures, write_capture
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
 from agentworks.errors import ExternalError, StateError
 from agentworks.harness_setup.dispatch import run_setup
@@ -363,6 +363,127 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
     current = read_native_setup(owner.db, "agent", "agent").records[0]
     assert current.complete and current.artifact_files == previous.artifact_files
     assert current.artifact_inputs == previous.artifact_inputs
+
+
+@pytest.mark.parametrize("scenario", ["unchanged", "checkpoint-failure", "modified-old", "foreign-new"])
+def test_same_declaration_reinit_migrates_recorded_guidance_packages(owner, monkeypatch, scenario):
+    import hashlib
+    import json
+    from unittest.mock import Mock
+
+    from agentworks.artifacts.declarations import ArtifactDefinitions, RuleArtifactSpec
+    from agentworks.artifacts.native.guidance import guidance_skills
+    from agentworks.artifacts.publication import publish_artifacts
+    from agentworks.execution.files import Files
+    from agentworks.harness_setup.dispatch import destination_id
+    from agentworks.harness_setup.model import NativeSetupState, SetupRecord
+    from agentworks.harness_setup.outcomes import SetupFailure
+    from agentworks.harness_setup.state import write_native_setup
+
+    owner.db.insert_agent("agent", "vm", "worker")
+    declaration = CapabilityConfig()
+    config = owner.artifacts.model_copy(
+        update={"declare": ArtifactDefinitions(rules={"review": RuleArtifactSpec(text="Read before review.")})}
+    )
+    template = ResolvedAgentTemplate("default", artifacts=config, harness_integrations={"codex": declaration})
+    inputs = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
+    assert inputs is not None and inputs.artifact_snapshot is not None
+    call = user_call(owner)
+    binary = owner.target.root / "bin/codex"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\nexit 97\n")
+    binary.chmod(0o700)
+    skill_root = owner.target.home / ".agents/skills"
+    new_names = {"agentworks-hints", "agentworks-rule-review"}
+    captured = inputs.artifact_snapshot.inputs
+    placements = guidance_skills(str(skill_root), ArtifactInputs(local=captured))
+    old_labels = {}
+    for label, identity in (
+        ("hints", ["hint"]),
+        ("rule-review", ["rule", "review"]),
+    ):
+        address = ["agent", "agent", "agent", *identity]
+        suffix = hashlib.sha256(json.dumps(address).encode()).hexdigest()[:10]
+        old_labels[f"agentworks-{label}"] = f"agentworks-{label}-{suffix}"
+    old_files = []
+    for file in placements:
+        assert file.package_root is not None
+        native = Path(file.package_root).name
+        old_name = old_labels[native]
+        package = str(skill_root / old_name)
+        old_files.append(
+            replace(
+                file,
+                path=file.path.replace(file.package_root, package, 1),
+                data=file.data.replace(f"name: {native}\n".encode(), f"name: {old_name}\n".encode()),
+                native_identity=f"skill:{old_name}",
+                package_root=package,
+            )
+        )
+    previous = SetupRecord(
+        component="agent",
+        integration="codex",
+        destination_id=destination_id(call.vm, call.access, location=call.home, username=call.username),
+        declaration=inputs.declaration("codex", declaration),
+        complete=True,
+        artifact_inputs=tuple(item.identity for item in captured.items()),
+        artifact_files=publish_artifacts(call.files, old_files, (), lambda _: None, roots=(call.home,)).files,
+    )
+    write_native_setup(owner.db, "agent", "agent", NativeSetupState(records=(previous,)), operation="fixture-baseline")
+    write_capture(owner.db, "agent", "agent", "agent", inputs.artifact_snapshot, operation="fixture-baseline")
+    old_package = skill_root / old_labels["agentworks-rule-review"]
+    foreign = skill_root / "agentworks-rule-review/SKILL.md"
+    if scenario == "modified-old":
+        (old_package / "guidance.md").write_text("Operator edit.")
+    if scenario == "foreign-new":
+        foreign.parent.mkdir()
+        foreign.write_text("---\nname: agentworks-rule-review\n---\nOperator instructions.\n")
+
+    def reinit() -> SetupRecord:
+        failures: list[SetupFailure] = []
+        state = run_setup(owner.db, owner.registry, inputs, call, failures=failures, operation="agent-reinit")
+        assert not failures
+        return state.records[0]
+
+    if scenario == "checkpoint-failure":
+        from agentworks.harness_setup import dispatch
+
+        def fail_first_install_checkpoint(db, kind, name, state, **kwargs):
+            if any(Path(file.path).parent.name in new_names for file in state.records[0].artifact_files):
+                raise StateError("fixture checkpoint failure")
+            return write_native_setup(db, kind, name, state, **kwargs)
+
+        with monkeypatch.context() as interrupt:
+            interrupt.setattr(dispatch, "write_native_setup", fail_first_install_checkpoint)
+            with pytest.raises(StateError, match="fixture checkpoint failure"):
+                reinit()
+        saved = read_native_setup(owner.db, "agent", "agent").records[0]
+        assert not saved.complete and not saved.artifact_files
+        assert len(list(skill_root.glob("*/SKILL.md"))) == 1
+        assert not any((skill_root / name).exists() for name in old_labels.values())
+
+    after = reinit()
+    assert after.declaration == previous.declaration
+    assert after.artifact_inputs == previous.artifact_inputs
+    if scenario in {"modified-old", "foreign-new"}:
+        assert not after.complete and after.skipped
+        assert old_package.exists()
+        assert (skill_root / "agentworks-hints/SKILL.md").is_file()
+        if scenario == "modified-old":
+            assert (old_package / "guidance.md").read_text() == "Operator edit."
+            assert not foreign.exists()
+        else:
+            assert foreign.read_text().endswith("Operator instructions.\n")
+        return
+
+    assert after.complete and not after.skipped
+    assert {path.name for path in skill_root.iterdir()} == new_names
+    assert {file.origins for file in after.artifact_files} == {file.origins for file in previous.artifact_files}
+    no_mutation = Mock(side_effect=AssertionError("converged reinit must not change native files"))
+    monkeypatch.setattr(Files, "write_if", no_mutation)
+    monkeypatch.setattr(Files, "remove_if", no_mutation)
+    assert reinit().artifact_files == after.artifact_files
+    no_mutation.assert_not_called()
 
 
 def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):

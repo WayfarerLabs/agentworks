@@ -55,25 +55,27 @@ def test_synthetic_guest_acknowledgement_bypasses_windows_text_newline_translati
 @pytest.mark.parametrize("delay", [0, 0.12])
 def test_entry_waits_for_same_guest_keeper_acknowledgement(monkeypatch, delay):
     original_popen = subprocess.Popen
-    process = _child(f"import sys,time; time.sleep({delay}); {_GUEST_ACK}; time.sleep(30)")
+    code = f"import sys,time; time.sleep({delay}); {_GUEST_ACK}; time.sleep(30)"
     called = []
 
     def spawn(argv, **kwargs):
-        called.append(argv)
+        process = original_popen([sys.executable, "-u", "-c", code], **kwargs)
+        called.append((argv, process))
         return process
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     entered = time.monotonic()
     with WSL2Platform("wsl2", {}).vm_active(_fake_vm("distro")):
+        [(argv, process)] = called
         assert time.monotonic() - entered >= delay * 0.8
         assert process.poll() is None
     assert process.poll() is not None
-    assert process.stdout.closed
-    assert called[0][:6] == [wsl2._WSL, "--distribution", "distro", "--", "sh", "-c"]
+    assert process.stdout is not None and process.stdout.closed
+    assert argv[:6] == [wsl2._WSL, "--distribution", "distro", "--", "sh", "-c"]
     # Run the actual guest command locally to verify its acknowledgement and
     # exec form instead of pinning the authored shell spelling.
     if sys.platform != "win32":
-        actual = original_popen(["sh", "-c", called[0][-1]], stdout=subprocess.PIPE)
+        actual = original_popen(["sh", "-c", argv[-1]], stdout=subprocess.PIPE)
         try:
             wsl2._await_keeper_attachment(actual, "distro")
         finally:

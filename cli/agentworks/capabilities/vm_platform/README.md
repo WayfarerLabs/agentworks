@@ -372,10 +372,11 @@ requirement, so a legacy site can still load for operations on existing VMs.
 
 Beside it, and as part of contract version 2, the pending node calls
 `validate_create_hostname(hostname)` with the hostname core composed for the VM (`{slug}-{name}`, or
-the bare name). It is pure and offline too, and its default accepts every hostname; a platform whose
+the bare name): lowercase letters, digits and hyphens, since core refuses a VM name holding an
+underscore. It is pure and offline too, and its default accepts every hostname; a platform whose
 backend would change some hostnames refuses them here with a `ValidationError`, before any secret
-resolves or the VM's row exists. WSL2 refuses a hostname with an underscore or consecutive hyphens,
-which its init would rewrite.
+resolves or the VM's row exists. WSL2 refuses a hostname with consecutive hyphens, which a system
+slug can carry and its init would collapse.
 
 An operator-owned artifact is also untrusted until the live guest proves what it contains. Core
 applies the same release check regardless of who owns the artifact map. A mismatch leaves the

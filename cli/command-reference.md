@@ -775,24 +775,26 @@ current power state; this never starts a VM. The human table adds `STATUS` only 
 and the command reports progress before provider work. `--status` cannot be combined with
 `--names-only`.
 
-`vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
-declared vm-template), `--admin-template` (a declared admin-template; defaults to the reserved
-`default` admin-template, which always exists), `--spec` (an inline final VM layer), `--admin-spec`
-(an inline final admin layer), and `--site` (a declared vm-site; falls back to `defaults.site`, else
-the one ENABLED site is inferred when there is exactly one, several prompt interactively, and
-non-interactive runs error naming the options). The selected admin-template is stored on the VM row
-(NULL = `default`) and drives its admin user on every later `vm reinit`, `vm shell`, and admin-mode
-session. An unknown `--admin-template` name fails before any provisioning or DB work. Hardware
-(`cpus`, `memory`, `disk`, `swap`) starts with the vm-template and the admin username comes from the
-admin-template. `--spec` may supply a typed final VM layer for hardware or other VM-template fields,
-while `--admin-spec` may supply a typed final admin layer. The removed individual override flags do
-not return. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's catalog
-(built-in B-series, or the site's `vm_sizes` platform key); an off-ratio request rounds up and
-warns. These are immutable provisioning parameters stored in the database. All initialization
-follows the effective VM and admin declarations, with config and registry resources backing
-referenced packages, credentials, secrets, and install commands. Both final layers are stored in one
-desired VM record and reapplied by `vm reinit`. Templates carry no `site`: placement is per-host, so
-it never travels inside a shared template.
+`vm create <name>` takes the VM name as a required positional. The name becomes the VM's hostname
+(`{slug}-{name}`, below), so unlike other resource names it cannot hold an underscore, which no DNS
+hostname allows. Optional flags: `--template` (a declared vm-template), `--admin-template` (a
+declared admin-template; defaults to the reserved `default` admin-template, which always exists),
+`--spec` (an inline final VM layer), `--admin-spec` (an inline final admin layer), and `--site` (a
+declared vm-site; falls back to `defaults.site`, else the one ENABLED site is inferred when there is
+exactly one, several prompt interactively, and non-interactive runs error naming the options). The
+selected admin-template is stored on the VM row (NULL = `default`) and drives its admin user on
+every later `vm reinit`, `vm shell`, and admin-mode session. An unknown `--admin-template` name
+fails before the VM row is created or anything is provisioned. Hardware (`cpus`, `memory`, `disk`,
+`swap`) starts with the vm-template and the admin username comes from the admin-template. `--spec`
+may supply a typed final VM layer for hardware or other VM-template fields, while `--admin-spec` may
+supply a typed final admin layer. The removed individual override flags do not return. On Azure,
+`cpus` + `memory` select the smallest fitting VM size from the site's catalog (built-in B-series, or
+the site's `vm_sizes` platform key); an off-ratio request rounds up and warns. These are immutable
+provisioning parameters stored in the database. All initialization follows the effective VM and
+admin declarations, with config and registry resources backing referenced packages, credentials,
+secrets, and install commands. Both final layers are stored in one desired VM record and reapplied
+by `vm reinit`. Templates carry no `site`: placement is per-host, so it never travels inside a
+shared template.
 
 During provisioning, the platform joins the VM to the tailnet once, through its own channel, and
 then reads the VM's Tailscale address. If the address cannot be read, create logs the node out of

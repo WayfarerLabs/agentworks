@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from typing import TYPE_CHECKING
 
 import yaml
 
 from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import delivery_name
 from agentworks.artifacts.session_paths import session_package_prefix
 
 if TYPE_CHECKING:
@@ -33,15 +33,11 @@ def guidance_entries(inputs: ArtifactInputs) -> tuple[tuple[ArtifactInput, ...],
     )
 
 
-def _guidance_name(items: tuple[ArtifactInput, ...]) -> str:
-    first = items[0]
-    label = "hints" if first.content.type is ArtifactType.HINT else f"rule-{first.content.name}"
-    owner = [first.origin.component, first.origin.resource_kind, first.origin.resource_name]
-    identity = [*owner, first.content.type.value]
-    if first.content.type is ArtifactType.RULE:
-        identity.append(first.content.name)
-    suffix = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:10]
-    return f"agentworks-{label[:42].rstrip('-')}-{suffix}"
+def _guidance_name(inputs: ArtifactInputs, first: ArtifactInput, *, skill: bool = False) -> str:
+    if first.content.type is ArtifactType.HINT:
+        return delivery_name(inputs, first, base="agentworks-hints")
+    base = f"agentworks-rule-{first.content.name}" if skill else first.content.name
+    return delivery_name(inputs, first, base=base)
 
 
 def _body(items: tuple[ArtifactInput, ...]) -> str:
@@ -66,7 +62,7 @@ def guidance_skills(
     files: list[ArtifactFile] = []
     for items in guidance_entries(inputs):
         first = items[0]
-        name = _guidance_name(items) if context is None else _session_name(items, context)
+        name = _session_name(items, context) if context is not None else _guidance_name(inputs, first, skill=True)
         label = "setup hints" if first.content.type is ArtifactType.HINT else f"rule {first.content.name}"
         description = f"Read before working: {label} from {_owner(first)}."
         data = _body(items).encode()
@@ -97,7 +93,7 @@ def guidance_skills(
 def guidance_rules(root: str, inputs: ArtifactInputs) -> tuple[ArtifactFile, ...]:
     return tuple(
         ArtifactFile(
-            f"{root}/{_guidance_name(items)}.md",
+            f"{root}/{_guidance_name(inputs, items[0])}.md",
             _body(items).encode(),
             tuple(item.origin_identity for item in items),
         )

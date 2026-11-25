@@ -800,13 +800,13 @@ apt source and package rows; `install-command` for its shipped user install-comm
 `onepassword` if a declared secret source selects the `onepassword` backend; `proxmox` if a
 `vm-site` uses the `proxmox` platform; `gcp` if you use `gcp-gce` or a template installs the
 `gcloud-cli` apt package; `aws` if you use `aws-ec2`; `azure` if you use the `azure-vm` platform,
-the `azdo` (Azure DevOps) git-credential provider, or the `az-cli` install-command; and `claude` if
-a `session-template` uses the `claude-code` integration or a template installs the `claude` CLI.
-Until you do, a resource that references one is not-ready (or refused at use) with an "enable plugin
-`<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2` platforms, the
-`shell` harness integration, the `env-var` / `prompt` secret backends, and the `github`
-git-credential provider) needs no `[plugins]` entry at all. `agw doctor` lists every installed
-plugin and whether it is enabled.
+the `azdo` (Azure DevOps) git-credential provider, the `azure-keyvault` secret backend, or the
+`az-cli` install-command; and `claude` if a `session-template` uses the `claude-code` integration or
+a template installs the `claude` CLI. Until you do, a resource that references one is not-ready (or
+refused at use) with an "enable plugin `<name>`" hint, never a silent failure. The default local
+path (the `lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt`
+secret backends, and the `github` git-credential provider) needs no `[plugins]` entry at all.
+`agw doctor` lists every installed plugin and whether it is enabled.
 
 ## Secrets: configured sources and implementation backends
 

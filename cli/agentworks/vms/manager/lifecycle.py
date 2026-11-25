@@ -43,7 +43,7 @@ from agentworks.errors import (
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing, VMNotReady
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
-from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
+from agentworks.naming import validate_vm_name
 
 if TYPE_CHECKING:
     from typing import NoReturn
@@ -149,7 +149,7 @@ def create_vm(
     ``admin_template`` selects which admin-template provisions the admin
     user (None = the reserved ``default``). A non-default name must be a
     declared admin-template resource; an unknown name fails here, before
-    any DB or backend work.
+    the VM's row is created or anything is provisioned.
     """
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
@@ -160,6 +160,19 @@ def create_vm(
     # surface before any template / DB / VM business logic. The
     # pending-plus-durable registry built below is authoritative for mutation.
     registry = load_request_registry(config, include_live_resources=False)
+
+    # The name's own checks come next, before anything uses the name or can
+    # prompt (site selection, the Tailscale and SSH checks, the slug prompt).
+    # Existence goes first so an existing VM, even one named before a
+    # current naming rule, reports that it exists.
+    vm_name = name
+    if db.get_vm(vm_name) is not None:
+        raise AlreadyExistsError(
+            f"VM '{vm_name}' already exists",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
+    validate_vm_name(vm_name)
 
     from agentworks.instance_specs import parse_vm_instance_specs
 
@@ -197,10 +210,10 @@ def create_vm(
 
     # Resolve the target site and its declaration. An undeclared site
     # fails here with the stranded-site ConfigError + manifest hint,
-    # and a NOT-READY one with its reason chain, both before any DB or
-    # backend work, and critically before the Tailscale check and the
-    # interactive system-slug prompt below: the operator must never
-    # answer a prompt for an op the site already sank.
+    # and a NOT-READY one with its reason chain, both before the VM's
+    # row is created or any backend work, and critically before the
+    # Tailscale check and the interactive system-slug prompt below: the
+    # operator must never answer a prompt for an op the site already sank.
     from agentworks.vms.sites import ensure_site_ready, lookup_site, select_site
 
     site = select_site(site, config.defaults.site, registry)
@@ -214,28 +227,17 @@ def create_vm(
         layered_vm=layered_vm_tmpl,
         layered_admin=layered_admin,
     )
-    existing_vm = db.get_vm(name)
-    if existing_vm is None:
-        registry = load_request_registry(
-            config,
-            live_database=db,
-            pending_publishers=(lambda target: target.add_live(pending),),
-        )
-        from agentworks.instance_specs import ensure_effective_references_enabled
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(lambda target: target.add_live(pending),),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
 
-        ensure_effective_references_enabled(registry, pending.outbound)
+    ensure_effective_references_enabled(registry, pending.outbound)
     site_decl = lookup_site(site, registry)
     ensure_site_ready(site_decl, registry)
 
-    vm_name = name
-    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
-
-    if existing_vm is not None:
-        raise AlreadyExistsError(
-            f"VM '{vm_name}' already exists",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
     from agentworks.instance_specs import refuse_orphan_creation_state
 
     refuse_orphan_creation_state(db, "vm", vm_name)

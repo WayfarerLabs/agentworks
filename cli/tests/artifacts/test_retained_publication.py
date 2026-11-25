@@ -65,12 +65,15 @@ def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_indepe
         target.files(), (entrypoint, supporting), (), lambda files: None, roots=(str(target.home),)
     ).files
     snapshots = {file.path: (Path(file.path).read_bytes(), Path(file.path).stat()) for file in previous}
-    new_member = replace(supporting, path=str(package / "new.sh"), origins=("b" * 64,), data=b"new script")
+    moved = target.home / "replacement/review"
+    new_entrypoint = replace(entrypoint, path=str(moved / "SKILL.md"), package_root=str(moved), origins=("d" * 64,))
+    new_member = ArtifactFile(str(package / "new.sh"), b"new script", ("b" * 64,), executable=True)
     independent = ArtifactFile(str(target.home / "independent.md"), b"independent", ("c" * 64,))
+    desired = (new_entrypoint, new_member, independent)
     checkpoints: list[tuple[OwnedArtifactFile, ...]] = []
     result = publish_artifacts(
         target.files(),
-        (replace(entrypoint, data=b"changed skill"), new_member, independent),
+        desired,
         previous,
         checkpoints.append,
         roots=(str(target.home),),
@@ -78,8 +81,13 @@ def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_indepe
     )
     assert result.files[: len(previous)] == previous
     assert {file.path for file in result.files} == {file.path for file in previous} | {independent.path}
-    assert {skip.path for skip in result.skipped} == {entrypoint.path, supporting.path, new_member.path}
-    assert not Path(new_member.path).exists()
+    assert {skip.path for skip in result.skipped} == {
+        entrypoint.path,
+        supporting.path,
+        new_entrypoint.path,
+        new_member.path,
+    }
+    assert not moved.exists() and not Path(new_member.path).exists()
     assert Path(independent.path).read_bytes() == independent.data
     assert checkpoints == [result.files]
     for path, (data, metadata) in snapshots.items():
@@ -88,13 +96,13 @@ def test_unresolved_routes_hold_package_updates_and_new_members_but_allow_indepe
     # Once inputs resolve, ordinary convergence can update the package and retire old members.
     healed = publish_artifacts(
         target.files(),
-        (replace(entrypoint, data=b"changed skill"), new_member, independent),
+        desired,
         result.files,
         checkpoints.append,
         roots=(str(target.home),),
     )
     assert not healed.skipped and not Path(supporting.path).exists()
-    assert Path(entrypoint.path).read_bytes() == b"changed skill"
+    assert not Path(entrypoint.path).exists() and Path(new_entrypoint.path).read_bytes() == new_entrypoint.data
     assert Path(new_member.path).read_bytes() == new_member.data
 
 
@@ -109,7 +117,7 @@ def test_retained_aggregate_section_does_not_drop_unresolved_members_when_new_in
     independent = ArtifactFile(str(target.home / "new-rule.md"), b"new fixture rule", ("d" * 64,))
     result = publish_artifacts(
         target.files(),
-        (replace(item, data=b"only local rule", origins=("a" * 64,)), independent),
+        (replace(item, data=b"updated local rules", origins=("a" * 64, "c" * 64)), independent),
         previous,
         lambda files: None,
         roots=(str(target.home),),
@@ -118,5 +126,5 @@ def test_retained_aggregate_section_does_not_drop_unresolved_members_when_new_in
     assert path.read_bytes() == before
     assert BEGIN in before and END in before
     assert result.files[0] == previous[0]
-    assert result.skipped[0].origins == item.origins
+    assert result.skipped[0].origins == (*item.origins, "c" * 64)
     assert Path(independent.path).read_bytes() == independent.data

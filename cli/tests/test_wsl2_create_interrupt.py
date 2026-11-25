@@ -161,10 +161,9 @@ def test_the_distro_keeps_its_vms_hostname_in_wsl_conf(monkeypatch: pytest.Monke
     assert conf["boot"]["systemd"] == "true"
 
 
-@pytest.mark.parametrize("hostname", ["vm_1", "team--vm1"])
-def test_a_hostname_wsl_would_rename_is_refused(hostname: str) -> None:
+def test_a_hostname_with_consecutive_hyphens_from_the_slug_is_refused() -> None:
     with pytest.raises(ValidationError) as caught:
-        WSL2Platform("wsl2", {}).validate_create_hostname(hostname)
+        WSL2Platform("wsl2", {}).validate_create_hostname("team--vm1")
     assert caught.value.hint
 
 

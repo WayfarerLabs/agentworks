@@ -114,12 +114,12 @@ agw console delete my-console              # Extra shells are lost but sessions 
 
 ## Global Options
 
-| Flag                | Description                                                                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--version`         | Print the installed CLI version and exit (equivalent to `agw version`)                                                                      |
-| `--non-interactive` | Do not use the TTY for interactions, even if one is present                                                                                 |
-| `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
-| `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                         |
+| Flag                | Description                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--version`         | Print the installed CLI version and exit (equivalent to `agw version`)                                                               |
+| `--non-interactive` | Do not use the TTY for interactions, even if one is present                                                                          |
+| `--debug`           | Print the full traceback on unhandled errors, and show Azure VM SDK log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
+| `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                  |
 
 `--non-interactive` is a terminal-input policy: it disables TTY interaction even when a TTY is
 present. A process without usable terminal input is subject to the same TTY limitation. This flag
@@ -133,8 +133,9 @@ Domain errors (SSH timeouts, validation failures, missing resources, etc.) surfa
 line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors, third-party
 library failures) also get a clean single-line message, plus the full traceback appended to
 `~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set `AGW_DEBUG=1`) to print
-the traceback to stderr instead. Debug mode also restores the Azure SDK's own credential-chain log
-lines, which are otherwise suppressed so a credential failure renders once as the typed error.
+the traceback to stderr instead. Debug mode also restores the Azure VM provider's credential-chain
+log lines, which are otherwise suppressed so a credential failure renders once as the typed error.
+Key Vault lookup diagnostics stay suppressed even in debug mode to keep provider values private.
 
 On an interactive terminal, output is colorized by role: a yellow `Warning:` prefix, a red `Error:`
 prefix, bold section headers, a dim-green result line (the closing "VM deleted", "rekeyed", etc.),
@@ -498,19 +499,24 @@ key to one scalar `op://` reference. A direct configured-backend reference such 
 breaks in 0.14 with an exact source declaration and mapping rewrite; no compatibility row is
 created.
 
+The `azure` plugin also supplies the `azure-keyvault` secret backend. Declare a source for the
+vault, add its name to `[secret_config].sources`, and map secrets to that source. See the
+[Key Vault source examples](agentworks/secrets/README.md#configuring-azure-key-vault) and
+`agw resource explain secret-backend/azure-keyvault` for the installed configuration contract.
+
 ### System Plugins
 
 Agentworks ships optional vendor, tool, and installer catalogs as **system plugins**: separable
 bundles that are installed but off by default. The shipped build installs `apt` (five apt sources
 and their five package sets), `install-command` (six user install commands), `azure` (the `azure-vm`
-VM platform, the `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the
-`proxmox` VM platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform and
-optional guest `gcloud-cli` apt package), `onepassword` (the `onepassword` secret backend), `claude`
-(the `claude-code` harness integration and the `claude` CLI install-command), and `codex` (the
-`codex` harness integration and the `codex` CLI install-command), and `grok` (the `grok-build`
-harness integration and the Grok Build CLI install-command). (This is a different sense of "plugin"
-from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into
-Claude Code itself.)
+VM platform, the `azdo` git-credential provider, the `azure-keyvault` secret backend, and the
+`az-cli` install-command), `proxmox` (the `proxmox` VM platform), `aws` (the `aws-ec2` VM platform),
+`gcp` (the `gcp-gce` VM platform and optional guest `gcloud-cli` apt package), `onepassword` (the
+`onepassword` secret backend), `claude` (the `claude-code` harness integration and the `claude` CLI
+install-command), and `codex` (the `codex` harness integration and the `codex` CLI install-command),
+and `grok` (the `grok-build` harness integration and the Grok Build CLI install-command). (This is a
+different sense of "plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs
+marketplace plugins into Claude Code itself.)
 
 Opt in by name in `config.toml`:
 

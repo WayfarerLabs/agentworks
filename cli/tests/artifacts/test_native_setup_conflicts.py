@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 
 from agentworks.artifacts.application import ArtifactApplication
-from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
+from agentworks.artifacts.model import ArtifactInputs, ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native.common import defer_setup_conflicts
 from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, _inventory_problems
@@ -25,8 +25,8 @@ from agentworks.harness_setup.model import SetupRecord
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
-from tests.artifacts._fixtures import received
-from tests.artifacts.test_native_delivery import artifact, context, enabled, owned
+from tests.artifacts._fixtures import group, received
+from tests.artifacts.test_native_delivery import artifact, context, owned
 from tests.vm_access_support import Admin, RecordingVMAccess
 
 
@@ -99,9 +99,9 @@ def test_setup_conflict_cause_and_hint_survive_redacted_persistence_and_inspecti
 @pytest.mark.parametrize("facet", ["user", "workspace"])
 @pytest.mark.parametrize("artifact_type", [ArtifactType.SKILL, ArtifactType.AGENT])
 @pytest.mark.parametrize("established", [False, True], ids=["cold", "established"])
-@pytest.mark.parametrize("local_first", [False, True], ids=["outer-first", "local-first"])
+@pytest.mark.parametrize("competing", [False, True], ids=["same-canonical", "same-native"])
 def test_setup_keeps_established_owner_or_defers_all_colliders(
-    db, monkeypatch, implementation, facet, artifact_type, established, local_first
+    db, monkeypatch, implementation, facet, artifact_type, established, competing
 ):
     module = import_module(implementation.__module__)
     monkeypatch.setattr(module, "probe_native", lambda *args, **kwargs: "/home/alice/.native")
@@ -116,8 +116,12 @@ def test_setup_keeps_established_owner_or_defers_all_colliders(
         monkeypatch.setattr(module, setup_method, native_setup)
     outer = replace(artifact(artifact_type), origin=ArtifactOrigin("vm", "vm", "vm", bundle="original", entry="review"))
     component = "agent" if facet == "user" else "workspace"
-    local = replace(artifact(artifact_type), origin=ArtifactOrigin(component, component, "local", entry="review"))
-    independent = replace(artifact(ArtifactType.RULE), origin=local.origin)
+    local_name = "vm-review" if competing else "review"
+    local = replace(
+        artifact(artifact_type, name=local_name), origin=ArtifactOrigin(component, component, "local", entry=local_name)
+    )
+    independent = replace(artifact(ArtifactType.RULE), origin=replace(local.origin, entry="review"))
+    outer_group = group(outer)
     incomplete = Mock()
     common = {
         "vm": db.insert_vm("vm", "site", "host"),
@@ -126,7 +130,7 @@ def test_setup_keeps_established_owner_or_defers_all_colliders(
         "prior": None,
         "checkpoint": lambda claims: None,
         "report_incomplete": incomplete,
-        "artifacts": received(outer),
+        "artifacts": ArtifactInputs(deferred={outer_group.owner: outer_group}),
     }
     invocation: SetupInvocation
     if facet == "user":
@@ -162,54 +166,28 @@ def test_setup_keeps_established_owner_or_defers_all_colliders(
             ),
         )
 
-    contenders = (local, outer) if local_first else (outer, local)
+    contenders = (outer, local)
     inputs = received(*contenders, independent)
     result = setup(replace(invocation, artifacts=inputs))
     validate_application(result, inputs, facet, integration=implementation.name)
 
+    rejected = ((local,) if established else contenders) if competing else ()
     assert {(item.input_id, item.destination) for item in result.deferred} == {
-        (item.identity, "session") for item in ((local,) if established else contenders)
+        (item.identity, "session") for item in rejected
     }
     expected_origins = {independent.origin_identity}
-    if established:
+    if not competing:
+        expected_origins.update(item.origin_identity for item in contenders)
+        names = {file.native_identity for file in result.files}
+        assert {f"{artifact_type.value}:review", f"{artifact_type.value}:vm-review"} <= names
+    elif established:
         expected_origins.add(outer.origin_identity)
+    if established:
         assert any(updated in file.data for file in result.files if outer.origin_identity in file.origins)
     assert {origin for file in result.files for origin in file.origins} == expected_origins
-    incomplete.assert_called_once()
+    assert incomplete.call_count == int(competing)
     if implementation is not GrokBuildIntegration:
         native_setup.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    "adapter,artifact_type",
-    [
-        ("claude", ArtifactType.SKILL),
-        ("claude", ArtifactType.AGENT),
-        ("codex", ArtifactType.AGENT),
-        ("grok", ArtifactType.AGENT),
-    ],
-)
-def test_session_cross_origin_names_are_rejected_or_left_unhandled(adapter, artifact_type):
-    module = import_module(f"agentworks.plugins.{adapter}.artifacts")
-    outer = artifact(artifact_type, owner="outer")
-    local = artifact(artifact_type, owner="local")
-    if adapter == "grok":
-        result = module.session_artifacts(
-            context=context(outer, local),
-            extra_args=["--single", "fixture task"],
-            enabled_workarounds=enabled(module.session_artifacts),
-        )
-        assert {item.input_id for item in result.application.deferred} == {outer.identity, local.identity}
-        assert all(item.destination == "session" for item in result.application.deferred)
-        assert result.application.files == ()
-        assert result.argv == ()
-        return
-    with pytest.raises(NativeArtifactConflictError):
-        module.session_artifacts(
-            context=context(outer, local),
-            extra_args=["--single", "fixture task"] if adapter == "grok" else [],
-            enabled_workarounds=enabled(module.session_artifacts),
-        )
 
 
 @pytest.mark.parametrize("override", [False, True])
@@ -259,7 +237,7 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
 
     def check(files):
         entries = {file.path: file.native_identity for file in files if file.native_identity}
-        problems = _inventory_problems(inventory, tuple(entries.values()), entries)
+        problems = _inventory_problems(inventory, entries)
         if problems:
             raise NativeArtifactConflictError(
                 "fixture retained persona name", tuple(problem.identity for problem in problems), hint="fixture repair"
@@ -272,10 +250,10 @@ def test_deferring_a_renamed_existing_entry_exposes_its_other_native_collision(d
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux guest native probe")
-def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identity_collision(db, tmp_path):
+@pytest.mark.parametrize("established", [False, True])
+def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identity_collision(db, tmp_path, established):
     from agentworks.artifacts.capture import content_from_members
     from agentworks.artifacts.model import ArtifactMember
-    from agentworks.plugins.codex.artifacts import outer_artifacts
     from tests.native_setup_fixtures import LocalFixtureAccount
 
     target = LocalFixtureAccount(tmp_path / "guest")
@@ -283,9 +261,7 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
     workspace.mkdir()
     owner = ArtifactOrigin("workspace", "workspace", "ws", entry="review")
     rule = replace(artifact(ArtifactType.RULE), origin=owner)
-    generated = outer_artifacts(received(rule), skills_root="/skills", agents_root="/agents").files[0]
-    assert generated.native_identity is not None
-    name = generated.native_identity.removeprefix("skill:")
+    name = "agentworks-rule-review"
     body = f"---\nname: {name}\ndescription: Fixture procedure\n---\nProcedure body.\n".encode()
     skill = replace(
         artifact(ArtifactType.SKILL, name=name),
@@ -309,9 +285,105 @@ def test_real_workspace_setup_defers_generated_helper_and_authored_skill_identit
         linux_group="",
     )
     integration = CodexIntegration.for_setup(owner_kind="workspace", owner_name="ws", facet="workspace", config={})
+    if established:
+        initial = integration.workspace_init(replace(invocation, artifacts=received(skill)))
+        invocation = replace(
+            invocation,
+            prior=SetupRecord(
+                component="workspace",
+                integration="codex",
+                destination_id="a" * 64,
+                declaration={},
+                artifact_files=tuple(owned(file) for file in initial.files),
+            ),
+        )
     result = integration.workspace_init(invocation)
-    assert {item.input_id for item in result.deferred} == {rule.identity, skill.identity}
+    assert {item.input_id for item in result.deferred} == (
+        {rule.identity} if established else {rule.identity, skill.identity}
+    )
     assert all(item.destination == "session" for item in result.deferred)
-    assert {origin for file in result.files for origin in file.origins} == {hint.origin_identity}
+    expected = {hint.origin_identity, skill.origin_identity} if established else {hint.origin_identity}
+    assert {origin for file in result.files for origin in file.origins} == expected
     assert incomplete and access.requests()
     validate_application(result, inputs, "workspace", integration="codex")
+
+
+def test_plain_rule_path_collision_defers_both_origins_and_keeps_an_independent_rule(db):
+    from agentworks.artifacts.native.common import render_setup_artifacts
+    from agentworks.plugins.claude.artifacts import outer_artifacts
+
+    inherited = replace(
+        artifact(ArtifactType.RULE, name="foo"),
+        origin=ArtifactOrigin("vm", "vm", "vm", entry="foo"),
+    )
+    local = replace(
+        artifact(ArtifactType.RULE, name="vm-foo"),
+        origin=ArtifactOrigin("agent", "agent", "alice", entry="vm-foo"),
+    )
+    independent = replace(artifact(ArtifactType.RULE, name="bar"), origin=replace(local.origin, entry="bar"))
+    access = RecordingVMAccess([], Admin())
+    incomplete = Mock()
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "site", "host"),
+        access=access,
+        files=access.files(),
+        prior=None,
+        checkpoint=lambda claims: None,
+        report_incomplete=incomplete,
+        artifacts=received(inherited, local, independent),
+        username="alice",
+        home="/home/alice",
+    )
+    plan = render_setup_artifacts(invocation, lambda inputs: outer_artifacts(inputs, "/home/alice/.claude"))
+    assert {(item.input_id, item.destination) for item in plan.deferred} == {
+        (inherited.identity, "session"),
+        (local.identity, "session"),
+    }
+    assert [(file.path, file.origins) for file in plan.files] == [
+        ("/home/alice/.claude/rules/bar.md", (independent.origin_identity,))
+    ]
+    incomplete.assert_called_once()
+
+
+@pytest.mark.parametrize("kind", [ArtifactType.SKILL, ArtifactType.RULE])
+def test_overlong_native_skill_delivery_defers_the_origin(db, monkeypatch, kind):
+    from agentworks.artifacts.native.common import prepare_session_delivery, render_setup_artifacts
+    from agentworks.plugins.claude import artifacts as claude
+
+    too_long = artifact(kind, name="a" * 64)
+    too_long = replace(too_long, origin=replace(too_long.origin, component="vm", resource_kind="vm"))
+    independent = artifact(ArtifactType.SKILL, name="b" * 64)
+    current = context(too_long, independent)
+    access = RecordingVMAccess([], Admin())
+    incomplete = Mock()
+    invocation = UserSetupInvocation(
+        vm=db.insert_vm("vm", "site", "host"),
+        access=access,
+        files=access.files(),
+        prior=None,
+        checkpoint=lambda claims: None,
+        report_incomplete=incomplete,
+        artifacts=current.inputs,
+        username="alice",
+        home=current.home,
+    )
+    plan = render_setup_artifacts(
+        invocation, lambda inputs: claude.outer_artifacts(inputs, "/native", guidance_as_skills=True)
+    )
+    assert [item.input_id for item in plan.deferred] == [too_long.identity]
+    assert {file.native_identity for file in plan.files} == {f"skill:{independent.content.name}"}
+    incomplete.assert_called_once()
+
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/native")
+    session, _ = prepare_session_delivery(
+        access,
+        tool="claude",
+        integration="claude-code",
+        context=current,
+        render=lambda selected: claude.session_artifacts(
+            selected, extra_args=[], enabled_workarounds=["session-skill-plugin"]
+        ),
+        workspace="/workspace",
+    )
+    assert [item.input_id for item in session.application.deferred] == [too_long.identity]
+    assert {origin for file in session.application.files for origin in file.origins} == {independent.origin_identity}

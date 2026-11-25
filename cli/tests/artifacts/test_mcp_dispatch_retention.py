@@ -121,7 +121,7 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
         servers = parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
         assert isinstance(servers, dict)
         assert removed.content.name not in servers
-        assert (ancestor.content.name in servers) is (unavailable != "none")
+        assert ("vm-ancestor" in servers) is (unavailable != "none")
         current_entry = servers[current.content.name]
         assert isinstance(current_entry, dict) and current_entry["command"] == "updated"
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity} | set(expected)
@@ -131,7 +131,7 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
         assert observed[-1] == frozenset() and failures == []
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity}
         remaining = parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
-        assert isinstance(remaining, dict) and ancestor.content.name not in remaining
+        assert isinstance(remaining, dict) and "vm-ancestor" not in remaining
     assert not list((target.root / "tmp").iterdir())
 
 
@@ -144,7 +144,7 @@ def test_shared_name_keeps_ancestor_source_across_dispatch_retries_local_changes
     vm = db.insert_vm("vm", site="fixture", hostname="vm")
     path = target.home / (".claude.json" if tool == "claude" else f".{tool}/config.toml")
     key = "mcpServers" if tool == "claude" else "mcp_servers"
-    ancestor, local = item("vm", "shared"), item("agent", "shared")
+    ancestor, local = item("vm", "shared"), item("agent", "vm-shared")
     independent = item("agent", "independent")
     checkpoints: list[tuple[NativeClaim, ...]] = []
     invocation = UserSetupInvocation(
@@ -218,7 +218,7 @@ def test_shared_name_keeps_ancestor_source_across_dispatch_retries_local_changes
             assert protected in state.claims
             assert {entry.input_id for entry in state.deferred} == unresolved_ids
         before = path.read_bytes()
-        changed = item("agent", "shared", command="changed")
+        changed = item("agent", "vm-shared", command="changed")
         for _ in range(2):
             state = reinit(changed, independent)
             assert protected in state.claims
