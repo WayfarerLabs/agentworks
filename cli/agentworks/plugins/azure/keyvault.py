@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import os
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -34,6 +35,7 @@ from agentworks.capabilities.secret_backend import (
 from agentworks.errors import ConfigError, StateError, UserAbort
 from agentworks.plugins.azure.keyvault_config import (
     AzureKeyVaultMapping,
+    AzureKeyVaultServicePrincipalAuth,
     AzureKeyVaultSourceConfig,
     vault_authority,
 )
@@ -109,22 +111,43 @@ class _AzureKeyVaultClient:
 
     def _client(self) -> SecretClient:
         """Open provider resources only after the selected method starts."""
-        from azure.identity import DefaultAzureCredential
+        from azure.core.exceptions import ClientAuthenticationError
+        from azure.identity import ClientSecretCredential, DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
 
         if self._sdk_client is None:
             allow_impact = not isinstance(self._intent, PreviewIntent) or self._intent.impact is OperatorImpact.ALLOW
-            credential = DefaultAzureCredential(
-                authority=vault_authority(self._config.vault_url),
-                exclude_interactive_browser_credential=not allow_impact,
-                exclude_visual_studio_code_credential=not allow_impact,
-                exclude_broker_credential=not allow_impact,
-                process_timeout=10,
-                connection_timeout=10,
-                read_timeout=30,
-                retry_total=2,
-                logging_enable=False,
-            )
+            auth = self._config.auth
+            credential: ClientSecretCredential | DefaultAzureCredential
+            if isinstance(auth, AzureKeyVaultServicePrincipalAuth):
+                secret = os.environ.get(auth.client_secret_env)
+                if not secret or "\0" in secret:
+                    raise ClientAuthenticationError("explicit Azure service-principal credential unavailable")
+                try:
+                    credential = ClientSecretCredential(
+                        auth.tenant_id,
+                        auth.client_id,
+                        secret,
+                        authority=vault_authority(self._config.vault_url),
+                        connection_timeout=10,
+                        read_timeout=30,
+                        retry_total=2,
+                        logging_enable=False,
+                    )
+                except ValueError:
+                    raise ClientAuthenticationError("explicit Azure service-principal credential invalid") from None
+            else:
+                credential = DefaultAzureCredential(
+                    authority=vault_authority(self._config.vault_url),
+                    exclude_interactive_browser_credential=not allow_impact,
+                    exclude_visual_studio_code_credential=not allow_impact,
+                    exclude_broker_credential=not allow_impact,
+                    process_timeout=10,
+                    connection_timeout=10,
+                    read_timeout=30,
+                    retry_total=2,
+                    logging_enable=False,
+                )
             self._resources.callback(credential.close)
             self._sdk_client = SecretClient(
                 self._config.vault_url,
@@ -164,7 +187,11 @@ class _AzureKeyVaultClient:
                 elif isinstance(result, BackendMissing):
                     results[request.name] = PreviewMissing()
                 else:
-                    if self._intent.impact is OperatorImpact.NONE and result.reason is FailureReason.AUTHENTICATION:
+                    if (
+                        self._intent.impact is OperatorImpact.NONE
+                        and not isinstance(self._config.auth, AzureKeyVaultServicePrincipalAuth)
+                        and result.reason is FailureReason.AUTHENTICATION
+                    ):
                         results[request.name] = PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)
                     else:
                         results[request.name] = PreviewFailed(result.reason)

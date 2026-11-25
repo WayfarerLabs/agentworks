@@ -89,6 +89,7 @@ class _SDK:
         self.credential_error: BaseException | None = None
         self.credentials: list[_Credential] = []
         self.credential_options: list[dict[str, Any]] = []
+        self.principal_inputs: list[tuple[str, str, str]] = []
         self.client_options: list[dict[str, Any]] = []
         self.client_error: BaseException | None = None
         real_client = azure.keyvault.secrets.SecretClient
@@ -108,7 +109,14 @@ class _SDK:
             kwargs["transport"] = RequestsTransport(session=session, session_owner=True)
             return real_client(*args, **kwargs)
 
+        def principal(tenant_id: str, client_id: str, client_secret: str, **kwargs: Any) -> _Credential:
+            self.principal_inputs.append((tenant_id, client_id, client_secret))
+            result = _Credential(self.credential_error)
+            self.credentials.append(result)
+            return result
+
         monkeypatch.setattr(azure.identity, "DefaultAzureCredential", credential)
+        monkeypatch.setattr(azure.identity, "ClientSecretCredential", principal)
         monkeypatch.setattr(azure.keyvault.secrets, "SecretClient", client)
 
 
@@ -129,13 +137,113 @@ def _context(
     )
 
 
-def _source() -> ActiveSource:
+def _source(config: AzureKeyVaultSourceConfig | None = None) -> ActiveSource:
+    config = config or AzureKeyVaultSourceConfig(name="azure-keyvault", vault_url=_VAULT)
     return ActiveSource(
-        source=SecretSourceDecl(name="work-kv", backend=CapabilityBlock.of("azure-keyvault", vault_url=_VAULT)),
+        source=SecretSourceDecl(
+            name="work-kv", backend=CapabilityBlock.of("azure-keyvault", **config.model_dump(exclude={"name"}))
+        ),
         backend_class=AzureKeyVaultBackend,
-        config=AzureKeyVaultSourceConfig(name="azure-keyvault", vault_url=_VAULT),
+        config=config,
         readiness=Readiness.ready(),
     )
+
+
+def _principal_config(variable: str | None = None) -> AzureKeyVaultSourceConfig:
+    auth = {"mode": "service-principal", "tenant_id": "tenant-id", "client_id": "client-id"}
+    if variable is not None:
+        auth["client_secret_env"] = variable
+    return AzureKeyVaultSourceConfig.model_validate({"name": "azure-keyvault", "vault_url": _VAULT, "auth": auth})
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_explicit_principal_reads_its_environment_only_during_operation(
+    monkeypatch: pytest.MonkeyPatch, preview: bool
+) -> None:
+    sdk = _SDK(monkeypatch, [(200, {}, {"value": "resolved"})])
+    config = _principal_config("AGW_KEYVAULT_BOOTSTRAP")
+    monkeypatch.setenv("AGW_KEYVAULT_BOOTSTRAP", "old-value")
+    intent = PreviewIntent(OperatorImpact.NONE) if preview else ResolutionIntent()
+    with _context(intent, config=config) as client:
+        monkeypatch.setenv("AGW_KEYVAULT_BOOTSTRAP", "selected-value")
+        if preview:
+            assert client.preview((_request(),)) == {"token": PreviewAvailable()}
+        else:
+            assert client.resolve((_request(),)) == {"token": BackendResolved("resolved")}
+    assert sdk.principal_inputs == [("tenant-id", "client-id", "selected-value")]
+    assert sdk.credential_options == []
+    assert sdk.credentials[0].closed
+    assert "selected-value" not in repr(config)
+
+
+@pytest.mark.parametrize("value", [None, ""])
+@pytest.mark.parametrize("preview", [False, True])
+def test_missing_explicit_principal_credentials_fail_without_fallback(
+    monkeypatch: pytest.MonkeyPatch, value: str | None, preview: bool
+) -> None:
+    sdk = _SDK(monkeypatch, [(200, {}, {"value": "unused"})])
+    if value is None:
+        monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
+    else:
+        monkeypatch.setenv("AZURE_CLIENT_SECRET", value)
+    intent = PreviewIntent(OperatorImpact.NONE) if preview else ResolutionIntent()
+    with _context(intent, config=_principal_config()) as client:
+        if preview:
+            assert client.preview((_request(),)) == {"token": PreviewFailed(FailureReason.AUTHENTICATION)}
+        else:
+            assert client.resolve((_request(),)) == {"token": BackendFailed(FailureReason.AUTHENTICATION)}
+    assert sdk.principal_inputs == []
+    assert sdk.credential_options == []
+    assert sdk.adapter.urls == []
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_rejected_explicit_principal_is_definitive_and_never_falls_back(
+    monkeypatch: pytest.MonkeyPatch, preview: bool
+) -> None:
+    sdk = _SDK(monkeypatch, [(401, _CHALLENGE, {})])
+    sdk.credential_error = ClientAuthenticationError("sensitive-bootstrap-value")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "sensitive-bootstrap-value")
+    intent = PreviewIntent(OperatorImpact.NONE) if preview else ResolutionIntent()
+    with _context(intent, config=_principal_config()) as client:
+        if preview:
+            assert client.preview((_request(),)) == {"token": PreviewFailed(FailureReason.AUTHENTICATION)}
+        else:
+            assert client.resolve((_request(),)) == {"token": BackendFailed(FailureReason.AUTHENTICATION)}
+    assert sdk.credential_options == []
+    assert sdk.credentials[0].closed
+
+
+@pytest.mark.parametrize("variable", ["AW_SECRET_AZURE_CLIENT_SECRET", "aw_secret_test", "bad-name", "", "NAME=VALUE"])
+def test_invalid_or_reserved_bootstrap_variables_fail_configuration(variable: str) -> None:
+    with pytest.raises(ValidationError):
+        _principal_config(variable)
+
+
+def test_missing_principal_bootstrap_stops_the_source_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("AGW_KEYVAULT_FALLBACK", "must-not-be-used")
+    fallback = ActiveSource(
+        source=SecretSourceDecl(name="env-var", backend=CapabilityBlock.of("env-var")),
+        backend_class=EnvVarBackend,
+        config=EnvVarSourceConfig(name="env-var"),
+        readiness=Readiness.ready(),
+    )
+    batch = resolve_batch(
+        [
+            SecretDecl(
+                name="token",
+                description="test",
+                backend_mappings={"work-kv": "npm-token", "env-var": "AGW_KEYVAULT_FALLBACK"},
+            )
+        ],
+        [_source(_principal_config()), fallback],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    )
+    assert batch.outcomes[0].status is ResolutionStatus.FAILED
+    assert batch.outcomes[0].reason is FailureReason.AUTHENTICATION
+    assert batch.outcomes[0].source == "work-kv"
 
 
 @pytest.mark.parametrize("value", ["", "  text \r\n", "line1\nline2\n", "café 🔑"])

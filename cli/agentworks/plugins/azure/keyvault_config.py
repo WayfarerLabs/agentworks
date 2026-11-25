@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from pydantic import AfterValidator, Field
 
-from agentworks.schema import AgwModel, AgwRootModel, ScalarShorthand
+from agentworks.schema import AgwModel, AgwRootModel, NonBlankStr, ScalarShorthand
 
 _VAULT_AUTHORITIES = {
     "vault.azure.net": "login.microsoftonline.com",
@@ -42,10 +42,42 @@ SecretName = Annotated[str, Field(pattern=r"^[a-zA-Z0-9-]{1,127}$")]
 SecretVersion = Annotated[str, Field(pattern=r"^[a-fA-F0-9]{32}$")]
 
 
+def _validate_bootstrap_variable(value: str) -> str:
+    """Reject bootstrap names whose carriers CLI startup reserves for env-var."""
+    if value.upper().startswith("AW_SECRET_"):
+        raise ValueError("AW_SECRET_ variables are reserved for the env-var source; use a dedicated bootstrap variable")
+    return value
+
+
+BootstrapVariable = Annotated[
+    str,
+    Field(pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$"),
+    AfterValidator(_validate_bootstrap_variable),
+]
+
+
 class AzureKeyVaultAmbientAuth(AgwModel):
     """Use Azure's default credential chain."""
 
     mode: Literal["ambient"]
+
+
+class AzureKeyVaultServicePrincipalAuth(AgwModel):
+    """Use exactly one environment-backed service principal."""
+
+    mode: Literal["service-principal"]
+    tenant_id: NonBlankStr
+    """The principal's Entra ID tenant identifier."""
+    client_id: NonBlankStr
+    """The principal's application (client) identifier."""
+    client_secret_env: BootstrapVariable = "AZURE_CLIENT_SECRET"
+    """The environment variable containing the client secret; AW_SECRET_ is reserved."""
+
+
+AzureKeyVaultAuth = Annotated[
+    AzureKeyVaultAmbientAuth | AzureKeyVaultServicePrincipalAuth,
+    Field(discriminator="mode"),
+]
 
 
 class AzureKeyVaultSourceConfig(AgwModel):
@@ -54,7 +86,7 @@ class AzureKeyVaultSourceConfig(AgwModel):
     name: Literal["azure-keyvault"]
     vault_url: VaultUrl = Field(examples=["https://example-vault.vault.azure.net"])
     """The vault's HTTPS DNS endpoint."""
-    auth: AzureKeyVaultAmbientAuth = AzureKeyVaultAmbientAuth(mode="ambient")
+    auth: AzureKeyVaultAuth = AzureKeyVaultAmbientAuth(mode="ambient")
     """Authentication for this source; defaults to the ambient credential chain."""
 
 
