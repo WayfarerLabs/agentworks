@@ -211,7 +211,7 @@ and private review are recorded as they complete. No prose-pinning unit test is 
 
 - [x] Reproduce F1 through the literal declaration and actual isolated CLI; add the required field.
 - [x] Confirm the corrected literal declaration loads and run applicable file-quality checks.
-- [ ] Complete independent project and complexity review of the documentation-only correction.
+- [x] Complete independent project and complexity review of the documentation-only correction.
 - [ ] Publish the coherent round-2 head and summary with green CI, then reapply ready.
 
 Round count: two started of three authorized; round 2 is not yet claimed complete. Later feedback
@@ -224,3 +224,9 @@ retained in the session-owned ignored namespace; the CLI used a temporary isolat
 configuration and no provider operation. Prettier, Markdown lint, spelling and diff checks pass for
 both changed documents. No full local suite is repeated for this documentation-only correction; all
 required published CI checks still gate its ready handoff.
+
+Independent project and complexity lanes both cleared `741f29945` without findings. The project
+reviewer read the retained exact-head integration report and substantiated receipt of its separate
+full-delta review. The complexity lane confirmed one required field is the complete correction. This
+final plan update records their completed work only; all source and tests remain unchanged.
+Publication and CI on the new head, the ready handoff and its pipeline response remain pending.
