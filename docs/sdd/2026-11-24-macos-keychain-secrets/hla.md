@@ -27,9 +27,9 @@ terminal. A parent-enforced shrinking source-turn deadline covers startup, all l
 Termination must reap the worker and close pipes. Never forward stderr or traceback text.
 
 Use a small lazy `ctypes` binding to the macOS Security and CoreFoundation frameworks. Declare exact
-ABI signatures and ownership. In the child, read and save the native interaction setting, set it
-according to the preview impact, and restore it in orderly cleanup. Abrupt child exit discards this
-process-local setting.
+ABI signatures and ownership. Each child owns one intent and batch: set its native interaction
+policy once and retain it through native cleanup. Process exit discards the setting; no getter or
+restoration path is needed, and the CLI's own setting never changes.
 
 Obtain a concrete keychain reference with `SecKeychainOpen` or `SecKeychainCopyDefault`, then check
 status. Opening a reference alone does not prove that the file exists. At zero impact, locked state

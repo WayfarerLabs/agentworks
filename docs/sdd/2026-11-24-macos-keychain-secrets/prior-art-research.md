@@ -34,9 +34,9 @@ The native interaction flag is stored in
 It selects
 [unlock and item-access credentials](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Globals.cpp#L56),
 which the native password retrieval path consumes. Design consequence: disable interaction only
-inside a dedicated worker, restore it on orderly exit, and leave the CLI's setting untouched.
-Allowed native authentication may change shared unlock/access state; never promise rollback or
-relock on cleanup.
+inside a dedicated worker and leave the CLI's setting untouched. Each worker handles one batch and
+exits, so no restoration is needed inside that process. Allowed native authentication may change
+shared unlock/access state; never promise rollback or relock on cleanup.
 
 ## Exact bytes and absence evidence
 
