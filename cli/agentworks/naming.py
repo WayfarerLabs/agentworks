@@ -101,10 +101,11 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: i
     - **workspace** -> ``MAX_WORKSPACE_NAME_LENGTH`` (``agents/grants.py``). The
       name is derived into the Linux group ``ws-<name>``, so the cap is the same
       32-char limit minus the ``ws-`` prefix.
-    - **vm** -> ``MAX_VM_NAME_LENGTH`` (above). The name composes into both the
-      ``{slug}-{vm}`` hostname / DNS label and the ``{slug}-{vm}-vnet`` Azure
-      virtual-network name; the cap is the MIN over both sinks (the vnet sink
-      binds).
+    - **vm** -> ``MAX_VM_NAME_LENGTH`` (above), applied by
+      :func:`validate_vm_name`, which VM names use instead of this function.
+      The name composes into both the ``{slug}-{vm}`` hostname / DNS label and
+      the ``{slug}-{vm}-vnet`` Azure virtual-network name; the cap is the MIN
+      over both sinks (the vnet sink binds).
     - **session** -> ``MAX_SESSION_NAME_LENGTH`` (``sessions/tmux.py``). The
       name embeds in the per-agent tmux AF_UNIX socket path, whose length is
       bounded by ``sun_path``; the cap is what remains under a max-length agent
@@ -118,7 +119,7 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: i
     The default is ``MAX_FREEFORM_NAME_LENGTH`` (64): a caller that forgets to
     pass a cap gets the generous freeform bound, never a silently-wrong OS cap.
     Callers whose name feeds a bounded downstream identifier (agent, workspace,
-    vm, session) MUST pass their derived cap so an over-limit identifier is
+    session) MUST pass their derived cap so an over-limit identifier is
     rejected at the CLI boundary rather than failing opaquely downstream.
 
     Consecutive hyphens (``--``) are rejected by default because they are
@@ -140,4 +141,31 @@ def validate_name(name: str, *, allow_double_hyphen: bool = False, max_length: i
             f"invalid name '{name}'. Names must be lowercase alphanumeric "
             "with hyphens or underscores, must start and end with a letter or "
             f"digit{suffix}."
+        )
+
+
+def validate_vm_name(name: str) -> None:
+    """Validate a new VM's name, raising ValidationError on failure.
+
+    The shared :func:`validate_name` rules at ``MAX_VM_NAME_LENGTH``, plus no
+    underscore: the name becomes the DNS hostname ``{slug}-{name}``, and a DNS
+    label cannot hold one (guests drop it, cloud providers refuse it). So a VM
+    name is lowercase letters, digits and single hyphens, and its message says
+    exactly that rather than the shared one, which allows underscores.
+    """
+    from agentworks.output import ValidationError
+
+    if len(name) > MAX_VM_NAME_LENGTH:
+        raise ValidationError(
+            f"VM name '{name}' is too long ({len(name)} chars, max {MAX_VM_NAME_LENGTH})",
+            entity_kind="vm",
+            entity_name=name,
+        )
+    if not NAME_RE.match(name) or "--" in name or "_" in name:
+        raise ValidationError(
+            f"invalid VM name '{name}'. VM names must be lowercase letters, digits and single hyphens, "
+            "starting and ending with a letter or digit.",
+            entity_kind="vm",
+            entity_name=name,
+            hint="A VM name becomes part of its DNS hostname, which cannot hold an underscore.",
         )
