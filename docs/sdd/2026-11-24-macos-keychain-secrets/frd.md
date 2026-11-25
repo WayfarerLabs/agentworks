@@ -27,8 +27,9 @@ confirm that all requested secret work is done and working.
   entry perform no native keychain operations or authentication.
 - Zero-impact preview prevents native authentication UI, returns no plaintext, and reports
   indeterminate when broader permitted interaction could allow progress. Allowed-impact preview and
-  resolution may display native unlock/access UI and change authentication state. This does not
-  authorize item creation, modification, deletion, keychain creation, or configuration changes.
+  resolution may display native unlock/access UI. Operator-approved authentication may unlock a
+  keychain or persist an access grant. Agentworks does not create/delete password items, change
+  their contents, directly edit access controls, or create/configure keychains.
 - The backend reads no terminal input. Global policy for terminal input remains distinct from native
   authentication UI under the existing framework contract.
 - Only confirmed item absence permits source fallback. A missing, invalid, locked, or inaccessible
