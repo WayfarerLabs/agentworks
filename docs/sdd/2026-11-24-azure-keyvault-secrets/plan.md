@@ -163,3 +163,22 @@ lanes cleared the test-only correction at `541f20357`; complexity and correctnes
 subsequent formatting-only head `065143cfc`. Production code remains identical to the fully tested
 cleanup correction. The next published Windows run and all required checks still gate ready; no
 third full local suite was repeated for these two test-only changes.
+
+Windows rerun at `2a4d7e513` passed the native-path test but retained two child failures (518
+passed, 21 skipped). The improved diagnostic identified the actual fixture failure: `Path.home()`
+could not resolve a home during imports, before Azure lookup. The follow-up `b22023c15` gives every
+probe an explicit fixture directory, creates its own home there, and sets child `HOME` and Windows
+`USERPROFILE` to that directory. It inherits no operator home or credential state and does not
+derive home from an unsafe credential-path candidate. The delegate repeated the existing 56
+behavioral tests and changed-file typing/style checks successfully. This test-only follow-up still
+needs independent review and exact-head Windows confirmation; production code is unchanged.
+
+The
+[initial-head integration report](https://github.com/WayfarerLabs/agentworks/pull/964#issuecomment-7154638713)
+was published at 06:17 UTC, after round 1's fixed batch. It reports successful real Linux Azure Key
+Vault runtime cases and a material documentation defect: the complete secret example omits required
+`metadata.description`. The lead verified both the current omission and the model's missing-field
+error, and posted a critical reading. That finding belongs to round 2 under the existing allowance,
+after the next handoff and reporting window. Initial-head live evidence does not validate the
+subsequent credential-file changes. The tester records an empty soft-deleted vault metadata residue
+with denied purge permission; the lead has not accessed those resources.
