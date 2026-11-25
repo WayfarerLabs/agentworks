@@ -140,16 +140,16 @@ rotation on re-apply, the operator chose:]
 
 > Yes, at rest at scope
 
-[Asked whether to accept the scope and path table as the FRD's starting shape (VM paths absolute
-but outside homes and workspaces; workspace and user paths relative; no session files), the operator
+[Asked whether to accept the scope and path table as the FRD's starting shape (VM paths absolute but
+outside homes and workspaces; workspace and user paths relative; no session files), the operator
 chose:]
 
 > Accept
 
-[Asked whether to design files as owner-attributed contributions with templates as the only
-producer in this effort, the operator asked:]
+[Asked whether to design files as owner-attributed contributions with templates as the only producer
+in this effort, the operator asked:]
 
 > How much bigger is the full emitter model?
 
-[The lead sized the full model at roughly two to three times this effort, almost all of it in
-moving `env` and its producers onto the model, and asked again. That ask is open.]
+[The lead sized the full model at roughly two to three times this effort, almost all of it in moving
+`env` and its producers onto the model, and asked again. That ask is open.]
