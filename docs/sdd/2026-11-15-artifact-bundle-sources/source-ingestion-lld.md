@@ -50,6 +50,13 @@ An imported definition is one ordinary artifact-bundle manifest. Parse its envel
 publishing it to the registry. Reject additional documents or another resource kind. Its local
 wrapper supplies the bundle identity; imported names never become artifact prefixes.
 
+Guard external definition parsing before constructing YAML values: reject aliases, anchors,
+duplicate keys and excessive structural depth or node count within the operation's existing bounds.
+Reuse the ordinary envelope/schema validation after that guard. Translate parser, envelope and model
+errors at this boundary into value-free diagnostics identifying the wrapper and safe field or line;
+do not forward source excerpts, rejected values or underlying exception chains. This is an imported
+content boundary, not a redesign of the workstation manifest loader.
+
 Under the proposed initial import contract, imported content may contain the five maps and at most
 one directory profile, including the accepted Agent Plugins directory profile. Empty inherited
 defaults have no effect; nonempty registry inheritance and a further bundle-definition import are
@@ -115,6 +122,11 @@ locations. Never capture the whole repository before filtering. For the single M
 the same `mcp.json`/`mcp.jsonc` locations inside the selected directory. Both files present is an
 ambiguity error. A selected valid empty directory is a known empty collection.
 
+Fixed profile child locations use exact documented case on workstation and Git sources. Reject a
+case-only alias instead of allowing a case-insensitive filesystem to select different content or
+report it absent. Bound any child-name metadata needed for this check; it does not become a second
+candidate enumeration or content-capture pass.
+
 ## Discovery and normalization
 
 Apply the HLA's documented candidate patterns to captured members. Ignore ordinary non-artifact
@@ -132,6 +144,10 @@ MCP discovery reads every selected entry from the ordinary duplicate-safe MCP en
 the canonical definition validator. Validate each discovered definition, not only one requested key.
 Use deterministic member/key order. Duplicate generated keys are ambiguity errors; traversal order
 is not an override policy.
+
+Bound expanded entries as they are emitted, using the existing operation member limit, including
+entries later replaced. A single MCP document can contain many entries; its file count and the final
+winning group's codec limit alone do not bound discovery or imported-map expansion.
 
 Perform composition in this order:
 
@@ -153,15 +169,20 @@ bounded core capture-evidence list alongside the normalized group, with one reco
 selected bundle source. Include:
 
 - The local wrapper bundle and effective selector identity.
-- Source address/provenance and resolved Git commit where applicable.
+- Separate existing `ArtifactProvenance` values for the imported definition and the selected
+  collection when present, each retaining its address and resolved Git commit where applicable.
 - Definition/manifest digests: at most one imported bundle document and one external profile
   manifest.
-- Discovered artifact type/key membership before explicit and later-bundle overrides.
+- Discovered and imported-explicit artifact type/key membership before wrapper and later-bundle
+  overrides. Keep their declaring-document association even for inline entries.
 - The recognized external profile version where applicable.
 
 Do not print imported bodies or connection values during inspection. An imported document's digest
 and source provenance provide its identity; do not add its body or floating revision to offline
-hashes. A capture must retain evidence even when it contributes no winning artifacts.
+hashes. A capture must retain evidence even when it contributes no winning artifacts. In particular,
+a workstation definition selecting an empty Git collection must retain that collection's commit
+independently of the definition's own provenance. Keep these facts in one record per wrapper rather
+than introducing a source graph.
 
 Keep the normalized artifact-group representation independent of this evidence. Extend the core
 capture envelope with a new supported version when the evidence is present; keep existing v2-v4
@@ -201,6 +222,13 @@ reject unsupported transport or runtime semantics with safe diagnostics. Do not 
 package-relative stdio server into a PATH-only command. Plugin cwd, installed package files and
 persistent plugin data require a separately accepted execution lifecycle.
 
+Validate the external profile before canonical mapping, including its schema identifier, JSON
+structure and stricter URL rules: reject fragments and non-loopback cleartext HTTP. Reject header
+spellings that the canonical/native pipeline would interpret as environment references, including
+`${NAME}` and `Authorization: Bearer ${NAME}`. They are literals in the imported format and cannot
+become authority to read a target environment variable. Keep ordinary explicit MCP reference
+semantics unchanged; do not add a renderer mode to support these imported literals.
+
 This is an ingestion profile, not native plugin installation or a full client-conformance claim.
 Unknown extension content is not inferred to be rules, hints, agents or executable hooks. There is
 no version polling, OAuth automation or imported package execution during capture or inspection.
@@ -211,6 +239,8 @@ Use local fixture repositories and temporary workstation sources for determinist
 failure tests. Real owning setup and native placement acceptance remains in the integration lane.
 
 - Local/Git parity, add/change/remove, known-empty and fully shadowed membership.
+- A local definition selecting an empty Git collection retains its commit during offline inspection;
+  an imported inline entry overridden inline retains its declaring-document membership.
 - Parent and child declarations in different files, changed cwd, direct maps, selector inheritance,
   whole replacement/null clearing and stored references without a declaring file under the accepted
   migration.
@@ -225,3 +255,7 @@ failure tests. Real owning setup and native placement acceptance remains in the 
   content/credentials.
 - External format fixtures for supported and rejected semantics. Preserve normal native approval,
   optional-artifact handling and cleanup behavior.
+- Imported YAML expansion/nesting and duplicate-key rejection with value-free failures; case-only
+  fixed-location aliases; expanded MCP entries exceeding limits even when later overridden.
+- Accepted literal HTTP headers survive native rendering without environment lookup;
+  reference-shaped literals and URLs outside the external profile fail before normalization.
