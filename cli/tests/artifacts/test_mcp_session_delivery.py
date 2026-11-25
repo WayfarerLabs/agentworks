@@ -245,6 +245,8 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
 ):
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+    from agentworks.execution.results import Completed, Result
+    from agentworks.plugins.claude.conversation_probe import conversation_request
     from tests.artifacts.test_rendered_launch_args import integration
     from tests.vm_access_support import Admin, RecordingVMAccess
 
@@ -270,6 +272,11 @@ def test_start_rebinds_mcp_to_current_inputs_and_run_without_accumulating_argv(
     )
     second = replace(first, inputs=received(second_server), directory=first.directory + "-next", run_id="next")
     selected.prepare_artifacts(second)
+    if module_name == "claude":
+        access.respond(
+            conversation_request(selected._state["session_id"], environment=second.environment),
+            Result(Completed(0), b"AGW_CLAUDE_TRANSCRIPT=1\n"),
+        )
     b = selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.RESUME_OR_NEW)
     assert not b.artifacts.deferred
     if module_name == "claude":
