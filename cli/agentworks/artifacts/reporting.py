@@ -79,7 +79,7 @@ def report_deferrals(
                 origin = item.origin
                 source = (
                     f"{origin.component} {origin.resource_kind}/{origin.resource_name} "
-                    f"(producer {origin.producer}, bundle {origin.bundle})"
+                    f"(producer {origin.producer}, {origin.declaration_label})"
                     if terminal
                     else ""
                 )

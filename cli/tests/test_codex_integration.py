@@ -11,11 +11,11 @@ nothing adopted), including the recreated-namesake scenario end to end.
 
 Three stub layers, per what each behavior actually lives in:
 
-- ``_FakeTarget`` (exit-code stubs) drives the integration-side forks: which
-  probe runs when, how each exit code is classified, what lands in the
-  state blob and the pane string.
-- ``_ShellTarget`` EXECUTES the generated probes against a real scratch
-  filesystem through ``sh``, because their crux (the ``"source":"cli"``
+- ``_target`` (a recording access answering each named probe with an exit
+  code) drives the integration-side forks: which probe runs when, how each
+  exit code is classified, what lands in the state blob and the pane string.
+- ``_shell_access`` EXECUTES the generated probes against a real scratch
+  filesystem through a real local access, because their crux (the ``"source":"cli"``
   plus session-cwd filter that keeps subagent rollouts out of the candidate
   set) is implemented target-side in the probe command itself; an
   exit-code stub cannot pin that a subagent or foreign-cwd rollout is
@@ -40,17 +40,47 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from agentworks.artifacts.session import HOME_PROBE
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.codex.harness_integration import CodexConfig, CodexIntegration
+from agentworks.execution.errors import (
+    ExecutionIncomplete,
+    PathRefusal,
+    PathRefused,
+    TrustMismatch,
+    TrustMissing,
+    VMNotReady,
+)
+from agentworks.execution.requests import PythonProgram
+from agentworks.execution.results import Completed, NotDeliveredReason, Result, Unknown, UnknownReason
+from agentworks.plugins.codex.harness_integration import (
+    CodexConfig,
+    CodexIntegration,
+    discovery_probe,
+    recorder_probe,
+    rollout_probe,
+)
+from agentworks.plugins.codex.recorder import recorder_script
 from agentworks.schema import RefOwner, merge_model
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.conftest import requires_posix_shell
+from tests.vm_access_support import (
+    Admin,
+    Call,
+    RecordingVMAccess,
+    account_shell,
+    command_check_access,
+    local_vm_access,
+    presence_check,
+    run_file_program_locally,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from pathlib import Path
+
+    from agentworks.execution.access import VMAccess
 
 
 def _skip_without_posix_paths() -> None:
@@ -78,13 +108,6 @@ _OTHER_ROLLOUT = f"/home/me/.codex/sessions/2026/08/01/rollout-2026-08-01T12-05-
 # A marker-era blob key (2026-08-01 through 2026-08-04), retired by the
 # notify-bound redesign; a legacy blob still carrying one must be cleaned up.
 _LEGACY_MARKER = ".agentworks/codex/s1-deadbeefdeadbeefdeadbeefdeadbeef.launch"
-
-# Substring keys for the three op-time probes: the recorder read carries the
-# session's ``.thread`` path, the rollout-presence probe the bound id's glob,
-# and discovery the source needle.
-_RECORDER_PROBE = ".thread"
-_ROLLOUT_PROBE = f"*-{_SID}.jsonl"
-_DISCOVERY_PROBE = "-exec awk"
 
 
 def _harness_integration(
@@ -115,8 +138,10 @@ def _target(
     rollout: int | None = None,
     discovered: str | None = None,
     discovery_exit: int | None = None,
-) -> _FakeTarget:
-    """A transport double keyed on the three op-time probes.
+    session_name: str = "s1",
+    workspace_path: str = "/srv/ws1",
+) -> RecordingVMAccess:
+    """The admin's access, answering the three op-time probes.
 
     The defaults are the do-nothing world: nothing recorded by the notify
     recorder (the file is absent, exit 1) and no discovery candidate, which
@@ -124,27 +149,45 @@ def _target(
     holding that uuid; ``rollout`` sets the bound id's presence-probe exit;
     ``discovered`` is the discovery probe's stdout (rollout paths, one per
     line). The ``*_exit`` forms force a raw exit code for the failure forks.
+    The recorder's install reads the home as ``/home/me`` and its write
+    succeeds.
     """
-    responses: dict[str, _FakeResult] = {}
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = AssertionError("an unscripted request reached the launch target")
+    access.answer = _installs_the_recorder
     if recorder_exit is not None:
-        responses[_RECORDER_PROBE] = _FakeResult(recorder_exit)
+        recorder = Result(Completed(recorder_exit))
     elif recorded is not None:
-        responses[_RECORDER_PROBE] = _FakeResult(0, stdout=f"{recorded}\n")
+        recorder = Result(Completed(0), f"{recorded}\n".encode())
     else:
-        responses[_RECORDER_PROBE] = _FakeResult(1)
+        recorder = Result(Completed(1))
+    access.respond(recorder_probe(session_name), recorder)
     if rollout is not None:
-        responses[_ROLLOUT_PROBE] = _FakeResult(rollout)
+        access.respond(rollout_probe(_SID), Result(Completed(rollout)))
     if discovery_exit is not None:
-        responses[_DISCOVERY_PROBE] = _FakeResult(discovery_exit)
+        access.respond(discovery_probe(workspace_path), Result(Completed(discovery_exit)))
     else:
-        responses[_DISCOVERY_PROBE] = _FakeResult(0, stdout=discovered or "")
-    return _FakeTarget(responses)
+        access.respond(discovery_probe(workspace_path), Result(Completed(0), (discovered or "").encode()))
+    return access
 
 
-def _op_ctx(target: _FakeTarget) -> RunContext:
-    """A context carrying only the launch target (admin mode); the op
-    reads ``ctx.admin_target()`` and touches no scope."""
-    return RunContext(admin_target=target)
+def _is_file_write(request: object) -> bool:
+    return isinstance(request, PythonProgram) and request.args[:1] == ("write",)
+
+
+def _installs_the_recorder(call: Call) -> Result | None:
+    """Answer the recorder install's home read with ``/home/me`` and its write as done."""
+    if call.request == HOME_PROBE:
+        return Result(Completed(0), b"/home/me")
+    if _is_file_write(call.request):
+        return Result(Completed(0))
+    return None
+
+
+def _op_ctx(access: VMAccess) -> RunContext:
+    """A context carrying only the launch target's access (admin mode); the
+    op reads ``ctx.admin_access()`` and touches no scope."""
+    return RunContext(admin_access=access)
 
 
 def _session_scope() -> OperationScope:
@@ -290,7 +333,8 @@ def test_create_is_always_fresh_even_with_a_recording_and_a_candidate() -> None:
     target = _target(recorded=_SID, rollout=0, discovered=f"{_ROLLOUT}\n")
     harness_integration = _harness_integration(state=state)
     result = harness_integration.start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
-    assert len(target.commands) == 1  # the recorder is fingerprinted, but no rollout discovery runs
+    # Besides installing the recorder, only the recording is read: no rollout discovery runs.
+    assert [r for r in target.requests() if r != HOME_PROBE and not _is_file_write(r)] == [recorder_probe("s1")]
     assert state == {"fresh_pending": _SID}
     assert "resume" not in _sh_argv(result, home="/home/me")
 
@@ -340,12 +384,13 @@ def test_resume_only_adopts_one_unambiguous_candidate() -> None:
 )
 def test_resume_only_refuses_non_resumable_paths_without_state_mutation(
     state: dict[str, object],
-    target: _FakeTarget,
+    target: RecordingVMAccess,
 ) -> None:
     before = state.copy()
     with pytest.raises(StateError):
         _harness_integration(state=state).start(_op_ctx(target), intent=HarnessLaunchIntent.RESUME_ONLY)
     assert state == before
+    assert not any(_is_file_write(request) for request in target.requests())
 
 
 def test_resume_only_refuses_a_missing_target_without_state_mutation() -> None:
@@ -426,7 +471,7 @@ def test_fresh_initial_prompt_cannot_be_parsed_as_a_command_or_option(initial_pr
         pytest.param({"session_id": _SID}, _target(rollout=1), id="stale-no-candidates"),
     ],
 )
-def test_resume_fresh_fallback_applies_workload_setup(state: dict[str, object], target: _FakeTarget) -> None:
+def test_resume_fresh_fallback_applies_workload_setup(state: dict[str, object], target: RecordingVMAccess) -> None:
     goal = "Restore the workload"
     command = _harness_integration({"goal": goal}, state=state).start(_op_ctx(target))
     assert any(goal in token for token in _raw_codex_argv(command))
@@ -477,7 +522,7 @@ def test_recorded_thread_id_binds_a_session_that_had_nothing_stored() -> None:
     assert f"resume {_SID}" in command
     assert "resuming session s1" in _echo(command)
     # Binding made discovery unnecessary: the fallback probe never ran.
-    assert all(_DISCOVERY_PROBE not in cmd for cmd in target.commands)
+    assert discovery_probe("/srv/ws1") not in target.requests()
 
 
 def test_recorded_thread_id_wins_over_a_differing_stored_id() -> None:
@@ -487,7 +532,7 @@ def test_recorded_thread_id_wins_over_a_differing_stored_id() -> None:
     rather than to the id an earlier op stored."""
     state: dict[str, object] = {"session_id": _SID}
     target = _target(recorded=_OTHER_SID, rollout=None)
-    target.responses[f"*-{_OTHER_SID}.jsonl"] = _FakeResult(0)
+    target.respond(rollout_probe(_OTHER_SID), Result(Completed(0)))
     command = _harness_integration(state=state).start(_op_ctx(target)).command
     assert state == {"session_id": _OTHER_SID}
     assert f"resume {_OTHER_SID}" in command
@@ -509,8 +554,9 @@ def test_recorder_file_that_exists_but_will_not_read_raises() -> None:
     not an answer: guessing unbound could orphan the conversation it
     names.
 
-    One exit code stands for both: an SSH failure's 255 reaches the same
-    raise with the same message, and what tells the two apart is the HINT,
+    One exit code stands for both: any other exit the probe does not define
+    reaches the same raise with the same message, and what tells the two
+    apart is the HINT,
     which ``test_raise_hints_name_a_recovery_the_operator_can_actually_take``
     pins for each.
     """
@@ -523,10 +569,9 @@ def test_raise_hints_name_a_recovery_the_operator_can_actually_take() -> None:
     """Hint accuracy is the point of this integration, so the hints fork on
     WHY the probe could not answer.
 
-    A file that exists and will not read is not a reachability problem, and
-    neither is a ``find`` that failed against the on-disk sessions tree:
-    "retry once the target is reachable" would point at a healthy
-    component. The recorder case gets the recovery that is actually safe,
+    A file that exists and will not read, a ``find`` that failed against
+    the on-disk sessions tree and an exit the probe does not define each
+    get their own recovery. The recorder case gets the recovery that is actually safe,
     deleting the recording, which costs determinism for one op and orphans
     nothing because resume then falls through to discovery."""
     with pytest.raises(StateError) as unreadable:
@@ -540,10 +585,10 @@ def test_raise_hints_name_a_recovery_the_operator_can_actually_take() -> None:
         _harness_integration().start(_op_ctx(_target(rollout=5)))
     assert "codex sessions directory" in (find_failed.value.hint or "")
 
-    # A transport failure IS reachability, and still says so.
-    with pytest.raises(StateError) as unreachable:
+    # Any other exit comes from the shell around the probe, which has its own hint.
+    with pytest.raises(StateError) as undefined:
         _harness_integration().start(_op_ctx(_target(rollout=255)))
-    assert (unreachable.value.hint or "") == "Retry once the launch target is reachable."
+    assert len({hint, find_failed.value.hint, undefined.value.hint}) == 3
 
 
 # -- layer 2: source-filtered discovery --------------------------------------
@@ -641,7 +686,7 @@ def test_discovery_with_an_unresolvable_workspace_raises() -> None:
 
 
 def test_discovery_probe_failure_raises_rather_than_guessing() -> None:
-    """A probe that FAILED (a find error's 5, an SSH failure's 255) is not
+    """A probe that FAILED (a find error's 5, an exit it does not define) is not
     a probe that found nothing: for an enumeration a partial listing could
     turn "several candidates" into one confident wrong adoption."""
     for code in (5, 255):
@@ -664,37 +709,37 @@ def test_gone_rollout_drops_the_id_and_falls_through_to_a_fresh_launch() -> None
 
 
 def test_rollout_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
-    """A non-{0,1} exit (an SSH failure's 255, a shell that could not
-    start) means the probe never ran. Guessing "gone" would drop the
-    bound id and orphan a resumable conversation; the op raises a typed
-    error naming the target instead."""
+    """A non-{0,1} exit (from a startup file that exits before the probe's
+    own command, say) means the probe gave no answer. Guessing "gone" would drop the bound id and orphan a
+    resumable conversation; the op raises a typed error naming the target
+    instead."""
     with pytest.raises(StateError, match="could not probe") as exc:
         _harness_integration().start(_op_ctx(_target(rollout=255)))
     assert "exit 255" in str(exc.value)
     assert exc.value.entity_name == "s1"
 
 
-def test_rollout_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
-    """The inner command's structure: a missing sessions dir short-circuits
-    to the clean no-match exit (1, not resumable), while a find that
-    FAILED without printing a match exits 5, which the exit-code fork
+@pytest.mark.parametrize("probe", ["recorder", "rollout", "discovery"])
+def test_a_probe_that_may_not_have_run_raises_its_execution_error(probe: str) -> None:
+    """Each op-time probe: a request that may not have run is the typed
+    transport error, never an answer."""
+    state: dict[str, object] = {"session_id": _SID} if probe == "rollout" else {}
+    access = _target(rollout=1)
+    request = {
+        "recorder": recorder_probe("s1"),
+        "rollout": rollout_probe(_SID),
+        "discovery": discovery_probe("/srv/ws1"),
+    }[probe]
+    access.responses.insert(0, (request, Result(Unknown(UnknownReason.CONNECTION))))
+    with pytest.raises(ExecutionIncomplete):
+        _harness_integration(state=state).start(_op_ctx(access))
+
+
+def test_a_failed_find_status_raises_rather_than_dropping_the_id() -> None:
+    """A find that FAILED without printing a match exits 5, which the fork
     raises on rather than folding into "no rollout"."""
-    target = _target(rollout=0)
-    _harness_integration().start(_op_ctx(target))
-    probe_cmd = next(cmd for cmd in target.commands if _ROLLOUT_PROBE in cmd)
-    assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
-    assert "exit 5" in probe_cmd  # find failure stays distinguishable
     with pytest.raises(StateError, match="could not probe"):
         _harness_integration().start(_op_ctx(_target(rollout=5)))
-
-
-def test_rollout_probe_is_rooted_at_codex_home_and_finds_by_the_bound_id() -> None:
-    target = _target(rollout=0)
-    _harness_integration().start(_op_ctx(target))
-    probe_cmd = next(cmd for cmd in target.commands if _ROLLOUT_PROBE in cmd)
-    assert "find" in probe_cmd
-    # Rooted at the CLI's state dir with its documented override.
-    assert "CODEX_HOME" in probe_cmd
 
 
 # -- state hygiene -----------------------------------------------------------
@@ -1074,6 +1119,36 @@ def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     assert argv[-2:] == ["--foo", "bar baz"]  # one token stays one token
 
 
+def test_writable_dirs_render_as_argv_data_once_and_keep_authored_config() -> None:
+    source = ["${agw:workspace_dir}/cache", "$${agw:user_home_dir}"]
+    integration = _harness_integration({"writable_dirs": source, "extra_args": ["${agw:workspace_dir}"]}, state={})
+    directory = "/srv/a project's ${agw:user_name}"
+    integration.prepare_context({"workspace_dir": directory}, intent=HarnessLaunchIntent.CREATE)
+
+    argv = _sh_argv(integration.start(_op_ctx(_target()), intent=HarnessLaunchIntent.CREATE), home="/home/me")
+
+    assert [argv[index + 1] for index, token in enumerate(argv) if token == "--add-dir"] == [
+        f"{directory}/cache",
+        "${agw:user_home_dir}",
+    ]
+    assert argv[-1] == directory
+    assert integration.config.writable_dirs == source
+
+
+def test_invalid_writable_dir_reference_fails_before_target_work() -> None:
+    from agentworks.errors import ValidationError
+
+    integration = _harness_integration({"writable_dirs": ["${agw:unknown}"]}, state={})
+    target = _target()
+
+    with pytest.raises(ValidationError) as caught:
+        integration.start(_op_ctx(target), intent=HarnessLaunchIntent.CREATE)
+
+    assert caught.value.entity_name is not None
+    assert caught.value.entity_name.startswith("session-template/codex.writable_dirs")
+    assert target.requests() == []
+
+
 def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     """``extra_args`` is operator-supplied and NOT name-validated, so an
     adversarial value with quotes/metacharacters must be ``shlex.quote``d
@@ -1088,17 +1163,15 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
 # -- the returned pane string shape ------------------------------------------
 
 
-def test_fresh_string_is_a_single_sh_c_that_provisions_then_execs() -> None:
+def test_fresh_string_is_a_single_sh_c_that_execs_after_clearing_the_binding() -> None:
     """A single ``sh -c`` (so it survives the pane's ``exec`` wrapping):
-    echo the visible decision, clear any stale recording, provision the
-    recorder, then exec codex with NO positional prompt (no
-    wrapper-authored turn ever appears in the conversation)."""
+    echo the visible decision, clear any stale recording, then exec codex
+    with NO positional prompt (no wrapper-authored turn ever appears in
+    the conversation)."""
     command = _harness_integration(state={}).start(_op_ctx(_target())).command
     assert command.startswith("sh -c ")
     inner = _inner(command)
     assert inner.startswith("echo ")
-    assert 'mkdir -p "$HOME"/.agentworks/codex' in inner
-    assert 'chmod +x "$HOME"/.agentworks/codex/.record-thread-v1.sh."$$"' in inner
     assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in inner  # no dead binding survives
     # The exec is last, and there is no positional prompt: the argv is the
     # default-on --strict-config plus the notify override.
@@ -1130,7 +1203,7 @@ def test_session_name_needing_quotes_stays_one_recorder_path_word() -> None:
     quoting is ``shlex.quote``d into the path token rather than splitting
     it (session names are validated to a safe charset, so this is defense
     in depth for both the shell word and the TOML string)."""
-    command = _harness_integration(state={}, session_name="s one").start(_op_ctx(_target()))
+    command = _harness_integration(state={}, session_name="s one").start(_op_ctx(_target(session_name="s one")))
     assert "\"$HOME\"/'.agentworks/codex/s one.thread'" in _inner(command)
     assert _notify_token(command).endswith('","/home/me/.agentworks/codex/s one.thread"]')
 
@@ -1143,27 +1216,11 @@ def test_session_name_needing_quotes_stays_one_recorder_path_word() -> None:
 # so the filter's behavior is pinned, not just its spelling.
 
 
-class _ShellTarget:
-    """A transport double that runs the probe's inner command through a
-    real ``sh`` with ``$HOME`` pointed at a scratch directory. It peels
-    the ``"$SHELL" -lic '<inner>'`` wrapper and runs the inner through
-    plain ``sh -c`` (no dotfiles, deterministic output)."""
-
-    def __init__(self, home: Path) -> None:
-        self._home = home
-        self.commands: list[str] = []
-
-    def run(self, command: str, **kwargs: object) -> _FakeResult:
-        self.commands.append(command)
-        inner = shlex.split(command)[-1]
-        proc = subprocess.run(
-            ["sh", "-c", inner],
-            env={"HOME": str(self._home), "PATH": os.environ["PATH"]},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return _FakeResult(proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
+def _shell_access(monkeypatch: pytest.MonkeyPatch, home: Path) -> VMAccess:
+    """A real local access whose account home is ``home``: each probe really
+    runs, in a login shell that reads only the scratch home's ``.profile``,
+    which these tests never write, so its output is deterministic."""
+    return local_vm_access(monkeypatch, home=home, shell=account_shell(home.parent))
 
 
 @pytest.fixture
@@ -1214,16 +1271,61 @@ def _write_rollout(
     return path
 
 
+def test_sh_rollout_probe_follows_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bound id's rollout under ``$CODEX_HOME``, which login startup sets, resumes it."""
+    _skip_without_posix_paths()
+    home = tmp_path / "home"
+    codex_root = tmp_path / "codex-home"
+    (codex_root / "sessions/2026/08/01").mkdir(parents=True)
+    home.mkdir()
+    (home / ".profile").write_text(f'export CODEX_HOME="{codex_root}"\n')
+    (tmp_path / "ws1").mkdir()
+    sessions = codex_root / "sessions/2026/08/01"
+    (sessions / f"rollout-2026-08-01T12-05-00-{_OTHER_SID}.jsonl").write_text("{}\n")  # another session's
+    access = _shell_access(monkeypatch, home)
+
+    unbound = _sh_harness_integration(tmp_path, {"session_id": _SID}).start(_op_ctx(access)).command
+    (sessions / f"rollout-2026-08-01T12-00-00-{_SID}.jsonl").write_text("{}\n")
+    bound = _sh_harness_integration(tmp_path, {"session_id": _SID}).start(_op_ctx(access)).command
+
+    assert f"resume {_SID}" not in unbound
+    assert f"resume {_SID}" in bound
+
+
+@requires_posix_shell
+def test_sh_unreadable_sessions_dir_raises_rather_than_dropping_the_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root reads an unreadable directory")
+    _skip_without_posix_paths()
+    home = tmp_path / "home"
+    unreadable = home / ".codex/sessions/unreadable"
+    unreadable.mkdir(parents=True)
+    (tmp_path / "ws1").mkdir()
+    access = _shell_access(monkeypatch, home)
+    state: dict[str, object] = {"session_id": _SID}
+    unreadable.chmod(0)
+    try:
+        with pytest.raises(StateError, match="could not probe"):
+            _sh_harness_integration(tmp_path, state).start(_op_ctx(access))
+    finally:
+        unreadable.chmod(0o755)
+    assert state == {"session_id": _SID}  # the bound id was not dropped as gone
+
+
 def _sh_harness_integration(tmp_path: Path, state: dict[str, object]) -> CodexIntegration:
     return _harness_integration(state=state, workspace_path=str(tmp_path / "ws1"))
 
 
-def _sh_resume(tmp_path: Path, home: Path, state: dict[str, object]) -> str:
+def _sh_resume(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, home: Path, state: dict[str, object]) -> str:
     _skip_without_posix_paths()
-    return _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(home))).command  # type: ignore[arg-type]
+    return _sh_harness_integration(tmp_path, state).start(_op_ctx(_shell_access(monkeypatch, home))).command
 
 
-def test_sh_probe_adopts_ours_and_filters_the_noise_around_it(codex_home: Path, tmp_path: Path) -> None:
+def test_sh_probe_adopts_ours_and_filters_the_noise_around_it(
+    codex_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """One interactive rollout in our workspace among a subagent's, an
     exec run's, and a foreign directory's: the filter leaves exactly ours,
     so this adopts rather than degrading to the picker.
@@ -1248,20 +1350,24 @@ def test_sh_probe_adopts_ours_and_filters_the_noise_around_it(codex_home: Path, 
     _write_rollout(codex_home, _THIRD_SID, tmp_path / "ws1", source="exec", ts="2026-08-01T12-06-00")
     _write_rollout(codex_home, _OTHER_SID, foreign_ws, ts="2026-08-01T12-07-00")
     state: dict[str, object] = {}
-    _sh_resume(tmp_path, codex_home, state)
+    _sh_resume(monkeypatch, tmp_path, codex_home, state)
     assert state == {"session_id": _SID}
 
 
-def test_sh_probe_two_interactive_rollouts_open_the_picker(codex_home: Path, tmp_path: Path) -> None:
+def test_sh_probe_two_interactive_rollouts_open_the_picker(
+    codex_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write_rollout(codex_home, _SID, tmp_path / "ws1")
     _write_rollout(codex_home, _OTHER_SID, tmp_path / "ws1", ts="2026-08-01T12-05-00")
     state: dict[str, object] = {}
-    command = _sh_resume(tmp_path, codex_home, state)
+    command = _sh_resume(monkeypatch, tmp_path, codex_home, state)
     assert state == {}
     assert "exec codex resume -c tui.resume_cwd=current" in command
 
 
-def test_sh_probe_counts_an_unreadable_rollout_as_a_candidate_it_cannot_name(codex_home: Path, tmp_path: Path) -> None:
+def test_sh_probe_counts_an_unreadable_rollout_as_a_candidate_it_cannot_name(
+    codex_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A rollout whose first line will not read is NOT skipped: it is an
     unnamed candidate, so a workspace holding one interactive rollout plus
     one unreadable file goes to the picker instead of confidently adopting
@@ -1273,7 +1379,7 @@ def test_sh_probe_counts_an_unreadable_rollout_as_a_candidate_it_cannot_name(cod
     unreadable.chmod(0o000)
     try:
         state: dict[str, object] = {}
-        command = _sh_resume(tmp_path, codex_home, state)
+        command = _sh_resume(monkeypatch, tmp_path, codex_home, state)
         assert state == {}  # nothing adopted, despite one readable candidate
         assert "exec codex resume -c tui.resume_cwd=current" in command
         assert "could not identify this session's codex conversation" in _echo(command)
@@ -1281,10 +1387,12 @@ def test_sh_probe_counts_an_unreadable_rollout_as_a_candidate_it_cannot_name(cod
         unreadable.chmod(0o644)
 
 
-def test_sh_probe_missing_workspace_dir_raises(codex_home: Path, tmp_path: Path) -> None:
+def test_sh_probe_missing_workspace_dir_raises(
+    codex_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     harness_integration = _harness_integration(state={}, workspace_path=str(tmp_path / "nonexistent"))
     with pytest.raises(StateError, match="could not resolve the workspace directory"):
-        harness_integration.start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+        harness_integration.start(_op_ctx(_shell_access(monkeypatch, codex_home)))
 
 
 _PARENT_PAYLOAD = json.dumps(
@@ -1318,20 +1426,103 @@ _SUBAGENT_PAYLOAD = json.dumps(
 
 
 def _provision(home: Path) -> Path:
-    """Run the REAL generated provisioning fragment through ``sh`` and
-    return the installed recorder's path, so these tests exercise the
-    shipped shell text rather than a copy of the script."""
-    command = _harness_integration(state={}).start(_op_ctx(_target()))
-    fragment = _inner(command).split("; exec codex ", 1)[0]
-    proc = subprocess.run(
-        ["sh", "-c", fragment],
-        env={"HOME": str(home), "PATH": os.environ["PATH"]},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr
+    """Run a REAL launch's recorder install against ``home``, its file write on this machine, and return the path.
+
+    These tests exercise the shipped script as the install writes it rather
+    than a copy of it.
+    """
+    access = _target()
+
+    def answer(call: Call) -> Result | None:
+        if call.request == HOME_PROBE:
+            return Result(Completed(0), str(home).encode())
+        return run_file_program_locally(call)
+
+    access.answer = answer
+    _harness_integration(state={}).start(_op_ctx(access))
     return home / ".agentworks/codex/record-thread-v1.sh"
+
+
+def test_the_recorder_is_installed_by_one_write_as_the_session_user_before_the_command() -> None:
+    """The recorder's install is one atomic file write, executable, before any launch command exists."""
+    access = _target()
+
+    _harness_integration(state={}).start(_op_ctx(access))
+
+    (write,) = [request for request in access.requests() if _is_file_write(request)]
+    assert isinstance(write, PythonProgram)
+    params = json.loads(write.args[1])
+    assert (params["path"], params["mode"], params["parent_mode"]) == (
+        "/home/me/.agentworks/codex/record-thread-v1.sh",
+        0o755,
+        0o755,
+    )
+    assert write.stdin.data.endswith(recorder_script())  # type: ignore[union-attr]
+    assert not write.elevated
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        # A link at the recorder's path is refused, not followed.
+        "write-refused",
+        # The session user's home cannot be read, or reads back as no usable path.
+        "home-failed",
+        "home-relative",
+    ],
+)
+def test_a_failed_recorder_install_warns_and_the_launch_goes_on(warnings: list[str], failure: str) -> None:
+    """The session falls back to discovery, and the launch command is built as without the failure."""
+    access = _target()
+
+    def answer(call: Call) -> Result | None:
+        if failure == "write-refused" and _is_file_write(call.request):
+            raise PathRefused("box", "write", "/home/me/.agentworks", PathRefusal.UNSUITABLE)
+        if failure == "home-failed" and call.request == HOME_PROBE:
+            return Result(Completed(1))
+        if failure == "home-relative" and call.request == HOME_PROBE:
+            return Result(Completed(0), b"home/me")
+        return _installs_the_recorder(call)
+
+    access.answer = answer
+
+    start = _harness_integration(state={}).start(_op_ctx(access))
+
+    assert start.command.startswith("sh -c ")
+    assert len(warnings) == 1
+    if failure != "write-refused":
+        assert not any(_is_file_write(request) for request in access.requests())
+
+
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        lambda: TrustMissing("box"),
+        lambda: TrustMismatch("box"),
+        lambda: VMNotReady("box", NotDeliveredReason.PYTHON_MISSING),
+    ],
+    ids=["host-key-missing", "host-key-mismatch", "vm-not-ready"],
+)
+@pytest.mark.parametrize("during", ["home", "write"])
+def test_a_host_key_or_readiness_error_from_the_recorder_install_stops_the_launch(
+    warnings: list[str], make_error: Callable[[], Exception], during: str
+) -> None:
+    """Every later request of the launch would fail the same way, so the install does not warn past it."""
+    access = _target()
+    error = make_error()
+
+    def answer(call: Call) -> Result | None:
+        if (during == "home" and call.request == HOME_PROBE) or (during == "write" and _is_file_write(call.request)):
+            raise error
+        return _installs_the_recorder(call)
+
+    access.answer = answer
+
+    with pytest.raises(type(error)) as caught:
+        _harness_integration(state={}).start(_op_ctx(access))
+
+    assert caught.value is error
+    assert warnings == []
 
 
 def _record(recorder: Path, dest: Path, payload: str) -> int:
@@ -1476,7 +1667,7 @@ def test_recorder_writes_atomically_leaving_no_staging_file(tmp_path: Path) -> N
     ]
 
 
-def test_recorder_round_trips_into_the_op_decision(tmp_path: Path) -> None:
+def test_recorder_round_trips_into_the_op_decision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """End to end across the two halves: the recorder writes what codex
     reported, and the next op reads that file and resumes it."""
     home = tmp_path / "home"
@@ -1486,12 +1677,12 @@ def test_recorder_round_trips_into_the_op_decision(tmp_path: Path) -> None:
     _record(recorder, home / ".agentworks/codex/s1.thread", _PARENT_PAYLOAD)
     _write_rollout(home, _SID, tmp_path / "ws1")
     state: dict[str, object] = {}
-    command = _sh_resume(tmp_path, home, state)
+    command = _sh_resume(monkeypatch, tmp_path, home, state)
     assert state == {"session_id": _SID}
     assert f"resume {_SID}" in command
 
 
-def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path) -> None:
+def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The delete-and-recreate scenario, end to end on real files, and the
     exact boundary of what create-is-always-fresh buys.
 
@@ -1511,6 +1702,7 @@ def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path) -> N
     (home / ".codex/sessions/2026/08/01").mkdir(parents=True)
     (tmp_path / "ws1").mkdir()
     recorder = _provision(home)
+    access = _shell_access(monkeypatch, home)
     thread = home / ".agentworks/codex/s1.thread"
     _record(recorder, thread, _PARENT_PAYLOAD)  # the dead namesake's binding
     _write_rollout(home, _SID, tmp_path / "ws1")  # and its conversation
@@ -1520,7 +1712,7 @@ def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path) -> N
     # generated pane command really removes the stale recording.
     state: dict[str, object] = {}
     create = _sh_harness_integration(tmp_path, state).start(  # type: ignore[arg-type]
-        _op_ctx(_ShellTarget(home)), intent=HarnessLaunchIntent.CREATE
+        _op_ctx(access), intent=HarnessLaunchIntent.CREATE
     )
     assert state == {"fresh_pending": _SID}
     assert "starting new session s1" in _echo(create)
@@ -1541,7 +1733,7 @@ def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path) -> N
     # clearing. The leaf it reaches instead announces itself as a
     # heuristic adoption, which is the visibility the design promises.
     harness_integration = _sh_harness_integration(tmp_path, {})
-    harness_integration.start(_op_ctx(_ShellTarget(home)))  # type: ignore[arg-type]
+    harness_integration.start(_op_ctx(access))
 
 
 # -- readiness probes codex ---------------------------------------------------
@@ -1549,14 +1741,13 @@ def test_recreated_namesake_never_inherits_the_dead_binding(tmp_path: Path) -> N
 
 def test_readiness_probes_codex() -> None:
     harness_integration = _harness_integration()
-    target = _FakeTarget()  # command -v codex -> default ok
-    harness_integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=target))
-    assert any("command -v codex" in cmd for cmd in target.commands)
+    access = command_check_access()
+    harness_integration.preflight(RunContext(operation_scope=_session_scope(), admin_access=access))
+    assert [presence_check(request) for request in access.requests()] == ["codex"]
 
 
 def test_readiness_missing_codex_is_a_typed_error() -> None:
     harness_integration = _harness_integration()
-    target = _FakeTarget({"command -v codex": _FakeResult(20)})
-    ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
+    ctx = RunContext(operation_scope=_session_scope(), admin_access=command_check_access(missing=("codex",)))
     with pytest.raises(StateError, match="'codex' harness integration.*requires 'codex'"):
         harness_integration.preflight(ctx)

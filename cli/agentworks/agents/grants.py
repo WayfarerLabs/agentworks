@@ -20,15 +20,17 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.execution.requests import Command
+from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
-from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.guest import ensure_group
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.ssh import SSHLogger
+    from agentworks.vms.initializer.phase_a import OperationLog
 
 WS_GROUP_PREFIX = "ws-"
 
@@ -91,13 +93,17 @@ def grant_workspaces(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config, live_database=db)
-    with gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        scope=agent_scope(db, vm.name, agent_name),
-        interaction=interaction,
+    with (
+        native_mutation_guard(db.path, vm.name) as guard,
+        gated_vm_boundary(
+            db,
+            config,
+            registry,
+            vm,
+            scope=agent_scope(db, vm.name, agent_name),
+            interaction=interaction,
+            held_native_guard=guard,
+        ),
     ):
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
@@ -210,14 +216,12 @@ def revoke_workspace_grants(
     """
     # Find agents that have grants for this workspace
     # We need to remove group membership for each
-    from agentworks.ssh import SSHLogger
+    from agentworks.vms.manager import operation_log
 
-    ssh_logger = SSHLogger(vm.name, "workspace-delete-grants")
-    agents = db.list_agents(vm_name=vm.name)
-    for agent in agents:
-        if db.has_any_grant(agent.name, ws_name):
-            remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
-    ssh_logger.close()
+    with operation_log(vm.name, "workspace-delete-grants") as log:
+        for agent in db.list_agents(vm_name=vm.name):
+            if db.has_any_grant(agent.name, ws_name):
+                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
 
 
 # -- Group-membership primitives -------------------------------------------
@@ -247,14 +251,15 @@ def add_to_workspace_group(
     linux_user: str,
     workspace_name: str,
     *,
-    logger: SSHLogger | None = None,
+    logger: OperationLog | None = None,
 ) -> None:
-    """Add an agent user to a workspace's Linux group."""
-    target = transport(vm, config, logger=logger)
+    """Add an agent user to a workspace's Linux group, as root on the admin's access."""
+    from agentworks.workspaces.backends.vm import admin_access
+
+    admin = admin_access(vm, config, logger)
     ws_grp = _resolve_ws_group(db, workspace_name)
-    # Ensure group exists (idempotent)
-    target.run(f"sh -c 'getent group {ws_grp} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_grp}'", sudo=True)
-    target.run(f"usermod -aG {ws_grp} {linux_user}", sudo=True)
+    admin.run(ensure_group(ws_grp), check=True)
+    admin.run(Command(("usermod", "-aG", ws_grp, linux_user), elevated=True), check=True)
 
 
 def remove_from_workspace_group(
@@ -264,12 +269,18 @@ def remove_from_workspace_group(
     linux_user: str,
     workspace_name: str,
     *,
-    logger: SSHLogger | None = None,
+    logger: OperationLog | None = None,
 ) -> None:
-    """Remove an agent user from a workspace's Linux group."""
-    target = transport(vm, config, logger=logger)
+    """Remove an agent user from a workspace's Linux group, as root on the admin's access.
+
+    The status is not read: the user may not be a member. An outcome that is
+    not a completion raises its typed error.
+    """
+    from agentworks.workspaces.backends.vm import admin_access
+
+    admin = admin_access(vm, config, logger)
     ws_grp = _resolve_ws_group(db, workspace_name)
-    target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
+    admin.run(Command(("gpasswd", "-d", linux_user, ws_grp), elevated=True)).require_completed(vm.name)
 
 
 # -- Grant-all materialization ---------------------------------------------
@@ -281,7 +292,7 @@ def materialize_grant_all_agents(
     vm: VMRow,
     workspace_name: str,
     *,
-    logger: SSHLogger | None = None,
+    logger: OperationLog | None = None,
 ) -> None:
     """Materialize every grant_all agent on ``vm`` onto the just-created
     workspace ``workspace_name``: one explicit grant row plus the on-VM

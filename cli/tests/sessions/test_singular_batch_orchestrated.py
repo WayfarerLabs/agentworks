@@ -10,7 +10,8 @@ import pytest
 
 from agentworks.db import PID_STOPPED, ProvisioningStatus, SessionMode, SessionStatus, VMStatus
 from agentworks.errors import NotFoundError, StateError
-from agentworks.execution.errors import TrustMissing
+from agentworks.execution.errors import ExecutionIncomplete, TrustMismatch, TrustMissing, VMNotReady
+from agentworks.execution.results import NotDeliveredReason, Result, Unknown, UnknownReason
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -19,9 +20,12 @@ from agentworks.sessions.manager._queries import session_listing_data
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.applied_state import VMSSHIdentityPolicyError
 from tests._runtime_probes import framed_runtime_result
-from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
+from tests.conftest import _FakeResult, seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import AccessRecorder, Call, command_line, is_command_check, route_vm_access_to_guest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
 
@@ -47,17 +51,22 @@ def _seed_vm(db: Database, name: str, host: str | None, *, site: str = "proxmox"
 
 
 def _seed_session(db: Database, name: str, ws: str, *, agent: str | None = None) -> None:
+    """A stopped session whose socket sits in its owner's managed directory."""
+    from agentworks.sessions.tmux import ADMIN_SOCKET_ROOT, AGENT_SOCKET_ROOT
+
+    agent_row = db.get_agent(agent) if agent else None
+    workspace = db.get_workspace(ws)
+    vm = db.get_vm(workspace.vm_name) if workspace is not None else None
+    assert vm is not None and (agent is None or agent_row is not None)
+    socket = (
+        f"{AGENT_SOCKET_ROOT}/{agent_row.linux_user}/{name}.sock"
+        if agent_row is not None
+        else f"{ADMIN_SOCKET_ROOT}/{vm.admin_username}/{name}.sock"
+    )
     db.insert_session(
-        name,
-        ws,
-        "default",
-        SessionMode.AGENT if agent else SessionMode.ADMIN,
-        agent_name=agent,
-        socket_path=f"/tmp/{name}.sock",
+        name, ws, "default", SessionMode.AGENT if agent else SessionMode.ADMIN, agent_name=agent, socket_path=socket
     )
-    db.update_session_runtime(
-        name, socket_path=f"/tmp/{name}.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
-    )
+    db.update_session_runtime(name, socket_path=socket, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None)
 
 
 def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
@@ -95,12 +104,18 @@ def _record_holds(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _recording_hold)
 
 
-def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transport(
+def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_access(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_vm(db, "vm-a", "100.64.0.11")
-    db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
+    db.insert_session(
+        "s-a",
+        "ws-vm-a",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-a.sock",
+    )
     session = db.get_session("s-a")
     assert session is not None
 
@@ -109,9 +124,8 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
-        session_manager,
-        "transport",
-        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+        "agentworks.execution.vm_access",
+        lambda *args, **kwargs: pytest.fail("access built after identity refusal"),
     )
 
     assert session_manager.observe_session_statuses([session], db=db, config=SimpleNamespace()) == {
@@ -120,24 +134,35 @@ def test_best_effort_status_and_pid_repair_skip_identity_refusal_before_transpor
     assert session_manager.ensure_pids_batch([session], db=db, config=SimpleNamespace()) == [session]
 
 
-def test_list_status_reports_identity_refusal_as_unknown_without_transport(
+def test_list_status_reports_identity_refusal_as_unknown_without_access(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
     _seed_vm(db, "vm-a", "100.64.0.11")
-    db.insert_session("s-a", "ws-vm-a", "default", SessionMode.ADMIN, socket_path="/tmp/s-a.sock")
-    db.update_session_runtime("s-a", socket_path="/tmp/s-a.sock", pid=4321, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.insert_session(
+        "s-a",
+        "ws-vm-a",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-a.sock",
+    )
+    db.update_session_runtime(
+        "s-a",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s-a.sock",
+        pid=4321,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
 
     def refuse(*args: object, **kwargs: object) -> None:
         raise VMSSHIdentityPolicyError("SSH identity drift")
 
     monkeypatch.setattr(vm_manager, "require_vm_ssh_boundary", refuse)
     monkeypatch.setattr(
-        session_manager,
-        "transport",
-        lambda *args, **kwargs: pytest.fail("transport constructed after identity refusal"),
+        "agentworks.execution.vm_access",
+        lambda *args, **kwargs: pytest.fail("access built after identity refusal"),
     )
 
     listing = session_manager.session_listing(
@@ -151,29 +176,33 @@ def test_list_status_reports_identity_refusal_as_unknown_without_transport(
     assert json_rows[0]["status"] == "unknown"
 
     session_manager.render_session_listing(listing, include_status=True)
-    assert sum(role is Role.WARNING for role, _level, _message in captured_output.lines) == 1
+    warnings = [message for role, _level, message in captured_output.lines if role is Role.WARNING]
+    # The observation's reason for the VM, then the table's summary of unknown statuses.
+    assert len(warnings) == 2 and "'vm-a'" in warnings[0]
 
 
-class _FakeTarget:
-    """Transport double for the probe / kill / regenerate helpers."""
+class _SingularGuest:
+    """Guest double for the probe / kill / regenerate helpers: each command line completes with status 0.
 
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        return framed_runtime_result(cmd, SimpleNamespace(ok=True, returncode=0, stdout="", stderr=""))
+    ``recorder`` is the access recorder the ``target`` fixture routes to it.
+    """
 
-    def interactive(self, cmd: str, **kwargs: object) -> int:
-        return 0
+    recorder: AccessRecorder | None = None
 
-    def write_file(self, path: str, content: str, **kwargs: object) -> None:
-        return None
+    def answer(self, call: Call) -> Result | None:
+        cmd = command_line(call.request)
+        if cmd is None or is_command_check(call.request):
+            return None
+        return self.dispatch(cmd).result()
+
+    def dispatch(self, cmd: str) -> _FakeResult:
+        return framed_runtime_result(cmd, _FakeResult())
 
 
 @pytest.fixture
-def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
-    fake = _FakeTarget()
-    factory = lambda vm, config, **kwargs: fake  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", factory)
-    # sessions.manager imports ``transport`` eagerly at module load.
-    monkeypatch.setattr(session_manager, "transport", factory)
+def target(monkeypatch: pytest.MonkeyPatch) -> _SingularGuest:
+    fake = _SingularGuest()
+    fake.recorder = route_vm_access_to_guest(monkeypatch, fake.answer)
     return fake
 
 
@@ -465,7 +494,7 @@ def test_batch_stop_under_stopped_parent_accepts_without_guest_probes(db, make_c
     row = db.get_vm("vm-a")
     db.set_vm_desired_runtime_state(row.name, DesiredRuntimeState.STOPPED, expected_vm_uuid=row.vm_uuid)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: VMStatus.STOPPED)
-    monkeypatch.setattr(session_manager, "transport", lambda *a, **k: pytest.fail("off guest probed"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest probed"))
     session_manager.stop_all_sessions(db, make_config(), interaction=TtyInteractionPolicy.REFUSE)
     assert db.get_session("s-a").desired_runtime_state is DesiredRuntimeState.STOPPED
     assert db.get_vm("vm-a").desired_runtime_state is DesiredRuntimeState.STOPPED
@@ -533,7 +562,7 @@ def test_single_stop_uses_prepared_teardown_and_preserves_runtime_identity(db, m
         "check_session_status",
         lambda *a, **k: SessionStatus.RUNNING if not stopped else SessionStatus.STOPPED,
     )
-    monkeypatch.setattr(session_manager, "_build_session_target", lambda *a, **k: target)
+    monkeypatch.setattr(session_manager, "_verified_session_access", lambda *a, **k: k["admin"])
     monkeypatch.setattr(session_manager, "_teardown_session", lambda session, **k: stopped.append(session.session_uuid))
     session_manager.stop_session(db, make_config(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
     assert stopped == [selected.session_uuid]
@@ -544,7 +573,7 @@ def test_delete_session_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -563,7 +592,7 @@ def test_attach_session_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config()
@@ -581,7 +610,7 @@ def test_session_logs_reachable_vm_is_one_boundary_burst(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config()
@@ -598,7 +627,7 @@ def test_session_logs_reachable_vm_is_one_boundary_burst(
 def test_residual_session_refuses_attach_without_interactive_entry(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.db import SessionStatus
@@ -609,11 +638,6 @@ def test_residual_session_refuses_attach_without_interactive_entry(
     assert session is not None
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda *args, **kwargs: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.RESIDUAL)
-    monkeypatch.setattr(
-        target,
-        "interactive",
-        lambda *args, **kwargs: pytest.fail("residual runtime must not be attached"),
-    )
 
     with pytest.raises(StateError):
         session_manager.attach_session(
@@ -622,6 +646,9 @@ def test_residual_session_refuses_attach_without_interactive_entry(
             name="s1",
             interaction=TtyInteractionPolicy.REFUSE,
         )
+
+    assert target.recorder is not None
+    assert [call for call in target.recorder.calls if call.operation == "attach"] == []
 
 
 def test_residual_session_refuses_logs_without_capture(
@@ -654,7 +681,7 @@ def test_residual_session_refuses_logs_without_capture(
 def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Session scrollback is the raw data pipe ``_logs.py``'s module
@@ -674,11 +701,11 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, target, db: session)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, admin, db: session)
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, admin, server: SessionStatus.RUNNING,
     )
     payload = "result=雪\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -704,7 +731,7 @@ def test_session_logs_writes_exact_utf8_bytes_on_a_legacy_console(
 def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Under ``python -u`` stdout's buffer is a raw ``FileIO`` whose
@@ -738,11 +765,11 @@ def test_session_logs_writes_the_whole_capture_through_a_short_writing_pipe(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
-    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, target, db: session)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, *, admin, db: session)
     monkeypatch.setattr(
         session_manager,
         "check_session_status",
-        lambda session, *, target: SessionStatus.RUNNING,
+        lambda session, *, admin, server: SessionStatus.RUNNING,
     )
     payload = ("line=雪\n" * 500)[:-1] + "\n"
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: payload)
@@ -759,7 +786,7 @@ def test_describe_session_observes_without_a_vm_hold(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -770,8 +797,8 @@ def test_describe_session_observes_without_a_vm_hold(
     events: list[str] = []
     _record_holds(monkeypatch, events)
 
-    def _probe(session: object, *, target: object) -> object:
-        del session, target
+    def _probe(session: object, *, admin: object, **_kwargs: object) -> object:
+        del session, admin
         assert db._tx_depth == 0  # noqa: SLF001
         events.append("probe")
         from agentworks.db import SessionStatus
@@ -791,7 +818,7 @@ def test_describe_session_derives_vm_from_its_structural_snapshot(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = make_config()
@@ -847,6 +874,46 @@ def test_session_description_warns_which_vm_has_no_host_key_record_and_degrades(
     assert len([w for w in captured_output.warnings if "'box'" in w]) == 1
 
 
+@pytest.mark.parametrize(
+    "make_error",
+    [lambda: TrustMismatch("box"), lambda: VMNotReady("box", NotDeliveredReason.PYTHON_MISSING)],
+    ids=["host-key-mismatch", "vm-not-ready"],
+)
+def test_session_description_raises_a_trust_or_readiness_error_from_its_reads(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    make_error: Callable[[], StateError],
+) -> None:
+    """Describing one session surfaces a host key or VM it cannot trust rather than reading as unknown."""
+    error = make_error()
+    config = make_config()
+    _seed_singular(db)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+
+    with pytest.raises(StateError) as caught:
+        session_manager.session_description(db, config, name="s1")
+
+    assert caught.value is error
+
+
+def test_session_description_reads_a_read_that_does_not_complete_as_unknown(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config()
+    _seed_singular(db)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
+    incomplete = ExecutionIncomplete("box", Result(Unknown(UnknownReason.DEADLINE)))
+    monkeypatch.setattr(
+        session_manager, "check_session_status", lambda *_args, **_kwargs: (_ for _ in ()).throw(incomplete)
+    )
+
+    assert session_manager.session_description(db, config, name="s1").status == SessionStatus.UNKNOWN.value
+
+
 def test_running_session_description_derives_uptime(
     db: Database,
     make_config,  # noqa: ANN001
@@ -898,33 +965,31 @@ def test_describe_session_preserves_malformed_stored_boot_error(
     config = make_config()
     _seed_singular(db)
     _reachable(monkeypatch, True)
+    seeded = db.get_session("s1")
+    assert seeded is not None
     db.update_session_runtime(
         "s1",
-        socket_path="/tmp/s1.sock",
+        socket_path=seeded.socket_path,
         pid=42,
         boot_id="malformed",
         tmux_server_start_ticks=100,
     )
 
-    class _AbsentTarget(_FakeTarget):
-        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-            del kwargs
+    class _AbsentGuest(_SingularGuest):
+        def dispatch(self, cmd: str) -> _FakeResult:
             if "has-session" in cmd:
-                return framed_runtime_result(
-                    cmd, SimpleNamespace(ok=False, returncode=1, stdout="", stderr="can't find session: s1")
-                )
+                return framed_runtime_result(cmd, _FakeResult(returncode=1, stderr="can't find session: s1"))
             if "list-sessions" in cmd:
-                return SimpleNamespace(
-                    ok=False,
+                return _FakeResult(
                     returncode=1,
                     stdout="AGW_RUNTIME_SERVER=",
-                    stderr="no server running on /tmp/s1.sock",
+                    stderr="no server running on /run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
                 )
             if "/proc/sys/kernel/random/boot_id" in cmd:
-                return SimpleNamespace(ok=True, returncode=0, stdout=f"AGW_RUNTIME_BOOT={BOOT_ID}\n", stderr="")
+                return _FakeResult(stdout=f"AGW_RUNTIME_BOOT={BOOT_ID}\n")
             raise AssertionError(cmd)
 
-    monkeypatch.setattr(session_manager, "transport", lambda *_args, **_kwargs: _AbsentTarget())
+    route_vm_access_to_guest(monkeypatch, _AbsentGuest().answer)
 
     with pytest.raises(StateError) as caught:
         session_manager.session_description(db, config, name="s1")
@@ -937,7 +1002,7 @@ def test_describe_session_shows_harness_integration_line(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -969,7 +1034,7 @@ def test_describe_session_stopped_vm_does_not_open_the_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -1039,7 +1104,7 @@ def test_no_tailscale_off_parent_stop_is_satisfied_without_guest_transport(
     _seed_vm(db, "box", None)
     _seed_session(db, "s1", "ws-box")
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: VMStatus.STOPPED)
-    monkeypatch.setattr(session_manager, "transport", lambda *a, **k: pytest.fail("off guest transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest transport"))
     session_manager.stop_session(db, make_config(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_session("s1").desired_runtime_state is DesiredRuntimeState.STOPPED
@@ -1048,7 +1113,7 @@ def test_no_tailscale_off_parent_stop_is_satisfied_without_guest_transport(
 def test_session_describe_does_not_reach_provider_readiness(
     db: Database,
     make_config,  # noqa: ANN001
-    target: _FakeTarget,
+    target: _SingularGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
@@ -1069,3 +1134,72 @@ def test_session_describe_does_not_reach_provider_readiness(
     session_manager.describe_session(db, config, name="s1")
 
     assert scopes == []
+
+
+def _agent_socket(db: Database) -> tuple[str, str]:
+    """The seeded agent session's socket path and its owner, the agent's Linux user."""
+    session, agent = db.get_session("s1"), db.get_agent("a1")
+    assert session is not None and session.socket_path is not None and agent is not None
+    return session.socket_path, agent.linux_user
+
+
+def test_attach_reaches_an_agent_sessions_server_only_as_the_agent(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The admin's terminal elevates only to switch to the agent, behind the socket guard, and keeps its options."""
+    from agentworks.execution.requests import TerminalCommand
+    from agentworks.sessions.tmux import exact_tmux_target, tmux_cmd
+    from tests._runtime_probes import owner_probe_line, owner_switch, socket_guard
+
+    _seed_singular(db, agent="a1")
+    _reachable(monkeypatch, True)
+    recorder = route_vm_access_to_guest(monkeypatch, _SingularGuest().answer)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.RUNNING)
+    socket, owner = _agent_socket(db)
+    config = make_config()
+
+    assert session_manager.attach_session(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE) == 0
+
+    [call] = [call for call in recorder.calls if call.operation == "attach"]
+    assert isinstance(call.request, TerminalCommand)
+    sudo, line = call.request.argv[:4], call.request.argv[4]
+    assert sudo == ("sudo", "-n", "/bin/sh", "-c") and len(call.request.argv) == 5
+    assert socket_guard(line) == (socket, owner)
+    assert owner_switch(line) == (owner, True)
+    assert owner_probe_line(line) == tmux_cmd(f"attach -t {exact_tmux_target('s1')}", socket)
+    assert "clear_screen_on_exit" in call.options
+
+
+def test_logs_capture_an_agent_sessions_pane_only_as_the_agent(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.execution.requests import Script
+    from agentworks.sessions import tmux
+    from agentworks.sessions.tmux import as_socket_owner_line
+    from tests._runtime_probes import owner_probe_line
+
+    _seed_singular(db, agent="a1")
+    _reachable(monkeypatch, True)
+    recorder = route_vm_access_to_guest(monkeypatch, _SingularGuest().answer)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *_args, **_kwargs: SessionStatus.RUNNING)
+    socket, owner = _agent_socket(db)
+
+    def capture(name: str, *, run_command: tmux.RunCommand, lines: int, socket_path: str | None) -> str:
+        run_command(tmux.tmux_cmd(f"capture-pane -p -t {tmux.exact_tmux_target(name)}", socket_path), check=False)
+        return ""
+
+    monkeypatch.setattr(tmux, "capture_output", capture)
+
+    session_manager.session_logs(db, make_config(), name="s1", interaction=TtyInteractionPolicy.REFUSE)
+
+    [request] = [
+        call.request
+        for call in recorder.calls
+        if isinstance(call.request, Script) and "capture-pane" in call.request.source
+    ]
+    expected = as_socket_owner_line(owner_probe_line(request.source), socket_path=socket, owner=owner, switch_user=True)
+    assert (request.elevated, request.source) == (True, expected)

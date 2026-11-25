@@ -11,6 +11,7 @@ import tomli_w
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import delivery_name
 from agentworks.artifacts.native.common import (
     MAX_CODEX_PERSONA_BYTES,
     NativeSessionArtifacts,
@@ -22,7 +23,6 @@ from agentworks.artifacts.native.common import (
     select_inputs,
     select_session_artifacts,
     skill_files,
-    validate_names,
     validate_native_argv,
 )
 from agentworks.artifacts.native.guidance import guidance_skills, session_skill_files
@@ -48,13 +48,13 @@ _SESSION_WORKAROUNDS = {
 }
 
 
-def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
+def _persona(item: ArtifactInput, *, name: str | None = None) -> str:
     values: dict[str, object] = {
         "developer_instructions": item.content.text,
         **persona_options(item, "codex", _OPTIONS),
     }
-    if not role_layer:
-        values.update(name=item.content.name, description=item.content.description)
+    if name is not None:
+        values.update(name=name, description=item.content.description)
     rendered = tomli_w.dumps(values)
     if len(rendered.encode()) > MAX_CODEX_PERSONA_BYTES:
         raise ConfigError("Codex persona exceeds the Agentworks rendered TOML size budget")
@@ -62,16 +62,16 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
 
 
 def outer_artifacts(inputs: ArtifactInputs, *, skills_root: str, agents_root: str) -> ArtifactApplication:
-    validate_names(inputs)
     files = list(guidance_skills(skills_root, inputs))
     for item in inputs.items():
         content = item.content
+        name = delivery_name(inputs, item)
         if content.type is ArtifactType.SKILL:
-            files.extend(skill_files(skills_root, item))
+            files.extend(skill_files(skills_root, item, name))
         elif content.type is ArtifactType.AGENT:
             files.append(
                 artifact_file(
-                    f"{agents_root}/{content.name}.toml", _persona(item), (item,), identity=f"agent:{content.name}"
+                    f"{agents_root}/{name}.toml", _persona(item, name=name), (item,), identity=f"agent:{name}"
                 )
             )
     return ArtifactApplication(tuple(files))
@@ -79,12 +79,11 @@ def outer_artifacts(inputs: ArtifactInputs, *, skills_root: str, agents_root: st
 
 def vm_artifacts(inputs: ArtifactInputs) -> ArtifactApplication:
     """Use machine skill discovery; other types need native user placement here."""
-    validate_names(inputs)
     files = list(guidance_skills("/etc/codex/skills", inputs))
     deferred = []
     for item in inputs.items():
         if item.content.type is ArtifactType.SKILL:
-            files.extend(skill_files("/etc/codex/skills", item))
+            files.extend(skill_files("/etc/codex/skills", item, delivery_name(inputs, item)))
         elif item.content.type in (ArtifactType.AGENT, ArtifactType.MCP_SERVER):
             deferred.append(
                 ArtifactDeferral(
@@ -144,7 +143,6 @@ def session_artifacts(
     )
     mcp = _session_mcp(context, mcp_inputs, extra_args, mcp_conflicts, profile=profile)
     deferred = (*deferred, *mcp.application.deferred)
-    validate_names(inputs, types=(ArtifactType.AGENT,))
     types = {item.content.type for item in inputs.items()}
     ancestors = {file.native_identity or "" for file in context.ancestor_files}
     if inputs:
@@ -174,11 +172,9 @@ def session_artifacts(
         )
     for item in inputs.items():
         if item.content.type is ArtifactType.AGENT:
-            name = item.content.name
-            path = f"{context.directory}/agents/{item.content.name}.toml"
-            files.append(
-                artifact_file(path, _persona(item, role_layer=True), (item,), identity=f"agent:{item.content.name}")
-            )
+            name = delivery_name(inputs, item)
+            path = f"{context.directory}/agents/{name}.toml"
+            files.append(artifact_file(path, _persona(item), (item,), identity=f"agent:{name}"))
             # Codex CLI override keys are dotted paths with literal components, including quotes.
             key = f"agents.{name}"
             argv += [
@@ -187,27 +183,19 @@ def session_artifacts(
                 "-c",
                 f"{key}.description={json.dumps(item.content.description, ensure_ascii=False)}",
             ]
+    application = ArtifactApplication(tuple(files), deferred)
+    return NativeSessionArtifacts(application, (*argv, *mcp.argv))
+
+
+def limit_session_argv(plan: NativeSessionArtifacts, inputs: ArtifactInputs) -> NativeSessionArtifacts:
+    """Budget the selected artifact overrides after resolving native placement conflicts."""
     try:
-        validate_native_argv((*argv, *mcp.argv))
+        validate_native_argv(plan.argv)
     except ConfigError:
         # Optional MCP must not prevent an otherwise-valid legacy launch.
-        validate_native_argv(tuple(argv))
-        deferred = (
-            *deferred,
-            *(
-                ArtifactDeferral(
-                    input_id=item.identity,
-                    destination="session",
-                    reason="session-mcp-overrides exceeds the native command carrier limit",
-                )
-                for item in mcp_inputs.items()
-                if item.identity not in {entry.input_id for entry in mcp.application.deferred}
-            ),
-        )
-    else:
-        argv.extend(mcp.argv)
-    application = ArtifactApplication(tuple(files), deferred)
-    return NativeSessionArtifacts(application, tuple(argv))
+        plan = defer_session_mcp(plan, inputs, "session-mcp-overrides exceeds the native command carrier limit")
+        validate_native_argv(plan.argv)
+    return plan
 
 
 def defer_session_mcp(plan: NativeSessionArtifacts, inputs: ArtifactInputs, reason: str) -> NativeSessionArtifacts:
@@ -215,7 +203,7 @@ def defer_session_mcp(plan: NativeSessionArtifacts, inputs: ArtifactInputs, reas
     keys: dict[str, set[str]] = {}
     for item in inputs.items():
         if item.content.type is ArtifactType.MCP_SERVER:
-            keys.setdefault(f"mcp_servers.{item.content.name}", set()).add(item.identity)
+            keys.setdefault(f"mcp_servers.{delivery_name(inputs, item)}", set()).add(item.identity)
     argv: list[str] = []
     omitted: set[str] = set()
     # Both persona and MCP overrides are generated flag/value pairs.
@@ -306,14 +294,14 @@ def _session_mcp(
                 )
             )
         )
-    conflicts = _mcp_override_conflicts(extra_args, {item.content.name for item in items})
+    conflicts = _mcp_override_conflicts(extra_args, {delivery_name(inputs, item) for item in items})
     input_conflicts = mcp_input_conflicts(inputs, "codex")
     inspect_inputs = select_inputs(
         inputs,
         {
             item.identity
             for item in items
-            if item.content.name not in conflicts and item.identity not in input_conflicts
+            if delivery_name(inputs, item) not in conflicts and item.identity not in input_conflicts
         },
     )
     native_conflicts = {} if inspect is None or not inspect_inputs else inspect(inspect_inputs, context)
@@ -322,7 +310,7 @@ def _session_mcp(
     argv: list[str] = []
     emitted: set[str] = set()
     for item in items:
-        name = item.content.name
+        name = delivery_name(inputs, item)
         if name in conflicts:
             deferred.append(
                 ArtifactDeferral(

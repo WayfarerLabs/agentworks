@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import traceback
 from pathlib import Path
 from types import SimpleNamespace
@@ -114,7 +115,7 @@ def test_post_spawn_failure_retains_new_owners_and_original_outcome(
             SimpleNamespace(session=SimpleNamespace(history_limit=1), paths=SimpleNamespace(vm_workspaces="/srv")),
             name="s1",
             new_workspace=True,
-            workspace_spec='{"tmuxinator":false}',
+            workspace_spec='{"git_user_name":"Ada"}',
             new_agent=True,
             agent_spec='{"shell":"zsh"}',
             vm_name="vm1",
@@ -139,7 +140,6 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(
     tmp_path, monkeypatch, capsys, operation, value_shape, make_config, resolve_counter
 ):
     from agentworks import cli
-    from agentworks.sessions.tmux import _tmux_env_flags
 
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     marker = uuid4().hex
@@ -148,9 +148,10 @@ def test_launch_secret_stays_out_of_terminal_and_cli_error_log(
         "quoted": f"prefix'{marker}'suffix",
         "ansi": f"prefix'{marker}\x1b[31m'suffix",
     }[value_shape]
-    command = "tmux new-session" + _tmux_env_flags({"TOKEN": secret})
+    command = "tmux new-session -e " + shlex.quote("TOKEN=" + secret)
     failure = ExternalError(command, hint=command)
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr("sys.argv", ["agw", "session", operation, "s1"])
     monkeypatch.delenv("AGW_DEBUG", raising=False)
     register_workload_secret(db, monkeypatch, name="token", value=secret)

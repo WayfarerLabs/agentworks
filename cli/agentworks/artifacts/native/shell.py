@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.artifacts.application import ArtifactApplication, ArtifactFile
 from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.names import delivery_name
 from agentworks.artifacts.native.common import artifact_file, json_text, skill_files
 
 if TYPE_CHECKING:
@@ -28,19 +29,20 @@ def filesystem_artifacts(
         hint_file = None
         if aggregate_hints and hints:
             hint_file = artifact_file(
-                f"{group_root}/hints/agentworks-hints.md",
+                f"{group_root}/hints/{delivery_name(inputs, hints[0], base='agentworks-hints')}.md",
                 "\n\n".join(f"## {item.content.name}\n\n{item.content.text}" for item in hints),
                 hints,
             )
             files.append(hint_file)
         for item in group.items():
             content = item.content
+            name = delivery_name(inputs, item)
             directory = f"{group_root}/{content.type.map_name}"
             publication: tuple[ArtifactFile, ...]
             if content.type is ArtifactType.HINT and hint_file is not None:
                 publication = (hint_file,)
             elif content.type is ArtifactType.SKILL:
-                publication = skill_files(directory, item)
+                publication = skill_files(directory, item, name, namespace=None)
             else:
                 body = content.text
                 if content.type is ArtifactType.AGENT:
@@ -55,7 +57,7 @@ def filesystem_artifacts(
                 elif content.type is ArtifactType.MCP_SERVER:
                     body = json_text(content.metadata)
                 suffix = "json" if content.type in (ArtifactType.AGENT, ArtifactType.MCP_SERVER) else "md"
-                publication = (artifact_file(f"{directory}/{content.name}.{suffix}", body, (item,)),)
+                publication = (artifact_file(f"{directory}/{name}.{suffix}", body, (item,)),)
             if content.type is not ArtifactType.HINT or hint_file is None:
                 files.extend(publication)
             maps[content.type.map_name][content.name] = {

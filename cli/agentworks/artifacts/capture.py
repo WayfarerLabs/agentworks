@@ -7,6 +7,7 @@ import json
 import re
 from contextlib import nullcontext
 from dataclasses import replace
+from itertools import chain
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.artifacts.bundle import ArtifactBundle
+    from agentworks.artifacts.declarations import ArtifactDefinitions
     from agentworks.package_sources import CapturedPackage
 
 _TEXT_SUFFIXES = frozenset(
@@ -64,12 +66,13 @@ def capture_artifacts(
     bundles: Sequence[tuple[str, ArtifactBundle]],
     origin: ArtifactOrigin,
     *,
+    declare: ArtifactDefinitions | None = None,
     limits: CaptureLimits | None = None,
     operation: PackageCapture | None = None,
 ) -> ArtifactGroup:
-    """Capture an owner's declared bundles once, in declaration order.
+    """Capture selected bundles in order, then the owner's direct declarations.
 
-    Source errors omit source strings and content. The bundle and entry address
+    Source errors omit source strings and content. The declaration and entry address
     identify the declaration to repair without repeating possibly secret input.
     No previous snapshot can substitute for a failed operation.
     A borrowed operation shares revision resolution and bounds across components;
@@ -80,8 +83,9 @@ def capture_artifacts(
     result: dict[str, dict[str, ArtifactInput]] = {kind.map_name: {} for kind in ArtifactType}
     changed: list[tuple[str, str, str]] = []
     with nullcontext(operation) if operation is not None else PackageCapture(limits or CaptureLimits()) as active:
-        for bundle_name, bundle in bundles:
-            for artifact_type, entries in bundle.type_maps():
+        declarations = chain(bundles, (("", declare),) if declare is not None else ())
+        for bundle_name, declaration in declarations:
+            for artifact_type, entries in declaration.type_maps():
                 selected = result[artifact_type.map_name]
                 for entry, spec in entries.items():
                     try:
@@ -126,13 +130,15 @@ def capture_artifacts(
                             content, provenance, replace(origin, bundle=bundle_name, entry=entry), replacements
                         )
                     except SourceRefError as error:
+                        label = replace(origin, bundle=bundle_name).declaration_label
                         raise SourceRefError(
-                            f"artifact {bundle_name}/{entry} for {origin.component} {origin.resource_name}: {error}"
+                            f"artifact {entry} in {label} for {origin.component} {origin.resource_name}: {error}"
                         ) from None
     for artifact_type_name, entry, bundle_name in changed:
+        label = replace(origin, bundle=bundle_name).declaration_label
         output.warn(
             f"Artifact {artifact_type_name} '{entry}' for {origin.component} {origin.resource_name} "
-            f"was replaced by bundle '{bundle_name}'."
+            f"was replaced by {label}."
         )
     return ArtifactGroup(origin.owner, **result)
 

@@ -13,6 +13,7 @@ from agentworks.capabilities.harness_integration.setup import (
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.db import Database
 from agentworks.errors import StateError
+from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.dispatch import destination_id
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
@@ -25,6 +26,7 @@ from agentworks.harness_setup.readiness import (
 from agentworks.harness_setup.state import write_native_setup
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
+from tests.vm_access_support import Admin, Call, RecordingVMAccess
 
 
 def test_default_session_setup_check_reads_no_ancestor_state():
@@ -40,17 +42,17 @@ def test_default_session_setup_check_reads_no_ancestor_state():
         state={},
     )
     db = Mock()
-    require_setup_ready(db, Mock(), integration, vm=Mock(), workspace=Mock(), agent_name=None, runner=Mock())
+    require_setup_ready(db, Mock(), integration, vm=Mock(), workspace=Mock(), agent_name=None, access=Mock())
     assert db.mock_calls == []
 
 
 def test_evidence_is_loaded_once_per_invocation():
     evidence = SetupEvidence("absent", "agent", "one", "repair")
     lookup = Mock(return_value=evidence)
-    readiness = SetupReadiness(lookup, Mock())
+    readiness = SetupReadiness(lookup)
     assert readiness.user is readiness.user is evidence
     lookup.assert_called_once_with("user")
-    next_operation = SetupReadiness(lookup, Mock())
+    next_operation = SetupReadiness(lookup)
     assert next_operation.user is evidence
     assert lookup.call_count == 2
 
@@ -77,7 +79,7 @@ def test_only_actual_user_current_applied_state_satisfies_evidence(tmp_path, mon
             activations={"shell": CapabilityConfig.model_validate({})},
             target=SecretTarget(vm={}, agent={}),
         )
-        runner = Mock()
+        access = Mock()
         record = SetupRecord(
             component="agent",
             integration="shell",
@@ -88,14 +90,14 @@ def test_only_actual_user_current_applied_state_satisfies_evidence(tmp_path, mon
         write_native_setup(db, "agent", "one", NativeSetupState(records=(record,)), operation="agent-reinit")
         monkeypatch.setattr("agentworks.harness_setup.readiness.destination_id", lambda *args, **kwargs: "a" * 64)
         assert evaluate_setup(
-            db, inputs, "shell", vm=vm, runner=runner, location="/home/user", username="user", remediation="repair"
+            db, inputs, "shell", vm=vm, access=access, location="/home/user", username="user", remediation="repair"
         ).current
         other = evaluate_setup(
             db,
             replace(inputs, name="two"),
             "shell",
             vm=vm,
-            runner=runner,
+            access=access,
             location="/home/user",
             username="user",
             remediation="repair",
@@ -110,7 +112,7 @@ def test_only_actual_user_current_applied_state_satisfies_evidence(tmp_path, mon
                     inputs,
                     "shell",
                     vm=vm,
-                    runner=runner,
+                    access=access,
                     location="/home/user",
                     username="user",
                     remediation="repair",
@@ -141,7 +143,7 @@ def test_incomplete_prerequisite_retains_recorded_upstream_repair(db):
         incomplete_reasons=("\x1b[31m" + upstream + "\x1b[0m\n",),
     )
     write_native_setup(db, "agent", inputs.name, NativeSetupState(records=(record,)), operation="agent-reinit")
-    evidence = evaluate_setup(db, inputs, "shell", vm=vm, runner=Mock(), remediation=own)
+    evidence = evaluate_setup(db, inputs, "shell", vm=vm, access=Mock(), remediation=own)
     with pytest.raises(RequiredSetupMissingError) as caught:
         enforce_setup_gaps((SetupGap(evidence, "required", "fixture prerequisite"),))
     assert caught.value.entity_kind == "agent" and caught.value.entity_name == inputs.name
@@ -168,7 +170,7 @@ def test_invalid_plugin_prerequisite_never_permits_launch(malformed_gap, capture
     )
     monkeypatch.setattr(integration, "check_setup", Mock(return_value=(malformed_gap,)))
     with pytest.raises(StateError):
-        require_setup_ready(Mock(), Mock(), integration, vm=Mock(), workspace=Mock(), agent_name=None, runner=Mock())
+        require_setup_ready(Mock(), Mock(), integration, vm=Mock(), workspace=Mock(), agent_name=None, access=Mock())
     assert captured_output.warnings == []
 
 
@@ -183,8 +185,11 @@ def test_invalid_plugin_prerequisite_never_permits_launch(malformed_gap, capture
 def test_destination_probe_preserves_previously_recorded_identities(db, location, username, recorded):
     # Applied-state record identities captured from the prior invocation-based API.
     vm = replace(db.insert_vm("fixture", site="local", hostname="fixture"), created_at="2026-01-01T00:00:00Z")
-    runner = Mock()
-    runner.run.side_effect = lambda command, **kwargs: Mock(
-        stdout="\nAGW_NATIVE_ID=" + ("machine-fixture\n" if "cat /etc/machine-id" in command else "1:2:1000\n")
-    )
-    assert destination_id(vm, runner, location=location, username=username) == recorded
+    access = RecordingVMAccess([], Admin())
+
+    def answer(call: Call) -> Result:
+        argv = call.request.argv  # type: ignore[union-attr]
+        return Result(Completed(0), b"machine-fixture\n" if argv == ("cat", "/etc/machine-id") else b"1:2:1000\n")
+
+    access.answer = answer
+    assert destination_id(vm, access, location=location, username=username) == recorded

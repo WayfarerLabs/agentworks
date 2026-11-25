@@ -6,7 +6,7 @@ first stage (``ssh_process.STAGE0``), which reads it with exact-length reads and
 ``s``, ``f``, ``r``, ``g``) are the globals this file runs in, so it defines
 none of them at module level. It has no import-time effect: it defines
 ``main(f, g)`` and calls it only when run as the first stage's program, so the
-client can import the file for the two definitions it shares without running
+client can import the file for the definitions it shares without running
 anything. Every other import sits in one ``try`` inside ``main``, because the
 client imports this module on Windows, where ``pwd`` does not exist.
 
@@ -20,6 +20,15 @@ release a supported Debian ships.
 STDLIB_MISSING_STATUS = 69
 """Exit status when the standard library is incomplete (Debian's python3-minimal
 has ``os``, ``sys`` and ``socket`` but not ``json``). Written before any marker."""
+
+
+DEFAULT_TERM = "xterm-256color"
+"""The terminal type a terminal half gets when its owner names none: a Windows
+workstation with no ``TERM``, or a pane whose environment has none."""
+
+HANDOVER_WAIT_SECONDS = 30
+"""How long a parked launcher waits for its terminal half after ``parked``.
+The client's collect bound (``attach.HANDOVER_COLLECT_SECONDS``) is built on it."""
 
 
 def refusal_status(code: str) -> int:
@@ -44,6 +53,7 @@ def main(f: int, g: bytes) -> None:
     try:
         import contextlib
         import errno
+        import fcntl
         import json
         import pwd
         import select
@@ -55,8 +65,15 @@ def main(f: int, g: bytes) -> None:
     except ImportError:
         sys.exit(STDLIB_MISSING_STATUS)
 
+    # What tmux sets for a pane besides TERM: its server and pane, and what it is.
+    pane_terminal_variables = ("TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
     fixed_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games"
-    handover_wait_seconds = 30
+    program_interpreter = "/usr/bin/python3"
+    # The lowest descriptor a staged source may take. Startup files close or
+    # reuse low descriptors (3 to 9 are the shell's own redirection range), so
+    # the source sits above them for as long as the payload runs. A
+    # precondition: the soft RLIMIT_NOFILE exceeds it.
+    staged_source_floor = 100
 
     # -- 1. Read: the envelope and the passwd entry. Every failure before the
     # start marker is an uncaught exception (exit 1) or the status above.
@@ -117,9 +134,22 @@ def main(f: int, g: bytes) -> None:
             "SHLVL": "1",
         }
         if mode == "tty" and os.isatty(0):
-            env["TERM"] = request["term"]
-            with contextlib.suppress(OSError):
-                env["SSH_TTY"] = os.ttyname(0)
+            # The terminal's variables describe the terminal the shell runs on, not anyone's
+            # environment, so they come from the terminal's owner. An attach's terminal is
+            # the workstation's, reached over ssh: TERM is the envelope's and SSH_TTY names
+            # the pty sshd made. A pane's handover (park) carries no TERM: tmux owns that
+            # terminal and set TERM and the rest in the environment it started the pane's
+            # command with, and a tmux pty is not an SSH terminal, so there is no SSH_TTY.
+            term = request["term"]
+            if term is not None:
+                env["TERM"] = term
+                with contextlib.suppress(OSError):
+                    env["SSH_TTY"] = os.ttyname(0)
+            else:
+                env["TERM"] = os.environ.get("TERM") or DEFAULT_TERM
+                for name in pane_terminal_variables:
+                    if name in os.environ:
+                        env[name] = os.environ[name]
         runtime_dir = f"/run/user/{uid}"
         try:
             info = os.stat(runtime_dir)
@@ -133,8 +163,10 @@ def main(f: int, g: bytes) -> None:
     # Encoded before the start marker, so a string that cannot be encoded
     # fails before it.
     environment = build_environment()
-    arguments = [enc(item) for item in request["argv"]] if request["kind"] == "argv" else []
-    source = enc(request["source"]) if request["kind"] == "script" else b""
+    kind = request["kind"]
+    arguments = [enc(item) for item in request["argv"]] if kind == "argv" else []
+    source = enc(request["source"]) if kind in ("script", "python") else b""
+    program_arguments = [enc(item) for item in request["args"]] if kind == "python" else []
 
     def reset_signals(include_python_ignores: bool) -> None:
         for number in signal.valid_signals():
@@ -150,7 +182,8 @@ def main(f: int, g: bytes) -> None:
         signal.pthread_sigmask(signal.SIG_SETMASK, ())
 
     # -- tty: the terminal half of an attach. No check, no markers and no
-    # child: it becomes the shell, so the shell is the session leader.
+    # child: it becomes the login shell or the terminal command, which is
+    # then the session leader.
 
     if mode == "tty":
 
@@ -168,8 +201,11 @@ def main(f: int, g: bytes) -> None:
             if int(name) > 2:
                 with contextlib.suppress(OSError):
                     os.close(int(name))
-        flags = ["-l", "-i"] if os.isatty(0) else ["-l"]
         try:
+            if kind == "argv":
+                # A terminal command: its argv[0] is searched in the rebuilt PATH.
+                os.execvpe(arguments[0], arguments, environment)
+            flags = ["-l", "-i"] if os.isatty(0) else ["-l"]
             os.execve(shell, [shell, *flags], environment)
         except OSError as error:
             tty_refusal(exec_code(error))
@@ -185,11 +221,12 @@ def main(f: int, g: bytes) -> None:
     if (out_info.st_dev, out_info.st_ino) == (err_info.st_dev, err_info.st_ino):
         sys.exit("agw-launch: standard output and error are the same stream")
 
-    # The script is staged before the start marker, so a failure to create or
-    # fill it is a launcher failure, not an outcome that may have run.
+    # A script's or program's source is staged before the start marker, so a
+    # failure to create or fill it is a launcher failure, not an outcome that
+    # may have run.
     script_fd = -1
     pass_fds: tuple[int, ...] = ()
-    if request["kind"] == "script":
+    if kind in ("script", "python"):
         try:
             # MFD_NOEXEC_SEAL (kernel 6.3 and later), retried without it only on
             # EINVAL; any other failure (EMFILE, say) is a launcher failure.
@@ -198,14 +235,40 @@ def main(f: int, g: bytes) -> None:
             if error.errno != errno.EINVAL:
                 raise
             script_fd = os.memfd_create("agw-script", os.MFD_CLOEXEC)
+        try:
+            staged = fcntl.fcntl(script_fd, fcntl.F_DUPFD_CLOEXEC, staged_source_floor)
+        except OSError as error:
+            if error.errno != errno.EINVAL:
+                raise
+            sys.exit(
+                f"agw-launch: staging a source needs a soft open-file limit (RLIMIT_NOFILE) above {staged_source_floor}"
+            )
+        os.close(script_fd)
+        script_fd = staged
         remaining = source
         while remaining:
             remaining = remaining[os.write(script_fd, remaining) :]
-        interpreter = {"sh": "/bin/sh", "bash": "/bin/bash", "user_default": shell}[request["shell"]]
-        arguments = [enc(interpreter)]
-        if request["login"]:
-            arguments.append(b"-l")
-        arguments.append(b"/dev/fd/%d" % script_fd)
+        source_path = b"/dev/fd/%d" % script_fd
+        startup = [b"-l"] if request["login"] else []
+        if request["interactive"]:
+            startup.append(b"-i")
+        if kind == "script":
+            interpreter = {"sh": "/bin/sh", "bash": "/bin/bash", "user_default": shell}[request["shell"]]
+            # An interactive shell reads no commands from a file it is given
+            # (dash prompts for each line), so it sources the script instead.
+            run_source = [b"-c", b'. "$0"'] if request["interactive"] else []
+            arguments = [enc(interpreter), *startup, *run_source, source_path]
+        elif startup:
+            # The startup shell runs its startup files, reopens the source as
+            # descriptor 9 and becomes the interpreter. It reopens the source
+            # itself because the shell may mark an inherited descriptor
+            # close-on-exec (bash -l -i does for 3 to 19). A redirect-only exec
+            # can return a stale status in zsh, which is why the line uses ";"
+            # and not "&&".
+            line = b'exec 9<"$0"; exec ' + enc(program_interpreter) + b' -I -S /dev/fd/9 "$@"'
+            arguments = [enc(shell), *startup, b"-c", line, source_path, *program_arguments]
+        else:
+            arguments = [enc(program_interpreter), b"-I", b"-S", source_path, *program_arguments]
         pass_fds = (script_fd,)
     # -- 3. Start marker, to stdout and then stderr.
 
@@ -224,13 +287,14 @@ def main(f: int, g: bytes) -> None:
     # -- park: wait for the terminal half to collect the request.
 
     if mode == "park":
-        try:
-            shell_info = os.stat(shell)
-        except OSError as error:
-            refuse(exec_code(error))
-        else:
-            if not stat.S_ISREG(shell_info.st_mode) or not os.access(shell, os.X_OK):
-                refuse("exec EACCES")
+        if kind == "shell":
+            try:
+                shell_info = os.stat(shell)
+            except OSError as error:
+                refuse(exec_code(error))
+            else:
+                if not stat.S_ISREG(shell_info.st_mode) or not os.access(shell, os.X_OK):
+                    refuse("exec EACCES")
 
         def stop(number: int, frame_: object) -> None:
             sys.exit(1)
@@ -251,7 +315,7 @@ def main(f: int, g: bytes) -> None:
                 os.umask(previous)
             server.listen(1)
             emit(1, marker + b"parked\n")
-            until = time.monotonic() + handover_wait_seconds
+            until = time.monotonic() + HANDOVER_WAIT_SECONDS
             while True:
                 left = until - time.monotonic()
                 if left <= 0:

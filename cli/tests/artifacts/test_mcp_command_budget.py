@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -13,7 +15,10 @@ from agentworks.errors import ConfigError
 from tests.artifacts.test_mcp_session_delivery import mcp
 from tests.artifacts.test_native_delivery import artifact, context
 from tests.artifacts.test_rendered_launch_args import integration
-from tests.conftest import _FakeResult, _FakeTarget
+from tests.vm_access_support import Admin, RecordingVMAccess
+
+if TYPE_CHECKING:
+    from agentworks.artifacts.model import ArtifactInput
 
 
 @pytest.mark.parametrize(
@@ -30,17 +35,17 @@ def test_large_complete_launch_defers_mcp_and_preserves_legacy_files(config, pay
     current = context(server, skill)
     monkeypatch.setattr("agentworks.plugins.codex.harness_integration.session_mcp_conflicts", lambda *a, **k: {})
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *a, **k: "/home/alice/.codex")
-    target = _FakeTarget({".thread": _FakeResult(1)})
+    access = RecordingVMAccess([], Admin())
     baseline = integration(
         "codex", "CodexIntegration", {**config, "enabled_workarounds": ["session-home-skills"]}, artifacts=current
-    ).start(RunContext(admin_target=target), intent=HarnessLaunchIntent.CREATE)
+    ).start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
     selected = integration(
         "codex",
         "CodexIntegration",
         {**config, "enabled_workarounds": ["session-home-skills", "session-mcp-overrides"]},
         artifacts=current,
     )
-    actual = selected.start(RunContext(admin_target=target), intent=HarnessLaunchIntent.CREATE)
+    actual = selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
     assert actual.command == baseline.command
     assert actual.artifacts.files == baseline.artifacts.files and actual.artifacts.files
     assert {entry.input_id for entry in actual.artifacts.deferred} == {server.identity}
@@ -87,6 +92,37 @@ def test_existing_legacy_command_limit_remains_strict(mcp_enabled, monkeypatch):
         artifacts=context(server, agent),
     )
     with pytest.raises(ConfigError):
-        selected.start(
-            RunContext(admin_target=_FakeTarget({".thread": _FakeResult(1)})), intent=HarnessLaunchIntent.CREATE
-        )
+        selected.start(RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE)
+
+
+@pytest.mark.parametrize("colliding", [False, True])
+def test_codex_persona_command_budget_uses_selected_files(monkeypatch, colliding):
+    def persona(name: str, *, vm: bool = False) -> ArtifactInput:
+        item = artifact(ArtifactType.AGENT, name=name)
+        origin = replace(item.origin, component="vm", resource_kind="vm") if vm else item.origin
+        return replace(item, origin=origin, content=replace(item.content, description="d" * 1024))
+
+    outer = tuple(persona(f"review-{index}", vm=True) for index in range(16))
+    prefix = "vm" if colliding else "local"
+    local = tuple(persona(f"{prefix}-review-{index}") for index in range(16))
+    independent = persona("independent")
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *a, **k: "/home/alice/.codex")
+    selected = integration(
+        "codex",
+        "CodexIntegration",
+        {"enabled_workarounds": ["session-agent-config"]},
+        artifacts=context(*outer, *local, independent),
+    )
+    access = RecordingVMAccess([], Admin())
+    if not colliding:
+        with pytest.raises(ConfigError):
+            selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
+        assert not access.requests()
+        return
+
+    actual = selected.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.CREATE)
+    assert {item.input_id for item in actual.artifacts.deferred} == {item.identity for item in (*outer, *local)}
+    assert [file.native_identity for file in actual.artifacts.files] == ["agent:independent"]
+    argv = shlex.split(shlex.split(actual.command)[2])
+    role_settings = {value.partition("=")[0] for value in argv if value.startswith("agents.")}
+    assert role_settings == {"agents.independent.config_file", "agents.independent.description"}

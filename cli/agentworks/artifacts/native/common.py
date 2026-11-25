@@ -5,21 +5,25 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
+
+import yaml
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, ArtifactDeferral, ArtifactFile
 from agentworks.artifacts.model import ArtifactInputs, ArtifactType
+from agentworks.artifacts.names import MAX_ARTIFACT_NAME_LENGTH
 from agentworks.errors import AgentworksError, ConfigError, StateError
-from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.harness_setup.outcomes import Redactor
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from agentworks.artifacts.application import OwnedArtifactFile, SessionArtifactContext
     from agentworks.artifacts.model import ArtifactFacet, ArtifactInput
     from agentworks.capabilities.harness_integration.setup import SetupInvocation
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 # Agentworks budget for a rendered persona TOML file, including its instruction body.
@@ -97,16 +101,21 @@ def artifact_file(
     )
 
 
-def skill_files(root: str, item: ArtifactInput, *, namespace: str = "") -> tuple[ArtifactFile, ...]:
-    identity = f"skill:{namespace}{item.content.name}"
+def skill_files(root: str, item: ArtifactInput, name: str, *, namespace: str | None = "") -> tuple[ArtifactFile, ...]:
+    """Render a complete skill package. Raw exports supply no native namespace."""
+    entrypoint = None
+    if namespace is not None and name != item.content.name:
+        metadata = yaml.safe_dump({**item.content.metadata, "name": name}, sort_keys=False)
+        entrypoint = f"---\n{metadata}---\n{item.content.text}".encode()
+    package = f"{root}/{name}"
     return tuple(
         ArtifactFile(
-            f"{root}/{item.content.name}/{member.path}",
-            member.data,
+            f"{package}/{member.path}",
+            entrypoint if entrypoint is not None and member.path == "SKILL.md" else member.data,
             (item.origin_identity,),
             executable=member.executable,
-            native_identity=identity,
-            package_root=f"{root}/{item.content.name}",
+            native_identity=None if namespace is None else f"skill:{namespace}{name}",
+            package_root=package,
         )
         for member in item.content.members
     )
@@ -125,18 +134,12 @@ def defer_setup_conflicts(
     """
     from agentworks.artifacts.native.probe import NativeArtifactConflictError
 
-    while application.files:
+    previous = invocation.prior.artifact_files if invocation.prior else ()
+    prior_catalog = any(
+        file.path.endswith("/SKILL.md") or (file.native_identity or "").startswith("agent:") for file in previous
+    )
+    while application.files or prior_catalog:
         try:
-            identities: dict[str, tuple[str, ...]] = {}
-            for file in application.files:
-                if file.native_identity is not None:
-                    prior = identities.setdefault(file.native_identity, file.origins)
-                    if set(prior) != set(file.origins):
-                        raise NativeArtifactConflictError(
-                            f"multiple artifacts claim native identity '{file.native_identity}'",
-                            (file.native_identity,),
-                            hint="Rename the conflicting artifact before retrying setup.",
-                        )
             probe(application.files)
             return application
         except NativeArtifactConflictError as error:
@@ -148,13 +151,14 @@ def defer_setup_conflicts(
             }
             if not rejected:
                 raise StateError("native artifact conflict does not identify a proposed setup entry") from error
-            invocation.report_incomplete(str(error))
+            reason = invocation.redactor.sanitize(" ".join(value for value in (str(error), error.hint) if value))
+            invocation.report_incomplete(reason)
             existing = {item.input_id for item in application.deferred}
             deferred = tuple(
                 ArtifactDeferral(
                     input_id=item.identity,
                     destination=_setup_deferral_destination(invocation),
-                    reason="Native identity conflicts with existing content; repair that entry and rerun owning setup",
+                    reason=reason,
                 )
                 for item in invocation.artifacts.items()
                 if item.origin_identity in rejected and item.identity not in existing
@@ -167,41 +171,79 @@ def defer_setup_conflicts(
     return application
 
 
-def _name_conflicts(
-    inputs: ArtifactInputs, types: tuple[ArtifactType, ...] = (ArtifactType.SKILL, ArtifactType.AGENT)
-) -> tuple[tuple[ArtifactInput, ...], ...]:
-    names: dict[tuple[ArtifactType, str], list[ArtifactInput]] = {}
-    for item in inputs.items():
-        if item.content.type in types:
-            names.setdefault((item.content.type, item.content.name), []).append(item)
-    return tuple(tuple(items) for items in names.values() if len(items) > 1)
+def _placement(file: ArtifactFile | OwnedArtifactFile) -> tuple[str, str]:
+    if file.native_identity is None:
+        return file.path, ""
+    if file.native_identity.startswith("skill:"):
+        # Older ownership records may have no package root. Their entrypoint
+        # still supplies the discovery directory for incumbent selection.
+        package = PurePosixPath(file.package_root) if file.package_root else PurePosixPath(file.path).parent
+        return str(package.parent), file.native_identity
+    return str(PurePosixPath(file.path).parent), file.native_identity
 
 
-def _name_conflict_reason(items: tuple[ArtifactInput, ...]) -> str:
-    content = items[0].content
-    owners = ", ".join(f"{item.origin.component}:{item.origin.resource_name}" for item in items)
-    return f"multiple artifacts claim native {content.type.value} name '{content.name}': {owners}"
+def _placement_rejections(
+    files: tuple[ArtifactFile, ...], previous: tuple[OwnedArtifactFile, ...] = ()
+) -> dict[str, str]:
+    """Reject overlong skill names and competing entries in one native namespace."""
+    wanted: dict[tuple[str, str], set[tuple[str, ...]]] = {}
+    rejected: dict[str, str] = {}
+    for file in files:
+        placement = _placement(file)
+        identity = placement[1]
+        name = identity.rsplit(":", 1)[-1]
+        if identity.startswith("skill:") and len(name) > MAX_ARTIFACT_NAME_LENGTH:
+            reason = (
+                f"Native skill name '{name}' exceeds {MAX_ARTIFACT_NAME_LENGTH} characters. "
+                "Shorten the supplied artifact name before retrying delivery."
+            )
+            rejected.update((origin, reason) for origin in file.origins)
+        else:
+            wanted.setdefault(placement, set()).add(file.origins)
+    incumbents: dict[tuple[str, str], set[str]] = {}
+    for prior in previous:
+        incumbents.setdefault(_placement(prior), set()).update(prior.origins)
+    for placement, candidates in wanted.items():
+        if len(candidates) < 2:
+            continue
+        current = [origins for origins in candidates if incumbents.get(placement, set()).intersection(origins)]
+        kept = current[0] if len(current) == 1 else None
+        directory, identity = placement
+        description = f"{identity!r} in {directory!r}" if identity else repr(directory)
+        reason = f"Multiple artifacts claim native placement {description}. "
+        if kept is not None:
+            reason += "Keeping the previously applied owner. "
+        reason += "Rename a conflicting artifact before retrying delivery."
+        rejected.update((origin, reason) for origins in candidates if origins != kept for origin in origins)
+    return rejected
 
 
 def render_setup_artifacts(
     invocation: SetupInvocation,
     render: Callable[[ArtifactInputs], ArtifactApplication],
 ) -> ArtifactApplication:
-    """Defer every colliding input origin before rendering independent setup files."""
-    rejected: dict[str, str] = {}
-    for items in _name_conflicts(invocation.artifacts):
-        reason = _name_conflict_reason(items)
+    """Keep a unique applied owner of a rendered placement and defer other colliders."""
+    application = render(invocation.artifacts)
+    previous = () if invocation.prior is None else invocation.prior.artifact_files
+    rejected = {
+        origin: invocation.redactor.sanitize(reason)
+        for origin, reason in _placement_rejections(application.files, previous).items()
+    }
+    for reason in dict.fromkeys(rejected.values()):
         invocation.report_incomplete(reason)
-        rejected.update((item.identity, reason) for item in items)
-    selected = {item.identity for item in invocation.artifacts.items() if item.identity not in rejected}
-    application = render(select_inputs(invocation.artifacts, selected))
     return replace(
         application,
+        files=tuple(file for file in application.files if rejected.keys().isdisjoint(file.origins)),
         deferred=(
             *application.deferred,
             *(
-                ArtifactDeferral(input_id=identity, destination=_setup_deferral_destination(invocation), reason=reason)
-                for identity, reason in rejected.items()
+                ArtifactDeferral(
+                    input_id=item.identity,
+                    destination=_setup_deferral_destination(invocation),
+                    reason=rejected[item.origin_identity],
+                )
+                for item in invocation.artifacts.items()
+                if item.origin_identity in rejected
             ),
         ),
     )
@@ -211,21 +253,6 @@ def _setup_deferral_destination(invocation: SetupInvocation) -> ArtifactFacet:
     from agentworks.capabilities.harness_integration.setup import VMSetupInvocation
 
     return "user" if isinstance(invocation, VMSetupInvocation) else "session"
-
-
-def validate_names(
-    inputs: ArtifactInputs, *, types: tuple[ArtifactType, ...] = (ArtifactType.SKILL, ArtifactType.AGENT)
-) -> None:
-    """Reject colliding native names at the integration input boundary."""
-    from agentworks.artifacts.native.probe import NativeArtifactConflictError
-
-    conflicts = _name_conflicts(inputs, types)
-    if conflicts:
-        raise NativeArtifactConflictError(
-            "; ".join(_name_conflict_reason(items) for items in conflicts),
-            tuple(f"{items[0].content.type.value}:{items[0].content.name}" for items in conflicts),
-            hint="Rename the conflicting artifacts or use an integration with separate native identities.",
-        )
 
 
 def persona_options(item: ArtifactInput, integration: str, allowed: Mapping[str, type]) -> dict[str, object]:
@@ -256,77 +283,21 @@ def json_text(value: object) -> str:
 
 
 @contextmanager
-def ancestor_diagnostics(
-    integration: str, *, runner: Transport | None = None, redactions: Iterable[str] = ()
-) -> Iterator[None]:
+def ancestor_diagnostics(integration: str, *, redactor: Redactor = Redactor()) -> Iterator[None]:
     """Keep native checks of existing upstream placement advisory at session start."""
     try:
         yield
     except AgentworksError as error:
-        diagnostic = sanitize_setup_diagnostic(
-            " ".join(part for part in (str(error), error.hint) if part),
-            redactions=redactions,
-            logger=None if runner is None else runner.logger,
-        )
+        diagnostic = redactor.sanitize(" ".join(part for part in (str(error), error.hint) if part))
         output.warn(f"Existing ancestor artifacts via {integration}: {diagnostic} Continuing with existing placement.")
-
-
-def validate_ancestor_names(context: SessionArtifactContext, application: ArtifactApplication) -> None:
-    """Report old branch collisions; refuse conflicts introduced by new delivery."""
-    from agentworks.artifacts.native.probe import NativeArtifactConflictError
-
-    files_by_name: dict[str, OwnedArtifactFile | ArtifactFile] = {}
-    conflicting_ancestors: dict[str, OwnedArtifactFile] = {}
-    for ancestor in context.ancestor_files:
-        if ancestor.native_identity is None:
-            continue
-        prior = files_by_name.setdefault(ancestor.native_identity, ancestor)
-        if set(prior.origins) != set(ancestor.origins) and ancestor.native_identity not in conflicting_ancestors:
-            conflicting_ancestors[ancestor.native_identity] = ancestor
-            output.warn(
-                f"Existing scopes share native artifact identity '{ancestor.native_identity}': "
-                f"{prior.path!r} and {ancestor.path!r}. Continuing with existing placement."
-            )
-    for file in application.files:
-        if file.native_identity is None:
-            continue
-        prior = files_by_name.setdefault(file.native_identity, file)
-        competing = conflicting_ancestors.get(file.native_identity)
-        if competing is not None or set(prior.origins) != set(file.origins):
-            paths = {prior.path, file.path}
-            if competing is not None:
-                paths.add(competing.path)
-            raise NativeArtifactConflictError(
-                f"multiple scopes claim native artifact identity '{file.native_identity}': "
-                + ", ".join(repr(path) for path in sorted(paths)),
-                (file.native_identity,),
-                hint="Rename the conflicting artifacts or retire the competing native entry.",
-            )
 
 
 def has_artifacts(context: SessionArtifactContext | None) -> bool:
     return context is not None and bool(context.inputs or context.ancestor_files)
 
 
-def recognized_ancestor_files(
-    context: SessionArtifactContext, application: ArtifactApplication
-) -> tuple[OwnedArtifactFile, ...]:
-    """Recognize earlier placements only for the same native identity and origin.
-
-    A removed activation can forward an artifact whose old native file remains.
-    New delivery recognizes that logical artifact without widening policy checks
-    to unrelated ancestor content.
-    """
-    proposed = {
-        (file.native_identity, frozenset(file.origins))
-        for file in application.files
-        if file.native_identity is not None
-    }
-    return tuple(file for file in context.ancestor_files if (file.native_identity, frozenset(file.origins)) in proposed)
-
-
 def prepare_session_delivery(
-    runner: Transport | None,
+    access: VMAccess | None,
     *,
     tool: str,
     integration: str,
@@ -348,7 +319,17 @@ def prepare_session_delivery(
         plan = None
         try:
             plan = render(current)
-            validate_ancestor_names(current, plan.application)
+            placement_rejections = _placement_rejections(plan.application.files)
+            if placement_rejections:
+                affected = {
+                    item.identity: context.redactor.sanitize(placement_rejections[item.origin_identity])
+                    for item in current.inputs.items()
+                    if item.origin_identity in placement_rejections
+                }
+                if not affected:
+                    raise StateError("native placement conflict does not identify a selected session input")
+                rejected.update(affected)
+                continue
             # MCP uses entry-specific config checks, not skill/persona discovery.
             deferred = {item.input_id for item in plan.application.deferred}
             legacy_delivery = not current.inputs or any(
@@ -356,37 +337,30 @@ def prepare_session_delivery(
                 for item in current.inputs.items()
             )
             if legacy_delivery and (plan.application.files or plan.argv):
-                if runner is None:
+                if access is None:
                     raise StateError("artifact delivery requires the actual native launch target")
                 root = probe_native(
-                    runner,
+                    access,
                     tool=tool,
                     environment=current.environment,
-                    redactions=current.redactions,
+                    redactor=current.redactor,
                     home=current.home,
                     workspace=workspace,
                     files=plan.application.files,
-                    recognized_files=recognized_ancestor_files(current, plan.application),
                     session_plugin="--plugin-dir" in plan.argv,
                 )
         except NativeArtifactConflictError as error:
             for identity in error.identities:
-                parts = identity.split(":")
                 origins = {
                     origin
                     for file in (() if plan is None else plan.application.files)
                     if file.native_identity == identity
                     for origin in file.origins
                 }
-                matching = tuple(
-                    item
-                    for item in current.inputs.items()
-                    if item.origin_identity in origins
-                    or (item.content.type.value == parts[0] and item.content.name == parts[-1])
-                )
+                matching = tuple(item for item in current.inputs.items() if item.origin_identity in origins)
                 if not matching:
                     raise StateError("native name conflict does not identify a selected session input") from error
-                reason = " ".join(value for value in (str(error), error.hint) if value)
+                reason = context.redactor.sanitize(" ".join(value for value in (str(error), error.hint) if value))
                 rejected.update((item.identity, reason) for item in matching)
             if not error.identities:
                 raise StateError("native name conflict does not identify a selected session input") from error
@@ -407,14 +381,14 @@ def prepare_session_delivery(
         ),
     )
     if context.ancestor_files:
-        with ancestor_diagnostics(integration, runner=runner, redactions=context.redactions):
-            if runner is None:
+        with ancestor_diagnostics(integration, redactor=context.redactor):
+            if access is None:
                 raise StateError("artifact delivery requires the actual native launch target")
             ancestor_root = probe_native(
-                runner,
+                access,
                 tool=tool,
                 environment=context.environment,
-                redactions=context.redactions,
+                redactor=context.redactor,
                 home=context.home,
                 workspace=workspace,
                 files=context.ancestor_files,

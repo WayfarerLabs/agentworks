@@ -50,6 +50,10 @@ def effective_references(
     return tuple(refs)
 
 
+TMUXINATOR_FIELD_REMOVAL = "0.22.0"
+"""The release that stops accepting the inert ``tmuxinator`` field (issue #918)."""
+
+
 class WorkspaceTemplate(DeclaredResource):
     """Workspace template definition. Every field is optional, and ``None``
     means "not set here, inherit it" rather than "off"."""
@@ -70,9 +74,10 @@ class WorkspaceTemplate(DeclaredResource):
     """The git repository cloned into workspaces built from this template."""
 
     tmuxinator: bool | None = None
-    """Whether to write a tmuxinator project for the workspace. ``None``
-    inherits and defaults to true when the chain does not set it. Write
-    booleans unquoted; quoted strings such as ``"no"`` are invalid."""
+    """Deprecated, with no effect: Agentworks no longer generates workspace
+    tmuxinator projects. Still accepted so existing declarations load, until
+    0.22.0 removes it; setting it reports a deprecation. Write booleans
+    unquoted; quoted strings such as ``"no"`` are invalid."""
 
     git_user_name: str | None = None
     """``user.name`` for commits made in this workspace's checkout."""
@@ -86,11 +91,23 @@ class WorkspaceTemplate(DeclaredResource):
     A null entry disables that integration."""
 
     artifacts: ArtifactsConfig | None = None
-    """Artifact bundles selected at this scope; an omitted selection inherits."""
+    """Bundle selections and direct artifact definitions at this scope; omission inherits."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported in this workspace, as a plaintext
     value or a ``{secret: <name>}`` reference per key."""
+
+    def deprecated_fields(self) -> dict[str, str]:
+        """An authored ``tmuxinator`` key is a setting with no effect, whatever its
+        value, null included."""
+        if "tmuxinator" not in self.model_fields_set:
+            return {}
+        return {
+            "tmuxinator": (
+                "it has no effect, since workspace tmuxinator projects are no longer generated, and it "
+                f"will be removed in {TMUXINATOR_FIELD_REMOVAL}; remove the setting"
+            )
+        }
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of

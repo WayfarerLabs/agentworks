@@ -86,6 +86,53 @@ def append_session_template_deprecation_checks(group: HealthGroup, registry: Reg
         )
 
 
+_STORED_HINT = (
+    "It was recorded when the workspace was created. No command edits stored settings, so there is nothing to do."
+)
+
+
+def append_workspace_deprecation_checks(group: HealthGroup) -> None:
+    """Inspect stored workspace declarations for deprecated settings.
+
+    Manifest declarations report through ``ManifestSet.deprecations``; this covers
+    the stored final layers instance specs created. No command edits those, so
+    their rows are informational and say there is nothing to do. It reads the
+    ordinary current database read-only, and an unavailable live view receives
+    an explicit coverage row.
+    """
+    from agentworks.db import DatabaseDriverError
+    from agentworks.declared_resource import DeclaredResource
+    from agentworks.errors import AgentworksError
+    from agentworks.instance_specs import get_instance_overlay
+
+    coverage = "Stored workspace declaration coverage"
+    try:
+        with _current_database() as (exists, current, latest, database):
+            if not exists:
+                return
+            if current != latest:
+                group.info(coverage, "Stored workspace declarations not checked; see the Database group")
+                return
+            assert database is not None
+            with database.snapshot():
+                for workspace in database.list_workspaces():
+                    owner = f"workspace/{workspace.name}"
+                    try:
+                        overlay = get_instance_overlay(database, "workspace", workspace.name)
+                    except AgentworksError:
+                        group.fail(owner, "Workspace compatibility could not be checked for this declaration")
+                        continue
+                    declaration = None if overlay is None else overlay.declaration
+                    if not isinstance(declaration, DeclaredResource):
+                        continue
+                    for field in declaration.deprecated_fields():
+                        group.info(
+                            f"{owner}.{field}", "Retired workspace setting in stored settings", hint=_STORED_HINT
+                        )
+    except (AgentworksError, DatabaseDriverError, OSError, ValueError):
+        group.fail(coverage, "Stored workspace declarations not checked; see the Database group")
+
+
 def _append_session_template_fields(group: HealthGroup, owner: str, template: ResolvedSessionTemplate) -> None:
     """Inspect session plaintext and validate persisted Shell capability fields.
 
@@ -213,7 +260,7 @@ def _report_contents(
 ) -> None:
     """Report stored counts and flag VMs in non-complete states."""
     from agentworks.db import InitStatus
-    from agentworks.ssh import LOG_DIR
+    from agentworks.execution import oplog
 
     group.ok(
         "Contents",
@@ -222,9 +269,7 @@ def _report_contents(
     )
 
     def log_hint(vm_name: str) -> str:
-        if not LOG_DIR.exists():
-            return ""
-        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
+        logs = oplog.vm_logs(vm_name)
         return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:
@@ -253,7 +298,11 @@ def _report_instance_state(
     )
     from agentworks.errors import StateError
     from agentworks.harness_setup.state import UnsupportedNativeSetupVersionError, decode_native_setup
-    from agentworks.instance_specs import UnsupportedStoredOverlayError, decode_stored_overlay
+    from agentworks.instance_specs import (
+        ExplicitReplacementRequired,
+        UnsupportedStoredOverlayError,
+        decode_stored_overlay,
+    )
     from agentworks.legacy_claude import LegacyClaudeContextRequired
     from agentworks.ssh_identity import SSHIdentityReadError, read_private_ssh_identity
     from agentworks.vms.applied_state import (
@@ -354,6 +403,15 @@ def _report_instance_state(
                 InstanceStateHealthFactType.MIGRATION_PENDING,
                 metadata,
                 hint="Migrate the selected template, then run owning reinit to convert the stored overlay.",
+            )
+        except ExplicitReplacementRequired as error:
+            add(
+                Status.WARN,
+                label(metadata),
+                "record holds a value this release retired and needs an explicit replacement",
+                InstanceStateHealthFactType.MIGRATION_PENDING,
+                metadata,
+                hint=error.hint,
             )
         except UnsupportedStoredOverlayError:
             add(

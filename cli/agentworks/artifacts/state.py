@@ -63,7 +63,7 @@ def _validate_owner(capture: CapturedArtifacts, kind: InstanceKind, name: str, c
 def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
     """Fingerprint effective declarations without opening their sources."""
     payload = []
-    for name in config.bundles:
+    for name in config.bundles or ():
         bundle = resolve_bundle(registry, name).value
         maps = {
             kind.map_name: {key: spec.model_dump(mode="json") for key, spec in entries.items()}
@@ -71,6 +71,16 @@ def declaration_digest(registry: Registry, config: ArtifactsConfig) -> str:
             if kind != ArtifactType.MCP_SERVER or entries
         }
         payload.append((name, maps))
+    if config.declare:
+        payload.append(
+            (
+                "",
+                {
+                    kind.map_name: {key: spec.model_dump(mode="json") for key, spec in entries.items()}
+                    for kind, entries in config.declare.type_maps()
+                },
+            )
+        )
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -85,11 +95,13 @@ def capture_owner(
 ) -> CapturedArtifacts:
     """Acquire and validate persistence before buffered captures can cause native effects."""
     bundles = []
-    for bundle_name in config.bundles:
+    for bundle_name in config.bundles or ():
         bundle: ArtifactBundle = resolve_bundle(registry, bundle_name).value
         bundles.append((bundle_name, bundle))
     try:
-        inputs = capture_artifacts(bundles, ArtifactOrigin(component, kind, name), operation=operation)
+        inputs = capture_artifacts(
+            bundles, ArtifactOrigin(component, kind, name), declare=config.declare, operation=operation
+        )
         encode_inputs(inputs)
     except SourceRefError as error:
         raise StateError(str(error), entity_kind=kind, entity_name=name) from None

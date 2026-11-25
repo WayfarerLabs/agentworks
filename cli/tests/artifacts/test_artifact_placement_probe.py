@@ -14,10 +14,15 @@ def test_machine_inventory_detects_native_name_collisions(tmp_path, tool):
     skill = root / "skills/other-path/SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("---\nname: review\ndescription: Machine skill\n---\nbody\n")
-    assert "native-artifact-collision" in probe(tmp_path, tool=tool)["problems"]
-    assert "native-artifact-collision" in probe(tmp_path, tool=tool, workspace_only=True)["problems"]
-    assert "native-artifact-collision" in probe(tmp_path, tool=tool, vm_only=True)["problems"]
-    assert probe(tmp_path, tool=tool, identities=("skill:other",))["problems"] == []
+    name = "skill:review"
+    proposed = {str(root / "skills/review/SKILL.md"): name}
+    assert "native-artifact-collision" in probe(tmp_path, tool=tool, vm_only=True, entries=proposed)["problems"]
+    native = ".claude" if tool == "claude" else ".agents"
+    for scope in ("home", "workspace"):
+        entrypoint = tmp_path / scope / native / "skills/review/SKILL.md"
+        result = probe(tmp_path, tool=tool, workspace_only=scope == "workspace", entries={str(entrypoint): name})
+        assert result["problems"] == []
+        assert str(skill) in {entry["path"] for entry in result["inventory"]}
 
 
 @pytest.mark.parametrize("tool", ["claude", "codex"])

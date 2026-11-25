@@ -6,33 +6,20 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field
 
-from agentworks.artifacts.declarations import (
-    AgentArtifactSpec,
-    HintArtifactSpec,
-    MCPServerArtifactSpec,
-    RuleArtifactSpec,
-    SkillArtifactSpec,
-)
-from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.names import ARTIFACT_NAME_PATTERN, MAX_ARTIFACT_NAME_LENGTH
+from agentworks.artifacts.declarations import ArtifactDefinitions
 from agentworks.declared_resource import DeclaredResource
 from agentworks.schema import ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from agentworks.artifacts.declarations import ArtifactSpec
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.inheritance import LayeredResolution
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.value_provenance import LayerContribution
 
-ArtifactName = Annotated[str, Field(pattern=ARTIFACT_NAME_PATTERN, max_length=MAX_ARTIFACT_NAME_LENGTH)]
 
-
-class ArtifactBundle(DeclaredResource):
+class ArtifactBundle(DeclaredResource, ArtifactDefinitions):
     """Named artifact definitions; each type map merges by key with whole-entry replacement."""
 
     inherits: list[
@@ -41,30 +28,6 @@ class ArtifactBundle(DeclaredResource):
         ]
     ] = Field(default_factory=list)
     """Parent bundles composed in order, nearest last."""
-
-    hints: dict[ArtifactName, HintArtifactSpec] = Field(default_factory=dict)
-    """Small setup facts, keyed by canonical artifact name."""
-
-    rules: dict[ArtifactName, RuleArtifactSpec] = Field(default_factory=dict)
-    """Unconditional instructions, keyed by canonical artifact name."""
-
-    skills: dict[ArtifactName, SkillArtifactSpec] = Field(default_factory=dict)
-    """Complete skill directories; each key must match the SKILL.md name."""
-
-    agents: dict[ArtifactName, AgentArtifactSpec] = Field(default_factory=dict)
-    """Agent personas; each key must match the definition's frontmatter name."""
-
-    mcp_servers: dict[ArtifactName, MCPServerArtifactSpec] = Field(default_factory=dict)
-    """Canonical MCP server connections, keyed by artifact name."""
-
-    def type_maps(self) -> tuple[tuple[ArtifactType, Mapping[str, ArtifactSpec]], ...]:
-        return (
-            (ArtifactType.HINT, self.hints),
-            (ArtifactType.RULE, self.rules),
-            (ArtifactType.SKILL, self.skills),
-            (ArtifactType.AGENT, self.agents),
-            (ArtifactType.MCP_SERVER, self.mcp_servers),
-        )
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import inherits_reference

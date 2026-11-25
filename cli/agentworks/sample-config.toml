@@ -39,6 +39,8 @@ ssh_public_key = "~/.ssh/id_ed25519.pub"    # required: used to authorize access
 # An encrypted private key must be loaded in your SSH agent (ssh-add): Agentworks runs ssh in batch mode.
 ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connections to VMs
 #ssh_config = "~/.ssh/config"               # SSH config file for VM host entries
+# ssh_config_dir adds an Include line for config.d to the top of ssh_config;
+# comment that line out to keep it from being added back.
 #ssh_config_dir = true                      # manage VM entries in ~/.ssh/config.d/
 #ssh_host_prefix = "awvm--"                 # prefix for VM SSH host aliases (e.g. awvm--myvm)
 #ssh_agent_host_prefix = "awagent--"        # prefix for agent SSH host aliases (e.g. awagent--myagent)
@@ -71,8 +73,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # --- Paths ---
 
 [paths]
+# An absolute directory on the VM, below the root, printable (no control or
+# format character, and no space but ' ') and with no '..' component (it is
+# normalized: empty and '.' components, so '//' and a trailing '/', go).
 # Must NOT be at or under /home: that is the Linux user-home namespace, and the
-# admin and agent homes there are kept private (mode 0750). Use a data volume path.
+# admin and agent homes there are kept private (mode 0750). Use a data volume path,
+# mounted (or bind-mounted) there: not a symbolic link, since workspace files are
+# never written through one.
 #vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 #vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
 # VM backups include stored instance specs, which can contain plaintext
@@ -102,13 +109,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # (the Codex harness integration and its `codex` CLI install-command), `grok`
 # (the Grok Build harness integration and its `grok` CLI install-command), `proxmox`
 # (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
-# DevOps git-credential provider, and the `az-cli` install-command), `aws`
+# DevOps git-credential provider, the Azure Key Vault secret backend, and the
+# `az-cli` install-command), `aws`
 # (the EC2 VM platform), and `gcp`
 # (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
-# package). Core still owns runners and executors, plus snap, mise, dotfiles,
-# and tmuxinator. Harness integrations own native marketplace/plugin setup and
-# declared MCP registrations. Artifact bundles and per-scope activation belong
-# in resource manifests; enabling a plugin alone does not register MCP servers.
+# package). Core still owns runners and executors, plus snap, mise, and
+# dotfiles. Harness integrations own native marketplace/plugin setup and
+# declared MCP registrations. Artifact bundles, direct declarations and per-scope
+# activation belong in resource manifests; enabling a plugin alone does not
+# register MCP servers.
 # `agw doctor` shows a System plugins roster with each plugin's state. For a
 # template that selects an apt catalog entry, add `apt`; for one that selects a
 # shipped user install command, add `install-command`. Keep existing names. If
@@ -183,6 +192,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `agw resource sample secret-source` prints the manifest shape;
 # `agw resource explain secret-backend/onepassword` documents its config
 # and mapping model.
+# For Azure Key Vault, enable `azure`, declare a source selecting
+# `spec.backend.name: azure-keyvault`, and add that source's name to the chain.
+# `agw resource explain secret-backend/azure-keyvault` documents its source
+# fields; `agw guide show concept-azure` links to Azure setup guidance.
 
 #[secret_config]
 #sources = ["env-var", "work-op", "prompt"]     # example; default is ["env-var", "prompt"].
@@ -193,8 +206,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # backend name is a 0.14 configuration error with the exact source declaration
 # and mapping rewrite needed to fix it.
 # Values are opaque strings. Resolution preserves CR/LF and rejects NUL.
-# Line-oriented consumers such as env injection, Git credentials, Proxmox API
-# auth, and Tailscale joins reject incompatible values at their own boundary.
+# Env injection delivers a value with its line breaks intact. Line-oriented
+# consumers such as Git credentials, Proxmox API auth, and Tailscale joins
+# reject a value with line breaks at their own boundary.
 
 # =============================================================================
 # Sessions

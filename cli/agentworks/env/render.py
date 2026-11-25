@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.env.entry import PlaintextEnvEntry
 from agentworks.errors import ValidationError
-from agentworks.interpolation import render_template
 from agentworks.interpolation_compat import (
     LEGACY_PLACEHOLDERS,
     uses_legacy_placeholders,
     warn_legacy_placeholders,
 )
+from agentworks.interpolation_fields import render_scalar_field
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
@@ -40,15 +41,18 @@ def render_plaintext(
             continue
         location = f"{field}.{key}"
         legacy = key in legacy_keys
-        value = render_template(
+        value = render_scalar_field(
+            PlaintextEnvEntry,
+            "value",
             entry.value,
             values,
-            field=location,
+            location=location,
             legacy_placeholders=LEGACY_PLACEHOLDERS if legacy else None,
         )
-        if any(character in value for character in ("\0", "\r", "\n")):
+        # Line breaks travel in the request intact; no exec'd environment can hold a NUL.
+        if "\0" in value:
             raise ValidationError(
-                f"{location}: environment value contains an unsupported line separator or NUL",
+                f"{location}: environment value contains a NUL byte",
                 entity_kind="template",
                 entity_name=location,
             )

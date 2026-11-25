@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from agentworks.artifacts.application import ArtifactFile
-from agentworks.artifacts.model import ArtifactType
+from agentworks.artifacts.model import ArtifactOrigin, ArtifactType
 from agentworks.artifacts.native.guidance import guidance_skills
 from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.session import validate_session_application
@@ -27,13 +27,22 @@ def metadata(file: ArtifactFile) -> dict:
 
 
 def test_same_named_rules_and_hints_from_different_scopes_have_distinct_owned_packages():
-    first = artifact(ArtifactType.RULE, owner="one")
+    first = replace(artifact(ArtifactType.RULE, owner="one"), origin=ArtifactOrigin("vm", "vm", "one", entry="review"))
     second = artifact(ArtifactType.RULE, owner="two")
-    hints = [artifact(ArtifactType.HINT, owner=owner, name=name) for owner in ("one", "two") for name in ("a", "b")]
+    hints = [
+        replace(artifact(ArtifactType.HINT, owner=owner, name=name), origin=replace(origin, entry=name))
+        for owner, origin in (("one", first.origin), ("two", second.origin))
+        for name in ("a", "b")
+    ]
     files = guidance_skills("/skills", received(first, second, *hints))
     entries = [file for file in files if file.path.endswith("/SKILL.md")]
     assert len(entries) == 4
-    assert len({file.native_identity for file in files}) == 4
+    assert {file.native_identity for file in files} == {
+        "skill:vm-agentworks-hints",
+        "skill:vm-agentworks-rule-review",
+        "skill:agentworks-hints",
+        "skill:agentworks-rule-review",
+    }
     assert sorted(len(file.origins) for file in entries) == [1, 1, 2, 2]
     assert {origin for file in files for origin in file.origins} == {
         item.origin_identity for item in (first, second, *hints)
@@ -75,8 +84,56 @@ def test_long_rule_keys_with_the_same_readable_prefix_keep_distinct_native_outpu
             name = metadata(file)["name"]
             assert name == PurePosixPath(file.package_root).name and len(name) <= 64
             assert file.native_identity == "skill:" + name
+        assert {file.native_identity for file in plan.files} == {
+            f"skill:agentworks-rule-{item.content.name}" for item in items
+        }
     else:
-        assert all(len(PurePosixPath(file.path).stem) <= 64 for file in plan.files)
+        assert {PurePosixPath(file.path).stem for file in plan.files} == {item.content.name for item in items}
+
+
+def test_claude_private_skill_uses_delivery_name_and_preserves_package_members():
+    from agentworks.plugins.claude import artifacts as claude
+
+    skill = artifact(ArtifactType.SKILL, name="vm-review")
+    vm_skill = replace(skill, origin=replace(skill.origin, component="vm", resource_kind="vm"))
+    current = context(vm_skill, skill)
+    plan = claude.session_artifacts(current, extra_args=[], enabled_workarounds=["session-skill-plugin"])
+    validate_session_application(plan.application, current, integration="claude-code")
+
+    for item, name in ((skill, "vm-review"), (vm_skill, "vm-vm-review")):
+        folder = f"{current.directory}/plugin/skills/{name}"
+        files = {
+            file.path.removeprefix(folder + "/"): file for file in plan.application.files if file.package_root == folder
+        }
+        assert set(files) == {member.path for member in item.content.members}
+        for member in item.content.members:
+            file = files[member.path]
+            assert file.origins == (item.origin_identity,)
+            assert file.executable is member.executable
+            if member.path == "SKILL.md" and name != item.content.name:
+                assert metadata(file) == {**item.content.metadata, "name": name}
+                assert file.data.split(b"---\n", 2)[2] == member.data.split(b"---\n", 2)[2]
+            else:
+                assert file.data == member.data
+    assert vm_skill.content.name == skill.content.name
+
+
+def test_shell_raw_skill_keeps_captured_bytes_when_its_export_path_gains_a_prefix():
+    from agentworks.artifacts.model import ArtifactInputs
+    from agentworks.artifacts.native.shell import filesystem_artifacts
+    from tests.artifacts._fixtures import group
+
+    item = artifact(ArtifactType.SKILL, name="x" * 64)
+    item = replace(item, origin=replace(item.origin, component="vm", resource_kind="vm"))
+    source = group(item)
+    plan = filesystem_artifacts(ArtifactInputs(deferred={source.owner: source}), "/artifacts")
+    root = f"/artifacts/scopes/vm/s1/skills/vm-{item.content.name}"
+    files = {file.path: file for file in plan.files if file.package_root == root}
+    assert not plan.deferred
+    assert set(files) == {f"{root}/{member.path}" for member in item.content.members}
+    for member in item.content.members:
+        file = files[f"{root}/{member.path}"]
+        assert file.data == member.data and file.executable == member.executable and file.native_identity is None
 
 
 def test_owner_hint_aggregate_keeps_one_native_name_when_its_keys_change():
@@ -264,20 +321,20 @@ def test_generated_guidance_supporting_file_is_updated_and_retired_with_its_entr
     from pathlib import Path
 
     from agentworks.artifacts.publication import publish_artifacts
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
 
-    target = LocalFixtureTransport(tmp_path / "guest")
+    target = LocalFixtureAccount(tmp_path / "guest")
     item = artifact(ArtifactType.RULE)
     initial = guidance_skills(str(target.home / "skills"), received(item))
-    owned = publish_artifacts(target, initial, (), lambda files: None, roots=(str(target.home),)).files
+    owned = publish_artifacts(target.files(), initial, (), lambda files: None, roots=(str(target.home),)).files
     assert len(owned) == 2
     changed = replace(item, content=replace(item.content, text="Revised literal body.\n"))
     desired = guidance_skills(str(target.home / "skills"), received(changed))
-    updated = publish_artifacts(target, desired, owned, lambda files: None, roots=(str(target.home),)).files
+    updated = publish_artifacts(target.files(), desired, owned, lambda files: None, roots=(str(target.home),)).files
     assert {file.path for file in owned} == {file.path for file in updated}
     for file in desired:
         assert Path(file.path).read_bytes() == file.data
     assert all(before.sha256 != after.sha256 for before, after in zip(owned, updated, strict=True))
-    retired = publish_artifacts(target, (), updated, lambda files: None, roots=(str(target.home),))
+    retired = publish_artifacts(target.files(), (), updated, lambda files: None, roots=(str(target.home),))
     assert not retired.files and not retired.skipped
     assert all(not Path(file.path).exists() for file in desired)

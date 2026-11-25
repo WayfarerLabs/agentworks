@@ -11,13 +11,14 @@ model: the parity carries the node layer could not prove on its own.
 - the SESSION operation scope reaches the held harness integration's readiness.
 
 Same fake surfaces as the imperative oracle tests: SimpleNamespace
-config, stubbed registry/gates/transports; the service-layer functions
+config, stubbed registry/gates, recording accesses; the service-layer functions
 are driven for real.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -33,14 +34,24 @@ from agentworks.bootstrap import load_request_registry as _real_load_request_reg
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent, HarnessStart, ShellIntegration
 from agentworks.db import Database, InitStatus, ProvisioningStatus, SessionMode, SessionRuntimeSnapshot, SessionStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.execution.requests import PythonProgram
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.sessions.manager._scope import _regenerate_tmuxinator as _real_regenerate_tmuxinator
 from agentworks.sessions.tmux import FingerprintProbe, ProbeStatus, TmuxServerFingerprint
 from agentworks.vms import manager as vm_manager
 from tests.conftest import seed_vm_trust
+from tests.vm_access_support import (
+    AccessRecorder,
+    check_result,
+    command_line,
+    guest_result,
+    is_command_check,
+    presence_check,
+    route_vm_access_to_guest,
+)
 
 from ..conftest import (
     ManifestDoc,
@@ -64,6 +75,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.capabilities.base import RunContext
+    from tests.vm_access_support import Call
+
+
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = pytest.mark.usefixtures("vm_access_recorder")
 
 
 @pytest.fixture(autouse=True)
@@ -72,36 +88,31 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_vm_ssh_identity(monkeypatch)
 
 
-class _Result:
-    def __init__(self, ok: bool = True) -> None:
-        self.ok = ok
-        self.returncode = 0 if ok else 20
-        self.stdout = ""
-        self.stderr = ""
-
-
 class _Target:
-    """Transport double: records probe events into a shared log."""
+    """Launch guest double: records probe events into a shared log.
+
+    :meth:`answer` answers its access's required-command checks, finding
+    every command except those in ``missing``, records each file write, and
+    answers the startup-protection read (off); every other request completes
+    with status 0.
+    """
 
     def __init__(self, events: list[str], *, missing: set[str] | None = None) -> None:
         self._events = events
         self._missing = missing or set()
 
-    def run(self, cmd: str, **kwargs: object) -> _Result:
-        if cmd.startswith("rm -f ") and ".tmuxinator.yml" in cmd:
-            self._events.append("tmuxinator_remove")
-            return _Result()
-        if "AGW_RUNTIME_STARTUP=" in cmd:
-            result = _Result()
-            result.stdout = "\nAGW_RUNTIME_STARTUP=off\n"
-            return result
-        if "command -v" in cmd:
-            self._events.append("probe")
-            return _Result(ok=not any(f"command -v {m} " in cmd for m in self._missing))
-        return _Result()
-
-    def write_file(self, remote_path: str, content: str, **kwargs: object) -> None:
-        self._events.append(f"tmuxinator_write:{remote_path}")
+    def answer(self, call: Call) -> Result | None:
+        request = call.request
+        if isinstance(request, PythonProgram) and request.args[:1] == ("write",):
+            self._events.append(f"write:{json.loads(request.args[1])['path']}")
+            return Result(Completed(0))
+        if not is_command_check(request):
+            line = command_line(request)
+            return (
+                guest_result(stdout="\nAGW_RUNTIME_STARTUP=off\n") if line and "AGW_RUNTIME_STARTUP=" in line else None
+            )
+        self._events.append("probe")
+        return check_result(request, 20 if presence_check(request) in self._missing else 0)
 
 
 def _seed_db(tmp_path: Path) -> Database:
@@ -138,12 +149,12 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
     )
 
 
-def _patch_transports(monkeypatch: pytest.MonkeyPatch, admin: _Target, agent: _Target) -> None:
-    admin_factory = lambda vm, config, **kwargs: admin  # noqa: E731
-    agent_factory = lambda vm, config, agent_row, **kwargs: agent  # noqa: E731
-    monkeypatch.setattr("agentworks.transports.transport", admin_factory)
-    monkeypatch.setattr("agentworks.sessions.manager.transport", admin_factory)
-    monkeypatch.setattr("agentworks.transports.agent_transport", agent_factory)
+def _route_guests(monkeypatch: pytest.MonkeyPatch, admin: _Target, agent: _Target) -> AccessRecorder:
+    """Route the admin's and the agent's accesses to ``admin`` and ``agent`` (``route_vm_access_to_guest``).
+
+    Each answer is looked up per request, so a test may replace a double's ``answer`` afterwards.
+    """
+    return route_vm_access_to_guest(monkeypatch, lambda call: admin.answer(call), lambda call: agent.answer(call))
 
 
 def test_create_flag_validation_precedes_unrelated_unsupported_live_overlay(
@@ -204,7 +215,7 @@ def _restart_fixture(
 
     events: list[str] = []
     runtime_status = [status]
-    _patch_transports(monkeypatch, _Target(events), _Target(events, missing=missing))
+    _route_guests(monkeypatch, _Target(events), _Target(events, missing=missing))
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     _requiring_template(monkeypatch, "claude")
@@ -244,8 +255,9 @@ def _restart_fixture(
         runtime_status[0] = SessionStatus.STOPPED
         db.compare_and_set_session_stopped(SessionRuntimeSnapshot.from_session(session))
 
-    def launch(*args, **kwargs):
-        result = _acknowledged_launch(events, "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock", **kwargs)
+    def launch(session_name, *args, **kwargs):
+        socket_path = f"/run/agentworks/agent-tmux-sockets/agt-a1/{session_name}.sock"
+        result = _acknowledged_launch(events, socket_path, **kwargs)
         runtime_status[0] = SessionStatus.RUNNING
         return result
 
@@ -262,7 +274,6 @@ def _restart_fixture(
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db, events
 
 
@@ -881,17 +892,17 @@ def test_restart_broken_without_force_refuses_before_the_resolve(
 
 
 def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[str]) -> Database:
-    from agentworks.agents import manager as agent_mgr
+    from agentworks.agents.manager import access as agent_access
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
     db = _seed_db(tmp_path)
-    _patch_transports(monkeypatch, _Target(events), _Target(events))
+    _route_guests(monkeypatch, _Target(events), _Target(events))
     stub_vm_gates(monkeypatch)
     stub_session_resolvers(monkeypatch)
     _requiring_template(monkeypatch, "claude")
 
-    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+    monkeypatch.setattr(agent_access, "_assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.agents.grants.add_to_workspace_group", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
@@ -909,7 +920,6 @@ def _create_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
     return db
 
 
@@ -941,42 +951,6 @@ def test_create_retains_unknown_runtime_if_start_observation_write_fails(
     assert session is not None
     assert session.socket_path == "/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock"
     assert session.pid is None and session.boot_id == BOOT_ID
-    db.close()
-
-
-@pytest.mark.parametrize(
-    ("workspace_spec", "expected_event"),
-    [(None, "tmuxinator_write:/home/me/ws1/.tmuxinator.yml"), ('{"tmuxinator":false}', "tmuxinator_remove")],
-)
-def test_regenerate_tmuxinator_preserves_missing_base_compatibility_and_overlay(
-    tmp_path: Path,
-    make_config,  # noqa: ANN001
-    monkeypatch: pytest.MonkeyPatch,
-    workspace_spec: str | None,
-    expected_event: str,
-) -> None:
-    from agentworks.instance_specs import parse_instance_spec
-    from agentworks.sessions import manager as session_manager
-
-    events: list[str] = []
-    db = _seed_db(tmp_path)
-    db._conn.execute("UPDATE workspaces SET template = 'copied' WHERE name = 'ws1'")
-    db._conn.commit()
-    if workspace_spec is not None:
-        overlay = parse_instance_spec("workspace", workspace_spec)
-        db.instance_state.put_desired_overlay("workspace", "ws1", overlay.payload)
-    monkeypatch.setattr(session_manager, "transport", lambda *args, **kwargs: _Target(events))
-    vm = db.get_vm("vm1")
-    ws = db.get_workspace("ws1")
-    assert vm is not None and ws is not None
-
-    _real_regenerate_tmuxinator(db, make_config(), vm, ws)
-
-    assert expected_event in events
-    if workspace_spec is None:
-        assert "tmuxinator_remove" not in events
-    else:
-        assert not any(event.startswith("tmuxinator_write:") for event in events)
     db.close()
 
 
@@ -1154,7 +1128,7 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
             name="s1",
             spec='{"env":{"SESSION_SPEC":"set"}}',
             new_workspace=True,
-            workspace_spec='{"tmuxinator":false}',
+            workspace_spec='{"git_user_name":"Ada"}',
             new_agent=True,
             agent_spec='{"shell":"zsh"}',
             vm_name="vm1",
@@ -1187,7 +1161,6 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
     db = _create_stubs(tmp_path, monkeypatch, events)
     outcomes: list[OverlayOutcome] = []
     monkeypatch.setattr("agentworks.instance_specs.render_overlay_outcome", outcomes.append)
-    monkeypatch.setattr("agentworks.sessions.manager._regenerate_tmuxinator", _real_regenerate_tmuxinator)
     monkeypatch.setattr(
         "agentworks.workspaces.manager.delete_workspace",
         lambda db_, config, *, name, **kwargs: db_.delete_workspace(name),
@@ -1223,7 +1196,7 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
         name="s1",
         spec='{"env":{"SESSION_SPEC":"set"}}',
         new_workspace=True,
-        workspace_spec='{"tmuxinator":false}',
+        workspace_spec='{"git_user_name":"Ada"}',
         new_agent=True,
         agent_spec='{"shell":"zsh"}',
         vm_name="vm1",
@@ -1231,15 +1204,14 @@ def test_compound_create_reports_each_retained_overlay_once_after_success(
     )
 
     assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
-        (OverlayDisposition.SET, ("tmuxinator",)),
+        (OverlayDisposition.SET, ("git_user_name",)),
         (OverlayDisposition.SET, ("shell",)),
         (OverlayDisposition.SET, ("env",)),
     ]
     stored = db.instance_state.get_desired_overlay("session", "s1")
     assert stored is not None
     assert stored.payload == VersionedPayload(1, {"env": {"SESSION_SPEC": {"value": "set"}}})
-    assert "tmuxinator_remove" in events
-    assert not any(event.startswith("tmuxinator_write:") for event in events)
+    assert not any(event.startswith("write:") for event in events)
     db.close()
 
 
@@ -1279,7 +1251,7 @@ def test_compound_child_post_commit_failure_unwinds_owner_and_overlay_without_ou
         monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _fail_workspace)
         create_kwargs = {
             "new_workspace": True,
-            "workspace_spec": '{"tmuxinator":false}',
+            "workspace_spec": '{"git_user_name":"Ada"}',
             "admin": True,
         }
     else:
@@ -1562,7 +1534,9 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
         assert callable(before_spawn)
         before_spawn()
         monkeypatch.setattr("agentworks.sessions.manager.check_session_status", lambda *a, **k: SessionStatus.RUNNING)
-        return ("/tmp/s1.sock", 4243)
+        if kwargs["is_admin"]:
+            return (tmux_mod.admin_socket_path(str(kwargs["admin_username"]), name), 4243)
+        return (tmux_mod.agent_socket_path(linux_user, name), 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
 
@@ -1634,7 +1608,7 @@ def test_restart_pane_command_uses_resume_command_and_session_workspace(
 # resolution happens in the command's own recorded passes, all before
 # the walk-away point; nothing resolves after them. Real config,
 # registry, resolver, and backend loop (env-var backend); the platform
-# backend ops, the reachability probe, and the transports are the
+# backend ops, the reachability probe, and the accesses are the
 # fakes.
 
 SESSION_ENV_MANIFESTS = [
@@ -1713,7 +1687,7 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
-    _patch_transports(monkeypatch, _Target(events), _Target(events))
+    _route_guests(monkeypatch, _Target(events), _Target(events))
     monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux_mod, "finalize_session_start", lambda *a, **k: None)
 
@@ -1724,7 +1698,7 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
         events.append("tmux_create")
         monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
         captured_env.update(env or {})
-        return ("/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243)
+        return (tmux_mod.admin_socket_path(str(k["admin_username"]), str(a[0])), 4243)
 
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
     monkeypatch.setattr(
@@ -1736,7 +1710,6 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
         ),
     )
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: BOOT_ID)
-    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
 def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
@@ -1771,7 +1744,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     assert db.get_session("s1") is not None
 
 
-def test_create_multiline_environment_secret_refuses_before_session_mutation(
+def test_create_hands_a_multiline_environment_secret_to_the_session_intact(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -1780,7 +1753,7 @@ def test_create_multiline_environment_secret_refuses_before_session_mutation(
     from agentworks.vms import manager as vm_manager
 
     config = make_config()
-    environment_value = "session-create-sentinel\r\ninjected\r\n"
+    environment_value = "session-create-value\r\nsecond 100%\r\n"
     monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
     _seed_stopped_proxmox_vm(db)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
@@ -1789,27 +1762,53 @@ def test_create_multiline_environment_secret_refuses_before_session_mutation(
     captured_env: dict[str, str] = {}
     _patch_session_ops(monkeypatch, events, captured_env)
 
-    with pytest.raises(ValidationError) as caught:
-        create_session(
-            db,
-            config,
-            name="s1",
-            new_workspace=True,
-            workspace_name="fresh-ws",
-            new_agent=True,
-            agent_name="fresh-agent",
-            vm_name="box",
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert db.get_session("s1") is None
-    assert db.get_workspace("fresh-ws") is None
-    assert db.get_agent("fresh-agent") is None
+    assert "tmux_create" in events
+    assert captured_env["API_KEY"] == environment_value
+    assert db.get_session("s1") is not None
+
+
+def test_create_refuses_a_nul_plaintext_before_resolving_writing_or_sending_anything(
+    db: Database,
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No exec'd environment can hold a NUL, so the value is refused while the command validates."""
+    from agentworks.sessions.manager import create_session
+    from agentworks.vms import manager as vm_manager
+
+    make_config()
+    template = ManifestDoc(
+        "session-template",
+        "default",
+        {
+            "harness_integration": {"name": "shell"},
+            "env": {"API_KEY": {"secret": "api-key"}, "NOTE": "before\0after"},
+        },
+    )
+    config = write_operator_config(
+        tmp_path, PLUGINS_ENABLED, manifests=[proxmox_site(), template, SESSION_ENV_MANIFESTS[1]]
+    )
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+    guests = _route_guests(monkeypatch, _Target(events), _Target(events))
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.resolve_batch", lambda *a, **k: pytest.fail("a refused value reached resolution")
+    )
+
+    with pytest.raises(ValidationError):
+        create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert guests.calls == []
     assert events == []
     assert captured_env == {}
-    assert "session-create-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert db.get_session("s1") is None
 
 
 def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
@@ -1842,7 +1841,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
     events: list[str] = []
     captured_env: dict[str, str] = {}
-    _patch_session_ops(monkeypatch, events, captured_env)  # transports must never be reached
+    _patch_session_ops(monkeypatch, events, captured_env)  # the accesses must never be reached
 
     with pytest.raises(StateError) as caught:
         create_session(
@@ -1985,7 +1984,13 @@ def test_restart_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     overlay = parse_instance_spec("session", '{"env":{"RESUME_SPEC":"set"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
     events: list[str] = []
     captured_env: dict[str, str] = {}
     _stop_the_vm(monkeypatch, events)
@@ -2021,7 +2026,13 @@ def test_restart_validates_stored_overlay_references_before_lifecycle_work(
     db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
     overlay = parse_instance_spec("session", '{"harness_integration": {"name": "missing"}}')
     db.instance_state.put_desired_overlay("session", "s1", overlay.payload)
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
     events: list[str] = []
     captured_env: dict[str, str] = {}
     _stop_the_vm(monkeypatch, events)
@@ -2036,7 +2047,7 @@ def test_restart_validates_stored_overlay_references_before_lifecycle_work(
     assert captured_env == {}
 
 
-def test_restart_multiline_environment_secret_refuses_before_kill(
+def test_restart_hands_a_multiline_environment_secret_to_the_new_runtime_intact(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -2046,11 +2057,19 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
     from agentworks.vms import manager as vm_manager
 
     config = make_config()
-    environment_value = "session-restart-sentinel\nsecond\n"
+    environment_value = "session-restart-value\nsecond\n"
     monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
     _seed_stopped_proxmox_vm(db)
-    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
-    db.update_session_runtime("s1", socket_path="/tmp/s1.sock", pid=4242, boot_id=BOOT_ID, tmux_server_start_ticks=77)
+    db.insert_session(
+        "s1", "ws1", "default", SessionMode.ADMIN, socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock"
+    )
+    db.update_session_runtime(
+        "s1",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/s1.sock",
+        pid=4242,
+        boot_id=BOOT_ID,
+        tmux_server_start_ticks=77,
+    )
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     events: list[str] = []
     captured_env: dict[str, str] = {}
@@ -2067,24 +2086,16 @@ def test_restart_multiline_environment_secret_refuses_before_kill(
         lambda *args, **kwargs: events.append("kill"),
     )
 
-    with pytest.raises(AgentworksError) as caught:
-        restart_session(
-            db,
-            config,
-            name="s1",
-            yes=True,
-            interaction=TtyInteractionPolicy.REFUSE,
-        )
+    restart_session(
+        db,
+        config,
+        name="s1",
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
 
-    refreshed = db.get_session("s1")
-    assert refreshed is not None
-    assert refreshed.pid == 4242
-    assert "kill" not in events
-    assert "tmux_create" not in events
-    assert captured_env == {}
-    assert "session-restart-sentinel" not in repr((caught.value.args, vars(caught.value)))
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert events.index("kill") < events.index("tmux_create")
+    assert captured_env["API_KEY"] == environment_value
 
 
 def test_invalid_selected_shell_command_preserves_running_session(
@@ -2213,7 +2224,7 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.capabilities.harness_integration import shell
+    from agentworks import interpolation_fields
     from agentworks.interpolation import render_template
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.manager import create_session
@@ -2245,7 +2256,7 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     def stop_before_mutation(self: Resolver) -> None:
         raise BeforeMutation
 
-    monkeypatch.setattr(shell, "render_template", record_render)
+    monkeypatch.setattr(interpolation_fields, "render_template", record_render)
     monkeypatch.setattr(Resolver, "resolve", stop_before_mutation)
     with pytest.raises(BeforeMutation):
         create_session(

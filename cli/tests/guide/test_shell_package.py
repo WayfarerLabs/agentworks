@@ -23,12 +23,15 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_guide_sources(t
     source_distribution = next(direct_dist.glob("*.tar.gz"))
     expected_readme = (repository / "README.md").read_bytes()
     expected_harness_guide = (repository / "docs" / "guides" / "harness-facets.md").read_bytes()
+    expected_runtime_context = (repository / "docs" / "arch" / "runtime-context.md").read_bytes()
     expected_manifesto = (repository / "docs" / "manifesto.md").read_bytes()
     with zipfile.ZipFile(wheel) as archive:
         packaged = set(archive.namelist())
         assert archive.read("agentworks/_guide_sources/README.md") == expected_readme
         assert archive.read("agentworks/_guide_sources/docs/manifesto.md") == expected_manifesto
         assert archive.read("agentworks/_guide_sources/docs/guides/harness-facets.md") == expected_harness_guide
+        assert archive.read("agentworks/_guide_sources/docs/arch/runtime-context.md") == expected_runtime_context
+        assert "agentworks/guide/guide-content/templating.md" in packaged
         assert "agentworks/guide/guide-content/core-model.md" in packaged
         assert "agentworks/capabilities/harness_integration/guide-content/harness-integrations.md" in packaged
         assert "agentworks/artifacts/guide-content/agent-artifacts.md" in packaged
@@ -50,6 +53,9 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_guide_sources(t
     assert (
         source_root / "agentworks/_guide_sources/docs/guides/harness-facets.md"
     ).read_bytes() == expected_harness_guide
+    assert (
+        source_root / "agentworks/_guide_sources/docs/arch/runtime-context.md"
+    ).read_bytes() == expected_runtime_context
 
     rebuilt_dist = tmp_path / "rebuilt-dist"
     _build(["uv", "build", "--wheel", "--out-dir", str(rebuilt_dist)], source_root, environment)
@@ -58,6 +64,7 @@ def test_wheel_and_source_distribution_vendor_the_same_canonical_guide_sources(t
         assert archive.read("agentworks/_guide_sources/README.md") == expected_readme
         assert archive.read("agentworks/_guide_sources/docs/manifesto.md") == expected_manifesto
         assert archive.read("agentworks/_guide_sources/docs/guides/harness-facets.md") == expected_harness_guide
+        assert archive.read("agentworks/_guide_sources/docs/arch/runtime-context.md") == expected_runtime_context
 
     wheel_environment = tmp_path / "wheel-environment"
     _build(

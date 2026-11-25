@@ -9,10 +9,10 @@ import pytest
 
 from agentworks.capabilities.harness_integration import harness_integration_for
 from agentworks.errors import ExternalError
+from agentworks.execution.oplog import OperationLogFile
 from agentworks.harness_setup.dispatch import run_setup
-from agentworks.harness_setup.outcomes import SetupFailure, describe_setup_failures
+from agentworks.harness_setup.outcomes import Redactor, SetupFailure, describe_setup_failures
 from agentworks.harness_setup.state import read_native_setup
-from agentworks.ssh import SSHLogger
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
 
 
@@ -46,10 +46,12 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
     log_token, log_rendered, log_canonical = _secret("logger", representation)
     logger = None
     if with_logger:
-        monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path / "logs")
-        logger = SSHLogger("private-diagnostics", "setup", redactions=(log_token,))
-    invocation.runner.logger = logger
-    invocation = replace(invocation, secrets={"credential": token})
+        monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path / "logs")
+        logger = OperationLogFile("private-diagnostics", "setup", redactions=(log_token,))
+    # Core hands the invocation every secret the operation log registered.
+    invocation = replace(
+        invocation, secrets={"credential": token}, redactor=Redactor(logger.redactions if logger else ())
+    )
     # The logger-only value precedes a long invocation value crossing the storage
     # limit. Redacting a truncated or pre-normalized copy cannot protect both.
     payload = "failure " + (log_rendered + " " if with_logger else "")
@@ -68,7 +70,15 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    state = run_setup(
+        db,
+        Mock(),
+        inputs,
+        invocation,
+        failures=failures,
+        operation="agent-reinit",
+        log_warning=None if logger is None else logger.warning,
+    )
     assert events == [("first", False), ("second", False)]
     assert not state.records[0].complete and state.records[1].complete
     (failure,) = failures

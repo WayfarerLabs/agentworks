@@ -69,6 +69,91 @@ raise desktop approval, biometric, browser, or device work. Item or field not-fo
 as failed lookup rejection, not ordinary missing, because the supported provider surface has not
 supplied conclusive stable evidence for a narrower absence token.
 
+## Configuring Azure Key Vault
+
+Enable the `azure` system plugin and declare a source for an existing vault:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret-source
+metadata:
+  name: work-kv
+spec:
+  backend:
+    name: azure-keyvault
+    vault_url: https://example-vault.vault.azure.net
+```
+
+Add `work-kv` to `[secret_config].sources` in the desired precedence order. Ambient authentication
+is the default and uses Azure's default credential chain. It needs no Azure VM site or subscription
+configuration. Each source binds one vault; declare another source for a different vault or
+identity.
+
+To select a service principal explicitly, set its tenant and client identifiers and the environment
+variable holding its client secret:
+
+```yaml
+auth:
+  mode: service-principal
+  tenant_id: 00000000-0000-0000-0000-000000000000
+  client_id: 00000000-0000-0000-0000-000000000000
+  client_secret_env: AZURE_CLIENT_SECRET
+```
+
+Place this `auth` table inside the source's `spec.backend`. The environment variable defaults to
+`AZURE_CLIENT_SECRET` when omitted. The backend reads it only when performing the selected lookup;
+it never stores the value in source configuration or falls back to another identity. A missing or
+rejected credential is an authentication failure. Secret sources cannot reference another Agentworks
+secret to authenticate themselves, so this input differs from a VM site's `auth.secret`. Use a
+dedicated variable outside the `AW_SECRET_` prefix; Agentworks quarantines that prefix at startup
+for its env-var secret backend.
+
+Map each Agentworks secret to its Azure secret name:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: npm-token
+  description: npm registry token
+spec:
+  backend_mappings:
+    work-kv: npm-token
+```
+
+The scalar mapping follows the latest Azure version. To pin a version, use an object instead:
+
+```yaml
+backend_mappings:
+  work-kv:
+    name: npm-token
+    version: 0123456789abcdef0123456789abcdef
+```
+
+Use `agw resource explain secret-backend/azure-keyvault` for the installed source fields. The
+backend only reads the selected secret version; it does not list the vault, create resources, write
+values, or grant access. Confirmed secret absence permits lookup in the next source; denied access
+or failed authentication stops lookup for that secret.
+
+Preview may read and discard a value inside the backend. Ambient no-impact preview uses environment,
+workload, and managed identities. Desktop caches and developer tools, including Azure CLI, are
+deferred because their credential stores may request operator action. Allowing interaction, or
+performing actual resolution, uses the default credential chain with an explicit browser fallback if
+ambient authentication fails. `--non-interactive` controls terminal input independently and does not
+suppress browser authentication. Explicit service principals never use this fallback.
+
+Ambient certificate and workload-token paths must name readable regular files. Agentworks resolves
+ordinary symlinks, then opens and checks the descriptor it will read. Devices, named pipes, and
+direct descriptor aliases such as `/dev/stdin` are refused without reading their contents. Each
+actual workload-token refresh repeats this check, including after a projected volume replaces a
+symlink. An unsafe or unreadable selected file fails the deployed credential chain; ambient browser
+fallback remains available only under the interaction policy above.
+
+Follow Microsoft's documentation for
+[Azure authentication](https://learn.microsoft.com/en-us/azure/developer/python/sdk/authentication/overview),
+[Key Vault permissions](https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide), and
+[Key Vault Secrets](https://learn.microsoft.com/en-us/python/api/overview/azure/keyvault-secrets-readme).
+
 ## Preview and actual resolution
 
 Preview is provider-aware and value-free. Its one impact input is:
@@ -127,9 +212,10 @@ service-account or Connect configuration. Do not rely on `--non-interactive` to 
 approval.
 
 TTY access is one of available, unavailable, or disabled. Prompt blocks before reading when terminal
-input is unavailable or disabled. Env-var and OnePassword declare no TTY support and are independent
-of all three states. Preview `--allow-interaction` and global `--non-interactive` may be used
-together: the former allows out-of-band impact, while the latter still disables prompt.
+input is unavailable or disabled. Env-var, OnePassword, and Azure Key Vault declare no TTY support
+and are independent of all three states. Preview `--allow-interaction` and global
+`--non-interactive` may be used together: the former allows out-of-band impact, while the latter
+still disables prompt.
 
 ## Operator surfaces
 
@@ -154,9 +240,19 @@ together: the former allows out-of-band impact, while the latter still disables 
 
 Resolved values live only in the private operation batch and scoped delivery cache. NUL is rejected
 before resolution succeeds. Carriage returns and line feeds are otherwise opaque value content. Each
-consumer enforces its own narrower syntax: environment injection, Git credentials, Proxmox headers,
-and Tailscale input require one logical line, while structured SDK credentials may remain multiline.
-Preview or verification proves existence, not suitability for every sink.
+consumer enforces its own narrower syntax: Git credentials, Proxmox headers, and Tailscale input
+require one logical line, while environment injection, which travels in the request, and structured
+SDK credentials take multiline values whole. Preview or verification proves existence, not
+suitability for every sink.
+
+Operation logs and guest diagnostics redact each secret an operation registers with them as a whole:
+the raw value, its shell-quoted and Python `repr` spellings, the value without leading or trailing
+line breaks, and bash's `$'...'` spelling (`printf %q`, `declare -p`) in the C locale and in the
+guest's `C.UTF-8`. In `C.UTF-8` bash prints a printable non-ASCII character raw, and printable is
+glibc's `iswprint`, which the redaction approximates as Python's `str.isprintable` plus space,
+format and private-use characters; a code point one side's Unicode tables assign and the other's do
+not can still be spelled differently. One line of a multi-line secret shown on its own is not
+redacted: matching each line would also redact common lines such as a PEM `-----END` line.
 
 Factory construction and context entry perform no provider or broker work. Cleanup always runs;
 cleanup failure emits fixed source-only warning text and never masks the primary result or

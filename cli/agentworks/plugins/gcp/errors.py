@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from enum import Enum
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from agentworks.capabilities.vm_platform.wall_bound import CallTimedOut, call_within
 from agentworks.errors import (
     AgentworksError,
     AlreadyExistsError,
@@ -18,6 +20,8 @@ from agentworks.errors import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from google.api_core.exceptions import GoogleAPICallError
+
 
 class GCEError(ProvisioningError):
     """A sanitized Compute Engine provider failure."""
@@ -25,6 +29,15 @@ class GCEError(ProvisioningError):
 
 class GCEQuotaError(GCEError):
     """Google Cloud refused an operation because quota is exhausted."""
+
+
+class GCERequestRefusedError(GCEError):
+    """Google Cloud answered a request with a client error no narrower type names, so it was not applied.
+
+    That is any ``ClientError`` subclass api_core raises but ``Cancelled``. A
+    4xx api_core has no class for arrives as the base ``GoogleAPICallError``
+    and stays a plain ``GCEError``, whose outcome is unknown.
+    """
 
 
 class GCEOperationError(GCEError):
@@ -38,6 +51,20 @@ class GCECapacityError(GCEOperationError):
 class GCEIndeterminateOperationError(GCEError):
     """A bounded Compute Engine wait ended without a known outcome."""
 
+
+DEFINITE_REFUSALS: tuple[type[AgentworksError], ...] = (
+    AlreadyExistsError,
+    AuthorizationError,
+    NotFoundError,
+    TokenRejectedError,
+    GCEQuotaError,
+    GCERequestRefusedError,
+)
+"""What :func:`google_error` maps a Google Cloud client error (4xx) to: an answer refusing the request it answers.
+
+Refusing the only request sent settles a mutation as not applied; refusing
+a retry says nothing about the try before it.
+"""
 
 _ZONE_CAPACITY_CODE = "ZONE_RESOURCE_POOL_EXHAUSTED"
 
@@ -55,6 +82,14 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
 
     Provider exceptions can retain credentials, request bodies, or reflected
     server text. The returned error contains only caller-authored labels.
+    Each class is matched with its subclasses, since the REST transport
+    raises the HTTP status's class (``Forbidden``, ``TooManyRequests``) and
+    gRPC the status code's (``PermissionDenied``, ``ResourceExhausted``). Every
+    ``ClientError`` subclass api_core raises but ``Cancelled``, which a client
+    can raise of its own, maps to one of :data:`DEFINITE_REFUSALS`; a 4xx it
+    has no class for is the base ``GoogleAPICallError`` and stays unknown. A
+    403 whose error reasons name a rate limit or quota is a quota refusal,
+    as Compute Engine answers some of them.
     """
     from google.api_core import exceptions as api_exceptions
     from google.auth import exceptions as auth_exceptions
@@ -64,13 +99,15 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
         "entity_kind": "gcp-resource" if resource else None,
         "entity_name": resource,
     }
-    if isinstance(exc, auth_exceptions.RefreshError | api_exceptions.Unauthenticated):
+    if isinstance(exc, auth_exceptions.RefreshError | api_exceptions.Unauthorized):
         return TokenRejectedError(
             f"Google Cloud rejected the selected credential while {operation}{target}",
             hint="check the vm-site auth mode and selected credential",
             **common,
         )
-    if isinstance(exc, api_exceptions.PermissionDenied):
+    if isinstance(exc, api_exceptions.Forbidden) and _names_a_quota(exc):
+        return _quota_error(operation, target, common)
+    if isinstance(exc, api_exceptions.Forbidden):
         return AuthorizationError(
             f"Google Cloud denied permission while {operation}{target}",
             hint="grant the selected identity the documented Compute Engine permissions",
@@ -78,12 +115,21 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
         )
     if isinstance(exc, api_exceptions.NotFound):
         return NotFoundError(f"Google Cloud resource was not found while {operation}{target}", **common)
-    if isinstance(exc, (api_exceptions.AlreadyExists, api_exceptions.Conflict)):
+    if isinstance(exc, api_exceptions.Conflict):
         return AlreadyExistsError(f"Google Cloud resource already exists while {operation}{target}", **common)
-    if isinstance(exc, api_exceptions.ResourceExhausted):
-        return GCEQuotaError(
-            f"Google Cloud quota was exhausted while {operation}{target}",
-            hint="review the project's Compute Engine quotas before retrying",
+    if isinstance(exc, api_exceptions.TooManyRequests):
+        return _quota_error(operation, target, common)
+    if isinstance(exc, api_exceptions.ClientError) and not isinstance(exc, api_exceptions.Cancelled):
+        return GCERequestRefusedError(
+            f"Google Cloud refused the request while {operation}{target}",
+            hint="inspect the Agentworks debug log and the named Google Cloud resource before retrying",
+            **common,
+        )
+    if isinstance(exc, CallTimedOut):
+        # Ours, not Google's: the call ran out of its bound, or had none left to be sent with.
+        return ConnectivityError(
+            f"a Google Cloud call ran out of its time bound while {operation}{target}",
+            hint="retry the operation once Google Cloud answers promptly",
             **common,
         )
     if isinstance(
@@ -107,6 +153,26 @@ def google_error(exc: Exception, *, operation: str, resource: str | None = None)
     return GCEError(
         f"Google Cloud failed while {operation}{target}",
         hint="inspect the Agentworks debug log and the named Google Cloud resource before retrying",
+        **common,
+    )
+
+
+_QUOTA_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"})
+"""The error reasons a Compute Engine 403 carries when it refuses for a rate limit or quota rather than a grant."""
+
+
+def _names_a_quota(exc: GoogleAPICallError) -> bool:
+    """Whether ``exc``'s error reasons, the provider's tokens and nothing of its text, name a rate limit or quota."""
+    try:
+        return any(isinstance(error, dict) and error.get("reason") in _QUOTA_REASONS for error in exc.errors)
+    except (AttributeError, TypeError):  # no errors list, one that is not iterable, or an unhashable reason
+        return False
+
+
+def _quota_error(operation: str, target: str, common: dict[str, Any]) -> GCEQuotaError:
+    return GCEQuotaError(
+        f"Google Cloud quota or rate limit was exhausted while {operation}{target}",
+        hint="review the project's Compute Engine quotas before retrying",
         **common,
     )
 
@@ -135,10 +201,17 @@ def call_google_optional[T](call: Callable[[], T], *, operation: str, resource: 
 
 
 def wait_for_extended_operation(operation: Any, *, label: str, zone: str | None, timeout: float) -> None:
-    """Wait once for a Compute extended operation and sanitize failure data."""
+    """Wait once, at most ``timeout`` on the wall clock, for a Compute extended operation and sanitize failure data.
+
+    The operation checks its own ``timeout`` only between the status reads
+    it polls with, each bounded by nothing but its silence, so the wait runs
+    as a bounded call (see
+    :mod:`~agentworks.capabilities.vm_platform.wall_bound`); one that runs
+    out is an indeterminate outcome like any other unfinished wait.
+    """
     failure: AgentworksError | None = None
     try:
-        operation.result(timeout=timeout)
+        call_within(partial(operation.result, timeout=timeout), timeout)
     except Exception:
         if _cached_operation_is_done(operation):
             failure = _completed_operation_failure(

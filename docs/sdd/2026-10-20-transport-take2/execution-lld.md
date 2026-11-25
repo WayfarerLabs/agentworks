@@ -31,7 +31,8 @@ them:
 - `reachability` (slice 3, polling a fixed probe) and the `observation` option with the retry it
   permits (slice 7, with `detached.observe`);
 - the operation log: `oplog.format_record` and `SSHLogger.record` (slice 3, with create's Phase A,
-  its first caller). `ssh.LOG_DIR`, its readers and `SSHLogger` stay until slice 8;
+  its first caller). `ssh.LOG_DIR`, its readers and `SSHLogger` stay until slice 8, which moves them
+  to `oplog` (below, "Slice 8: removal");
 - `FeatureUnavailable` (slice 4, with `vm shell --platform`);
 - `PythonProgram` and `Script.interactive` (a later slice). Measured for that slice: `dash -i FILE`
   prints a prompt to stderr per line it reads from the file, so an interactive script needs the
@@ -49,7 +50,7 @@ them:
 | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `agentworks/execution/client.py`                 | `resolve_ssh`, `SSHClient`: resolution, banner and version check                                                  |
 | `agentworks/execution/ssh_process.py`            | `VMPolicy`, `build_argv`, the stage 0 string, the client log and `spawn`, the one place a client is started       |
-| `agentworks/execution/pump.py`                   | `Deadline` and `PipeSession`, the argv-agnostic pump                                                              |
+| `agentworks/execution/pump.py`                   | `PipeSession`, the argv-agnostic pump, waiting on `agentworks/deadline.py`'s `Deadline`                           |
 | `agentworks/execution/envelope.py`               | Frames, the JSON envelope, markers, the stream filters, the classifier and `launcher_source()`                    |
 | `agentworks/execution/agw_launch.py`             | The guest program. Stage 0 execs it; the client imports only its two shared definitions                           |
 | `agentworks/execution/requests.py`, `results.py` | The slice 2 vocabulary, with `Shell` and `AccountShell` (below)                                                   |
@@ -61,7 +62,7 @@ them:
 | `agentworks/execution/trust.py` (slice 4)        | Gains `fingerprint(key)`, OpenSSH's `SHA256:` form                                                                |
 | `agentworks/vms/manager/port_forward.py`         | `port_forward_vm`, moved out of `tailscale.py` so the file can pass the static import check                       |
 | `agentworks/vms/manager/platform_shell.py`       | Held `vm shell --platform`'s legacy part until slice 4 deleted it for `native_shell`                              |
-| `tests/execution/conftest.py`                    | The legacy-module blocker                                                                                         |
+| `tests/execution/conftest.py`                    | The legacy-module blocker (deleted in slice 8)                                                                    |
 | `tests/execution/conformance/`                   | The vectors and their lanes                                                                                       |
 | `tests/vm_access_support.py`                     | `RecordingVMAccess`                                                                                               |
 
@@ -76,7 +77,7 @@ Citations of the proof in this LLD (`carrier.py`, `connection.py`, `_io.py` and 
 
 | Proof module                                                    | Fate                                                                                                                                                                                                                                                                                                                                                                                    |
 | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `carrier.py`                                                    | Deleted. `Deadline` (`:20`) moves into `pump.py`; the report types give way to `results.py`                                                                                                                                                                                                                                                                                             |
+| `carrier.py`                                                    | Deleted. `Deadline` (`:20`) moves into `agentworks/deadline.py`; the report types give way to `results.py`                                                                                                                                                                                                                                                                              |
 | `preparation.py`                                                | Deleted. The base64 line envelope and its 256 KiB cap are superseded by `envelope.py`; the `Command` and `Script` shapes carry over to `requests.py`. Its reserved-environment list existed for the Bash bootstrap and does not carry over                                                                                                                                              |
 | `bootstrap.py`                                                  | Deleted, replaced by `agw_launch.py`. Its locale save, force and restore (`:31-33`, `:135`) was for Bash's own parsing and has no counterpart in a Python launcher                                                                                                                                                                                                                      |
 | `carriers/ssh/client.py`                                        | Adopted into `client.py`: the banner regex (`:27`) and the 8.5 floor (`:61`). The probe on every execute becomes once per process; `SSHCarrier` is deleted                                                                                                                                                                                                                              |
@@ -116,7 +117,7 @@ bare name; the legacy transports find `ssh` and `scp` along `PATH` through
 - **Doctor.** `_check_required_tools` (`doctor.py:526`) keeps its PATH presence rows for `ssh`,
   `scp` and `tailscale`, because the legacy paths still find `ssh` and `scp` along `PATH`, and adds
   a row with the resolver's verdict: path and version, or the refusal. Slice 7 or 8 removes the
-  `ssh` and `scp` rows with the last legacy user.
+  `ssh` and `scp` rows with the last legacy user (slice 8 did; "Slice 8: removal" below).
 
 Every other workstation program `agw` starts by name goes through `programs.resolve_program(name)`,
 the same walk over absolute `PATH` elements (`name.exe` on Windows), which raises
@@ -365,19 +366,19 @@ import os,sys,socket as S;a=sys.argv[1:];s=a and S.socket(1);a and s.connect(a[0
 **Envelope.** One JSON object, `json.dumps(obj, ensure_ascii=True, separators=(",", ":"))`, so the
 wire is pure ASCII whatever the workstation's locale. No version field (HLA D3).
 
-| Field      | Type                         | Meaning                                                                             |
-| ---------- | ---------------------------- | ----------------------------------------------------------------------------------- |
-| `nonce`    | 32 lowercase hex             | `secrets.token_hex(16)` per request, never in the payload's argv or environment     |
-| `mode`     | `run`, `tty` or `park`       | Pipe mode with markers; terminal exec; park for a handover                          |
-| `kind`     | `argv`, `script` or `shell`  | `Command`, `Script`, `LoginShell`                                                   |
-| `argv`     | list of str                  | `argv` kind, non-empty                                                              |
-| `shell`    | `sh`, `bash`, `user_default` | `script` kind                                                                       |
-| `source`   | str                          | `script` kind                                                                       |
-| `login`    | bool                         | `script` kind                                                                       |
-| `cwd`      | str or null                  | Absolute; null means the home directory                                             |
-| `env`      | object of str to str         | The request's environment                                                           |
-| `term`     | str or null                  | `tty` and `park` modes: the operator's `TERM`, `xterm-256color` when unset or empty |
-| `handover` | 16 lowercase hex             | `park` mode: the client's `secrets.token_hex(8)`, naming the socket directory       |
+| Field      | Type                         | Meaning                                                                                                                                                                                                        |
+| ---------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nonce`    | 32 lowercase hex             | `secrets.token_hex(16)` per request, never in the payload's argv or environment                                                                                                                                |
+| `mode`     | `run`, `tty` or `park`       | Pipe mode with markers; terminal exec; park for a handover                                                                                                                                                     |
+| `kind`     | `argv`, `script` or `shell`  | `Command`, `Script`, `LoginShell`                                                                                                                                                                              |
+| `argv`     | list of str                  | `argv` kind, non-empty                                                                                                                                                                                         |
+| `shell`    | `sh`, `bash`, `user_default` | `script` kind                                                                                                                                                                                                  |
+| `source`   | str                          | `script` kind                                                                                                                                                                                                  |
+| `login`    | bool                         | `script` kind                                                                                                                                                                                                  |
+| `cwd`      | str or null                  | Absolute; null means the home directory                                                                                                                                                                        |
+| `env`      | object of str to str         | The request's environment                                                                                                                                                                                      |
+| `term`     | str or null                  | `tty` and `park` modes: an attach's operator `TERM` (`xterm-256color` when unset or empty); null for a pane's handover (`VMAccess.park`), whose `tty` mode takes the terminal's variables from its environment |
+| `handover` | 16 lowercase hex             | `park` mode: the client's `secrets.token_hex(8)`, naming the socket directory                                                                                                                                  |
 
 The client validates; agw-launch does not re-validate the schema. A malformed envelope is an
 uncaught exception before the start marker, and one build ships both halves.
@@ -425,13 +426,16 @@ defined once. Steps, mapped to HLA D4:
    entry of `os.getuid()` (looked up in step 1, before the marker: a missing entry is an exception,
    since sshd cannot authenticate a uid without one; an empty shell is `/bin/sh`), then
    `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games`,
-   `LANG=C.UTF-8`, `SHLVL=1`, `TERM` and `SSH_TTY` (the terminal name) in `tty` mode when stdin is a
-   terminal, `XDG_RUNTIME_DIR=/run/user/<uid>` when that directory exists and the uid owns it, and
-   last the request's `env`, which may override anything. Nothing is copied from the inherited
-   environment. The working directory is set with `os.chdir` in agw-launch itself, to `cwd` or home
-   (`refused cwd` on failure, which `Popen` could not tell from a missing `argv[0]`), the umask is
-   `022`, every signal an earlier process ignored goes back to its default, the signal mask is
-   cleared, and the payload gets no descriptor above 2 other than a script's.
+   `LANG=C.UTF-8`, `SHLVL=1`, in `tty` mode when stdin is a terminal `TERM` and, for an attach,
+   `SSH_TTY` (the terminal name), `XDG_RUNTIME_DIR=/run/user/<uid>` when that directory exists and
+   the uid owns it, and last the request's `env`, which may override anything. Nothing else is
+   copied from the inherited environment, except that a pane's handover (a `park` envelope, whose
+   `term` is null) takes `TERM`, `TMUX`, `TMUX_PANE`, `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` from
+   it, `DEFAULT_TERM` standing in for an absent `TERM`, and gets no `SSH_TTY` (HLA D4). The working
+   directory is set with `os.chdir` in agw-launch itself, to `cwd` or home (`refused cwd` on
+   failure, which `Popen` could not tell from a missing `argv[0]`), the umask is `022`, every signal
+   an earlier process ignored goes back to its default, the signal mask is cleared, and the payload
+   gets no descriptor above 2 other than a script's.
    - **Choices the HLA leaves open.** `PATH` is one fixed value for every identity, a superset of
      Debian's login paths so `ip` resolves for an admin and later for root. The locale is
      `LANG=C.UTF-8` and no `LC_*`: sessions used to inherit the workstation's `LANG` through
@@ -643,6 +647,16 @@ the package attribute so one patch reaches every manager.
   existing `ConnectivityError`). Every other outcome raises as it is: `VMNotReady`, `TrustMismatch`,
   `RequestRefused` or `ExecutionIncomplete`. This keeps incident row I19, so I19 is re-proved in
   slice 2 as well as 6.
+- **Presence probes.** A guard whose wrong "absent" answer would do harm that a rerun does not undo
+  calls `remote_presence.probe_presence`, which returns the result on 0, `None` on the probe's own
+  definite absent status (`test`'s 1, `getent`'s 2) and raises `CommandFailed` on any other status.
+  An outcome that is not a completion already raises, and `sudo -n` runs before the launcher, so
+  neither ssh's nor sudo's status can be read as an answer. This carries #899's fix (PR #915) onto
+  `VMAccess`: the agent account, home and getent probes, the backup path check, the create, copy and
+  rehome path checks, the git source's checkout probes, and the mise lockfile check (an unanswered
+  one skips the install rather than install unlocked). Steps a rerun converges keep reading nonzero
+  as absent: making sure a group or package key exists, removing the retired socket group, and the
+  mise config check.
 - **Behavior changes** for release notes and the 0.20 guide:
   - OpenSSH 8.5 or newer is required for these six commands, and Windows needs the native build.
   - A VM without `python3` is `VMNotReady`, not a shell error.
@@ -724,15 +738,16 @@ the package attribute so one patch reaches every manager.
 
 One list of vectors, three lanes. **L** runs `$SHELL -c <remote command>` locally through the same
 pump and envelope, with the account's startup files set per vector and `SSH_CLIENT` exported as sshd
-does; its interpreter path is a parameter. It covers the shells and runs on every Linux CI host,
-once with `/usr/bin/python3` and once with a 3.11 interpreter from `uv python install 3.11`, since
-`ast.parse` cannot catch 3.12-only standard library calls. **S** runs the real client against a
-rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host key and `AuthorizedKeysFile`,
-`UsePAM no`, `StrictModes no`) and `trust.write_records` for the test host key; it skips locally
-when `sshd` is missing or cannot start, fails on CI in either case, and the CI job installs
-`openssh-server` if the runner image lacks it. **V** is the live lane, `-m integration` with
-`AGW_CONFORMANCE_VM`, run by the tester from each workstation. `zsh` and `dash` are required on CI
-(a missing shell fails there, skips locally).
+does; its interpreter path is a parameter. L runs the account shell behind a stand-in for ssh and
+sshd, so ending the client never kills the guest directly. It covers the shells and runs on every
+Linux CI host, once with `/usr/bin/python3` and once with a 3.11 interpreter from
+`uv python install 3.11`, since `ast.parse` cannot catch 3.12-only standard library calls. **S**
+runs the real client against a rootless local `sshd` (`ListenAddress 127.0.0.1`, a temporary host
+key and `AuthorizedKeysFile`, `UsePAM no`, `StrictModes no`) and `trust.write_records` for the test
+host key; it skips locally when `sshd` is missing or cannot start, fails on CI in either case, and
+the CI job installs `openssh-server` if the runner image lacks it. **V** is the live lane,
+`-m integration` with `AGW_CONFORMANCE_VM`, run by the tester from each workstation. `zsh` and
+`dash` are required on CI (a missing shell fails there, skips locally).
 
 | Vector                                                                                                                                                                                          | Lanes  |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
@@ -751,11 +766,11 @@ when `sshd` is missing or cannot start, fails on CI in either case, and the CI j
 | Signal dispositions and descriptors reset; a startup `TERM` or `XDG_RUNTIME_DIR` leaves the payload's values; in the shell of a handover, `SigIgn` and `SigBlk` in `/proc/self/status` are zero | L      |
 | Exact stdin positioning through `stream(stdin=...)`: the payload reads the caller's first byte                                                                                                  | L S V  |
 | A bash child of the payload reads no account startup file; stdin a pipe, and in L a socket (I11)                                                                                                | L S V  |
-| Background child holding both streams: prompt completion, status correct                                                                                                                        | L S V  |
+| Background child holding both streams: completion while the child still runs, within a bound, status correct                                                                                    | L S V  |
 | Payload stdout with no trailing newline; a `refused` trailer                                                                                                                                    | L S    |
-| Deadline: `Unknown(DEADLINE)` at the deadline, client reaped                                                                                                                                    | L S    |
+| Deadline: `Unknown(DEADLINE)` at the deadline and the client killed; its reap is covered by the pump unit tests (`test_pump.py`)                                                                | L S    |
 | Handover: success, the 30 s timeout, an existing directory name, a missing `cwd`, second connection never arrives, nothing left behind                                                          | L S V  |
-| The payload leaves stdout and stderr non-blocking and full, then exits 0: `Completed(0)` with both closing markers (L is the regression guard; S and V drain too fast to catch it)              | L S V  |
+| The payload leaves stdout and stderr non-blocking and full, then exits 0: `Completed(0)` with both closing markers (the operator's streams take nothing until every pipe and buffer is full)    | L S V  |
 | A startup file that reads stdin under an attach: the parking wait expires with the terminal untouched, bounded by the vector itself                                                             | L      |
 | `memfd_create` refusing `MFD_NOEXEC_SEAL` (`EINVAL`) runs the script; `EMFILE` is `NotDelivered(LAUNCHER_FAILED)` with the payload not run                                                      | L      |
 | Host key mismatch is `TrustMismatch`, read from the client log                                                                                                                                  | S      |
@@ -816,6 +831,189 @@ client on one workstation (else the operator's disposition). For each, the V vec
 - `vm exec` from Windows with binary stdin and early exit;
 - an attach from each workstation, killed mid-session, and a handover whose second connection fails;
 - a forward with a busy local port, and Ctrl-C on a live forward.
+
+## Slice 8: removal
+
+Slice 8 deletes the legacy stack this LLD's package replaced, `agentworks.transports` and
+`agentworks.ssh`, and moves the operation log out of `agentworks.ssh` into `execution/oplog.py` (HLA
+D13). Line references in this section are at `4b4818fb7`, the PR C head before slice 8, and paths
+are under `cli/agentworks/` unless they start with `cli/` or `docs/`.
+
+### Incident audit
+
+The audit read the fix history of both modules (`git log` at `4b4818fb7` on `transports/` and
+`ssh.py`, 78 and 115 commits), the bodies of the incident-bearing commits it cites, the issues they
+link (this repository's issues 117, 199, 211, 251, 270, 330, 331, 360, 361, 669, 684, 736, 889 and
+893, and Win32-OpenSSH's 1338), ADRs 0014, 0015, 0017 and 0020, whose decisions these modules
+carried (0003 and 0019 name the transports only in passing), and the transport-improv migration
+strategy's inventory. At `4b4818fb7` no production module imports `agentworks.transports`, and only
+the operation log and its readers import `agentworks.ssh`, so nothing the audit found still runs on
+the legacy path except the log.
+
+**Existing rows that rode on these modules.** Each was re-proved on the execution core in the slice
+its row names, and the legacy copy goes with the module: I1 (ADR 0020, #361), I2, I4 (#684), I5, I12
+(ADR 0015), I13, I14 (#736) and I21 (#889, #669) in slice 2; I15 (#251), I17 and I32 in slices 3
+and 4. I28 moves with the log and is re-proved by the log's own tests at its new home. I15's tests
+are `tests/execution/test_reachability.py`'s
+`test_an_answer_after_a_failure_is_confirmed_by_a_second_probe`,
+`test_a_failed_confirmation_keeps_polling` and
+`test_exhaustion_returns_false_after_every_attempt_and_no_trailing_pause`, the bound and the
+confirming probe. Its closed wording is a choice of `reachability.Wording`, which
+`tests/vms/test_await_tailnet.py::test_the_wait_verifies_a_running_vm_and_waits_out_a_start` and
+`tests/vms/test_recover.py`'s
+`test_a_healthy_node_is_repaired_read_and_verified_with_the_key_resolved_once` and
+`test_a_join_selects_the_settle_and_the_reconnect_wording` prove is selected; the sentences
+themselves are prose no test pins.
+
+**New rows, I90 to I93**, added to the HLA's inventory before anything is deleted:
+
+| Row | Behavior                                                                                                                                                                                                                                                                    |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I90 | On a Windows console an interactive `ssh -t` with a remote command is led by a NUL, so Win32-OpenSSH's first raw-mode write never moves the console and deletes the operator's lines (#893 round 1 F1, `601e81d87`; `transports/ssh.py:383`, `execution/ssh_process.py:92`) |
+| I91 | Threads of one command share one operation log: each write holds the log's lock and opens and closes its own handler, so every record lands once and no file is left open (`e34199c0d`, `279d4cdeb`; `ssh.py:153`, `:323`)                                                  |
+| I92 | An operation's own log holds the traceback of the exception that ended it, redacted like every other line, so the shared `error.log` is only the fallback for a failure before any log exists (`ec1ab0246`; `ssh.py:275-300`)                                               |
+| I93 | OpenSSH is started by an absolute path, never looked up in the working directory, and a missing client is a typed refusal with install guidance rather than a bare `FileNotFoundError` (`d05382778`, `43943f033`; `ssh.py:94-106`)                                          |
+
+**How each is re-proved, by test.** I90 by
+`test_an_interactive_remote_command_is_led_by_a_nul_only_on_a_windows_console` and
+`test_a_nul_led_command_writes_the_nul_first_and_keeps_its_exit_status`
+(`cli/tests/execution/test_ssh_process.py`), whose `ssh_process.nul_first_on_a_windows_console` is
+the one copy left once `transports/ssh.py` goes, and live by I21's Windows Terminal cells; I91 by
+the eight-thread test and I92 by the close tests, both moved with the log to
+`cli/tests/execution/test_operation_log_file.py`; I93 by `test_client_resolution.py`'s relative and
+current-directory elements and `test_pump.py`'s
+`test_a_client_that_cannot_start_is_a_typed_refusal`, the Windows candidate order that never
+searches `PATH`, and the refusal when no client is found.
+
+**Not rows.**
+
+- Decoding a child's output as text mode did, and the Windows code page fixes (`ea4a3a9b1`,
+  `491786020`, `1209f2ed1`). The execution core never decodes: results are bytes, read from binary
+  pipes (I2), and each consumer decodes UTF-8 with replacement, so no locale encoding is involved.
+- Quoting a remote copy's paths and the `chmod` after it, and a staging file whose cleanup warns
+  (`656fe4470`, `8e095b17c`, `75b77e0ac`). The file program carries its paths as data in its
+  request, never in a shell line, and publishes from a sibling temporary file (I37).
+- Coalescing `SetEnv` pairs (`94f54f873`). Nothing sends environment by `SetEnv`; ADR 0014 is
+  superseded by ADR 0026.
+- Remote Lima's login shell for an interactive `PATH` and its isolated guest commands (`3e4b83ce2`,
+  `638fa0185`). Remote Lima's host channel is the platform's private `lima_host.py` (slice 4).
+- Logging each timed-out attempt, and the retry count (`fbc117a65`, `ccf6d7df8`). `VMAccess` makes
+  one attempt (HLA D5), and a request that ran out of time is recorded as `Unknown(DEADLINE)`.
+- The log's sink keeping the sanitized record and its file handler in one function for CodeQL's
+  clear-text storage query (`b59153d1f`, `8030b035b`). It is a scanner constraint, not behavior; the
+  function moves unchanged with its comment.
+
+### The operation log
+
+`SSHLogger` and `LOG_DIR` move from `ssh.py` to `execution/oplog.py`, beside `format_record`, and
+the class becomes `OperationLogFile`: it is the file an operation's log is written to, and the
+`OperationLog` name is already the protocol Phase A types its log as (`vms/initializer/phase_a.py`).
+What it keeps: the redaction set registered before the header (I28), the lock and the per-write
+handler (I91), the traceback on close (I92), `display_path`, `redactions`, `sanitize`, `step`,
+`record`, `output`, `warning`, `log_error` and the warning count. What it drops, with no caller
+left: `log_command` and `log_timeout`, which took the legacy `SSHResult`, and a settable `path`,
+which only backup used before it passed `path=` (`vms/manager/_helpers.py:230`).
+
+`oplog.vm_logs(vm_name, stem=None)` is the one way to find a VM's logs. It matches a file name whole
+against `<vm>-<timestamp>-<stem>.log`, newest first. The timestamp's uppercase `T` and `Z` cannot
+occur in a VM name, which is lowercase (`naming.py:22`), so it marks where the name ends: VM `dev`
+never matches VM `dev-2`'s logs, as the `<vm>-*.log` glob each reader used did. That glob made
+`vm delete dev` remove `dev-2`'s logs and `vm logs dev` show them. Every reader goes through it:
+doctor's failure hint (`doctor_state.py:216`), create's `Details:` pointer
+(`vms/manager/lifecycle.py:105`), the gate's log hint (`vms/manager/_helpers.py:219`), delete's
+cleanup (`vms/manager/power.py:294`) and `vm logs` (`cli/commands/vm.py:531`). Tests patch
+`agentworks.execution.oplog.LOG_DIR`, and a test that replaces the class patches
+`agentworks.execution.oplog.OperationLogFile`, since every constructor imports it at call time.
+
+`vm_logs` counts only a file or a link, which `vm delete` can unlink, so a directory named like a
+log cannot abort a delete after its backend and database cleanup. `vm logs` reads a log as the UTF-8
+it is written in, whatever the workstation's locale. The top-level `error.log` sits in the same
+directory through `oplog.LOG_DIR`, rather than a second spelling of it under `CONFIG_DIR`. Every
+operator-facing mention, `vm logs`'s help, the hints that name a log and the troubleshooting guide,
+says "operation log", since the log records `wsl.exe`, `limactl` and guest-agent steps as well as
+SSH requests.
+
+### The join's log
+
+Create's `ProvisionRequest.progress` is already its operation log (`vms/manager/lifecycle.py:522`),
+so `BootstrapProgress` gains `record(request, result)`, the callable `root_script.run` takes as
+`log`, rather than `ProvisionRequest` gaining a second field for the same log. Platforms only call
+the protocol; the manager's log and the tests' `MagicMock` already provide `record`, and the one
+hand-written fake (`cli/tests/_gcp_platform_fakes.py`) adds it.
+
+`join_tailscale`, `read_tailnet_address`, `settle_tailnet_address` and `complete_cloud_bootstrap`
+take `log` with no default, as `vms/recovery.py`'s `rekey` does, so a caller that logs nothing says
+so with `log=None` and a platform cannot skip the log by leaving it out. Every platform that joins
+passes `log=request.progress.record` to its join and its settle: Lima (local and remote), WSL2 and
+Proxmox directly, AWS, Azure and GCP through `complete_cloud_bootstrap`, which records the readiness
+wait too. Lima's `tailscaled` wait and Proxmox's cloud-init wait are recorded the same way, and each
+platform names the step before its join (`progress.step`), so the join's record is labeled as the
+join, not as the last bootstrap step. `run_bootstrap` records its run through `progress.record`
+under a `Bootstrap` step, in place of the sizes and streams it wrote itself: the record holds the
+same streams and the channel's output, and adds the outcome, which the old transcript did not show.
+
+The join's record holds `tailscale up`'s stderr with the key redacted by `root_script.run` itself,
+before the log's own sink redacts it again (I10, I31), and never the script. A failed join raises
+`ProvisioningError`, which create wraps with `Details: <log>` (`vms/manager/lifecycle.py:589`), so
+the error names the log that holds the reason. Tests: the join's record against a real log that
+registered no secret (`test_tailscale_join.py`), create's error naming its log
+(`test_create_vm_dispatch.py`), each platform's create recording its root scripts, and the
+bootstrap's record (`test_run_bootstrap.py`).
+
+### Deletions
+
+- **The modules.** `agentworks.transports` (`__init__.py`, `base.py`, `ssh.py`) and
+  `agentworks.ssh`, with their tests: `cli/tests/transports/`, `cli/tests/test_ssh_input.py` and
+  `cli/tests/test_ssh_missing_client.py`, whose live counterparts are the execution core's own (I1,
+  I2, I4, I5, I14, I93). `subprocess_io.py`'s two helpers had one caller left, Lima's host channel
+  (`lima_host.py:296`), so they move into `lima_host.py` as private functions, tested through
+  `LimaHost` in local mode.
+- **The suite's doubles.** `tests/native_setup_fixtures.LocalFixtureTransport` subclassed the legacy
+  `Transport` only for methods no test still called. It is `LocalFixtureAccount`, an account on this
+  machine that answers an access's requests, with `shell()` for the few tests that set the fixture
+  up by running git or a native CLI; its pytest fixtures are named `account`. Session tests build
+  `sessions.tmux.CommandOutcome`, which `RunCommand` really returns, instead of `SSHResult`, and
+  tests that raised `SSHError` as a generic connection failure raise `ConnectivityError`, its base.
+  The decoy rows for the legacy `ssh` and `scp` argvs (`cli/tests/test_programs.py`) and the check
+  that `SSHError` is an `AgentworksError` go with the types.
+- **Dead test patches.** Every patch of `agentworks.ssh.LOG_DIR` and `agentworks.ssh.SSHLogger`
+  moved to `oplog` with the log, and no other patch names a deleted module: the suite passes with
+  both gone, and none of its `raising=False` patches names a missing attribute.
+- **`cli/_entry.py`.** There was no `SSHError` branch to delete: `ConnectivityError` and
+  `ExternalError` share one handler that prefixes the type's name, and `SSHError` appeared only as
+  that comment's example. The comment names `ExecutionIncomplete` instead; the rendering is
+  unchanged.
+- **Doctor.** `_check_required_tools` keeps `tailscale`'s `PATH` row and the resolver's verdict; the
+  `ssh` and `scp` presence rows go, since nothing starts either from `PATH` any more. Remote Lima's
+  readiness had the same flaw, asking for an `ssh` on `PATH` while its host channel runs the
+  resolved client; it asks the resolver and reads `ClientUnsupported` as not ready.
+- **The live root vectors.** `cli/tests/test_root_channel_live_vectors.py` sat outside
+  `tests/execution/` only because the blocker refused the platform boundary's legacy imports; it is
+  `cli/tests/execution/conformance/test_root_live_vectors.py`.
+- **The independence guards.** The fresh-interpreter guard
+  (`cli/tests/execution/test_independence.py`), the conftest blocker
+  (`cli/tests/execution/conftest.py`), the static check
+  (`cli/tests/test_execution_import_boundary.py`) and the module list they shared
+  (`cli/tests/execution/legacy_modules.py`) can no longer fail: the modules they guard against do
+  not exist, so an import of one fails everywhere (HLA D14).
+
+### Search: no other ssh or scp command line
+
+R10's end state, no core code building its own `ssh` or `scp` command line outside the execution
+core and the platforms' private access, was confirmed at the end of this slice by:
+
+- `git grep -nE "[\"'](ssh|scp|ssh\.exe|scp\.exe)[\"']|\bscp\b|resolve_program\([\"']s|find_program\([\"']s|client\.path"`
+  over `cli/agentworks` outside `execution/`: the hits are Remote Lima's `mode: "ssh"` placement
+  value (`capabilities/vm_platform/lima.py`), doctor's resolver row printing the client's path,
+  prose (`sources.py`'s scp-style git remotes, `shell_env.py`, an `agents/initializer.py` comment),
+  the `systemctl reload ssh` argv run on the guest, and `vm verify-connection`'s `transport="ssh"`
+  label. None builds a workstation command line.
+- every `subprocess.run`, `Popen` and `call` outside `execution/` (18 call sites): git, `wsl.exe`,
+  PowerShell, the operator's editor, `taskkill`, 1Password's `op`, `tailscale`, `ssh-keygen` and VS
+  Code. None starts `ssh` or `scp`.
+- every caller of `ssh_process.build_argv`, `build_host_argv`, `spawn` and `run_terminal` outside
+  `execution/`: `capabilities/vm_platform/public_ssh.py` (the clouds' route) and `lima_host.py`
+  (Remote Lima's host), both platforms' private access, and WSL2's `wsl.exe` terminal.
 
 ## Amendments
 

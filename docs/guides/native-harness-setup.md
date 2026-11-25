@@ -8,10 +8,13 @@ Integration activation must be explicit, including when all configuration fields
 
 Agentworks installs `python3` as a required system package on every VM during create and reinit.
 Native setup uses its standard library for guarded file access, atomic publication and artifact
-discovery; `python3-venv` and `python3-pip` are not required. Run `agw vm recover <vm-name>` to
-install it on an older VM missing the interpreter, then `agw vm reinit <vm-name>`. A missing
-interpreter is reported before staging or native mutation. The harness CLI itself must also be
-installed through the existing package or install-command configuration.
+discovery; `python3-venv` and `python3-pip` are not required. Artifact discovery runs after the
+account's login and interactive startup files, so it sees the environment the harness gets, but
+always with `/usr/bin/python3`, not whichever `python3` the login `PATH` finds first. Every request
+Agentworks sends needs that interpreter, so on an older VM missing it the first one fails, before
+any native mutation, naming `agw vm recover <vm-name>` to install it; then run
+`agw vm reinit <vm-name>`. The harness CLI itself must also be installed through the existing
+package or install-command configuration.
 
 ## Settings mappings
 
@@ -50,11 +53,14 @@ and refuses malformed existing settings. Repair those settings separately first.
 Serialization preserves values, not comments or formatting. JSON duplicate keys and non-finite
 numbers are rejected. Destinations must be regular files reached without traversing symbolic links.
 Publication uses a private sibling temporary file, checks the observed destination hash, and renames
-atomically. Traversal respects search-only ancestors. After plugin commands finish, merge policies
-use the current settings and preserve the native associations. Publication refuses if the file
-changes again between that read and the atomic write. Publication sets user files to mode `0600` and
-workspace files to mode `0660` with the workspace group. Unchanged or skipped files retain their
-existing permissions. Permission failures do not trigger elevation.
+atomically, holding the VM-wide file lock that every Agentworks file write takes. Traversal respects
+search-only ancestors. After plugin commands finish, merge policies use the current settings and
+preserve the native associations. If the file changes between that read and the atomic write,
+publication refuses and leaves the file as the other writer left it; rerunning setup reads the
+changed file and applies the settings to it. Publication sets user files to mode `0600`, creating
+missing directories `0700`, and workspace files to mode `0660` with the workspace group, creating
+missing directories `2770`. Unchanged or skipped files retain their existing permissions. Permission
+failures do not trigger elevation.
 
 Use non-secret settings sources. Authentication files are not supported settings roles. Captured
 contents and native command output are transferred privately and are not stored in applied-state
@@ -68,10 +74,11 @@ preserve work outside the workspace first; see the
 ## MCP registrations
 
 Select connections through an artifact bundle's `mcp_servers` map and the owner's
-`artifacts.bundles` block. Explicit integration activation is still required, including default
-configuration. See the
-[artifact format and examples](../../cli/agentworks/artifacts/README.md#mcp-servers) for the strict
-stdio/Streamable HTTP profile, workstation/Git sources and unresolved env references. MCP
+`artifacts.bundles` block, or declare them directly under `artifacts.declare.mcp_servers`. This lets
+one template keep a connection beside its env declarations while retaining the same capture and
+native handling. Explicit integration activation is still required, including default configuration.
+See the [artifact format and examples](../../cli/agentworks/artifacts/README.md#mcp-servers) for the
+strict stdio/Streamable HTTP profile, workstation/Git sources and unresolved env references. MCP
 definitions register connections; they do not install executables or dependencies, authenticate, run
 a server, connect to an endpoint or grant tool permissions. Native clients keep their own trust,
 approval and runtime authentication behavior.
@@ -89,12 +96,13 @@ override, Claude's role is `~/.claude.json`, not `~/.claude/settings.json`. Code
 VM facets defer MCP to user; Shell publishes canonical JSON and an index at each scope without
 running clients or servers.
 
-The declared artifact key is the native server name, unchanged: `github` registers as `github`.
-Original-owner hashes remain internal provenance and do not rename the server. Separate native
-user/project configurations retain the harness's normal loading and precedence rules; use distinct
-names to address separate connections. Within one destination, equal same-name inputs share one
-entry; different definitions are all deferred with a warning. Use `agw artifact show` for recorded
-names and destinations without querying a native MCP inventory or exposing connection values.
+An artifact placed at its owning scope uses its declared key. A server named `github` deferred from
+VM scope registers as `vm-github`. The original scope prefix stays the same through later routing.
+Separate native user/project configurations follow the harness's loading and precedence rules. Use
+distinct names to address separate connections. Within one destination, equal definitions for the
+same receiving key share an entry. Different definitions for that key are all deferred. Use
+`agw artifact show` for recorded names and destinations without querying a native MCP inventory or
+exposing connection values.
 
 Application owns an entry, not the whole shared file. Missing entries are created; identical unowned
 entries can be adopted and become managed, with a notice after ownership is saved. Matching the
@@ -109,13 +117,12 @@ When ancestor routing is unresolved, its existing entry and ownership are retain
 declaration keeps that ownership; a different local definition is deferred until ancestor setup is
 repaired. Withdrawing only the local declaration does not remove the retained ancestor entry.
 
-When upgrading from generated MCP names, the next owning setup retires unchanged recorded aliases
-and creates or adopts the declared name. Modified aliases remain recorded with a warning; unclaimed
-entries remain foreign regardless of their spelling. A conflicting literal entry stays in place and
-leaves the requested artifact unhandled, while an unchanged obsolete alias still retires. Native
-credentials are retained, although native clients can bind credentials or approvals to a server name
-and require operator review after a rename. Private session carriers change on the next managed
-start/restart. This adds no automatic ancestor repair or workspace reinit operation.
+On upgrade, the owning VM/admin or agent reinit retires unchanged recorded MCP keys and creates or
+adopts the current name. Modified entries retain their claims and warn. A differing unowned entry
+stays in place and leaves the requested artifact unhandled, while an unchanged obsolete key still
+retires. Native credentials are retained. The harness may bind credentials or approvals to a server
+name and require operator review after a rename. Private session carriers change on managed restart.
+Existing workspace placements keep their names, and new workspaces use the current rules.
 
 Codex settings mappings share `config.toml` with MCP. Setup computes safe obsolete-entry removal,
 the selected mapping policy and desired MCP entries in one document plan. An actual surviving mapped
@@ -180,8 +187,9 @@ nor temporary reprovisioning.
 ## Marketplaces and plugins
 
 User configuration has `marketplaces` and `plugins` lists, both empty by default. Marketplace
-strings use the installed harness's native source grammar. Local marketplace paths refer to the
-guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
+strings use the installed harness's native source grammar, except that one beginning with `-`, which
+the native CLI would read as an option, is a configuration error. Local marketplace paths refer to
+the guest filesystem; relative paths resolve against the actual user's home. Plugin names resolve
 against the native catalog; qualify ambiguous names as `plugin@marketplace`. An ambiguous
 unqualified selection is retained and reported without retiring its prior associations. A name
 absent from the catalog is a configuration error.

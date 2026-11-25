@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +20,10 @@ from agentworks.plugins.gcp.platform import GCEPlatform
 from tests._root_channel_fakes import Answer, FakeGuest, answer_by_payload, install_at_run_process
 from tests.conftest import provisioning_trust_for_tests
 
+if TYPE_CHECKING:
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
+
 TAILSCALE_SENTINEL = "tskey-hostile-'\"$()"
 SERVICE_SENTINEL = '{"private_key":"service-hostile-\'\\"$()"}'
 PROJECT = "project-a"
@@ -29,6 +33,26 @@ NETWORK = f"projects/{PROJECT}/global/networks/default"
 
 def api_error(kind: type[Exception], message: str) -> Exception:
     return cast("Callable[[str], Exception]", kind)(message)
+
+
+def rest_error(status: int, *, reason: str | None = None) -> Exception:
+    """What the Compute REST transport raises for an HTTP ``status`` answer: api_core's own converter's exception.
+
+    The body is Compute's error shape, its one entry carrying ``reason`` when one is given.
+    """
+    import json
+
+    import requests
+
+    error: dict[str, object] = {"code": status, "message": "m"}
+    if reason is not None:
+        error["errors"] = [{"message": "m", "domain": "usageLimits", "reason": reason}]
+    response = requests.Response()
+    response.status_code = status
+    response._content = json.dumps({"error": error}).encode()
+    response.request = requests.Request("POST", "https://compute.googleapis.com/compute/v1/projects/p").prepare()
+    converted: Exception = api_exceptions.from_http_response(response)  # type: ignore[no-untyped-call]
+    return converted
 
 
 class FakeOperation:
@@ -45,6 +69,7 @@ class FakeOperation:
         status: object = None,
         error: object = None,
     ) -> None:
+        self.name = f"operation-{operation_type}-{target_id}"
         self.client_operation_id = request_id
         self.operation_type = operation_type
         self.target_link = target_link
@@ -66,7 +91,7 @@ class FakeFirewalls:
         self.insert_requests: list[compute_v1.InsertFirewallRequest] = []
         self.delete_requests: list[compute_v1.DeleteFirewallRequest] = []
         self.get_failures: dict[str, list[Exception]] = {}
-        self.insert_failures: list[Exception | None] = []
+        self.insert_failures: list[BaseException | None] = []
         self.insert_wait_failures: list[BaseException | None] = []
         self.delete_failures: list[BaseException] = []
         self._next_id = 101
@@ -122,11 +147,13 @@ class FakeInstances:
         self.stop_requests: list[compute_v1.StopInstanceRequest] = []
         self.delete_requests: list[compute_v1.DeleteInstanceRequest] = []
         self.get_failures: list[Exception] = []
-        self.insert_failures: list[Exception | None] = []
+        self.insert_failures: list[BaseException | None] = []
         self.insert_wait_failures: list[BaseException] = []
         self.insert_operation_errors: list[object] = []
         self.delete_failures: list[Exception] = []
         self.get_calls: list[dict[str, object]] = []
+        # False accepts each insert without the instance appearing, as while its operation still runs.
+        self.insert_lands = True
 
     def get(self, **kwargs: object) -> compute_v1.Instance:
         self.get_calls.append(kwargs)
@@ -142,10 +169,11 @@ class FakeInstances:
             failure = self.insert_failures.pop(0)
             if failure is not None:
                 raise failure
-        self.resource = compute_v1.Instance(compute_v1.Instance.to_dict(request.instance_resource))
-        self.resource.id = 201
-        self.resource.status = "RUNNING"
-        self.resource.network_interfaces[0].access_configs[0].nat_i_p = "203.0.113.19"
+        if self.insert_lands:
+            self.resource = compute_v1.Instance(compute_v1.Instance.to_dict(request.instance_resource))
+            self.resource.id = 201
+            self.resource.status = "RUNNING"
+            self.resource.network_interfaces[0].access_configs[0].nat_i_p = "203.0.113.19"
         return self._operation(
             request.request_id,
             "insert",
@@ -284,6 +312,9 @@ class RecordingProgress:
 
     def log_error(self, msg: str) -> None:
         self.events.append(f"error:{msg}")
+
+    def record(self, request: RunRequest, result: Result) -> None:
+        self.events.append(f"record:{result.completion}")
 
 
 def gce_ctx(*ssh_allow_cidrs: str) -> RunContext:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,6 +17,7 @@ from agentworks.db import (
     VMStatus,
 )
 from agentworks.errors import AgentworksError, ValidationError
+from agentworks.execution.results import Result
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.runtime_state import reconcile_console, reconcile_session, reconcile_vm
@@ -28,12 +28,16 @@ from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus, TmuxServerFingerprint
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
 from tests.console_helpers import create_console_record
+from tests.vm_access_support import Call, command_line, guest_result, is_command_check, route_vm_access_to_guest
 
 if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
 
 
 REFUSE = TtyInteractionPolicy.REFUSE
+# Bounds the waits on worker threads only so a broken run fails instead of hanging. Healthy runs end
+# the waits in milliseconds; a loaded host can still delay a thread by seconds.
+HANG_GUARD_SECONDS = 30
 BOOT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
@@ -110,23 +114,14 @@ def runtime(monkeypatch):
         lambda rows, **k: {row.name: statuses.get(row.name, SessionStatus.STOPPED) for row in rows},
     )
 
-    class Target:
-        def run(self, command, **kwargs):
-            return SimpleNamespace(
-                returncode=0,
-                ok=True,
-                stdout="AGW_RUNTIME_STARTUP=off\n" if "AGW_RUNTIME_STARTUP=" in command else "",
-                stderr="",
-            )
+    def guest(call: Call) -> Result | None:
+        command = command_line(call.request)
+        if command is None or is_command_check(call.request):
+            return None
+        return guest_result(stdout="AGW_RUNTIME_STARTUP=off\n" if "AGW_RUNTIME_STARTUP=" in command else "")
 
-        def write_file(self, *args, **kwargs):
-            pass
-
-    target = Target()
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: target)
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
-    monkeypatch.setattr(manager, "_get_boot_id", lambda target: BOOT)
-    monkeypatch.setattr(manager, "_regenerate_tmuxinator", lambda *a, **k: None)
+    route_vm_access_to_guest(monkeypatch, guest)
+    monkeypatch.setattr(manager, "_get_boot_id", lambda run_command: BOOT)
     monkeypatch.setattr(tmux, "deploy_restricted_config", lambda *a, **k: None)
     monkeypatch.setattr(tmux, "finalize_session_start", lambda *a, **k: None)
 
@@ -195,9 +190,7 @@ def test_workload_secret_failure_blocks_all_tmux_and_provider_stops(db, make_con
         return prepared
 
     monkeypatch.setattr(manager, "prepare_session_stop", prepare)
-    monkeypatch.setattr(
-        manager, "_build_session_target", lambda *a, **k: manager.transport(db.get_vm("launch"), object())
-    )
+    monkeypatch.setattr(manager, "_verified_session_access", lambda *a, **k: k["admin"])
     monkeypatch.setattr(
         manager, "_teardown_session", lambda *a, **k: pytest.fail("session stopped before shared secrets")
     )
@@ -235,7 +228,7 @@ def test_off_child_stop_never_enters_guest_or_hold(db, make_config, runtime, mon
     seed_vm(db, "box", target=DesiredRuntimeState.STOPPED)
     seed_session(db, "work", "box", target=DesiredRuntimeState.STOPPED)
     powers["box"] = VMStatus.STOPPED
-    monkeypatch.setattr(manager, "transport", lambda *a, **k: pytest.fail("off guest transport"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("off guest transport"))
     reconcile_session(db, make_config(), name="work", interaction=REFUSE)
     assert not events
 
@@ -483,7 +476,7 @@ def test_console_stop_requires_host_key_only_for_live_guest(db, make_config, mon
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *a: events.append("status") or power)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda *a: pytest.fail("started guest"))
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", lambda *a, **k: pytest.fail("held guest"))
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: pytest.fail("guest transport before trust"))
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: pytest.fail("guest access before trust"))
     if power is VMStatus.RUNNING:
         with pytest.raises(AgentworksError):
             mc.stop_console(db, make_config(), name="console", interaction=REFUSE)

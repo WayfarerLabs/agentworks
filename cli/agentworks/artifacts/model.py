@@ -108,7 +108,7 @@ class ArtifactContent:
 
 @dataclass(frozen=True)
 class ArtifactOrigin:
-    """Identity of the owner consuming a bundle entry."""
+    """Identity of the owner consuming a bundle entry or direct declaration."""
 
     component: ArtifactComponent
     resource_kind: str
@@ -120,6 +120,11 @@ class ArtifactOrigin:
     @property
     def owner(self) -> ArtifactOwner:
         return ArtifactOwner(self.component, self.resource_kind, self.resource_name)
+
+    @property
+    def declaration_label(self) -> str:
+        """Describe the authoring origin independently of content acquisition."""
+        return f"bundle '{self.bundle}'" if self.bundle else "direct declaration"
 
 
 @dataclass(frozen=True)

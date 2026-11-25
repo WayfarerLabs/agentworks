@@ -36,6 +36,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.public_ssh import PublicAddressPlatform, PublicSSH
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import complete_cloud_bootstrap
+from agentworks.capabilities.vm_platform.wall_bound import BoundedClient
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import (
@@ -46,7 +47,6 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
 )
-from agentworks.interrupts import interrupts_deferred
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
@@ -72,6 +72,8 @@ from agentworks.plugins.aws.network import (
     is_credential_rejection,
     poke_ssh_allow,
     remove_ssh_allow,
+    remove_ssh_allow_interruptibly,
+    single_send_config,
     terminate_and_cleanup_strict,
     vm_tag,
     wrap_ec2_error,
@@ -97,6 +99,10 @@ _DEBIAN_SSM_RELEASES: dict[DebianRelease, str] = {
 # The payload is gzipped (cloud-init decompresses natively), so this bounds the
 # COMPRESSED bytes; a pre-launch guard raises typed if even that is over.
 _MAX_USER_DATA_BYTES = 16384
+
+# How long one EC2 call on a route (opening, address read, closing) may take on
+# the wall clock; botocore's read_timeout bounds only each socket read.
+_ROUTE_CALL_TIMEOUT_SECONDS = 300.0
 
 
 class EC2Platform(PublicAddressPlatform):
@@ -161,11 +167,11 @@ class EC2Platform(PublicAddressPlatform):
         # instance's remaining ops. The session's identity is fixed by the
         # bound config (whichever arm the site's auth.mode names), so it caches
         # once per instance. Clients key by
-        # (service, region): the config names one region, but power ops read
+        # (service, region, single_send): the config names one region, but power ops read
         # each VM's stored region, and rows created under an older region must
         # keep operating regardless of what the config says today.
         self._session_cached: Any | None = None
-        self._clients: dict[tuple[str, str], Any] = {}
+        self._clients: dict[tuple[str, str, bool], Any] = {}
         self._account_id_cached: str | None = None
 
     # No preflight override, on either credential path, for the same reasons
@@ -212,20 +218,16 @@ class EC2Platform(PublicAddressPlatform):
             self._session_cached = session
         return session
 
-    def _client(self, service: str, region: str, ctx: RunContext) -> Any:
-        """The ``service`` client for ``region``, built on first need from the
-        cached session and reused for the instance's remaining ops against that
-        (service, region). Client construction is inert (no network), so the
-        credential's only live cost is the session build in :meth:`_get_session`,
-        which sits here OUTSIDE every op's error-wrapping try: a typed
-        credential failure is already the answer and re-wrapping it would strip
-        the site-and-secret hint (worse, a ``status`` that degrades to UNKNOWN
-        on any exception would swallow it entirely)."""
-        key = (service, region)
+    def _client(self, service: str, region: str, ctx: RunContext, *, single_send: bool = False) -> Any:
+        """The ``service`` client for ``region``, sending each request once if ``single_send``, built on first
+        need from the cached session and reused after. Construction is inert, so the session build is its only
+        live cost, and it sits OUTSIDE every op's error-wrapping try: a typed credential failure is already the
+        answer, and re-wrapping it would strip the site-and-secret hint (or a ``status`` would swallow it)."""
+        key = (service, region, single_send)
         client = self._clients.get(key)
         if client is None:
-            client = self._get_session(ctx).client(service, region_name=region)
-            self._clients[key] = client
+            config = single_send_config() if single_send else None
+            client = self._clients[key] = self._get_session(ctx).client(service, region_name=region, config=config)
         return client
 
     def _account_id_from_identity(self, identity: Any) -> str:
@@ -469,7 +471,8 @@ class EC2Platform(PublicAddressPlatform):
         def _cleanup_or_retain() -> None:
             try:
                 if bootstrap_ssh_open and security_group_id is not None:
-                    remove_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
+                    # A second Ctrl-C abandons the rollback, which then retains what it could not confirm.
+                    remove_ssh_allow_interruptibly(ec2, security_group_id, ssh_allow_prefixes)
                 cleanup_created_resources(ec2, instance_id, security_group_id)
             except (Exception, KeyboardInterrupt) as cleanup_error:
                 if isinstance(cleanup_error, EC2Error):
@@ -500,8 +503,8 @@ class EC2Platform(PublicAddressPlatform):
                 ) from cleanup_error
 
         # The WHOLE fallible region is guarded by both arms of the create
-        # rollback contract: a failure (including a non-SSHError from transport
-        # construction or the inline bootstrap wait) AND an operator interrupt
+        # rollback contract: a failure (including an untyped error from the
+        # channel's construction or the inline bootstrap wait) AND an operator interrupt
         # each sweep the partial backend state before propagating. The caller's
         # unwind deletes only the DB row, so anything left here would be orphaned.
         try:
@@ -559,7 +562,9 @@ class EC2Platform(PublicAddressPlatform):
             # until now); close_provisioning_access closes exactly
             # these prefixes, recorded in platform_metadata below.
             output.detail("Opening scoped SSH bootstrap access...")
-            poke_ssh_allow(ec2, security_group_id, ssh_allow_prefixes)
+            poke_ssh_allow(
+                ec2, security_group_id, ssh_allow_prefixes, authorize=self._client("ec2", region, ctx, single_send=True)
+            )
             bootstrap_ssh_open = True
 
             # Read the auto-assigned public IP LIVE (never cached).
@@ -570,7 +575,10 @@ class EC2Platform(PublicAddressPlatform):
             # credential. Wait for it over the VM's root channel, then join
             # once and settle the address.
             target = PublicSSH(public_ip, request.admin_username, request.ssh_private_key, request.provisioning_trust)
-            tailnet_address = complete_cloud_bootstrap(target, request.tailscale_auth_key, node=request.hostname)
+            request.progress.step("Wait for cloud-init and join Tailscale")
+            tailnet_address = complete_cloud_bootstrap(
+                target, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+            )
         except KeyboardInterrupt:
             output.warn(
                 f"Interrupted: cleaning up partial AWS resources for '{backend_name}', "
@@ -716,7 +724,7 @@ class EC2Platform(PublicAddressPlatform):
             output.warn(f"VM '{vm.name}' has no recorded bootstrap SSH prefixes; cannot close provisioning access")
             return
         try:
-            ec2 = self._client("ec2", self._region_of(vm), ctx)
+            ec2 = self._route_client(vm, ctx)
         except Exception as exc:
             raise ProvisioningError(
                 f"could not close or check the bootstrap SSH allow for {', '.join(prefixes)} on security group "
@@ -744,15 +752,14 @@ class EC2Platform(PublicAddressPlatform):
         mutates ingress and cleans up any partial poke itself. Once the poke
         succeeds, this context's ``finally`` owns the matching close.
         """
-        ec2 = self._client("ec2", self._region_of(vm), ctx)
+        ec2 = self._route_client(vm, ctx)
         security_group_id = self._security_group_id(vm)
         prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
-        poke_ssh_allow(ec2, security_group_id, prefixes)
+        poke_ssh_allow(ec2, security_group_id, prefixes, authorize=self._route_client(vm, ctx, single_send=True))
         try:
             yield
         finally:
-            with interrupts_deferred():
-                remove_ssh_allow(ec2, security_group_id, prefixes)
+            remove_ssh_allow(ec2, security_group_id, prefixes)
 
     # -- Helpers ---------------------------------------------------------------
 
@@ -806,7 +813,12 @@ class EC2Platform(PublicAddressPlatform):
         return str(vm.platform_metadata.get("region") or self.config.region)
 
     def _public_address(self, vm: VMRow, ctx: RunContext) -> str:
-        return self._public_ip(self._client("ec2", self._region_of(vm), ctx), self._instance_id(vm))
+        return self._public_ip(self._route_client(vm, ctx), self._instance_id(vm))
+
+    def _route_client(self, vm: VMRow, ctx: RunContext, *, single_send: bool = False) -> Any:
+        """The VM's EC2 client, each call through it bounded by ``_ROUTE_CALL_TIMEOUT_SECONDS`` on the wall clock."""
+        ec2 = self._client("ec2", self._region_of(vm), ctx, single_send=single_send)
+        return BoundedClient(ec2, _ROUTE_CALL_TIMEOUT_SECONDS)
 
     def _public_ip(self, ec2: Any, instance_id: str) -> str:
         """The instance's live auto-assigned public IP (never cached)."""

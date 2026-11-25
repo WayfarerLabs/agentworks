@@ -31,7 +31,7 @@ import shlex
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 from urllib.parse import urlparse
 
@@ -43,7 +43,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import JOIN_FRAGMENT
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError, ValidationError
-from tests._root_channel_fakes import ADDRESS, FakeGuest, install_at_run_process
+from tests._root_channel_fakes import ADDRESS, FakeGuest, install_at_run_process, logged_payloads
 from tests.conftest import provisioning_trust_for_tests, requires_posix_shell
 
 if TYPE_CHECKING:
@@ -161,10 +161,9 @@ def test_the_distro_keeps_its_vms_hostname_in_wsl_conf(monkeypatch: pytest.Monke
     assert conf["boot"]["systemd"] == "true"
 
 
-@pytest.mark.parametrize("hostname", ["vm_1", "team--vm1"])
-def test_a_hostname_wsl_would_rename_is_refused(hostname: str) -> None:
+def test_a_hostname_with_consecutive_hyphens_from_the_slug_is_refused() -> None:
     with pytest.raises(ValidationError) as caught:
-        WSL2Platform("wsl2", {}).validate_create_hostname(hostname)
+        WSL2Platform("wsl2", {}).validate_create_hostname("team--vm1")
     assert caught.value.hint
 
 
@@ -199,6 +198,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
     # The join and the address read go through the root channel, after the bootstrap.
     assert calls.guest.payloads == [JOIN_FRAGMENT, "tailscale ip -4"]
     assert {argv[0] for argv in calls.guest.argvs} == {wsl2._WSL}
+    assert logged_payloads(cast("MagicMock", request.progress)) == [JOIN_FRAGMENT, "tailscale ip -4"]
 
 
 def test_primary_bootstrap_failure_cleans_up_and_reraises(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import Field, field_validator
 
+import agentworks.execution as execution
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
@@ -56,6 +57,8 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import BootstrapProgress
     from agentworks.db import VMRow
+    from agentworks.execution.requests import RunRequest
+    from agentworks.execution.results import Result
     from agentworks.execution.root_script import RawRun
     from agentworks.resources.graph import Readiness
 
@@ -138,14 +141,19 @@ _TAILSCALED_WAIT_PAYLOAD = (
 )
 
 
-def _wait_for_tailscaled(run_as_root: Callable[[bytes, float], RawRun], instance_name: str) -> None:
+def _wait_for_tailscaled(
+    run_as_root: Callable[[bytes, float], RawRun],
+    instance_name: str,
+    *,
+    log: Callable[[RunRequest, Result], None] | None,
+) -> None:
     """Wait for ``tailscaled`` to be active before the key is sent, or raise ``ProvisioningError``.
 
     ``limactl start`` and ``limactl restart`` return once the guest's sshd
     answers, not once ``tailscaled`` is up, and a join sent too early fails
-    with the key already spent. The wait carries no key.
+    with the key already spent. The wait carries no key; ``log`` records it.
     """
-    result = root_script.run(run_as_root, _TAILSCALED_WAIT_PAYLOAD, deadline=_TAILSCALED_WAIT_SECONDS + 10)
+    result = root_script.run(run_as_root, _TAILSCALED_WAIT_PAYLOAD, deadline=_TAILSCALED_WAIT_SECONDS + 10, log=log)
     if result.status != 0:
         raise ProvisioningError(
             f"tailscaled did not become active on Lima instance '{instance_name}' within "
@@ -239,11 +247,13 @@ class LimaPlatform(VMPlatform):
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
-        """Require local ``limactl`` only for local placement.
+        """Require local ``limactl`` for local placement, and a supported OpenSSH client for SSH placement.
 
-        Reads raw config without constructing the model so readiness stays
-        total. A malformed written placement is left to validation; an
-        omitted placement uses the model's declared default.
+        The SSH placement's host channel runs the client the resolver chose
+        (``execution.resolve_ssh``), so readiness asks the resolver rather
+        than ``PATH``. Reads raw config without constructing the model so
+        readiness stays total. A malformed written placement is left to
+        validation; an omitted placement uses the model's declared default.
         """
         from agentworks.resources.graph import Readiness
 
@@ -257,8 +267,11 @@ class LimaPlatform(VMPlatform):
         from agentworks.programs import is_installed
 
         if not local:
-            if remote and not is_installed("ssh"):
-                return Readiness.blocked("ssh not installed")
+            if remote:
+                try:
+                    execution.resolve_ssh()
+                except ClientUnsupported:
+                    return Readiness.blocked("no supported OpenSSH client")
             return Readiness.ready()
         if not is_installed("limactl"):
             return Readiness.blocked("limactl not installed")
@@ -458,12 +471,15 @@ class LimaPlatform(VMPlatform):
                 # The join follows any restart, so nothing but the address read
                 # sits between the join and the settle that logs a failed one out.
                 run_as_root = functools.partial(self._host.run_as_root, instance_name)
-                _wait_for_tailscaled(run_as_root, instance_name)
+                request.progress.step("Wait for tailscaled and join Tailscale")
+                _wait_for_tailscaled(run_as_root, instance_name, log=request.progress.record)
                 output.detail("Joining Tailscale...")
-                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                join_tailscale(
+                    run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+                )
                 output.detail("Retrieving Tailscale IP...")
                 tailnet_address = settle_tailnet_address(
-                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT, log=request.progress.record
                 )
             except Exception as failure:
                 output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
@@ -535,10 +551,11 @@ class LimaPlatform(VMPlatform):
             raise
 
     @staticmethod
-    def _remote_base_path(instance_name: str) -> str:
-        """run_detached's file identity for this instance's create; the
-        interrupt rollback derives the same path to kill the detached
-        limactl before deleting the instance."""
+    def _remote_detached_prefix(instance_name: str) -> str:
+        """Where run_detached makes this instance's create its private
+        directory; the interrupt rollback and a later delete find it by the
+        same prefix to kill the detached limactl before deleting the
+        instance."""
         return f"/var/tmp/agentworks-lima-{instance_name}"
 
     def _create_remote(
@@ -566,7 +583,7 @@ class LimaPlatform(VMPlatform):
                 f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
             )
             output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
-            result = host.run_detached(lima_cmd, base_path=self._remote_base_path(instance_name), timeout=600)
+            result = host.run_detached(lima_cmd, prefix=self._remote_detached_prefix(instance_name), timeout=600)
             progress.step(f"limactl create and start on '{self._remote_host}'")
             progress.output(result.output)
             if result.exit_code != 0:
@@ -633,7 +650,7 @@ class LimaPlatform(VMPlatform):
             # and erase its output, wrapper, PID, and status before deleting
             # the instance it was mutating.
             with contextlib.suppress(Exception):
-                self._host.kill_detached(self._remote_base_path(instance_name))
+                self._host.kill_detached(self._remote_detached_prefix(instance_name))
         try:
             self._delete_instance(instance_name)
         except Exception as e:
@@ -749,7 +766,7 @@ class LimaPlatform(VMPlatform):
             # mutating, as the create rollback does. Best-effort: the instance's removal is what the
             # row's removal needs.
             with contextlib.suppress(Exception):
-                self._host.kill_detached(self._remote_base_path(instance_name))
+                self._host.kill_detached(self._remote_detached_prefix(instance_name))
         self._delete_instance(instance_name)
         output.info(f"Lima VM '{vm.name}' deleted")
 

@@ -39,20 +39,19 @@ from agentworks.errors import (
     StateError,
     TokenRejectedError,
     UserAbort,
-    ValidationError,
 )
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing, VMNotReady
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
-from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
+from agentworks.naming import validate_vm_name
 
 if TYPE_CHECKING:
     from typing import NoReturn
 
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from agentworks.transports import Transport
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
 # ``bootstrap_vm``, ``run_initialization``):
@@ -102,12 +101,11 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
     record) is not chained on a VM that never completed: recover refuses that
     VM, so the delete guidance is the only hint.
     """
-    from agentworks.ssh import LOG_DIR
+    from agentworks.execution import oplog
+    from agentworks.path_rendering import format_host_path
 
-    log_hint = ""
-    logs = sorted(LOG_DIR.glob(f"{vm_name}-*-vm-create.log"), reverse=True)
-    if logs:
-        log_hint = f"\nDetails: {logs[0]}"
+    logs = oplog.vm_logs(vm_name, stem="vm-create")
+    log_hint = f"\nDetails: {format_host_path(logs[0])}" if logs else ""
 
     vm = db.get_vm(vm_name)
     if vm is not None and vm.provisioning_status != ProvisioningStatus.COMPLETE.value:
@@ -151,7 +149,7 @@ def create_vm(
     ``admin_template`` selects which admin-template provisions the admin
     user (None = the reserved ``default``). A non-default name must be a
     declared admin-template resource; an unknown name fails here, before
-    any DB or backend work.
+    the VM's row is created or anything is provisioned.
     """
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
@@ -162,6 +160,19 @@ def create_vm(
     # surface before any template / DB / VM business logic. The
     # pending-plus-durable registry built below is authoritative for mutation.
     registry = load_request_registry(config, include_live_resources=False)
+
+    # The name's own checks come next, before anything uses the name or can
+    # prompt (site selection, the Tailscale and SSH checks, the slug prompt).
+    # Existence goes first so an existing VM, even one named before a
+    # current naming rule, reports that it exists.
+    vm_name = name
+    if db.get_vm(vm_name) is not None:
+        raise AlreadyExistsError(
+            f"VM '{vm_name}' already exists",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
+    validate_vm_name(vm_name)
 
     from agentworks.instance_specs import parse_vm_instance_specs
 
@@ -199,10 +210,10 @@ def create_vm(
 
     # Resolve the target site and its declaration. An undeclared site
     # fails here with the stranded-site ConfigError + manifest hint,
-    # and a NOT-READY one with its reason chain, both before any DB or
-    # backend work, and critically before the Tailscale check and the
-    # interactive system-slug prompt below: the operator must never
-    # answer a prompt for an op the site already sank.
+    # and a NOT-READY one with its reason chain, both before the VM's
+    # row is created or any backend work, and critically before the
+    # Tailscale check and the interactive system-slug prompt below: the
+    # operator must never answer a prompt for an op the site already sank.
     from agentworks.vms.sites import ensure_site_ready, lookup_site, select_site
 
     site = select_site(site, config.defaults.site, registry)
@@ -216,28 +227,17 @@ def create_vm(
         layered_vm=layered_vm_tmpl,
         layered_admin=layered_admin,
     )
-    existing_vm = db.get_vm(name)
-    if existing_vm is None:
-        registry = load_request_registry(
-            config,
-            live_database=db,
-            pending_publishers=(lambda target: target.add_live(pending),),
-        )
-        from agentworks.instance_specs import ensure_effective_references_enabled
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=(lambda target: target.add_live(pending),),
+    )
+    from agentworks.instance_specs import ensure_effective_references_enabled
 
-        ensure_effective_references_enabled(registry, pending.outbound)
+    ensure_effective_references_enabled(registry, pending.outbound)
     site_decl = lookup_site(site, registry)
     ensure_site_ready(site_decl, registry)
 
-    vm_name = name
-    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
-
-    if existing_vm is not None:
-        raise AlreadyExistsError(
-            f"VM '{vm_name}' already exists",
-            entity_kind="vm",
-            entity_name=vm_name,
-        )
     from agentworks.instance_specs import refuse_orphan_creation_state
 
     refuse_orphan_creation_state(db, "vm", vm_name)
@@ -332,14 +332,14 @@ def create_vm(
     def scoped_ctx(
         secret_names: tuple[str, ...],
         *,
-        admin_target: Transport | None = None,
-        agent_target: Transport | None = None,
+        admin_access: VMAccess | None = None,
+        agent_access: VMAccess | None = None,
     ) -> RunContext:
         return RunContext(
             config=config,
             operation_scope=scope,
-            admin_target=admin_target,
-            agent_target=agent_target,
+            admin_access=admin_access,
+            agent_access=agent_access,
             secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
@@ -458,7 +458,7 @@ def create_vm(
             # resolved) at the composition root above; dispatch is just ops now.
             platform_obj = site_node.platform
             from agentworks.capabilities.vm_platform import ProvisionRequest
-            from agentworks.ssh import SSHLogger
+            from agentworks.execution.oplog import OperationLogFile
 
             # One manager-owned log spans platform bootstrap, Phase A, and
             # initialization. Construct it before dispatch so WSL2 can report
@@ -467,7 +467,7 @@ def create_vm(
             # success, failure, and interrupt after construction exits it. A
             # close error warns but cannot replace the primary operation result.
             try:
-                logger = SSHLogger(
+                logger = OperationLogFile(
                     vm_name,
                     "vm-create",
                     redactions=tuple(
@@ -575,10 +575,11 @@ def create_vm(
                 log.unwind()
                 output.warn(f"Log: {logger.display_path}")
                 raise
-            except (AuthorizationError, ConfigError, StateError, TokenRejectedError, ValidationError):
+            except (AuthorizationError, ConfigError, StateError, TokenRejectedError):
                 # These failures are already typed with their owning
-                # platform's remediation (a ValidationError is a request the
-                # platform refuses before it mutates anything).
+                # platform's remediation. A request the platform refuses is
+                # refused earlier, in the create node's preflight
+                # (validate_create_release, validate_create_hostname).
                 # A compliant platform has not mutated, or has rolled back,
                 # so only the provisional row remains to unwind.
                 log.unwind()
@@ -622,7 +623,7 @@ def create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                ts_target, home, observed_release = _mgr.bootstrap_vm(
+                access, home, observed_release = _mgr.bootstrap_vm(
                     db,
                     config,
                     vm_name,
@@ -660,8 +661,8 @@ def create_vm(
                 _raise_init_failure(db, vm_name, e)
 
         # -- Initialization (Phase B) --
-        # Sibling of Provisioning: runs after the section closes, over
-        # Tailscale SSH, with the same failure mapping as Phase A.
+        # Sibling of Provisioning: runs after the section closes, on the
+        # admin's access Phase A returned, with the same failure mapping.
         try:
             _mgr.run_initialization(
                 db,
@@ -670,7 +671,7 @@ def create_vm(
                 vm_tmpl,
                 admin,
                 vm_name,
-                ts_target,
+                access,
                 credential_ops,
                 home,
                 resolved_admin_username,

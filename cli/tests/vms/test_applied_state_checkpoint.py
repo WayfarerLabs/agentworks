@@ -33,6 +33,7 @@ from agentworks.vms.initializer.ssh_keys import (
     _reconcile_authorized_keys,
 )
 from tests.ssh_fixtures import write_test_ssh_keypair
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -179,7 +180,7 @@ def test_password_protected_native_key_is_checkpointed_for_create_and_reinit(
             extra_ssh_public_keys=[],
         )
     )
-    outcome = _reconcile_authorized_keys(MagicMock(), config, "/home/agentworks", _Logger())
+    outcome = _reconcile_authorized_keys(RecordingVMAccess([], Admin()).files(), config, "/home/agentworks", _Logger())
     assert isinstance(outcome, AuthorizedKeysApplied)
     if operation is VMInitializationOperation.VM_REINIT:
         db.instance_state.replace_applied_slices(
@@ -455,13 +456,12 @@ def test_public_private_mismatch_refuses_before_any_remote_write(
             extra_ssh_public_keys=[],
         )
     )
-    target = MagicMock()
+    access = RecordingVMAccess([], Admin())
 
     with pytest.raises(ConfigError):
-        _reconcile_authorized_keys(target, config, "/home/agentworks", _Logger())
+        _reconcile_authorized_keys(access.files(), config, "/home/agentworks", _Logger())
 
-    target.write_file.assert_not_called()
-    target.run.assert_not_called()
+    assert access.calls == []
 
 
 def test_same_path_post_write_instability_clears_prior_ssh_evidence(

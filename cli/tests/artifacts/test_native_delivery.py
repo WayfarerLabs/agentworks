@@ -11,9 +11,9 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import get_args
 
 import pytest
+import yaml
 
 from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication, OwnedArtifactFile, SessionArtifactContext
@@ -25,7 +25,7 @@ from agentworks.artifacts.model import (
     ArtifactProvenance,
     ArtifactType,
 )
-from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home, validate_ancestor_names
+from agentworks.artifacts.native.common import NativeSessionArtifacts, native_home
 from agentworks.artifacts.native.layout import NativeUserLayout
 from agentworks.artifacts.native.probe import NativeArtifactConflictError, probe_native
 from agentworks.artifacts.native.shell import filesystem_artifacts
@@ -35,6 +35,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.harness_integration import HarnessStart
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.errors import ConfigError, StateError
+from agentworks.execution.results import Result
 from agentworks.plugins.claude import artifacts as claude
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.plugins.codex import artifacts as codex
@@ -42,6 +43,7 @@ from agentworks.plugins.codex.harness_integration import CodexIntegration
 from agentworks.plugins.grok import artifacts as grok
 from agentworks.plugins.grok.harness_integration import GrokBuildIntegration
 from tests.artifacts._fixtures import received
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 def enabled(render: Callable[..., NativeSessionArtifacts]) -> list[str]:
@@ -56,9 +58,15 @@ def artifact(
     type: ArtifactType, *, name: str = "review", owner: str = "s1", options: dict | None = None
 ) -> ArtifactInput:
     members: tuple[ArtifactMember, ...] = ()
+    body = "before ${agw:session_name} after\n"
+    description = "Review changes"
+    metadata = {}
     if type is ArtifactType.SKILL:
+        body = "Use this skill.\n"
+        metadata = {"name": name, "description": description}
+        header = yaml.safe_dump(metadata, sort_keys=False)
         members = (
-            ArtifactMember("SKILL.md", b"---\nname: review\ndescription: Review changes\n---\nUse this skill.\n"),
+            ArtifactMember("SKILL.md", f"---\n{header}---\n{body}".encode(), text=True),
             ArtifactMember("scripts/check.sh", b"#!/bin/sh\nexit 0\n", executable=True),
             ArtifactMember("data/logo.bin", bytes(range(256))),
         )
@@ -66,13 +74,13 @@ def artifact(
         ArtifactContent(
             type,
             name,
-            description="Review changes",
-            text="" if type is ArtifactType.MCP_SERVER else "before ${agw:session_name} after\n",
+            description=description,
+            text="" if type is ArtifactType.MCP_SERVER else body,
             members=members,
             metadata_json=json.dumps(
                 {"type": "stdio", "command": "fixture-server", "args": [], "env": {}, "description": "Review changes"}
                 if type is ArtifactType.MCP_SERVER
-                else {}
+                else metadata
             ),
             native_options_json=json.dumps({} if type is ArtifactType.MCP_SERVER else options or {}),
         ),
@@ -285,38 +293,27 @@ def test_native_home_override_is_used_instead_of_default():
 
 
 def test_native_probe_passes_environment_separately_and_rejects_policy_failures():
-    calls = []
+    from agentworks.execution.requests import PythonProgram
+    from agentworks.execution.results import Completed
 
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        if len(calls) == 1:
-            return SimpleNamespace(returncode=0, ok=True, stdout="AGW_PYTHON3=available\n", stderr="")
-        return SimpleNamespace(
-            returncode=0,
-            ok=True,
-            stderr="",
-            stdout="AGW_ARTIFACT_PROBE="
-            + json.dumps(
-                {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
-            ),
-        )
+    observed = {"native_home": "/home/a/.claude", "problems": ["native-discovery-exclusions"], "inventory": []}
+    access = RecordingVMAccess([], Admin())
+    access.default_outcome = Result(Completed(0), f"AGW_ARTIFACT_PROBE={json.dumps(observed)}\n".encode())
 
     with pytest.raises(StateError):
-        probe_native(
-            SimpleNamespace(run=run, logger=None),
-            tool="claude",
-            home="/home/a",
-            environment={"API_TOKEN": "a-secret-value"},
-        )
-    assert "a-secret-value" not in calls[-1][0]
-    assert calls[-1][1]["env"]["API_TOKEN"] == "a-secret-value"
+        probe_native(access, tool="claude", home="/home/a", environment={"API_TOKEN": "a-secret-value"})
+    (request,) = access.requests()
+    assert isinstance(request, PythonProgram)
+    assert all("a-secret-value" not in part for part in (request.source, *request.args))
+    assert request.env["API_TOKEN"] == "a-secret-value"
+    assert request.deadline == 30
 
 
 @pytest.mark.parametrize("implementation", [CodexIntegration, GrokBuildIntegration])
 def test_vm_deferral_preserves_input_identity_without_descendant_knowledge(implementation):
     integration = implementation.for_setup(owner_name="box", owner_kind="vm", facet="vm", config={})
     item = artifact(ArtifactType.AGENT)
-    result = integration.vm_init(SimpleNamespace(artifacts=received(item)))
+    result = integration.vm_init(SimpleNamespace(artifacts=received(item), prior=None))
     assert result.files == ()
     assert result.deferred[0].input_id == item.identity
     assert result.deferred[0].destination == "user"
@@ -336,7 +333,6 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
 ):
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
-    from tests.conftest import _FakeTarget
 
     monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.native")
     if implementation is GrokBuildIntegration:
@@ -373,7 +369,7 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
     else:
         monkeypatch.setattr(integration, "_session_exists", lambda *_args: resume)
     result = integration.start(
-        RunContext(admin_target=_FakeTarget()),
+        RunContext(admin_access=RecordingVMAccess([], Admin())),
         intent=HarnessLaunchIntent.RESUME_OR_NEW if resume else HarnessLaunchIntent.CREATE,
     )
     assert "{{" not in result.command
@@ -389,6 +385,52 @@ def test_native_launch_carries_literal_artifact_guidance_on_new_and_resumed_thre
         assert argv[argv.index(flag) + 1] == "configured guidance"
         assert any(item.content.text.encode() in file.data for file in result.artifacts.files)
         assert all(item.content.text not in value for value in argv)
+
+
+@pytest.mark.parametrize("selection", ["review", "vm-review", "native-external", "other-plugin:review"])
+def test_claude_launch_selects_the_delivered_persona_name(monkeypatch, selection):
+    from agentworks.capabilities.harness_integration import HarnessLaunchIntent
+
+    local = artifact(ArtifactType.AGENT)
+    vm = replace(
+        local,
+        content=replace(local.content, text="VM review instructions.\n"),
+        origin=ArtifactOrigin("vm", "vm", "box", entry="review"),
+    )
+    prepared = context(vm, local)
+    monkeypatch.setattr("agentworks.artifacts.native.probe.probe_native", lambda *args, **kwargs: "/home/alice/.claude")
+    integration = ClaudeCodeIntegration(
+        "claude-code",
+        {"agent": selection, "enabled_workarounds": ["session-agent-definitions"]},
+        session_name="s1",
+        vm_name="box",
+        workspace_name="ws",
+        workspace_path="/ws",
+        target=None,
+        admin=True,
+        state={},
+        artifact_context=prepared,
+    )
+    result = integration.start(
+        RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.CREATE
+    )
+    assert isinstance(result, HarnessStart)
+    personas = {
+        file.native_identity.removeprefix("agent:"): file.data.decode()
+        for file in result.artifacts.files
+        if file.native_identity is not None and file.native_identity.startswith("agent:")
+    }
+    assert len(personas) == 2
+    for name, item in (("review", local), ("vm-review", vm)):
+        contents = next(contents for identity, contents in personas.items() if identity.endswith(f":{name}"))
+        assert contents.endswith(item.content.text)
+    argv = shlex.split(shlex.split(result.command)[2])
+    selected = argv[argv.index("--agent") + 1]
+    if selection not in {"review", "vm-review"}:
+        assert selected == selection
+    else:
+        assert selected in personas
+        assert selected.partition(":")[2] == selection
 
 
 @pytest.mark.parametrize("fresh", [False, True])
@@ -528,7 +570,8 @@ def test_user_native_home_boundary_precedes_other_setup(db, monkeypatch, impleme
     integration = implementation.for_setup(owner_kind="agent", owner_name="alice", facet="user", config={})
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "lima", "vm"),
-        runner=SimpleNamespace(),
+        access=(recorded := RecordingVMAccess([], Admin())),
+        files=recorded.files(),
         prior=None,
         checkpoint=lambda claims: None,
         username="alice",
@@ -558,7 +601,8 @@ def test_codex_external_home_does_not_block_home_owned_skills(db, monkeypatch):
     result = integration.user_init(
         UserSetupInvocation(
             vm=db.insert_vm("vm", "lima", "vm"),
-            runner=SimpleNamespace(),
+            access=(recorded := RecordingVMAccess([], Admin())),
+            files=recorded.files(),
             prior=None,
             checkpoint=lambda claims: None,
             username="alice",
@@ -618,9 +662,10 @@ def test_session_delivery_defaults_to_unhandled_before_native_validation(render)
     ],
 )
 def test_config_workaround_names_match_native_delivery(integration, workarounds):
-    annotation = integration.config_model.model_fields["enabled_workarounds"].annotation
-    names = get_args(get_args(annotation)[0])
-    assert set(names) == set(workarounds.values())
+    names = set(workarounds.values())
+    for name in names:
+        selected = integration.config_model.model_validate({"enabled_workarounds": [name]})
+        assert selected.enabled_workarounds == [name]
 
 
 @pytest.mark.parametrize("type", list(ArtifactType))
@@ -761,14 +806,14 @@ def test_skipped_inputs_do_not_probe_or_require_launch_target(monkeypatch, imple
         (GrokBuildIntegration.config_model, "session-home-skills"),
     ],
 )
-def test_workaround_config_replaces_inherited_optins_and_refuses_unknown_names(config, workaround):
+def test_workaround_defaults_stay_conservative_and_unknown_names_are_rejected(config, workaround):
     from pydantic import ValidationError
 
     from agentworks.schema import merge_model
 
     assert config().enabled_workarounds == []
     value, _ = merge_model(config, {"enabled_workarounds": [workaround]}, {"enabled_workarounds": []})
-    assert config.model_validate(value).enabled_workarounds == []
+    assert config.model_validate(value).enabled_workarounds == [workaround]
     with pytest.raises(ValidationError):
         config.model_validate({"enabled_workarounds": ["unknown-workaround"]})
 
@@ -810,7 +855,6 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
 ):
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.errors import ExternalError
-    from tests.conftest import _FakeTarget
 
     warnings: list[str] = []
     monkeypatch.setattr(output, "warn", warnings.append)
@@ -839,9 +883,13 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
     if own_delivery:
         with pytest.raises(ExternalError):
-            integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+            integration.start(
+                RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
+            )
     else:
-        result = integration.start(RunContext(admin_target=_FakeTarget()), intent=HarnessLaunchIntent.RESUME_OR_NEW)
+        result = integration.start(
+            RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
+        )
         assert result.command == "fixture-launch" and warnings
 
 
@@ -861,14 +909,12 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
 def test_setup_native_name_conflict_defers_only_affected_artifact(implementation, facet, db, monkeypatch):
     from importlib import import_module
 
-    from agentworks.artifacts.native.probe import NativeArtifactConflictError
     from agentworks.capabilities.harness_integration.setup import (
         SetupInvocation,
         UserSetupInvocation,
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from tests.conftest import _FakeTarget
 
     module = import_module(implementation.__module__)
     module_root = "/home/alice/.native"
@@ -889,7 +935,8 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
     incomplete: list[str] = []
     common = {
         "vm": db.insert_vm("vm", "site", "host"),
-        "runner": _FakeTarget(),
+        "access": (recorded := RecordingVMAccess([], Admin())),
+        "files": recorded.files(),
         "prior": None,
         "checkpoint": lambda claims: None,
         "report_incomplete": incomplete.append,
@@ -919,16 +966,15 @@ def test_setup_native_name_conflict_defers_only_affected_artifact(implementation
 @pytest.mark.parametrize("modified", [False, True])
 def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, modified):
     from agentworks.artifacts.native.common import defer_setup_conflicts
-    from agentworks.artifacts.native.probe import NativeArtifactConflictError
     from agentworks.artifacts.publication import publish_artifacts
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
-    from tests.native_setup_fixtures import LocalFixtureTransport
+    from tests.native_setup_fixtures import LocalFixtureAccount
 
-    target = LocalFixtureTransport(tmp_path)
+    target = LocalFixtureAccount(tmp_path)
     bad, good = artifact(ArtifactType.SKILL), artifact(ArtifactType.RULE)
     inputs = received(bad, good)
     plan = claude.outer_artifacts(inputs, str(target.home / ".claude"))
-    current = publish_artifacts(target, plan.files, (), lambda files: None, roots=(str(target.home),)).files
+    current = publish_artifacts(target.files(), plan.files, (), lambda files: None, roots=(str(target.home),)).files
     entrypoint = target.home / ".claude/skills/review/SKILL.md"
     if modified:
         entrypoint.write_text("operator changed entrypoint")
@@ -938,7 +984,8 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
     incomplete: list[str] = []
     invocation = UserSetupInvocation(
         vm=db.insert_vm("vm", "site", "host"),
-        runner=target,
+        access=(recorded := target.access()),
+        files=recorded.files(),
         prior=None,
         checkpoint=lambda claims: None,
         report_incomplete=incomplete.append,
@@ -952,26 +999,10 @@ def test_setup_name_conflict_deferral_uses_safe_owned_retirement(tmp_path, db, m
             raise NativeArtifactConflictError("fixture competing skill", ("skill:review",), hint="fixture repair")
 
     filtered = defer_setup_conflicts(plan, invocation, check)
-    result = publish_artifacts(target, filtered.files, current, lambda files: None, roots=(str(target.home),))
+    result = publish_artifacts(target.files(), filtered.files, current, lambda files: None, roots=(str(target.home),))
     assert incomplete and filtered.deferred[0].input_id == bad.identity
     assert competing.read_text() == "operator content"
     assert entrypoint.exists() is modified
     assert any(file.path == str(entrypoint) for file in result.files) is modified
     assert all(Path(file.path).exists() for file in result.files)
     assert any(good.origin_identity in file.origins for file in result.files)
-
-
-@pytest.mark.parametrize("render", [codex.session_artifacts])
-@pytest.mark.parametrize("matching_owner", ["user", "workspace"])
-def test_new_carrier_cannot_choose_one_of_competing_ancestor_origins(render, matching_owner):
-    first = artifact(ArtifactType.AGENT, owner="user")
-    second = artifact(ArtifactType.AGENT, owner="workspace")
-    earlier = (
-        *claude.outer_artifacts(received(first), "/home/alice/.claude").files,
-        *claude.outer_artifacts(received(second), "/workspace/.claude").files,
-    )
-    selected = first if matching_owner == "user" else second
-    with pytest.raises(NativeArtifactConflictError):
-        prepared = context(selected, ancestors=tuple(owned(file) for file in earlier))
-        plan = render(prepared, extra_args=[], enabled_workarounds=enabled(render))
-        validate_ancestor_names(prepared, plan.application)

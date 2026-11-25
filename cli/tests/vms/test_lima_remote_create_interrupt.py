@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import stat
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -24,7 +23,7 @@ from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaP
 from agentworks.capabilities.vm_platform.lima_host import DetachedResult, LimaCommandFailed, LimaHost, _Completed
 from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
-from tests.conftest import provisioning_trust_for_tests
+from tests.conftest import provisioning_trust_for_tests, requires_posix_shell
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -33,6 +32,8 @@ if TYPE_CHECKING:
 _REMOTE_TEMPLATE_DIR = "/tmp/agentworks-lima-template.A1b2C3d4E5"
 _PROVIDER_YAML = "arch: default\nmounts: []\n"
 _BASE = "/var/tmp/agentworks-lima-myvm"
+# The detached create's private directory, which mktemp names and a later kill finds by its prefix.
+_RUN = f"{_BASE}.F6g7H8i9J0"
 _REMOTE = {"placement": {"mode": "ssh", "host": "user@host"}}
 
 
@@ -86,7 +87,9 @@ class _Host:
         if command in self.outputs:
             return _Completed(0, self.outputs[command], "")
         if "mktemp -d" in command:
-            return _Completed(0, f"{_REMOTE_TEMPLATE_DIR}\n", "")
+            return _Completed(0, f"{_RUN if _BASE in command else _REMOTE_TEMPLATE_DIR}\n", "")
+        if command.startswith("find /var/tmp "):
+            return _Completed(0, f"{_RUN}\n", "")
         if "nohup " in command:
             self.launched = True
         if command.startswith("test -f") and command.endswith(".status"):
@@ -121,12 +124,14 @@ def _create_remote(platform: LimaPlatform | None = None, progress: object | None
 # -- Staging the template ------------------------------------------------------------------
 
 
-def test_remote_template_staging_is_mode_0600_stdin_and_verified_cleanup(host: _Host) -> None:
+def test_remote_template_goes_over_stdin_into_the_private_directory_with_verified_cleanup(host: _Host) -> None:
+    """The staged file's mode is the local-shell test's to check; this one checks what crosses the wire."""
     _create_remote()
 
-    staged = [call for call in host.calls if "template.yaml" in call[0] and "cat >" in call[0]]
+    (staged,) = [call for call in host.calls if call[1] is not None and "template.yaml" in call[0]]
     assert host.calls[0] == ("umask 077 && mktemp -d /tmp/agentworks-lima-template.XXXXXXXXXX", None)
-    assert staged == [(f"umask 077 && cat > {_REMOTE_TEMPLATE_DIR}/template.yaml", _PROVIDER_YAML)]
+    assert staged[1] == _PROVIDER_YAML
+    assert f"{_REMOTE_TEMPLATE_DIR}/template.yaml" in staged[0]
     assert host.calls[-1] == (f"rm -rf -- {_REMOTE_TEMPLATE_DIR} && test ! -e {_REMOTE_TEMPLATE_DIR}", None)
     assert not any(_PROVIDER_YAML in command for command in host.commands)
 
@@ -159,6 +164,7 @@ def test_remote_template_rejects_untrusted_allocation_path(monkeypatch: pytest.M
     assert "/tmp/other" not in repr(caught.value)
 
 
+@requires_posix_shell
 def test_remote_template_uses_private_random_directory_not_predictable_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -190,31 +196,28 @@ def test_remote_template_uses_private_random_directory_not_predictable_path(
 
     _create_remote()
 
-    if sys.platform == "win32":
-        # The local (git-bash) shell has no Unix mode bits for umask 077 to land on.
-        assert [content for _, _, content in staged_snapshots] == [_PROVIDER_YAML]
-    else:
-        assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
+    assert staged_snapshots == [(0o700, 0o600, _PROVIDER_YAML)]
     assert predictable_path.read_text() == "legacy provider data\n"
     assert list(remote_root.glob("agentworks-lima-template.*")) == []
 
 
 def test_remote_template_cleanup_interrupt_preserves_active_failure_and_order(host: _Host) -> None:
     primary = LimaCommandFailed("detached create could not start")
-    host.errors = {"nohup": primary, "rm -rf": KeyboardInterrupt("cleanup interrupted")}
+    host.errors = {"nohup": primary, f"rm -rf -- {_REMOTE_TEMPLATE_DIR}": KeyboardInterrupt("cleanup interrupted")}
 
     with pytest.raises(LimaCommandFailed) as caught:
         _create_remote()
 
     assert caught.value is primary
+    staged_at = next(i for i, (_, content) in enumerate(host.calls) if content == _PROVIDER_YAML)
     commands = host.commands
-    assert _index(commands, lambda c: "mktemp" in c) < _index(commands, lambda c: "template.yaml" in c and "cat >" in c)
+    assert _index(commands, lambda c: "mktemp -d" in c and "lima-template" in c) < staged_at
     assert commands[-1].startswith("rm -rf")
 
 
 def test_remote_standalone_template_cleanup_interrupt_remains_visible(host: _Host) -> None:
     cleanup_interrupt = KeyboardInterrupt("cleanup interrupted")
-    host.errors = {"rm -rf": cleanup_interrupt}
+    host.errors = {f"rm -rf -- {_REMOTE_TEMPLATE_DIR}": cleanup_interrupt}
 
     with pytest.raises(KeyboardInterrupt) as caught:
         _create_remote()
@@ -227,14 +230,14 @@ def test_remote_standalone_template_cleanup_interrupt_remains_visible(host: _Hos
 
 def test_the_detached_create_runs_once_and_its_output_reaches_the_creates_log(host: _Host) -> None:
     progress = MagicMock()
-    host.outputs[f"cat {_BASE}.out 2>/dev/null"] = "limactl says hello\n"
+    host.outputs[f"cat {_RUN}/run.out 2>/dev/null"] = "limactl says hello\n"
 
     _create_remote(progress=progress)
 
     launches = [command for command in host.commands if "nohup " in command]
     assert len(launches) == 1
-    assert f"{_BASE}.sh" in launches[0]
-    wrapper = [content for command, content in host.calls if command.endswith(f"cat > {_BASE}.sh")]
+    assert f"{_RUN}/run.sh" in launches[0]
+    wrapper = [content for command, content in host.calls if content is not None and f"{_RUN}/run.sh" in command]
     assert len(wrapper) == 1
     assert "limactl create --name myvm --tty=false" in (wrapper[0] or "")
     progress.output.assert_called_once_with("limactl says hello\n")
@@ -254,7 +257,7 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
     host: _Host, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
     """A Ctrl-C during the poll stops nothing on the host, since nohup keeps the command alive, so the
-    rollback kills it through its PID file, removes its files, and only then deletes the instance."""
+    rollback kills it through its PID file, removes its directory, and only then deletes the instance."""
     host.detached_status = None
     interrupt = KeyboardInterrupt("first")
 
@@ -269,8 +272,8 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
 
     assert caught.value is interrupt
     commands = host.commands
-    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
-    artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
+    kill = _index(commands, lambda c: f"pid=$(cat {_RUN}/run.pid)" in c)
+    artifacts = _index(commands, lambda c: c == f"rm -rf -- {_RUN}")
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
     assert kill < artifacts < delete
     assert any(command.startswith(f"rm -rf -- {_REMOTE_TEMPLATE_DIR}") for command in commands)
@@ -281,7 +284,7 @@ def test_remote_interrupt_preserves_original_when_artifact_cleanup_fails(
 ) -> None:
     """Detached artifact cleanup is best-effort on the interrupt unwind."""
     interrupt = KeyboardInterrupt("first")
-    host.errors = {f"rm -f {_BASE}.out": LimaCommandFailed("artifact cleanup failed")}
+    host.errors = {f"rm -rf -- {_RUN}": LimaCommandFailed("artifact cleanup failed")}
     monkeypatch.setattr(
         LimaPlatform, "_create_remote", lambda self, name, yaml, *, progress: (_ for _ in ()).throw(interrupt)
     )
@@ -299,7 +302,7 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
 ) -> None:
     """An ordinary provisioning failure gets the full remote rollback."""
     original = LimaCommandFailed("ordinary provisioning failure")
-    host.errors = {f"rm -f {_BASE}.out": LimaCommandFailed("artifact cleanup failed")}
+    host.errors = {f"rm -rf -- {_RUN}": LimaCommandFailed("artifact cleanup failed")}
     monkeypatch.setattr(
         LimaPlatform, "_create_remote", lambda self, name, yaml, *, progress: (_ for _ in ()).throw(original)
     )
@@ -309,8 +312,8 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
 
     assert caught.value is original
     commands = host.commands
-    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
-    artifacts = _index(commands, lambda c: c.startswith(f"rm -f {_BASE}.out"))
+    kill = _index(commands, lambda c: f"pid=$(cat {_RUN}/run.pid)" in c)
+    artifacts = _index(commands, lambda c: c == f"rm -rf -- {_RUN}")
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
     assert kill < artifacts < delete
     surfaced = "\n".join([*captured_output.detail, *captured_output.warnings])
@@ -398,8 +401,8 @@ def test_a_remote_delete_removes_what_an_abandoned_create_left_on_the_host(
 
     commands = host.commands
     delete = _index(commands, lambda c: c == "limactl delete --force myvm")
-    kill = _index(commands, lambda c: f"pid=$(cat {_BASE}.pid)" in c)
-    artifacts = _index(commands, lambda c: c == f"rm -f {_BASE}.out {_BASE}.sh {_BASE}.pid {_BASE}.status")
+    kill = _index(commands, lambda c: f"pid=$(cat {_RUN}/run.pid)" in c)
+    artifacts = _index(commands, lambda c: c == f"rm -rf -- {_RUN}")
     assert kill < artifacts < delete
 
 

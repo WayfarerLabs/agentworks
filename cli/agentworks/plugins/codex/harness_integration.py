@@ -36,8 +36,8 @@ inference over every rollout in the workspace directory produced 14
 indistinguishable candidates and a bricked resume: codex SUBAGENTS write
 sibling rollouts with the same cwd as their parent):
 
-1. **The notify binding (primary).** Every generated launch provisions a
-   recorder script under ``~/.agentworks/codex/`` and passes
+1. **The notify binding (primary).** Every launch first installs a
+   recorder script under ``~/.agentworks/codex/``, and its command passes
    ``-c notify=[<recorder>, <destination>]``. Codex runs the recorder after
    every completed turn, handing it the turn's ``thread-id``; the recorder
    writes that uuid to ``~/.agentworks/codex/<session-name>.thread``. The next
@@ -131,11 +131,18 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import ConfigError, StateError
+from agentworks.execution.requests import Script, Shell
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
-from agentworks.plugins.codex.artifacts import defer_session_mcp, outer_artifacts, session_artifacts, vm_artifacts
-from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
-from agentworks.schema import AgwModel, MergeStrategy
+from agentworks.plugins.codex.artifacts import (
+    defer_session_mcp,
+    limit_session_argv,
+    outer_artifacts,
+    session_artifacts,
+    vm_artifacts,
+)
+from agentworks.plugins.codex.recorder import home_word, install_recorder, notify_value_word, thread_tail
+from agentworks.schema import AgwModel, Interpolated, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -148,7 +155,7 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class CodexUserConfig(NativeUserConfig):
@@ -225,7 +232,7 @@ class CodexConfig(AgwModel):
     the target's own configuration remains authoritative by default. A
     child template's declared value replaces its parent's."""
 
-    writable_dirs: list[str] = Field(default_factory=list)
+    writable_dirs: list[Annotated[str, Interpolated()]] = Field(default_factory=list)
     """Extra directories the sandbox may write, each forwarded as
     ``--add-dir``. Inheritance combines parent and child entries."""
 
@@ -240,12 +247,13 @@ class CodexConfig(AgwModel):
     """Turn OFF ``--strict-config``, for a target whose own
     ``config.toml`` a newer codex wrote."""
 
-    enabled_workarounds: Annotated[
-        list[Literal["session-home-skills", "session-agent-config", "session-mcp-overrides"]], MergeStrategy.REPLACE
-    ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+    enabled_workarounds: (
+        list[Literal["session-home-skills", "session-agent-config", "session-mcp-overrides"]] | None
+    ) = Field(default_factory=list)
+    """Session artifact carriers append and deduplicate across layers.
+    Omission or an empty list inherits; null clears inherited opt-ins."""
 
-    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
+    extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Argv tokens appended after every generated CLI option,
     so they can add unmodeled arguments or override managed ``-c`` values.
     Codex 0.147.0 takes the last value for a repeated ``-c`` key. On a fresh
@@ -358,22 +366,34 @@ _UNREADABLE_SENTINEL = "?agw-unreadable-rollout"
 _LEGACY_MARKER_RE = re.compile(r"^\.agentworks/codex/[A-Za-z0-9_.-]+\.launch$")
 
 
+_STARTUP_HINT = (
+    "Check that the launch user's login and interactive shell startup files run to completion "
+    "without exiting or failing, then retry."
+)
+"""The hint for a probe that completed with a status it does not define.
+
+The probe reached the target and its shell ran, so reachability is not the
+problem; a startup file that exits or fails before the probe's own command
+is the usual cause."""
+
+
 def _probe_hint(returncode: int) -> str:
-    """The recovery hint for a probe that could not answer, forked on WHY.
+    """The recovery hint for a probe that completed without an answer, forked on WHY.
 
     A hint that names an action the operator cannot take is worse than no
     hint: ``_FIND_FAILED_EXIT`` means ``find`` ran and failed against the
-    on-disk sessions tree, so telling them to wait for the target to
-    become reachable would point at a healthy component. Everything else
-    in the non-{0,1} band (an SSH failure's 255, a shell that would not
-    start) really is reachability.
+    on-disk sessions tree, so the sessions directory is what to check. Any
+    other status the probe does not define comes from the shell around it,
+    so the hint points at the launch user's startup files. A probe that may
+    not have run raises its typed execution error instead and reaches no
+    hint here.
     """
     if returncode == _FIND_FAILED_EXIT:
         return (
             f"Check that the codex sessions directory ({_SESSIONS_DIR_DISPLAY}) is readable by the "
             f"launch user and not damaged, then retry."
         )
-    return "Retry once the launch target is reachable."
+    return _STARTUP_HINT
 
 
 def _awk_string(value: str) -> str:
@@ -395,6 +415,55 @@ _FIND_FAILED_EXIT = 5  # find itself failed (not a mere no-match): raise
 _READ_FAILED_EXIT = 6  # the recorder file exists but would not read: raise
 
 
+# The three op-time probes, each run in the launch target's login and
+# interactive shell, the environment the pane gets, so ``CODEX_HOME``
+# resolves as the pane's codex resolves it. ``CodexIntegration`` reads their
+# exit codes and stdout.
+
+
+def recorder_probe(session_name: str) -> Script:
+    """Print the notify recorder's file for ``session_name``: exit 1 when absent, ``_READ_FAILED_EXIT`` unreadable."""
+    target = home_word(thread_tail(session_name))
+    inner = f"[ -f {target} ] || exit 1; cat {target} 2>/dev/null || exit {_READ_FAILED_EXIT}"
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
+
+
+def rollout_probe(sid: str) -> Script:
+    """Whether ``*-<sid>.jsonl`` exists under the sessions dir: exit 0 found, 1 not, ``_FIND_FAILED_EXIT`` failed."""
+    needle = shlex.quote(f"*-{sid}.jsonl")
+    inner = (
+        f"[ -d {_SESSIONS_DIR} ] || exit 1; "
+        f"out=$(find {_SESSIONS_DIR} -name {needle} -print -quit 2>/dev/null); rc=$?; "
+        f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; exit 1'
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
+
+
+def discovery_probe(workspace_path: str) -> Script:
+    """Print every interactive rollout whose cwd is ``workspace_path``, one path per line.
+
+    ``CodexIntegration._discover`` explains the filter and its exit codes.
+    """
+    workspace = shlex.quote(workspace_path)
+    awk = (
+        f"BEGIN{{s={_awk_string(_CLI_SOURCE_NEEDLE)};"
+        f'c="\\"cwd\\":\\"" ENVIRON["agw_ws"] "\\"";'
+        f"for(i=1;i<ARGC;i++){{"
+        f"r=(getline l < ARGV[i]);close(ARGV[i]);"
+        f"if(r<0){{print {_awk_string(_UNREADABLE_SENTINEL)};continue}}"
+        f"if(r>0&&index(l,s)&&index(l,c))print ARGV[i]}}}}"
+    )
+    inner = (
+        f"[ -d {_SESSIONS_DIR} ] || exit {_NO_SESSIONS_DIR_EXIT}; "
+        f"agw_ws=$(cd {workspace} 2>/dev/null && pwd -P) || exit {_CWD_RESOLVE_EXIT}; "
+        f"export agw_ws; "
+        f"find {_SESSIONS_DIR} -type f -name {shlex.quote('rollout-*.jsonl')} "
+        f"-exec awk {shlex.quote(awk)} {{}} + 2>/dev/null || exit {_FIND_FAILED_EXIT}; "
+        f"exit 0"
+    )
+    return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)
+
+
 class _Layer2(NamedTuple):
     """What source-filtered discovery found: the ids it could name, plus
     whether it also saw a candidate it could NOT name (a rollout that
@@ -410,7 +479,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
@@ -453,6 +522,7 @@ class CodexIntegration(HarnessIntegration):
     _dropped_stale: bool = False
     _artifact_plan: NativeSessionArtifacts = NativeSessionArtifacts()
     _rendered_extra_args: tuple[str, ...] = ()
+    _rendered_writable_dirs: tuple[str, ...] = ()
 
     @classmethod
     def config_for(cls, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -467,16 +537,17 @@ class CodexIntegration(HarnessIntegration):
 
     def vm_init(self, invocation: VMSetupInvocation) -> ArtifactApplication:
         plan = ArtifactApplication() if self.retiring else render_setup_artifacts(invocation, vm_artifacts)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="codex",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     files=files,
+                    setup=invocation,
                     vm_only=True,
                 ),
             )
@@ -514,10 +585,10 @@ class CodexIntegration(HarnessIntegration):
             item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
         ):
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="codex",
-                environment=invocation.environment,
-                redactions=invocation.secrets.values(),
+                environment=invocation.request_environment(),
+                redactor=invocation.redactor,
                 home=invocation.home,
                 native_root=root,
                 check_policy=False,
@@ -532,18 +603,19 @@ class CodexIntegration(HarnessIntegration):
             skip_mcp=skip_mcp,
         )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="codex",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     home=invocation.home,
                     native_root=root,
                     files=files,
+                    setup=invocation,
                 ),
             )
         return replace(
@@ -569,17 +641,18 @@ class CodexIntegration(HarnessIntegration):
             )
         )
         mcp = setup_workspace("codex", config, invocation)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="codex",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
+                    setup=invocation,
                     workspace_only=True,
                 ),
             )
@@ -636,22 +709,23 @@ class CodexIntegration(HarnessIntegration):
         asymmetry to apologize for: a fresh launch resumes nothing, while its
         effective workload config may provide initial input.
         """
-        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
+        self._rendered_extra_args = self.render_context_args("extra_args", self.config.extra_args)
+        self._rendered_writable_dirs = self.render_context_args("writable_dirs", self.config.writable_dirs)
         artifact_context = self._session_binding.artifact_context
-        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        access = ctx.admin_access() if self._admin else ctx.agent_access()
         self._artifact_plan, native_root = prepare_session_delivery(
-            runner,
+            access,
             tool="codex",
             integration=self.name,
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
                 extra_args=self._rendered_extra_args,
-                enabled_workarounds=self.config.enabled_workarounds,
+                enabled_workarounds=self.config.enabled_workarounds or (),
                 profile=self.config.profile,
                 mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
                     "codex",
-                    runner,
+                    access,
                     inputs,
                     home=prepared.home,
                     environment=prepared.environment,
@@ -660,6 +734,8 @@ class CodexIntegration(HarnessIntegration):
             ),
             workspace=self._workspace_path,
         )
+        if artifact_context is not None:
+            self._artifact_plan = limit_session_argv(self._artifact_plan, artifact_context.inputs)
         if artifact_context is not None and native_root is not None:
             validate_discovery_paths(
                 artifact_context,
@@ -687,6 +763,10 @@ class CodexIntegration(HarnessIntegration):
                 if intent.starts_fresh
                 else self._resume_or_launch(ctx, resume_only=intent is HarnessLaunchIntent.RESUME_ONLY)
             )
+            # Every launch form passes the recorder to codex, so it is in place
+            # once the launch is decided, and never for a refused resume.
+            if access is not None:
+                install_recorder(access, home=None if artifact_context is None else artifact_context.home)
         except StateError:
             if prior_state is not None:
                 self._state.clear()
@@ -745,7 +825,7 @@ class CodexIntegration(HarnessIntegration):
 
     def _start_fresh(self, ctx: RunContext) -> str:
         """Reject the visible recorder binding and launch bare Codex."""
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         if launch_target is None:
             raise StateError(
                 "codex fresh start requires its owning launch target",
@@ -791,10 +871,9 @@ class CodexIntegration(HarnessIntegration):
         never wrote (the blob is only as trustworthy as the DB it came
         from): it is swept out of the namespace rather than left to
         confuse a later read. Every path returns a single ``sh -c`` pane
-        command that echoes the visible decision, provisions the recorder,
-        and ``exec``s ``codex``.
+        command that echoes the visible decision and ``exec``s ``codex``.
         """
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         if launch_target is None:
             # Unlike claude-code (which keeps its minted id either way, so
             # guessing "fresh" is lossless), a codex fresh launch drops the
@@ -936,7 +1015,7 @@ class CodexIntegration(HarnessIntegration):
             return marker
         return None
 
-    def _bound_session_id(self, transport: Transport) -> str | None:
+    def _bound_session_id(self, access: VMAccess) -> str | None:
         """The id bound to this session, or ``None`` when nothing is: the
         uuid codex last recorded through the notify recorder if there is
         one, else the id a previous op stored.
@@ -957,7 +1036,7 @@ class CodexIntegration(HarnessIntegration):
         if "session_id" in self._state and not (isinstance(stored, str) and _RECORDED_ID_RE.match(stored)):
             del self._state["session_id"]  # sweep garbage; never this harness integration's write
             stored = None
-        recorded = self._recorded_thread_id(transport)
+        recorded = self._recorded_thread_id(access)
         if recorded is not None:
             if recorded != stored:
                 self._state["session_id"] = recorded
@@ -974,9 +1053,9 @@ class CodexIntegration(HarnessIntegration):
         fresh: bool = False,
     ) -> str:
         """The pane command shared by all three launch forms: echo the
-        visible decision, clean up after the retired marker scheme,
-        provision the notify recorder, then ``exec codex`` with ``head``
-        (the form's own leading argv) followed by the config flags.
+        visible decision, clean up after the retired marker scheme, then
+        ``exec codex`` with ``head`` (the form's own leading argv) followed
+        by the config flags. ``start`` installed the notify recorder first.
 
         A single ``sh -c`` so the whole thing survives the ``exec``
         wrapping the tmux pane applies (``exec`` takes one simple
@@ -990,7 +1069,6 @@ class CodexIntegration(HarnessIntegration):
             # A fresh launch has no conversation bound yet, so a leftover
             # recording must not outlive it and re-report a dead id.
             parts.append(f"rm -f {home_word(thread_tail(self._session_name))}")
-        parts.append(provision_fragment())
 
         def render() -> str:
             body = [*parts, f"exec codex {self._codex_argv(head, fresh=fresh)}".rstrip()]
@@ -1194,7 +1272,7 @@ class CodexIntegration(HarnessIntegration):
             tokens += ["-c", f"{_REASONING_EFFORT_KEY}={_toml_basic_string(self.config.reasoning_effort)}"]
         if self.config.vim_mode:
             tokens += ["-c", f"{_VIM_MODE_KEY}=true"]
-        for item in self.config.writable_dirs:
+        for item in self._rendered_writable_dirs:
             tokens += ["--add-dir", item]
         if self.config.web_search is True:
             tokens.append("--search")
@@ -1202,7 +1280,7 @@ class CodexIntegration(HarnessIntegration):
             tokens += ["-c", f"{_WEB_SEARCH_KEY}={_toml_basic_string(self.config.web_search)}"]
         return tokens
 
-    def _recorded_thread_id(self, transport: Transport) -> str | None:
+    def _recorded_thread_id(self, access: VMAccess) -> str | None:
         """The uuid the notify recorder last wrote for this session, or
         ``None`` when nothing valid is recorded.
 
@@ -1213,22 +1291,21 @@ class CodexIntegration(HarnessIntegration):
         only ever writes one, so anything else is not ours to interpret,
         and the fresh path clears it. Only a file that EXISTS and would
         not read raises, since that is a probe that could not run rather
-        than an answer.
+        than an answer, as does a probe that may not have run at all.
 
         The stdout parse tolerates login-shell noise the same way the
         discovery probe does: only uuid-shaped lines are considered.
         """
-        target = home_word(thread_tail(self._session_name))
-        inner = f"[ -f {target} ] || exit 1; cat {target} 2>/dev/null || exit {_READ_FAILED_EXIT}"
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 1:
+        result = access.run(recorder_probe(self._session_name))
+        status = result.require_completed(access.vm_name)
+        if status == 1:
             return None  # nothing recorded yet: not bound
-        if result.returncode != 0:
+        if status != 0:
             recording = f"~/{thread_tail(self._session_name)}"
             raise StateError(
                 f"session '{self._session_name}': could not read the recorded "
                 f"codex thread id ({recording}) on "
-                f"{self._target_label} (exit {result.returncode}); refusing to "
+                f"{self._target_label} (exit {status}); refusing to "
                 f"guess resume-vs-launch.",
                 entity_kind="session",
                 entity_name=self._session_name,
@@ -1241,21 +1318,23 @@ class CodexIntegration(HarnessIntegration):
                     f"Remove {recording} on the launch target (or fix its permissions) and retry; "
                     f"the next resume identifies the conversation from codex's own state instead, "
                     f"so nothing is orphaned."
-                    if result.returncode == _READ_FAILED_EXIT
-                    else "Retry once the launch target is reachable."
+                    if status == _READ_FAILED_EXIT
+                    else _STARTUP_HINT
                 ),
             )
-        recorded = [line.strip() for line in result.stdout.splitlines() if _RECORDED_ID_RE.match(line.strip())]
+        stdout = result.stdout.decode("utf-8", "replace")
+        recorded = [line.strip() for line in stdout.splitlines() if _RECORDED_ID_RE.match(line.strip())]
         if len(recorded) != 1:
             return None  # empty, noise-only, or not something the recorder wrote
         return recorded[0]
 
-    def _rollout_exists(self, transport: Transport, sid: str) -> bool:
+    def _rollout_exists(self, access: VMAccess, sid: str) -> bool:
         """True iff the bound session's rollout
         (``rollout-<timestamp>-<sid>.jsonl``, hence the ``*-<sid>.jsonl``
         glob) exists under the sessions dir on the launch target.
-        Shell-neutral (the glob is quoted through to find); runs through
-        ``$SHELL -lic`` like the readiness probe. ``archived_sessions/``
+        Shell-neutral (the glob is quoted through to find); runs in the
+        login and interactive shell like the readiness probe
+        (:func:`rollout_probe`). ``archived_sessions/``
         is deliberately NOT probed: an archived session reports
         not-resumable and the caller drops the bound id and falls through to
         discovery, rather than silently reversing ``codex archive``. Note
@@ -1269,30 +1348,26 @@ class CodexIntegration(HarnessIntegration):
         printed match exits 0 (a found rollout is definitive even if find
         also stumbled elsewhere); a find that FAILED without printing one
         exits with the find-failed code rather than folding into "no
-        rollout". Anything but {0, 1} (that code, an SSH failure's 255, a
-        shell that could not start) raises: guessing "fresh" would drop
-        the bound id and orphan a resumable conversation."""
-        needle = shlex.quote(f"*-{sid}.jsonl")
-        inner = (
-            f"[ -d {_SESSIONS_DIR} ] || exit 1; "
-            f"out=$(find {_SESSIONS_DIR} -name {needle} -print -quit 2>/dev/null); rc=$?; "
-            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; exit 1'
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == 0:
+        rollout". Any other exit (that code, or a status from a startup file
+        that exits or fails before the probe's own command) raises, and so
+        does a probe that may not have run, with its typed
+        execution error: guessing "fresh" would drop the bound id and
+        orphan a resumable conversation."""
+        status = access.run(rollout_probe(sid)).require_completed(access.vm_name)
+        if status == 0:
             return True  # rollout on disk: resume
-        if result.returncode == 1:
+        if status == 1:
             return False  # the probe ran, no match: not resumable
         raise StateError(
             f"session '{self._session_name}': could not probe for the codex "
-            f"rollout on {self._target_label} (exit {result.returncode}); "
+            f"rollout on {self._target_label} (exit {status}); "
             f"refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,
-            hint=_probe_hint(result.returncode),
+            hint=_probe_hint(status),
         )
 
-    def _discover(self, transport: Transport) -> _Layer2:
+    def _discover(self, access: VMAccess) -> _Layer2:
         """Layer-2 discovery: the rollouts in this session's workspace
         directory that could be a human's interactive codex conversation.
 
@@ -1358,27 +1433,11 @@ class CodexIntegration(HarnessIntegration):
           dropped candidate can turn "several" into one confident wrong
           adoption.
         """
-        workspace = shlex.quote(self._workspace_path)
-        awk = (
-            f"BEGIN{{s={_awk_string(_CLI_SOURCE_NEEDLE)};"
-            f'c="\\"cwd\\":\\"" ENVIRON["agw_ws"] "\\"";'
-            f"for(i=1;i<ARGC;i++){{"
-            f"r=(getline l < ARGV[i]);close(ARGV[i]);"
-            f"if(r<0){{print {_awk_string(_UNREADABLE_SENTINEL)};continue}}"
-            f"if(r>0&&index(l,s)&&index(l,c))print ARGV[i]}}}}"
-        )
-        inner = (
-            f"[ -d {_SESSIONS_DIR} ] || exit {_NO_SESSIONS_DIR_EXIT}; "
-            f"agw_ws=$(cd {workspace} 2>/dev/null && pwd -P) || exit {_CWD_RESOLVE_EXIT}; "
-            f"export agw_ws; "
-            f"find {_SESSIONS_DIR} -type f -name {shlex.quote('rollout-*.jsonl')} "
-            f"-exec awk {shlex.quote(awk)} {{}} + 2>/dev/null || exit {_FIND_FAILED_EXIT}; "
-            f"exit 0"
-        )
-        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
-        if result.returncode == _NO_SESSIONS_DIR_EXIT:
+        result = access.run(discovery_probe(self._workspace_path))
+        status = result.require_completed(access.vm_name)
+        if status == _NO_SESSIONS_DIR_EXIT:
             return _Layer2((), False)  # codex never ran on this target
-        if result.returncode == _CWD_RESOLVE_EXIT:
+        if status == _CWD_RESOLVE_EXIT:
             raise StateError(
                 f"session '{self._session_name}': could not resolve the "
                 f"workspace directory ({self._workspace_path}) on "
@@ -1388,18 +1447,18 @@ class CodexIntegration(HarnessIntegration):
                 entity_name=self._session_name,
                 hint="Check that the workspace directory exists on the launch target and retry.",
             )
-        if result.returncode != 0:
+        if status != 0:
             raise StateError(
                 f"session '{self._session_name}': could not probe for codex "
-                f"rollouts on {self._target_label} (exit {result.returncode}); "
+                f"rollouts on {self._target_label} (exit {status}); "
                 f"refusing to guess resume-vs-launch.",
                 entity_kind="session",
                 entity_name=self._session_name,
-                hint=_probe_hint(result.returncode),
+                hint=_probe_hint(status),
             )
         ids: list[str] = []
         unnamed = False
-        for line in result.stdout.splitlines():
+        for line in result.stdout.decode("utf-8", "replace").splitlines():
             path = line.strip()
             if path == _UNREADABLE_SENTINEL:
                 unnamed = True  # a candidate we could not read: the human decides
@@ -1414,12 +1473,12 @@ class CodexIntegration(HarnessIntegration):
                 ids.append(match.group(1))
         return _Layer2(tuple(ids), unnamed)
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         """Readiness proves only that ``codex`` is installed; it never
         inspects session state (detection is an op-time concern)."""
         require_commands(
             ("codex",),
-            transport,
+            access,
             harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,

@@ -29,10 +29,14 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from tests.conftest import stub_build_registry
-from tests.native_setup_fixtures import LocalFixtureTransport
-from tests.sessions.test_create_start_restart_orchestrated import _patch_transports, _restart_fixture
+from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.sessions.test_create_start_restart_orchestrated import _restart_fixture, _route_guests
 
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
+# Every access a command builds is the recording fake: these tests run no ssh.
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution"),
+    pytest.mark.usefixtures("vm_access_recorder"),
+]
 
 
 @dataclass
@@ -40,7 +44,7 @@ class Lifecycle:
     db: Database
     config: Any
     template: ResolvedSessionTemplate
-    target: LocalFixtureTransport
+    target: LocalFixtureAccount
     events: list[str]
 
     def restart(self) -> None:
@@ -58,8 +62,8 @@ class Lifecycle:
 def lifecycle(tmp_path, monkeypatch):
     stub_build_registry(monkeypatch)
     db, events = _restart_fixture(tmp_path, monkeypatch)
-    target = LocalFixtureTransport(tmp_path / "native")
-    _patch_transports(monkeypatch, target, target)
+    target = LocalFixtureAccount(tmp_path / "native")
+    _route_guests(monkeypatch, target, target)
     # The shared lifecycle fixture simulates a completed runtime without
     # creating tmux. Keep its startup observation on that same runtime seam.
     monkeypatch.setattr("agentworks.sessions.tmux.startup_protection_enabled", lambda *a, **k: False)
@@ -129,7 +133,7 @@ def test_launch_environment_exposes_only_the_prepared_run_directory(lifecycle, m
     monkeypatch.setattr(tmux, "create_session", inspect)
     if operation == "create":
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
         manager.create_session(
             lifecycle.db,
             lifecycle.config,
@@ -331,7 +335,7 @@ def test_unhandled_session_inputs_warn_without_files_or_discovery_env(
     monkeypatch.setattr(tmux, "create_session", inspect)
     if operation == "create":
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
         manager.create_session(
             lifecycle.db,
             lifecycle.config,
@@ -392,11 +396,16 @@ def test_deleted_name_reuses_no_private_run_or_uuid(lifecycle):
     old = lifecycle.db.get_session("s1")
     assert old is not None
     files = lifecycle.files()
-    cleanup_session_artifacts(lifecycle.db, old, lifecycle.target)
+    cleanup_session_artifacts(lifecycle.db, old, lifecycle.target.access())
     lifecycle.db.delete_session("s1")
     assert all(not path.exists() for path in files)
     replacement = lifecycle.db.insert_session(
-        "s1", "ws1", "claude", SessionMode.AGENT, agent_name="a1", socket_path="/tmp/s1.sock"
+        "s1",
+        "ws1",
+        "claude",
+        SessionMode.AGENT,
+        agent_name="a1",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-a1/s1.sock",
     )
     assert replacement.session_uuid != old.session_uuid
     lifecycle.restart()
@@ -413,7 +422,7 @@ def test_modified_session_file_keeps_ownership_for_recovery(lifecycle):
     files = lifecycle.files()
     files[0].write_text("operator modification")
     with pytest.raises(StateError):
-        cleanup_session_artifacts(lifecycle.db, session, lifecycle.target)
+        cleanup_session_artifacts(lifecycle.db, session, lifecycle.target.access())
     assert lifecycle.db.get_session("s1") is not None
     assert files[0].exists()
     assert any(
@@ -429,7 +438,7 @@ def test_create_and_delete_keep_same_user_sessions_separate(lifecycle, monkeypat
     first_files = lifecycle.files()
     assert first is not None
     lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-    monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+    monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
     monkeypatch.setattr(manager, "_teardown_session", lambda *a, **k: lifecycle.events.append("delete-kill"))
     manager.create_session(
         lifecycle.db, lifecycle.config, name="s2", workspace="ws1", agent="a1", interaction=TtyInteractionPolicy.REFUSE
@@ -475,13 +484,13 @@ def test_unconfirmed_new_runtime_keeps_its_run_and_artifacts(lifecycle, monkeypa
 
 
 def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifecycle, monkeypatch):
-    from agentworks.native_files import NativeFiles
+    from agentworks.execution.files import Files
 
     lifecycle.restart()
     previous = lifecycle.db.get_session("s1")
     old_files = lifecycle.files()
     assert previous is not None
-    original = NativeFiles.publish
+    original = Files.write_if
     calls = 0
 
     def fail_second(self, *args, **kwargs):
@@ -492,7 +501,7 @@ def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifec
         return original(self, *args, **kwargs)
 
     lifecycle.events.clear()
-    monkeypatch.setattr(NativeFiles, "publish", fail_second)
+    monkeypatch.setattr(Files, "write_if", fail_second)
     with pytest.raises(StateError):
         lifecycle.restart()
     interrupted_files = lifecycle.files()
@@ -502,7 +511,7 @@ def test_partial_publication_retains_old_run_and_retry_cleans_staged_files(lifec
     assert current is not None and current.run_id == previous.run_id
     assert "kill" not in lifecycle.events
     assert not read_native_setup(lifecycle.db, "session", "s1").records[0].complete
-    monkeypatch.setattr(NativeFiles, "publish", original)
+    monkeypatch.setattr(Files, "write_if", original)
     lifecycle.restart()
     assert len(lifecycle.files()) == 2
     assert all(not path.exists() for path in interrupted_files)
@@ -557,7 +566,7 @@ def test_uncaptured_ancestor_does_not_block_session_operations(lifecycle, monkey
         _stopped_until_launch(lifecycle, monkeypatch)
     if operation == "create":
         lifecycle.db.insert_agent_grant("a1", "ws1", "explicit")
-        monkeypatch.setattr("agentworks.agents.manager._assert_agent_ssh_works", lambda *a, **k: None)
+        monkeypatch.setattr("agentworks.agents.manager.access._assert_agent_access_works", lambda *a, **k: None)
     lifecycle.events.clear()
     if operation == "create":
         manager.create_session(
@@ -661,8 +670,10 @@ def test_real_launch_probe_failure_preserves_existing_runtime_before_teardown(
         monkeypatch.setattr(module, "probe_conversation", lambda *a, **k: ConversationProbe(True))
     lifecycle.events.clear()
 
-    # A failed guest login produces a real process failure before native discovery.
-    (lifecycle.target.root / "login-shell").write_text("#!/bin/sh\nexit 9\n")
+    # The real probes run in the fixture's account, whose login startup fails,
+    # so each fails with its own status rather than a fabricated exception. The
+    # status is one the conversation probe cannot read as "no transcript" (1).
+    (lifecycle.target.home / ".profile").write_text("exit 3\n")
     with pytest.raises(StateError) as failure:
         lifecycle.restart()
     assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")
@@ -821,3 +832,59 @@ def test_unknown_passthrough_restart_records_missing_delivery_and_retires_old_fi
     assert state.complete and not state.incomplete_reasons
     assert not any(entry.input_id == item.identity for entry in state.deferred)
     assert all(not path.exists() for path in old_files)
+
+
+def test_direct_session_spec_persists_recaptures_and_clears_inherited_entries(lifecycle, monkeypatch):
+    from agentworks.artifacts.state import read_captures
+    from agentworks.schema import CapabilityBlock
+    from agentworks.sessions.manager._env import _resolve_template
+    from agentworks.sessions.template import SessionTemplate
+    from agentworks.sessions.templates import resolve_from_dict_with_provenance
+
+    # Restore real template resolution around the fixture's process/transport seams.
+    base = SessionTemplate.model_validate(
+        {
+            "name": "claude",
+            "harness_integration": CapabilityBlock.of("shell"),
+            "artifacts": {"declare": {"hints": {"base": {"text": "Base direct context."}}}},
+        }
+    )
+    monkeypatch.setattr(lifecycle.config, "session_templates", {"claude": base}, raising=False)
+    monkeypatch.setattr(manager, "_resolve_template", _resolve_template)
+    monkeypatch.setattr(
+        "agentworks.sessions.templates.resolve_template_with_provenance",
+        lambda registry, name=None, **kwargs: resolve_from_dict_with_provenance(
+            dict(registry.iter_kind_items("session-template")), name, **kwargs
+        ),
+    )
+    specification = {"artifacts": {"declare": {"hints": {"instance": {"text": "Instance direct context."}}}}}
+    manager.restart_session(
+        lifecycle.db,
+        lifecycle.config,
+        name="s1",
+        spec=json.dumps(specification),
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    captured = read_captures(lifecycle.db, "session", "s1")["session"]
+    assert list(captured.inputs.hints) == ["base", "instance"]
+    assert all(item.origin.bundle == "" for item in captured.inputs.items())
+    desired = lifecycle.db.instance_state.get_desired_overlay("session", "s1")
+    assert desired is not None and desired.payload.value == specification
+    first_files = lifecycle.files()
+    assert len(first_files) == 3 and all(path.exists() for path in first_files)
+    lifecycle.restart()
+    assert read_captures(lifecycle.db, "session", "s1")["session"] == captured
+    assert all(not path.exists() for path in first_files)
+    manager.restart_session(
+        lifecycle.db,
+        lifecycle.config,
+        name="s1",
+        spec='{"artifacts":{"declare":null}}',
+        yes=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+    assert not read_captures(lifecycle.db, "session", "s1")["session"].inputs
+    assert not lifecycle.files()
+    lifecycle.restart()
+    assert not read_captures(lifecycle.db, "session", "s1")["session"].inputs

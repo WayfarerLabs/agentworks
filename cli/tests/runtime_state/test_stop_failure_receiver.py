@@ -7,7 +7,6 @@ from collections import Counter
 from concurrent.futures import Future
 from concurrent.futures import ThreadPoolExecutor as PythonThreadPoolExecutor
 from concurrent.futures import wait as wait_for_futures
-from time import monotonic
 
 import pytest
 
@@ -16,7 +15,7 @@ from agentworks.errors import ExternalError, UserAbort
 from agentworks.runtime_state._models import Outcome, RuntimeInvocation
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _teardown
-from tests.runtime_state.test_composition import REFUSE, seed_vm
+from tests.runtime_state.test_composition import HANG_GUARD_SECONDS, REFUSE, seed_vm
 from tests.runtime_state.test_composition import runtime as runtime
 from tests.runtime_state.test_public_stop import _running
 
@@ -64,14 +63,14 @@ def test_failure_receiver_error_drains_and_propagates_without_replaying_known_fa
             return future
 
     monkeypatch.setattr(_teardown, "ThreadPoolExecutor", Pool)
-    # A broken coordinator must fail instead of waiting forever on the
-    # synthetic queued item. The watchdog runs only on the caller thread.
-    deadline = monotonic() + 5
+    # A broken coordinator must fail instead of waiting forever on the synthetic queued item,
+    # which only cancellation finishes: waiting on it alone is that hang. The watchdog runs only
+    # on the caller thread.
     watchdog_fired = False
 
     def wait(pending, **kwargs):
         nonlocal watchdog_fired
-        if monotonic() >= deadline:
+        if set(pending) == {queued} and not queued.done():
             watchdog_fired = True
             queued.cancel()
         kwargs["timeout"] = min(kwargs["timeout"], 0.1)
@@ -85,9 +84,9 @@ def test_failure_receiver_error_drains_and_propagates_without_replaying_known_fa
 
     def execute(plan):
         native[plan.session_name] += 1
-        ready.wait(timeout=2)
+        ready.wait(timeout=HANG_GUARD_SECONDS)
         if plan.session_name == "good" and not prior_cancellation:
-            assert draining.wait(timeout=5)
+            assert draining.wait(timeout=HANG_GUARD_SECONDS)
         powers["box"] = VMStatus.STOPPED
         if plan.session_name == "bad" and failure_stage == "native":
             raise ExternalError("native teardown failed")

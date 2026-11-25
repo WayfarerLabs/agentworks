@@ -11,9 +11,9 @@ from uuid import uuid4
 import pytest
 
 from agentworks.errors import ExternalError
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.sessions.tmux import capture_output
-from agentworks.ssh import SSHResult
+from agentworks.sessions.tmux import CommandOutcome, capture_output
 from tests.conftest import stub_build_registry, stub_vm_ssh_identity
 from tests.sessions._workload_secrets import register_workload_secret
 from tests.sessions.test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
@@ -33,35 +33,49 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(
     else:
         db, events = _restart_fixture(tmp_path, monkeypatch)
         db._conn.execute(
-            "UPDATE sessions SET mode = ?, agent_name = NULL WHERE name = 's1'", (SessionMode.ADMIN.value,)
+            "UPDATE sessions SET mode = ?, agent_name = NULL, socket_path = ? WHERE name = 's1'",
+            (SessionMode.ADMIN.value, "/run/agentworks/admin-tmux-sockets/admin/s1.sock"),
         )
         db._conn.commit()
     stub_build_registry(monkeypatch)
     stub_vm_ssh_identity(monkeypatch)
     log_root = tmp_path / "logs"
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", log_root)
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", log_root)
     secret = uuid4().hex
     original_resolve = _create._preflight_and_resolve
 
     def resolve(*args, **kwargs):
-        values, agent = original_resolve(*args, **kwargs)
-        return {**values, "fixture": secret}, agent
+        return {**original_resolve(*args, **kwargs), "fixture": secret}
 
     monkeypatch.setattr(_create, "_preflight_and_resolve", resolve)
     if operation == "restart":
         register_workload_secret(db, monkeypatch, name="fixture", value=secret)
     monkeypatch.setattr(manager, "_resolve_session_env", lambda *args, **kwargs: {"TOKEN": kwargs["values"]["fixture"]})
 
-    def transport(*args, logger=None, **kwargs):
-        def run(command, **options):
-            result = SSHResult(0, "", "")
-            if logger is not None:
-                logger.log_command(command, result)
+    import agentworks.execution as execution
+
+    routed = execution.vm_access
+
+    def logged_access(vm, config, identity, *, log=None):
+        """The routed access, its runs written to the operation's log as a real access writes them.
+
+        The launch, the one request carrying the session's environment, gets
+        a guest that echoes its value back on stderr.
+        """
+        access = routed(vm, config, identity, log=log)
+        run = access.run
+
+        def run_and_log(request, **options):
+            result = echoed if "TOKEN" in getattr(request, "env", {}) else run(request, **options)
+            if log is not None:
+                log(request, result)
             return result
 
-        return SimpleNamespace(run=run, write_file=lambda *args, **kwargs: None, logger=logger)
+        access.run = run_and_log  # type: ignore[method-assign]
+        return access
 
-    monkeypatch.setattr(manager, "transport", transport)
+    echoed = Result(Completed(0), b"", f"launch env TOKEN={secret}".encode())
+    monkeypatch.setattr("agentworks.execution.vm_access", logged_access)
 
     def create(*args, run_command, env, **kwargs):
         kwargs["before_spawn"]()
@@ -70,7 +84,8 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(
             from agentworks.db import SessionStatus
 
             monkeypatch.setattr(manager, "check_session_status", lambda *a, **k: SessionStatus.RUNNING)
-        run_command(f"tmux new-session -e TOKEN={env['TOKEN']}")
+        launched = run_command("tmux new-session", env=env)
+        assert launched.stderr == echoed.stderr.decode()
         return "/run/agentworks/admin-tmux-sockets/admin/s1.sock", 4243
 
     monkeypatch.setattr(tmux, "create_session", create)
@@ -85,7 +100,7 @@ def test_admin_session_launch_redacts_resolved_values_in_actual_command_log(
             assert sum("fixture" in names for names in resolve_counter) == 1
         assert db.get_session("s1") is not None
         logs = [path.read_text() for path in log_root.glob("*.log")]
-        assert logs and any("tmux new-session" in text for text in logs)
+        assert any("env [TOKEN]" in text and "launch env TOKEN=" in text for text in logs)
         assert all(secret not in text for text in logs)
     finally:
         db.close()
@@ -102,7 +117,7 @@ def test_real_tmux_capture_targets_the_exact_session_pane():
             completed = subprocess.run(
                 ["/bin/sh", "-c", command], capture_output=True, text=True, timeout=10, env=environment
             )
-            return SSHResult(completed.returncode, completed.stdout, completed.stderr)
+            return CommandOutcome(stdout=completed.stdout, stderr=completed.stderr, returncode=completed.returncode)
 
         try:
             subprocess.run(

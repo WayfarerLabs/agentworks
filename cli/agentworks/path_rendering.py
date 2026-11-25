@@ -37,7 +37,7 @@ def format_host_path(file: Path) -> str:
     difference carries meaning, and it does not; that mixed screen is the
     defect this helper exists to prevent, and it has recurred twice.
 
-    Four kinds of path are deliberately NOT rendered here, and each
+    Five kinds of path are deliberately NOT rendered here, and each
     exclusion is load-bearing rather than an oversight:
 
     - **Paths on a VM or other remote.** ``$HOME`` here is the *host's*
@@ -47,21 +47,25 @@ def format_host_path(file: Path) -> str:
       ``~/workspaces/w`` and go looking on the wrong machine. Remote
       paths stay absolute. See ``workspaces/manager/rehome.py`` for the
       density of them.
-    - **Text written into a file another program parses**, where ``~`` is
-      not expanded in that position: the PowerShell ``$PROFILE``
-      source line (``completions/install.py``), and the OpenSSH config
-      writer, which has its own ``_to_ssh_path`` because it is generating
-      config for ``ssh`` to read rather than prose for a human.
+    - **Text written into a file another program parses**, which follows
+      that program's rules rather than these: the PowerShell ``$PROFILE``
+      source line (``completions/install.py``), where ``~`` is not
+      expanded in that position, and the OpenSSH config writer, which has
+      its own ``_to_ssh_path`` because it is generating config for ``ssh``
+      to read rather than prose for a human.
     - **Verbatim echoes of what the operator typed**, such as
       ``admin.dotfiles_source`` (which may be a git URL, not a path at
       all) and ``apt.source_file``. Quoting input back unchanged is the
       point of those messages.
-    - **The body of an SSH log**, which is a verbatim transcript whose
-      command lines are the literal argv that ran. Naming the log file is
-      this rule's job (``ssh.py``'s ``display_path``); rewriting the
-      prose lines inside it while the ``$ ssh -i /home/you/...`` lines
-      beside them stayed absolute would recreate the mixed rendering one
-      level down.
+    - **The body of an operation log**, which is a verbatim transcript
+      whose records quote the literal argv that ran. Naming the log file is
+      this rule's job (``oplog.OperationLogFile.display_path``); rewriting
+      the prose lines inside it while the argv beside them stayed absolute
+      would recreate the mixed rendering one level down.
+    - **A path whose own characters are the subject of the message**, where
+      ``~`` would hide the character at fault: the Windows home directory
+      named when its apostrophe keeps a managed SSH entry from being
+      written (``ssh_config._entry_value``).
 
     A path outside ``$HOME`` needs no exclusion: it already falls through
     to the absolute form.

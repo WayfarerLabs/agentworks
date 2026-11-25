@@ -11,6 +11,7 @@ from agentworks.env import EnvEntry, PlaintextEnvEntry
 from agentworks.errors import AgentworksError
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _env
+from tests._runtime_probes import server_for
 
 from .test_create_start_restart_orchestrated import _create_stubs, _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
@@ -64,7 +65,7 @@ def test_manager_refuses_composed_reserved_env_before_staging_or_teardown(
         assert stages == []
         assert not any("kill-server" in command or "new-session" in command for command, _ in native.calls[first:])
         if observed is not None:
-            assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == observed
+            assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == observed
             assert native.native("has-session -t '=s1'").ok
     finally:
         db.close()
@@ -81,8 +82,9 @@ def test_manager_preserves_unreserved_private_prefix_env_in_native_launch(tmp_pa
     try:
         invoke(db, "create_session", workspace="ws1", agent="a1")
         row = db.get_session("s1")
-        assert row is not None and manager.check_session_status(row, target=native) is SessionStatus.RUNNING
-        assert native.native("show-environment -t '=s1' _AGW_OPERATOR_VALUE").stdout.strip() == (
+        assert row is not None
+        assert manager.check_session_status(row, admin=native.access(), server=server_for(row)) is SessionStatus.RUNNING
+        assert native.native("show-environment -g _AGW_OPERATOR_VALUE").stdout.strip() == (
             "_AGW_OPERATOR_VALUE=operator-value"
         )
     finally:

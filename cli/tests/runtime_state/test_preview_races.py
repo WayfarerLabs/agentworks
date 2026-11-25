@@ -58,7 +58,7 @@ def test_preview_workspace_deletion_during_grouped_observation_isolated(
     monkeypatch.setattr(manager, "observe_session_statuses", observe)
     monkeypatch.setattr(
         "agentworks.sessions.manager._status.batch_check_status",
-        lambda rows, **k: {row.name: SessionStatus.STOPPED for row in rows},
+        lambda rows, **k: {row.name: SessionStatus.STOPPED for row, _server in rows},
     )
     monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
     with pytest.raises(StateError):
@@ -85,7 +85,7 @@ def test_preview_console_deleted_after_route_selection_keeps_independent_results
     config = make_config()
     deleted: list[bool] = []
     rendered = []
-    monkeypatch.setattr(consoles, "_live_target", lambda *a, **k: None)
+    monkeypatch.setattr(consoles, "_live_access", lambda *a, **k: None)
 
     def get_console(name):
         if name == "gone" and not deleted:

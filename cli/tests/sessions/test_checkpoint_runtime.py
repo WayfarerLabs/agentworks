@@ -8,16 +8,17 @@ from uuid import uuid4
 
 import pytest
 
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode
 from agentworks.errors import StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
-from agentworks.sessions.manager import _teardown
+from tests._runtime_probes import server_for
 from tests.sessions.test_create_start_restart_orchestrated import _create_stubs
 from tests.sessions.test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from tests.sessions.test_native_startup import _NATIVE_CAPTURE, launch
 from tests.sessions.test_native_startup import native as native
 from tests.sessions.test_round8_startup import bind_native_runtime
+from tests.vm_access_support import Admin, RecordingVMAccess
 
 
 @pytest.mark.parametrize("operation", ["start_session", "restart_session", "stop_session"])
@@ -27,7 +28,7 @@ def test_checkpoint_then_changed_boot_observation_enables_safe_ordinary_start(
 ):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(tmux, "ADMIN_SOCKET_ROOT", str(native.root))
     native.socket = str(native.root / "admin" / "s1.sock")
     Path(native.socket).parent.mkdir(exist_ok=True)
     db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, socket_path=None if null_address else native.socket)
@@ -41,7 +42,7 @@ def test_checkpoint_then_changed_boot_observation_enables_safe_ordinary_start(
         with pytest.raises(StateError):
             getattr(manager, operation)(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
         checkpoint = db.get_session("s1")
-        assert checkpoint is not None and checkpoint.boot_id == tmux.read_boot_id(native) and checkpoint.pid is None
+        assert checkpoint is not None and checkpoint.boot_id == tmux.read_boot_id(native.run) and checkpoint.pid is None
         with pytest.raises(StateError):
             getattr(manager, operation)(db, config, name="s1", interaction=TtyInteractionPolicy.REFUSE)
         assert db.get_session("s1") == checkpoint
@@ -55,7 +56,7 @@ def test_checkpoint_then_changed_boot_observation_enables_safe_ordinary_start(
             and current.session_uuid == checkpoint.session_uuid
             and (current.pid == PID_STOPPED) is (operation == "stop_session")
         )
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).status is (
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).status is (
             tmux.ProbeStatus.ABSENT if operation == "stop_session" else tmux.ProbeStatus.PRESENT
         )
     finally:
@@ -68,7 +69,7 @@ def test_checkpoint_refuses_present_or_unknown_native_server_without_writing_ide
 ):
     db = _create_stubs(tmp_path, monkeypatch, [])
     bind_native_runtime(db, monkeypatch, native)
-    monkeypatch.setattr(_teardown, "ADMIN_SOCKET_ROOT", str(native.root))
+    monkeypatch.setattr(tmux, "ADMIN_SOCKET_ROOT", str(native.root))
     native.socket = str(native.root / "admin" / "s1.sock")
     Path(native.socket).parent.mkdir(exist_ok=True)
     null_address = "default" in obstruction
@@ -112,45 +113,34 @@ def test_checkpoint_refuses_present_or_unknown_native_server_without_writing_ide
         db.close()
 
 
-def test_runtime_observer_bounds_admin_and_legacy_owning_transports(tmp_path, monkeypatch):
+def test_runtime_observer_bounds_its_reads_and_reads_a_legacy_row_as_the_admin(tmp_path, monkeypatch):
     from dataclasses import replace
-    from typing import cast
 
-    from agentworks.status_observation import GUEST_OBSERVATION_ATTEMPTS, GUEST_OBSERVATION_TIMEOUT_SECONDS
-    from agentworks.transports import Transport
+    from agentworks.sessions.manager import _status
+    from agentworks.status_observation import GUEST_OBSERVATION_TIMEOUT_SECONDS
 
     db = _create_stubs(tmp_path, monkeypatch, [])
-    db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
+    vm = db.get_vm("vm1")
+    assert vm is not None
+    db.insert_session(
+        "s1", "ws1", "claude", SessionMode.ADMIN, socket_path=f"{tmux.ADMIN_SOCKET_ROOT}/{vm.admin_username}/s1.sock"
+    )
     row = db.get_session("s1")
     assert row is not None
-    calls = []
+    admin = RecordingVMAccess([], Admin())
+    monkeypatch.setattr(manager, "check_session_status", _status.check_session_status)
 
-    class Target:
-        def run(self, command, **kwargs):
-            calls.append(kwargs)
-            return SimpleNamespace(returncode=0, stdout="", stderr="", ok=True)
-
-    target = cast("Transport", Target())
-
-    def inspect(session, *, target):
-        target.run("inspect", check=False)
-        return SessionStatus.RUNNING
-
-    monkeypatch.setattr(manager, "check_session_status", inspect)
-    manager.observe_session_runtime(row, admin_target=target)
+    manager.observe_session_runtime(row, admin=admin, server=server_for(row))
 
     def legacy(name, *, run_command, socket_path):
         run_command("legacy", check=False)
         return tmux.ProbeStatus.PRESENT
 
     monkeypatch.setattr(tmux, "probe_tmux_session", legacy)
-    manager.observe_session_runtime(
-        replace(row, socket_path=None, pid=4242), admin_target=target, session_target=target
-    )
-    assert calls and all(
-        options["timeout"] == GUEST_OBSERVATION_TIMEOUT_SECONDS
-        and options["retries"] == GUEST_OBSERVATION_ATTEMPTS
-        and options["tty"] is False
-        for options in calls
-    )
+    before = len(admin.calls)
+    manager.observe_session_runtime(replace(row, socket_path=None, pid=4242), admin=admin, server=None)
+    requests = [call.request for call in admin.calls]
+    legacy_reads = requests[before:]
+    assert legacy_reads and not any(request.elevated for request in legacy_reads)
+    assert all(request.deadline == GUEST_OBSERVATION_TIMEOUT_SECONDS for request in requests)
     db.close()

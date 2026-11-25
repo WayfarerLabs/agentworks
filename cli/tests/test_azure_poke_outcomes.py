@@ -1,0 +1,300 @@
+"""Which outcomes of an Azure poke's create let its cleanup delete stand without a warning.
+
+A create that did not return normally is removed, and its rule named for
+removal by hand, unless its outcome is known: Azure refused the create,
+or reported that it succeeded. Most cases drive the real
+azure-core poller and generated network client over an in-memory
+``requests`` adapter, since what they pin is how azure-core sends the
+create and records what Azure answered: the create is never retried, and a
+failure to observe the operation becomes its own ``Failed``. Retries go
+to the fake rules, so the poke returns and the first attempt's cleanup is
+what each case inspects.
+"""
+
+from __future__ import annotations
+
+import signal
+from typing import TYPE_CHECKING, Any
+
+import pytest
+import requests
+from azure.core.pipeline.policies import RetryPolicy
+from azure.core.polling.base_polling import LROBasePolling
+from azure.mgmt.network import NetworkManagementClient
+
+from agentworks.plugins.azure import network as azure_network
+from agentworks.plugins.azure.errors import AzureError
+from agentworks.plugins.azure.network import TRANSIENT_ALLOW_RULE_PREFIX, poke_ssh_allow
+from agentworks.plugins.azure.route_calls import _RouteCallTimeout
+from tests._azure_platform_support import _FakeAzure, _install_fakes, _Poller
+from tests._azure_scripted_transport import _Answer, _refused, _scripted_client, _ScriptedAdapter
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tests.conftest import CapturedOutput
+
+_PREFIX = "198.18.0.7/32"
+_MONITOR = "https://management.azure.com/subscriptions/sub-A/providers/Microsoft.Network/operations/1?api-version=1"
+
+# The first wait of the poke's backoff: azure-core's own factor.
+_BACKOFF = RetryPolicy().backoff_factor
+
+_ACCEPTED: _Answer = (201, {"Azure-AsyncOperation": _MONITOR}, {"properties": {"provisioningState": "Updating"}})
+
+
+def _reported(status: str) -> _Answer:
+    return (200, {}, {"status": status})
+
+
+def _poke_after(monkeypatch: pytest.MonkeyPatch, first: Callable[..., Any]) -> tuple[_FakeAzure, str, list[float]]:
+    """Poke with the first create through ``first`` and any retry through the fakes.
+
+    Returns the fakes, the first attempt's rule name and the fake clock's reading at each of its deletes.
+    """
+    fakes = _install_fakes(monkeypatch)
+    rules = fakes.network.security_rules
+    real_create, real_delete = rules.begin_create_or_update, rules.begin_delete
+    first_name: list[str] = []
+    deleted_at: list[float] = []
+
+    def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> Any:
+        if not first_name:
+            first_name.append(rule_name)
+            return first(rg, nsg, rule_name, rule, **options)
+        return real_create(rg, nsg, rule_name, rule, **options)
+
+    def _delete(rg: str, nsg: str, rule_name: str, **options: Any) -> Any:
+        if first_name and rule_name == first_name[0]:
+            deleted_at.append(fakes.clock.now)
+        return real_delete(rg, nsg, rule_name, **options)
+
+    monkeypatch.setattr(rules, "begin_create_or_update", _create)
+    monkeypatch.setattr(rules, "begin_delete", _delete)
+    poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+    assert rules.transient_names(), "the retry opens the route"
+    return fakes, first_name[0], deleted_at
+
+
+def _through_sdk(answers: list[_Answer]) -> tuple[Callable[..., Any], _ScriptedAdapter]:
+    """A create sent by the generated client over an adapter giving ``answers``, and that adapter."""
+    adapter = _ScriptedAdapter(answers)
+    return _scripted_client(NetworkManagementClient, adapter).security_rules.begin_create_or_update, adapter
+
+
+def _assert_named(captured_output: CapturedOutput, rule_name: str) -> None:
+    (warning,) = captured_output.warnings
+    assert rule_name in warning
+    assert _PREFIX in warning
+
+
+@pytest.mark.parametrize(
+    "monitor",
+    [
+        _refused(403),
+        (200, {}, {"no": "status"}),
+        _reported("Failed"),
+        _reported("Canceled"),
+    ],
+    ids=["status-read-refused", "status-read-without-status", "provider-failed", "provider-canceled"],
+)
+def test_an_accepted_create_that_azure_core_records_as_failed_is_named(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, monitor: _Answer
+) -> None:
+    """azure-core records a status read it could not use as ``Failed``, which says nothing of the create."""
+    create, _adapter = _through_sdk([_ACCEPTED, monitor])
+    fakes, first, deleted_at = _poke_after(monkeypatch, create)
+
+    assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
+    assert deleted_at == [0.0]  # a final state, if not Azure's, ends the settle at once
+    _assert_named(captured_output, first)
+
+
+def test_a_create_azure_reported_succeeded_is_removed_without_a_warning(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The final read failing after Azure reported success leaves a rule that exists, so its delete is authoritative."""
+    create, _adapter = _through_sdk([_ACCEPTED, _reported("Succeeded"), (200, {}, b"{not json")])
+    fakes, first, _deleted_at = _poke_after(monkeypatch, create)
+
+    assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
+    assert captured_output.warnings == []
+
+
+@pytest.mark.parametrize("status", [400, 403, 409], ids=["bad-request", "forbidden", "conflict"])
+def test_a_create_azure_refused_is_removed_without_a_warning(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, status: int
+) -> None:
+    """The create is never retried, so Azure's refusal of it says the rule never exists."""
+    create, adapter = _through_sdk([_refused(status)])
+    fakes, first, deleted_at = _poke_after(monkeypatch, create)
+
+    assert adapter.methods == ["PUT"]
+    assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
+    assert deleted_at == [0.0]  # no poller to wait on
+    assert fakes.clock.now == 0.0  # nor a refusal to back off from
+    assert captured_output.warnings == []
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [
+        [requests.exceptions.ReadTimeout("read timed out"), _refused(403)],
+        [requests.exceptions.ConnectionError("connection reset")],
+        [_refused(504)],
+    ],
+    ids=["unanswered", "request-unsent", "gateway-timeout"],
+)
+def test_a_create_azure_did_not_refuse_before_its_poller_is_named(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, answers: list[_Answer]
+) -> None:
+    """Without Azure's 4xx answer the try may have reached the network provider; nothing is retried to find out."""
+    create, adapter = _through_sdk(answers)
+    fakes, first, deleted_at = _poke_after(monkeypatch, create)
+
+    assert adapter.methods == ["PUT"]
+    assert ("rg1", "vm1-nsg", first) in fakes.network.security_rules.deletes()
+    assert deleted_at == [0.0]  # no poller to wait on
+    _assert_named(captured_output, first)
+
+
+@pytest.mark.parametrize(
+    ("answer", "wait"),
+    [
+        ((429, {"Retry-After": "7"}, {"error": {"code": "Throttled"}}), 7.0),
+        ((429, {"Retry-After": "600"}, {"error": {"code": "Throttled"}}), azure_network._POKE_RETRY_AFTER_MAX_SECONDS),
+        (_refused(503), _BACKOFF),
+        ((429, {"Retry-After": "soon"}, {"error": {"code": "Throttled"}}), _BACKOFF),
+    ],
+    ids=["retry-after", "retry-after-capped", "backoff", "retry-after-unparsable"],
+)
+def test_an_answer_azure_core_would_retry_waits_before_the_next_attempt(
+    monkeypatch: pytest.MonkeyPatch, answer: _Answer, wait: float
+) -> None:
+    """The create goes unretried, so the poke waits before its next attempt on azure-core's backoff factor."""
+    create, adapter = _through_sdk([answer])
+    fakes, _first, deleted_at = _poke_after(monkeypatch, create)
+
+    assert adapter.methods == ["PUT"]
+    assert deleted_at == [0.0]  # the cleanup comes first
+    assert fakes.clock.now == wait
+
+
+def test_the_backoff_grows_between_attempts_and_ends_with_the_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    create, adapter = _through_sdk([_refused(503)])
+    fakes = _install_fakes(monkeypatch)
+    monkeypatch.setattr(fakes.network.security_rules, "begin_create_or_update", create)
+
+    with pytest.raises(AzureError):
+        poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+
+    assert adapter.methods == ["PUT"] * azure_network._POKE_ALLOCATION_ATTEMPTS
+    waits = [_BACKOFF * 2**n for n in range(azure_network._POKE_ALLOCATION_ATTEMPTS - 1)]
+    assert fakes.clock.now == sum(waits)
+
+
+def test_ctrl_c_ends_the_wait_before_the_next_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wait holds no interrupts: the failed attempt is already cleaned up, and nothing else is sent."""
+    create, adapter = _through_sdk([_refused(503)])
+    fakes = _install_fakes(monkeypatch)
+    rules = fakes.network.security_rules
+    monkeypatch.setattr(rules, "begin_create_or_update", create)
+    slept: list[float] = []
+
+    def _interrupted_sleep(seconds: float) -> None:
+        signal.raise_signal(signal.SIGINT)
+        slept.append(seconds)  # reached only if the interrupt was held
+
+    monkeypatch.setattr(fakes.clock, "sleep", _interrupted_sleep)
+
+    with pytest.raises(KeyboardInterrupt):
+        poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+
+    assert slept == []
+    assert adapter.methods == ["PUT"]
+    (deleted,) = rules.deletes()
+    assert deleted[2].startswith(TRANSIENT_ALLOW_RULE_PREFIX)
+
+
+def test_the_creates_status_reads_keep_azure_cores_retries(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """Only the create's own request goes unretried; a status read Azure could not serve is read again."""
+    create, adapter = _through_sdk([_ACCEPTED, _refused(503), _reported("Succeeded"), (200, {}, {"name": "rule"})])
+    fakes = _install_fakes(monkeypatch)
+    rules = fakes.network.security_rules
+    monkeypatch.setattr(rules, "begin_create_or_update", create)
+
+    poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+
+    assert adapter.methods == ["PUT", "GET", "GET", "GET"]
+    assert rules.deletes() == []
+    assert captured_output.warnings == []
+
+
+class _TimedOut(_Poller):
+    """A create whose wait runs out, with ``polling`` as its polling method."""
+
+    def __init__(self, polling: object) -> None:
+        super().__init__(None, finishes=False)
+        self._polling = polling
+
+    def polling_method(self) -> Any:
+        return self._polling
+
+
+def _time_out_with(monkeypatch: pytest.MonkeyPatch, polling: object) -> tuple[_FakeAzure, str]:
+    fakes = _install_fakes(monkeypatch)
+    rules = fakes.network.security_rules
+    real_create = rules.begin_create_or_update
+
+    def _create(rg: str, nsg: str, rule_name: str, rule: object, **options: Any) -> _Poller:
+        real_create(rg, nsg, rule_name, rule)
+        return _TimedOut(polling)
+
+    monkeypatch.setattr(rules, "begin_create_or_update", _create)
+    with pytest.raises(_RouteCallTimeout):
+        poke_ssh_allow(fakes.network, "rg1", "vm1", [_PREFIX])  # type: ignore[arg-type]
+    (attempted,) = rules.transient_names()
+    assert attempted.startswith(TRANSIENT_ALLOW_RULE_PREFIX)
+    assert ("rg1", "vm1-nsg", attempted) in rules.deletes()
+    return fakes, attempted
+
+
+@pytest.mark.parametrize(
+    ("final", "warns"),
+    [("Succeeded", False), ("succeeded", False), ("Failed", True), ("Canceled", True), ("InProgress", True)],
+)
+def test_a_timed_out_create_is_named_unless_azure_reports_it_succeeded_within_the_settle(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput, final: str, warns: bool
+) -> None:
+    """azure-core's own polling method decides which states end the settle; only success ends the doubt."""
+    polling: LROBasePolling[Any, Any, Any, Any] = LROBasePolling()
+    states = iter(["InProgress", "InProgress"])
+    monkeypatch.setattr(polling, "status", lambda: next(states, final))
+
+    fakes, attempted = _time_out_with(monkeypatch, polling)
+
+    if final == "InProgress":
+        assert fakes.clock.now == azure_network._UNFINISHED_CREATE_SETTLE_SECONDS
+    if warns:
+        _assert_named(captured_output, attempted)
+    else:
+        assert captured_output.warnings == []
+
+
+def test_a_state_that_cannot_be_read_counts_as_unconfirmed_and_the_rule_still_goes(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A failed read of the state never skips the removal; it warns instead."""
+
+    class _Unreadable:
+        def finished(self) -> bool:
+            raise RuntimeError("no state to read")
+
+        def status(self) -> str:
+            raise RuntimeError("no state to read")
+
+    _fakes, attempted = _time_out_with(monkeypatch, _Unreadable())
+
+    _assert_named(captured_output, attempted)

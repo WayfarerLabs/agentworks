@@ -20,7 +20,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
 from agentworks.execution.requests import AccountShell, account_shell_basename
 from agentworks.git_credentials.credential import credential_references
-from agentworks.schema import CapabilityConfig, NonEmptyStr, ResourceRef
+from agentworks.schema import CapabilityConfig, Interpolated, NonEmptyStr, ResourceRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -117,12 +117,27 @@ class AgentTemplate(DeclaredResource):
     """Names of ``user-install-command`` resources run during agent init."""
 
     dotfiles_source: str | None = None
-    """Where to fetch the agent user's dotfiles from."""
+    """Where to fetch the agent user's dotfiles from, a source reference (see the
+    source references guide) checked at load."""
 
-    dotfiles_destination: str | None = None
-    """Where the fetched dotfiles are checked out."""
+    @field_validator("dotfiles_source")
+    @classmethod
+    def _check_dotfiles_source(cls, value: str | None) -> str | None:
+        from agentworks.sources import check_source_ref
 
-    dotfiles_install_cmd: str | None = None
+        return None if value is None else check_source_ref(value, field="dotfiles_source")
+
+    dotfiles_destination: Annotated[str | None, Interpolated()] = None
+    """Where the fetched dotfiles are checked out: a path in the agent's home
+    (`dots` or `~/dots`), or an absolute path. Supports ${agw:NAME} context
+    substitution. The rendered value is checked before the sync: it may not be
+    the home itself or one of its parents, be, hold or lie inside a path
+    Agentworks manages in the home (`~/.ssh`, `~/.agentworks`,
+    `~/.agentworks-artifacts` and the `~/.agentworks-*.sh` fragments), or have
+    an empty, `.` or `..` component, and a trailing `/` is dropped. A refused
+    destination warns and syncs nothing."""
+
+    dotfiles_install_cmd: Annotated[str | None, Interpolated()] = None
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool | None = None
@@ -154,7 +169,7 @@ class AgentTemplate(DeclaredResource):
     A null entry disables that integration."""
 
     artifacts: ArtifactsConfig | None = None
-    """Artifact bundles selected at this scope; an omitted selection inherits."""
+    """Bundle selections and direct artifact definitions at this scope; omission inherits."""
 
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported for this agent, as a plaintext value

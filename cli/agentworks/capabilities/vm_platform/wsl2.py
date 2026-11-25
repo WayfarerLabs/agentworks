@@ -7,7 +7,6 @@ import functools
 import json
 import os
 import platform
-import re
 import shlex
 import subprocess
 import sys
@@ -305,12 +304,6 @@ _blob_opener = urllib.request.build_opener(_StripAuthRedirectHandler)
 
 class WSLCommandFailed(ExternalError):
     """A ``wsl.exe`` command exited non-zero; the message quotes what it printed."""
-
-
-# The hostnames WSL keeps as given: its init cleans ``network.hostname`` to
-# alphanumerics joined by single hyphens (dropping underscores and collapsing
-# repeated hyphens), and the guest would then disagree with ``vms.hostname``.
-_WSL_HOSTNAME_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 
 
 def _wsl_conf(admin_username: str, hostname: str) -> str:
@@ -754,23 +747,19 @@ class WSL2Platform(VMPlatform):
         return _keepalive(self._distro_name(vm))
 
     def validate_create_hostname(self, hostname: str) -> None:
-        """Refuse a hostname WSL would rename (``_WSL_HOSTNAME_RE``), which the guest would then not carry.
+        """Refuse a hostname with consecutive hyphens, which WSL would rename and the guest would then not carry.
 
-        A VM name may hold underscores and a system slug consecutive hyphens;
-        core composes the hostname from both, and no command changes the slug.
+        WSL's init cleans ``network.hostname`` to alphanumerics joined by single
+        hyphens, so the guest would disagree with ``vms.hostname``. Core has
+        already refused an underscore; a VM name cannot hold ``--``, but a
+        system slug can, and no command changes the slug.
         """
-        if _WSL_HOSTNAME_RE.fullmatch(hostname):
-            return
-        if "_" in hostname:
-            hint = "Pick a VM name without underscores."
-        else:
-            hint = "This install's system slug has consecutive hyphens, so it cannot be part of a WSL2 hostname."
-        raise ValidationError(
-            f"WSL2 would rename the VM's hostname '{hostname}': it keeps only lowercase letters and digits "
-            "joined by single hyphens",
-            entity_kind="vm",
-            hint=hint,
-        )
+        if "--" in hostname:
+            raise ValidationError(
+                f"WSL2 would rename the VM's hostname '{hostname}': it collapses consecutive hyphens",
+                entity_kind="vm",
+                hint="This install's system slug has consecutive hyphens, so it cannot be part of a WSL2 hostname.",
+            )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         image_tag = code_owned_release_value(
@@ -862,7 +851,7 @@ class WSL2Platform(VMPlatform):
                         " -o Dpkg::Options::=--force-confnew"
                         " bash bash-completion sudo passwd"
                         " openssh-server curl git ca-certificates"
-                        " tmux tmuxinator"
+                        " tmux"
                         " locales procps iproute2 iputils-ping"
                         " less vim-tiny man-db"
                         " > /dev/null",
@@ -909,20 +898,6 @@ class WSL2Platform(VMPlatform):
                 _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
                 import shlex
 
-                _wsl(
-                    [
-                        "--distribution",
-                        vm_name,
-                        "--user",
-                        "root",
-                        "--",
-                        "bash",
-                        "-c",
-                        f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
-                        f" > /etc/sudoers.d/{shlex.quote(admin_username)}",
-                    ]
-                )
-
                 # Configure wsl.conf: default user, systemd and the hostname
                 output.info("Enabling systemd...")
                 _wsl(
@@ -962,9 +937,12 @@ class WSL2Platform(VMPlatform):
                     deadline=_BOOTSTRAP_DEADLINE_SECONDS,
                     progress=request.progress,
                 )
-                join_tailscale(run_as_root, request.tailscale_auth_key, node=request.hostname)
+                request.progress.step("Join Tailscale")
+                join_tailscale(
+                    run_as_root, request.tailscale_auth_key, node=request.hostname, log=request.progress.record
+                )
                 tailnet_address = settle_tailnet_address(
-                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT
+                    run_as_root, node=request.hostname, rerun_hint=CREATE_RERUN_HINT, log=request.progress.record
                 )
             except Exception as failure:
                 # WSL2's error convention holds: the errors from _wsl and

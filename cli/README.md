@@ -114,12 +114,12 @@ agw console delete my-console              # Extra shells are lost but sessions 
 
 ## Global Options
 
-| Flag                | Description                                                                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--version`         | Print the installed CLI version and exit (equivalent to `agw version`)                                                                      |
-| `--non-interactive` | Do not use the TTY for interactions, even if one is present                                                                                 |
-| `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
-| `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                         |
+| Flag                | Description                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--version`         | Print the installed CLI version and exit (equivalent to `agw version`)                                                               |
+| `--non-interactive` | Do not use the TTY for interactions, even if one is present                                                                          |
+| `--debug`           | Print the full traceback on unhandled errors, and show Azure VM SDK log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
+| `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                  |
 
 `--non-interactive` is a terminal-input policy: it disables TTY interaction even when a TTY is
 present. A process without usable terminal input is subject to the same TTY limitation. This flag
@@ -133,8 +133,9 @@ Domain errors (SSH timeouts, validation failures, missing resources, etc.) surfa
 line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors, third-party
 library failures) also get a clean single-line message, plus the full traceback appended to
 `~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set `AGW_DEBUG=1`) to print
-the traceback to stderr instead. Debug mode also restores the Azure SDK's own credential-chain log
-lines, which are otherwise suppressed so a credential failure renders once as the typed error.
+the traceback to stderr instead. Debug mode also restores the Azure VM provider's credential-chain
+log lines, which are otherwise suppressed so a credential failure renders once as the typed error.
+Key Vault lookup diagnostics stay suppressed even in debug mode to keep provider values private.
 
 On an interactive terminal, output is colorized by role: a yellow `Warning:` prefix, a red `Error:`
 prefix, bold section headers, a dim-green result line (the closing "VM deleted", "rekeyed", etc.),
@@ -231,13 +232,13 @@ Configuration splits into two surfaces:
 
 Settings sections (`config.toml`, permanent):
 
-- `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
-- `[paths]` -- VM workspace, VS Code workspace file, and backup directories
+- `[operator]`: SSH keys (required), additional authorized keys, SSH config management
+- `[paths]`: VM workspace, VS Code workspace file, and backup directories
 - `[terminal]`: local screen behavior on detach (`clear_on_detach`: `auto` / `always` / `never`)
 - `[defaults]`: `site`, the default vm-site for `vm create`
 - `[database]`: automatic pre-migration backup policy (safe default: enabled)
-- `[session.config]` -- session defaults (history limit)
-- `[secret_config]` -- active secret source chain; its `sources` key names `secret-source` resources
+- `[session.config]`: session defaults (history limit)
+- `[secret_config]`: active secret source chain; its `sources` key names `secret-source` resources
 - `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
   plugins (see [System Plugins](#system-plugins) below)
 
@@ -286,8 +287,8 @@ Agent artifact declarations and their native placement have a dedicated read-onl
 `agw artifact show --session my-session` includes the session and its actual ancestors;
 `--integration codex` narrows the explanation. It shows capture and application evidence without
 fetching content or exposing bodies. Start with `agw guide show concept-agent-artifacts` or the
-[artifact documentation](agentworks/artifacts/README.md) for bundle sources, explicit facet
-activation, worked manifests, and native delivery limits.
+[artifact documentation](agentworks/artifacts/README.md) for bundle selection, direct declarations,
+sources, explicit facet activation, worked manifests, and native delivery limits.
 
 Bundles include an explicit `mcp_servers` map for portable stdio and Streamable HTTP definitions.
 Workstation/Git JSON(C) sources select a same-named entry from `mcpServers`; only that definition is
@@ -498,19 +499,24 @@ key to one scalar `op://` reference. A direct configured-backend reference such 
 breaks in 0.14 with an exact source declaration and mapping rewrite; no compatibility row is
 created.
 
+The `azure` plugin also supplies the `azure-keyvault` secret backend. Declare a source for the
+vault, add its name to `[secret_config].sources`, and map secrets to that source. See the
+[Key Vault source examples](agentworks/secrets/README.md#configuring-azure-key-vault) and
+`agw resource explain secret-backend/azure-keyvault` for the installed configuration contract.
+
 ### System Plugins
 
 Agentworks ships optional vendor, tool, and installer catalogs as **system plugins**: separable
 bundles that are installed but off by default. The shipped build installs `apt` (five apt sources
 and their five package sets), `install-command` (six user install commands), `azure` (the `azure-vm`
-VM platform, the `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the
-`proxmox` VM platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform and
-optional guest `gcloud-cli` apt package), `onepassword` (the `onepassword` secret backend), `claude`
-(the `claude-code` harness integration and the `claude` CLI install-command), and `codex` (the
-`codex` harness integration and the `codex` CLI install-command), and `grok` (the `grok-build`
-harness integration and the Grok Build CLI install-command). (This is a different sense of "plugin"
-from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into
-Claude Code itself.)
+VM platform, the `azdo` git-credential provider, the `azure-keyvault` secret backend, and the
+`az-cli` install-command), `proxmox` (the `proxmox` VM platform), `aws` (the `aws-ec2` VM platform),
+`gcp` (the `gcp-gce` VM platform and optional guest `gcloud-cli` apt package), `onepassword` (the
+`onepassword` secret backend), `claude` (the `claude-code` harness integration and the `claude` CLI
+install-command), and `codex` (the `codex` harness integration and the `codex` CLI install-command),
+and `grok` (the `grok-build` harness integration and the Grok Build CLI install-command). (This is a
+different sense of "plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs
+marketplace plugins into Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
@@ -615,9 +621,10 @@ VM creation follows a two-phase lifecycle tracked by separate status columns:
 Initialization is fully declarative. `vm create` accepts a name, `--template`, `--spec`,
 `--admin-template`, `--admin-spec`, and `--site`. Immutable hardware starts with the VM template and
 may be refined by `--spec`; the admin user starts with the selected admin template and may be
-refined by `--admin-spec`. `vm reinit` takes only the VM name and re-runs initialization using the
-current config and both stored final layers. See
-[Instance specs](command-reference.md#instance-specs) for the exact create and agent-reinit surface.
+refined by `--admin-spec`. `vm reinit` re-runs initialization using the current config and both
+stored final layers; `--admin-template` and `--admin-spec` re-point the admin template and replace
+or clear the admin layer. See [Instance specs](command-reference.md#instance-specs) for the exact
+create and reinit surface.
 
 Agentworks records the configured SSH identity only after a VM create, reinit or recover proves the
 VM accepts it. It does not synthesize evidence for VMs created before this tracking was introduced.
@@ -641,9 +648,9 @@ Passphrase-protected OpenSSH private keys remain supported: Agentworks reads the
 embedded in the private-key envelope without decrypting it or consulting a sibling public-key file.
 Recognized encrypted legacy key formats that do not expose a public identity are reported as
 unverifiable, not mismatched. SSH-agent identity selection is not part of this comparison contract;
-the configured private-key path remains the identity source. Connections for `vm exec`, `vm shell`,
-`agent exec`, `agent shell`, `vm verify-connection` and `vm port-forward` run in SSH batch mode and
-never prompt for a passphrase, so an encrypted key must be loaded in the SSH agent first.
+the configured private-key path remains the identity source. Every Agentworks connection to a VM
+runs in SSH batch mode and never prompts for a passphrase, so an encrypted key must be loaded in the
+SSH agent first.
 
 Required system packages, including `python3` for guest-side native setup and artifact helpers, are
 installed on every platform during create and reinit regardless of template configuration. Failure

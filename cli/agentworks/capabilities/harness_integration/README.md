@@ -33,23 +33,23 @@ owned effects to retire is skipped and not marked applied. A config model, inclu
 schema, does not establish facet support. See
 [harness facets](../../../../docs/guides/harness-facets.md) for complete configuration examples.
 
-The harness contract supplies grouped artifact delivery. Core captures each owner's
-`artifacts.bundles` into an immutable `ArtifactGroup` with hints, rules, skills and agents maps.
-`SetupInvocation.artifacts` is an `ArtifactInputs` value: one local group and deferred groups keyed
-by their original owner. `SessionArtifactContext.inputs` uses the same boundary. Later selected
-bundles replace whole same-type/key definitions within an owner; different owners never overwrite
-each other. Normalized content and map keys enforce the same portable lowercase artifact-name
-contract used by declarations and persisted captures. An integration must consume those groups
-without flattening away equal names. Setup methods return an `ArtifactApplication`: concrete native
-files plus deferrals for inputs requiring a later facet. Core performs guarded whole-file or
-generated-section publication and checkpoints confirmed ownership. The integration owns native
-formats, placement, compatibility checks and routing decisions. A successful application reports
-inputs omitted from its deferral list as handled. The integration must fulfill that delivery
-obligation, through native files, launch arguments or another supported native mechanism; omission
-is its handling report, not independent proof of consumption. Core validates the result and warns
-about final-session deferrals. A session deferral targets `session` as a terminal unhandled result;
-it is persisted for inspection and never routed again. Returning the old `None` result is a contract
-error even for an empty invocation.
+The harness contract supplies grouped artifact delivery. Core captures each owner's selected
+`artifacts.bundles` and `artifacts.declare` into an immutable `ArtifactGroup` with hints, rules,
+skills, agents and MCP server maps. `SetupInvocation.artifacts` is an `ArtifactInputs` value: one
+local group and deferred groups keyed by their original owner. `SessionArtifactContext.inputs` uses
+the same boundary. Later selected bundles replace whole same-type/key definitions within an owner,
+followed by effective direct declarations; different owners never overwrite each other. Normalized
+content and map keys enforce the same portable lowercase artifact-name contract used by declarations
+and persisted captures. An integration must consume those groups without flattening away equal
+names. Setup methods return an `ArtifactApplication`: concrete native files plus deferrals for
+inputs requiring a later facet. Core performs guarded whole-file or generated-section publication
+and checkpoints confirmed ownership. The integration owns native formats, placement, compatibility
+checks and routing decisions. A successful application reports inputs omitted from its deferral list
+as handled. The integration must fulfill that delivery obligation, through native files, launch
+arguments or another supported native mechanism; omission is its handling report, not independent
+proof of consumption. Core validates the result and warns about final-session deferrals. A session
+deferral targets `session` as a terminal unhandled result; it is persisted for inspection and never
+routed again. Returning the old `None` result is a contract error even for an empty invocation.
 
 `ArtifactFile.generated_section` selects a bounded Agentworks-generated section in an instruction
 file. Core replaces a complete section while preserving surrounding bytes, ownership, permissions
@@ -90,9 +90,10 @@ native-home workaround can also publish narrowly validated, session-owned skill 
 user's native discovery directory; the publication boundary covers exact packages, not all of HOME.
 Catalog visibility is shared with other sessions of that user, and applicability is best effort.
 First-party native session facets default to no artifact delivery. Their typed `enabled_workarounds`
-config lists specific delivery opt-ins, with an empty default and replacement inheritance. Grok
-accepts `session-home-skills`; session personas remain unhandled. Return an explicit deferral for
-each disabled or unsupported input, including its relevant workaround in the reason when one exists.
+config lists specific delivery opt-ins, with an empty default and append-dedupe inheritance.
+Omission and `[]` preserve inherited opt-ins; `null` clears them. Grok accepts
+`session-home-skills`; session personas remain unhandled. Return an explicit deferral for each
+disabled or unsupported input, including its relevant workaround in the reason when one exists.
 Filter disabled inputs before applying delivery-specific validation or compatibility probes. Keep
 unsafe paths, conflicting ownership, malformed results and invalid configuration as errors. Do not
 turn an optional artifact into a blanket version requirement.
@@ -231,7 +232,14 @@ session facet. Its session implementation:
 
 It does not own the tmux session, the user, the workspace, or attach and detach. Agentworks provides
 those; the session facet only decides what runs in the pane. Setup facets use the core-supplied
-runner and checkpoint callback to configure native tooling at their owning scope.
+access (`invocation.access`), its file operations (`invocation.files`) and checkpoint callback to
+configure native tooling at their owning scope. A request's `env` comes from
+`invocation.request_environment(local)`: the setup environment with the facet's own variables added,
+never an `AGENTWORKS_*` one. Guest text a facet quotes in an error or warning is sanitized with
+`invocation.redactor` (`redactor.sanitize(text)`, or `redactor.sanitize_error(error)` in place),
+which redacts every secret the operation resolved or logs without handing those values to the facet:
+they are wider than its own `secrets`. `probe_native` takes it, and a session's
+`SessionArtifactContext.redactor` serves the same purpose at launch.
 
 ## Technical Overview
 
@@ -360,10 +368,10 @@ activations are removed. With neither selections nor applied-state records, setu
 unused environment secrets. Install commands keep their existing environment behavior.
 
 The command registers setup environment and config secrets before its single secret-resolution pass
-and before constructing its SSH logger. An invocation receives the complete scope environment with
-protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that integration's config
-references. VM/admin setup binds references to the live VM owner; agent and workspace setup bind to
-their respective live owners, including resources still pending during session creation.
+and before constructing its operation log. An invocation receives the complete scope environment
+with protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that integration's
+config references. VM/admin setup binds references to the live VM owner; agent and workspace setup
+bind to their respective live owners, including resources still pending during session creation.
 
 A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
 Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
@@ -390,7 +398,6 @@ The session facet's `check_setup(SetupReadiness)` may inspect `.vm`, `.user`, or
 Evidence is loaded once per requested facet and includes the actual owner, its last setup record,
 status, and remediation. A record is current only when completion, effective declaration, and native
 destination identity agree. Checks do not reread workstation settings sources or resolve secrets.
-Integrations can use the supplied session runner for read-only native probes.
 
 Return `SetupGap` entries with `required` or `recommended` severity and an integration-specific
 reason. Core refuses required gaps before session runtime replacement and warns for recommended
@@ -500,11 +507,12 @@ world happens in readiness or ops.
 
 The base owns the whole readiness fork (`_run_readiness`): the loud scope-less error, the
 out-of-scope-level skip, the SESSION-level identity guard, the single-fire guard, the admin-vs-agent
-target selection, the pending-target defer to runup, and the preflight-tolerated / runup-fatal
-missing-transport split. A subclass fills in exactly one slot, `_probe_target`, which should call
-the shared `require_commands` helper with the executables the launch target must have on PATH
-(`shell`: the merged `required_commands`; `claude-code`: `("claude",)`; `codex`: `("codex",)`;
-`grok-build`: `("grok",)`).
+target selection (`ctx.admin_access()` or `ctx.agent_access()`), the pending-target defer to runup,
+and the preflight-tolerated / runup-fatal missing-access split. A subclass fills in exactly one
+slot, `_probe_target(access)`, which should call the shared `require_commands` helper with the
+launch target's `VMAccess` and the executables it must have on PATH (`shell`: the merged
+`required_commands`; `claude-code`: `("claude",)`; `codex`: `("codex",)`; `grok-build`:
+`("grok",)`).
 
 Keep readiness to tool PRESENCE. Session state (is there something to resume?) is an op-time
 concern: readiness is read-only and re-runnable by contract, and it runs at command start against a
@@ -627,8 +635,8 @@ sessions. Five rules, each earned:
    and tool-version drift; a stored opaque value the tool itself reported is not.
 2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
    Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
-   dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
-   not cached: the world changes between ops. Restart calls `start` before teardown so an
+   dir) through the launch target's access, in the login and interactive shell the pane gets. Do it
+   per op, not cached: the world changes between ops. Restart calls `start` before teardown so an
    unsupported intent or strict-resume failure leaves the managed tmux runtime and integration-owned
    state intact; ordinary lifecycle runtime-identity repair can already have persisted observed
    facts. The decision therefore has to rely on durable tool state rather than process liveness.
@@ -657,12 +665,13 @@ sessions. Five rules, each earned:
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
 - **Quote generated argv data.** Build a token list and use `shlex.quote` for each generated or
   modeled argument, preserving literal profile names, model values, settings, and workload input.
-- **Render declared template fields in the integration.** Render designated `extra_args` once
-  against the bound context with `self.render_context_argv`. Validate the effective vector and emit
-  those same values with ordinary shell quoting. A workspace path containing an apostrophe remains
-  one argument, and namespace-looking replacement data is not interpreted twice. Shell renders its
-  selected command field as operator-authored source with ordinary shell quoting responsibilities.
-  The manager never interpolates returned commands.
+- **Render declared template fields in the integration.** Annotate string argument elements with
+  `Interpolated()` and render the field against the bound context using
+  `self.render_context_args("extra_args", self.config.extra_args)`. Validate the effective vector
+  and emit those same values with ordinary shell quoting. A workspace path containing an apostrophe
+  remains one argument, and namespace-looking replacement data is not interpreted twice. Shell
+  renders its selected command field as operator-authored source with ordinary shell quoting
+  responsibilities. The manager never interpolates returned commands.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`, `reasoning_effort`, workload inputs, and session preferences) plus an
   explicit `extra_args` list emitted after generated options keeps the integration useful without
@@ -707,10 +716,13 @@ These helper rules preserve the session-scoped effects rule ([A Note on Scope](#
 
 - **Rewrite it identically on every launch.** If two sessions of the same user would write the same
   bytes, neither can change what the other's file does, and an Agentworks upgrade cannot leave a
-  stale copy of the same file behind. Write it atomically (stage, `chmod`, `mv`) so the tool never
-  sees a partial one. The corollary of the versioning rule below: an OBSOLETE version (a `-v1` after
-  the integration moved to `-v2`) is deliberately left alone, since a running session may still hold
-  its path, and nothing prunes it today.
+  stale copy of the same file behind. Write it atomically so the tool never sees a partial one, from
+  a stage that holds an access, with `Files.write` or `Files.write_if` (`access.files()`), which
+  writes a sibling file with the mode and renames it into place; `codex`'s `start` writes its
+  recorder this way before it builds the launch command. A failure to write a helper the tool can do
+  without warns rather than failing the launch. The corollary of the versioning rule below: an
+  OBSOLETE version (a `-v1` after the integration moved to `-v2`) is deliberately left alone, since
+  a running session may still hold its path, and nothing prunes it today.
 - **Version anything the tool holds a path to.** `codex`'s recorder is `record-thread-v1.sh`: a
   future recorder taking different arguments becomes `-v2`, so an upgrade mid-session cannot reshape
   the contract of a script a running tool is about to invoke.
@@ -723,12 +735,18 @@ These helper rules preserve the session-scoped effects rule ([A Note on Scope](#
 
 #### Probing the Launch Target
 
-Run probes as `"$SHELL" -lic '<inner>'` with `check=False`: login+interactive sources the same
-dotfiles the pane's shell will (mise activation, PATH fragments), so the probe answers for the
-environment the workload actually gets. Prefer shell-neutral inner commands (the transcript probe's
-`find ... -print -quit | grep -q .` avoids bash/zsh divergence on unmatched globs).
-`require_commands` applies harness-specific refusal policy over the neutral
-`check_required_commands` mechanism; reuse it rather than hand-rolling executable checks.
+Read the launch target's access with `ctx.admin_access()` or `ctx.agent_access()`, and build each
+probe with one named function returning
+`Script(inner, Shell.USER_DEFAULT, login=True, interactive=True)` (claude's
+`conversation_probe.conversation_request`, codex's `recorder_probe`, `rollout_probe` and
+`discovery_probe`, grok's `session_probe`): login and interactive startup sources the same dotfiles
+the pane's shell will (mise activation, PATH fragments), so the probe answers for the environment
+the workload actually gets. Read its exit code through `require_completed`, which raises the typed
+execution error for a probe that may not have run, so only a completed probe is ever classified.
+Prefer shell-neutral inner commands (the Claude conversation probe's `find ... -print -quit` avoids
+bash/zsh divergence on unmatched globs). `require_commands` applies harness-specific refusal policy
+over the neutral `check_required_commands` mechanism; reuse it rather than hand-rolling executable
+checks.
 
 #### Testing a Harness Integration
 
@@ -738,23 +756,30 @@ requests; see
 [native setup evidence](../../../../docs/guides/native-harness-setup.md#native-compatibility-evidence).
 The session layers, with the shipped tests as templates:
 
-- **Unit (the bulk):** `cli/tests/test_claude_code_integration.py`. Use `_FakeTarget` /
-  `_FakeResult` from `cli/tests/conftest.py`: a substring-to-result map standing in for the
-  transport, so one fake serves the readiness probe (keyed on `command -v <tool>`) and the detection
-  probe (keyed on the stored id) in a single test. Cover: config vocabulary (accepts, unknown-field
-  raises, wrong-type raises), both detection directions (probe hit resumes, miss launches fresh,
-  other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, state
-  minting, and the integration's create, resume-only, resume-or-new, and force-new behavior.
+- **Unit (the bulk):** `cli/tests/test_claude_code_integration.py`. Readiness runs against
+  `command_check_access` from `cli/tests/vm_access_support.py`, an access whose command checks find
+  every command except the ones a test names missing. The detection probe runs against a
+  `RecordingVMAccess` from the same module, answering the probe's own builder
+  (`conversation_request` of the stored id) with an exit code through `respond`. Cover: config
+  vocabulary (accepts, unknown-field raises, wrong-type raises), both detection directions (probe
+  hit resumes, miss launches fresh, other exit raises), flag mapping and `extra_args` quoting, the
+  visible-decision line, state minting, and the integration's create, resume-only, resume-or-new,
+  and force-new behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's
   filter that keeps subagent rollouts out of the candidate set, the recorder script it provisions,
-  the three-layer quoting of a `-c` override). Run that text through a real `sh` against scratch
-  fixtures with `$HOME` pointed at a tmp dir: still no tool binary, but a mis-quoted token or an
-  inverted filter fails in the test rather than in a pane.
+  the three-layer quoting of a `-c` override). Run that text through `local_vm_access` from
+  `cli/tests/vm_access_support.py`, a real access whose account home is a tmp dir of scratch
+  fixtures: still no tool binary, but a mis-quoted token or an inverted filter fails in the test
+  rather than in a pane.
 - **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/restart
-  through the orchestrator with stubbed transports: state persisted to the row, pre-existing blob
-  read back, substitution does not mangle the returned snippet.
+  through the orchestrator with a launch-target double whose `answer` the recording access asks for
+  each probe. The double matches each probe by equality with its builder's request for the session's
+  seeded id (`conversation_request(sid)`), compared with the request's `env` cleared because the
+  launch environment rides on it, so a probe for the wrong id goes unanswered and the test fails.
+  Cover: state persisted to the row, pre-existing blob read back, substitution does not mangle the
+  returned snippet.
 - **Plugin end-to-end:** `cli/tests/plugins/test_claude.py`. Through `build_registry`:
   present-but-disabled row with `system-plugin` origin, gate refusal with the enable hint,
   enablement via `[plugins] system`.
@@ -812,8 +837,8 @@ The checklist beyond code, per the repo rules:
 Known holes the current contract leaves open on purpose, so the boundaries read as deliberate:
 
 - **Features and further artifact types.** Core provisioning prepares scoped env and declared
-  artifact bundles before harness integrations handle or defer them. A future feature-emission stage
-  can fit between core and integrations. Core hint emission and hooks remain later work; see
+  artifacts before harness integrations handle or defer them. A future feature-emission stage can
+  fit between core and integrations. Core hint emission and hooks remain later work; see
   [agent artifacts](../../artifacts/README.md) for the supported artifact types.
 - **Secrets and integration-owned environment.** The declare-and-receive secret plumbing is in place
   but no shipped integration declares a config secret. The session template's `env` chain, including

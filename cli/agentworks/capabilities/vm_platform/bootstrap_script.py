@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
+from agentworks.capabilities.vm_platform.sudoers import admin_sudoers_script
 from agentworks.errors import ProvisioningError
 from agentworks.execution import root_script
 
@@ -108,7 +109,6 @@ else
     echo "##SUCCESS## user $VM_USER created"
 fi
 usermod -aG sudo "$VM_USER"
-echo "$VM_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$VM_USER"
 HOME_DIR="/home/$VM_USER"
 
 # -- Step 1b: Default shell rc seeds for admin's home --
@@ -134,6 +134,12 @@ timeout 600 apt-get dist-upgrade -y -qq -o Dpkg::Options::="--force-confnew"
 # shellcheck disable=SC2086
 apt-get install -y -qq -o Dpkg::Options::="--force-confnew" $PROVISIONING_PACKAGES
 echo "##SUCCESS## provisioning packages installed"
+
+# sudo and visudo are supplied by the provisioning packages above.
+echo "##STEP## Admin sudo grant"
+(
+{admin_sudoers_script})
+echo "##SUCCESS## admin sudo grant installed"
 
 # -- Step 2b: Preserve SSH host keys across reboots --
 # By default, cloud-init may delete and regenerate SSH host keys on certain
@@ -173,19 +179,41 @@ else
 fi
 
 # -- Step 4: Swap file --
+# Each part resumes on its own, so a run cut short anywhere in this step
+# finishes it on the next run, and an existing /swapfile is never replaced.
+# /swapfile appears only once it is a complete swap area: it is built under
+# /swapfile.agentworks-partial, flushed and renamed into place, and a partial
+# one from an earlier run is removed and started again. That name is
+# Agentworks' own in a root-only directory, so a file or link there is an
+# earlier build's; a directory there fails the removal and stops the bootstrap.
+# An existing /swapfile that is not a swap area, or a link to nothing, stops
+# the bootstrap rather than being overwritten. Activation and the fstab line
+# are each checked before they are done, so neither repeats.
 echo "##STEP## Swap file"
 if [ "$SWAP_GB" -gt 0 ]; then
-    if [ -f /swapfile ]; then
-        echo "##SUCCESS## swap file already exists"
+    if [ -L /swapfile ] && [ ! -e /swapfile ]; then
+        echo "##ERROR## /swapfile is a link to nothing; create the VM from an image without one, or with swap 0"
+        exit 1
+    elif [ -e /swapfile ]; then
+        if ! grep -q '^/swapfile ' /proc/swaps \
+            && [ "$(blkid -p -s TYPE -o value /swapfile 2>/dev/null || true)" != swap ]; then
+            echo "##ERROR## /swapfile is not a swap area; create the VM from an image without one, or with swap 0"
+            exit 1
+        fi
+        SWAP_DONE="swap file already exists"
     else
         SWAP_MB=$((SWAP_GB * 1024))
-        fallocate -l "${{SWAP_MB}}M" /swapfile
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo '/swapfile none swap sw 0 0' >> /etc/fstab
-        echo "##SUCCESS## ${{SWAP_GB}} GiB swap file created"
+        rm -f /swapfile.agentworks-partial
+        fallocate -l "${{SWAP_MB}}M" /swapfile.agentworks-partial
+        chmod 600 /swapfile.agentworks-partial
+        mkswap /swapfile.agentworks-partial
+        sync
+        mv /swapfile.agentworks-partial /swapfile
+        SWAP_DONE="${{SWAP_GB}} GiB swap file created"
     fi
+    grep -q '^/swapfile ' /proc/swaps || swapon /swapfile
+    grep -q '^/swapfile[[:space:]]' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo "##SUCCESS## $SWAP_DONE"
 else
     echo "##SUCCESS## swap disabled"
 fi
@@ -277,6 +305,7 @@ def generate_bootstrap_script(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
+        admin_sudoers_script=admin_sudoers_script(admin_username),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
@@ -378,9 +407,10 @@ def run_bootstrap(
 
     For a platform with no provider-side payload (WSL2, Proxmox): the script
     holds no secret, so it travels on the channel's stdin like any root
-    script. Each reported step goes to the console and to ``progress``, the
-    create's log, followed by the sizes of the two streams and the streams
-    themselves. Nothing here retries or persists VM state.
+    script. The run is recorded in ``progress``, the create's log, under a
+    ``Bootstrap`` step: its outcome, both streams and the channel's own
+    output. Each step the script reports then goes to the console and to the
+    log. Nothing here retries or persists VM state.
     """
     script = generate_bootstrap_script(
         admin_username=admin_username,
@@ -390,7 +420,8 @@ def run_bootstrap(
         swap=swap,
     )
     output.detail("Running bootstrap script...")
-    result = root_script.run(run_as_root, script, deadline=deadline)
+    progress.step("Bootstrap")
+    result = root_script.run(run_as_root, script, deadline=deadline, log=progress.record)
     stdout = result.stdout.decode("utf-8", errors="replace")
 
     for step in parse_bootstrap_steps(stdout):
@@ -404,12 +435,6 @@ def run_bootstrap(
         if step.error:
             output.warn(f"Error: {step.error}")
             progress.log_error(step.error)
-
-    progress.step("Bootstrap output")
-    progress.output(f"{len(result.stdout)} bytes on stdout, {len(result.stderr)} bytes on stderr")
-    for text in (stdout, result.stderr.decode("utf-8", errors="replace"), result.channel_tail):
-        if text:
-            progress.output(text)
 
     if result.status is None:
         raise ProvisioningError("the outcome of the bootstrap script is unknown")

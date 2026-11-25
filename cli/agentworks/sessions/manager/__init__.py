@@ -9,14 +9,11 @@ Internal submodules reach cross-module helpers through this package object
 (``import agentworks.sessions.manager as _mgr`` then ``_mgr.NAME(...)``) rather
 than binding them with ``from ... import NAME``. The reads are deferred to call
 time, so the tests' monkeypatches on this namespace (for example
-``agentworks.sessions.manager.transport`` and
 ``agentworks.sessions.manager._require_workspace``) intercept the internal call
 paths, and the partially-initialized package during import is never a problem.
 """
 
 from __future__ import annotations
-
-from agentworks.transports import transport as transport
 
 from ._create import (
     create_session as create_session,
@@ -79,10 +76,10 @@ from ._logs import (
     session_logs as session_logs,
 )
 from ._pids import (
-    _build_session_target as _build_session_target,
+    _ensure_pid as _ensure_pid,
 )
 from ._pids import (
-    _ensure_pid as _ensure_pid,
+    _identity_access as _identity_access,
 )
 from ._pids import (
     _needs_repair as _needs_repair,
@@ -97,6 +94,9 @@ from ._pids import (
     _resolve_session_linux_user as _resolve_session_linux_user,
 )
 from ._pids import (
+    _session_access as _session_access,
+)
+from ._pids import (
     _validated_observed_boot_id as _validated_observed_boot_id,
 )
 from ._pids import (
@@ -104,6 +104,9 @@ from ._pids import (
 )
 from ._pids import (
     _validated_stored_start_ticks as _validated_stored_start_ticks,
+)
+from ._pids import (
+    _verified_session_access as _verified_session_access,
 )
 from ._pids import (
     ensure_pids_batch as ensure_pids_batch,
@@ -148,9 +151,6 @@ from ._scope import (
     _prepare_vm as _prepare_vm,
 )
 from ._scope import (
-    _regenerate_tmuxinator as _regenerate_tmuxinator,
-)
-from ._scope import (
     _require_session as _require_session,
 )
 from ._scope import (
@@ -172,6 +172,9 @@ from ._status import (
     _get_boot_id as _get_boot_id,
 )
 from ._status import (
+    _legacy_session_status as _legacy_session_status,
+)
+from ._status import (
     _legacy_session_status_error as _legacy_session_status_error,
 )
 from ._status import (
@@ -185,6 +188,18 @@ from ._status import (
 )
 from ._status import (
     observe_session_statuses as observe_session_statuses,
+)
+from ._status import (
+    owner_run_command as owner_run_command,
+)
+from ._tmux_server import (
+    SessionTmuxServer as SessionTmuxServer,
+)
+from ._tmux_server import (
+    require_session_tmux_server as require_session_tmux_server,
+)
+from ._tmux_server import (
+    resolve_session_tmux_server as resolve_session_tmux_server,
 )
 
 __all__ = [
@@ -207,6 +222,9 @@ __all__ = [
     "check_session_status",
     "batch_check_status",
     "observe_session_statuses",
+    "SessionTmuxServer",
+    "resolve_session_tmux_server",
+    "require_session_tmux_server",
     "ensure_pids_batch",
     "filter_sessions",
     "_ensure_pid",
@@ -214,7 +232,6 @@ __all__ = [
     "_session_secret_target",
     "_session_secret_target_pre_create",
     "_require_workspace",
-    "transport",
 ]
 
 from ._execute import execute_session_start as execute_session_start

@@ -38,9 +38,10 @@ from agentworks.sessions.manager._queries import (
 )
 from agentworks.workspaces.manager import workspace_external_explicit_granters, workspace_has_sessions
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests.vm_access_support import install_access_recorder
 
 if TYPE_CHECKING:
-    from tests.conftest import CapturedOutput, _FakeTarget
+    from tests.conftest import CapturedOutput, _ScriptedGuest
 
 
 def _session_snapshot(
@@ -745,19 +746,24 @@ def _prep_delete_session(db: Database, monkeypatch: pytest.MonkeyPatch, *, creat
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["s"])
     db.update_session_runtime(
-        "s", socket_path="/tmp/s.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        "s",
+        socket_path="/run/agentworks/admin-tmux-sockets/admin/s.sock",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
     if created_workspace:
         db._conn.execute("UPDATE sessions SET created_workspace = 1 WHERE name = 's'")
         db._conn.commit()
     monkeypatch.setattr(manager_mod, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
-    monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
+    # Delete builds the session identity's access for artifact cleanup.
+    install_access_recorder(monkeypatch)
 
 
 def test_delete_session_interactive_offers_now_empty_workspace(
     db: Database,
-    fake_target: _FakeTarget,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -779,7 +785,7 @@ def test_delete_session_interactive_offers_now_empty_workspace(
 
 def test_delete_session_yes_reports_now_empty_uncreated_workspace(
     db: Database,
-    fake_target: _FakeTarget,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -803,7 +809,7 @@ def test_delete_session_yes_reports_now_empty_uncreated_workspace(
 
 def test_delete_session_yes_auto_deletes_created_workspace(
     db: Database,
-    fake_target: _FakeTarget,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
@@ -822,7 +828,7 @@ def test_delete_session_yes_auto_deletes_created_workspace(
 
 def test_delete_session_warns_when_now_empty_workspace_delete_raises(
     db: Database,
-    fake_target: _FakeTarget,
+    scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:

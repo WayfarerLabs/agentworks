@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path  # noqa: TC003  # Typer resolves the runtime annotation.
 from typing import Annotated
 
 import typer
@@ -273,10 +273,10 @@ def vm_import_host_keys(
 
     Matches each VM's tailnet address with OpenSSH's own ssh-keygen, so the
     result is what ssh would have trusted. A VM that already has a record is
-    never changed. Exits non-zero while any selected VM has no record. For a VM
-    with no matching entry, verify its host key fingerprints against its console
-    or provider, gather the keys with ssh-keyscan into a file, and pass it with
-    --known-hosts.
+    never changed. Every run rewrites the managed SSH config entries. Exits
+    non-zero while any selected VM has no record. For a VM with no matching
+    entry, verify its host key fingerprints against its console or provider,
+    gather the keys with ssh-keyscan into a file, and pass it with --known-hosts.
     """
     if all_vms == bool(names):
         raise typer.BadParameter("provide VM names or --all, not both")
@@ -399,13 +399,37 @@ def vm_recover(
 @vm_app.command("reinit")
 def vm_reinit(
     name: Annotated[str, typer.Argument(help="VM name")],
+    admin_template: Annotated[
+        str | None,
+        typer.Option(
+            "--admin-template",
+            help="Re-point the VM's admin user to a different declared admin-template, then reinit to apply it",
+        ),
+    ] = None,
+    admin_spec: Annotated[
+        str | None,
+        typer.Option(
+            "--admin-spec",
+            help=(
+                "Inline JSON admin spec applied after the selected admin template, replacing the stored one; "
+                "'{}' or an exact empty string clears it (whitespace is invalid)"
+            ),
+        ),
+    ] = None,
 ) -> None:
-    """Re-run initialization on a provisioned VM."""
+    """Re-run initialization on a provisioned VM using its stored templates and final specs."""
     interaction = ordinary_tty_interaction_policy()
     from agentworks.config import load_config
     from agentworks.vms.manager import reinit_vm
 
-    reinit_vm(get_db(), load_config(), name, interaction=interaction)
+    reinit_vm(
+        get_db(),
+        load_config(),
+        name,
+        admin_template=admin_template,
+        admin_spec=admin_spec,
+        interaction=interaction,
+    )
 
 
 @vm_app.command("exec", context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
@@ -502,26 +526,21 @@ def vm_logs(
     name: Annotated[str, typer.Argument(help="VM name")],
     show_all: Annotated[bool, typer.Option("--all", help="Show all logs instead of only the latest")] = False,
 ) -> None:
-    """Show SSH logs for a VM."""
+    """Show operation logs for a VM."""
     from agentworks import output
-    from agentworks.ssh import LOG_DIR
+    from agentworks.execution import oplog
 
-    if not LOG_DIR.exists():
-        output.info("No logs found.")
-        return
-
-    # Collect all logs for this VM -- filename is <vm>-<timestamp>-<cmd>.log
-    all_logs = sorted(LOG_DIR.glob(f"{name}-*.log"), reverse=True)
-    logs = [(str(p), p.name) for p in all_logs]
+    logs = oplog.vm_logs(name)
 
     if not logs:
-        output.info(f"No SSH logs found for VM '{name}'.")
+        output.info(f"No operation logs found for VM '{name}'.")
         return
 
     # Header names the log file (the handler owns any decoration); the raw
     # log body is emitted flush-left so it stays copy-paste faithful.
     display = logs if show_all else logs[:1]
-    for log_path, log_name in display:
-        output.info(log_name)
-        output.info(Path(log_path).read_text().rstrip("\n"))
+    for log in display:
+        output.info(log.name)
+        # The log is written as UTF-8, whatever the workstation's locale.
+        output.info(log.read_text(encoding="utf-8", errors="replace").rstrip("\n"))
         output.info("")

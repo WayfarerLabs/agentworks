@@ -16,9 +16,12 @@ authentication may request approval and wait for the configured source timeout.
 An instance spec is an inline JSON object applied as the final layer after a selected template. Use
 `--spec JSON` on `vm create`, `workspace create`, `agent create`, and `session create`. A VM has two
 declarations: `--template` and `--spec` shape the VM, while `--admin-template` and `--admin-spec`
-shape its admin user. `agent reinit` and named `session start`/`session restart` also accept
-`--spec JSON` to replace an existing instance layer. Other reinit, repair, start, restart, or copy
-commands do not accept an instance spec; session bulk operations reject `--spec`.
+shape its admin user. `agent reinit`, `vm reinit`, and named `session start`/`session restart` can
+replace an existing instance layer: `agent reinit` and the session commands accept `--spec JSON`,
+and `vm reinit` accepts `--admin-spec JSON`, because those reinit commands can change the bound
+template (`--update-template` and `--admin-template`). Other reinit, repair, start, restart, or copy
+commands do not accept an instance spec, session bulk operations reject `--spec`, and a VM's own
+`--spec` layer cannot change after create.
 
 The JSON must be one object written directly on the command line. It cannot be a file path, `null`,
 an array, or multiple JSON values. Duplicate keys, non-finite numbers, unknown fields, and the
@@ -35,12 +38,14 @@ agw vm create build-01 --template dev --spec '{"cpus":8,"memory":16}' \
 agw agent create coder-01 --spec '{"shell":"/bin/bash","mise_activate":true}'
 ```
 
-An omitted `--spec` on `agent reinit` retains the stored instance layer. A supplied object replaces
-the complete prior layer, and `{}` or an empty value clears it. The empty-value shorthand applies
-only to `agent reinit`; create commands and session start/restart require a JSON object. Template
-changes and instance-spec changes are validated and persisted together before remote convergence. If
-that remote work fails, the new desired state remains stored so a plain `agent reinit NAME` can
-retry it.
+An omitted `--spec` on `agent reinit`, or `--admin-spec` on `vm reinit`, retains the stored layer. A
+supplied object replaces the complete prior layer, and `{}` or an empty value clears it. The
+empty-value shorthand applies only to these reinit options; create commands and session
+start/restart require a JSON object. A stored layer this release can no longer use, such as one
+holding a refused source reference, can be replaced or cleared this way, while a plain reinit
+refuses it. Template changes and instance-spec changes are validated and persisted together before
+remote convergence. If that remote work fails, the new desired state remains stored so a plain
+`agent reinit NAME` or `vm reinit NAME` can retry it.
 
 On named `session start` and `session restart`, omitted `--spec` retains the stored layer, supplied
 JSON replaces the complete layer, and `{}` clears it. An empty or whitespace-only argument is
@@ -306,16 +311,19 @@ object. Current producers always include it; older JSON v1 producers may omit th
 ```
 
 `instance_spec` is tagged `absent`; `present` with `recorded_at` and the canonical partial `spec`;
-or `unavailable` with reason `malformed` or `unsupported-version`. `current` is the resolved shape
-documented for `resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where
-reason is `missing-selection`, `instance-spec-unavailable`, or `registry-unavailable`. A fact is
+or `unavailable` with reason `malformed`, `unsupported-version`, `migration-pending`, or
+`replacement-required`, the last for a stored spec this release uses only once it is explicitly
+replaced or cleared (see [Instance specs](#instance-specs)), such as one holding a refused source
+reference or a retired harness activation list. `current` is the resolved shape documented for
+`resource show`, or `{status: "unresolved", selection: {kind, name}, reason}` where reason is
+`missing-selection`, `instance-spec-unavailable`, or `registry-unavailable`. A fact is
 `{key, status}` with status `not-recorded` or `unavailable`, or status `recorded` plus
 `recorded_at`, `operation`, and a typed `value` object. Each entry is a successful lifecycle
 operation's configuration-snapshot slice and may include evidence that its corresponding work
 succeeded. Comparisons are `{key, state, differences?}`; differences are
 `{field, recorded, current}`. Unconsumed records carry only safe type, key, version, and timestamp
-metadata. An issue contains a closed `code` plus optional `slot` or `record_key`; malformed future
-record types use `record-malformed` rather than an applied-state issue code. These explicit
+metadata. An issue contains an enumerated `code` plus optional `slot` or `record_key`; malformed
+future record types use `record-malformed` rather than an applied-state issue code. These explicit
 inspection commands can show authored plaintext declaration values, but never resolved secret
 values; handle their human and JSON output as sensitive. Human describe renders instance specs,
 complete current specs, and lifecycle-evidence value objects as block YAML without the exhaustive
@@ -517,8 +525,16 @@ normal stderr message and nonzero exit status. Doctor is the exception: it conve
 failures into its complete report, emits that JSON document, then exits 1.
 
 JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
-Removing a field, changing a type, changing a value's meaning, changing collection order, or
-changing an enum spelling requires a new schema version and an explicit compatibility period.
+Enumerated values come in two kinds. A frozen vocabulary is one this reference calls frozen or
+closes with an `unknown` sentinel: the VM list's provisioning and initialization statuses, the
+session mode, and the VM event names. It gains no values, and no case moves between its values.
+Every other enumerated value, including those this reference calls closed or lists as exactly a set,
+such as reasons, issue codes and doctor's check statuses, may gain values under the same schema
+version, and a release may move a case from one such value to another; a release that moves a case
+says so in a `BREAKING CHANGE:` footer and in its upgrade guide. Consumers must accept values they
+do not recognize. Changing the document's shape (removing a field, changing a type, changing
+collection order, or renaming a field or a value) requires a new schema version and an explicit
+compatibility period.
 
 ### Top-Level
 
@@ -613,7 +629,7 @@ a definitive answer. The opt-in is valid with global `--non-interactive`: termin
 disabled while out-of-band provider work is permitted. Verification deduplicates names in request
 order, prints one row per name, and exits nonzero for every result other than `available`. An
 available row proves current provider presence under the requested impact, not that a narrower
-line-oriented environment, credential, header, or stdin consumer accepts the value.
+line-oriented credential, header, or stdin consumer accepts the value.
 
 Actual resolution is separate. It performs one bounded source-first pass, preserves multiline
 strings, rejects NUL, falls through ordinary missing and blocked sources, and hard-stops a secret on
@@ -710,28 +726,28 @@ just a vm-site.
 > workflows. Use a site on a different platform that provides true long-lived VMs (e.g. Lima, Azure,
 > Proxmox, etc.) if you need a VM that survives independent of your workstation.
 
-| Command                                             | Description                                                    |
-| --------------------------------------------------- | -------------------------------------------------------------- |
-| `agw vm create <name>`                              | Create a new VM (provision + initialize)                       |
-| `agw vm list`                                       | List configured VMs                                            |
-| `agw vm describe <name>`                            | Show VM details, workspaces, and event log                     |
-| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM    |
-| `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)         |
-| `agw vm shell <name> --platform`                    | A shell through the platform's own channel, without Tailscale  |
-| `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace)  |
-| `agw vm start <name>`                               | Record running intent, start the VM, and wait for it to answer |
-| `agw vm set-desired-state <name> <state>`           | Record running, stopped, or on-demand without runtime work     |
-| `agw vm reconcile [<name>] [--all] [--dry-run]`     | Apply the named VM scope or explicitly selected fleet          |
-| `agw vm stop <name>`                                | Stop a VM and keep it stopped (no auto-start)                  |
-| `agw vm reinit <name>`                              | Re-run initialization on a provisioned VM                      |
-| `agw vm confirm-release <name>`                     | Observe and explicitly record the live Debian release          |
-| `agw vm delete <name>`                              | Delete a VM (with confirmation)                                |
-| `agw vm backup <name>`                              | Back up a VM: metadata, agents, workspaces, and files          |
-| `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
-| `agw vm recover <name>`                             | Repair a VM's SSH access, python3 and Tailscale node           |
-| `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)      |
-| `agw vm logs <name>`                                | Show SSH logs for a VM                                         |
-| `agw vm import-host-keys (--all \| <name>...)`      | Import VM host keys from `known_hosts` into the host-key store |
+| Command                                                              | Description                                                    |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `agw vm create <name>`                                               | Create a new VM (provision + initialize)                       |
+| `agw vm list`                                                        | List configured VMs                                            |
+| `agw vm describe <name>`                                             | Show VM details, workspaces, and event log                     |
+| `agw vm verify-connection <name>`                                    | Test the canonical admin connection without starting the VM    |
+| `agw vm shell <name> [--workspace <ws>]`                             | Admin shell on a VM (optionally rooted in a workspace)         |
+| `agw vm shell <name> --platform`                                     | A shell through the platform's own channel, without Tailscale  |
+| `agw vm exec <name> [--workspace <ws>] -- <cmd...>`                  | Run a one-shot command as admin (optionally from a workspace)  |
+| `agw vm start <name>`                                                | Record running intent, start the VM, and wait for it to answer |
+| `agw vm set-desired-state <name> <state>`                            | Record running, stopped, or on-demand without runtime work     |
+| `agw vm reconcile [<name>] [--all] [--dry-run]`                      | Apply the named VM scope or explicitly selected fleet          |
+| `agw vm stop <name>`                                                 | Stop a VM and keep it stopped (no auto-start)                  |
+| `agw vm reinit <name> [--admin-template <tmpl>] [--admin-spec JSON]` | Re-run initialization on a provisioned VM                      |
+| `agw vm confirm-release <name>`                                      | Observe and explicitly record the live Debian release          |
+| `agw vm delete <name>`                                               | Delete a VM (with confirmation)                                |
+| `agw vm backup <name>`                                               | Back up a VM: metadata, agents, workspaces, and files          |
+| `agw vm rekey <name>`                                                | Assign a new Tailscale auth key to a VM (logout + rejoin)      |
+| `agw vm recover <name>`                                              | Repair a VM's SSH access, python3 and Tailscale node           |
+| `agw vm port-forward <name> <ports...>`                              | Forward local port(s) to a VM (like kubectl port-forward)      |
+| `agw vm logs <name> [--all]`                                         | Show a VM's latest operation log, or every one with `--all`    |
+| `agw vm import-host-keys (--all \| <name>...)`                       | Import VM host keys from `known_hosts` into the host-key store |
 
 `vm rekey <name>` resolves the template's auth-key secret by default. Use `--secret <name>` to
 select another declared secret for this operation, or `--prompt` to enter the replacement key
@@ -759,24 +775,26 @@ current power state; this never starts a VM. The human table adds `STATUS` only 
 and the command reports progress before provider work. `--status` cannot be combined with
 `--names-only`.
 
-`vm create <name>` takes the VM name as a required positional. Optional flags: `--template` (a
-declared vm-template), `--admin-template` (a declared admin-template; defaults to the reserved
-`default` admin-template, which always exists), `--spec` (an inline final VM layer), `--admin-spec`
-(an inline final admin layer), and `--site` (a declared vm-site; falls back to `defaults.site`, else
-the one ENABLED site is inferred when there is exactly one, several prompt interactively, and
-non-interactive runs error naming the options). The selected admin-template is stored on the VM row
-(NULL = `default`) and drives its admin user on every later `vm reinit`, `vm shell`, and admin-mode
-session. An unknown `--admin-template` name fails before any provisioning or DB work. Hardware
-(`cpus`, `memory`, `disk`, `swap`) starts with the vm-template and the admin username comes from the
-admin-template. `--spec` may supply a typed final VM layer for hardware or other VM-template fields,
-while `--admin-spec` may supply a typed final admin layer. The removed individual override flags do
-not return. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's catalog
-(built-in B-series, or the site's `vm_sizes` platform key); an off-ratio request rounds up and
-warns. These are immutable provisioning parameters stored in the database. All initialization
-follows the effective VM and admin declarations, with config and registry resources backing
-referenced packages, credentials, secrets, and install commands. Both final layers are stored in one
-desired VM record and reapplied by `vm reinit`. Templates carry no `site`: placement is per-host, so
-it never travels inside a shared template.
+`vm create <name>` takes the VM name as a required positional. The name becomes the VM's hostname
+(`{slug}-{name}`, below), so unlike other resource names it cannot hold an underscore, which no DNS
+hostname allows. Optional flags: `--template` (a declared vm-template), `--admin-template` (a
+declared admin-template; defaults to the reserved `default` admin-template, which always exists),
+`--spec` (an inline final VM layer), `--admin-spec` (an inline final admin layer), and `--site` (a
+declared vm-site; falls back to `defaults.site`, else the one ENABLED site is inferred when there is
+exactly one, several prompt interactively, and non-interactive runs error naming the options). The
+selected admin-template is stored on the VM row (NULL = `default`) and drives its admin user on
+every later `vm reinit`, `vm shell`, and admin-mode session. An unknown `--admin-template` name
+fails before the VM row is created or anything is provisioned. Hardware (`cpus`, `memory`, `disk`,
+`swap`) starts with the vm-template and the admin username comes from the admin-template. `--spec`
+may supply a typed final VM layer for hardware or other VM-template fields, while `--admin-spec` may
+supply a typed final admin layer. The removed individual override flags do not return. On Azure,
+`cpus` + `memory` select the smallest fitting VM size from the site's catalog (built-in B-series, or
+the site's `vm_sizes` platform key); an off-ratio request rounds up and warns. These are immutable
+provisioning parameters stored in the database. All initialization follows the effective VM and
+admin declarations, with config and registry resources backing referenced packages, credentials,
+secrets, and install commands. Both final layers are stored in one desired VM record and reapplied
+by `vm reinit`. Templates carry no `site`: placement is per-host, so it never travels inside a
+shared template.
 
 During provisioning, the platform joins the VM to the tailnet once, through its own channel, and
 then reads the VM's Tailscale address. If the address cannot be read, create logs the node out of
@@ -790,9 +808,9 @@ removal.
 Agentworks then reaches the VM over SSH at that address. Its first connection records the VM's host
 key, and the VM contract's base checks follow on verified connections: the Debian release first,
 then systemd, passwordless `sudo` for the admin, and the base tools Agentworks runs (`install`,
-`flock`, `nohup`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of
-this fails, the VM is kept in a failed state; if create is interrupted first (Ctrl-C, on macOS and
-Linux `SIGTERM` or `SIGHUP`, or on Windows Ctrl-Break), it is kept with its provisioning incomplete.
+`flock`, `setsid`, `tar`). The VM's provisioning is complete only once they pass. If any of this
+fails, the VM is kept in a failed state; if create is interrupted first (Ctrl-C, on macOS and Linux
+`SIGTERM` or `SIGHUP`, or on Windows Ctrl-Break), it is kept with its provisioning incomplete.
 Either way its temporary provisioning access is closed, and `vm start`, `vm stop`, `vm rekey`,
 `vm recover`, `vm reinit`, `vm exec`, `vm shell` (with `--platform` too), `vm port-forward`,
 `vm backup` and `vm confirm-release` refuse it, as they do a VM a killed create left in progress;
@@ -810,7 +828,11 @@ ask again. Non-interactive runs never prompt (a later interactive create still a
 
 `vm reinit` re-runs the initialization phase using the current config without reprovisioning the VM.
 Changes to config (new packages, different install commands, etc.) are picked up automatically. It
-consumes both stored VM and admin instance specs but cannot change or clear either one.
+consumes both stored VM and admin instance specs. `--admin-template <tmpl>` re-points the admin user
+to a different declared admin-template (an unknown name fails before anything is stored), and
+`--admin-spec JSON` replaces the stored admin layer or, as `'{}'` or `''`, clears it; see
+[Instance specs](#instance-specs). Without them both are retained, and the stored VM layer is always
+kept.
 
 Reinit starts with the VM contract's base checks, before it changes anything. A live Debian release
 that differs from the recorded one refuses first, naming `vm confirm-release`. A VM without systemd,
@@ -920,12 +942,15 @@ so, and `agw vm rekey <name>` puts the VM back on Tailscale if you would rather 
 
 `vm backup` exports the VM row and exact owner tree of agents, workspaces, sessions, events, grants,
 desired instance specs, and workspace files. It does not create or copy a provider VM snapshot,
-disk, export, or other recovery artifact. On POSIX, its local timestamp directory is created with
-mode 0700 and its JSON files with mode 0600. Native Windows refuses backups containing instance
-specs until private access-control export is supported. Instance specs can contain plaintext
-environment values, so keep the configured backup path on a trusted local filesystem and protect any
-copies of the archive with equivalent access controls. Current archives use manifest version 5;
-their VM and session rows include the nullable latest-start observations.
+disk, export, or other recovery artifact. The workspace archive is built on the VM in a root-only
+directory under `/var/lib/agentworks/detached`, which the backup removes when it ends; it keeps
+running across a dropped connection, and the backup waits for it. On POSIX, the backup's local
+timestamp directory is created with mode 0700 and its JSON files with mode 0600. Native Windows
+refuses backups containing instance specs until private access-control export is supported. Instance
+specs can contain plaintext environment values, so keep the configured backup path on a trusted
+local filesystem and protect any copies of the archive with equivalent access controls. Current
+archives use manifest version 5; their VM and session rows include the nullable latest-start
+observations.
 
 `agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
@@ -936,20 +961,25 @@ directory on this VM. The workspace's template env joins the env chain (between 
 into the workspace; the exec variant runs the command from the workspace directory. A workspace that
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
-`vm shell`, `vm exec`, `vm verify-connection`, `vm port-forward`, `agent shell` and `agent exec`,
-`vm start` and the automatic start of a stopped VM, `vm rekey` and `vm recover` for their final
-waits, and `vm create`, `vm reinit` and `vm confirm-release` for their checks of the VM, connect
-with the OpenSSH client on the workstation, version 8.5 or newer (`vm shell --platform` uses the
-platform's own path instead and needs no `python3`; Remote Lima and the clouds need the client, and
-check it only once they connect, a cloud inside its temporary network route). Agentworks uses the
-first `ssh` on `PATH`; on Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or
-`Program Files\OpenSSH`, never the `ssh` bundled with Git for Windows. `agw doctor` shows which
-client was resolved, and these commands, other than `vm shell --platform`, refuse an unsupported one
-before anything else runs. These commands run `ssh -F none` in batch mode, so `~/.ssh/config` does
-not apply and an encrypted private key must be loaded in the SSH agent. The VM needs `python3`; a VM
-without it is reported as unable to run Agentworks requests, and `agw vm recover <name>` installs
-it. A command that is not found exits 127, one that cannot run exits 126, and a missing workspace
-directory exits 125.
+Every command that reaches a VM over SSH (the `vm`, `agent`, `workspace`, `session` and `console`
+commands, create's checks of a new VM, initialization, the waits of `vm start`, the automatic start,
+`vm rekey` and `vm recover`, and `vm describe`'s live resources) connects with the OpenSSH client on
+the workstation, version 8.5 or newer (`vm shell --platform` uses the platform's own path instead
+and needs no `python3`; Remote Lima and the clouds need the client, and check it only once they
+connect, a cloud inside its temporary network route). Agentworks uses the first `ssh` on `PATH`; on
+Windows it uses only the native Win32-OpenSSH under `System32\OpenSSH` or `Program Files\OpenSSH`,
+never the `ssh` bundled with Git for Windows. `agw doctor` shows which client was resolved.
+`vm create`, `vm start`, `vm rekey`, `vm recover`, `vm reinit`, `vm confirm-release`,
+`vm verify-connection`, `vm backup`, `vm exec`, `vm shell` (but not `vm shell --platform`),
+`vm port-forward`, `agent shell` and `agent exec` refuse an unsupported client before anything else
+runs; `vm describe` warns and leaves its live resources out instead. Session status reads
+(`session list --status`, `session describe`) warn and report that VM's sessions as unknown. Every
+other command that reaches a VM, and the automatic start, fails at its first request to the VM,
+after any VM start and secret prompt. These commands run `ssh -F none` in batch mode, so
+`~/.ssh/config` does not apply and an encrypted private key must be loaded in the SSH agent. The VM
+needs `python3`; a VM without it is reported as unable to run Agentworks requests, and
+`agw vm recover <name>` installs it. A command that is not found exits 127, one that cannot run
+exits 126, and a missing workspace directory exits 125.
 
 `vm port-forward` runs until interrupted and exits 0 when stopped with Ctrl-C, on macOS and Linux
 also with `SIGTERM` or `SIGHUP` (a closed terminal), and on Windows also with Ctrl-Break; started
@@ -996,12 +1026,13 @@ notice that the connection may have dropped.
 
 Agentworks verifies every connection to a VM against a per-VM host-key store, never against your
 `~/.ssh/known_hosts`. The store is one file per VM under `~/.config/agentworks/known_hosts/`, keyed
-by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records the key on
-its first connection and nowhere else; `vm delete` removes the file, and so does a `vm create` that
-fails and removes the VM's row. A command that reaches a VM over SSH refuses a VM with no recorded
-key, with a hint naming the import, rather than trusting it on first use; describe and listing
-commands warn per VM and carry on. `vm delete` still works without a record, but on a cloud VM it
-cannot then log the node out of Tailscale.
+by VM name, so a VM keeps its trust across tailnet address changes. `vm create` records a new VM's
+key on its first connection, writing it to the store only; an existing VM's key enters the store
+only through `vm import-host-keys` or `vm recover`. `vm delete` removes the file, and so does a
+`vm create` that fails and removes the VM's row. A command that reaches a VM over SSH refuses a VM
+with no recorded key, with a hint naming the import, rather than trusting it on first use; describe
+and listing commands warn per VM and carry on. `vm delete` still works without a record, but on a
+cloud VM it cannot then log the node out of Tailscale.
 
 `agw vm import-host-keys (--all | <name>...) [--known-hosts <path>]` copies keys you already trust
 into the store. It asks OpenSSH's own `ssh-keygen -F` which keys `~/.ssh/known_hosts` (or the file
@@ -1015,11 +1046,18 @@ for that VM (`trust marker present`).
 
 Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
 `trust marker present`, `conflicts with the stored key`, or `no tailnet address`. The command exits
-non-zero while any selected VM ends without a record, with `--all` as well.
+non-zero while any selected VM ends without a record, with `--all` as well. Every run then rewrites
+the managed SSH config entries, whatever it imported.
 
 For a VM with no matching entry, verify its host key fingerprints against its console or provider,
 gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned
 file is trusted as given, so check the fingerprints first.
+
+A VM that presents a key other than its recorded one fails with `host key verification failed`, and
+neither the import nor `vm recover` replaces an existing record. If the VM was rebuilt or its keys
+were regenerated, verify the new key through the platform console or provider, remove the VM's file
+under `~/.config/agentworks/known_hosts/`, and import a verified file with
+`agw vm import-host-keys <name> --known-hosts FILE`. If you did not expect a change, do not connect.
 
 ### Workspaces
 
@@ -1041,7 +1079,15 @@ workspace file with VS Code's `code` command; on Windows `agw` does not start VS
 names the file to open.
 
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
-and destination can be the same VM (a clone) or different VMs.
+and destination can be the same VM (a clone) or different VMs. The tree travels through the
+workstation as a compressed tar stream that is never unpacked there, so modes and links survive any
+workstation, and nothing is staged on either VM. The destination extracts it as root without the
+source's owners and then gives it to the admin and the workspace group; an extraction that fails or
+is interrupted leaves the partial tree in the new directory and no workspace row, so remove the
+directory before retrying.
+
+`workspace rehome <name>` moves the workspace to `--target`, an absolute path on the VM (a trailing
+`/` is dropped), or to the configured workspace directory without it.
 
 `workspace list` accepts `--vm` to narrow the result set to one VM's workspaces. An unknown name in
 the filter is an error, not an empty result.
@@ -1119,17 +1165,36 @@ The agent alias is keyed on the agent's operator-facing name (the same name you 
 prefixes are configurable via `operator.ssh_host_prefix` (default `awvm--`) and
 `operator.ssh_agent_host_prefix` (default `awagent--`).
 
-Entries are rebuilt declaratively from the database on every agent / VM lifecycle operation, so a
-fresh `agw agent create` or `agw vm delete` keeps the file in sync without manual intervention. Each
-entry's `IdentityFile` is `operator.ssh_private_key`, so after changing that key, `agw vm recover`
-or `agw vm reinit` (which install the new key on the VM) rebuild the file too. Run
-`agw config sync-ssh-config` to force a rebuild.
+Entries are rebuilt declaratively from the database by `vm create`, `vm reinit`, `vm recover`,
+`vm rekey`, `vm delete`, `agent create`, `agent reinit`, `agent delete`, `session create` or
+`session delete` when it creates or deletes an agent, and every `vm import-host-keys` run, so those
+commands keep the file in sync without manual intervention. Each entry's `IdentityFile` is
+`operator.ssh_private_key`, so after changing that key, `agw vm recover` or `agw vm reinit` (which
+install the new key on the VM) rebuild the file too. Run `agw config sync-ssh-config` to force a
+rebuild.
 
-Entries for a VM that has a host-key record also carry `HostKeyAlias`, `UserKnownHostsFile` (the
-VM's store file) and `StrictHostKeyChecking yes`, plus `UpdateHostKeys no` and `HashKnownHosts no`
-so your own `ssh` neither writes to the store nor hashes it. Entries for a VM without a record are
-unchanged, so your own `ssh` keeps working until you run `agw vm import-host-keys`. See
-[Host keys](#host-keys).
+Every entry also carries `HostKeyAlias`, `StrictHostKeyChecking yes`, `GlobalKnownHostsFile` (the
+VM's store file) and `UserKnownHostsFile` set to the null device, plus `UpdateHostKeys no` and
+`HashKnownHosts no`. Your own `ssh` reads the store and never writes to it, because the store is its
+global known-hosts file and `ssh` writes known hosts only to the user file. With the entries' own
+settings, your own `ssh` therefore trusts exactly the keys Agentworks has recorded. It refuses a VM
+with no record (`Host key verification failed`) until `agw vm import-host-keys NAME` or
+`agw vm recover NAME` records one, and that VM's entries carry a comment naming both. A host-key
+checking setting of your own (`StrictHostKeyChecking accept-new` or `no`, in an earlier `Host *`
+block or on the command line) can let `ssh` connect without verifying, to a VM with no record or,
+under `no`, past a key the store does not hold. Neither that nor an update setting
+(`UpdateHostKeys`) ever records a key in the store. A known-hosts file setting of your own
+(`UserKnownHostsFile` or `GlobalKnownHostsFile`) read before the entry takes precedence over it:
+keys then go into your file rather than nowhere, and later connections trust them, or the store is
+skipped and the VM fails closed. See [Host keys](#host-keys).
+
+The entries name the key and the host-key store by the absolute paths Agentworks itself uses. When
+the store's path cannot be written into an entry, no VM gets entries, with one warning, rather than
+entries that would trust whatever answers; a key path that cannot be written is left out with a
+warning, so your own `ssh` offers its default keys. On Windows, where the `ssh` shipped with Git for
+Windows may read the entries and accepts no form of a path with an apostrophe and no whitespace,
+such a path is refused the same way. The store is under your profile, so a profile named with an
+apostrophe and no whitespace gets no managed entries, with one warning that names the profile.
 
 ### Sessions
 
@@ -1383,12 +1448,16 @@ name. The user's `~/.tmux.conf` (customizable via dotfiles) is loaded first so t
 keybindings (prefix, detach, copy mode, scroll) work for direct `session attach`. Window/pane
 creation, session management, and the command prompt are selectively unbound.
 
-Agent-mode sessions each get their own tmux socket, so every session runs as its own tmux server
-rather than as a window in a shared one. The sockets are grouped in a per-agent directory whose
-ownership keeps one agent from reaching another's (cross-agent isolation), and giving each session
-its own server means it inherits the environment delivered over its own SSH connection instead of
-leaking env across sessions through a shared server. The agent's shell attaches directly to the tmux
-pane PTY, and each socket path is persisted in the database.
+Every session runs as its own tmux server, on a socket of its own, rather than as a window in a
+shared one. An agent session's socket is in that agent's directory under
+`/run/agentworks/agent-tmux-sockets`, which only the agent and root can enter, so one agent cannot
+reach another's servers; its server runs as the agent, with the agent's shells directly on the
+panes' terminals. An admin session's socket is in the VM admin's directory under
+`/run/agentworks/admin-tmux-sockets`. A session's environment, secrets included, travels in its
+launch request, and its server takes it as the global environment every pane inherits, so one
+session's environment never leaks into another's. Each socket path is persisted in the database;
+[Session status internals](../docs/guides/session-status.md) says which account each tmux client
+Agentworks starts runs as.
 
 #### Named Console
 
@@ -1410,15 +1479,6 @@ Membership and per-session shell layout are stored in the database; see
 is the VM-boot behavior: the mutation commands (`add-sessions`, `remove-sessions`,
 `reorder-sessions`, `add-shell`) never auto-boot the VM, whereas the explicit attach/repair commands
 (`attach`, `restore-session`) do start a stopped VM, since their job is to bring live state up.
-
-#### Workspace tmuxinator Config
-
-Workspaces with tmuxinator enabled in their template (the default) carry a tmuxinator config
-(`.tmuxinator.yml` in the workspace root, symlinked as `~/.config/tmuxinator/ws-<name>-console.yml`)
-describing a `ws-<name>-console` session: an admin-shell window plus one window per session. It is
-regenerated whenever sessions change. The `agw workspace console` command that attached to it was
-removed (superseded by named consoles); the config remains usable directly on the VM via
-`tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
 #### Shells
 
@@ -1485,9 +1545,9 @@ spec:
 strings support context substitution such as `${agw:session_name}`, `${agw:workspace_name}`, and
 `${agw:user_home_dir}`. The namespaced syntax keeps shell variables and Go templates available to
 their own consumers. For existing Shell configurations, `{{session_name}}` and `{{workspace_name}}`
-remain accepted in `command` and `resume_command` throughout CLI 1.x, with removal planned for
-2.0.0. They also remain accepted in winning session-scope plaintext env values for every
-integration. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Affected
+remain accepted in `command` and `resume_command` through CLI 0.20.x and 0.21.x, with removal
+planned for 0.22.0. They also remain accepted in winning session-scope plaintext env values for
+every integration. Replace them with `${agw:session_name}` and `${agw:workspace_name}`. Affected
 operations emit one suppressible deprecation notice; `agw doctor` also identifies affected effective
 templates and stored session overrides. Other brace text remains literal. The executables an
 integration requires are checked on the session's launch target before state mutation, so a missing

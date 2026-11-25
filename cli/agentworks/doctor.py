@@ -523,25 +523,20 @@ def _check_python() -> HealthGroup:
 
 
 def _check_required_tools() -> HealthGroup:
-    """PATH presence rows, then the OpenSSH resolver's verdict.
+    """``tailscale`` on ``PATH``, then the OpenSSH resolver's verdict.
 
-    The ``ssh`` and ``scp`` rows stay while legacy paths still start them
-    through ``programs.resolve_program``. The resolver row is what the
-    migrated commands use: the absolute client path and version, or the
-    refusal with its install guidance.
+    The resolver row is the client every command uses: its absolute path and
+    version, or the refusal with its install guidance.
     """
     from agentworks.execution import resolve_ssh
     from agentworks.execution.errors import ClientUnsupported
-    from agentworks.programs import resolve_program
+    from agentworks.programs import is_installed
 
     g = HealthGroup("Required tools")
-    for tool in ("ssh", "scp", "tailscale"):
-        try:
-            resolve_program(tool)
-        except FileNotFoundError:
-            g.fail(tool, "not found")
-        else:
-            g.ok(tool)
+    if is_installed("tailscale"):
+        g.ok("tailscale")
+    else:
+        g.fail("tailscale", "not found")
     try:
         client = resolve_ssh()
     except ClientUnsupported as e:
@@ -814,6 +809,8 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     if manifests is not None:
         for issue in manifests.issues:
             g.warn("Manifest", issue)
+        for deprecation in manifests.deprecations:
+            g.warn("Manifest", deprecation)
     if not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # Every settings-side deprecation doctor used to render is retired now,
@@ -836,9 +833,10 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     if registry is None:
         return g, config, None
 
-    from agentworks.doctor_state import append_session_template_deprecation_checks
+    from agentworks.doctor_state import append_session_template_deprecation_checks, append_workspace_deprecation_checks
 
     append_session_template_deprecation_checks(g, registry)
+    append_workspace_deprecation_checks(g)
 
     # Dotfiles
     from agentworks.resources.access import admin_template

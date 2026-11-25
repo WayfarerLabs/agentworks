@@ -662,17 +662,24 @@ all must pass before Agentworks skips the command. With no checks, the command a
 A `system-install-command` is VM-wide in scope, but Agentworks executes it as the VM admin user, not
 root. The command must explicitly use `sudo` for each step that needs root privileges. A
 `user-install-command` runs as the admin or agent user whose template selects it and should not
-assume elevation.
+assume elevation. For either account it runs after that account's dotfiles sync and mise install,
+with mise's shims on its `PATH`.
 
 An install-command's `path` entries persist in the target user's managed `~/.agentworks-profile.sh`.
 User install commands contribute to the selected admin or agent user's profile; system install
-commands contribute to the VM admin's profile. Agentworks rewrites the profile after install
-commands run, including paths from successful commands and commands skipped by completion checks.
-Failed commands warn and setup continues, without contributing paths. Later shells that source the
-profile prepend these directories to `PATH`, and child processes inherit them. A leading `~`
-resolves to the target user's home. Install commands share existing home and login state, but
-declared paths are deferred until the batch finishes. Use an absolute path to invoke a tool absent
-from the login shell's existing `PATH`.
+commands contribute to the VM admin's profile. Agentworks writes the profile from the declarations
+early in every initialization of that account, before its dotfiles sync and its user install
+commands, including paths from commands skipped by completion checks. A command that fails warns and
+setup continues; its paths leave the profile once that account's install commands finish, so a
+failed system install command contributes none, and a failed user install command's paths stay in
+the profile until that account's user install commands finish. Shells that source the profile
+prepend these directories to `PATH`, and child processes inherit them. On `PATH`, a user install
+command's directories precede mise's shims, so they take precedence over a shim of the same name;
+for the admin, mise's shims precede the system install commands' directories, so a shim takes
+precedence over them. A leading `~` resolves to the target user's home. A user install command's
+login shell therefore already has every declared directory on `PATH`, its own included. System
+install commands run earlier, before the admin's profile is written: on a first create they see none
+of it, and on reinit they see the previous one.
 
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a
@@ -775,8 +782,8 @@ Authoring a system plugin is documented in the plugins package README
 The `apt` plugin owns five shipped apt sources and five apt package sets. The `install-command`
 plugin owns six shipped user install commands. They are both disabled by default. Core still owns
 the resource kinds, validation, apt source-before-package ordering, idempotent runners, executors,
-and initialization. Core also continues to own snap, mise, dotfiles, tmuxinator, and Claude
-marketplace/plugin setup. Enable `apt` only for a template selecting its apt catalog, and
+and initialization. Core also continues to own snap, mise, and dotfiles; harness integrations own
+native marketplace/plugin setup. Enable `apt` only for a template selecting its apt catalog, and
 `install-command` only for an admin or agent template selecting its shipped user command. Use
 `agw doctor` to see their states and `agw resource list --include-disabled` to inspect their rows.
 
@@ -793,13 +800,13 @@ apt source and package rows; `install-command` for its shipped user install-comm
 `onepassword` if a declared secret source selects the `onepassword` backend; `proxmox` if a
 `vm-site` uses the `proxmox` platform; `gcp` if you use `gcp-gce` or a template installs the
 `gcloud-cli` apt package; `aws` if you use `aws-ec2`; `azure` if you use the `azure-vm` platform,
-the `azdo` (Azure DevOps) git-credential provider, or the `az-cli` install-command; and `claude` if
-a `session-template` uses the `claude-code` integration or a template installs the `claude` CLI.
-Until you do, a resource that references one is not-ready (or refused at use) with an "enable plugin
-`<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2` platforms, the
-`shell` harness integration, the `env-var` / `prompt` secret backends, and the `github`
-git-credential provider) needs no `[plugins]` entry at all. `agw doctor` lists every installed
-plugin and whether it is enabled.
+the `azdo` (Azure DevOps) git-credential provider, the `azure-keyvault` secret backend, or the
+`az-cli` install-command; and `claude` if a `session-template` uses the `claude-code` integration or
+a template installs the `claude` CLI. Until you do, a resource that references one is not-ready (or
+refused at use) with an "enable plugin `<name>`" hint, never a silent failure. The default local
+path (the `lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt`
+secret backends, and the `github` git-credential provider) needs no `[plugins]` entry at all.
+`agw doctor` lists every installed plugin and whether it is enabled.
 
 ## Secrets: configured sources and implementation backends
 

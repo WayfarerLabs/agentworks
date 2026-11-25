@@ -23,6 +23,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
 from tests.conftest import ManifestDoc, seed_vm_trust, stub_vm_ssh_identity
+from tests.vm_access_support import answer_destination_identity
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -227,7 +228,7 @@ def test_create_with_spec_persists_owner_and_overlay_and_reports_set(
         config,
         name="ws1",
         vm_name="box",
-        spec='{"tmuxinator":false}',
+        spec='{"git_user_name":"Ada"}',
         interaction=TtyInteractionPolicy.REFUSE,
     )
 
@@ -235,9 +236,9 @@ def test_create_with_spec_persists_owner_and_overlay_and_reports_set(
     assert db.get_workspace("ws1") is not None
     stored = db.instance_state.get_desired_overlay("workspace", "ws1")
     assert stored is not None
-    assert stored.payload == VersionedPayload(1, {"tmuxinator": False})
+    assert stored.payload == VersionedPayload(1, {"git_user_name": "Ada"})
     assert [(outcome.disposition, outcome.fields) for outcome in outcomes] == [
-        (OverlayDisposition.SET, ("tmuxinator",))
+        (OverlayDisposition.SET, ("git_user_name",))
     ]
 
 
@@ -331,7 +332,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
     deletes: list[str] = []
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.delete_vm_workspace",
-        lambda vm, config_, ws_name, path, linux_group, *, logger=None: deletes.append(path),
+        lambda vm, config_, path, linux_group, *, logger=None: deletes.append(path),
     )
 
     with pytest.raises(ExternalError, match="creating workspace: ssh exploded"):
@@ -340,7 +341,7 @@ def test_create_mutation_failure_cleans_up_and_leaves_no_row(
             config,
             name="ws1",
             vm_name="box",
-            spec='{"tmuxinator":false}',
+            spec='{"git_user_name":"Ada"}',
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
@@ -383,22 +384,16 @@ def test_workspace_scope_reaches_node_readiness(
 
 
 def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
-    db, make_config, mutation, monkeypatch, resolve_counter
+    db, make_config, mutation, monkeypatch, resolve_counter, vm_access_recorder
 ):
-    from unittest.mock import Mock
-
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.state import read_native_setup
-    from agentworks.transports import Transport
 
     config = make_config()
     _seed_vm(db)
     _reachable(monkeypatch, True)
     monkeypatch.setenv("AW_SECRET_PROJECT_TOKEN", "project-private")
-    target = Mock(spec=Transport)
-    target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
+    vm_access_recorder.answer = answer_destination_identity
     calls = []
 
     def setup(self, invocation):
@@ -425,24 +420,21 @@ def test_workspace_setup_joins_eager_env_and_follows_directory_creation(
     assert read_native_setup(db, "workspace", "project").records[0].complete
 
 
-def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(db, make_config, mutation, monkeypatch):
+def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(
+    db, make_config, mutation, monkeypatch, vm_access_recorder
+):
     from dataclasses import replace
-    from unittest.mock import Mock
 
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
     from agentworks.harness_setup.state import read_native_setup
     from agentworks.plugins.codex.harness_integration import CodexIntegration
-    from agentworks.transports import Transport
 
     config = make_config()
     config = replace(config, enabled_system_plugins=(*config.enabled_system_plugins, "codex"))
     _seed_vm(db)
     _reachable(monkeypatch, True)
     db.insert_agent("dev", "box", "agt-dev", template="default", grant_all=True)
-    target = Mock(spec=Transport)
-    target.logger = None
-    target.run.return_value.stdout = "\nAGW_NATIVE_ID=native-identity\n"
-    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: target)
+    vm_access_recorder.answer = answer_destination_identity
     events = []
 
     def fail_setup(self, invocation):

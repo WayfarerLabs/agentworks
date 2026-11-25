@@ -18,6 +18,7 @@ from agentworks.db.projections import (
     project_vm_provisioning_status,
 )
 from tests.instance_state_support import stub_instance_state
+from tests.vm_access_support import install_access_recorder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,7 +36,11 @@ def _seed_invalid_persisted_enums(db: Database) -> None:
     db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
     db.insert_session("session-a", "ws", "default", SessionMode.ADMIN)
     db.update_session_runtime(
-        "session-a", socket_path="/tmp/session-a.sock", pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None
+        "session-a",
+        socket_path="/run/agentworks/admin-tmux-sockets/agentworks/session-a.sock",
+        pid=PID_STOPPED,
+        boot_id=None,
+        tmux_server_start_ticks=None,
     )
     db._conn.execute(
         "UPDATE vms SET provisioning_status = ?, init_status = ? WHERE name = 'box'",
@@ -103,7 +108,7 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
 
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sessions, "check_session_status", lambda *_args, **_kwargs: SessionStatus.STOPPED)
-    monkeypatch.setattr(sessions, "transport", lambda *_args, **_kwargs: object())
+    install_access_recorder(monkeypatch)
     platform = SimpleNamespace(
         name="fixture-platform",
         display_backend_name=lambda _vm: "fixture-backend",

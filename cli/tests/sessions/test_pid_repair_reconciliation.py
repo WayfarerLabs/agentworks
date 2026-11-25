@@ -22,15 +22,15 @@ from agentworks.errors import StateConflictError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _lifecycle, _pids, _teardown
+from tests.vm_access_support import install_access_recorder
 
-from .test_session_batch_stop_parallelism import BOOT_ID, _prepared_stop_config, _seed_session, _Target
+from .test_session_batch_stop_parallelism import BOOT_ID, _access, _prepared_stop_config, _seed_session
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.config import Config
     from agentworks.db import SessionRow
-    from agentworks.transports import Transport
     from tests.conftest import CapturedOutput
 
 
@@ -118,7 +118,7 @@ def test_each_repair_write_preserves_replacement_from_another_connection(
     with contextlib.closing(Database(db.path)) as other:
         _observations(monkeypatch, branch, lambda: changed.append(_replace(other, session, change)))
         with pytest.raises(StateConflictError):
-            _pids._repair_session_pid(session, target=cast("Transport", _Target("repair")), db=db)
+            _pids._repair_session_pid(session, admin=_access("repair"), db=db)
         assert len(changed) == 1
         assert db.get_session(session.name) == changed[0]
         assert other.get_session(session.name) == changed[0]
@@ -134,11 +134,11 @@ def test_repair_retains_positive_recovery_and_learned_boot_refusal(
     expected_runtime: tuple[int | None, str | None, int | None]
     if branch.endswith("boot"):
         with pytest.raises(StateError) as caught:
-            _pids._repair_session_pid(session, target=cast("Transport", _Target("repair")), db=db)
+            _pids._repair_session_pid(session, admin=_access("repair"), db=db)
         assert not isinstance(caught.value, StateConflictError)
         expected_runtime = (None, BOOT_ID, None)
     else:
-        assert _pids._repair_session_pid(session, target=cast("Transport", _Target("repair")), db=db)
+        assert _pids._repair_session_pid(session, admin=_access("repair"), db=db)
         expected_runtime = (101, BOOT_ID, 201) if branch == "recovered" else (PID_STOPPED, None, None)
     current = db.get_session(session.name)
     assert current is not None
@@ -157,7 +157,7 @@ def test_repair_writes_respect_enclosing_transaction_rollback(
     session = _session(db, branch)
     _observations(monkeypatch, branch, lambda: None)
     with pytest.raises(StateError), db.transaction():
-        _pids._repair_session_pid(session, target=cast("Transport", _Target("repair")), db=db, announce=False)
+        _pids._repair_session_pid(session, admin=_access("repair"), db=db, announce=False)
         raise StateError("roll back the completed repair")
     assert db.get_session(session.name) == session
     with contextlib.closing(Database(db.path)) as other:
@@ -193,7 +193,7 @@ def test_repair_conflict_refuses_callers_before_status_or_destructive_dispatch(
 
             monkeypatch.setattr(db, "set_session_desired_runtime_state", already_accepted)
         monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *args, **kwargs: None)
-        monkeypatch.setattr(manager, "transport", lambda *args, **kwargs: _Target("repair"))
+        install_access_recorder(monkeypatch).answer = _access("repair").answer
         workspace = db.get_workspace(session.workspace_name)
         assert workspace is not None
         vm = db.get_vm(workspace.vm_name)
@@ -260,7 +260,7 @@ def test_batch_repair_retains_best_effort_for_ordinary_ownership_refusal(
     _observations(monkeypatch, "recovered", lambda: None)
     monkeypatch.setattr(tmux, "_matches_launch_attempt", lambda **kwargs: False)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *args, **kwargs: None)
-    monkeypatch.setattr(manager, "transport", lambda *args, **kwargs: _Target("repair"))
+    install_access_recorder(monkeypatch).answer = _access("repair").answer
     result = _pids.ensure_pids_batch([session], db=db, config=cast("Config", SimpleNamespace()))
     assert result == [session]
     assert db.get_session(session.name) == session

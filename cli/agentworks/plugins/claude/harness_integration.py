@@ -52,11 +52,12 @@ from agentworks.capabilities.harness_integration.base import (
     require_commands,
 )
 from agentworks.errors import StateError
+from agentworks.harness_setup.outcomes import Redactor
 from agentworks.plugins._harness_native.native import setup_user, setup_workspace
 from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 from agentworks.plugins.claude.artifacts import outer_artifacts, session_artifacts
 from agentworks.plugins.claude.conversation_probe import probe_conversation
-from agentworks.schema import AgwModel, InstanceOnly, MergeStrategy
+from agentworks.schema import AgwModel, InstanceOnly, Interpolated, MergeStrategy
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -71,7 +72,7 @@ if TYPE_CHECKING:
         VMSetupInvocation,
         WorkspaceSetupInvocation,
     )
-    from agentworks.transports import Transport
+    from agentworks.execution.access import VMAccess
 
 
 class ClaudeCodeUserConfig(NativeUserConfig):
@@ -129,8 +130,11 @@ class ClaudeCodeConfig(AgwModel):
     replayed on resume."""
 
     agent: str | None = None
-    """Forwarded as ``--agent`` on every process launch, including resume.
-    Claude Code owns agent discovery and validation."""
+    """Select a Claude agent on every process launch, including resume.
+
+    Use the delivered name for a session artifact, such as ``vm-review``.
+    Agentworks qualifies that name with the session plugin when it supplies
+    the persona. Claude Code owns discovery and validation."""
 
     append_system_prompt: str | None = None
     """Forwarded as ``--append-system-prompt`` on every process launch,
@@ -155,12 +159,13 @@ class ClaudeCodeConfig(AgwModel):
     later and replaces this generated setting. False (the default) adds no
     override. A child template's value replaces its parent's."""
 
-    enabled_workarounds: Annotated[
-        list[Literal["session-skill-plugin", "session-agent-definitions", "session-mcp-config"]], MergeStrategy.REPLACE
-    ] = Field(default_factory=list)
-    """Explicitly enabled session artifact carriers. An authored list replaces inherited opt-ins."""
+    enabled_workarounds: (
+        list[Literal["session-skill-plugin", "session-agent-definitions", "session-mcp-config"]] | None
+    ) = Field(default_factory=list)
+    """Session artifact carriers append and deduplicate across layers.
+    Omission or an empty list inherits; null clears inherited opt-ins."""
 
-    extra_args: Annotated[list[str], MergeStrategy.REPLACE] = Field(default_factory=list)
+    extra_args: Annotated[list[Annotated[str, Interpolated()]], MergeStrategy.REPLACE] = Field(default_factory=list)
     """Appended after every generated CLI option, so it can carry
     any flag this integration does not model. Claude uses the last
     ``--settings`` occurrence, so a raw one here replaces all generated
@@ -174,7 +179,7 @@ class ClaudeCodeConfig(AgwModel):
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
-    contract_version: ClassVar[int] = 7
+    contract_version: ClassVar[int] = 8
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig
@@ -228,16 +233,17 @@ class ClaudeCodeIntegration(HarnessIntegration):
                 lambda inputs: outer_artifacts(inputs, "/etc/claude-code/.claude", guidance_as_skills=True),
             )
         )
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     files=files,
+                    setup=invocation,
                     vm_only=True,
                 ),
             )
@@ -290,10 +296,10 @@ class ClaudeCodeIntegration(HarnessIntegration):
             item.content.type is not ArtifactType.MCP_SERVER for item in invocation.artifacts.items()
         ):
             probe_native(
-                invocation.runner,
+                invocation.access,
                 tool="claude",
-                environment=invocation.environment,
-                redactions=invocation.secrets.values(),
+                environment=invocation.request_environment(),
+                redactor=invocation.redactor,
                 home=invocation.home,
                 native_root=root,
                 check_policy=False,
@@ -308,18 +314,19 @@ class ClaudeCodeIntegration(HarnessIntegration):
             skip_mcp=skip_mcp,
         )
         mcp = replace(mcp, deferred=(*mcp.deferred, *mcp_deferred))
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     home=invocation.home,
                     native_root=root,
                     files=files,
+                    setup=invocation,
                 ),
             )
         return replace(
@@ -340,17 +347,18 @@ class ClaudeCodeIntegration(HarnessIntegration):
             )
         )
         mcp = setup_workspace("claude", config, invocation)
-        if plan.files:
+        if not self.retiring:
             plan = defer_setup_conflicts(
                 plan,
                 invocation,
                 lambda files: probe_native(
-                    invocation.runner,
+                    invocation.access,
                     tool="claude",
-                    environment=invocation.environment,
-                    redactions=invocation.secrets.values(),
+                    environment=invocation.request_environment(),
+                    redactor=invocation.redactor,
                     workspace=invocation.root,
                     files=files,
+                    setup=invocation,
                     workspace_only=True,
                 ),
             )
@@ -418,21 +426,21 @@ class ClaudeCodeIntegration(HarnessIntegration):
     ) -> HarnessStart:
         """Choose the requested fresh, strict-resume, or fallback policy."""
         sid, resume = self._conversation(ctx, intent=intent)
-        self._rendered_extra_args = tuple(self.render_context_argv(token) for token in self.config.extra_args)
+        self._rendered_extra_args = self.render_context_args("extra_args", self.config.extra_args)
         artifact_context = self._session_binding.artifact_context
-        runner = ctx.admin_target() if self._admin else ctx.agent_target()
+        access = ctx.admin_access() if self._admin else ctx.agent_access()
         self._artifact_plan, native_root = prepare_session_delivery(
-            runner,
+            access,
             tool="claude",
             integration=self.name,
             context=artifact_context,
             render=lambda prepared: session_artifacts(
                 prepared,
                 extra_args=self._rendered_extra_args,
-                enabled_workarounds=self.config.enabled_workarounds,
+                enabled_workarounds=self.config.enabled_workarounds or (),
                 mcp_conflicts=lambda inputs, prepared: session_mcp_conflicts(
                     "claude",
-                    runner,
+                    access,
                     inputs,
                     home=prepared.home,
                     environment=prepared.environment,
@@ -479,7 +487,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
         if resume_only and forced is None and not (isinstance(stored_sid, str) and stored_sid):
             raise self._resume_only_error()
         sid = forced or (stored_sid if not fresh and isinstance(stored_sid, str) and stored_sid else str(uuid.uuid4()))
-        launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
+        launch_target = ctx.admin_access() if self._admin else ctx.agent_access()
         resume = False
         if (not fresh or forced is not None) and launch_target is not None:
             try:
@@ -489,7 +497,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
                     sid,
                     detect=forced is None,
                     environment=context.environment if context is not None else {},
-                    redactions=context.redactions if context is not None else (),
+                    redactor=context.redactor if context is not None else Redactor(),
                 )
             except StateError as error:
                 raise StateError(
@@ -549,24 +557,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
         parts = [shlex.quote(token) for token in (*identity, "--name", self._session_name, *self._managed_flags())]
         if self.config.agent is not None:
             selected_agent = self.config.agent
-            context = self._session_binding.artifact_context
-            selected_origins = (
-                {
-                    item.origin_identity
-                    for item in context.inputs.items()
-                    if item.content.type is ArtifactType.AGENT and item.content.name == selected_agent
-                }
-                if context is not None
-                else set()
-            )
-            delivered = {
-                file.native_identity.removeprefix("agent:")
-                for file in self._artifact_plan.application.files
-                if file.native_identity is not None
-                and file.native_identity.startswith("agent:")
-                and selected_origins.intersection(file.origins)
-            }
-            selected_agent = next(iter(delivered), selected_agent)
+            for file in self._artifact_plan.application.files:
+                kind, _, qualified = (file.native_identity or "").partition(":")
+                plugin, _, delivered = qualified.partition(":")
+                if kind == "agent" and plugin and delivered and delivered == selected_agent:
+                    selected_agent = qualified
+                    break
             parts += ["--agent", shlex.quote(selected_agent)]
         if self.config.append_system_prompt is not None:
             parts += ["--append-system-prompt", shlex.quote(self.config.append_system_prompt)]
@@ -637,12 +633,12 @@ class ClaudeCodeIntegration(HarnessIntegration):
             prompt += f"\n\nInitial guidance for this goal:\n{self.config.initial_prompt}"
         return prompt
 
-    def _probe_target(self, transport: Transport) -> None:
+    def _probe_target(self, access: VMAccess) -> None:
         """Readiness proves only that ``claude`` is installed; it never
         inspects session state (detection is an op-time concern)."""
         require_commands(
             ("claude",),
-            transport,
+            access,
             harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,

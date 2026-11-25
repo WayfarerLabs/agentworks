@@ -44,7 +44,8 @@ from agentworks.schema._shape import (
     structurally_addressable_arms,
     table_addresses_block,
 )
-from agentworks.schema.markers import REF_SCHEMA_KEY
+from agentworks.schema.interpolation import field_interpolation, interpolation_marker_error
+from agentworks.schema.markers import INTERPOLATION_SCHEMA_KEY, REF_SCHEMA_KEY
 from agentworks.schema.shorthand import ScalarShorthand, scalar_shorthand_of, shorthand_field_error
 
 if TYPE_CHECKING:
@@ -134,7 +135,7 @@ class AgwModel(BaseModel):
         what the author would otherwise see instead.
         """
         super().__pydantic_init_subclass__(**kwargs)
-        reason = shorthand_field_error(cls)
+        reason = shorthand_field_error(cls) or interpolation_marker_error(cls)
         if reason is not None:
             raise StateError(reason)
 
@@ -163,7 +164,10 @@ class AgwModel(BaseModel):
         shorthand = cls.scalar_shorthand
         if shorthand is None:
             return json_schema
-        return {"anyOf": [handler(shorthand.core_schema()), json_schema]}
+        scalar_schema = handler(shorthand.core_schema())
+        if field_interpolation(cls.model_fields[shorthand.field]) == "scalar":
+            scalar_schema[INTERPOLATION_SCHEMA_KEY] = True
+        return {"anyOf": [scalar_schema, json_schema]}
 
 
 def _with_marker_corrections(
@@ -235,6 +239,14 @@ class AgwRootModel[T](RootModel[T]):
     """
 
     model_config = _AGW_ROOT_MODEL_CONFIG
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Refuse interpolation metadata that cannot be consumed as declared."""
+        super().__pydantic_init_subclass__(**kwargs)
+        reason = interpolation_marker_error(cls)
+        if reason is not None:
+            raise StateError(reason)
 
     operator_input_annotation: ClassVar[object | None] = None
     """Optional field-reference annotation for a root model whose custom

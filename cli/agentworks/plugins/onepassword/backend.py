@@ -249,7 +249,7 @@ class _OnePasswordContext(AbstractContextManager[SecretSourceClient]):
 class OnePasswordBackend(SecretBackend):
     """Resolve secret values from 1Password via ``op read``."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 3
     config_model: ClassVar[type[AgwModel]] = OnePasswordSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = OnePasswordMapping
     name: ClassVar[str] = "onepassword"

@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.errors import ValidationError
+from agentworks.errors import SourceRefFormError, ValidationError, ValueFreeError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
 
@@ -37,6 +37,14 @@ class UnsupportedOverlayFieldsError(ValidationError):
     """An overlay uses declaration fields this release does not understand."""
 
 
+class RefusedSourceFieldsError(ValidationError):
+    """An overlay fails only on source reference fields this release refuses; ``fields`` names them."""
+
+    def __init__(self, message: str, *, fields: tuple[str, ...], entity_kind: str, entity_name: str | None) -> None:
+        super().__init__(message, entity_kind=entity_kind, entity_name=entity_name)
+        self.fields = fields
+
+
 def decode_overlay_model[T: BaseModel](
     model_type: type[T],
     instance_kind: str,
@@ -59,6 +67,29 @@ def decode_overlay_model[T: BaseModel](
         ) from None
 
 
+def refused_source_fields(error: PydanticValidationError, *, layer: bool = False) -> tuple[str, ...]:
+    """The path of each refused source field when every failure is one (``SourceRefFormError``), else ``()``.
+
+    ``layer`` reads ``error`` as a partial layer's, which may omit what its
+    base supplies, so its ``missing`` failures do not count.
+    """
+    paths: list[str] = []
+    for item in error.errors(include_url=False, include_context=True, include_input=False):
+        if layer and item["type"] == "missing":
+            continue
+        cause = _cause(item)
+        if not isinstance(cause, SourceRefFormError):
+            return ()
+        paths.append(".".join([*(str(part) for part in item["loc"][:-1] if part != "name"), cause.field]))
+    return tuple(dict.fromkeys(paths))
+
+
+def _cause(item: Mapping[str, object]) -> object:
+    """The exception a value or assertion error item carries, if any."""
+    context = item.get("ctx")
+    return context.get("error") if isinstance(context, dict) else None
+
+
 def value_safe_model_validation_error(
     error: PydanticValidationError,
     label: str,
@@ -75,11 +106,13 @@ def value_safe_model_validation_error(
     for item in errors:
         location = ".".join(str(part) for part in item["loc"] if part != "name") or "<root>"
         message = item["msg"]
+        cause = _cause(item)
         if item["type"] in {"value_error", "assertion_error"}:
-            context = item.get("ctx")
-            cause = context.get("error") if isinstance(context, dict) else None
-            sanitized = None if custom_error_sanitizer is None else custom_error_sanitizer(cause)
-            message = sanitized or "Value failed domain validation"
+            if isinstance(cause, ValueFreeError):
+                message = str(cause)
+            else:
+                sanitized = None if custom_error_sanitizer is None else custom_error_sanitizer(cause)
+                message = sanitized or "Value failed domain validation"
         if item["type"] == "extra_forbidden" and item["loc"] in (("claude_marketplaces",), ("claude_plugins",)):
             message += "; move Claude setup into harness_integrations under the claude-code map key"
         details.append(f"{location}: {message}")
@@ -88,12 +121,19 @@ def value_safe_model_validation_error(
         any(item["type"] == "extra_forbidden" and len(item["loc"]) == 1 for item in errors)
         or any(types == {"extra_forbidden"} for types in errors_by_parent.values())
     )
-    error_type = UnsupportedOverlayFieldsError if unsupported else ValidationError
-    return error_type(
-        f"{label}: {'; '.join(details)}",
-        entity_kind=entity_kind,
-        entity_name=entity_name,
-    )
+    if unsupported:
+        return UnsupportedOverlayFieldsError(
+            f"{label}: {'; '.join(details)}", entity_kind=entity_kind, entity_name=entity_name
+        )
+    refused = refused_source_fields(error)
+    if refused:
+        return RefusedSourceFieldsError(
+            f"{label}: {'; '.join(details)}",
+            fields=refused,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+        )
+    return ValidationError(f"{label}: {'; '.join(details)}", entity_kind=entity_kind, entity_name=entity_name)
 
 
 def encode_overlay_model(model: BaseModel, instance_kind: str) -> JsonObject:

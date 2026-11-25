@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -14,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentworks.capabilities.vm_platform.lima_host import LimaCommandFailed, LimaHost, _Completed
+from agentworks.capabilities.vm_platform.lima_host import _UPLOAD_SCRIPT, LimaCommandFailed, LimaHost, _Completed
 from agentworks.execution import root_script, ssh_process
 from agentworks.execution.client import SSHClient
 from agentworks.execution.root_script import RawRun
@@ -149,30 +151,235 @@ def test_a_command_given_input_exposes_no_output() -> None:
     assert "tskey-reflected" not in str(caught.value)
 
 
-def test_a_detached_command_clears_a_stale_result_and_runs_fresh(
-    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+needs_posix_sh = pytest.mark.skipif(not Path("/bin/sh").exists(), reason="runs the host command in a POSIX shell")
+
+
+def _upload_in_a_local_shell(
+    monkeypatch: pytest.MonkeyPatch,
+    path: Path,
+    content: str,
+    *,
+    shell_setup: str = "",
+    env: dict[str, str] | None = None,
 ) -> None:
-    """A leftover status file is an interrupted earlier run's: consuming it would report a phantom result."""
+    """``LimaHost.upload`` with its host command run by a local ``sh``, after ``shell_setup``."""
+
+    def in_a_local_shell(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        completed = subprocess.run(
+            ["sh", "-c", shell_setup + command], input=input, capture_output=True, text=True, check=False, env=env
+        )
+        return _Completed(completed.returncode, completed.stdout, completed.stderr)
+
+    monkeypatch.setattr(LimaHost, "_execute", in_a_local_shell)
+    LimaHost("vm-host").upload(str(path), content)
+
+
+@needs_posix_sh
+def test_an_upload_is_mode_0600_under_an_inherited_default_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A default ACL on the directory, such as one on ``/var/tmp``, overrides the umask for new files."""
+    setfacl = shutil.which("setfacl")
+    if setfacl is None:
+        pytest.skip("setfacl is required to provision the ACL fixture")
+    if subprocess.run([setfacl, "-d", "-m", "g::rwx,o::rwx", str(tmp_path)], capture_output=True).returncode:
+        pytest.skip("the test file system does not support default ACLs")
+    target = tmp_path / "agentworks-lima-myvm.sh"
+
+    _upload_in_a_local_shell(monkeypatch, target, "echo hi\n")
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert target.read_text() == "echo hi\n"
+
+
+def test_an_upload_runs_under_an_explicit_sh_whatever_the_login_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The host command runs under the user's login shell, whose syntax the script must not rely on."""
     commands: list[str] = []
-    launched = False
+
+    def record(self: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        commands.append(command)
+        return _Completed(0, "", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", record)
+
+    LimaHost("vm-host").upload("/var/tmp/my dir/agentworks-lima-myvm.sh", "echo hi\n")
+
+    (command,) = commands
+    argv = shlex.split(command)
+    assert argv[:2] == ["/bin/sh", "-c"]
+    assert argv[3:] == ["sh", "/var/tmp/my dir", "/var/tmp/my dir/agentworks-lima-myvm.sh"]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_the_upload_script_writes_under_noclobber_imported_by_bash(tmp_path: Path) -> None:
+    """bash as /bin/sh imports an exported SHELLOPTS, and mktemp has already created the file it writes."""
+    target = tmp_path / "agentworks-lima-myvm.sh"
+
+    subprocess.run(
+        ["bash", "-c", _UPLOAD_SCRIPT, "sh", str(tmp_path), str(target)],
+        input="echo hi\n",
+        text=True,
+        check=True,
+        env={**os.environ, "SHELLOPTS": "noclobber"},
+    )
+
+    assert target.read_text() == "echo hi\n"
+
+
+@needs_posix_sh
+def test_an_upload_replaces_an_existing_file_when_the_login_shell_sets_noclobber(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wrapper is rewritten on every create, and a host user's startup files may ``set -C``."""
+    target = tmp_path / "agentworks-lima-myvm.sh"
+    target.write_text("old\n")
+
+    _upload_in_a_local_shell(monkeypatch, target, "new\n", shell_setup="set -C; ")
+
+    assert target.read_text() == "new\n"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+@needs_posix_sh
+def test_an_upload_replaces_a_symlink_instead_of_writing_through_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_text("not yours\n")
+    target = tmp_path / "agentworks-lima-myvm.sh"
+    target.symlink_to(elsewhere)
+
+    _upload_in_a_local_shell(monkeypatch, target, "echo hi\n")
+
+    assert not target.is_symlink()
+    assert target.read_text() == "echo hi\n"
+    assert elsewhere.read_text() == "not yours\n"
+
+
+@needs_posix_sh
+@pytest.mark.parametrize("shape", ["directory", "link to a directory"])
+def test_an_upload_refuses_a_directory_instead_of_moving_into_it(
+    shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mv would move the file inside a directory at the target and report success."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    directory = staging / "template.yaml" if shape == "directory" else tmp_path / "elsewhere"
+    directory.mkdir()
+    if shape != "directory":
+        (staging / "template.yaml").symlink_to(directory)
+
+    with pytest.raises(LimaCommandFailed):
+        _upload_in_a_local_shell(monkeypatch, staging / "template.yaml", "arch: default\n")
+
+    assert sorted(entry.name for entry in staging.iterdir()) == ["template.yaml"]
+    assert list(directory.iterdir()) == []
+
+
+@needs_posix_sh
+def test_a_failed_upload_leaves_no_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    (shims / "mv").write_text("#!/bin/sh\nexit 1\n")
+    (shims / "mv").chmod(0o755)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    env = {**os.environ, "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}"}
+
+    with pytest.raises(LimaCommandFailed):
+        _upload_in_a_local_shell(monkeypatch, staging / "template.yaml", "arch: default\n", env=env)
+
+    assert list(staging.iterdir()) == []
+
+
+_RUN_DIRECTORY = "/var/tmp/agw-x.AbCdEf1234"
+_MKTEMP = "umask 077 && mktemp -d /var/tmp/agw-x.XXXXXXXXXX"
+
+
+def test_a_detached_command_stages_its_files_in_a_private_directory_it_removes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Predictable names in a world-writable /var/tmp let another account plant or read a run's files."""
+    commands: list[str] = []
 
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
-        nonlocal launched
         commands.append(command)
-        launched = launched or "nohup " in command
-        if command.startswith("test -f") and command.endswith(".status"):
-            return _Completed(0, "", "")  # stale before the launch, this run's after it
+        if command == _MKTEMP:
+            return _Completed(0, _RUN_DIRECTORY + "\n", "")
         if command.startswith("cat") and ".status" in command:
-            return _Completed(0, "0\n" if launched else "7\n", "")
+            return _Completed(0, "0\n", "")
         return _Completed(0, "", "")
 
     monkeypatch.setattr(LimaHost, "_execute", execute)
     monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.time.sleep", lambda seconds: None)
 
-    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
 
     assert result.exit_code == 0
-    assert sum("nohup " in command for command in commands) == 1
+    assert commands[0] == _MKTEMP
+    # Every file the run touches is inside the directory, which is removed at the end.
+    touched = [command for command in commands[1:-1] if "/var/tmp/" in command]
+    assert touched and all(f"{_RUN_DIRECTORY}/run." in command for command in touched)
+    assert commands[-1] == f"rm -rf -- {_RUN_DIRECTORY}"
+
+
+def test_a_detached_command_refuses_a_directory_the_host_did_not_make_private(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[str] = []
+
+    def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        commands.append(command)
+        return _Completed(0, "/var/tmp/agw-x\n", "")
+
+    monkeypatch.setattr(LimaHost, "_execute", execute)
+
+    with pytest.raises(LimaCommandFailed):
+        LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
+    assert commands == [_MKTEMP]
+
+
+def _run_here(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+    """Run a placement host command in this machine's shell instead."""
+    completed = subprocess.run(["/bin/bash", "-c", command], input=input, capture_output=True, text=True, check=False)
+    return _Completed(completed.returncode, completed.stdout, completed.stderr)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the listing in a POSIX shell")
+def test_a_kill_reaches_only_directories_with_a_runs_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The listing keeps directories this user owns with a run's name; nothing else beside them is touched."""
+    run = tmp_path / "agw-x.AbCdEf1234"
+    (run / "run.out").parent.mkdir()
+    (run / "run.out").write_text("")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (tmp_path / "agw-x.Link567890").symlink_to(elsewhere, target_is_directory=True)
+    (tmp_path / "agw-x.File123456").write_text("")
+    (tmp_path / "agw-y.AbCdEf1234").mkdir()
+    (tmp_path / "agw-x.short").mkdir()
+    bystanders = sorted(path.name for path in tmp_path.iterdir() if path != run)
+    monkeypatch.setattr(LimaHost, "_execute", _run_here)
+
+    LimaHost("me@gpu-box").kill_detached(str(tmp_path / "agw-x"))
+
+    assert not run.exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == bystanders
+    assert (tmp_path / "agw-x.Link567890").is_symlink() and elsewhere.is_dir()
+
+
+def test_a_kill_that_cannot_list_the_runs_warns_and_touches_nothing(
+    monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A run the listing missed keeps going alongside the caller's ``limactl delete``, so the operator hears of it."""
+    commands: list[str] = []
+
+    def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
+        commands.append(command)
+        return _Completed(1, "", "find: '/var/tmp': Permission denied\n")
+
+    monkeypatch.setattr(LimaHost, "_execute", execute)
+
+    LimaHost("me@gpu-box").kill_detached("/var/tmp/agw-x")
+
+    assert len(commands) == 1
     assert len(captured_output.warnings) == 1
 
 
@@ -184,15 +391,21 @@ def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_comma
     # A login banner on stdout does not make a dropped connection an answer.
     dropped_after_banner = _Completed(255, "Welcome to gpu-box\n", "Connection closed by gpu-box")
     answers = {
-        "test -f /var/tmp/agw-x.status": [dropped, dropped, _Completed(1, "", ""), _Completed(0, "", "")],
+        f"test -f {_RUN_DIRECTORY}/run.status": [dropped, dropped, _Completed(1, "", ""), _Completed(0, "", "")],
         "ps -p": [dropped, _Completed(0, "", "")],
-        "cat /var/tmp/agw-x.out 2>/dev/null": [dropped_after_banner, dropped, _Completed(0, "limactl output\n", "")],
-        "cat /var/tmp/agw-x.status 2>/dev/null": [dropped, _Completed(0, "0\n", "")],
+        f"cat {_RUN_DIRECTORY}/run.out 2>/dev/null": [
+            dropped_after_banner,
+            dropped,
+            _Completed(0, "limactl output\n", ""),
+        ],
+        f"cat {_RUN_DIRECTORY}/run.status 2>/dev/null": [dropped, _Completed(0, "0\n", "")],
     }
     launched = False
 
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         nonlocal launched
+        if command == _MKTEMP:
+            return _Completed(0, _RUN_DIRECTORY + "\n", "")
         launched = launched or "nohup " in command
         for prefix, queue in answers.items():
             if launched and command.startswith(prefix):
@@ -204,7 +417,7 @@ def test_a_placement_host_that_drops_for_a_while_does_not_end_the_detached_comma
     monkeypatch.setattr(LimaHost, "_execute", execute)
     monkeypatch.setattr("agentworks.capabilities.vm_platform.lima_host.time.sleep", lambda seconds: None)
 
-    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+    result = LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
 
     assert (result.exit_code, result.output) == (0, "limactl output\n")
     assert all(len(queue) == 1 for queue in answers.values())  # every dropped answer was asked again
@@ -235,6 +448,8 @@ def test_a_placement_host_that_stops_answering_is_an_unknown_outcome_not_an_exit
     def execute(host: LimaHost, command: str, *, input: str | None, timeout: float | None) -> _Completed:
         nonlocal down
         commands.append(command)
+        if command == _MKTEMP:
+            return _Completed(0, _RUN_DIRECTORY + "\n", "")
         down = down or ("nohup " in command if down_from == "launch" else command.startswith("wc -c"))
         if down:
             return _Completed(255, "", "ssh: connect to host gpu-box port 22: Operation timed out")
@@ -243,7 +458,7 @@ def test_a_placement_host_that_stops_answering_is_an_unknown_outcome_not_an_exit
     monkeypatch.setattr(LimaHost, "_execute", execute)
 
     with pytest.raises(LimaCommandFailed) as caught:
-        LimaHost("me@gpu-box").run_detached("limactl start vm1", base_path="/var/tmp/agw-x", timeout=600)
+        LimaHost("me@gpu-box").run_detached("limactl start vm1", prefix="/var/tmp/agw-x", timeout=600)
 
     assert "gpu-box" in str(caught.value)
     # Down at the launch, nothing is polled; down mid-poll, the poll still waits out its bound.

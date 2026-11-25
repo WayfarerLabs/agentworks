@@ -2,7 +2,7 @@
 
 Pins the load-bearing ordering the two steps depend on: the recursive ACL
 apply (which sets ``other::---`` across ``workspaces_dir`` and its subtree)
-must run BEFORE the parent-traversal ``chmod a+x`` loop that re-grants
+must run BEFORE the parent-traversal ``chmod a+x`` that re-grants
 ``other::--x`` on the shared parent chain. Reversed, step 1 would clobber the
 traverse bit step 2 just granted and cut agents off from every workspace on
 the VM (the #254 regression). This is the pin that would have caught it: the
@@ -12,73 +12,47 @@ per-workspace create/repair tests do not cover the driver-parent path.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+
+from agentworks.execution.errors import CommandFailed
+from agentworks.execution.requests import Command
+from agentworks.execution.results import Completed, Result
+from agentworks.vms.initializer.workspaces_dir import _setup_workspaces_directory, traversal_paths
+from agentworks.workspaces.acls import workspace_acl_commands
+from tests.phase_b_support import StepGuest
+
+WORKSPACES = "/opt/agentworks/workspaces"
 
 
-class _RecordingTarget:
-    """Minimal transport double: records every command, answers ok."""
-
-    def __init__(self) -> None:
-        self.commands: list[str] = []
-
-    def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-        self.commands.append(cmd)
-        return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
-
-
-def _make_config(workspaces_dir: str = "/opt/agentworks/workspaces") -> SimpleNamespace:
+def _config(workspaces_dir: str = WORKSPACES) -> SimpleNamespace:
     return SimpleNamespace(paths=SimpleNamespace(vm_workspaces=workspaces_dir))
 
 
-def test_traversal_regrant_runs_after_the_recursive_acl_apply() -> None:
-    """The parent ``chmod a+x`` on workspaces_dir is emitted AFTER the
-    recursive ``setfacl ... o::--- workspaces_dir``, so ``a+x`` has the last
-    word on the parent and agent traverse survives. The mkdir precedes both."""
-    from agentworks.vms.initializer.workspaces_dir import _setup_workspaces_directory
+def test_the_acl_passes_run_after_the_mkdir_and_before_the_traversal_regrant() -> None:
+    """mkdir, then the three recursive ACL passes, then one ``chmod a+x`` of the parent and its ancestors, as root."""
+    guest = StepGuest(local_files=False)
 
-    target = _RecordingTarget()
-    ws = "/opt/agentworks/workspaces"
+    _setup_workspaces_directory(guest.files, _config(), guest.log)
 
-    _setup_workspaces_directory(target, _make_config(ws), MagicMock())  # type: ignore[arg-type]
-
-    mkdir_i = next(i for i, c in enumerate(target.commands) if c == f"mkdir -p {ws}")
-    # The recursive access apply that sets other::--- on workspaces_dir itself.
-    acl_i = next(i for i, c in enumerate(target.commands) if "-exec setfacl -m" in c and "o::---" in c and ws in c)
-    # The parent-traversal re-grant loop (walks workspaces_dir up its ancestors).
-    traverse_i = next(i for i, c in enumerate(target.commands) if "chmod a+x" in c and f"p={ws};" in c)
-
-    assert mkdir_i < acl_i < traverse_i
+    assert guest.commands() == [
+        Command(("mkdir", "-p", "--", WORKSPACES), elevated=True, deadline=60),
+        *workspace_acl_commands(WORKSPACES),
+        Command(("chmod", "a+x", "--", WORKSPACES, "/opt/agentworks", "/opt"), elevated=True, deadline=60),
+    ]
+    assert guest.log.warned == []
 
 
-def test_default_acl_on_dirs_still_precedes_the_traversal_regrant() -> None:
-    """Both ACL applications (the default-on-dirs and the recursive access) run
-    before the traverse re-grant, so the whole ACL spec is in place first."""
-    from agentworks.vms.initializer.workspaces_dir import _setup_workspaces_directory
-
-    target = _RecordingTarget()
-    ws = "/opt/agentworks/workspaces"
-
-    _setup_workspaces_directory(target, _make_config(ws), MagicMock())  # type: ignore[arg-type]
-
-    default_acl_i = next(i for i, c in enumerate(target.commands) if c.startswith("find ") and "setfacl -d" in c)
-    traverse_i = next(i for i, c in enumerate(target.commands) if "chmod a+x" in c)
-
-    assert default_acl_i < traverse_i
+def test_traversal_covers_the_parent_and_every_ancestor_but_the_root() -> None:
+    assert traversal_paths("/srv/a/workspaces/") == ("/srv/a/workspaces", "/srv/a", "/srv")
+    assert traversal_paths("/workspaces") == ("/workspaces",)
 
 
-def test_setup_warns_and_continues_when_a_command_fails() -> None:
-    """A step failure is non-fatal: the SSHError is caught, logged, and warned,
-    not raised (the operator recovers on the next reinit)."""
-    from agentworks.ssh import SSHError
-    from agentworks.vms.initializer.workspaces_dir import _setup_workspaces_directory
+def test_a_failed_acl_pass_warns_and_skips_the_regrant() -> None:
+    """A step failure is non-fatal: logged and warned, not raised (the operator recovers on the next reinit)."""
+    guest = StepGuest(local_files=False)
+    first_pass = workspace_acl_commands(WORKSPACES)[0]
+    guest.respond(first_pass, CommandFailed("box", 1, Result(Completed(1)), streams_logged=True))
 
-    class _FailingTarget(_RecordingTarget):
-        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
-            self.commands.append(cmd)
-            raise SSHError("boom")
+    _setup_workspaces_directory(guest.files, _config(), guest.log)
 
-    logger = MagicMock()
-    # Must not raise.
-    _setup_workspaces_directory(_FailingTarget(), _make_config(), logger)  # type: ignore[arg-type]
-
-    assert logger.warning.called
+    assert len(guest.log.warned) == 1
+    assert guest.commands()[-1] == first_pass

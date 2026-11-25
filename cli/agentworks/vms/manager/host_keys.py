@@ -158,34 +158,36 @@ def import_host_keys(
     all_vms: bool,
     known_hosts: Path | None,
 ) -> tuple[HostKeyImport, ...]:
-    """Import host keys for the named VMs, or for every VM with ``all_vms``.
+    """Import host keys for the named VMs, or for every VM with ``all_vms``, then sync the SSH config.
 
+    The managed SSH entries are rewritten on every run, whatever was imported
+    and whether or not the run fails, so a refused name, a missing source or an
+    unsupported client still leaves them in the store-verifying shape.
     ``known_hosts`` names the source file; None means ``~/.ssh/known_hosts``,
     where absence just means nothing to import. A named file that does not
-    exist is a :class:`ConfigError`.
+    exist is a :class:`ConfigError`. A sync that fails only warns, so it never
+    changes the outcomes.
     """
-    vms = db.list_vms() if all_vms else [_require_vm(db, name) for name in dict.fromkeys(names)]
-
-    if known_hosts is None:
-        default = default_known_hosts()
-        source: Path | None = default if default.is_file() else None
-    else:
-        if not known_hosts.is_file():
-            raise ConfigError(f"known-hosts file '{format_host_path(known_hosts)}' does not exist")
-        source = known_hosts
-
-    keygen = locate_ssh_keygen() if source is not None else ""
     outcomes: list[HostKeyImport] = []
     try:
+        vms = db.list_vms() if all_vms else [_require_vm(db, name) for name in dict.fromkeys(names)]
+
+        if known_hosts is None:
+            default = default_known_hosts()
+            source: Path | None = default if default.is_file() else None
+        else:
+            if not known_hosts.is_file():
+                raise ConfigError(f"known-hosts file '{format_host_path(known_hosts)}' does not exist")
+            source = known_hosts
+
+        keygen = locate_ssh_keygen() if source is not None else ""
         for vm in vms:
             outcomes.append(_import_one(vm, keygen, source))
     finally:
-        # Whatever was imported before a later VM failed has a record now, so
-        # its managed entries must carry the store options.
-        if any(o.status is ImportStatus.IMPORTED for o in outcomes):
-            from agentworks.ssh_config import sync_ssh_config_or_warn
+        # Whatever was imported before a later VM failed is covered too.
+        from agentworks.ssh_config import sync_ssh_config_or_warn
 
-            sync_ssh_config_or_warn(config, db)
+        sync_ssh_config_or_warn(config, db)
     return tuple(outcomes)
 
 

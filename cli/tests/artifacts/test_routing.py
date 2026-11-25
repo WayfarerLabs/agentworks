@@ -212,6 +212,38 @@ def test_each_branch_handles_only_its_prepared_inputs(db):
     assert result.active_facets == ("vm", "user", "workspace")
 
 
+@pytest.mark.parametrize("user", ["agent", "admin"])
+def test_delivery_names_keep_original_scope_through_multiple_routes(db, user):
+    import json
+
+    from agentworks.artifacts.native.shell import filesystem_artifacts
+
+    fixture = graph(db, active=("vm", user, "workspace"))
+    fixture.save("vm", routes={"vm-0": "user"})
+    vm_group = fixture.captures["vm"].inputs
+    vm_item = vm_group.hints["vm-0"]
+    user_inputs = setup_artifacts(db, fixture.registry, fixture.owners[user], fixture.vm, "shell").inputs
+    user_plan = filesystem_artifacts(user_inputs, "/user")
+    assert any(
+        file.path == "/user/scopes/vm/vm/hints/vm-vm-0.md" and file.origins == (vm_item.origin_identity,)
+        for file in user_plan.files
+    )
+    fixture.save(user, inherited=vm_group, routes={"vm-0": "session", f"{user}-0": "session"})
+    fixture.save("workspace", routes={"workspace-0": "session"})
+    routed = fixture.route(user=None if user == "admin" else user)
+    session_plan = filesystem_artifacts(routed.inputs, "/private", session=True)
+
+    index = json.loads(next(file.data for file in session_plan.files if file.path == "/private/index.json"))
+    assert {file.path for file in session_plan.files} == {
+        "/private/index.json",
+        "/private/scopes/vm/vm/hints/vm-vm-0.md",
+        f"/private/scopes/{user}/{fixture.owners[user].name}/hints/{user}-{user}-0.md",
+        "/private/scopes/workspace/workspace/hints/workspace-workspace-0.md",
+    }
+    assert [next(iter(entry["hints"])) for entry in index["groups"]] == ["vm-0", f"{user}-0", "workspace-0"]
+    assert vm_item == routed.inputs.deferred[vm_group.owner].hints["vm-0"]
+
+
 def test_setup_routes_only_requested_vm_branch_and_uses_prospective_capture(db):
     fixture = graph(db, active=("vm",), counts={"vm": 2})
     fixture.save("vm", routes={"vm-0": "workspace", "vm-1": "user"})

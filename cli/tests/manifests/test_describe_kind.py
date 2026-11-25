@@ -10,7 +10,7 @@ than authored twice.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, get_args, get_origin
 
 import pytest
 from pydantic import BaseModel, Discriminator, Field
@@ -140,7 +140,7 @@ def test_a_field_carries_its_type_requiredness_and_description() -> None:
     # about to write it into a document.
     assert "  hint  (string or null, optional, e.g. Generate at https://" in text
     assert "Operator-facing text shown when the secret has to be entered by hand" in text
-    assert "<key>  (string or one of: false, required, names a secret-source)" in text
+    assert "<key>  (string or table or one of: false, required, names a secret-source)" in text
 
 
 def test_secret_source_kind_describes_the_backend_union_and_override_provenance() -> None:
@@ -158,15 +158,22 @@ def test_an_optional_root_union_keeps_its_outer_null_spelling() -> None:
 
 
 def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
-    """Env values document both the scalar and table spellings."""
-    text = _text("vm-template")
+    """The field tree carries both accepted types and each arm's semantics."""
+    env = next(entry for entry in reference_for("vm-template").spec if entry.name == "env")
+    value = env.contents[0]
+    arms = {arm.name: arm.fields for arm in value.alternatives}
 
-    assert "  env  (table of string or table, optional)" in text
-    assert "    <key>  (string or table, required)" in text
-    assert "      - plaintext: An env var whose exported value is written as plaintext." in text
-    assert "        value  (string, required)" in text
-    assert "      - secret: An env var whose exported value comes from a declared secret." in text
-    assert "        secret  (string, required, names a secret)" in text
+    assert get_origin(env.doc.annotation) is dict
+    annotation = value.doc.annotation
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
+    assert str in get_args(annotation)
+    assert tuple(entry.name for entry in arms["plaintext"]) == ("value",)
+    assert arms["plaintext"][0].doc.interpolation == "scalar"
+    assert tuple(entry.name for entry in arms["secret"]) == ("secret",)
+    assert arms["secret"][0].doc.ref is not None
+    assert arms["secret"][0].doc.ref.kind == "secret"
+    assert arms["secret"][0].doc.interpolation is None
 
 
 def test_secret_backend_describes_its_source_config() -> None:

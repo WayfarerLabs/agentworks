@@ -74,6 +74,13 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   matches.
 - **MUST NOT** gate existing-VM operations on the current creation release or image catalog.
 - **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
+- **MUST** deliver a VM that passes the VM contract (`agentworks.vms.contract`), which core checks
+  over SSH before provisioning counts as complete: the requested Debian release, systemd as init,
+  the admin's passwordless `sudo`, OpenSSH reachable at the returned tailnet address with the
+  admin's key authorized, `python3` with its standard library (every request core sends runs it),
+  and the tools `install`, `flock`, `setsid` and `tar`. `PROVISIONING_PACKAGES` (`cloud_init.py`)
+  lists what a Debian image may lack, `openssh-server` and `python3` among them; the tools ship in
+  every Debian base system.
 - **MUST** implement `run_as_root`, core's channel for its own root scripts, which works without the
   VM's Tailscale state or identity, and declare `recovery_needs_guest_sshd` (below).
 - A native interactive shell is optional: a platform offers one by overriding `native_shell`. A
@@ -203,14 +210,19 @@ and DB migration.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 - `run_as_root(vm, ctx, script, deadline) -> RawRun` **MUST** run `/bin/bash -s` as root through the
   platform's own channel, independent of the VM's Tailscale state, with `script` on its stdin and
-  nowhere else, **MUST** run it once, and **MUST** return both streams without a status. A channel
-  that waits for the VM to answer before it dispatches anything (the clouds' public SSH and
-  Proxmox's guest agent each wait about two minutes) **MUST** raise `root_script.ChannelUnreachable`
-  when that wait runs out, since nothing was dispatched: callers then stop instead of retrying, and
-  do not try a logout they could not deliver. Any other channel failure raises `ConnectivityError`,
-  whose outcome is unknown. Its docstring in `base.py` is the full contract. The clouds inherit
-  theirs from `public_ssh.PublicAddressPlatform`, supplying how to read the live public address, the
-  console hint for a VM without one, and their route (below).
+  nowhere else, **MUST** run it once, and **MUST** return both streams without a status. The
+  `deadline` starts at dispatch and bounds the script alone, so callers size it for their script.
+  What a channel does before dispatch (opening a route, reading an address, confirming the guest,
+  waiting for the VM to answer) **MUST** have bounds of its own: each cloud provider call a bound on
+  the wall clock (`wall_bound.py`, since the SDKs' own timeouts bound only silence), each Proxmox
+  request its socket timeout, and a wait for the VM about two minutes. A channel that waits for the
+  VM to answer before it dispatches anything (the clouds' public SSH and Proxmox's guest agent)
+  **MUST** raise `root_script.ChannelUnreachable` when that wait runs out, since nothing was
+  dispatched: callers then stop instead of retrying, and do not try a logout they could not deliver.
+  Any other channel failure raises another `AgentworksError`, which core treats as an unknown
+  outcome and never dispatches again. Its docstring in `base.py` is the full contract. The clouds
+  inherit theirs from `public_ssh.PublicAddressPlatform`, supplying how to read the live public
+  address, the console hint for a VM without one, and their route (below).
 - `read_host_keys(vm, ctx)` has a default over `run_as_root`; the clouds' base reads under an
   Unverified provisioning file and refuses a VM that already has a record.
 - `native_shell(vm, ctx) -> int` is optional: the default offers no shell, and a platform offers one
@@ -223,7 +235,10 @@ and DB migration.
   `wsl.exe` as the admin, the clouds' base runs an interactive SSH to the public address inside its
   route, and Proxmox offers none.
 - `recovery_needs_guest_sshd` **MUST** be declared (no default): `True` when the root channel goes
-  through the guest's sshd.
+  through the guest's sshd, as the clouds' public SSH and Lima's do. A broken sshd then leaves no
+  root script a way in, and `vm recover`'s failure hint points the operator at one that does not use
+  it (a provider's serial console) or at recreation. Proxmox's guest agent and WSL2's `wsl.exe` do
+  not need it, so their root scripts can repair sshd.
 
 Vm-platform is the contract that third-party VM platforms implement, as the bundled ones do. Its
 complete contract is version 2, and the six bundled implementations change atomically with the
@@ -240,9 +255,13 @@ the route has closed, the base also calls `close_provisioning_access` (below). E
 it privately, as an abstract member of that base: `_transient_route(vm, ctx)`, a context manager
 that opens this call's own SSH allow scoped to the operator's egress prefixes (widened by
 `ctx.config.operator.ssh_allow_cidrs`) and removes exactly it in a `finally`, under
-`interrupts_deferred`, so an interrupt that lands during the removal waits for it; Azure and GCP
-bound that wait, warning that the rule may remain when the provider has not answered in time. When
-the VM never answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
+`interrupts_deferred`, so an interrupt that lands during the removal waits for it; every cloud
+bounds that wait, warning that the rule may remain when the provider has not answered in time. The
+route's removal and the close of the provisioning access that always follows it are separate held
+steps, each sharing one bound of 300 s across its calls, so an interrupt that lands during the
+removal can wait for both: at most 600 s on GCP and EC2, and 660 s on Azure, where a poke's accepted
+create that had not finished is let settle for up to 60 s before its removal. When the VM never
+answers, `PublicSSH.wait_until_answering` warns `public_ssh.PROBE_FAILURE_HINT`, the
 `ssh_allow_cidrs` advice, unless the address refused the last probe's connection: the allow let it
 through, and the `ChannelUnreachable` it raises names a restart for an SSH server that is not
 running. Azure also heals a missing public IP and converges the NSG onto the baseline-deny model on
@@ -353,10 +372,11 @@ requirement, so a legacy site can still load for operations on existing VMs.
 
 Beside it, and as part of contract version 2, the pending node calls
 `validate_create_hostname(hostname)` with the hostname core composed for the VM (`{slug}-{name}`, or
-the bare name). It is pure and offline too, and its default accepts every hostname; a platform whose
+the bare name): lowercase letters, digits and hyphens, since core refuses a VM name holding an
+underscore. It is pure and offline too, and its default accepts every hostname; a platform whose
 backend would change some hostnames refuses them here with a `ValidationError`, before any secret
-resolves or the VM's row exists. WSL2 refuses a hostname with an underscore or consecutive hyphens,
-which its init would rewrite.
+resolves or the VM's row exists. WSL2 refuses a hostname with consecutive hyphens, which a system
+slug can carry and its init would collapse.
 
 An operator-owned artifact is also untrusted until the live guest proves what it contains. Core
 applies the same release check regardless of who owns the artifact map. A mismatch leaves the
@@ -381,7 +401,7 @@ author most needs to get right.
 `RunContext` (`../base.py`) is a frozen dataclass, rebuilt fresh per stage (never mutated, never
 `replace()`'d). It carries `config` and `operation_scope` as plain fields, and grants power through
 accessor methods rather than bare fields so a future permission model can gate them without changing
-signatures: `admin_target()` / `agent_target()` return execution `Transport`s, and `secret(name)`
+signatures: `admin_access()` / `agent_access()` return that user's `VMAccess`, and `secret(name)`
 returns a resolved secret value. `ctx.secret(name)` raises a typed `ConfigError` if the context was
 assembled without a resolve pass, and it is scoped: an op can read only the names its config model
 marked.
@@ -619,7 +639,7 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   the address itself. A failure before the contract passes leaves the VM failed, and an interrupt
   leaves it incomplete; every ordinary command refuses either, and the guidance names delete.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
-  (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
+  (`agentworks.vms.hardening`), run on the admin's `VMAccess` to the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A
   record-and-verify driver `bootstrap_vm` is provisioning, not this stage, and runs only at create.
 
@@ -643,14 +663,16 @@ The seam between the two stages is the source of the most important gotcha below
 
 Because create-time bootstrap is baked into the backend's create mechanism, **a change to it reaches
 new VMs only.** `agw vm reinit` (`manager.reinit_vm`) re-runs initialization (`run_initialization`
--> the platform-agnostic setup and hardening) over a transport; it does not call `platform.create()`
-again or re-run the backend's create-time user-data. So decide deliberately where a fix belongs:
+-> the platform-agnostic setup and hardening) over the admin's `VMAccess`; it does not call
+`platform.create()` again or re-run the backend's create-time user-data. So decide deliberately
+where a fix belongs:
 
 - **Must reach already-provisioned VMs?** Put it in initialization, as an idempotent reconciliation
   step. The models are `initializer._preserve_ssh_host_keys` and the sysctl / `hidepid` steps in
-  `agentworks.vms.hardening` (ADR 0012): each is written at create and re-applied on `reinit`,
-  content-diffed so a steady-state VM produces no change. Initialization is platform-agnostic, so
-  weigh whether the fix is truly generic before putting it there.
+  `agentworks.vms.hardening` (ADR 0012): each is written at create and re-applied on `reinit`, the
+  sysctl baseline through `Files.update` so a steady-state VM produces no change, and the host-key
+  drop-in rewritten with the same content. Initialization is platform-agnostic, so weigh whether the
+  fix is truly generic before putting it there.
 - **Genuinely platform-specific, and new-VMs-only is acceptable?** Put it in the platform's
   create-time provisioning and remediate existing VMs out of band. The Lima `subuid` cap took this
   route on purpose (below).
@@ -728,13 +750,15 @@ VNet / disk creation and calls `cleanup_vm_resources` on any exception). The sam
 an operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
 readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
 create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
-naming the exact manual removal (Azure's `rollback_create_on_interrupt`). A platform that implements
-the retained-cleanup handoff (EC2, Proxmox, Lima and WSL2) raises `RetainedProvisioningError`
-instead whenever its cleanup, after a failure or an interrupt, is abandoned or cannot show the
-backend clean, so core keeps the row for `vm delete` to finish. That is distinct from, and composes
-under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls
-back the persisted VM row. The platform's sweep undoes backend-side resources created inside
-`create()`; the orchestrator undoes the Agentworks-side record on top of it.
+naming the exact manual removal (Azure's `rollback_create_on_interrupt`). On Windows that second
+Ctrl-C reaches Python only once a blocked native call returns, so the abandonment can lag it by
+seconds. A platform that implements the retained-cleanup handoff (EC2, Proxmox, Lima and WSL2)
+raises `RetainedProvisioningError` instead whenever its cleanup, after a failure or an interrupt, is
+abandoned or cannot show the backend clean, so core keeps the row for `vm delete` to finish. That is
+distinct from, and composes under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` /
+node `teardown`), which rolls back the persisted VM row. The platform's sweep undoes backend-side
+resources created inside `create()`; the orchestrator undoes the Agentworks-side record on top of
+it.
 
 #### Quoting and Escaping in Embedded Scripts
 
@@ -772,7 +796,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    over SSH. Use `bootstrap_script.py` / `cloud_init.py` for the create-time payload instead of a
    platform-specific reinvention. Join with `tailscale_join.join_tailscale` over `run_as_root`, and
    return the address `settle_tailnet_address` reads over the same channel, inside the create's
-   rollback window so an address that cannot be read rolls the backend back.
+   rollback window so an address that cannot be read rolls the backend back. Pass both
+   `log=request.progress.record` (a cloud passes it to `complete_cloud_bootstrap`), so the join's
+   redacted output lands in the create's operation log, which create's error names.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it
@@ -820,9 +846,12 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
 - `agentworks.vms.nodes`: the `vm-site` / live-VM nodes that hold and drive a platform instance
   under the orchestration layer.
 - `public_ssh.py`: the clouds' shared base and their SSH to the public address.
+- `wall_bound.py`: the wall-clock bound on each provider call a cloud makes before dispatch and in
+  its held removals, which GCP also puts on every operation wait.
 - `lima_host.py`: where Lima's `limactl` runs, its root channel and native shell.
 - `docs/guides/idempotency.md`: the canonical table of what `vm reinit` reconciles.
 - ADR 0012: VM hardening at init.
 - ADR 0016: the `vm-platform` capability / `vm-site` declarable split.
 - ADR 0018: Azure VM size from spec.
 - ADR 0019: the orchestration layer (command plans over node graphs) that drives the lifecycle.
+- ADR 0027: one SSH execution channel, with platforms keeping only a root channel.

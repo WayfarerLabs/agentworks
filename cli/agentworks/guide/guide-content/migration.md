@@ -1,9 +1,31 @@
 ---
-description: Adopt desired runtime intent after upgrade and migrate retired resource settings.
+description: Adopt host keys and runtime intent after upgrade; migrate retired resource settings.
 index-order: 60
 ---
 
 # Migration
+
+## Import host keys, then reinit
+
+Agentworks 0.20 verifies every VM against its own host-key store and accepts a key on first use only
+during `vm create`. Until an existing VM has a record, every command that reaches it over SSH
+refuses it. `agw vm import-host-keys --all` copies matching keys from `~/.ssh/known_hosts` into the
+store without modifying that file, then rewrites the managed SSH entries so the operator's own `ssh`
+through them verifies against the store; it changes only local state and exits nonzero while any VM
+still lacks a record. `agw vm import-host-keys --help` covers a VM with no matching entry, and
+`agw vm recover NAME`, which changes the VM, can instead record keys the operator confirms.
+
+Once a VM has a record, one `agw vm reinit NAME` removes sshd and sudoers grants and the admin's
+group access to agent tmux servers, none of which is used any more. That changes the VM: afterwards
+the operator's own `ssh -o SetEnv` and `sudo` no longer pass `AGENTWORKS_*` or arbitrary variables.
+Reinit also deletes the workspace tmuxinator projects earlier releases generated and the admin's
+links to them, even a generated `.tmuxinator.yml` a repository committed. Named consoles replace
+those projects; do not start an old one by hand before reinit. Then `agw console restart NAME`
+rebuilds each running named console, whose shells and agent-session windows change only when
+rebuilt; restarting replaces the console's tmux windows. Skipping a VM's reinit keeps the unused
+grants and the old project files in place, and a console that is not restarted keeps its old
+windows, which cannot reconnect to agent sessions once the VM is reinitialized. The 0.20 upgrade
+guide in the repository's `docs/guides/` has the full sequence.
 
 ## Adopt desired runtime intent
 

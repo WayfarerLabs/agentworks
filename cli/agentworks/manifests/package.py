@@ -57,8 +57,11 @@ def load_manifest_package(
     with importlib_resources.as_file(directory) as resolved:
         manifests = load_manifests(Path(resolved))
 
-    if manifests.issues:
-        raise ConfigError(f"bundled manifests under {anchor}/{subdir} must be issue-free: {manifests.issues}")
+    if manifests.issues or manifests.deprecations:
+        raise ConfigError(
+            f"bundled manifests under {anchor}/{subdir} must be issue-free: "
+            f"{[*manifests.issues, *manifests.deprecations]}"
+        )
     if allowed_kinds is not None:
         for entry in manifests.entries:
             _reject_unbundleable(entry.kind, entry.name, entry.location.file.name, allowed_kinds)

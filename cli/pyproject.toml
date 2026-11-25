@@ -31,6 +31,8 @@ dependencies = [
     # upper bound excludes a v3, which would be a re-litigation of that design
     # rather than a drop-in upgrade.
     "pydantic>=2.13.4,<3",
+    # Plugin annotations can carry the distinct backport alias runtime type.
+    "typing-extensions>=4.16.0",
     # PyYAML reads manifests. Nothing round-trips YAML any more: ruamel
     # was here only for the migrator's in-place rewrites, and tomlkit only
     # for its comment-preserving config.toml edits. Both went with it
@@ -39,6 +41,7 @@ dependencies = [
     # Native harness settings merge semantically; TOML reads use stdlib tomllib.
     "tomli-w>=1.2.0",
     "json5>=0.17.3",
+    "azure-keyvault-secrets>=4.12.0",
 ]
 
 [project.urls]
@@ -92,6 +95,13 @@ runtime-evaluated-base-classes = [
     "pydantic.BaseModel",
     "agentworks.schema.AgwModel",
     "agentworks.declared_resource.DeclaredResource",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# Immutable values, safe as argument defaults.
+extend-immutable-calls = [
+    "agentworks.execution.requests.CaptureOutput",
+    "agentworks.harness_setup.outcomes.Redactor",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -167,6 +177,10 @@ dev = [
     "pytest>=9.0.0",
     "pytest-xdist>=3.8.0",
     "types-pyyaml>=6.0.12.20260518",
+    # Tests import requests directly to drive azure-core's requests transport
+    # over an in-memory adapter; at runtime it is only azure-core's dependency.
+    "requests>=2.34.2",
+    "types-requests>=2.33.0.20261030",
     # The reference JSON Schema implementation, for the emission tests only:
     # agentworks/manifests/emit.py has no runtime dependency on it, and
     # nothing under agentworks/ imports it. Emission's failure mode is a

@@ -79,6 +79,14 @@ if TYPE_CHECKING:
 
 _TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
+TERMINAL_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+"""The Unicode categories no text shown on a terminal may carry raw.
+
+Controls, format characters (bidirectional overrides among them), lone
+surrogates and the line and paragraph separators: each can move, hide or
+reorder what a terminal shows, or cannot be encoded at all.
+"""
+
 
 def sanitize_terminal_output(value: str) -> str:
     """Remove terminal controls while preserving ordinary line feeds and tabs."""
@@ -89,7 +97,7 @@ def sanitize_fact_line(value: str) -> str:
     """Remove terminal controls and unsafe Unicode categories from a scalar line."""
     sanitized = sanitize_terminal_output(value)
     return "".join(
-        character for character in sanitized if unicodedata.category(character) not in {"Cc", "Cf", "Cs", "Zl", "Zp"}
+        character for character in sanitized if unicodedata.category(character) not in TERMINAL_UNSAFE_CATEGORIES
     )
 
 

@@ -8,8 +8,7 @@ runs) and "what env does this pane actually get?" (``_resolve_pane_env``,
 called at split time once the values are in hand).
 
 Some of these names (``_pane_secret_target``, ``_admin_only_secret_target``,
-``_console_build_secret_targets``, ``_restore_session_secret_targets``,
-``_resolve_pane_env``) are monkeypatched by tests directly on the
+``_console_build_secret_targets``, ``_resolve_pane_env``) are monkeypatched by tests directly on the
 ``agentworks.sessions.multi_console`` package object. Because a patch there
 only rebinds the *package's* attribute, not this module's own global, every
 call site anywhere in the package (including the ones below that call a
@@ -26,7 +25,7 @@ from typing import TYPE_CHECKING, Protocol
 import agentworks.sessions.multi_console as _mc
 from agentworks.errors import NotFoundError
 
-from .attach import _session_linux_user
+from .attach import _pane_runs_as_admin, _session_linux_user
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -34,12 +33,6 @@ if TYPE_CHECKING:
     from agentworks.db import ConsoleSessionRow, Database, SessionRow, VMRow
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
-
-# Deliberately matches no AGENTWORKS_SUDOERS_ENV_KEEP_PATTERNS entry, so it is
-# only ever preservable via `setenv`. That is what makes it a clean capability
-# probe: a var the allowlist already covers would pass even without the
-# fragment. test_consoles pins the two against each other.
-_SUDO_PRESERVE_PROBE_VAR = "AWPROBE"
 
 
 class _ConsoleDefinition(Protocol):
@@ -67,18 +60,17 @@ def _pane_secret_target(
     - Admin pane: vm + workspace + admin.
     - Agent pane: vm + workspace + agent.
 
-    Session-template env is NOT included -- those vars are for the session
+    Session-template env is NOT included: those vars are for the session
     itself, not for sidecar shells attached to its window. Returns
     ``None`` when the session row is missing fields the resolver would
     need.
 
     ``is_admin_pane`` is the PROMOTED value, not the operator-passed
-    --admin flag. Callers must apply the same promotion ``_split_shell_pane``
-    uses: ``use_admin = shell_admin_flag or session_user == admin_user``.
-    Passing the raw flag for an admin-mode session (session_user ==
-    admin_user) would route through the ``agent_name is None`` branch
-    and silently return ``None``, breaking the eager-resolve guarantee
-    for that shape.
+    --admin flag: callers pass ``_pane_runs_as_admin``'s answer, the rule
+    the panes run by. Passing the raw flag for an admin-mode session (one
+    whose owner is the VM's admin) would route through the ``agent_name is
+    None`` branch and silently return ``None``, breaking the eager-resolve
+    guarantee for that shape.
     """
     from agentworks.agents.templates import resolve_live_template as _resolve_agent_template
     from agentworks.secrets import SecretTarget
@@ -147,7 +139,7 @@ def _admin_only_secret_target(
 ) -> SecretTarget:
     """SecretTarget for an admin-only console pane (no workspace context).
 
-    Used for ``console.admin_shell`` panes at build time -- a vanilla
+    Used for ``console.admin_shell`` panes at build time: a vanilla
     admin login shell with vm + admin scope. Workspace and session
     contexts don't apply (the admin shell isn't tied to either).
 
@@ -183,17 +175,9 @@ def _console_build_secret_targets(
 
     - The admin shell window (when ``console.admin_shell`` is set):
       vm + admin scope.
-    - For each session window: every configured shell pane (a session-
-      attach pane joins the session's existing tmux server and consumes
-      no new secrets, so it is skipped here).
-
-    Same ``use_admin`` promotion as ``_split_shell_pane`` (shell admin
-    flag OR session_user == admin_user) so the eager-resolve scope
-    matches what the build path will actually consume.
-
-    Sessions whose agent / workspace rows are missing get their shell
-    panes skipped (matches ``_pane_secret_target``'s defensive
-    fallthrough). The operator surfaces these via ``agw doctor``.
+    - For each session window: every configured shell pane
+      (``_member_secret_targets``; a session-attach pane joins the session's
+      existing tmux server and consumes no new secrets, so it is skipped).
     """
     targets: list[SecretTarget] = []
     if console.admin_shell:
@@ -206,45 +190,24 @@ def _console_build_secret_targets(
             ),
         )
     for member in members if members is not None else db.list_console_sessions(console.name):
-        session = db.get_session(member.session_name)
-        if session is None:
-            continue
-        try:
-            session_user = _session_linux_user(db, session, vm)
-        except NotFoundError:
-            continue
-        for shell in member.shells:
-            use_admin = shell["admin"] or session_user == vm.admin_username
-            pane = _mc._pane_secret_target(
-                db,
-                registry,
-                vm=vm,
-                session=session,
-                is_admin_pane=use_admin,
-            )
-            if pane is not None:
-                targets.append(pane)
+        targets.extend(_mc._member_secret_targets(db, registry, vm=vm, member=member))
     return targets
 
 
-def _restore_session_secret_targets(
+def _member_secret_targets(
     db: Database,
     registry: Registry,
     *,
     vm: VMRow,
     member: ConsoleSessionRow,
-    indices: list[int],
 ) -> list[SecretTarget]:
-    """SecretTargets for the specific missing shell-pane indices that
-    ``restore_session`` will open.
+    """A SecretTarget for each of ``member``'s configured shell panes.
 
-    Targets are scoped precisely to the caller-supplied indices: the
-    restore path's validation guards filter down to ``missing`` before
-    invoking this helper, so over-approximating would risk prompting
-    for secrets the command never actually consumes. (The window-
-    missing rebuild path in ``restore_session`` calls
-    ``_add_session_window`` directly; that path does its own
-    enumeration and doesn't route through this helper.)
+    Each pane's scope follows ``_pane_runs_as_admin``, the rule the panes
+    themselves run by, so the eager resolve covers what opening them will
+    consume. A session whose row or agent is gone has no panes to open, so
+    it gets none (matching ``_pane_secret_target``'s defensive fallthrough);
+    the operator surfaces these via ``agw doctor``.
     """
     targets: list[SecretTarget] = []
     session = db.get_session(member.session_name)
@@ -254,15 +217,13 @@ def _restore_session_secret_targets(
         session_user = _session_linux_user(db, session, vm)
     except NotFoundError:
         return targets
-    for idx in indices:
-        shell = member.shells[idx]
-        use_admin = shell["admin"] or session_user == vm.admin_username
+    for shell in member.shells:
         pane = _mc._pane_secret_target(
             db,
             registry,
             vm=vm,
             session=session,
-            is_admin_pane=use_admin,
+            is_admin_pane=_pane_runs_as_admin(vm, session_user, admin_shell=shell["admin"]),
         )
         if pane is not None:
             targets.append(pane)
@@ -281,21 +242,21 @@ def _resolve_pane_env(
 ) -> dict[str, str]:
     """Compose env for a console add-shell pane attached to a session's window.
 
-    Console add-shell panes are sidecar shells -- they're organized under
+    Console add-shell panes are sidecar shells: they're organized under
     a session's window in the console UI, but they're not *in* the session
     (separate process tree, not part of the session's tmux). Under the
     env-and-secrets identity taxonomy they're "admin or agent shell rooted
     in a workspace": they see workspace dynamic identity but NOT session
     identity, and their operator env stops at workspace scope. The
     sessions themselves (the agent's actual tmux server / shells) keep
-    full session context -- they ARE the workload.
+    full session context; they ARE the workload.
 
     Admin pane: admin + vm + workspace operator env; workspace dynamic
     identity.
 
     Agent pane: vm + workspace + agent operator env; workspace dynamic
     identity. ``AGENTWORKS_AGENT`` reaches the pane via the agent's
-    per-user profile fragment (static identity), not via SetEnv.
+    per-user profile fragment (static identity), not via the pane's environment.
 
     Returns ``{}`` when the session's row is missing fields that the env
     resolution needs (e.g. workspace lookup fails); the caller proceeds
@@ -339,9 +300,8 @@ def _resolve_pane_env(
         )
 
     if session.agent_name is None:
-        # In theory unreachable given the caller's ``use_admin`` logic in
-        # ``_split_shell_pane`` (an admin-mode session has session_user ==
-        # admin_user, which forces is_admin_pane=True up there). Guarded
+        # In theory unreachable given ``_pane_runs_as_admin`` (an admin-mode
+        # session's owner is the admin, which forces is_admin_pane=True). Guarded
         # here against future invariant drift so a non-admin pane on a
         # session with no agent silently skips env rather than crashing.
         return {}
@@ -409,7 +369,7 @@ def _validate_console_build_values(
             )
         session_user = _mc._session_linux_user(db, session, vm)
         for shell in member.shells:
-            use_admin = shell["admin"] or session_user == vm.admin_username
+            use_admin = _pane_runs_as_admin(vm, session_user, admin_shell=shell["admin"])
             _mc._resolve_pane_env(
                 db,
                 registry,

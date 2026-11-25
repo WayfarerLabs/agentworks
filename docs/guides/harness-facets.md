@@ -78,16 +78,16 @@ Integration activation maps merge by key:
 - Omit `harness_integrations` or supply `{}` to inherit the effective map.
 - Adding a key activates that integration and preserves the parent's other integrations.
 - Restating a key merges its configuration according to the owning facet's schema. Claude and Codex
-  user facets replace an inherited `plugins` or `marketplaces` list when that field is supplied;
-  include every desired entry, or use `[]` to clear the list. Omitted fields inherit.
+  user facets append and deduplicate authored `plugins` and `marketplaces` lists. Omission and `[]`
+  preserve inherited entries; use `null` to clear a list.
 - An empty entry activates defaults when new and preserves inherited configuration when already
   selected.
 - A `null` entry disables that integration, including an inherited activation. For example,
   `harness_integrations: {codex: null}` leaves other integrations active. A later layer can
   reactivate Codex with `{}` or explicit config; the disabled config is not restored.
 
-For example, this child sets Claude's marketplace and plugin lists, replacing any inherited values
-for those fields. It retains the parent's Codex activation and Claude settings:
+For example, this child adds to Claude's inherited marketplace and plugin lists. It retains the
+parent's Codex activation and Claude settings:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -170,10 +170,10 @@ declarations and stored overlays have a dedicated [migration guide](migrating-cl
 
 ## Core setup and the environment
 
-At each owner, core prepares environment and captures declared artifact bundles before harness
-integration setup. The integration receives the applicable inputs and applies native configuration
-and artifacts or defers artifacts to a later facet. VM/admin setup completes before the final
-authorized-key and successful VM initialization checkpoint. Agent setup follows core user
+At each owner, core prepares environment and captures selected bundles and direct declarations
+before harness integration setup. The integration receives the applicable inputs and applies native
+configuration and artifacts or defers artifacts to a later facet. VM/admin setup completes before
+the final authorized-key and successful VM initialization checkpoint. Agent setup follows core user
 initialization; workspace setup follows directory and repository creation. Creating pending
 resources during session creation runs their owning setup before the session launches.
 
@@ -189,9 +189,11 @@ Active setup receives environment from the scopes that already exist for that ow
 Inner values win collisions under the normal env merge rules. Core protects `AGENTWORKS_*` identity
 values. Setup environment and declared config secrets join the operation's eager resolution before
 remote mutation and logger construction. Each integration receives only its declared config secrets;
-environment arrives separately through the prepared runner. With neither selected activations nor
-prior applied-state records, this setup path does not resolve otherwise unused environment secrets.
-Existing install commands keep their own execution behavior.
+environment arrives separately as the invocation's `environment`, and `request_environment(local)`
+builds a request's `env` from it with the integration's own variables added, never an `AGENTWORKS_*`
+one. With neither selected activations nor prior applied-state records, this setup path does not
+resolve otherwise unused environment secrets. Existing install commands keep their own execution
+behavior.
 
 Session environment retains its existing precedence: session over actual user, over workspace, over
 VM. It is not produced by merging setup configs. Environment values follow their own merge rules;
@@ -205,12 +207,13 @@ and automatic hint emission are future work.
 
 ## Artifact handling across facets
 
-An owner selects reusable bundles through `artifacts.bundles`, independently of integration
-activation. Core captures those inputs even when no integration is activated there. A later facet
-reads the capture; it does not reopen workstation files or fetch Git sources for an ancestor.
-Bundles contain `hints`, `rules`, `skills`, `agents` and `mcp_servers` maps. MCP entries describe
-connections, not running services; registration never proves authentication, connectivity, tool
-discovery or model use. Select the consuming user's env/secret declarations separately.
+An owner selects reusable bundles through `artifacts.bundles` or authors its five artifact type maps
+under `artifacts.declare`, independently of integration activation. Core captures those inputs even
+when no integration is activated there. A later facet reads the capture; it does not reopen
+workstation files or fetch Git sources for an ancestor. Both forms contain `hints`, `rules`,
+`skills`, `agents` and `mcp_servers` maps. MCP entries describe connections, not running services;
+registration never proves authentication, connectivity, tool discovery or model use. Select the
+consuming user's env/secret declarations separately.
 
 Core routes an inactive VM facet's inputs to the user facet by default. An activated VM facet can
 choose user, workspace, or session for each deferred input. These routes do not depend on which
@@ -223,7 +226,8 @@ its actual user and workspace results with anything routed directly from the VM.
 that the session integration cannot handle produce warnings with their original source and reason.
 Native harness session delivery requires explicit `enabled_workarounds` in the selected
 integration's session config. The default empty list leaves all remaining inputs unhandled. Each
-named workaround enables only its documented delivery method; `[]` replaces inherited opt-ins. See
+named workaround enables only its documented delivery method. Lists append and deduplicate; omission
+and `[]` preserve inherited opt-ins, while `null` clears them. See
 `agw guide show concept-agent-artifacts` for the supported methods and their limitations. Shell
 publishes directly as files at every activated facet, including the private session directory.
 
@@ -281,12 +285,13 @@ and inspection. `agw artifact show` includes upstream handling even when handled
 flow to a descendant.
 
 Claude Code, Codex and Grok register MCP at user/workspace scope in their actual native config
-roles, preserving unrelated settings and entries unless an explicit mapping changes them. Managed
-names include the original owner, so equal keys at different scopes do not shadow one another. An
-identical unowned entry can be adopted; conflicting entries are retained and deferred individually.
-The optional session carriers are Claude `session-mcp-config` and Codex `session-mcp-overrides`.
-Grok has no supported session MCP carrier; unhandled MCP warns and launch continues. Shell publishes
-canonical files at every scope without running servers. See
+roles, preserving unrelated settings and entries unless an explicit mapping changes them. Artifacts
+use canonical keys in their owning native scope. Deferred inputs add their original scope prefix,
+for example `vm-github`. Equal native names across scopes follow the harness's loading and
+precedence rules. An identical unowned entry can be adopted. Conflicting entries are retained and
+deferred individually. The optional session carriers are Claude `session-mcp-config` and Codex
+`session-mcp-overrides`. Grok has no supported session MCP carrier; unhandled MCP warns and launch
+continues. Shell publishes canonical files at every scope without running servers. See
 [MCP setup](native-harness-setup.md#mcp-registrations) for paths, merge interaction and the separate
 native authentication/credential-removal workflow. OAuth configuration is planned for a later phase;
 the initial artifact profile rejects OAuth and tool-filter fields explicitly.

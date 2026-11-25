@@ -11,22 +11,29 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
-from agentworks.db import SessionStatus
-from agentworks.errors import AgentworksError, ExternalError, StateError
+from agentworks.db import SessionRow, SessionStatus
+from agentworks.errors import AgentworksError, ConnectivityError, ExternalError, StateError
+from agentworks.execution.requests import Bytes
+from agentworks.execution.results import Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
+from agentworks.sessions.manager import SessionTmuxServer
 from agentworks.sessions.manager._pids import _repair_session_pid
-from agentworks.sessions.manager._status import check_session_status
-from agentworks.ssh import SSHError, SSHResult
+from agentworks.sessions.manager._status import batch_check_status, check_session_status
+from agentworks.sessions.tmux import CommandOutcome
+from tests._runtime_probes import server_for
+from tests.conftest import current_user_name
+from tests.vm_access_support import Admin, Call, RecordingVMAccess, command_line, guest_result
 
 from .test_create_start_restart_orchestrated import (
     _create_stubs,
-    _patch_transports,
     _requiring_template,
     _restart_fixture,
+    _route_guests,
 )
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
 from .test_startup_recovery import _fake_owner_realizers
@@ -41,41 +48,78 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-class NativeTarget:
+class NativeGuest:
     logger = None
 
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.socket = str(root / "s")
+        # Inside an owner's directory, as agent sockets are (see the fixture's
+        # AGENT_SOCKET_ROOT); admin-mode launches share the same address.
+        self.socket = str(root / "agt-owned" / "s1.sock")
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        # Every request the accesses from :meth:`access` were asked, in order.
+        self.access_calls: list[Call] = []
         self.banner = ""
         self.stderr_banner = ""
+        # Every switch to a server's owner goes through runuser; this account
+        # owns every native server here, so the stand-in runs the rest as it.
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        self.runuser = root / "runuser"
+        self.runuser.write_text('#!/bin/sh\n[ "$1" = -u ] && [ "$3" = -- ] || exit 64\nshift 3\nexec "$@"\n')
+        self.runuser.chmod(0o700)
         self.environment = {
             "HOME": str(root),
-            "PATH": os.defpath,
+            "PATH": f"{bin_dir}{os.pathsep}{os.defpath}",
             "SHELL": "/bin/sh",
             "TERM": "xterm",
             "TMUX_TMPDIR": str(root),
         }
 
-    def run(self, command: str, *, check: bool = True, **kwargs: Any) -> SSHResult:
+    def run(self, command: str, *, check: bool = True, **kwargs: Any) -> CommandOutcome:
+        """Run ``command`` locally, with ``env`` exported beside the guest's own environment as a request's is.
+
+        The tmux primitives take it as their ``RunCommand``; :meth:`answer`
+        runs an access's requests through it, passing a request's ``Bytes``
+        input as ``input_data``.
+        """
         self.calls.append((command, kwargs))
         input_data = kwargs.get("input_data")
-        if isinstance(input_data, bytes):
-            input_data = input_data.decode()
         result = subprocess.run(
             ["/bin/sh", "-c", command],
             capture_output=True,
             text=True,
             timeout=10,
-            env=self.environment,
+            env={**self.environment, **(kwargs.get("env") or {})},
             input=input_data,
         )
         if check and result.returncode:
             raise ExternalError(result.stderr or result.stdout)
-        return SSHResult(result.returncode, self.banner + result.stdout, self.stderr_banner + result.stderr)
+        return CommandOutcome(
+            stdout=self.banner + result.stdout, stderr=self.stderr_banner + result.stderr, returncode=result.returncode
+        )
 
-    def native(self, command: str) -> SSHResult:
+    def answer(self, call: Call) -> Result | None:
+        """Run a ``Command`` or ``Script`` here from its command line, with the request's environment and input."""
+        request = call.request
+        line = command_line(request)
+        if line is None:
+            return None
+        input_data = request.stdin.data.decode() if isinstance(request.stdin, Bytes) else None
+        result = self.run(line, check=False, env=dict(request.env), input_data=input_data)
+        return guest_result(result.returncode, result.stdout, result.stderr)
+
+    def access(self) -> RecordingVMAccess:
+        """The admin's access, its requests run here."""
+        access = RecordingVMAccess(self.access_calls, Admin())
+        access.answer = self.answer
+        return access
+
+    def batch_status(self, sessions: list[SessionRow]) -> dict[str, SessionStatus]:
+        """``batch_check_status`` on :meth:`access`, each row with the server its socket path names."""
+        return batch_check_status([(session, server_for(session)) for session in sessions], admin=self.access())
+
+    def native(self, command: str) -> CommandOutcome:
         return self.run(tmux.tmux_cmd(command, self.socket), check=False)
 
     def wait_dead(self) -> None:
@@ -95,7 +139,10 @@ def native(monkeypatch):
     # pytest's nested tmp_path is longer than sun_path on some hosts.
     with tempfile.TemporaryDirectory(prefix="agw-r9-runtime-native-", dir="/tmp") as directory:
         root = Path(directory)
-        target = NativeTarget(root)
+        target = NativeGuest(root)
+        Path(target.socket).parent.mkdir()
+        monkeypatch.setattr(tmux, "AGENT_SOCKET_ROOT", str(root))
+        monkeypatch.setattr(tmux, "RUNUSER_PATH", str(target.runuser))
         config = root / "tmux.conf"
         config.write_text("set-option -g @agentworks-native-config loaded\n")
         monkeypatch.setattr(tmux, "RESTRICTED_CONFIG_PATH", str(config))
@@ -104,8 +151,10 @@ def native(monkeypatch):
         monkeypatch.setattr(tmux, "ensure_admin_socket_root", lambda *a: None)
         monkeypatch.setattr(tmux, "ensure_agent_socket_root", lambda *a: None)
         monkeypatch.setattr(tmux, "ensure_agent_socket_dir", lambda *a: None)
-        # Cross-user access is independently tested; no system users are created.
-        monkeypatch.setattr(tmux, "_grant_server_access", lambda *a: None)
+        # This account owns every native socket, whichever owner's directory holds
+        # it, so every socket guard checks for this account.
+        owner = current_user_name()
+        monkeypatch.setattr(SessionTmuxServer, "account", property(lambda server: owner))
         try:
             yield target
         finally:
@@ -114,7 +163,13 @@ def native(monkeypatch):
     assert not root.exists()
 
 
-def launch(native: NativeTarget, command: str, *, is_admin: bool = True, launch_options=None):
+def _in_agent_directory(native: NativeGuest, linux_user: str) -> None:
+    """Move the fixture socket into the directory of the agent the row names."""
+    native.socket = str(native.root / linux_user / "s1.sock")
+    Path(native.socket).parent.mkdir(exist_ok=True)
+
+
+def launch(native: NativeGuest, command: str, *, is_admin: bool = True, launch_options=None):
     options = launch_options or {}
     return _NATIVE_CREATE(
         "s1",
@@ -122,7 +177,7 @@ def launch(native: NativeTarget, command: str, *, is_admin: bool = True, launch_
         command,
         linux_user="owned",
         run_command=native.run,
-        target=native,
+        admin_files=RecordingVMAccess([], Admin()).files(),
         admin_username="owned",
         is_admin=is_admin,
         env=options.get("env"),
@@ -141,7 +196,7 @@ def test_native_global_config_and_last_n_log_lines(native):
         "exec sleep 30\n"
     )
     socket, _pid = launch(native, f"/bin/sh {shlex.quote(str(script))}")
-    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=True)
+    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket)
     assert native.native("show-option -wAqv -t =s1: remain-on-exit").stdout.strip() == "off"
     assert native.native("show-option -gqv @agentworks-native-config").stdout.strip() == "loaded"
     gate.touch()
@@ -153,6 +208,30 @@ def test_native_global_config_and_last_n_log_lines(native):
     assert len(captured.splitlines()) == 3
     assert "line-35" in captured
     assert "line-1\n" not in captured
+
+
+def test_native_launch_env_reaches_the_workload_and_never_the_command_line(native):
+    marker = uuid4().hex
+    lines = f"first {marker}\r\nsecond 100%\n"
+    received = native.root / "lines.out"
+    script = native.root / "work.sh"
+    script.write_text(
+        f'printf %s "$AGW_LINES" > {shlex.quote(str(received))}; printf "env-%s\\n" "$AGW_PROBE"; exec sleep 30\n'
+    )
+    socket, _pid = launch(
+        native,
+        f"/bin/sh {shlex.quote(str(script))}",
+        launch_options={"env": {"AGW_PROBE": marker, "AGW_LINES": lines}},
+    )
+    deadline = time.monotonic() + 5
+    captured = ""
+    while f"env-{marker}" not in captured and time.monotonic() < deadline:
+        captured = tmux.capture_output("s1", run_command=native.run, socket_path=socket)
+        time.sleep(0.02)
+    assert f"env-{marker}" in captured
+    # A value with line breaks reaches the workload byte-exact.
+    assert received.read_bytes() == lines.encode()
+    assert not any(marker in command for command, _ in native.calls)
 
 
 def test_native_dead_pane_captures_saved_screen_and_active_overlay(native):
@@ -174,7 +253,7 @@ def test_native_dead_pane_captures_saved_screen_and_active_overlay(native):
         return result
 
     with pytest.raises(StateError) as caught:
-        _NATIVE_FINALIZE("s1", run_command=observed_run, socket_path=socket, is_admin=False)
+        _NATIVE_FINALIZE("s1", run_command=observed_run, socket_path=socket)
     assert "saved-marker" in str(caught.value)
     assert "active-marker" in str(caught.value)
     # tmux can observe death before a wait status is available. Preserve the
@@ -182,18 +261,17 @@ def test_native_dead_pane_captures_saved_screen_and_active_overlay(native):
     assert len(observations) == 1 and observations[0] in ("1", "1 23")
     if observations[0] == "1 23":
         assert "23" in str(caught.value)
-    chmod = next(index for index, (cmd, _) in enumerate(native.calls) if "chmod g+rwx" in cmd)
-    finished = chmod + 1
-    check = next(index for index, (cmd, _) in enumerate(native.calls[finished:], finished) if "#{pane_dead}" in cmd)
-    assert chmod < check
-    assert Path(socket).stat().st_mode & 0o070 == 0o070
     assert native.native("list-sessions").returncode != 0
 
 
 @pytest.mark.parametrize("operation", ["start_session", "restart_session"])
 def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_path, monkeypatch, native, operation):
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
-    _patch_transports(monkeypatch, native, native)
+    # The stored address lives in the row's own agent socket directory.
+    _in_agent_directory(native, "agt-a1")
+    db._conn.execute("UPDATE sessions SET socket_path = ? WHERE name = 's1'", (native.socket,))
+    db._conn.commit()
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "check_session_status", check_session_status)
     gate = native.root / "exit"
@@ -208,7 +286,7 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
         # This is the old 1.5-3 second observation window, while protection is held.
         time.sleep(1.6)
         native.wait_dead()
-        return _NATIVE_CAPTURE(target=native, socket_path=native.socket)
+        return _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket)
 
     monkeypatch.setattr(tmux, "create_session", create)
     monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", capture)
@@ -229,11 +307,11 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
         # kill-server acknowledgement can precede process teardown. Keep the
         # stored-identity guard in force until that process is actually absent.
         deadline = time.monotonic() + 5
-        status = check_session_status(row, target=native)
+        status = check_session_status(row, admin=native.access(), server=server_for(row))
         while status is not SessionStatus.STOPPED and time.monotonic() < deadline:
             assert status is SessionStatus.BROKEN
             time.sleep(0.02)
-            status = check_session_status(row, target=native)
+            status = check_session_status(row, admin=native.access(), server=server_for(row))
         assert status is SessionStatus.STOPPED
         monkeypatch.setattr(
             tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
@@ -248,14 +326,21 @@ def test_native_death_during_identity_capture_keeps_recoverable_fingerprint(tmp_
         )
         recovered = db.get_session("s1")
         assert recovered is not None and recovered.pid is not None
-        assert check_session_status(recovered, target=native) is SessionStatus.RUNNING
+        assert (
+            check_session_status(recovered, admin=native.access(), server=server_for(recovered))
+            is SessionStatus.RUNNING
+        )
     finally:
         db.close()
 
 
 def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, monkeypatch, native):
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
-    _patch_transports(monkeypatch, native, native)
+    # The stored address lives in the row's own agent socket directory.
+    _in_agent_directory(native, "agt-a1")
+    db._conn.execute("UPDATE sessions SET socket_path = ? WHERE name = 's1'", (native.socket,))
+    db._conn.commit()
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     monkeypatch.setattr(
@@ -275,10 +360,11 @@ def test_native_unverified_checkpoint_recovers_still_private_socket(tmp_path, mo
         row = db.get_session("s1")
         assert row is not None and row.pid is None
         assert Path(native.socket).stat().st_mode & 0o077 == 0
-        assert check_session_status(row, target=native) is SessionStatus.UNKNOWN
-        assert any(options.get("sudo") is True for command, options in native.calls if "has-session" in command)
+        assert check_session_status(row, admin=native.access(), server=server_for(row)) is SessionStatus.UNKNOWN
+        probes = [call.request for call in native.access_calls if "has-session" in (command_line(call.request) or "")]
+        assert any(request.elevated for request in probes)
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
-        assert _repair_session_pid(row, target=native, db=db)
+        assert _repair_session_pid(row, admin=native.access(), db=db)
         recovered = db.get_session("s1")
         assert recovered is not None and recovered.pid is not None and recovered.tmux_server_start_ticks is not None
     finally:
@@ -293,26 +379,27 @@ def test_real_fingerprint_and_presence_ignore_pre_frame_login_stdout(native, str
         native.stderr_banner = "harmless login stderr without a newline"
     socket, pid = launch(native, "sleep 30")
     assert (pid is None) is (stream == "stdout")
-    fingerprint = _NATIVE_CAPTURE(target=native, socket_path=socket)
+    fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=socket)
     assert fingerprint.status is tmux.ProbeStatus.PRESENT
     assert fingerprint.fingerprint is not None and fingerprint.fingerprint.pid > 0
     assert tmux.probe_tmux_session("s1", run_command=native.run, socket_path=socket) is tmux.ProbeStatus.PRESENT
-    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket, is_admin=True)
+    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=socket)
 
 
-@pytest.mark.parametrize("fault", ["fingerprint", "grant", "interrupt"])
+@pytest.mark.parametrize("fault", ["fingerprint", "liveness", "interrupt"])
 def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path, monkeypatch, native, fault):
     db = _create_stubs(tmp_path, monkeypatch, [])
+    _in_agent_directory(native, "agt-s1")
     _fake_owner_realizers(monkeypatch)
-    _patch_transports(monkeypatch, native, native)
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     monkeypatch.setattr(
         tmux, "create_session", lambda *a, **k: launch(native, "sleep 30", is_admin=False, launch_options=k)
     )
-    failure = KeyboardInterrupt() if fault == "interrupt" else SSHError("controlled sharing failure")
+    failure = KeyboardInterrupt() if fault == "interrupt" else ConnectivityError("controlled liveness failure")
 
-    def grant(*args, **kwargs):
+    def observe_liveness(*args, **kwargs):
         raise failure
 
     monkeypatch.setattr(tmux, "finalize_session_start", _NATIVE_FINALIZE)
@@ -322,7 +409,7 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
         )
     else:
         monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
-        monkeypatch.setattr(tmux, "_grant_server_access", grant)
+        monkeypatch.setattr(tmux, "_ensure_workload_alive", observe_liveness)
     try:
         with pytest.raises(ExternalError if fault == "fingerprint" else type(failure)) as caught:
             manager.create_session(
@@ -330,7 +417,7 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
                 SimpleNamespace(session=SimpleNamespace(history_limit=1), paths=SimpleNamespace(vm_workspaces="/srv")),
                 name="s1",
                 new_workspace=True,
-                workspace_spec='{"tmuxinator":false}',
+                workspace_spec='{"git_user_name":"Ada"}',
                 new_agent=True,
                 agent_spec='{"shell":"zsh"}',
                 vm_name="vm1",
@@ -342,11 +429,11 @@ def test_native_create_failure_keeps_live_runtime_and_new_dependencies(tmp_path,
         assert row is not None and row.socket_path == native.socket
         assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None
         expected = SessionStatus.UNKNOWN if fault == "fingerprint" else SessionStatus.RUNNING
-        assert check_session_status(row, target=native) is expected
+        assert check_session_status(row, admin=native.access(), server=server_for(row)) is expected
         if fault == "fingerprint":
             assert row.pid is None
             monkeypatch.setattr(tmux, "capture_tmux_server_fingerprint", _NATIVE_CAPTURE)
-            assert _repair_session_pid(row, target=native, db=db)
+            assert _repair_session_pid(row, admin=native.access(), db=db)
         else:
             assert row.pid is not None and row.boot_id is not None and row.tmux_server_start_ticks is not None
         assert native.native("show-option -wqv -t =s1: remain-on-exit").stdout.strip() == "on"
@@ -361,15 +448,19 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
         _fake_owner_realizers(monkeypatch)
         options = {
             "new_workspace": True,
-            "workspace_spec": '{"tmuxinator":false}',
+            "workspace_spec": '{"git_user_name":"Ada"}',
             "new_agent": True,
             "agent_spec": '{"shell":"zsh"}',
             "vm_name": "vm1",
         }
     else:
         db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
+        # The stored address lives in the row's own agent socket directory.
+        _in_agent_directory(native, "agt-a1")
+        db._conn.execute("UPDATE sessions SET socket_path = ? WHERE name = 's1'", (native.socket,))
+        db._conn.commit()
         options = {}
-    _patch_transports(monkeypatch, native, native)
+    _route_guests(monkeypatch, native, native)
     _requiring_template(monkeypatch, "sh")
     monkeypatch.setattr(manager, "_get_boot_id", tmux.read_boot_id)
     monkeypatch.setattr(
@@ -381,8 +472,8 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
 
     def reject_release(command, *, check=True, **kwargs):
         if "remain-on-exit off" in command:
-            # Make the actual native command fail. NativeTarget.run enforces
-            # check=True exactly as the production Transport does.
+            # Make the actual native command fail. NativeGuest.run enforces
+            # check=True exactly as the production access does.
             command = command.replace("remain-on-exit", "agentworks-invalid-release-option")
         return real_run(command, check=check, **kwargs)
 
@@ -398,14 +489,14 @@ def test_failed_native_startup_release_retains_checkpointed_runtime(tmp_path, mo
             )
         row = db.get_session("s1")
         assert row is not None and row.socket_path == native.socket
-        observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+        observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
         assert observed is not None
         assert (row.pid, row.boot_id, row.tmux_server_start_ticks) == (
             observed.pid,
             observed.boot_id,
             observed.start_ticks,
         )
-        assert check_session_status(row, target=native) is SessionStatus.RUNNING
+        assert check_session_status(row, admin=native.access(), server=server_for(row)) is SessionStatus.RUNNING
         assert native.native("show-option -wqv -t =s1: remain-on-exit").stdout.strip() == "on"
         if operation == "create_session":
             assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None

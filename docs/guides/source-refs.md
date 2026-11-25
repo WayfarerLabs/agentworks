@@ -7,7 +7,10 @@ They are used in agentworks config fields that accept file sources (e.g., `mise_
 
 ### Local file
 
-A plain path or a `file::` prefixed path. Tilde expansion is supported.
+A plain path or a `file::` prefixed path. Tilde expansion is supported. A remote is never a local
+path: a value holding `://` or `::`, or whose first path component holds a colon that is not a
+Windows drive letter (as in `user@host:path`, git's own rule for an scp-style remote), is refused,
+so write a git remote with the `git::` prefix.
 
 ```text
 ~/.config/agentworks/mise.lock
@@ -16,11 +19,12 @@ file::~/.config/agentworks/mise.lock
 
 ### Git repository
 
-A `git::` prefix followed by a git URL. The file is cloned from the repository during VM
-initialization.
+A `git::` prefix followed by a git URL: `git::https://host/path` or the scp-style
+`git::git@host:path`. The file is fetched from the repository during VM initialization.
 
 ```text
 git::https://github.com/user/repo.git
+git::git@github.com:user/repo.git
 ```
 
 ### Git with subpath
@@ -35,12 +39,13 @@ git::https://github.com/user/infra.git//tools/agent-mise.lock
 
 ### Git with ref
 
-Use `?ref=` to pin a specific branch, tag, or commit.
+Use `?ref=` to pin a specific branch, tag, or commit. A commit must be its full hash: a remote
+serves only names and whole object ids, so a short hash cannot be fetched.
 
 ```text
 git::https://github.com/user/infra.git?ref=main
 git::https://github.com/user/infra.git//mise/mise.lock?ref=v1.0
-git::https://github.com/user/infra.git?ref=abc123def
+git::https://github.com/user/infra.git?ref=4f2c9e1d7b3a6f0e8c5d2b9a1e7f3c6d0b4a8e2f
 ```
 
 ## Full syntax
@@ -50,10 +55,12 @@ git::https://github.com/user/infra.git?ref=abc123def
 ```
 
 - **Scheme**: `file::` (default if omitted) or `git::`.
-- **URL**: For git sources, must start with `https://` or `git@`.
-- **Subpath**: Path to a file within the repository. Must not contain `..`.
-- **Ref**: Branch name, tag, or commit hash. Must be alphanumeric with hyphens, dots, underscores,
-  and slashes.
+- **URL**: For git sources, must start with `https://` or `git@`. An `https://` URL may not carry a
+  user name or token (`https://user:token@host/...`); declare a `git-credential` resource for the
+  host instead (see [Private repositories](#private-repositories)).
+- **Subpath**: Path to a file within the repository. Must not have an empty, `.` or `..` component.
+- **Ref**: Branch name, tag, or full commit hash. Must be alphanumeric with hyphens, dots,
+  underscores, and slashes.
 
 ## Private repositories
 

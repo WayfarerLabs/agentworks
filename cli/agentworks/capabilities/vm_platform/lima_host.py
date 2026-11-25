@@ -11,6 +11,8 @@ argv, so the operator's SSH configuration for the host applies.
 from __future__ import annotations
 
 import contextlib
+import posixpath
+import re
 import shlex
 import subprocess
 import time
@@ -19,9 +21,8 @@ from typing import TYPE_CHECKING, Literal
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.errors import ExternalError
+from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution import root_script, ssh_process
-from agentworks.subprocess_io import decode_stream, stdin_bytes
 
 if TYPE_CHECKING:
     from agentworks.execution.root_script import RawRun
@@ -30,6 +31,8 @@ _DETACHED_POLL_SECONDS = 3
 _DETACHED_QUIET_SECONDS = 300
 _DETACHED_READ_ATTEMPTS = 6
 _DETACHED_READ_RETRY_SECONDS = 5
+# The random part of a detached run's private directory name, as mktemp fills it.
+_DETACHED_RANDOM_LENGTH = 10
 # ssh's own status for a connection that failed. A remote command's 255 is indistinguishable,
 # and none of the detached checks below exits 255 by itself.
 _SSH_CONNECTION_FAILED = 255
@@ -44,6 +47,17 @@ echo $$ > {pid_file}
 {{ {command} ; }} > {output_file} 2>&1
 echo $? > {status_file}
 """
+
+
+# Writes stdin to "$2" through a private temporary file in its directory "$1".
+# ">|" because bash as /bin/sh (macOS) imports an exported SHELLOPTS, so a
+# login shell's noclobber can reach it, and mktemp has already created "$tmp".
+# "[ ! -d ]", which follows a link, because mv would move the file into a
+# directory at "$2", and BSD mv has no -T to refuse that.
+_UPLOAD_SCRIPT = (
+    'tmp=$(mktemp "$1/.agw-upload.XXXXXX") && '
+    '{ cat >| "$tmp" && [ ! -d "$2" ] && mv -f "$tmp" "$2" || { rm -f "$tmp"; false; }; }'
+)
 
 
 class LimaCommandFailed(ExternalError):
@@ -112,29 +126,43 @@ class LimaHost:
         return ssh_process.run_terminal(self._argv(command, mode=ssh_process.ArgvMode.TERMINAL))
 
     def upload(self, path: str, content: str) -> None:
-        """Write ``content`` to ``path``, mode 0600, through stdin, never an argument."""
-        self.run(f"umask 077 && cat > {shlex.quote(path)}", input=content)
+        """Write ``content`` to ``path``, mode 0600, through stdin, never an argument.
+
+        The content goes to a file ``mktemp`` creates beside ``path``, which
+        passes mode 0600 to the create itself, so neither the umask nor a POSIX
+        default ACL on the directory can widen it, and is then renamed over
+        ``path``. The rename replaces a symlink at ``path`` rather than
+        following it, and in a sticky directory such as ``/var/tmp`` is refused
+        over a file another user owns. A directory at ``path``, or a symlink to
+        one, is refused. The temporary file is removed if the write or the
+        rename fails or is refused. Inherited macOS ACL entries are not masked
+        by mode bits, so they still apply. The script runs under an explicit
+        ``/bin/sh``, with the paths as its arguments, so beyond the
+        ``$SHELL -lc`` layer every host command goes through, which needs a
+        Bourne-family shell or fish, it does not depend on the login shell's
+        syntax.
+        """
+        self.run(shlex.join(["/bin/sh", "-c", _UPLOAD_SCRIPT, "sh", posixpath.dirname(path), path]), input=content)
 
     # -- Detached commands, for work that must outlive the connection --------------------
 
-    def run_detached(self, command: str, *, base_path: str, timeout: int) -> DetachedResult:
+    def run_detached(self, command: str, *, prefix: str, timeout: int) -> DetachedResult:
         """Run ``command`` under ``nohup`` on the placement host and poll it to completion.
 
-        ``base_path`` names its ``.sh``, ``.out``, ``.pid`` and ``.status``
-        files. A leftover status file is an interrupted earlier run's, so it
-        is cleared with a warning and a fresh run starts. At ``timeout``
-        seconds the command is killed and the result is exit 1 with the
-        output so far. Every file is removed at the end. A host that does
-        not answer the launch, or never answers for the status, raises
-        :class:`LimaCommandFailed` saying so rather than reporting an exit
-        status nothing read; the files are then the caller's to remove
-        (:meth:`kill_detached`).
+        Its ``.sh``, ``.out``, ``.pid`` and ``.status`` files live in a
+        directory of their own, ``prefix`` and a random suffix, that
+        ``mktemp -d`` creates private to the host user, so no other account
+        can plant or read them and no earlier run's files are ever consumed.
+        At ``timeout`` seconds the command is killed and the result is exit 1
+        with the output so far. The directory is removed at the end. A host
+        that does not answer the launch, or never answers for the status,
+        raises :class:`LimaCommandFailed` saying so rather than reporting an
+        exit status nothing read; the directory is then the caller's to
+        remove (:meth:`kill_detached` with the same ``prefix``).
         """
-        files = _DetachedFiles(base_path)
-        if self._returncode(f"test -f {files.status}") == 0:
-            output.warn(f"clearing stale result files from a previous interrupted run ({base_path}.*)")
+        directory = self._private_directory(prefix)
+        files = _DetachedFiles(f"{directory}/run")
         self.upload(files.wrapper, _WRAPPER_TEMPLATE.format(command=command, **files.template_fields()))
-        self._returncode(f"rm -f {files.output} {files.pid} {files.status}")
         if self._returncode(_launch_wrapper(files)) == _SSH_CONNECTION_FAILED:
             raise LimaCommandFailed(f"the placement host '{self.host}' did not answer when starting: {command}")
         time.sleep(0.5)
@@ -152,26 +180,52 @@ class LimaHost:
         except ValueError:
             exit_code = 1
         with contextlib.suppress(LimaCommandFailed):
-            self._returncode(f"rm -f {files.wrapper} {files.pid} {files.status} {files.output}")
+            self._returncode(_remove_directory(directory))
         return DetachedResult(exit_code=exit_code, output=captured or "")
 
-    def kill_detached(self, base_path: str) -> None:
-        """Stop the command a :meth:`run_detached` with ``base_path`` started, then remove its files.
+    def kill_detached(self, prefix: str) -> None:
+        """Stop every command a :meth:`run_detached` with ``prefix`` started, then remove its directory.
 
-        A no-op when it never started or already finished. Best-effort, so a
-        caller unwinding from an earlier failure keeps that failure:
+        Each run's directory is found by its name and kept only when it is a
+        directory the host user owns, which no other account can create in
+        a sticky ``/var/tmp``. A no-op when none is left, and a warning when
+        the listing itself fails, since a run it could not find keeps going
+        alongside the caller's next step. Best-effort, so a caller unwinding
+        from an earlier failure keeps that failure:
         ``nohup`` exists precisely so the command survives this process, so
         an interrupted caller must stop it before undoing what it built.
         The PID file may be days old by the time a later delete calls this,
         so the PID is killed only while it is still that run's wrapper.
         """
-        files = _DetachedFiles(base_path)
-        try:
-            with contextlib.suppress(LimaCommandFailed):
-                self._returncode(_kill_wrapper(files))
-        finally:
-            with contextlib.suppress(Exception):
-                self._returncode(f"rm -f {files.output} {files.wrapper} {files.pid} {files.status}")
+        parent, name = prefix.rsplit("/", 1)
+        listing = self._ask(
+            f'find {shlex.quote(parent)} -maxdepth 1 -type d -name {shlex.quote(name + ".*")} -user "$(id -u)" -print'
+        )
+        if listing is None or listing.returncode != 0:
+            output.warn(
+                f"could not list the detached runs '{prefix}.*' on the placement host '{self.host}', "
+                "so any still running there were not stopped"
+            )
+            return
+        for directory in listing.stdout.splitlines():
+            if not _is_private_directory(directory, prefix):
+                continue
+            files = _DetachedFiles(f"{directory}/run")
+            try:
+                with contextlib.suppress(LimaCommandFailed):
+                    self._returncode(_kill_wrapper(files))
+            finally:
+                with contextlib.suppress(Exception):
+                    self._returncode(_remove_directory(directory))
+
+    def _private_directory(self, prefix: str) -> str:
+        """Create ``prefix`` plus a random suffix as a directory only the host user can enter."""
+        directory = self.run(
+            f"umask 077 && mktemp -d {shlex.quote(prefix + '.' + 'X' * _DETACHED_RANDOM_LENGTH)}"
+        ).strip()
+        if not _is_private_directory(directory, prefix):
+            raise LimaCommandFailed(f"the placement host '{self.host}' returned an invalid temporary directory")
+        return directory
 
     def _poll_until_done(self, files: _DetachedFiles, *, timeout: int) -> None:
         """Wait for the status file, warning on a long silence and killing the command at ``timeout``."""
@@ -257,15 +311,17 @@ class LimaHost:
 
         A local command with no input inherits stdin, as ``limactl`` always
         has; a remote one reads the null device, so ssh never takes the
-        operator's terminal input.
+        operator's terminal input. ``input`` is encoded before anything
+        starts, so a payload that cannot be sent starts nothing.
         """
+        payload = _stdin_bytes(input)
         if input is not None:
             stdin: int | None = subprocess.PIPE
         else:
             stdin = subprocess.DEVNULL if self.is_remote else None
         process = ssh_process.spawn(self._argv(command), stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            stdout, stderr = process.communicate(stdin_bytes(input), timeout=timeout)
+            stdout, stderr = process.communicate(payload, timeout=timeout)
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate()
@@ -275,7 +331,49 @@ class LimaHost:
             process.kill()
             process.wait()
             raise
-        return _Completed(process.returncode, decode_stream(stdout), decode_stream(stderr))
+        return _Completed(process.returncode, _decode_stream(stdout), _decode_stream(stderr))
+
+
+def _stdin_bytes(input_text: str | None) -> bytes | None:
+    """``input_text`` for a byte-mode stdin pipe, or ``None`` for no input.
+
+    Text mode rewrites every LF to ``os.linesep`` on the way in, so on Windows
+    a line-oriented payload would reach the child with a CR on every line;
+    bytes are the only cure, since ``subprocess.Popen`` takes no ``newline``.
+    ``surrogateescape`` sends a value that arrived as raw OS bytes back out as
+    those bytes. A payload that still cannot be encoded raises a value-free
+    ``ValidationError``: ``UnicodeEncodeError`` carries the whole string,
+    which may be a secret.
+    """
+    if input_text is None:
+        return None
+    try:
+        return input_text.encode("utf-8", errors="surrogateescape")
+    except UnicodeEncodeError:
+        pass
+    # Raised clear of the except block on purpose: ``from None`` would still
+    # leave the original exception, payload and all, on ``__context__``.
+    raise ValidationError("stdin payload is not encodable as UTF-8")
+
+
+def _decode_stream(raw: bytes) -> str:
+    """One captured stream as text, decoded as ``text=True, encoding="utf-8", errors="replace"`` would.
+
+    CRLF and lone CR fold to LF, as text mode's universal newlines did, so a
+    caller comparing ``limactl``'s output reads the same text on every
+    workstation.
+    """
+    return raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _is_private_directory(directory: str, prefix: str) -> bool:
+    """Whether ``directory`` has the name :meth:`LimaHost._private_directory` gives a run under ``prefix``."""
+    return re.fullmatch(rf"{re.escape(prefix)}\.[A-Za-z0-9]{{{_DETACHED_RANDOM_LENGTH}}}", directory) is not None
+
+
+def _remove_directory(directory: str) -> str:
+    """The command that removes a detached run's directory and everything in it."""
+    return f"rm -rf -- {shlex.quote(directory)}"
 
 
 def _wrapper_invocation(files: _DetachedFiles) -> str:

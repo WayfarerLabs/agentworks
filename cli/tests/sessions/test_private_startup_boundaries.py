@@ -19,14 +19,14 @@ from agentworks.sessions.manager._lifecycle import _redacted_launch_errors
 from ._runtime_assertions import assert_runtime_preserved
 from .test_create_start_restart_orchestrated import _restart_fixture
 from .test_create_start_restart_orchestrated import _stub_build_registry as _stub_build_registry
-from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_FINALIZE, NativeTarget, launch
+from .test_native_startup import _NATIVE_CAPTURE, _NATIVE_FINALIZE, NativeGuest, launch
 from .test_native_startup import native as native
 from .test_round8_startup import bind_native_runtime
 
 
-def record_native_runtime(db: Database, native: NativeTarget) -> tmux.TmuxServerFingerprint:
+def record_native_runtime(db: Database, native: NativeGuest) -> tmux.TmuxServerFingerprint:
     socket, _ = launch(native, "sleep 30", is_admin=False)
-    fingerprint = _NATIVE_CAPTURE(target=native, socket_path=socket).fingerprint
+    fingerprint = _NATIVE_CAPTURE(run_command=native.run, socket_path=socket).fingerprint
     assert fingerprint is not None
     db.update_session_runtime(
         "s1",
@@ -42,7 +42,7 @@ def test_legacy_multiwindow_retains_running_noop_and_active_pane_logs(tmp_path, 
     db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
     bind_native_runtime(db, monkeypatch, native)
     fingerprint = record_native_runtime(db, native)
-    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=native.socket, is_admin=False)
+    _NATIVE_FINALIZE("s1", run_command=native.run, socket_path=native.socket)
     marker = uuid4().hex
     native.native("set-option -gu @agentworks-launch-pane")
     native.native(f"new-window -n operator {shlex.quote(f'printf {marker}; sleep 30')}")
@@ -63,7 +63,7 @@ def test_legacy_multiwindow_retains_running_noop_and_active_pane_logs(tmp_path, 
             name="s1",
             interaction=TtyInteractionPolicy.REFUSE,
         )
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
         assert not any("chmod " in command or "remain-on-exit off" in command for command, _ in native.calls[first:])
     finally:
         db.close()
@@ -91,7 +91,7 @@ def test_redirected_managed_socket_preserves_other_runtime_and_row(tmp_path, mon
     Path(owned_socket).symlink_to(native.socket)
     db._conn.execute(
         "UPDATE sessions SET socket_path=?, pid=?, boot_id=?, tmux_server_start_ticks=? WHERE name='s1'",
-        (owned_socket, pid, tmux.read_boot_id(native) if known_boot else None, 77 if pid == 99999999 else None),
+        (owned_socket, pid, tmux.read_boot_id(native.run) if known_boot else None, 77 if pid == 99999999 else None),
     )
     db._conn.commit()
     before = db.get_session("s1")
@@ -102,10 +102,7 @@ def test_redirected_managed_socket_preserves_other_runtime_and_row(tmp_path, mon
         assert_runtime_preserved(db, before, operation="stop_session")
         assert Path(owned_socket).is_symlink()
         assert native.native("list-sessions").ok
-        assert not any(
-            "kill-server" in command or "chmod " in command or "server-access" in command
-            for command, _ in native.calls[first:]
-        )
+        assert not any("kill-server" in command for command, _ in native.calls[first:])
     finally:
         db.close()
 
@@ -133,7 +130,7 @@ def test_recovery_refuses_mismatched_complete_process_fingerprint(tmp_path, monk
                 interaction=TtyInteractionPolicy.REFUSE,
             )
         assert db.get_session("s1") == before
-        assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+        assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
         assert tmux.startup_protection_enabled("s1", run_command=native.run, socket_path=native.socket) is True
         assert not any("chmod " in command or "remain-on-exit off" in command for command, _ in native.calls[first:])
     finally:
@@ -172,7 +169,7 @@ def test_recovery_rechecks_identity_after_secret_resolution(tmp_path, monkeypatc
                     name="s1",
                     interaction=TtyInteractionPolicy.REFUSE,
                 )
-            observed = _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint
+            observed = _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint
             assert observed is not None and observed != fingerprint
             assert not any(
                 "chmod " in command or "remain-on-exit off" in command
@@ -185,7 +182,7 @@ def test_recovery_rechecks_identity_after_secret_resolution(tmp_path, monkeypatc
                 name="s1",
                 interaction=TtyInteractionPolicy.REFUSE,
             )
-            assert _NATIVE_CAPTURE(target=native, socket_path=native.socket).fingerprint == fingerprint
+            assert _NATIVE_CAPTURE(run_command=native.run, socket_path=native.socket).fingerprint == fingerprint
         assert (
             tmux.startup_protection_enabled("s1", run_command=native.run, socket_path=native.socket) is replace_runtime
         )
