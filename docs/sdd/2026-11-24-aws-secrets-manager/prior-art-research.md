@@ -44,8 +44,8 @@ These internals are corroborated by the upstream
 [Botocore credential implementation](https://github.com/boto/botocore/blob/develop/botocore/credentials.py).
 The implementation must be tested against the installed locked version rather than assume the moving
 upstream branch is identical. Its process-provider injection seam and role prompter allow
-session-local policy; no global patch is necessary. Authentication integration tests must also
-cover nested profile chains and earlier successful credentials bypassing later providers.
+session-local policy; no global patch is necessary. Authentication integration tests must also cover
+nested profile chains and earlier successful credentials bypassing later providers.
 
 ## Diagnostic containment
 
@@ -65,8 +65,8 @@ resolve credentials immediately.
 
 ## Refuted claims
 
-- A native Boto3 session is always unattended: configured role MFA and credential processes
-  disprove this.
+- A native Boto3 session is always unattended: configured role MFA and credential processes disprove
+  this.
 - Removing unsafe providers preserves authentication: native chain fallthrough can choose another
   identity.
 - A top-level process-provider guard covers role chains: nested source-profile resolvers disprove

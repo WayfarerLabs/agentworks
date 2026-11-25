@@ -18,7 +18,7 @@ work is done and working.
 ## Design
 
 - [ ] Obtain authenticated requirements acceptance and designation of this SDD.
-- [ ] Complete factual scouting and official SDK/service prior-art research.
+- [x] Complete factual scouting and official SDK/service prior-art research.
 - [ ] Review the FRD, architecture, plan, and authentication policy at one exact artifact head.
 - [ ] Publish the draft SDD checkpoint for review before implementation handoff.
 

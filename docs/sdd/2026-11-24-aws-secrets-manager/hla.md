@@ -34,10 +34,11 @@ automatically invoke an AWS login command or substitute another identity after a
 fails.
 
 At zero-impact preview, progress through unattended native credentials and cached sessions. A
-reached credential process or MFA prompt returns impact-limited indeterminate before it can request
-operator action. Do not treat every authentication failure as indeterminate: broken, missing,
-rejected, or expired credentials are definitive failures unless a concrete reached action boundary
-could permit progress.
+reached credential process returns impact-limited indeterminate before it can request operator
+action. A reached native MFA prompt fails authentication under every intent: this backend cannot
+service that challenge, so broader impact would not permit progress. Do not treat every
+authentication failure as indeterminate: broken, missing, rejected, or expired credentials are
+definitive failures unless a concrete reached action boundary could permit progress.
 
 At maximum-impact preview or resolution, a configured credential process may run through an
 operation-owned, bounded runner with no inherited terminal input or controlling terminal.
