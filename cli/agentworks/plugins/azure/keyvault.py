@@ -33,6 +33,7 @@ from agentworks.capabilities.secret_backend import (
     TtyInteractionAccess,
 )
 from agentworks.errors import ConfigError, StateError, UserAbort
+from agentworks.plugins.azure.keyvault_auth import ambient_credential
 from agentworks.plugins.azure.keyvault_config import (
     AzureKeyVaultMapping,
     AzureKeyVaultServicePrincipalAuth,
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
     from types import TracebackType
 
+    from azure.core.credentials import TokenCredential
     from azure.keyvault.secrets import SecretClient
     from pydantic import BaseModel
 
@@ -126,7 +128,7 @@ class _AzureKeyVaultClient:
     def _client(self) -> SecretClient:
         """Open provider resources only after the selected method starts."""
         from azure.core.exceptions import ClientAuthenticationError
-        from azure.identity import ClientSecretCredential, DefaultAzureCredential, InteractiveBrowserCredential
+        from azure.identity import ClientSecretCredential, InteractiveBrowserCredential
         from azure.keyvault.secrets import SecretClient
 
         if self._sdk_client is None:
@@ -139,7 +141,7 @@ class _AzureKeyVaultClient:
                     raise ClientAuthenticationError(
                         "selected ambient Azure credential requires broader operator impact"
                     )
-            credential: ClientSecretCredential | DefaultAzureCredential | InteractiveBrowserCredential
+            credential: TokenCredential
             if isinstance(auth, AzureKeyVaultServicePrincipalAuth):
                 secret = os.environ.get(auth.client_secret_env)
                 if not secret or "\0" in secret:
@@ -157,6 +159,7 @@ class _AzureKeyVaultClient:
                     )
                 except ValueError:
                     raise ClientAuthenticationError("explicit Azure service-principal credential invalid") from None
+                self._resources.callback(credential.close)
             elif self._browser_fallback or selector == "interactivebrowsercredential":
                 self._browser_fallback = True
                 credential = InteractiveBrowserCredential(
@@ -166,6 +169,7 @@ class _AzureKeyVaultClient:
                     retry_total=2,
                     logging_enable=False,
                 )
+                self._resources.callback(credential.close)
             else:
                 exclusions = {"exclude_interactive_browser_credential": True}
                 if not allow_impact:
@@ -177,16 +181,12 @@ class _AzureKeyVaultClient:
                         exclude_powershell_credential=True,
                         exclude_developer_cli_credential=True,
                     )
-                credential = DefaultAzureCredential(
+                credential = ambient_credential(
                     authority=vault_authority(self._config.vault_url),
-                    process_timeout=10,
-                    connection_timeout=10,
-                    read_timeout=30,
-                    retry_total=2,
-                    logging_enable=False,
-                    **exclusions,
+                    selector=selector,
+                    exclusions=exclusions,
+                    resources=self._resources,
                 )
-            self._resources.callback(credential.close)
             self._sdk_client = SecretClient(
                 self._config.vault_url,
                 credential,

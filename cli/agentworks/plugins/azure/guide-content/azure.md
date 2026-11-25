@@ -29,3 +29,7 @@ operator's instruction covers any browser or account approval the preview may re
 retain the no-impact result. `agw secret verify NAME...` checks that the selected names resolve
 without displaying their values. A successful lookup does not authorize displaying, persisting, or
 passing those values to another destination.
+
+Ambient certificate and workload-token inputs use checked regular files, including ordinary file
+symlinks. Devices, pipes, and direct descriptor aliases such as `/dev/stdin` are refused. Configure
+a regular credential file instead of passing terminal or pipe input through a file path.

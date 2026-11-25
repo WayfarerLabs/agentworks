@@ -74,6 +74,8 @@ class _UnavailableCredential:
 def real_chain(monkeypatch: pytest.MonkeyPatch) -> _AuthenticatedAdapter:
     """Retain DAC and SecretClient while isolating every external credential location."""
     monkeypatch.delenv("AZURE_TOKEN_CREDENTIALS", raising=False)
+    monkeypatch.delenv("AZURE_CLIENT_CERTIFICATE_PATH", raising=False)
+    monkeypatch.delenv("AZURE_FEDERATED_TOKEN_FILE", raising=False)
     for name in (
         "WorkloadIdentityCredential",
         "ManagedIdentityCredential",
