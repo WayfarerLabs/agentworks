@@ -41,10 +41,12 @@ sibling rollouts with the same cwd as their parent):
    ``-c notify=[<recorder>, <destination>]``. Codex runs the recorder after
    every completed turn, handing it the turn's ``thread-id``; the recorder
    writes that uuid to ``~/.agentworks/codex/<session-name>.thread``. The next
-   op reads the file and adopts the uuid, so resume is deterministic rather
-   than inferred. Last-write-wins on purpose: a picker-esc fresh conversation
-   rebinds the session to the conversation actually in the pane. The recorder
-   itself, and every target-side path around it, lives in ``recorder.py``.
+   op reads the file and adopts the uuid if its rollout exists, so resume
+   is deterministic rather than inferred. Otherwise an existing stored
+   rollout keeps its binding. Last-write-wins among resumable bindings on
+   purpose: a picker-esc fresh conversation rebinds the session to the
+   conversation actually in the pane. The recorder itself, and every
+   target-side path around it, lives in ``recorder.py``.
 2. **Source-filtered discovery (the fallback).** Reached whenever no id is
    bound: nothing recorded and nothing stored, OR a bound id just dropped
    because its rollout was archived or deleted. Candidates are rollouts
@@ -78,10 +80,10 @@ rollout file on disk: the rollout-file boundary was empirically confirmed to
 equal codex's own resume boundary. An archived rollout (moved to
 ``archived_sessions/`` by ``codex archive``) is deliberately treated as
 not-resumable: auto-unarchiving would silently reverse an explicit operator
-action. Not-resumable means the bound id is DROPPED and layers 2/3 decide, not
-that the session starts fresh: the next op can adopt a different conversation
-in the same workspace, or open the picker, and only a workspace with no
-candidate launches fresh. The archived history stays recoverable manually
+action. When neither binding is resumable, the bound id is DROPPED and
+layers 2/3 decide, rather than always starting fresh: the next op can adopt
+a conversation in the same workspace, or open the picker, and only a
+workspace with no candidate launches fresh. The archived history stays recoverable manually
 (``codex unarchive``), and the leaf reports the drop alongside whatever
 replaced it.
 
@@ -802,9 +804,7 @@ class CodexIntegration(HarnessIntegration):
         if self._decision == "resumed":
             return "Existing Codex session found. Resuming..."
         if self._decision == "adopted":
-            which = (
-                "a different Codex conversation in this workspace" if dropped else "this session's Codex conversation"
-            )
+            which = "a Codex conversation in this workspace" if dropped else "this session's Codex conversation"
             return f"{dropped}Identified {which} from Codex's own on-disk state: {self._adopted_id}. Resuming..."
         if self._decision == "picker":
             note = (
@@ -848,8 +848,8 @@ class CodexIntegration(HarnessIntegration):
 
         - a BOUND id (recorded by the notify recorder, or stored by an
           earlier op) whose rollout exists: resume it (``resumed``);
-        - a bound id whose rollout is gone (archived or deleted): drop the
-          stale id and fall through to discovery, which lands on
+        - neither bound id has a rollout (archived or deleted): drop the
+          stale binding and fall through to discovery, which lands on
           ``adopted``, ``picker``, or ``stale``. Note what that means for
           the archived policy: dropping the id is NOT the same as starting
           fresh. Layers 2/3 then decide, so an archived conversation can be
@@ -862,10 +862,11 @@ class CodexIntegration(HarnessIntegration):
           picker and let the human decide (``picker``);
         - nothing bound, no candidate: launch fresh (``fresh``).
 
-        The recorder's id WINS over a differing stored one: it is what
+        A resumable recorder id WINS over a differing stored one: it is what
         codex reported for the conversation most recently live in this
         session's pane, so a picker-esc fresh conversation rebinds the
-        session to what the operator is actually looking at.
+        session to what the operator is actually looking at. If that rollout
+        is gone but the stored id is resumable, keep the stored binding.
 
         A stored ``session_id`` of the wrong type is garbage this harness integration
         never wrote (the blob is only as trustworthy as the DB it came
@@ -920,21 +921,14 @@ class CodexIntegration(HarnessIntegration):
                 )
             self._state["session_id"] = recorded
             self._state.pop("fresh_pending", None)
-        sid = self._bound_session_id(launch_target)
+        sid = self._resumable_bound_session_id(launch_target)
         if sid is not None:
-            if self._rollout_exists(launch_target, sid):
-                self._decision = "resumed"
-                return self._resume_command(
-                    sid,
-                    msg=f"agentworks harness integration (codex): resuming session {self._session_name}",
-                    legacy_marker=legacy_marker,
-                )
-            # The rollout is gone (archived or deleted): not resumable, by
-            # the pinned archived policy. Drop the stale id and let
-            # discovery decide, so an archived conversation does not block
-            # adopting the one actually in this workspace.
-            self._state.pop("session_id", None)
-            self._dropped_stale = True
+            self._decision = "resumed"
+            return self._resume_command(
+                sid,
+                msg=f"agentworks harness integration (codex): resuming session {self._session_name}",
+                legacy_marker=legacy_marker,
+            )
         # The drop is composed into whichever leaf follows, never swallowed
         # by it: the operator archived that conversation on purpose and
         # needs to know both that the binding is gone and what replaced it.
@@ -945,9 +939,7 @@ class CodexIntegration(HarnessIntegration):
             self._state["session_id"] = adopted
             self._adopted_id = adopted
             self._decision = "adopted"
-            which = (
-                "a different codex conversation in this workspace" if dropped else "this session's codex conversation"
-            )
+            which = "a codex conversation in this workspace" if dropped else "this session's codex conversation"
             return self._resume_command(
                 adopted,
                 msg=f"agentworks harness integration (codex): {dropped}identified {which} "
@@ -1015,16 +1007,17 @@ class CodexIntegration(HarnessIntegration):
             return marker
         return None
 
-    def _bound_session_id(self, access: VMAccess) -> str | None:
-        """The id bound to this session, or ``None`` when nothing is: the
-        uuid codex last recorded through the notify recorder if there is
-        one, else the id a previous op stored.
+    def _resumable_bound_session_id(self, access: VMAccess) -> str | None:
+        """Select a bound id whose rollout exists, or drop stale bindings.
 
-        The recorder's id wins over a differing stored one (last write
-        wins): it names the conversation most recently live in this
-        session's pane. Adopting it into the blob is what makes a
+        The recorder's id wins over a differing stored one when resumable:
+        it names the conversation most recently live in this session's
+        pane. Adopting it into the blob is what makes a
         picker-esc fresh conversation, or any conversation codex minted
-        after our launch, resumable deterministically next time.
+        after our launch, resumable deterministically next time. A missing
+        recorded rollout does not displace a resumable stored binding.
+        Probe each distinct id once and finish probing before changing state,
+        so a failed probe cannot overwrite the prior binding.
 
         A stored value that is not a uuid is swept rather than used: the
         blob is only as trustworthy as the DB row it came from, and
@@ -1033,15 +1026,19 @@ class CodexIntegration(HarnessIntegration):
         ids are UUIDv7, so every id this integration ever stored passes.
         """
         stored = self._state.get("session_id")
-        if "session_id" in self._state and not (isinstance(stored, str) and _RECORDED_ID_RE.match(stored)):
-            del self._state["session_id"]  # sweep garbage; never this harness integration's write
+        if not (isinstance(stored, str) and _RECORDED_ID_RE.match(stored)):
             stored = None
         recorded = self._recorded_thread_id(access)
-        if recorded is not None:
-            if recorded != stored:
-                self._state["session_id"] = recorded
-            return recorded
-        return stored if isinstance(stored, str) else None
+        candidates = [recorded] if recorded is not None else []
+        if stored is not None and stored != recorded:
+            candidates.append(stored)
+        for sid in candidates:
+            if self._rollout_exists(access, sid):
+                self._state["session_id"] = sid
+                return sid
+        self._state.pop("session_id", None)
+        self._dropped_stale = bool(candidates)
+        return None
 
     def _pane_command(
         self,
@@ -1336,9 +1333,10 @@ class CodexIntegration(HarnessIntegration):
         login and interactive shell like the readiness probe
         (:func:`rollout_probe`). ``archived_sessions/``
         is deliberately NOT probed: an archived session reports
-        not-resumable and the caller drops the bound id and falls through to
-        discovery, rather than silently reversing ``codex archive``. Note
-        that not-resumable is not the same as fresh: layers 2/3 decide what
+        not-resumable. When neither binding is resumable, the caller drops
+        the bound id and falls through to discovery, rather than silently
+        reversing ``codex archive``. Note that not-resumable is not the same
+        as fresh: layers 2/3 decide what
         happens next.
 
         The exit code is read, not just ``.ok``, so a probe that could not

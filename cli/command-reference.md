@@ -1596,13 +1596,15 @@ Codex conversation, while ordinary start/restart continue it once Codex has reco
 mints its own session ids, so the integration learns which conversation is this session's from Codex
 itself: every launch installs a small recorder script that Codex runs after each completed turn
 (through Codex's `notify` hook, so nothing is added to the conversation), and the next ordinary
-start/restart resumes what it recorded (a session archived with `codex archive` is deliberately
-treated as not resumable: the binding is dropped and the fallback below decides what happens
-instead, which is not always a fresh session). With nothing recorded yet, an ordinary start falls
-back to a single interactive Codex conversation recorded in this workspace directory, and on several
-it opens Codex's own session picker in the pane instead of guessing: picking one binds this session
-to it from its next turn, and esc starts a fresh conversation. `session create` and `--force-new`
-always launch a brand-new conversation and adopt nothing, so reusing a deleted session's name cannot
+start/restart resumes what it recorded when that rollout exists. If the recorded rollout is missing
+but the previously stored conversation is resumable, it keeps that stored binding. A session
+archived with `codex archive` is deliberately treated as not resumable. When neither binding is
+resumable, the binding is dropped and the fallback below decides what happens instead, which is not
+always a fresh session. With nothing recorded or stored yet, an ordinary start falls back to a
+single interactive Codex conversation recorded in this workspace directory, and on several it opens
+Codex's own session picker in the pane instead of guessing: picking one binds this session to it
+from its next turn, and esc starts a fresh conversation. `session create` and `--force-new` always
+launch a brand-new conversation and adopt nothing, so reusing a deleted session's name cannot
 silently pick its conversation back up; the fallback remains a heuristic, though, so if that
 conversation is the only one recorded in the workspace a later ordinary start can still adopt it,
 announced with the id it chose. It ships as the opt-in `codex` system plugin, disabled by default
