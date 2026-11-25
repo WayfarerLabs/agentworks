@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
+from agentworks.errors import AgentworksError, StateError
 from agentworks.execution.access import Admin, Agent
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.requests import AccountShell
     from agentworks.git_credentials import CredentialRequest
     from agentworks.resources import Registry
@@ -64,8 +66,6 @@ def create_new_agent_user(
     """
     import shlex
 
-    from agentworks.errors import StateError
-
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
     home = managed_home(linux_user)
     account = passwd_lookup(linux_user)
@@ -81,6 +81,70 @@ def create_new_agent_user(
             hint="Choose another agent name or remove the unowned native account and home first.",
         )
     admin.run(Command(("useradd", "-m", "-U", "-s", f"/bin/{shell}", linux_user), elevated=True), check=True)
+
+
+def _require_retained_group(admin: VMAccess, linux_user: str, gid: str) -> None:
+    """Require the guest's named and numeric group lookups to identify the retained group."""
+    for key in (linux_user, gid):
+        result = admin.run(Command(("getent", "group", key)), check=True)
+        fields = result.stdout.decode("utf-8", "replace").strip().split(":")
+        if len(fields) != 4 or fields[0] != linux_user or fields[2] != gid:
+            raise StateError(f"retained home group identity mismatch for '{linux_user}' at GID {gid}")
+
+
+def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shell_path: str) -> None:
+    """Recreate a DB-owned account with the retained home's numeric UID and GID."""
+    import shlex
+    import stat
+
+    home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
+    if probe_presence(admin, home_entry, absent_status=TEST_FALSE_STATUS) is None:
+        admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
+        return
+
+    # GNU stat does not follow the final symlink. Refuse retained entries
+    # other than directories, without changing ownership of their contents.
+    retained = admin.run(Command(("stat", "-c", "%f:%u:%g", "--", home), elevated=True), check=True)
+    fields = retained.stdout.decode("utf-8", "replace").strip().split(":")
+    try:
+        mode, uid, gid = fields
+        usable = stat.S_ISDIR(int(mode, 16)) and all(value.isascii() and value.isdecimal() for value in (uid, gid))
+    except ValueError:
+        usable = False
+    if not usable:
+        raise StateError(
+            f"cannot recreate agent '{linux_user}': could not read retained home directory UID/GID at '{home}'"
+        )
+
+    # Cooperating writers hold the VM mutation guard. Exclusive native
+    # creation refuses occupied IDs; NSS checks establish the identity used
+    # by numeric useradd and by later home/SSH setup, without enumerating NSS.
+    try:
+        admin.run(Command(("groupadd", "-g", gid, linux_user), elevated=True), check=True)
+        _require_retained_group(admin, linux_user, gid)
+        admin.run(
+            Command(("useradd", "-M", "-d", home, "-u", uid, "-g", gid, "-s", shell_path, linux_user), elevated=True),
+            check=True,
+        )
+        for key in (linux_user, uid):
+            account = admin.run(passwd_lookup(key), check=True)
+            entry = account.stdout.decode("utf-8", "replace").strip().split(":")
+            if len(entry) != 7 or (entry[0], entry[2], entry[3], entry[5], entry[6]) != (
+                linux_user,
+                uid,
+                gid,
+                home,
+                shell_path,
+            ):
+                raise StateError(f"retained home account identity mismatch for '{linux_user}' at UID {uid}/GID {gid}")
+    except AgentworksError as exc:
+        exc.add_hint(
+            f"Recreation over retained home '{home}' requires UID {uid} and GID {gid}. "
+            f"Account '{linux_user}' and group '{linux_user}' may remain after a failed or uncertain creation; "
+            "inspect both on the VM before retrying. Retained ownership has not been changed."
+        )
+        raise
+    output.info(f"Reused retained home UID {uid} and GID {gid} for agent user '{linux_user}'")
 
 
 def create_agent_on_vm(
@@ -169,7 +233,7 @@ def create_agent_on_vm(
     # not assume a clean Debian image (see capabilities/vm_platform/README).
     passwd_entry = probe_presence(admin, passwd_lookup(linux_user), absent_status=GETENT_NOT_FOUND_STATUS)
     if passwd_entry is None:
-        admin.run(Command(("useradd", "-m", "-U", "-s", shell_path, linux_user), elevated=True), check=True)
+        _create_missing_agent_user(admin, linux_user, home, shell_path)
         output.info(f"Created agent user '{linux_user}' on VM '{vm.name}'")
     else:
         # ``getent passwd`` line is colon-delimited with the login shell

@@ -101,6 +101,8 @@ def _run_create_on_vm(
 
     def answer(call: Call) -> Result | None:
         request = call.request
+        if isinstance(request, Script) and request.source == f"test -e {HOME} || test -L {HOME}":
+            return Result(Completed(1))
         if isinstance(request, Command) and request.argv == ("getent", "passwd", LINUX_USER):
             if not user_exists:
                 return Result(Completed(2))
