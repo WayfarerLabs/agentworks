@@ -153,6 +153,6 @@ underlying cause was not established. The PR remains draft within unfinished rou
 The test-only correction `e1f17280a`, integrated as `59feb6646`, compares guarded file bytes with
 the host's native open using distinct possible path targets. Its synthetic Windows subprocess
 environment now supplies the documented required `SYSTEMROOT`, and nonzero child exits expose
-escaped synthetic diagnostics. No production code changed. The delegate's 56 focused Linux tests
-and changed-file typing/style checks passed. Independent follow-up review, local verification and
+escaped synthetic diagnostics. No production code changed. The delegate's 56 focused Linux tests and
+changed-file typing/style checks passed. Independent follow-up review, local verification and
 Windows CI must confirm this correction; the original child failure is not claimed diagnosed.
