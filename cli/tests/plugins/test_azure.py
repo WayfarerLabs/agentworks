@@ -113,23 +113,40 @@ def test_azure_seated_by_plugin() -> None:
     import (so resolution finds them by registry name), and the plugin is
     indexed once."""
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
+    from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "azure" in SYSTEM_PLUGINS
     assert "azure-vm" in VM_PLATFORM_REGISTRY
     assert "azdo" in GIT_CREDENTIAL_PROVIDER_REGISTRY
+    assert "azure-keyvault" in SECRET_BACKEND_REGISTRY
 
 
-def test_one_plugin_contributes_all_three_kinds() -> None:
-    """The ``azure`` descriptor carries both capability kinds AND a manifests
-    anchor: one plugin, three contributions (vm-platform + git-credential +
-    the az-cli install-command)."""
+def test_one_plugin_contributes_all_capabilities_and_manifests() -> None:
+    """The Azure descriptor bundles its capabilities and install manifests."""
     from agentworks.plugins import SYSTEM_PLUGINS
 
     plugin = SYSTEM_PLUGINS["azure"]
-    assert set(plugin.capabilities) == {"vm-platform", "git-credential-provider"}
+    assert set(plugin.capabilities) == {"vm-platform", "git-credential-provider", "secret-backend"}
     assert plugin.manifests == "agentworks.plugins.azure"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_keyvault_source_folds_azure_plugin_enablement(tmp_path: Path, enabled: bool) -> None:
+    source = ManifestDoc(
+        "secret-source",
+        "work-kv",
+        {"backend": {"name": "azure-keyvault", "vault_url": "https://example-vault.vault.azure.net"}},
+    )
+    secret = ManifestDoc("secret", "token", {"backend_mappings": {"work-kv": "npm-token"}}, description="Test token")
+    registry = build_registry(_config(tmp_path, enabled=enabled, manifests=[source, secret]))
+    row = registry.lookup("secret-backend", "azure-keyvault")
+    assert row.origin.plugin == "azure"
+    assert registry.graph.enablement_of("secret-backend", "azure-keyvault") is (
+        Enablement.enabled if enabled else Enablement.disabled
+    )
+    assert registry.graph.is_ready("secret-source", "work-kv") is enabled
 
 
 # -- all three rows present-but-disabled by default --------------------------

@@ -140,7 +140,7 @@ def test_a_field_carries_its_type_requiredness_and_description() -> None:
     # about to write it into a document.
     assert "  hint  (string or null, optional, e.g. Generate at https://" in text
     assert "Operator-facing text shown when the secret has to be entered by hand" in text
-    assert "<key>  (string or one of: false, required, names a secret-source)" in text
+    assert "<key>  (string or table or one of: false, required, names a secret-source)" in text
 
 
 def test_secret_source_kind_describes_the_backend_union_and_override_provenance() -> None:

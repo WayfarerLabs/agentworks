@@ -142,8 +142,10 @@ def _schema_types(node: dict[str, Any], defs: dict[str, Any]) -> frozenset[str]:
 
 
 def _dereferenced(node: dict[str, Any], defs: dict[str, Any]) -> dict[str, Any]:
-    ref = node.get("$ref")
-    return defs[ref.rsplit("/", 1)[-1]] if isinstance(ref, str) else node
+    # A root model around another model emits a chain of references.
+    while isinstance(ref := node.get("$ref"), str):
+        node = defs[ref.rsplit("/", 1)[-1]]
+    return node
 
 
 def _element_nodes(node: dict[str, Any], defs: dict[str, Any], keyword: str) -> Iterator[dict[str, Any]]:

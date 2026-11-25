@@ -1,0 +1,339 @@
+"""Read Azure Key Vault secrets through operation-local SDK clients."""
+
+from __future__ import annotations
+
+import concurrent.futures
+import logging
+import os
+from contextlib import AbstractContextManager, ExitStack, contextmanager
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from agentworks.capabilities.secret_backend import (
+    BackendFailed,
+    BackendMissing,
+    BackendPreview,
+    BackendResolution,
+    BackendResolved,
+    FailureReason,
+    IndeterminateReason,
+    InteractionBroker,
+    LookupDescription,
+    LookupDisposition,
+    OperatorImpact,
+    PreviewAvailable,
+    PreviewFailed,
+    PreviewIndeterminate,
+    PreviewIntent,
+    PreviewMissing,
+    ResolutionIntent,
+    SecretBackend,
+    SecretClientIntent,
+    SecretLookupRequest,
+    SecretSourceClient,
+    TtyInteractionAccess,
+)
+from agentworks.errors import ConfigError, StateError, UserAbort
+from agentworks.plugins.azure.keyvault_auth import ambient_credential
+from agentworks.plugins.azure.keyvault_config import (
+    AzureKeyVaultMapping,
+    AzureKeyVaultServicePrincipalAuth,
+    AzureKeyVaultSourceConfig,
+    vault_authority,
+)
+from agentworks.topics import TopicProse
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
+    from types import TracebackType
+
+    from azure.core.credentials import TokenCredential
+    from azure.keyvault.secrets import SecretClient
+    from pydantic import BaseModel
+
+    from agentworks.resources.graph import Readiness
+    from agentworks.schema import AgwModel, AgwRootModel
+
+
+_INTERACTION_ONLY_SELECTORS = frozenset(
+    {
+        "dev",
+        "azureclicredential",
+        "azurepowershellcredential",
+        "azuredeveloperclicredential",
+        "visualstudiocodecredential",
+        "interactivebrowsercredential",
+    }
+)
+"""Documented Azure Identity selectors whose credentials can require operator action."""
+
+
+@contextmanager
+def _quiet_provider_logging() -> Iterator[None]:
+    """Contain Azure/MSAL diagnostics during this synchronous provider operation.
+
+    HTTP logging is also disabled per client. Identity emits independent
+    credential failure logs, and caller-installed child handlers must not
+    expose those diagnostics even when Agentworks debug mode is enabled.
+    """
+    names = {"azure", "msal", "msal_extensions"}
+    names.update(
+        name for name in logging.Logger.manager.loggerDict if name.startswith(("azure.", "msal.", "msal_extensions."))
+    )
+    saved: list[tuple[logging.Logger, list[logging.Handler], bool]] = []
+    for name in names:
+        logger = logging.getLogger(name)
+        saved.append((logger, logger.handlers, logger.propagate))
+        logger.handlers = [logging.NullHandler()]
+        logger.propagate = False
+    try:
+        yield
+    finally:
+        for logger, handlers, propagate in saved:
+            logger.handlers = handlers
+            logger.propagate = propagate
+
+
+def _provider_failure(exc: Exception) -> BackendFailed | BackendMissing:
+    """Project structured provider input without retaining diagnostic text."""
+    from azure.core.exceptions import (
+        ClientAuthenticationError,
+        HttpResponseError,
+        ServiceRequestError,
+        ServiceResponseError,
+    )
+
+    if isinstance(exc, ClientAuthenticationError):
+        return BackendFailed(FailureReason.AUTHENTICATION)
+    if isinstance(exc, (ServiceRequestError, ServiceResponseError)):
+        return BackendFailed(FailureReason.CONNECTIVITY)
+    if isinstance(exc, HttpResponseError):
+        code = exc.error.code if exc.error is not None else None
+        if exc.status_code == 404 and code == "SecretNotFound":
+            return BackendMissing()
+        if exc.status_code == 401:
+            return BackendFailed(FailureReason.AUTHENTICATION)
+        if exc.status_code in (400, 403, 404):
+            return BackendFailed(FailureReason.LOOKUP_REJECTED)
+    return BackendFailed(FailureReason.EXTERNAL)
+
+
+class _AzureKeyVaultClient:
+    def __init__(self, config: AzureKeyVaultSourceConfig, intent: SecretClientIntent) -> None:
+        self._config = config
+        self._intent = intent
+        self._resources = ExitStack()
+        self._sdk_client: SecretClient | None = None
+        self._browser_fallback = False
+
+    def _client(self) -> SecretClient:
+        """Open provider resources only after the selected method starts."""
+        from azure.core.exceptions import ClientAuthenticationError
+        from azure.identity import ClientSecretCredential, InteractiveBrowserCredential
+        from azure.keyvault.secrets import SecretClient
+
+        if self._sdk_client is None:
+            allow_impact = not isinstance(self._intent, PreviewIntent) or self._intent.impact is OperatorImpact.ALLOW
+            auth = self._config.auth
+            selector = ""
+            if not isinstance(auth, AzureKeyVaultServicePrincipalAuth):
+                selector = os.environ.get("AZURE_TOKEN_CREDENTIALS", "").strip().lower()
+                if not allow_impact and selector in _INTERACTION_ONLY_SELECTORS:
+                    raise ClientAuthenticationError(
+                        "selected ambient Azure credential requires broader operator impact"
+                    )
+            credential: TokenCredential
+            if isinstance(auth, AzureKeyVaultServicePrincipalAuth):
+                secret = os.environ.get(auth.client_secret_env)
+                if not secret or "\0" in secret:
+                    raise ClientAuthenticationError("explicit Azure service-principal credential unavailable")
+                try:
+                    credential = ClientSecretCredential(
+                        auth.tenant_id,
+                        auth.client_id,
+                        secret,
+                        authority=vault_authority(self._config.vault_url),
+                        connection_timeout=10,
+                        read_timeout=30,
+                        retry_total=2,
+                        logging_enable=False,
+                    )
+                except ValueError:
+                    raise ClientAuthenticationError("explicit Azure service-principal credential invalid") from None
+                self._resources.callback(credential.close)
+            elif self._browser_fallback or selector == "interactivebrowsercredential":
+                self._browser_fallback = True
+                credential = InteractiveBrowserCredential(
+                    authority=vault_authority(self._config.vault_url),
+                    connection_timeout=10,
+                    read_timeout=30,
+                    retry_total=2,
+                    logging_enable=False,
+                )
+                self._resources.callback(credential.close)
+            else:
+                exclusions = {"exclude_interactive_browser_credential": True}
+                if not allow_impact:
+                    exclusions.update(
+                        exclude_shared_token_cache_credential=True,
+                        exclude_visual_studio_code_credential=True,
+                        exclude_broker_credential=True,
+                        exclude_cli_credential=True,
+                        exclude_powershell_credential=True,
+                        exclude_developer_cli_credential=True,
+                    )
+                credential = ambient_credential(
+                    authority=vault_authority(self._config.vault_url),
+                    selector=selector,
+                    exclusions=exclusions,
+                    resources=self._resources,
+                )
+            self._sdk_client = SecretClient(
+                self._config.vault_url,
+                credential,
+                verify_challenge_resource=True,
+                connection_timeout=10,
+                read_timeout=30,
+                retry_total=2,
+                logging_enable=False,
+            )
+            self._resources.callback(self._sdk_client.close)
+        return self._sdk_client
+
+    def _read(self, request: SecretLookupRequest) -> BackendFailed | BackendMissing | BackendResolved:
+        from azure.core.exceptions import ClientAuthenticationError
+
+        mapping = request.mapping
+        if not isinstance(mapping, AzureKeyVaultMapping):
+            return BackendFailed(FailureReason.INVALID_MAPPING)
+        authentication_failed = False
+        value: object = None
+        try:
+            value = self._client().get_secret(mapping.root.name, mapping.root.version).value
+        except (UserAbort, concurrent.futures.CancelledError):
+            raise
+        except ClientAuthenticationError:
+            authentication_failed = True
+        except Exception as exc:
+            return _provider_failure(exc)
+        if authentication_failed:
+            allow_impact = not isinstance(self._intent, PreviewIntent) or self._intent.impact is OperatorImpact.ALLOW
+            if (
+                allow_impact
+                and not isinstance(self._config.auth, AzureKeyVaultServicePrincipalAuth)
+                and not self._browser_fallback
+            ):
+                # A deployed DAC credential can stop its chain before browser
+                # auth. Keep the browser fallback explicit and once per turn.
+                self._browser_fallback = True
+                self._sdk_client = None
+                return self._read(request)
+            return BackendFailed(FailureReason.AUTHENTICATION)
+        if type(value) is not str or "\0" in value:
+            return BackendFailed(FailureReason.MALFORMED_VALUE)
+        return BackendResolved(value)
+
+    def preview(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendPreview]:
+        if not isinstance(self._intent, PreviewIntent):
+            raise StateError("resolution client cannot perform preview")
+        results: dict[str, BackendPreview] = {}
+        with _quiet_provider_logging():
+            for request in requests:
+                result = self._read(request)
+                if isinstance(result, BackendResolved):
+                    results[request.name] = PreviewAvailable()
+                elif isinstance(result, BackendMissing):
+                    results[request.name] = PreviewMissing()
+                else:
+                    if (
+                        self._intent.impact is OperatorImpact.NONE
+                        and not isinstance(self._config.auth, AzureKeyVaultServicePrincipalAuth)
+                        and result.reason is FailureReason.AUTHENTICATION
+                    ):
+                        results[request.name] = PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)
+                    else:
+                        results[request.name] = PreviewFailed(result.reason)
+        return results
+
+    def resolve(self, requests: tuple[SecretLookupRequest, ...]) -> Mapping[str, BackendResolution]:
+        if not isinstance(self._intent, ResolutionIntent):
+            raise StateError("preview client cannot perform resolution")
+        with _quiet_provider_logging():
+            return {request.name: self._read(request) for request in requests}
+
+    def close(self) -> None:
+        with _quiet_provider_logging():
+            self._resources.close()
+
+
+class _AzureKeyVaultContext(AbstractContextManager[SecretSourceClient]):
+    def __init__(self, config: AzureKeyVaultSourceConfig, intent: SecretClientIntent) -> None:
+        self._config = config
+        self._intent = intent
+        self._client: _AzureKeyVaultClient | None = None
+
+    def __enter__(self) -> SecretSourceClient:
+        self._client = _AzureKeyVaultClient(self._config, self._intent)
+        return self._client
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
+    ) -> None:
+        if self._client is not None:
+            self._client.close()
+
+
+class AzureKeyVaultBackend(SecretBackend):
+    """Resolve declared secrets from Azure Key Vault."""
+
+    name: ClassVar[str] = "azure-keyvault"
+    description: ClassVar[str] = "reads Azure Key Vault secrets using Azure credentials"
+    contract_version: ClassVar[int] = 3
+    supports_tty_interaction: ClassVar[bool] = False
+    config_model: ClassVar[type[AgwModel]] = AzureKeyVaultSourceConfig
+    mapping_model: ClassVar[type[AgwRootModel[Any]]] = AzureKeyVaultMapping
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Azure Key Vault",
+        overview="""
+        Reads declared secrets from a configured vault. In
+        `backend_mappings.<source-name>`, a bare string selects the Azure secret
+        name at its latest version. A table with `name` and `version` pins one
+        version. Authentication belongs to the source. Preview never returns
+        the secret value.
+
+        Ambient authentication tries the default credential chain, then browser
+        login on authentication failure when operator impact is permitted.
+        Explicit service-principal mode selects one identity and never falls
+        back to another credential.
+
+        See Microsoft's Azure Key Vault and Azure Identity documentation for
+        vault permissions and provider authentication setup.
+        """,
+    )
+
+    @classmethod
+    def backend_readiness(cls) -> Readiness:
+        from agentworks.resources.graph import Readiness
+
+        return Readiness.ready()
+
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> LookupDescription:
+        if not isinstance(mapping, AzureKeyVaultMapping):
+            return LookupDescription(LookupDisposition.NOT_APPLICABLE, None)
+        identifier = mapping.root.name
+        if mapping.root.version is not None:
+            identifier += "/" + mapping.root.version
+        return LookupDescription(LookupDisposition.CANDIDATE, identifier)
+
+    @classmethod
+    def create_client(
+        cls,
+        *,
+        config: AgwModel,
+        intent: SecretClientIntent,
+        tty_access: TtyInteractionAccess,
+        interaction_broker: InteractionBroker | None,
+    ) -> AbstractContextManager[SecretSourceClient]:
+        if not isinstance(config, AzureKeyVaultSourceConfig):
+            raise ConfigError("azure-keyvault received the wrong source config model")
+        return _AzureKeyVaultContext(config, intent)
