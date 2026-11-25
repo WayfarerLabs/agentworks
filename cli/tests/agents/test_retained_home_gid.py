@@ -22,7 +22,7 @@ GID = "1003"
 HOME_PROBE = Script(f"test -e {HOME} || test -L {HOME}", Shell.SH, elevated=True)
 STAT = Command(("stat", "-c", "%f:%u:%g", "--", HOME), elevated=True)
 GROUPADD = ("groupadd", "-g", GID, LINUX_USER)
-USERADD = ("useradd", "-m", "-u", UID, "-g", GID, "-s", "/bin/bash", LINUX_USER)
+USERADD = ("useradd", "-M", "-d", HOME, "-u", UID, "-g", GID, "-s", "/bin/bash", LINUX_USER)
 
 
 def _retained_home(recorder: AccessRecorder, overrides: list[tuple[object, Result]] | None = None) -> None:
@@ -68,6 +68,39 @@ def test_recreation_uses_the_retained_numeric_ids_without_reowning_files(
     assert USERADD in commands
     assert commands.index(GROUPADD) < commands.index(USERADD) < commands.index(("chmod", "0750", HOME))
     assert [argv for argv in commands if argv[0] == "useradd"] == [USERADD]
+    assert _ownership_changes(recorder) == []
+
+
+@pytest.mark.parametrize("create_home_by_default", [False, True])
+def test_recovery_binds_the_inspected_home_without_requesting_creation_under_changed_guest_defaults(
+    db: Database, config: Any, monkeypatch: pytest.MonkeyPatch, create_home_by_default: bool
+) -> None:
+    account_home: str | None = None
+    home_creation_requests: list[str] = []
+
+    def configure(recorder: AccessRecorder) -> None:
+        _retained_home(recorder)
+        answer = recorder.answer
+
+        def changed_defaults(call: Call) -> Result | BaseException | None:
+            nonlocal account_home
+            if isinstance(call.request, Command):
+                argv = call.request.argv
+                if argv[0] == "useradd":
+                    account_home = argv[argv.index("-d") + 1] if "-d" in argv else f"/srv/logins/{LINUX_USER}"
+                    if "-m" in argv or (create_home_by_default and "-M" not in argv):
+                        home_creation_requests.append(account_home)
+                    return Result(Completed(0))
+                if argv in (("getent", "passwd", LINUX_USER), ("getent", "passwd", UID)) and account_home is not None:
+                    return Result(Completed(0), f"{LINUX_USER}:x:{UID}:{GID}::{account_home}:/bin/bash\n".encode())
+            return answer(call) if answer is not None else None
+
+        recorder.answer = changed_defaults
+
+    recorder = _run_create_on_vm(db, config, monkeypatch, user_exists=False, before_create=configure)
+
+    assert account_home == HOME
+    assert home_creation_requests == []
     assert _ownership_changes(recorder) == []
 
 

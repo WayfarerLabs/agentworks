@@ -123,7 +123,8 @@ def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shel
         admin.run(Command(("groupadd", "-g", gid, linux_user), elevated=True), check=True)
         _require_retained_group(admin, linux_user, gid)
         admin.run(
-            Command(("useradd", "-m", "-u", uid, "-g", gid, "-s", shell_path, linux_user), elevated=True), check=True
+            Command(("useradd", "-M", "-d", home, "-u", uid, "-g", gid, "-s", shell_path, linux_user), elevated=True),
+            check=True,
         )
         for key in (linux_user, uid):
             account = admin.run(passwd_lookup(key), check=True)
