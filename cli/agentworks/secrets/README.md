@@ -141,6 +141,13 @@ performing actual resolution, uses the default credential chain with an explicit
 ambient authentication fails. `--non-interactive` controls terminal input independently and does not
 suppress browser authentication. Explicit service principals never use this fallback.
 
+Ambient certificate and workload-token paths must name readable regular files. Agentworks resolves
+ordinary symlinks, then opens and checks the descriptor it will read. Devices, named pipes, and
+direct descriptor aliases such as `/dev/stdin` are refused without reading their contents. Each
+actual workload-token refresh repeats this check, including after a projected volume replaces a
+symlink. An unsafe or unreadable selected file fails the deployed credential chain; ambient browser
+fallback remains available only under the interaction policy above.
+
 Follow Microsoft's documentation for
 [Azure authentication](https://learn.microsoft.com/en-us/azure/developer/python/sdk/authentication/overview),
 [Key Vault permissions](https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide), and

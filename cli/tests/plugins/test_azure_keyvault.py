@@ -86,6 +86,8 @@ class _Credential:
 class _SDK:
     def __init__(self, monkeypatch: pytest.MonkeyPatch, answers: list[_Answer]) -> None:
         monkeypatch.delenv("AZURE_TOKEN_CREDENTIALS", raising=False)
+        monkeypatch.delenv("AZURE_CLIENT_CERTIFICATE_PATH", raising=False)
+        monkeypatch.delenv("AZURE_FEDERATED_TOKEN_FILE", raising=False)
         self.adapter = _Adapter(answers)
         self.credential_error: BaseException | None = None
         self.credentials: list[_Credential] = []
