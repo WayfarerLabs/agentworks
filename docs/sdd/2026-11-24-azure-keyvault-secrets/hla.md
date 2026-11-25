@@ -25,6 +25,15 @@ preview reports indeterminate rather than launching interactive authentication. 
 preview and actual resolution may use browser authentication, consistently with the existing Azure
 VM ambient behavior. Explicit service principals use only their selected credential.
 
+File-backed ambient credentials must read regular files through checked descriptors, not reopen a
+path after checking it. Devices, pipes, and stdin aliases must not consume terminal or redirected
+input. Feed checked certificate bytes and a checked workload assertion supplier into public SDK
+credentials, preserving native environment precedence, selectors, identity, authority, and the
+remaining default credential chain. Each workload refresh repeats the checked read. A failed
+deployed credential must not become an unavailable credential that silently selects another
+unattended identity. Keep the existing explicit ambient browser policy separate from that chain.
+Give every constructed credential immediate operation-owned cleanup, including partial construction.
+
 The service-principal mode reads its client secret from the named environment variable during the
 selected operation. Tenant and client identifiers stay in source config. Do not add recursive secret
 resolution or a generic credential framework to solve it.

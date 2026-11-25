@@ -73,7 +73,7 @@ record the work that was actually completed and remain unchanged.
       The Azure implementation and its tests are byte-identical after the clean rebase.
 - [x] Run the additional local PR gates: Typer isolation, 160 Python website tests, 103 Node website
       tests, and deterministic repeated builds at root and project site bases.
-- [ ] Publish the ready Azure PR and record its exact head, CI state, and review request.
+- [x] Publish the ready Azure PR and record its exact head, CI state, and review request.
 - [ ] Receive and assess the integration tester's live Azure evidence and disposition.
 - [ ] Receive a complete PR-level review separate from the private quality loop.
 - [ ] Batch published feedback after the process reporting window and perform at most three
@@ -84,3 +84,36 @@ record the work that was actually completed and remain unchanged.
 The overall goal remains active until the operator confirms all secret work is complete and
 everything is working. AWS, GCP, and macOS Keychain each ship separately under that goal. The
 operator's thread 3 direction routes Azure live testing through the standard ready-PR pipeline.
+
+## Published handoff and fix round 1
+
+PR [#964](https://github.com/WayfarerLabs/agentworks/pull/964) opened ready at
+`740838bd81418ee0c93a4b789aa2b549374b8bc9` on 2026-11-25 at 04:57:01 UTC. All fourteen published
+checks passed. Copilot reported insufficient quota and performed no review; complete PR-level review
+and live integration evidence remain pending.
+
+A focused follow-up check reproduced an important no-stdin contract violation in ambient native
+certificate and workload file reads. With synthetic input, real credentials and fake HTTP,
+`/dev/stdin` was consumed at zero-impact preview with terminal access disabled. Regular-file
+controls preserved stdin. The lead independently reproduced it and posted the
+[critical reading](https://github.com/WayfarerLabs/agentworks/pull/964#issuecomment-7154073983).
+Complexity review cleared checked descriptor reads, public SDK credential seams, and native-order
+composition as a bounded correction within the accepted architecture.
+
+The operator's continuing goal authorizes at most three feedback/fix rounds. Round 1's batch was
+fixed at 2026-11-25 05:57:28 UTC, after the initial reporting window, with that material finding and
+the quota report. No unresolved inline threads or live report were present. The PR returned to draft
+before correction work. Later feedback belongs to the next batch.
+
+- [ ] Implement the checked credential-file read boundary while preserving native authentication
+      selection, identity, supported forms, browser policy, and cleanup.
+- [ ] Add real SDK/HTTP-boundary regressions for regular files, unsafe aliases, refresh replacement,
+      selectors, earlier successful credentials, and partial-construction cleanup.
+- [ ] Run required project, complexity, and correctness/security private lanes on the integrated
+      round head and dispose all material findings.
+- [ ] Run applicable required gates, publish the coherent round head and summary, and reapply ready
+      for the standard review and integration pipeline.
+
+Round count: one started of three authorized; no round is claimed complete yet. The other separate
+backend proposals are AWS PR #965, GCP PR #966, and macOS Keychain PR #967, with their requirements
+acceptance still pending in authenticated Agention threads 5, 7, and 6 respectively.
