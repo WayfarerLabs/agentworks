@@ -1,7 +1,8 @@
 # Azure Key Vault implementation plan
 
-Delivery vehicle: one feature branch and one PR if publication is requested. No push, PR, merge,
-cloud creation, or permission change is part of the current instruction.
+Delivery vehicle: one Azure feature branch and one PR. The continuing operator goal authorizes PR
+delivery and up to three feedback/fix rounds per opened PR. The target is a merge-ready PR; live
+validation follows the integration-testing pipeline after the ready handoff.
 
 ## Design
 
@@ -61,5 +62,25 @@ SDD only when the effort is actually complete.
   despite its version-3 contract; this is an out-of-scope documentation finding for that document's
   owner.
 
-Delivery remains local on `feat/azure-keyvault-secrets`. No PR, push, release, or merge was
-requested.
+## Continuing PR delivery
+
+The initial local implementation was completed at `915a028b9`. The operator then established the
+continuing secret-work goal recorded in the FRD. Its additional delivery and confirmation work
+reopens this unmerged SDD; the former local-completion lock is removed. Earlier checked items above
+record the work that was actually completed and remain unchanged.
+
+- [x] Refresh `origin/main`, verify merge compatibility, and rebase the unpublished Azure branch.
+      The Azure implementation and its tests are byte-identical after the clean rebase.
+- [x] Run the additional local PR gates: Typer isolation, 160 Python website tests, 103 Node website
+      tests, and deterministic repeated builds at root and project site bases.
+- [ ] Publish the ready Azure PR and record its exact head, CI state, and review request.
+- [ ] Receive and assess the integration tester's live Azure evidence and disposition.
+- [ ] Receive a complete PR-level review separate from the private quality loop.
+- [ ] Batch published feedback after the process reporting window and perform at most three
+      authorized fix rounds, each with its required checks, reviews, and handoff.
+- [ ] Hand off a merge-ready Azure PR with current CI, review disposition, and live evidence.
+- [ ] Record operator confirmation that Azure secret support is working.
+
+The overall goal remains active until the operator confirms all secret work is complete and
+everything is working. AWS, GCP, and macOS Keychain each ship separately under that goal. The
+operator's thread 3 direction routes Azure live testing through the standard ready-PR pipeline.

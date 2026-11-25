@@ -49,3 +49,26 @@ Both authentication modes resolve a declared secret through the real backend bou
 demonstrate value containment, version selection, source precedence, offline inspection, and plugin
 enablement. Live validation requires an authorized test vault; unavailable live coverage is reported
 explicitly rather than inferred from mocked tests.
+
+## Operator direction: PR delivery
+
+The operator established this continuing goal through the authenticated session:
+
+> work with the operator here and in Agention to define the work to be done and then get any PRs
+> merge-ready via our standard agentic-dev-process, with up to 3 feedback/fix rounds per PR that you
+> open. This goal can't complete until all secret work is confirmed done by the operator and
+> everything is confirmed working.
+
+This resumes Azure delivery beyond the completed local implementation. The implementation's prior
+validation remains evidence; PR checks, live confirmation, feedback disposition, and operator
+confirmation remain open work under the continuing goal.
+
+In Agention thread 3, message 2, the operator added:
+
+> Include it but each of these should be shipped individually
+
+This includes macOS Keychain in the overall secret effort while preserving separate delivery for
+each backend. For Azure live validation, the operator directed:
+
+> The integration tester will be able to test this. Just mark it ready when you are ready and await
+> the results per our agentic-dev-process
