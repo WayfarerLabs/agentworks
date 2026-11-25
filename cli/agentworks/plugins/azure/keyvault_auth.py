@@ -58,7 +58,7 @@ def _read_regular_file(path: str) -> bytes:
         finally:
             try:
                 os.close(descriptor)
-            except BaseException:
+            except OSError:
                 # Cleanup must not replace a primary cancellation or failure.
                 if not primary_failed:
                     raise

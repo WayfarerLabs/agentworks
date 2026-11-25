@@ -330,13 +330,15 @@ def test_parent_segments_are_resolved_after_directory_symlinks(monkeypatch: pyte
     assert len(sdk.http.forms) == 1
 
 
-def _close_then_fail(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+def _close_then_fail(monkeypatch: pytest.MonkeyPatch, failure: BaseException | None = None) -> list[int]:
     real_close = os.close
     closed: list[int] = []
 
     def close(descriptor: int) -> None:
         real_close(descriptor)
         closed.append(descriptor)
+        if failure is not None:
+            raise failure
         raise OSError(errno.EIO, "synthetic-sensitive-close-diagnostic")
 
     monkeypatch.setattr(os, "close", close)
@@ -385,6 +387,35 @@ def test_standalone_file_close_failure_is_an_opaque_authentication_error(
     with pytest.raises(ClientAuthenticationError) as raised:
         _read_regular_file(str(path))
     assert "synthetic-sensitive-close-diagnostic" not in str(raised.value)
+    assert len(closed) == 1
+    with pytest.raises(OSError) as released:
+        os.fstat(closed[0])
+    assert released.value.errno == errno.EBADF
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("cancellation", [KeyboardInterrupt(), SystemExit(17)])
+def test_new_cancellation_during_close_escapes_an_ordinary_read_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cancellation: BaseException
+) -> None:
+    path = tmp_path / "credential"
+    path.write_bytes(b"synthetic-credential")
+    real_fdopen = os.fdopen
+
+    class FailedRead:
+        def read(self) -> bytes:
+            raise OSError(errno.EIO, "synthetic-read-failure")
+
+    @contextmanager
+    def fdopen(descriptor: int, *args: Any, **kwargs: Any) -> Iterator[FailedRead]:
+        with real_fdopen(descriptor, *args, **kwargs):
+            yield FailedRead()
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    closed = _close_then_fail(monkeypatch, cancellation)
+    with pytest.raises(type(cancellation)) as raised:
+        _read_regular_file(str(path))
+    assert raised.value is cancellation
     assert len(closed) == 1
     with pytest.raises(OSError) as released:
         os.fstat(closed[0])
