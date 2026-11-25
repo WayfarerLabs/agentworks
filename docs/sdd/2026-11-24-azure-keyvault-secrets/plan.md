@@ -124,3 +124,15 @@ passing. The integrated head still requires the full required gates and all thre
 Guarded workload credentials use vault-derived public/Government/China authority as the source
 architecture requires; this corrects the native default chain's omitted authority forwarding for
 that credential without changing the configured tenant/client identity.
+
+Private review of `7809c7eff` cleared project and complexity lanes; the generic lane found one
+cleanup defect: descriptor close failure could mask cancellation. The delegate corrected primary
+exception preservation and ensured a new cleanup interruption also propagates. The two follow-ups
+are `b336cc777` and `36e856a00`, with 56 file/input tests and changed-file typing/style checks
+passing. All three lanes must assess the integrated correction before re-handoff.
+
+The first full Linux run at `7809c7eff` passed 15,437 tests with 85 skipped. Its required typing,
+style, file-quality, drift, isolation, Node website and deterministic-build gates passed. The
+website Python run initially had one browser timing failure in unchanged website code; the isolated
+case and subsequent complete 160-test rerun passed. The cancellation correction still requires its
+final full-suite run; no final gate or round completion is inferred from the earlier head.
