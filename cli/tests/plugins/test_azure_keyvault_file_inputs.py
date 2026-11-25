@@ -21,15 +21,19 @@ def _probe(
     path: Path,
     payload: bytes,
     *,
+    fixture_dir: Path,
     stdin_path: Path | None = None,
     replace_after_check: bool = False,
     replace_on_refresh: bool = False,
     selector: str | None = None,
     client_secret: str | None = None,
 ) -> dict[str, Any]:
+    isolated_home = fixture_dir / "probe-home"
+    isolated_home.mkdir(exist_ok=True)
     environment = {
         "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
         "PATH": os.defpath,
+        "HOME": str(isolated_home),
         "AZURE_CLIENT_ID": _CLIENT,
         "AZURE_TENANT_ID": _TENANT,
         "AZURE_TOKEN_CREDENTIALS": selector
@@ -38,6 +42,7 @@ def _probe(
         "PROBE_PATH": str(path),
     }
     if sys.platform == "win32":
+        environment["USERPROFILE"] = str(isolated_home)
         # Python's Windows subprocess runtime requires this for SxS assemblies.
         environment["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
     if client_secret is not None:
@@ -88,7 +93,7 @@ def test_special_or_unreadable_credential_files_do_not_consume_piped_input(
     else:
         path = tmp_path / "absent"
     payload = certificate_bytes() if kind == "certificate" else b"synthetic-stdin-assertion"
-    result = _probe(kind, path, payload)
+    result = _probe(kind, path, payload, fixture_dir=tmp_path)
     assert result["results"] == {"token": "PreviewIndeterminate"}
     assert result["remaining"] == len(payload)
     assert result["token_requests"] == 0
@@ -101,7 +106,7 @@ def test_descriptor_aliases_are_rejected_with_regular_redirected_input(tmp_path:
     payload = certificate_bytes() if kind == "certificate" else b"synthetic-stdin-assertion"
     stdin = tmp_path / "redirected-input"
     stdin.write_bytes(payload)
-    result = _probe(kind, Path(alias), payload, stdin_path=stdin)
+    result = _probe(kind, Path(alias), payload, fixture_dir=tmp_path, stdin_path=stdin)
     assert result["results"] == {"token": "PreviewIndeterminate"}
     assert result["remaining"] == len(payload)
     assert result["token_requests"] == 0
@@ -113,7 +118,7 @@ def test_named_regular_file_is_allowed_when_stdin_references_the_same_file(tmp_p
     payload = certificate_bytes() if kind == "certificate" else b"synthetic-assertion"
     path = tmp_path / "credential"
     path.write_bytes(payload)
-    result = _probe(kind, path, payload, stdin_path=path)
+    result = _probe(kind, path, payload, fixture_dir=tmp_path, stdin_path=path)
     assert result["results"] == {"token": "PreviewAvailable"}
     assert result["remaining"] == len(payload)
     assert result["token_requests"] == 1
@@ -124,7 +129,7 @@ def test_certificate_path_replacement_after_fstat_does_not_cause_a_second_open(t
     certificate = tmp_path / "certificate.pem"
     certificate.write_bytes(certificate_bytes())
     payload = b"synthetic-stdin-marker"
-    result = _probe("certificate", certificate, payload, replace_after_check=True)
+    result = _probe("certificate", certificate, payload, fixture_dir=tmp_path, replace_after_check=True)
     assert result["results"] == {"token": "PreviewAvailable"}
     assert result["remaining"] == len(payload)
 
@@ -134,7 +139,7 @@ def test_workload_path_replacement_is_checked_at_the_next_real_token_refresh(tmp
     token = tmp_path / "token.jwt"
     token.write_text("initial-assertion")
     payload = b"synthetic-stdin-marker"
-    result = _probe("workload", token, payload, replace_on_refresh=True)
+    result = _probe("workload", token, payload, fixture_dir=tmp_path, replace_on_refresh=True)
     assert result["results"] == {"token": "PreviewAvailable", "refreshed": "PreviewIndeterminate"}
     assert result["remaining"] == len(payload)
     assert result["token_requests"] == 1
@@ -144,7 +149,14 @@ def test_workload_path_replacement_is_checked_at_the_next_real_token_refresh(tmp
 @pytest.mark.parametrize("kind", ["certificate", "workload"])
 def test_complete_client_secret_precedes_and_bypasses_file_credentials(tmp_path: Path, kind: str) -> None:
     payload = b"synthetic-stdin-marker"
-    result = _probe(kind, Path("/dev/stdin"), payload, selector="prod", client_secret="synthetic-client-secret")
+    result = _probe(
+        kind,
+        Path("/dev/stdin"),
+        payload,
+        fixture_dir=tmp_path,
+        selector="prod",
+        client_secret="synthetic-client-secret",
+    )
     assert result["results"] == {"token": "PreviewAvailable"}
     assert result["remaining"] == len(payload)
     assert result["token_requests"] == 1
@@ -153,9 +165,9 @@ def test_complete_client_secret_precedes_and_bypasses_file_credentials(tmp_path:
 @_LINUX
 @pytest.mark.parametrize("kind", ["certificate", "workload"])
 @pytest.mark.parametrize("selector", ["dev", "not-a-valid-selector"])
-def test_selectors_are_applied_before_any_credential_file_read(kind: str, selector: str) -> None:
+def test_selectors_are_applied_before_any_credential_file_read(tmp_path: Path, kind: str, selector: str) -> None:
     payload = b"synthetic-stdin-marker"
-    result = _probe(kind, Path("/dev/stdin"), payload, selector=selector)
+    result = _probe(kind, Path("/dev/stdin"), payload, fixture_dir=tmp_path, selector=selector)
     expected = "PreviewIndeterminate" if selector == "dev" else "PreviewFailed"
     assert result["results"] == {"token": expected}
     assert result["remaining"] == len(payload)
@@ -164,9 +176,9 @@ def test_selectors_are_applied_before_any_credential_file_read(kind: str, select
 
 @_LINUX
 @pytest.mark.parametrize("kind", ["certificate", "workload"])
-def test_empty_present_client_secret_does_not_fall_through_to_file_credentials(kind: str) -> None:
+def test_empty_present_client_secret_does_not_fall_through_to_file_credentials(tmp_path: Path, kind: str) -> None:
     payload = b"synthetic-stdin-marker"
-    result = _probe(kind, Path("/dev/stdin"), payload, selector="prod", client_secret="")
+    result = _probe(kind, Path("/dev/stdin"), payload, fixture_dir=tmp_path, selector="prod", client_secret="")
     assert result["results"] == {"token": "PreviewFailed"}
     assert result["remaining"] == len(payload)
     assert result["token_requests"] == 0
