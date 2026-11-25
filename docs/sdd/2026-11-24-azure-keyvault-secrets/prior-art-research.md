@@ -41,7 +41,6 @@ wall-clock deadline over a credential chain and multiple secret reads. Source:
 
 ## Open questions
 
-- Operator disposition of the proposed environment-backed explicit service principal.
 - Availability of an authorized live Key Vault fixture and its permitted operations.
 
 The external sources above are primary Microsoft documentation. Local code is authoritative for

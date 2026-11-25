@@ -69,6 +69,81 @@ raise desktop approval, biometric, browser, or device work. Item or field not-fo
 as failed lookup rejection, not ordinary missing, because the supported provider surface has not
 supplied conclusive stable evidence for a narrower absence token.
 
+## Configuring Azure Key Vault
+
+Enable the `azure` system plugin and declare a source for an existing vault:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret-source
+metadata:
+  name: work-kv
+spec:
+  backend:
+    name: azure-keyvault
+    vault_url: https://example-vault.vault.azure.net
+```
+
+Add `work-kv` to `[secret_config].sources` in the desired precedence order. Ambient authentication
+is the default and uses Azure's default credential chain. It needs no Azure VM site or subscription
+configuration. Each source binds one vault; declare another source for a different vault or
+identity.
+
+To select a service principal explicitly, set its tenant and client identifiers and the environment
+variable holding its client secret:
+
+```yaml
+auth:
+  mode: service-principal
+  tenant_id: 00000000-0000-0000-0000-000000000000
+  client_id: 00000000-0000-0000-0000-000000000000
+  client_secret_env: AZURE_CLIENT_SECRET
+```
+
+Place this `auth` table inside the source's `spec.backend`. The environment variable defaults to
+`AZURE_CLIENT_SECRET` when omitted. The backend reads it only when performing the selected lookup;
+it never stores the value in source configuration or falls back to another identity. A missing or
+rejected credential is an authentication failure. Secret sources cannot reference another Agentworks
+secret to authenticate themselves, so this input differs from a VM site's `auth.secret`. Use a
+dedicated variable outside the `AW_SECRET_` prefix; Agentworks quarantines that prefix at startup
+for its env-var secret backend.
+
+Map each Agentworks secret to its Azure secret name:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: npm-token
+spec:
+  backend_mappings:
+    work-kv: npm-token
+```
+
+The scalar mapping follows the latest Azure version. To pin a version, use an object instead:
+
+```yaml
+backend_mappings:
+  work-kv:
+    name: npm-token
+    version: 0123456789abcdef0123456789abcdef
+```
+
+Use `agw resource explain secret-backend/azure-keyvault` for the installed source fields. The
+backend only reads the selected secret version; it does not list the vault, create resources, write
+values, or grant access. Confirmed secret absence permits lookup in the next source; denied access
+or failed authentication stops lookup for that secret.
+
+Preview may read and discard a value inside the backend. No-impact preview excludes authentication
+paths that can request operator action. Allowing interaction, or performing actual resolution, may
+initiate browser authentication for ambient credentials. `--non-interactive` controls terminal input
+independently and does not suppress browser authentication.
+
+Follow Microsoft's documentation for
+[Azure authentication](https://learn.microsoft.com/en-us/azure/developer/python/sdk/authentication/overview),
+[Key Vault permissions](https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide), and
+[Key Vault Secrets](https://learn.microsoft.com/en-us/python/api/overview/azure/keyvault-secrets-readme).
+
 ## Preview and actual resolution
 
 Preview is provider-aware and value-free. Its one impact input is:
@@ -127,9 +202,10 @@ service-account or Connect configuration. Do not rely on `--non-interactive` to 
 approval.
 
 TTY access is one of available, unavailable, or disabled. Prompt blocks before reading when terminal
-input is unavailable or disabled. Env-var and OnePassword declare no TTY support and are independent
-of all three states. Preview `--allow-interaction` and global `--non-interactive` may be used
-together: the former allows out-of-band impact, while the latter still disables prompt.
+input is unavailable or disabled. Env-var, OnePassword, and Azure Key Vault declare no TTY support
+and are independent of all three states. Preview `--allow-interaction` and global
+`--non-interactive` may be used together: the former allows out-of-band impact, while the latter
+still disables prompt.
 
 ## Operator surfaces
 

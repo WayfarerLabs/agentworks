@@ -1,5 +1,7 @@
 # Azure Key Vault secrets
 
+<!-- cspell:ignore Agention -->
+
 ## Scope
 
 Add Azure Key Vault secret lookup to the existing Azure plugin. The operator selected Azure as the
@@ -27,14 +29,19 @@ Keychain remain separate efforts.
 - Documentation covers Agentworks configuration and links to Microsoft's documentation for Azure
   setup, permissions, and authentication. Avoid duplicating provider manuals.
 
-## Proposed credential bootstrap
+## Credential bootstrap
 
 The current framework forbids a secret source's configuration from containing an Agentworks
 `SecretRef`. Unlike a VM site, a secret source must authenticate before Agentworks can resolve
-secrets. The proposed explicit-principal mode takes tenant and client identifiers in source config
-and reads its client secret from an explicitly named environment variable, defaulting to
-`AZURE_CLIENT_SECRET`. No plaintext credential belongs in a manifest. This proposal is being put to
-the operator before implementation of that input path.
+secrets. The explicit-principal mode takes tenant and client identifiers in source config and reads
+its client secret from an explicitly named environment variable, defaulting to
+`AZURE_CLIENT_SECRET`. No plaintext credential belongs in a manifest.
+
+### Operator ruling, 2026-11-24
+
+In Agention thread 1, message 5, the operator selected "Use environment (recommended)" in response
+to "Use an environment-backed client secret for explicit Key Vault service-principal
+authentication?"
 
 ## Acceptance
 

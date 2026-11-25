@@ -25,8 +25,9 @@ preview reports indeterminate rather than launching interactive authentication. 
 preview and actual resolution may use browser authentication, consistently with the existing Azure
 VM ambient behavior. Explicit service principals use only their selected credential.
 
-The service-principal bootstrap input is pending the operator's disposition of the proposal in the
-FRD. Do not add recursive secret resolution or a generic credential framework to solve it.
+The service-principal mode reads its client secret from the named environment variable during the
+selected operation. Tenant and client identifiers stay in source config. Do not add recursive secret
+resolution or a generic credential framework to solve it.
 
 Use explicit finite provider network and credential-subprocess timeouts. A connection or read
 timeout is not a source-wide deadline. Do not expose a source-wide timeout setting without enforcing

@@ -14,10 +14,11 @@ manifest. Use `agw resource sample secret-source` to start a source manifest and
 `agw resource explain secret-backend/NAME` for its implementation contract. Use
 `agw secret describe NAME` for a provider-aware, value-free preview.
 
-The optional `onepassword` plugin supplies the shipped non-synthesized backend. Enable that system
-plugin, declare a source that selects `onepassword`, and map each secret to a scalar `op://`
-reference. `agw resource explain secret-backend/onepassword` shows the current fields; the
-[Secret Sources README](../README.md#declaring-a-source) gives one complete example.
+The optional `onepassword` plugin supplies the 1Password backend, and the `azure` plugin supplies
+Azure Key Vault. Enable the selected plugin, declare its source, and map each secret to that
+source's lookup. `agw resource explain secret-backend/onepassword` and
+`agw resource explain secret-backend/azure-keyvault` show the current fields. Use
+`agw guide show concept-azure` for Azure documentation links.
 
 Both `agw secret describe NAME` and `agw secret verify NAME...` default to no operator impact. A
 backend may still read a provider value and safely discard it when it can do so without operator
