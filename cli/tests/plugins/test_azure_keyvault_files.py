@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
+import errno
 import json
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
+from azure.core.exceptions import ClientAuthenticationError
 
 from agentworks.capabilities.secret_backend import (
     FailureReason,
@@ -20,6 +26,7 @@ from agentworks.capabilities.secret_backend import (
     TtyInteractionAccess,
 )
 from agentworks.plugins.azure.keyvault import AzureKeyVaultBackend
+from agentworks.plugins.azure.keyvault_auth import _read_regular_file
 from agentworks.plugins.azure.keyvault_config import AzureKeyVaultMapping, AzureKeyVaultSourceConfig
 from agentworks.resources.graph import Readiness
 from agentworks.schema import CapabilityBlock
@@ -321,3 +328,64 @@ def test_parent_segments_are_resolved_after_directory_symlinks(monkeypatch: pyte
         result = client.preview((_request(),))
     assert result == {"token": PreviewAvailable()}
     assert len(sdk.http.forms) == 1
+
+
+def _close_then_fail(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    real_close = os.close
+    closed: list[int] = []
+
+    def close(descriptor: int) -> None:
+        real_close(descriptor)
+        closed.append(descriptor)
+        raise OSError(errno.EIO, "synthetic-sensitive-close-diagnostic")
+
+    monkeypatch.setattr(os, "close", close)
+    return closed
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("cancellation", [KeyboardInterrupt(), concurrent.futures.CancelledError()])
+def test_file_close_failure_preserves_primary_cancellation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cancellation: BaseException
+) -> None:
+    path = tmp_path / "credential"
+    path.write_bytes(b"synthetic-credential")
+    real_fdopen = os.fdopen
+    opened: list[int] = []
+
+    class InterruptedRead:
+        def read(self) -> bytes:
+            raise cancellation
+
+    @contextmanager
+    def fdopen(descriptor: int, *args: Any, **kwargs: Any) -> Iterator[InterruptedRead]:
+        with real_fdopen(descriptor, *args, **kwargs):
+            opened.append(descriptor)
+            yield InterruptedRead()
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    closed = _close_then_fail(monkeypatch)
+    with pytest.raises(type(cancellation)) as raised:
+        _read_regular_file(str(path))
+    assert raised.value is cancellation
+    assert closed == opened
+    assert len(closed) == 1
+    with pytest.raises(OSError) as released:
+        os.fstat(closed[0])
+    assert released.value.errno == errno.EBADF
+
+
+@pytest.mark.windows
+def test_standalone_file_close_failure_is_an_opaque_authentication_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "credential"
+    path.write_bytes(b"synthetic-credential")
+    closed = _close_then_fail(monkeypatch)
+    with pytest.raises(ClientAuthenticationError) as raised:
+        _read_regular_file(str(path))
+    assert "synthetic-sensitive-close-diagnostic" not in str(raised.value)
+    assert len(closed) == 1
+    with pytest.raises(OSError) as released:
+        os.fstat(closed[0])
+    assert released.value.errno == errno.EBADF

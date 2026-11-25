@@ -45,14 +45,23 @@ def _read_regular_file(path: str) -> bytes:
         for name in ("O_NONBLOCK", "O_NOCTTY", "O_CLOEXEC", "O_BINARY", "O_NOFOLLOW"):
             flags |= getattr(os, name, 0)
         descriptor = os.open(resolved, flags)
+        primary_failed = False
         try:
             opened = os.fstat(descriptor)
             if not stat.S_ISREG(opened.st_mode):
                 raise ClientAuthenticationError("ambient Azure credential input must be a readable regular file")
             with os.fdopen(descriptor, "rb", closefd=False) as stream:
                 return stream.read()
+        except BaseException:
+            primary_failed = True
+            raise
         finally:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except BaseException:
+                # Cleanup must not replace a primary cancellation or failure.
+                if not primary_failed:
+                    raise
     except (OSError, ValueError, RuntimeError):
         raise ClientAuthenticationError("ambient Azure credential file could not be read") from None
 
