@@ -105,9 +105,9 @@ fixed at 2026-11-25 05:57:28 UTC, after the initial reporting window, with that 
 the quota report. No unresolved inline threads or live report were present. The PR returned to draft
 before correction work. Later feedback belongs to the next batch.
 
-- [ ] Implement the checked credential-file read boundary while preserving native authentication
+- [x] Implement the checked credential-file read boundary while preserving native authentication
       selection, identity, supported forms, browser policy, and cleanup.
-- [ ] Add real SDK/HTTP-boundary regressions for regular files, unsafe aliases, refresh replacement,
+- [x] Add real SDK/HTTP-boundary regressions for regular files, unsafe aliases, refresh replacement,
       selectors, earlier successful credentials, and partial-construction cleanup.
 - [ ] Run required project, complexity, and correctness/security private lanes on the integrated
       round head and dispose all material findings.
@@ -117,3 +117,10 @@ before correction work. Later feedback belongs to the next batch.
 Round count: one started of three authorized; no round is claimed complete yet. The other separate
 backend proposals are AWS PR #965, GCP PR #966, and macOS Keychain PR #967, with their requirements
 acceptance still pending in authenticated Agention threads 5, 7, and 6 respectively.
+
+The isolated implementation delegate handed off commit `26a9199e9`, integrated as `9c176e824`, with
+368 focused tests passing and changed-file typing, lint, formatting, and documentation gates
+passing. The integrated head still requires the full required gates and all three private lanes.
+Guarded workload credentials use vault-derived public/Government/China authority as the source
+architecture requires; this corrects the native default chain's omitted authority forwarding for
+that credential without changing the configured tenant/client identity.
