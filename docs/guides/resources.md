@@ -484,27 +484,27 @@ The `codex` integration runs Codex the same way and ships as the opt-in `codex` 
 Codex mints its own session ids, so instead of assigning one the integration learns the id from
 Codex itself: every launch installs a small recorder script that Codex runs after each completed
 turn (via Codex's `notify` hook, so nothing is ever added to your conversation), which writes down
-which conversation the pane is in. Ordinary `session start` and `session restart` then resume
-exactly that conversation whenever its session file still exists. A session archived with
-`codex archive` is deliberately treated as not resumable, since un-archiving it behind your back
-would undo a decision you made: the binding is dropped, and the fallback below then decides, so the
-next start may adopt a different conversation in the workspace or open the picker rather than simply
-starting fresh (`codex unarchive` brings the archived one back). When nothing has been recorded yet,
-an ordinary start falls back to looking for a single interactive Codex conversation recorded in this
-workspace directory; if it finds several, it opens Codex's own session picker in the pane rather
-than guessing, so pick the conversation you want (the session binds to it from its next turn) or
-press esc to start a fresh one. `session create` does none of that: a new session always starts a
-brand-new conversation and adopts nothing, so reusing a deleted session's name can never silently
-pick that session's conversation back up. Note the limit of that, because the fallback is still a
-heuristic: if the deleted session's conversation is the only Codex conversation recorded in the
-workspace, the new session's first `session start` can still adopt it. Whichever way it went is
-announced in the command's output and as the pane's first line: `session create` always reports a
-brand-new conversation, while the adoption and picker outcomes belong to ordinary start or restart,
-and an adoption names the Codex conversation id it chose, so you can see it happen and fix it (pick
-the right conversation from the picker, or archive the stale one) rather than discovering it later.
-Overriding `notify` yourself through `extra_args` turns the recording off (yours wins, because
-`extra_args` follows generated options), which leaves later resume attempts relying on that
-fallback.
+which conversation the pane is in. Ordinary `session start` and `session restart` then resume that
+recorded conversation when its session file exists. If the recorded file is missing but the
+previously stored conversation is resumable, Agentworks keeps that stored binding. A resumable
+recorded conversation still takes precedence. A session archived with `codex archive` is
+deliberately treated as not resumable, since un-archiving it behind your back would undo a decision
+you made (`codex unarchive` brings the archived one back). When neither the recorded nor stored
+binding is resumable, the binding is dropped. An ordinary start then looks for a single interactive
+Codex conversation recorded in this workspace directory; if it finds several, it opens Codex's own
+session picker in the pane rather than guessing, so pick the conversation you want (the session
+binds to it from its next turn) or press esc to start a fresh one. `session create` does none of
+that: a new session always starts a brand-new conversation and adopts nothing, so reusing a deleted
+session's name can never silently pick that session's conversation back up. Note the limit of that,
+because the fallback is still a heuristic: if the deleted session's conversation is the only Codex
+conversation recorded in the workspace, the new session's first `session start` can still adopt it.
+Whichever way it went is announced in the command's output and as the pane's first line:
+`session create` always reports a brand-new conversation, while the adoption and picker outcomes
+belong to ordinary start or restart, and an adoption names the Codex conversation id it chose, so
+you can see it happen and fix it (pick the right conversation from the picker, or archive the stale
+one) rather than discovering it later. Overriding `notify` yourself through `extra_args` turns the
+recording off (yours wins, because `extra_args` follows generated options), which leaves later
+resume attempts relying on that fallback.
 
 Its config is all optional, and `agw resource explain harness-integration/codex` documents every
 field. The field reference omits these details because they describe Codex behavior rather than the
