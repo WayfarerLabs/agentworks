@@ -74,8 +74,8 @@ record the work that was actually completed and remain unchanged.
 - [x] Run the additional local PR gates: Typer isolation, 160 Python website tests, 103 Node website
       tests, and deterministic repeated builds at root and project site bases.
 - [x] Publish the ready Azure PR and record its exact head, CI state, and review request.
-- [ ] Receive and assess the integration tester's live Azure evidence and disposition.
-- [ ] Receive a complete PR-level review separate from the private quality loop.
+- [x] Receive and assess the integration tester's live Azure evidence and disposition.
+- [x] Receive a complete PR-level review separate from the private quality loop.
 - [ ] Batch published feedback after the process reporting window and perform at most three
       authorized fix rounds, each with its required checks, reviews, and handoff.
 - [ ] Hand off a merge-ready Azure PR with current CI, review disposition, and live evidence.
@@ -112,7 +112,7 @@ before correction work. Later feedback belongs to the next batch.
 - [x] Run required project, complexity, and correctness/security private lanes on the integrated
       round head and dispose all material findings.
 - [x] Run applicable required gates on the cleanup-corrected candidate.
-- [ ] Publish the coherent round head and summary, and reapply ready for the standard review and
+- [x] Publish the coherent round head and summary, and reapply ready for the standard review and
       integration pipeline.
 
 Round count: one started of three authorized; no round is claimed complete yet. The other separate
@@ -182,3 +182,45 @@ error, and posted a critical reading. That finding belongs to round 2 under the 
 after the next handoff and reporting window. Initial-head live evidence does not validate the
 subsequent credential-file changes. The tester records an empty soft-deleted vault metadata residue
 with denied purge permission; the lead has not accessed those resources.
+
+## Feedback/fix round 2
+
+Round 1 closed with its
+[ready handoff](https://github.com/WayfarerLabs/agentworks/pull/964#issuecomment-7156181904) at
+`7e5168c486b2dcdbe70eb750dcd15d2857f43340` on 2026-11-25 07:43:35 UTC. All fourteen published checks
+passed, including Windows (520 passed, 21 skipped). All three private lanes cleared that exact head.
+Main remains `1c13df6c1136a147b107ddea59d75369ea6115fa`.
+
+The updated-head integration report independently reviewed all 25 changed files and the SDD, with F1
+as its only material source correction. It ran real Linux-to-Key-Vault cases on the exact installed
+candidate, including seven additional file cases for precedence and finite errors. The report's
+gates passed (15,633 tests passed, 274 skipped); these are its measurements rather than the
+implementation session's local counts. Genuine certificate/workload identity success, native
+provider behavior and the other stated gaps are not established. This separate full-delta review
+satisfies receiving PR-level review; it is not formal approval or final corrected-head clearance.
+The lead critically read that report, reconfirmed F1 and distinguished the repeated quota failure
+from all fourteen green core/CodeQL checks.
+
+The operator's existing allowance authorizes round 2. Its batch was fixed at 2026-11-25 08:44:08
+UTC, after the required reporting window, against `7e5168c48`: repeated F1 and the repeated Copilot
+quota report, with no unresolved inline thread or additional finding. The PR returned to draft
+before changing its head. The permanent Azure secret example now includes its required description.
+No runtime or test code changed. The original literal example failed actual isolated
+`agw secret list --output json` with the required-description error; corrected-example validation
+and private review are recorded as they complete. No prose-pinning unit test is added.
+
+- [x] Reproduce F1 through the literal declaration and actual isolated CLI; add the required field.
+- [x] Confirm the corrected literal declaration loads and run applicable file-quality checks.
+- [ ] Complete independent project and complexity review of the documentation-only correction.
+- [ ] Publish the coherent round-2 head and summary with green CI, then reapply ready.
+
+Round count: two started of three authorized; round 2 is not yet claimed complete. Later feedback
+belongs to the next batch. The corrected head's pipeline response, merge-ready handoff and operator
+working confirmation remain separate pending steps.
+
+The corrected literal README declaration now loads through actual `agw secret list --output json`
+with exit 0, returning the npm-token row and its work-kv mapping. Both before/after receipts are
+retained in the session-owned ignored namespace; the CLI used a temporary isolated home, synthetic
+configuration and no provider operation. Prettier, Markdown lint, spelling and diff checks pass for
+both changed documents. No full local suite is repeated for this documentation-only correction; all
+required published CI checks still gate its ready handoff.

@@ -115,6 +115,7 @@ apiVersion: agentworks/v1
 kind: secret
 metadata:
   name: npm-token
+  description: npm registry token
 spec:
   backend_mappings:
     work-kv: npm-token
