@@ -77,10 +77,11 @@ entities. That is all of R2:
 
 Because a session has two parents, exclusive on one parent does not cover it: a workspace change and
 an agent change could otherwise both reach a session in that workspace for that agent. So an
-operation that changes descendants it finds (workspace delete and agent delete remove sessions,
-grants and console windows) takes each of them exclusive too, and with them every ancestor it does
-not already hold, shared. Workspace delete then needs the session's account shared, which a
-concurrent agent delete holds exclusive, so one of the two is refused.
+operation that changes descendants it finds (workspace delete removes sessions, grants and console
+windows) takes each of them exclusive too, and with them every ancestor it does not already hold,
+shared. Workspace delete then needs the session's account shared, which a concurrent agent reinit
+holds exclusive, so one of the two is refused. Agent delete holds the vm exclusive instead, as today
+([Shared state across entities](#shared-state-across-entities-r5)).
 
 An access or observe command (R4) takes the **vm** shared for its admission only, as `hold_active`
 does today, and runs its body (the shell, the attach, the forward) unlocked. Only a VM-wide
@@ -145,7 +146,7 @@ paths, grants, sessions, consoles, each by name) and takes each lock without wai
 refusal releases what was taken and raises. Because nothing waits, there is no deadlock, and the
 fixed order keeps a refusal deterministic.
 
-An operation whose set depends on state (agent delete removes its sessions, grants and console
+An operation whose set depends on state (workspace delete removes its sessions, grants and console
 windows; workspace create grants the grant-all agents) reads that state before locking, includes
 what it found, acquires, and re-reads under the set: anything different refuses the operation and
 the operator runs it again. Each acquisition takes its whole request, and a set never grows after it
@@ -177,18 +178,25 @@ other local processes read them.
 Some writes reach state no single entity owns. Each gets an explicit home:
 
 - **The VM's account and group files.** Every account or group edit Agentworks makes is a single
-  shadow-utils command (`useradd`, `usermod -aG`, `gpasswd -d`, `userdel`, `groupadd`, `groupdel`),
+  shadow-utils command (`useradd`, `usermod -aG`, `usermod -rG`, `userdel`, `groupadd`, `groupdel`),
   and shadow-utils serializes its own tools through `lckpwdf` on both supported guest releases
-  (Debian 12 and 13). The one check-then-create sequence that can now run twice at once, creating a
-  workspace's group during a grant, becomes `groupadd -f`. Agent deletion, under the account's
-  exclusive lock, stops the account's processes and skips the removal with a warning if any remain,
-  as today, then runs `userdel -r` as today. That keeps today's behavior exactly: a configured
-  pre-deletion hook can still veto before anything is removed, a mailbox owned by someone else is
-  kept, and the numeric user ID stays reserved while `userdel` removes the home (a removal that
-  fails partway leaves what it leaves today). Its cost under finer locks is that `userdel -r` holds
-  shadow's lock while it removes the home, so a concurrent account edit elsewhere on the VM waits on
-  it, and past `lckpwdf`'s 15 seconds fails with a typed error the operator can retry; nothing is
-  lost.
+  (Debian 12 and 13). Each of these locks the files before it reads them, so concurrent edits of one
+  group cannot undo each other. `gpasswd -d`, which removes a membership today, reads the group
+  before it locks and writes its stale copy back whole, so two removals from one group could restore
+  each other's member; removal moves to `usermod -rG`, the tool additions already use, and its
+  status is checked. A command that drops an agent's last grant on a workspace removes the
+  membership first and deletes the grant row only once that succeeds, so a failure leaves the row to
+  retry from. The one check-then-create sequence that can now run twice at once, creating a
+  workspace's group during a grant, becomes `groupadd -f`. Agent deletion stops the account's
+  processes and skips the removal with a warning if any remain, as today, then runs `userdel -r` as
+  today. That keeps today's behavior exactly: a configured pre-deletion hook can still veto before
+  anything is removed, a mailbox owned by someone else is kept, and the numeric user ID stays
+  reserved while `userdel` removes the home (a removal that fails partway leaves what it leaves
+  today). Because `userdel -r` holds shadow's lock while it removes the home, agent delete keeps the
+  vm exclusive, as today: under the account alone, account edits elsewhere on the VM would wait
+  behind it and fail past `lckpwdf`'s 15 seconds, and a second agent delete that failed that way
+  would drop its row and strand its account. A rollback that removes an account its own command just
+  created keeps that command's set, since the home is new.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
@@ -214,17 +222,20 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   their target, rehome and copy's source take their source, rehome its target, workspace delete its
   path; the walk runs again under the set to confirm nothing moved. An operation that only removes a
   final entry that is a link locks the entry and its parents without following the link, so a stale
-  or looping link can still be deleted. The rehome that would move a workspace into `/data/B/new`
-  holds `/data/B` shared, so a removal of `/data/B` is refused while it runs, and work in disjoint
-  trees still runs together. A nested layout that already exists keeps today's behavior, including
-  what a later `--remove-old` does to it (#957).
+  or looping link can still be deleted; every link the walk does follow is locked shared at its own
+  entry too, so deleting that link is refused while an operation runs through it. Delete removes the
+  stored path in its normalized spelling, so a stored trailing slash cannot make the removal follow
+  a final link into its target. The rehome that would move a workspace into `/data/B/new` holds
+  `/data/B` shared, so a removal of `/data/B` is refused while it runs, and work in disjoint trees
+  still runs together. A nested layout that already exists keeps today's behavior, including what a
+  later `--remove-old` does to it (#957).
 - **Stale socket cleanup across one agent's sessions** runs under that account's exclusive lock
   (agent create and reinit) or the vm exclusive (vm reinit and create), so no session of that agent
   is starting meanwhile.
 - **Membership** is the grant entity above. Every caller that adds an agent to a workspace group or
-  removes it holds that grant exclusive, session delete included when it drops an implicit grant.
-  Grant-all materialization reads the grant-all agents (or the workspaces) before locking and takes
-  one grant per pair.
+  removes it holds that grant exclusive, session delete included when it drops an implicit grant,
+  and removes the membership before deleting the last grant row. Grant-all materialization reads the
+  grant-all agents (or the workspaces) before locking and takes one grant per pair.
 
 The mutators that take no lock today take the lock for what they change: grant and revoke (the
 grant, with its workspace and account shared), workspace repair and copy's destination (the

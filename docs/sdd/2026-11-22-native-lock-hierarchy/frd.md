@@ -1,6 +1,7 @@
 # Native lock hierarchy
 
-Status: accepted by the operator on 2026-11-23.
+Status: accepted by the operator on 2026-11-23; R2's wording amended on the operator's suggestion on
+2026-11-25.
 
 ## Purpose
 
@@ -42,8 +43,8 @@ sessions, are locked so that they cannot interleave with changes to the sessions
 ### R2. Lower levels block higher levels; unrelated subtrees proceed
 
 An operation locks the entity it changes and marks every entity above it as in use. A change at any
-level is refused while a change is held at that entity, below it, or above it. Changes in subtrees
-that share no entity run at the same time, on the same VM and across VMs.
+level is refused while a change is held at that entity, below it, or above it. Changes in
+non-overlapping subtrees run at the same time, on the same VM and across VMs.
 
 ### R3. Fail fast, naming the holder
 
@@ -114,3 +115,18 @@ below the VM), R5 (no new races) and R6 (no lock held across a prompt) named as 
 additions, and offered accepting without R4, without R6, or changing something, the operator chose:]
 
 > Accept as drafted
+
+### 2026-11-25
+
+[Asked whether to change R2's "subtrees that share no entity" to "subtrees that share no entity
+below the VM", since every subtree on a VM shares the VM, the operator answered:]
+
+> Non-overlapping subtrees?
+
+[The lead adopted that wording in R2.]
+
+[Asked how the design PR should proceed after the tester found one blocking and two important design
+defects, and offered one final round then merge, merging and carrying the fixes into the
+implementation PRs, or more iteration, the operator chose:]
+
+> One final round, then merge

@@ -21,7 +21,9 @@ is left undisposed, and #949 is merged.
 
 ## Implementation, PR 1: under today's single lock
 
-- [ ] Shared state: `groupadd -f` in the workspace-group helper, agent deletion stopping processes
+- [ ] Shared state: `groupadd -f` in the workspace-group helper, membership removal through
+      `usermod -rG` with its status checked, the membership removed before the last grant row is
+      deleted, workspace delete removing its normalized path, agent deletion stopping processes
       before `userdel -r`, the per-user rebuild mutex for the SSH config, the bounded
       package-manager wait in workspace repair, and unique operation log names created exclusively.
 - [ ] The unguarded mutators (grant and revoke, workspace repair, workspace copy,
