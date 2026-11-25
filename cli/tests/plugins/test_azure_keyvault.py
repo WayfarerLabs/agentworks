@@ -268,6 +268,50 @@ def test_provider_logs_are_contained_and_logging_is_restored(monkeypatch: pytest
     assert "logging-restored" in output.getvalue()
 
 
+@pytest.mark.parametrize(
+    "error", [requests.ConnectionError("sensitive-network-detail"), requests.ReadTimeout("secret")]
+)
+def test_transport_failures_remain_value_free_failures(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    sdk = _SDK(monkeypatch, [error])
+    with _context(ResolutionIntent()) as client:
+        result = client.resolve((_request(),))
+    assert result == {"token": BackendFailed(FailureReason.CONNECTIVITY)}
+    assert sdk.credentials[0].closed
+
+
+def test_partial_provider_construction_is_closed_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    sdk = _SDK(monkeypatch, [(200, {}, {"value": "unused"})])
+    sdk.client_error = ValueError("sensitive-construction-detail")
+    with _context(ResolutionIntent()) as client:
+        result = client.resolve((_request(),))
+    assert result == {"token": BackendFailed(FailureReason.EXTERNAL)}
+    assert sdk.credentials[0].closed
+
+
+def test_cleanup_failure_does_not_change_primary_resolution_or_leak(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sdk = _SDK(monkeypatch, [(200, {}, {"value": "resolved"})])
+
+    def broken_close(self: _Credential) -> None:
+        self.closed = True
+        logging.getLogger("azure.identity").error("sensitive-cleanup-detail")
+        raise ValueError("sensitive-cleanup-detail")
+
+    monkeypatch.setattr(_Credential, "close", broken_close)
+    batch = resolve_batch(
+        [SecretDecl(name="token", description="test", backend_mappings={"work-kv": "npm-token"})],
+        [_source()],
+        tty_access=TtyInteractionAccess.DISABLED,
+        interaction_broker=None,
+    )
+    assert batch.complete_or_raise() == {"token": "resolved"}
+    assert sdk.credentials[0].closed
+    assert sdk.adapter.closed
+    captured = capsys.readouterr()
+    assert "sensitive-cleanup-detail" not in captured.out + captured.err
+
+
 @pytest.mark.parametrize("error", [KeyboardInterrupt(), UserAbort("cancelled"), concurrent.futures.CancelledError()])
 def test_cancellation_closes_credentials_and_preserves_exit(
     monkeypatch: pytest.MonkeyPatch, error: BaseException
