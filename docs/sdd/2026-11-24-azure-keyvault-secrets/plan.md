@@ -109,10 +109,11 @@ before correction work. Later feedback belongs to the next batch.
       selection, identity, supported forms, browser policy, and cleanup.
 - [x] Add real SDK/HTTP-boundary regressions for regular files, unsafe aliases, refresh replacement,
       selectors, earlier successful credentials, and partial-construction cleanup.
-- [ ] Run required project, complexity, and correctness/security private lanes on the integrated
+- [x] Run required project, complexity, and correctness/security private lanes on the integrated
       round head and dispose all material findings.
-- [ ] Run applicable required gates, publish the coherent round head and summary, and reapply ready
-      for the standard review and integration pipeline.
+- [x] Run applicable required gates on the cleanup-corrected candidate.
+- [ ] Publish the coherent round head and summary, and reapply ready for the standard review and
+      integration pipeline.
 
 Round count: one started of three authorized; no round is claimed complete yet. The other separate
 backend proposals are AWS PR #965, GCP PR #966, and macOS Keychain PR #967, with their requirements
@@ -136,3 +137,10 @@ style, file-quality, drift, isolation, Node website and deterministic-build gate
 website Python run initially had one browser timing failure in unchanged website code; the isolated
 case and subsequent complete 160-test rerun passed. The cancellation correction still requires its
 final full-suite run; no final gate or round completion is inferred from the earlier head.
+
+Final local validation at `0cac3963c`: **15,442 passed, 85 skipped** on Linux/Python 3.12.16. All
+three private lanes cleared that exact correction. Strict mypy passed 1,147 files; Ruff lint and
+formatting passed, as did file-quality, Typer isolation, Rulesync drift, locked-SDD checks, 103 Node
+website tests and deterministic builds at both site bases. The complete website Python rerun passed
+160 tests. The final plan update changes no runtime or test code. Publication, CI on the published
+head, the ready handoff, complete PR-level review and live evidence remain separate pending steps.
