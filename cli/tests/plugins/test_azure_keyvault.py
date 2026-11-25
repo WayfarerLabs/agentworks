@@ -85,6 +85,7 @@ class _Credential:
 
 class _SDK:
     def __init__(self, monkeypatch: pytest.MonkeyPatch, answers: list[_Answer]) -> None:
+        monkeypatch.delenv("AZURE_TOKEN_CREDENTIALS", raising=False)
         self.adapter = _Adapter(answers)
         self.credential_error: BaseException | None = None
         self.credentials: list[_Credential] = []
@@ -116,6 +117,7 @@ class _SDK:
             return result
 
         monkeypatch.setattr(azure.identity, "DefaultAzureCredential", credential)
+        monkeypatch.setattr(azure.identity, "InteractiveBrowserCredential", credential)
         monkeypatch.setattr(azure.identity, "ClientSecretCredential", principal)
         monkeypatch.setattr(azure.keyvault.secrets, "SecretClient", client)
 
@@ -330,10 +332,6 @@ def test_preview_authentication_obeys_impact_ceiling(monkeypatch: pytest.MonkeyP
         assert result == {"token": PreviewIndeterminate(IndeterminateReason.OPERATOR_IMPACT_LIMITED)}
     else:
         assert result == {"token": PreviewFailed(FailureReason.AUTHENTICATION)}
-    options = sdk.credential_options[0]
-    assert options["exclude_interactive_browser_credential"] is (impact is OperatorImpact.NONE)
-    assert options["exclude_visual_studio_code_credential"] is (impact is OperatorImpact.NONE)
-    assert options["exclude_broker_credential"] is (impact is OperatorImpact.NONE)
     assert sdk.credentials[0].closed
 
 

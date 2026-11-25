@@ -52,6 +52,19 @@ if TYPE_CHECKING:
     from agentworks.schema import AgwModel, AgwRootModel
 
 
+_INTERACTION_ONLY_SELECTORS = frozenset(
+    {
+        "dev",
+        "azureclicredential",
+        "azurepowershellcredential",
+        "azuredeveloperclicredential",
+        "visualstudiocodecredential",
+        "interactivebrowsercredential",
+    }
+)
+"""Documented Azure Identity selectors whose credentials can require operator action."""
+
+
 @contextmanager
 def _quiet_provider_logging() -> Iterator[None]:
     """Contain Azure/MSAL diagnostics during this synchronous provider operation.
@@ -108,17 +121,25 @@ class _AzureKeyVaultClient:
         self._intent = intent
         self._resources = ExitStack()
         self._sdk_client: SecretClient | None = None
+        self._browser_fallback = False
 
     def _client(self) -> SecretClient:
         """Open provider resources only after the selected method starts."""
         from azure.core.exceptions import ClientAuthenticationError
-        from azure.identity import ClientSecretCredential, DefaultAzureCredential
+        from azure.identity import ClientSecretCredential, DefaultAzureCredential, InteractiveBrowserCredential
         from azure.keyvault.secrets import SecretClient
 
         if self._sdk_client is None:
             allow_impact = not isinstance(self._intent, PreviewIntent) or self._intent.impact is OperatorImpact.ALLOW
             auth = self._config.auth
-            credential: ClientSecretCredential | DefaultAzureCredential
+            selector = ""
+            if not isinstance(auth, AzureKeyVaultServicePrincipalAuth):
+                selector = os.environ.get("AZURE_TOKEN_CREDENTIALS", "").strip().lower()
+                if not allow_impact and selector in _INTERACTION_ONLY_SELECTORS:
+                    raise ClientAuthenticationError(
+                        "selected ambient Azure credential requires broader operator impact"
+                    )
+            credential: ClientSecretCredential | DefaultAzureCredential | InteractiveBrowserCredential
             if isinstance(auth, AzureKeyVaultServicePrincipalAuth):
                 secret = os.environ.get(auth.client_secret_env)
                 if not secret or "\0" in secret:
@@ -136,17 +157,34 @@ class _AzureKeyVaultClient:
                     )
                 except ValueError:
                     raise ClientAuthenticationError("explicit Azure service-principal credential invalid") from None
+            elif self._browser_fallback or selector == "interactivebrowsercredential":
+                self._browser_fallback = True
+                credential = InteractiveBrowserCredential(
+                    authority=vault_authority(self._config.vault_url),
+                    connection_timeout=10,
+                    read_timeout=30,
+                    retry_total=2,
+                    logging_enable=False,
+                )
             else:
+                exclusions = {"exclude_interactive_browser_credential": True}
+                if not allow_impact:
+                    exclusions.update(
+                        exclude_shared_token_cache_credential=True,
+                        exclude_visual_studio_code_credential=True,
+                        exclude_broker_credential=True,
+                        exclude_cli_credential=True,
+                        exclude_powershell_credential=True,
+                        exclude_developer_cli_credential=True,
+                    )
                 credential = DefaultAzureCredential(
                     authority=vault_authority(self._config.vault_url),
-                    exclude_interactive_browser_credential=not allow_impact,
-                    exclude_visual_studio_code_credential=not allow_impact,
-                    exclude_broker_credential=not allow_impact,
                     process_timeout=10,
                     connection_timeout=10,
                     read_timeout=30,
                     retry_total=2,
                     logging_enable=False,
+                    **exclusions,
                 )
             self._resources.callback(credential.close)
             self._sdk_client = SecretClient(
@@ -162,15 +200,34 @@ class _AzureKeyVaultClient:
         return self._sdk_client
 
     def _read(self, request: SecretLookupRequest) -> BackendFailed | BackendMissing | BackendResolved:
+        from azure.core.exceptions import ClientAuthenticationError
+
         mapping = request.mapping
         if not isinstance(mapping, AzureKeyVaultMapping):
             return BackendFailed(FailureReason.INVALID_MAPPING)
+        authentication_failed = False
+        value: object = None
         try:
             value = self._client().get_secret(mapping.root.name, mapping.root.version).value
         except (UserAbort, concurrent.futures.CancelledError):
             raise
+        except ClientAuthenticationError:
+            authentication_failed = True
         except Exception as exc:
             return _provider_failure(exc)
+        if authentication_failed:
+            allow_impact = not isinstance(self._intent, PreviewIntent) or self._intent.impact is OperatorImpact.ALLOW
+            if (
+                allow_impact
+                and not isinstance(self._config.auth, AzureKeyVaultServicePrincipalAuth)
+                and not self._browser_fallback
+            ):
+                # A deployed DAC credential can stop its chain before browser
+                # auth. Keep the browser fallback explicit and once per turn.
+                self._browser_fallback = True
+                self._sdk_client = None
+                return self._read(request)
+            return BackendFailed(FailureReason.AUTHENTICATION)
         if type(value) is not str or "\0" in value:
             return BackendFailed(FailureReason.MALFORMED_VALUE)
         return BackendResolved(value)
@@ -242,6 +299,11 @@ class AzureKeyVaultBackend(SecretBackend):
         name at its latest version. A table with `name` and `version` pins one
         version. Authentication belongs to the source. Preview never returns
         the secret value.
+
+        Ambient authentication tries the default credential chain, then browser
+        login on authentication failure when operator impact is permitted.
+        Explicit service-principal mode selects one identity and never falls
+        back to another credential.
 
         See Microsoft's Azure Key Vault and Azure Identity documentation for
         vault permissions and provider authentication setup.
