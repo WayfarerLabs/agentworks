@@ -37,6 +37,9 @@ def _probe(
         "PROBE_KIND": kind,
         "PROBE_PATH": str(path),
     }
+    if sys.platform == "win32":
+        # Python's Windows subprocess runtime requires this for SxS assemblies.
+        environment["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
     if client_secret is not None:
         environment["AZURE_CLIENT_SECRET"] = client_secret
     if replace_after_check:
@@ -45,12 +48,18 @@ def _probe(
         environment["PROBE_REPLACE_ON_REFRESH"] = "1"
     command = [sys.executable, "-c", "from tests.plugins._keyvault_file_support import input_probe; input_probe()"]
     if stdin_path is None:
-        completed = subprocess.run(command, input=payload, capture_output=True, timeout=8, env=environment, check=True)
+        completed = subprocess.run(command, input=payload, capture_output=True, timeout=8, env=environment, check=False)
     else:
         with stdin_path.open("rb") as stdin:
             completed = subprocess.run(
-                command, stdin=stdin, capture_output=True, timeout=8, env=environment, check=True
+                command, stdin=stdin, capture_output=True, timeout=8, env=environment, check=False
             )
+    # The child's environment and credential inputs are synthetic; repr escapes
+    # terminal control characters in its failure diagnostics.
+    assert completed.returncode == 0, (
+        f"synthetic credential probe exited {completed.returncode}; "
+        f"stderr={completed.stderr.decode('utf-8', errors='replace')!r}"
+    )
     assert completed.stderr == b""
     return cast("dict[str, Any]", json.loads(completed.stdout))
 

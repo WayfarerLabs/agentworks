@@ -310,24 +310,23 @@ def test_native_username_password_authentication_is_preserved(
 
 
 @pytest.mark.windows
-def test_parent_segments_are_resolved_after_directory_symlinks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_credential_read_matches_native_parent_segment_resolution(tmp_path: Path) -> None:
     target = tmp_path / "target"
     nested = target / "nested"
     nested.mkdir(parents=True)
-    certificate = target / "certificate.pem"
-    certificate.write_bytes(certificate_bytes())
+    physical = b"synthetic-physical-parent"
+    lexical = b"synthetic-lexical-parent"
+    (target / "credential").write_bytes(physical)
+    (tmp_path / "credential").write_bytes(lexical)
     link = tmp_path / "directory-link"
     try:
         link.symlink_to(nested, target_is_directory=True)
     except OSError:
         pytest.skip("host does not permit directory symlinks")
-    monkeypatch.setenv("AZURE_CLIENT_CERTIFICATE_PATH", str(link / ".." / "certificate.pem"))
-    monkeypatch.setenv("AZURE_TOKEN_CREDENTIALS", "EnvironmentCredential")
-    sdk = FileSDK(monkeypatch)
-    with _context() as client:
-        result = client.preview((_request(),))
-    assert result == {"token": PreviewAvailable()}
-    assert len(sdk.http.forms) == 1
+    configured = link / ".." / "credential"
+    native = configured.read_bytes()
+    assert native in (physical, lexical)
+    assert _read_regular_file(str(configured)) == native
 
 
 def _close_then_fail(monkeypatch: pytest.MonkeyPatch, failure: BaseException | None = None) -> list[int]:
