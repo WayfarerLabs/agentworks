@@ -925,10 +925,12 @@ One outcome changes. Today any failure in these steps warns through the `STEP_FA
 (`:486-488`) and agent delete still drops the agent's row (`agents/manager/lifecycle.py:435-437`).
 Now a failure, a busy account or a `lckpwdf` timeout included, raises its typed error and agent
 delete keeps the row, so rerunning the delete retries: the same rule as membership removal, where
-cleanup succeeds before the row that tracks it is dropped. A rollback has no row; its failure
-already raises naming the agent left standing and the recovery command (`agents/nodes.py:233-240`),
-and that command now finds the row it names. Without a row, `agent create` of the name adopts the
-existing account (`agents/initializer.py:248`).
+cleanup succeeds before the row that tracks it is dropped. The two rollbacks differ. The
+`session create --new-agent` rollback goes through `delete_agent` (`agents/nodes.py:219`), so the
+agent has a row; its failure raises naming the agent left standing and the recovery command
+(`:233-240`), and that command now finds the row it names. Agent create's rollback
+(`agents/realize.py:103-112`) runs before any row exists and warns on failure, as today; a later
+`agent create` of the name adopts the account left behind (`agents/initializer.py:248`).
 
 Everything else keeps today's behavior. A `userdel-pre.d` hook or `userdel`'s busy check still
 refuses before anything is removed, so a vetoed account keeps its home and mail spool. A non-forced
