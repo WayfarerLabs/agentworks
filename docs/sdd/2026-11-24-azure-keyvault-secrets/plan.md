@@ -156,3 +156,10 @@ environment now supplies the documented required `SYSTEMROOT`, and nonzero child
 escaped synthetic diagnostics. No production code changed. The delegate's 56 focused Linux tests and
 changed-file typing/style checks passed. Independent follow-up review, local verification and
 Windows CI must confirm this correction; the original child failure is not claimed diagnosed.
+
+The lead repeated all 56 file/input tests successfully at the integrated Windows-fixture correction,
+with changed-file mypy, Ruff lint/format and plan file-quality checks passing. All three private
+lanes cleared the test-only correction at `541f20357`; complexity and correctness also cleared the
+subsequent formatting-only head `065143cfc`. Production code remains identical to the fully tested
+cleanup correction. The next published Windows run and all required checks still gate ready; no
+third full local suite was repeated for these two test-only changes.
