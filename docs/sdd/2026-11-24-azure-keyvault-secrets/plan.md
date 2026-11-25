@@ -144,3 +144,15 @@ formatting passed, as did file-quality, Typer isolation, Rulesync drift, locked-
 website tests and deterministic builds at both site bases. The complete website Python rerun passed
 160 tests. The final plan update changes no runtime or test code. Publication, CI on the published
 head, the ready handoff, complete PR-level review and live evidence remain separate pending steps.
+
+Published CI at `8b8b4338d` passed all three Linux Python versions and other gates, but Windows
+failed three new credential-file tests (517 passed, 21 skipped). The symlink-parent test assumed
+POSIX path semantics. Two subprocess tests failed without captured child diagnostics, so their
+underlying cause was not established. The PR remains draft within unfinished round 1.
+
+The test-only correction `e1f17280a`, integrated as `59feb6646`, compares guarded file bytes with
+the host's native open using distinct possible path targets. Its synthetic Windows subprocess
+environment now supplies the documented required `SYSTEMROOT`, and nonzero child exits expose
+escaped synthetic diagnostics. No production code changed. The delegate's 56 focused Linux tests
+and changed-file typing/style checks passed. Independent follow-up review, local verification and
+Windows CI must confirm this correction; the original child failure is not claimed diagnosed.
