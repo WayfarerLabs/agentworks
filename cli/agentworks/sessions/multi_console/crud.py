@@ -520,7 +520,6 @@ def remove_sessions(
     with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
         require_unchanged("console", console_name, read, console_fields(db, console_name))
         console = _require_console(db, console_name)
-        require_members()
         live = _mc._live_access(db, config, console.vm_name)
         with db.transaction():
             for n in session_names:
