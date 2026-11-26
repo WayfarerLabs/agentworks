@@ -81,6 +81,33 @@ def _confirm_running_restart(
         raise UserAbort("restart cancelled")
 
 
+def probe_restart_target(db: Database, session: SessionRow) -> None:
+    """Probe the session's lock set before a restart consent asks about it, refusing one that is held."""
+    from agentworks.native_locks import probe_locks
+
+    from ._intent import session_request
+
+    probe_locks(db.path, session_request(db, session))
+
+
+def _free_restart_targets(db: Database, sessions: Iterable[SessionRow]) -> list[SessionRow]:
+    """The sessions a batch restart's consent asks about: those whose lock set is free.
+
+    The batch probes again and reports a busy one blocked, so the operator
+    is never asked about a session another operation holds.
+    """
+    from agentworks.native_locks import NativeLockBusyError
+
+    free = []
+    for session in sessions:
+        try:
+            probe_restart_target(db, session)
+        except NativeLockBusyError:
+            continue
+        free.append(session)
+    return free
+
+
 def _require_selected_session(db: Database, name: str, session_uuid: str) -> SessionRow:
     """Re-fetch one selected session and refuse a same-name replacement."""
     session = _mgr._require_session(db, name)
@@ -303,15 +330,16 @@ def _launch_all_sessions(
         return
 
     authorized_running_names: set[str] = set()
-    if replace_running:
+    consentable = _free_restart_targets(db, sessions) if replace_running else []
+    if consentable:
         consent_status_map = _mgr.observe_session_statuses(
-            sessions,
+            consentable,
             db=db,
             config=config,
             include_legacy=True,
         )
         running_names = sorted(
-            session.name for session in sessions if consent_status_map.get(session.name) is SessionStatus.RUNNING
+            session.name for session in consentable if consent_status_map.get(session.name) is SessionStatus.RUNNING
         )
         _confirm_running_restart(running_names, yes=yes, interaction=interaction)
         authorized_running_names.update(running_names)
@@ -401,6 +429,7 @@ def restart_session(
         )
         return
     session = _mgr._require_session(db, name)
+    probe_restart_target(db, session)
     consent_status = _mgr.observe_session_statuses(
         [session],
         db=db,

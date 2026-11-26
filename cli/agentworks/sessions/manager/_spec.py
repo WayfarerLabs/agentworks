@@ -117,8 +117,9 @@ def launch_with_spec(
 ) -> None:
     """Own validation and restart consent, then hand the layer to the batch, which accepts it with the intent.
 
-    The restart consent probe and its confirmation run with nothing locked.
-    This command takes no lock of its own: the batch replaces the layer
+    A restart probes the session's lock set first, so a held session refuses
+    before the operator is asked, then observes the session and asks its
+    confirmation with nothing locked. This command takes no lock of its own: the batch replaces the layer
     under its family's brief set at intent acceptance, after it observes the
     session again, so a session whose status changed since the confirmation
     refuses there before the layer is replaced.
@@ -129,7 +130,7 @@ def launch_with_spec(
     from agentworks.runtime_state._models import SessionDeclaration
     from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-    from ._lifecycle import _confirm_running_restart
+    from ._lifecycle import _confirm_running_restart, probe_restart_target
 
     require_exact_tty_interaction_policy(interaction)
     overlay = parse_instance_spec("session", spec)
@@ -145,6 +146,7 @@ def launch_with_spec(
     pending = _validate_candidate(db, config, session, overlay, intent=intent)
     authorized = False
     if operation == "restart":
+        probe_restart_target(db, session)
         authorized = observed_running(session)
         _confirm_running_restart([name] if authorized else [], yes=yes, interaction=interaction)
     outcomes: list[OverlayOutcome] = []
