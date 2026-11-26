@@ -8,7 +8,8 @@ from uuid import uuid4
 import pytest
 
 from agentworks.errors import StateConflictError
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.secrets import SecretTarget
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
@@ -29,9 +30,9 @@ PANE = SecretTarget(vm={}, label="console-pane:pin")
 
 def _guard_free(db: Database) -> bool:
     try:
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             return True
-    except NativeSetupBusyError:
+    except NativeLockBusyError:
         return False
 
 

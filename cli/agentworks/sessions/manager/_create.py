@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.instance_specs import InstanceOverlay
+    from agentworks.native_locks import Entity, LockRequest
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
@@ -114,7 +115,7 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     ``vms.tailscale_host``, and without the reload the address check
     below could spuriously raise. Create reloads it before building its
     graph, inside the activation gate, whose start records
-    ``last_started_at``, and once more under the VM's guard, where it is
+    ``last_started_at``, and once more under its lock set, where it is
     compared with the plan. (The pre-create SecretTarget read only
     ``vm.template``, which a refresh cannot change, so the pre-refresh row
     was safe to target; the nodes keep their construction row, whose
@@ -422,6 +423,7 @@ def create_session(
         interaction=interaction,
     )
 
+    from agentworks.native_locks import probe_locks
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -434,6 +436,8 @@ def create_session(
     # the boundary resolver so nothing resolves or prompts twice.
     from agentworks.vms.manager import require_vm_ssh_boundary
 
+    request, grant_all_agents = session_create_request(db, plan)
+    probe_locks(db.path, request)
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
         vm = _reload_vm(db, plan.target_vm_name)
@@ -447,12 +451,29 @@ def create_session(
             interaction=interaction,
         )
 
-        # Every prompt is answered: the VM's guard is held from here through
-        # the roll-forward and any rollback, which share it through the
-        # graph's VM node, and what the plan read is read again under it.
-        with graph.vm_node.mutation_guard():
+        # Every prompt is answered: the set is held from here through the
+        # roll-forward and any rollback, which reuse it through the graph's VM
+        # node, and what the plan read is read again under it. A new
+        # workspace's target tree joins as the guest's lookup walk names it.
+        from agentworks.workspaces.locks import (
+            require_grant_all_unchanged,
+            require_trees_unchanged,
+            walk_trees,
+            with_trees,
+        )
+
+        trees = (
+            ()
+            if graph.pending_workspace is None
+            else (walk_trees(vm, config, [graph.pending_workspace.workspace_path]),)
+        )
+        with graph.vm_node.locked(with_trees(request, *trees)):
             require_vm_unchanged(db, graph.vm_node.row)
             require_plan_rows_current()
+            if plan.new_workspace:
+                require_grant_all_unchanged(db, vm, grant_all_agents)
+            for tree in trees:
+                require_trees_unchanged(vm, config, tree)
             if db.get_session(plan.name) is not None:
                 raise StateConflictError(
                     f"session '{plan.name}' was created since this command read it",
@@ -485,3 +506,39 @@ def create_session(
                     setup_failures=setup_failures,
                 )
             raise_setup_failures(setup_failures)
+
+
+def session_create_request(db: Database, plan: SessionPlan) -> tuple[LockRequest, tuple[str, ...]]:
+    """Session create's lock set without a new workspace's tree, and the grant-all agents it grants.
+
+    The session, and in agent mode its implicit grant, exclusive; a new
+    workspace adds what workspace create takes (the workspace, the admin's
+    grant and the grant-all agents' grants, with grant-all shared), and a
+    new agent its account. Each new entity is locked by name before its row
+    exists.
+    """
+    from agentworks.agents.manager import derive_linux_user
+    from agentworks.native_locks import LockRequest, account_entity, grant_entity, session_entity, workspace_entity
+    from agentworks.native_locks.rows import admin_account_entity, agent_account_entity
+    from agentworks.workspaces.locks import workspace_create_request
+
+    vm = plan.vm
+    workspace = workspace_entity(vm.name, plan.workspace_name)
+    if plan.agent_name is None:
+        account = admin_account_entity(vm)
+    elif plan.new_agent or plan.existing_agent is None:
+        account = account_entity(vm.name, derive_linux_user(plan.agent_name))
+    else:
+        account = agent_account_entity(plan.existing_agent)
+    exclusive = [session_entity(plan.name, workspace=workspace, account=account)]
+    shared: list[Entity] = []
+    if plan.agent_name is not None:
+        exclusive.append(grant_entity(workspace, account))
+    if plan.new_agent:
+        exclusive.append(account)
+    grant_all_agents: tuple[str, ...] = ()
+    if plan.new_workspace:
+        created, grant_all_agents = workspace_create_request(db, vm, plan.workspace_name)
+        exclusive.extend(created.exclusive)
+        shared.extend(created.shared)
+    return LockRequest(exclusive=tuple(exclusive), shared=tuple(shared)), grant_all_agents

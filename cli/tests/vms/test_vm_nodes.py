@@ -19,6 +19,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ConfigError, StateError
 from agentworks.execution import trust
 from agentworks.execution.errors import TrustMissing
+from agentworks.native_locks import LockMode
 from agentworks.orchestration.activation import activation_gate, ensure_active
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -435,7 +436,8 @@ def test_pending_vm_teardown_deletes_the_row(db: Database) -> None:
 
 @pytest.mark.windows
 def test_auto_start_rechecks_power_with_family_guard(db, monkeypatch):
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     vm = _seed(db)
     platform = _GatePlatform(status=VMStatus.STOPPED)
@@ -450,14 +452,15 @@ def test_auto_start_rechecks_power_with_family_guard(db, monkeypatch):
     monkeypatch.setattr(platform, "status", status)
     ensure_active(node, _no_resolve)
     assert platform.start_calls == 0
-    with native_mutation_guard(db.path, vm.name), pytest.raises(NativeSetupBusyError):
+    with native_locks(db.path, vm_exclusive(vm.name)), pytest.raises(NativeLockBusyError):
         node.auto_start(cast("SecretReader", object()))
     assert platform.start_calls == 0
 
 
 @pytest.mark.windows
 def test_hold_admission_is_guarded_but_interactive_body_is_unlocked(db, monkeypatch):
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     vm = _seed(db)
     platform = _GatePlatform()
@@ -465,24 +468,25 @@ def test_hold_admission_is_guarded_but_interactive_body_is_unlocked(db, monkeypa
 
     @contextlib.contextmanager
     def delayed_attachment(row, *, config):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive(vm.name)):
             pytest.fail("stop admitted before keeper attachment")
         yield
 
     monkeypatch.setattr(platform, "vm_active", delayed_attachment)
-    with node.hold_active(), native_mutation_guard(db.path, vm.name):
+    with node.hold_active(), native_locks(db.path, vm_exclusive(vm.name)):
         pass
 
 
 @pytest.mark.windows
 def test_stopped_live_guest_access_skips_booting_hold_and_admission_can_be_busy(db, monkeypatch):
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     vm = _seed(db)
     db.set_vm_desired_runtime_state(vm.name, Target.STOPPED, expected_vm_uuid=vm.vm_uuid)
     platform = _GatePlatform()
     node, _ = _node(db, platform, vm)
-    with native_mutation_guard(db.path, vm.name), pytest.raises(NativeSetupBusyError), node.hold_active():
+    with native_locks(db.path, vm_exclusive(vm.name)), pytest.raises(NativeLockBusyError), node.hold_active():
         pytest.fail("live diagnostic skipped guarded admission")
     with node.hold_active():
         pass
@@ -491,21 +495,79 @@ def test_stopped_live_guest_access_skips_booting_hold_and_admission_can_be_busy(
 
 @pytest.mark.windows
 def test_explicit_guard_token_reuses_outer_operation_for_auto_start_and_hold(db, monkeypatch):
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     vm = _seed(db)
     platform = _GatePlatform(status=VMStatus.STOPPED)
-    with native_mutation_guard(db.path, vm.name) as guard:
+    with native_locks(db.path, vm_exclusive(vm.name)) as guard:
         site = VMSiteNode("stub", cast("VMPlatform", platform), (), cast("Registry", object()))
-        node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site, held_native_guard=guard)
+        node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site, held=guard)
         monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: None)
         node.auto_start(cast("SecretReader", object()))
-        with node.hold_active(), pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+        with node.hold_active(), pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive(vm.name)):
             pytest.fail("outer operation guard released")
     assert platform.start_calls == 1
     assert platform.holds == 2
     with pytest.raises(StateError), node.hold_active():
         pytest.fail("completed token accepted")
+
+
+@pytest.mark.windows
+def test_a_cold_boot_holds_the_vm_exclusive_only_for_the_boot(db, monkeypatch):
+    from agentworks.native_locks import LockRequest, NativeLockBusyError, native_locks, vm_entity
+
+    vm = _seed(db)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    node, _ = _node(db, platform, vm)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: None)
+    admission = LockRequest(shared=(vm_entity(vm.name),))
+    during_start: list[NativeLockBusyError] = []
+    original_start = platform.start
+
+    def start(row, ctx):
+        with pytest.raises(NativeLockBusyError) as refused, native_locks(db.path, admission):
+            pass
+        during_start.append(refused.value)
+        original_start(row, ctx)
+
+    monkeypatch.setattr(platform, "start", start)
+    ensure_active(node, lambda name: "value")
+    assert platform.start_calls == 1
+    assert [(error.entity_kind, error.mode) for error in during_start] == [("vm", LockMode.SHARED)]
+    assert node.held is None
+    with native_locks(db.path, admission):
+        pass
+
+
+@pytest.mark.windows
+def test_a_transient_reachability_miss_on_a_running_vm_takes_no_vm_exclusive(db, monkeypatch):
+    from agentworks.native_locks import LockRequest, native_locks, workspace_entity
+
+    vm = _seed(db)
+    platform = _GatePlatform(status=VMStatus.RUNNING)
+    node, _ = _node(db, platform, vm)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
+    # A change below the VM holds it shared; a vm exclusive would be refused.
+    with native_locks(db.path, LockRequest(exclusive=(workspace_entity(vm.name, "busy"),))):
+        ensure_active(node, lambda name: "value")
+    assert platform.start_calls == 0
+
+
+@pytest.mark.windows
+def test_a_boot_under_a_set_holding_the_vm_shared_refuses(db, monkeypatch):
+    from agentworks.native_locks import LockRequest, native_locks, workspace_entity
+
+    vm = _seed(db)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    with native_locks(db.path, LockRequest(exclusive=(workspace_entity(vm.name, "ws"),))) as held:
+        site = VMSiteNode("stub", cast("VMPlatform", platform), (), cast("Registry", object()))
+        node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site, held=held)
+        with pytest.raises(StateError) as refused:
+            node.auto_start(cast("SecretReader", object()))
+    assert (refused.value.entity_kind, refused.value.entity_name) == ("vm", vm.name)
+    assert platform.start_calls == 0
 
 
 @pytest.mark.parametrize("replaced", [False, True])

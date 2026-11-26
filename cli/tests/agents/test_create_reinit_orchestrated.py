@@ -1282,8 +1282,9 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     resolve_counter,
 ):
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
     from agentworks.harness_setup.state import read_native_setup
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     config = make_config()
     _seed_vm(db)
@@ -1299,7 +1300,7 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
         assert invocation.environment["SETUP_TOKEN"] == "setup-private"
         assert invocation.environment["AGENTWORKS_AGENT"] == "dev"
         assert "AGENTWORKS_WORKSPACE" not in invocation.environment
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         calls.append(invocation)
         return ArtifactApplication()

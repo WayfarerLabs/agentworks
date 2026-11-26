@@ -287,7 +287,7 @@ def restore_session(
     checks the agents of only the panes it will open and resolves only their
     secrets, in one pass, before its first tmux change; a window with nothing
     missing prompts for nothing. Each pane it opens parks a fresh handover.
-    All of that runs before the console's family guard is taken; under it
+    All of that runs before the console's lock is taken; under it
     the console, the member and the window are read and observed again, and
     a change refuses before the first tmux change.
     """
@@ -300,9 +300,10 @@ def restore_session(
         require_vm_unchanged,
     )
 
-    from ._helpers import guarded_console_selection
+    from ._helpers import guarded_console_selection, probe_console
 
     console = _require_console(db, console_name)
+    probe_console(db, console_name)
     registry = load_request_registry(config, live_database=db)
     member = db.get_console_session(console_name, session_name)
     if member is None:
@@ -315,7 +316,7 @@ def restore_session(
 
     @contextmanager
     def guarded(run: RunCommand, admin: VMAccess, vm: VMRow, observed: _WindowObservation) -> Iterator[None]:
-        """The console's guard, with the console, the member and the window observed again under it."""
+        """The console's exclusive lock, with the console, the member and the window observed again under it."""
         with guarded_console_selection(db, console_name):
             require_unchanged("console", console_name, read, console_fields(db, console_name))
             require_unchanged(
@@ -389,7 +390,7 @@ def restore_session(
         values = resolver.values
         try:
             with guarded(run, admin, vm, observed):
-                # The session the window is rebuilt for, as read before the guard.
+                # The session the window is rebuilt for, as read before the lock.
                 require_session_unchanged(db, session_name, session)
                 _apply_restore(
                     access,

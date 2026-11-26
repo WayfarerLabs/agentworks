@@ -17,19 +17,27 @@ from agentworks.errors import (
 )
 from agentworks.execution.requests import Command, FromFile, ToFile
 from agentworks.naming import validate_name
+from agentworks.native_locks import probe_locks
 from agentworks.path_rendering import format_host_path
 from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
-from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied
+from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied, stored_workspace_path
+from agentworks.workspaces.locks import (
+    require_grant_all_unchanged,
+    require_trees_unchanged,
+    walk_trees,
+    with_trees,
+)
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.native_locks import LockRequest
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.initializer.steps import InitLog
@@ -57,10 +65,14 @@ def copy_workspace(
     workspace's scope) is entered on the ExitStack and, when the
     destination VM differs, a SECOND boundary (destination workspace's
     scope) nests on the same stack so both VMs stay held; the same-VM
-    case reuses the source composition with no second boundary. With
-    every prompt answered, the native mutation guard of each VM is taken
-    in VM name order (one when both are the same VM) and held across
-    the pack and the unpack, and the rows read before it are read again.
+    case reuses the source composition with no second boundary. Each VM's
+    lock set is probed before the gates: on the destination the new
+    workspace, its target tree, the admin's grant and one per grant-all
+    agent, with grant-all shared; on the source its tree, read whole and so
+    exclusive, with the source workspace shared. With every prompt
+    answered, the trees are walked on their VMs and each VM's set is taken
+    in VM name order (one set when both are the same VM) and held across
+    the pack and the unpack; the rows and walks read before are read again.
     The multi-root walk stays available for the batch commands that
     already coalesce.
 
@@ -113,6 +125,9 @@ def copy_workspace(
             # is a read like the others, and every prompt precedes the guards.
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
+            requests, grant_all_agents = _copy_requests(db, src_ws, src_vm, dest_vm, dest_name)
+            for locked_vm in sorted(requests):
+                probe_locks(db.path, requests[locked_vm])
             registry = load_request_registry(config, live_database=db)
             src_node, _resolver, _ctx = _keepalive_stack.enter_context(
                 gated_vm_boundary(
@@ -150,13 +165,22 @@ def copy_workspace(
                         entity_name=vm.name,
                     )
 
-            # One guard per VM, taken in VM name order once both are admitted,
+            # One set per VM, taken in VM name order once both are admitted,
             # and held across the pack and the unpack: the source cannot be
             # changed under the read, nor the destination under the write.
-            for guarded in sorted(nodes):
-                _keepalive_stack.enter_context(nodes[guarded].mutation_guard())
+            source_tree = walk_trees(src_vm, config, [stored_workspace_path(src_ws.workspace_path)])
+            target_tree = walk_trees(dest_vm, config, [default_workspace_path(config, dest_name)])
+            trees = {src_vm.name: [source_tree], dest_vm.name: [target_tree]}
+            if src_vm.name == dest_vm.name:
+                trees[src_vm.name] = [source_tree, target_tree]
+            for locked_vm in sorted(nodes):
+                request = with_trees(requests[locked_vm], *trees[locked_vm])
+                _keepalive_stack.enter_context(nodes[locked_vm].locked(request))
             for node in nodes.values():
                 require_vm_unchanged(db, node.row)
+            require_trees_unchanged(src_vm, config, source_tree)
+            require_trees_unchanged(dest_vm, config, target_tree)
+            require_grant_all_unchanged(db, dest_vm, grant_all_agents)
             require_unchanged(
                 "workspace", source_name, workspace_fields(src_ws), workspace_fields(db.get_workspace(source_name))
             )
@@ -302,3 +326,24 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
 
     vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
     output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
+
+
+def _copy_requests(
+    db: Database, src_ws: WorkspaceRow, src_vm: VMRow, dest_vm: VMRow, dest_name: str
+) -> tuple[dict[str, LockRequest], tuple[str, ...]]:
+    """Copy's lock set per VM, without its trees, and the destination's grant-all agents.
+
+    The destination creates ``dest_name`` as workspace create does; the
+    source workspace is held shared, so it cannot be deleted, rehomed or
+    repaired mid-copy while its sessions keep running. One VM gets one set.
+    """
+    from agentworks.native_locks import LockRequest
+    from agentworks.native_locks.rows import workspace_entity_for
+    from agentworks.workspaces.locks import workspace_create_request
+
+    destination, grant_all_agents = workspace_create_request(db, dest_vm, dest_name)
+    source = workspace_entity_for(src_ws)
+    if src_vm.name == dest_vm.name:
+        merged = LockRequest(exclusive=destination.exclusive, shared=(*destination.shared, source))
+        return {dest_vm.name: merged}, grant_all_agents
+    return {src_vm.name: LockRequest(shared=(source,)), dest_vm.name: destination}, grant_all_agents

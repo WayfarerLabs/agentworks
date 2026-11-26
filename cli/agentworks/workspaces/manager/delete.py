@@ -14,8 +14,9 @@ from agentworks.workspaces.manager._common import _workspace_scope
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, WorkspaceRow
     from agentworks.execution.access import VMAccess
+    from agentworks.native_locks import LockRequest
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
@@ -90,6 +91,13 @@ def delete_workspace(
             "so its directory is not touched. Check the VM for it by hand."
         )
 
+    from agentworks.native_locks import probe_locks
+
+    request, dependents = _workspace_delete_request(db, ws)
+    if vm_node is None:
+        # A conflict refuses before the confirmation; a nested teardown's caller holds the set.
+        probe_locks(db.path, request)
+
     if not yes:
         if path_known:
             msg = (
@@ -105,8 +113,9 @@ def delete_workspace(
 
     import contextlib
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
     from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
+    from agentworks.workspaces.locks import require_trees_unchanged, walk_trees, with_trees
 
     vm = db.get_vm(ws.vm_name)
     if vm is not None:
@@ -120,7 +129,7 @@ def delete_workspace(
         if vm is not None:
             if vm_node is None:
                 # The standalone composition root: build the boundary here.
-                # Its secrets resolve before the guard below.
+                # Its secrets resolve before the lock set below.
                 from agentworks.bootstrap import load_request_registry
 
                 registry = load_request_registry(config, live_database=db)
@@ -163,16 +172,24 @@ def delete_workspace(
                     )
                 _keepalive_stack.enter_context(vm_node.hold_active())
                 vm = vm_node.row
+        # Only the entry the stored path names is removed, so its walk resolves
+        # every component but the last and names that entry without following it.
+        trees = None
+        if vm is not None and stored_path is not None:
+            trees = walk_trees(vm, config, [stored_path], unlink_only=True)
+            request = with_trees(request, trees)
         # A workspace whose VM row is gone, outside a nested teardown, has no
-        # node to take the guard through.
-        _keepalive_stack.enter_context(
-            native_mutation_guard(db.path, ws.vm_name) if node is None else node.mutation_guard()
-        )
-        # What the confirmation showed: the workspace and the sessions it counted.
+        # node to lock through.
+        _keepalive_stack.enter_context(native_locks(db.path, request) if node is None else node.locked(request))
+        # What the confirmation showed: the workspace and the sessions it counted,
+        # and the grants and consoles its lock set was built from.
         if vm is not None:
             require_vm_unchanged(db, vm)
         require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
         require_unchanged("workspace", name, session_names, [s.name for s in db.list_sessions(workspace_name=name)])
+        require_unchanged("workspace", name, dependents, _workspace_dependents(db, ws))
+        if vm is not None and trees is not None:
+            require_trees_unchanged(vm, config, trees)
         log = _keepalive_stack.enter_context(operation_log(ws.vm_name, "workspace-delete"))
         output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
         # console_pairs is populated only when we reach the VM; the
@@ -276,3 +293,50 @@ def delete_workspace(
 
         db.delete_workspace(name)
         output.info(f"Workspace '{name}' deleted")
+
+
+def _workspace_dependents(db: Database, ws: WorkspaceRow) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The agents holding grants on ``ws`` and the consoles holding its sessions, by name."""
+    sessions = db.list_sessions(workspace_name=ws.name)
+    agents = tuple(
+        sorted(a.name for a in db.list_agents(vm_name=ws.vm_name) if ws.name in db.list_granted_workspaces(a.name))
+    )
+    consoles = tuple(sorted({c.name for s in sessions for c in db.list_consoles_for_session(s.name)}))
+    return agents, consoles
+
+
+def _workspace_delete_request(
+    db: Database, ws: WorkspaceRow
+) -> tuple[LockRequest, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Workspace delete's lock set without its tree, and the dependents it was built from.
+
+    The workspace, each of its sessions, its grants (the admin's and each
+    granted agent's) and the consoles holding its sessions, all exclusive.
+    A workspace whose VM row is gone has no admin to name, so it locks the
+    agents' grants alone.
+    """
+    from agentworks.native_locks import LockRequest
+    from agentworks.native_locks.rows import (
+        admin_account_entity,
+        agent_account_entity,
+        consoles_holding,
+        grant_entity_for,
+        session_entity_for,
+        workspace_entity_for,
+    )
+
+    sessions = db.list_sessions(workspace_name=ws.name)
+    vm = db.get_vm(ws.vm_name)
+    accounts = [] if vm is None else [admin_account_entity(vm)]
+    accounts.extend(
+        agent_account_entity(agent)
+        for agent in db.list_agents(vm_name=ws.vm_name)
+        if ws.name in db.list_granted_workspaces(agent.name)
+    )
+    exclusive = (
+        workspace_entity_for(ws),
+        *(session_entity_for(db, session) for session in sessions),
+        *(grant_entity_for(ws, account) for account in accounts),
+        *consoles_holding(db, sessions),
+    )
+    return LockRequest(exclusive=exclusive), _workspace_dependents(db, ws)

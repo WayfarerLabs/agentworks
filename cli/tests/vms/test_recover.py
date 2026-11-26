@@ -171,11 +171,11 @@ def test_a_vm_whose_provisioning_changed_before_the_guard_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The row read under the guard decides: a VM whose provisioning failed meanwhile is not repaired."""
-    from agentworks.harness_setup import locking
+    from agentworks import native_locks as locking
 
     _seed(db)
     guest = _guest(monkeypatch)
-    real_guard = locking.native_mutation_guard
+    real_guard = locking.native_locks
 
     @contextlib.contextmanager
     def guard_after_a_change(*args: object, **kwargs: object) -> Iterator[object]:
@@ -183,7 +183,7 @@ def test_a_vm_whose_provisioning_changed_before_the_guard_is_refused(
         with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
             yield held
 
-    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_change)
+    monkeypatch.setattr(locking, "native_locks", guard_after_a_change)
 
     with pytest.raises(StateError) as raised:
         _recover(db, make_config())
@@ -201,11 +201,11 @@ def test_a_vm_replaced_before_the_guard_is_refused(
     """A VM deleted and recreated under the same name before the guard is not the VM recover selected.
 
     The secrets resolved before the guard; nothing reaches the guest."""
-    from agentworks.harness_setup import locking
+    from agentworks import native_locks as locking
 
     _seed(db)
     guest = _guest(monkeypatch)
-    real_guard = locking.native_mutation_guard
+    real_guard = locking.native_locks
     replacements = []
 
     @contextlib.contextmanager
@@ -216,7 +216,7 @@ def test_a_vm_replaced_before_the_guard_is_refused(
         with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
             yield held
 
-    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_replacement)
+    monkeypatch.setattr(locking, "native_locks", guard_after_a_replacement)
 
     with pytest.raises(StateError) as raised:
         _recover(db, make_config())

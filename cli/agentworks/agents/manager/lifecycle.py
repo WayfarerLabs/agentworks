@@ -27,13 +27,16 @@ from agentworks.vms.manager import gated_vm_boundary
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic import BaseModel
 
     from agentworks.agents.template import AgentTemplate
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import AgentRow, Database, SessionRow
     from agentworks.execution.access import VMAccess
     from agentworks.instance_specs import InstanceOverlay
+    from agentworks.native_locks import LockRequest
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
@@ -184,8 +187,12 @@ def create_agent(
         agent=name,
     )
 
+    from agentworks.agents.realize import agent_create_request
+    from agentworks.native_locks import probe_locks
     from agentworks.vms.manager import require_vm_ssh_boundary
 
+    request, grant_workspaces = agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
+    probe_locks(db.path, request)
     require_vm_ssh_boundary(db, config, vm)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # The preflight boundary: an unresolvable token fails before
@@ -227,8 +234,14 @@ def create_agent(
         git_redactions = credential_redactions(tmpl_node.credentials, resolver.values)
 
         setup_failures: list[SetupFailure] = []
-        with output.section("Agent Initialization"):
+        with vm_node.locked(request) as held, output.section("Agent Initialization"):
             from agentworks.agents.realize import realize_agent
+            from agentworks.recheck import require_unchanged, require_vm_unchanged
+
+            require_vm_unchanged(db, vm_node.row)
+            if grant_all_workspaces:
+                current = tuple(ws.name for ws in db.list_workspaces(vm_name=vm.name))
+                require_unchanged("vm", vm.name, sorted(grant_workspaces), sorted(current))
 
             # realize_agent emits its own "Agent '<name>' created ..."
             # line (shared with the session-create ephemeral path), so it
@@ -249,6 +262,7 @@ def create_agent(
                 setup_values=resolver.values,
                 grant_all_workspaces=grant_all_workspaces,
                 overlay=overlay,
+                held=held,
             )
             # Bookkeeping only, deliberately not via a realization log:
             # this command never unwinds a realized agent (a failure after
@@ -315,6 +329,13 @@ def delete_agent(
             hint="Delete the sessions first, or pass --force to also stop them.",
         )
 
+    from agentworks.native_locks import probe_locks
+
+    request, dependents = _agent_delete_request(db, agent, agent_sessions)
+    if vm_node is None:
+        # A conflict refuses before the confirmation; a nested teardown's caller holds the set.
+        probe_locks(db.path, request)
+
     if not yes:
         msg = f"Delete agent '{name}'?"
         if agent_sessions:
@@ -336,7 +357,7 @@ def delete_agent(
             resolve_session_tmux_server(db, session)
         if vm_node is None:
             # The standalone composition root: build the boundary here. Its
-            # secrets resolve before the guard below.
+            # secrets resolve before the lock set below.
             from agentworks.bootstrap import load_request_registry
 
             registry = load_request_registry(config, live_database=db)
@@ -377,9 +398,11 @@ def delete_agent(
                 )
             held.enter_context(vm_node.hold_active())
             node = vm_node
-        held.enter_context(node.mutation_guard())
-        # What the confirmation showed: the agent and the sessions it named.
+        held.enter_context(node.locked(request))
+        # What the confirmation showed: the agent and the sessions it named,
+        # and the grants and consoles its lock set was built from.
         require_vm_unchanged(db, node.row)
+        require_unchanged("agent", name, dependents, _agent_dependents(db, agent, agent_sessions))
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
         require_unchanged(
             "agent",
@@ -461,6 +484,57 @@ def delete_agent(
             log.close()
 
 
+def _agent_dependents(
+    db: Database, agent: AgentRow, sessions: Sequence[SessionRow]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The workspaces the agent holds grants on and the consoles holding its sessions, by name."""
+    granted = tuple(sorted(db.list_granted_workspaces(agent.name)))
+    consoles = tuple(sorted({c.name for s in sessions for c in db.list_consoles_for_session(s.name)}))
+    return granted, consoles
+
+
+def _agent_delete_request(
+    db: Database, agent: AgentRow, sessions: Sequence[SessionRow]
+) -> tuple[LockRequest, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Agent delete's lock set, and the dependents it was built from for the step-7 re-check.
+
+    The account, each of its sessions, its grants and the consoles holding
+    its sessions, all exclusive, and the grant-all set when the agent is a
+    grant-all agent.
+    """
+    from agentworks.native_locks import LockRequest, grant_all_entity, grant_entity, workspace_entity
+    from agentworks.native_locks.rows import agent_account_entity, consoles_holding, session_entity_for
+
+    account = agent_account_entity(agent)
+    dependents = _agent_dependents(db, agent, sessions)
+    exclusive = [
+        account,
+        *(session_entity_for(db, session) for session in sessions),
+        *(grant_entity(workspace_entity(agent.vm_name, ws), account) for ws in dependents[0]),
+        *consoles_holding(db, sessions),
+    ]
+    if agent.grant_all:
+        exclusive.append(grant_all_entity(agent.vm_name))
+    return LockRequest(exclusive=tuple(exclusive)), dependents
+
+
+def _reinit_declaration(db: Database, name: str) -> tuple[object, ...]:
+    """What agent reinit saved and prepares its setup from: the template binding and the desired overlay."""
+    agent = db.get_agent(name)
+    return (None if agent is None else agent.template, db.instance_state.get_desired_overlay("agent", name))
+
+
+def _agent_reinit_request(db: Database, agent: AgentRow) -> tuple[LockRequest, tuple[str, ...]]:
+    """Agent reinit's lock set (its account and a grant per recorded grant it replays), and those workspaces."""
+    from agentworks.native_locks import LockRequest, grant_entity, workspace_entity
+    from agentworks.native_locks.rows import agent_account_entity
+
+    account = agent_account_entity(agent)
+    granted = tuple(sorted(db.list_granted_workspaces(agent.name)))
+    grants = tuple(grant_entity(workspace_entity(agent.vm_name, ws), account) for ws in granted)
+    return LockRequest(exclusive=(account, *grants)), granted
+
+
 def reinit_agent(
     db: Database,
     config: Config,
@@ -513,12 +587,19 @@ def reinit_agent(
             entity_name=name,
         )
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import LockRequest, native_locks, probe_locks
+    from agentworks.native_locks.rows import agent_account_entity
+    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
 
-    with native_mutation_guard(db.path, agent.vm_name) as guard:
+    request, granted = _agent_reinit_request(db, agent)
+    probe_locks(db.path, request)
+    # The declaration is accepted under a brief account exclusive of its own,
+    # before the gate and any secret, so it remains if setup fails; the final
+    # set compares it again at step 7.
+    with native_locks(db.path, LockRequest(exclusive=(agent_account_entity(agent),))):
         current_agent = db.get_agent(name)
-        if current_agent is None or current_agent.vm_name != guard.vm_name:
-            raise StateError("agent changed before reinit acquired its mutation guard; retry against current state")
+        require_unchanged("agent", name, agent_fields(agent), agent_fields(current_agent))
+        assert current_agent is not None
         agent = current_agent
         vm = _require_vm(db, agent.vm_name)
 
@@ -597,276 +678,283 @@ def reinit_agent(
                 f"Agent '{name}' template binding saved as {selected_template!r} (previously {previous_template!r}). "
                 "The binding remains if setup fails; use --update-template to choose a different template."
             )
+        saved_declaration = _reinit_declaration(db, name)
 
-        try:
-            # BUILD: the live agent from its row, plus the resolved template
-            # whose declared credentials become edges (the template is a
-            # planned-ops participant at reinit: the materials rewrite needs
-            # its tokens, so they must join the boundary union). The live
-            # agent's row carries no template edge, so the walk is multi-root.
-            from agentworks.agents.nodes import (
-                agent_template_node,
-                live_agent_node,
+    try:
+        # BUILD: the live agent from its row, plus the resolved template
+        # whose declared credentials become edges (the template is a
+        # planned-ops participant at reinit: the materials rewrite needs
+        # its tokens, so they must join the boundary union). The live
+        # agent's row carries no template edge, so the walk is multi-root.
+        from agentworks.agents.nodes import (
+            agent_template_node,
+            live_agent_node,
+        )
+        from agentworks.capabilities.base import (
+            OperationScope,
+            RunContext,
+            ScopeLevel,
+        )
+        from agentworks.db import SYSTEM_SLUG_KEY
+        from agentworks.git_credentials import announce_git_credentials
+        from agentworks.orchestration.activation import (
+            activation_gate,
+            gate_secret_resolver,
+        )
+        from agentworks.orchestration.readiness import preflight_all
+        from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+        from agentworks.orchestration.walk import walk
+        from agentworks.secrets.resolver import Resolver
+        from agentworks.vms.nodes import live_vm_node
+
+        resolver = Resolver(config, registry, interaction=interaction)
+
+        vm_node = live_vm_node(db, config, registry, vm)
+        agent_node = live_agent_node(agent, vm_node)
+        tmpl_node = agent_template_node(registry, agent_tmpl)
+        nodes = walk(agent_node, tmpl_node)
+        for secret_name in secret_union(nodes):
+            resolver.register_name(secret_name)
+
+        from agentworks.harness_setup.lifecycle import prepare_agent_setup
+
+        setup_inputs = prepare_agent_setup(db, registry, vm=vm, name=name, template=agent_tmpl)
+        if setup_inputs is not None:
+            setup_inputs.register(resolver, registry)
+
+        scope = OperationScope(
+            level=ScopeLevel.AGENT,
+            system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
+            vm=agent.vm_name,
+            agent=name,
+        )
+    except BaseException:
+        from agentworks.instance_specs import render_overlay_outcome
+
+        render_overlay_outcome(overlay_outcome)
+        raise
+
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(report_overlay_outcome(overlay_outcome))
+        require_vm_ssh_boundary(db, config, vm)
+        stack.enter_context(
+            activation_gate(
+                vm_node,
+                gate_secret_resolver(config, registry, resolver),
             )
-            from agentworks.capabilities.base import (
-                OperationScope,
-                RunContext,
-                ScopeLevel,
-            )
-            from agentworks.db import SYSTEM_SLUG_KEY
-            from agentworks.git_credentials import announce_git_credentials
-            from agentworks.orchestration.activation import (
-                activation_gate,
-                gate_secret_resolver,
-            )
-            from agentworks.orchestration.readiness import preflight_all
-            from agentworks.orchestration.secrets import ScopedSecrets, secret_union
-            from agentworks.orchestration.walk import walk
-            from agentworks.secrets.resolver import Resolver
-            from agentworks.vms.nodes import live_vm_node
-
-            resolver = Resolver(config, registry, interaction=interaction)
-
-            vm_node = live_vm_node(db, config, registry, vm, held_native_guard=guard)
-            agent_node = live_agent_node(agent, vm_node)
-            tmpl_node = agent_template_node(registry, agent_tmpl)
-            nodes = walk(agent_node, tmpl_node)
-            for secret_name in secret_union(nodes):
-                resolver.register_name(secret_name)
-
-            from agentworks.harness_setup.lifecycle import prepare_agent_setup
-
-            setup_inputs = prepare_agent_setup(db, registry, vm=vm, name=name, template=agent_tmpl)
-            if setup_inputs is not None:
-                setup_inputs.register(resolver, registry)
-
-            scope = OperationScope(
-                level=ScopeLevel.AGENT,
-                system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
-                vm=agent.vm_name,
-                agent=name,
-            )
-        except BaseException:
-            from agentworks.instance_specs import render_overlay_outcome
-
-            render_overlay_outcome(overlay_outcome)
-            raise
-
-        from agentworks.vms.manager import require_vm_ssh_boundary
-
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(report_overlay_outcome(overlay_outcome))
-            require_vm_ssh_boundary(db, config, vm)
-            stack.enter_context(
-                activation_gate(
-                    vm_node,
-                    gate_secret_resolver(config, registry, resolver),
-                )
-            )
-            # Git tokens, site config, and active setup inputs resolve in one pass.
-            # Setup env is delivered only to integration methods; install commands
-            # retain their existing hermetic runners.
-            with output.section("Preflight"):
-                output.info(f"Checking agent-template/{agent_tmpl.name}...")
-                announce_git_credentials(tmpl_node.credentials)
-                preflight_all(
-                    nodes,
-                    RunContext(config=config, operation_scope=scope),
-                    registry=registry,
-                    interaction=interaction,
-                )
-
-            with output.section("Resolving Secrets"):
-                resolver.resolve()
-
-            def scoped_ctx(
-                secret_names: tuple[str, ...],
-                *,
-                admin_access: VMAccess | None = None,
-                agent_access: VMAccess | None = None,
-            ) -> RunContext:
-                return RunContext(
-                    config=config,
-                    operation_scope=scope,
-                    admin_access=admin_access,
-                    agent_access=agent_access,
-                    secrets=ScopedSecrets(resolver.values, secret_names),
-                )
-
-            from agentworks.git_credentials import (
-                credential_redactions,
-                credential_requests,
+        )
+        # Git tokens, site config, and active setup inputs resolve in one pass.
+        # Setup env is delivered only to integration methods; install commands
+        # retain their existing hermetic runners.
+        with output.section("Preflight"):
+            output.info(f"Checking agent-template/{agent_tmpl.name}...")
+            announce_git_credentials(tmpl_node.credentials)
+            preflight_all(
+                nodes,
+                RunContext(config=config, operation_scope=scope),
+                registry=registry,
+                interaction=interaction,
             )
 
-            credential_ops = credential_requests(tmpl_node.credentials, scoped_ctx)
-            git_redactions = credential_redactions(tmpl_node.credentials, resolver.values)
+        with output.section("Resolving Secrets"):
+            resolver.resolve()
 
-            from agentworks.harness_setup.lifecycle import require_prepared_setup
+        # Every prompt is answered: the final set is held from here, and what
+        # the setup was prepared from is read again under it.
+        held = stack.enter_context(vm_node.locked(request))
+        require_vm_unchanged(db, vm_node.row)
+        require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
+        require_unchanged("agent", name, saved_declaration, _reinit_declaration(db, name))
+        require_unchanged("agent", name, granted, tuple(sorted(db.list_granted_workspaces(name))))
 
-            require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
-            setup_failures: list[SetupFailure] = []
-            native_setup = None
-            with output.section("Agent Initialization"):
-                from agentworks.agents.initializer import create_agent_on_vm
-                from agentworks.execution.oplog import OperationLogFile
+        def scoped_ctx(
+            secret_names: tuple[str, ...],
+            *,
+            admin_access: VMAccess | None = None,
+            agent_access: VMAccess | None = None,
+        ) -> RunContext:
+            return RunContext(
+                config=config,
+                operation_scope=scope,
+                admin_access=admin_access,
+                agent_access=agent_access,
+                secrets=ScopedSecrets(resolver.values, secret_names),
+            )
 
-                log = OperationLogFile(
-                    vm.name,
-                    "agent-reinit",
-                    redactions=tuple(
-                        dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))
-                    ),
-                )
+        from agentworks.git_credentials import (
+            credential_redactions,
+            credential_requests,
+        )
+
+        credential_ops = credential_requests(tmpl_node.credentials, scoped_ctx)
+        git_redactions = credential_redactions(tmpl_node.credentials, resolver.values)
+
+        from agentworks.harness_setup.lifecycle import require_prepared_setup
+
+        require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
+        setup_failures: list[SetupFailure] = []
+        native_setup = None
+        with output.section("Agent Initialization"):
+            from agentworks.agents.initializer import create_agent_on_vm
+            from agentworks.execution.oplog import OperationLogFile
+
+            log = OperationLogFile(
+                vm.name,
+                "agent-reinit",
+                redactions=tuple(dict.fromkeys((*git_redactions, *(resolver.values.values() if setup_inputs else ())))),
+            )
+            try:
                 try:
-                    try:
-                        from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+                    from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
 
-                        create_agent_on_vm(
-                            vm,
+                    create_agent_on_vm(
+                        vm,
+                        config,
+                        registry,
+                        agent_tmpl,
+                        agent.linux_user,
+                        agent_name=agent.name,
+                        credential_requests=credential_ops,
+                        logger=log,
+                        admin_git_force_safe_directory=resolve_admin_template(
+                            db,
+                            registry,
+                            vm.name,
+                            vm.admin_template,
+                        ).git_force_safe_directory,
+                    )
+
+                    if setup_inputs is not None:
+                        from agentworks.harness_setup.lifecycle import apply_agent_setup
+
+                        native_setup = apply_agent_setup(
+                            db,
                             config,
                             registry,
-                            agent_tmpl,
-                            agent.linux_user,
-                            agent_name=agent.name,
-                            credential_requests=credential_ops,
+                            inputs=setup_inputs,
+                            failures=setup_failures,
+                            vm=vm,
+                            username=agent.linux_user,
+                            values=resolver.values,
                             logger=log,
-                            admin_git_force_safe_directory=resolve_admin_template(
-                                db,
-                                registry,
-                                vm.name,
-                                vm.admin_template,
-                            ).git_force_safe_directory,
+                            held=held,
+                            operation="agent-reinit",
                         )
 
-                        if setup_inputs is not None:
-                            from agentworks.harness_setup.lifecycle import apply_agent_setup
+                    # Reconcile the agent's recorded workspace grants onto the
+                    # VM. reinit shares create_agent_on_vm with the create path
+                    # but not realize's grant pass, so when the user step
+                    # recreates a truly-gone Linux user (issue #252) the fresh
+                    # user lands with no workspace group memberships while the
+                    # DB grant rows survive untouched. The agent would then hold
+                    # grants in the DB but no on-VM access (issue #280); this
+                    # repairs that.
+                    #
+                    # We reconcile from the recorded grant ROWS
+                    # (list_granted_workspaces), not from the live workspace set.
+                    # This one query is uniform across grant types: explicit,
+                    # grant_all, and implicit (session-tied) grants all
+                    # materialize rows, so it covers every kind with no per-type
+                    # branching. grant_all needs no special case: enabling it
+                    # materializes an explicit row per workspace, and the create
+                    # and workspace-create paths keep that in sync, so for a
+                    # grant_all agent the rows normally equal the live workspace
+                    # set. That sync is a maintained convention, not an
+                    # unbreakable invariant (e.g. copy_workspace does not
+                    # materialize grant_all rows today, issue #321), so the two
+                    # can legitimately diverge. reinit deliberately reconciles the
+                    # recorded ledger rather than re-deriving membership from the
+                    # grant_all flag: a missing row means the agent is not granted
+                    # that workspace yet, and reinit reflecting that (no access) is
+                    # more honest than papering over a materialization gap by
+                    # self-healing from the flag. The gap is fixed at its source
+                    # (issue #321), not masked here.
+                    #
+                    # add_to_workspace_group is idempotent (groupadd -f, then
+                    # usermod -aG), so running it unconditionally is a
+                    # no-op on the already-exists branch and a repair on the
+                    # recreate branch. This reconciles ON-VM state only: the
+                    # grant rows already exist, so we do NOT re-insert them.
+                    from agentworks.agents.grants import add_to_workspace_group
 
-                            native_setup = apply_agent_setup(
-                                db,
-                                config,
-                                registry,
-                                inputs=setup_inputs,
-                                failures=setup_failures,
-                                vm=vm,
-                                username=agent.linux_user,
-                                values=resolver.values,
-                                logger=log,
-                                held=guard,
-                                operation="agent-reinit",
+                    reconciled = 0
+                    for ws_name in db.list_granted_workspaces(name):
+                        try:
+                            add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
+                            reconciled += 1
+                        except NotFoundError:
+                            # The only NotFoundError reachable here is the
+                            # workspace-gone case: list_granted_workspaces
+                            # returned this name, so the agent (and its grant
+                            # row) exist; _resolve_ws_group is the sole lookup,
+                            # and it raises only when the workspace row is
+                            # absent. workspace deletion is supposed to sweep an
+                            # agent's grants (revoke_workspace_grants), so a
+                            # grant row pointing at a deleted workspace is an
+                            # invariant violation, a bookkeeping bug elsewhere.
+                            #
+                            # We deliberately do NOT delete the stale row here.
+                            # reinit's job is to reconcile ON-VM state to the
+                            # recorded grants, not to mutate the grant ledger;
+                            # silently sweeping the row would hide the upstream
+                            # bug, so warning and skipping is the conservative
+                            # repair. It is also non-fatal: reinit must not crash
+                            # on stale DB state, so we skip this workspace and
+                            # reconcile the rest. Any other failure (SSH / sudo)
+                            # propagates through the wrapper below, exactly like
+                            # create_agent_on_vm.
+                            output.warn(
+                                f"agent '{name}': skipping stale grant for workspace "
+                                f"'{ws_name}' (workspace no longer exists)"
                             )
 
-                        # Reconcile the agent's recorded workspace grants onto the
-                        # VM. reinit shares create_agent_on_vm with the create path
-                        # but not realize's grant pass, so when the user step
-                        # recreates a truly-gone Linux user (issue #252) the fresh
-                        # user lands with no workspace group memberships while the
-                        # DB grant rows survive untouched. The agent would then hold
-                        # grants in the DB but no on-VM access (issue #280); this
-                        # repairs that.
-                        #
-                        # We reconcile from the recorded grant ROWS
-                        # (list_granted_workspaces), not from the live workspace set.
-                        # This one query is uniform across grant types: explicit,
-                        # grant_all, and implicit (session-tied) grants all
-                        # materialize rows, so it covers every kind with no per-type
-                        # branching. grant_all needs no special case: enabling it
-                        # materializes an explicit row per workspace, and the create
-                        # and workspace-create paths keep that in sync, so for a
-                        # grant_all agent the rows normally equal the live workspace
-                        # set. That sync is a maintained convention, not an
-                        # unbreakable invariant (e.g. copy_workspace does not
-                        # materialize grant_all rows today, issue #321), so the two
-                        # can legitimately diverge. reinit deliberately reconciles the
-                        # recorded ledger rather than re-deriving membership from the
-                        # grant_all flag: a missing row means the agent is not granted
-                        # that workspace yet, and reinit reflecting that (no access) is
-                        # more honest than papering over a materialization gap by
-                        # self-healing from the flag. The gap is fixed at its source
-                        # (issue #321), not masked here.
-                        #
-                        # add_to_workspace_group is idempotent (groupadd -f, then
-                        # usermod -aG), so running it unconditionally is a
-                        # no-op on the already-exists branch and a repair on the
-                        # recreate branch. This reconciles ON-VM state only: the
-                        # grant rows already exist, so we do NOT re-insert them.
-                        from agentworks.agents.grants import add_to_workspace_group
+                    # Confirm the repair to an operator recovering a truly-gone
+                    # user. reconciled counts the grants whose group add ran;
+                    # some may have been idempotent no-ops (add_to_workspace_group
+                    # cannot report whether membership actually changed), hence
+                    # "Reconciled", not "Repaired". Stay silent when there was
+                    # nothing to reconcile.
+                    if candidate_overlay is not None and not setup_failures:
+                        from agentworks.legacy_claude import checkpoint_conversion
 
-                        reconciled = 0
-                        for ws_name in db.list_granted_workspaces(name):
-                            try:
-                                add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
-                                reconciled += 1
-                            except NotFoundError:
-                                # The only NotFoundError reachable here is the
-                                # workspace-gone case: list_granted_workspaces
-                                # returned this name, so the agent (and its grant
-                                # row) exist; _resolve_ws_group is the sole lookup,
-                                # and it raises only when the workspace row is
-                                # absent. workspace deletion is supposed to sweep an
-                                # agent's grants (revoke_workspace_grants), so a
-                                # grant row pointing at a deleted workspace is an
-                                # invariant violation, a bookkeeping bug elsewhere.
-                                #
-                                # We deliberately do NOT delete the stale row here.
-                                # reinit's job is to reconcile ON-VM state to the
-                                # recorded grants, not to mutate the grant ledger;
-                                # silently sweeping the row would hide the upstream
-                                # bug, so warning and skipping is the conservative
-                                # repair. It is also non-fatal: reinit must not crash
-                                # on stale DB state, so we skip this workspace and
-                                # reconcile the rest. Any other failure (SSH / sudo)
-                                # propagates through the wrapper below, exactly like
-                                # create_agent_on_vm.
-                                output.warn(
-                                    f"agent '{name}': skipping stale grant for workspace "
-                                    f"'{ws_name}' (workspace no longer exists)"
-                                )
+                        with db.transaction():
+                            checkpoint_conversion(db, original_overlay, candidate_overlay.payload)
 
-                        # Confirm the repair to an operator recovering a truly-gone
-                        # user. reconciled counts the grants whose group add ran;
-                        # some may have been idempotent no-ops (add_to_workspace_group
-                        # cannot report whether membership actually changed), hence
-                        # "Reconciled", not "Repaired". Stay silent when there was
-                        # nothing to reconcile.
-                        if candidate_overlay is not None and not setup_failures:
-                            from agentworks.legacy_claude import checkpoint_conversion
+                    if reconciled:
+                        output.info(f"Reconciled {output.count(reconciled, 'workspace grant')}")
+                except KeyboardInterrupt:
+                    output.warn(
+                        f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
+                        f"Re-run 'agent reinit {name}' to retry. Operation log: {log.display_path}"
+                    )
+                    raise
+                except AgentworksError as error:
+                    if error.entity_kind is None and error.entity_name is None:
+                        error.entity_kind = "agent"
+                        error.entity_name = name
+                    raise
+                except Exception as e:
+                    raise ExternalError(
+                        f"reinitializing agent: {e}",
+                        entity_kind="agent",
+                        entity_name=name,
+                        hint=f"Operation log: {log.display_path}",
+                    ) from e
+            finally:
+                log.close()
 
-                            with db.transaction():
-                                checkpoint_conversion(db, original_overlay, candidate_overlay.payload)
+            # Refresh operator SSH config (declarative rebuild; picks up any
+            # config changes that affect the per-agent block).
+            from agentworks.ssh_config import sync_ssh_config
 
-                        if reconciled:
-                            output.info(f"Reconciled {output.count(reconciled, 'workspace grant')}")
-                    except KeyboardInterrupt:
-                        output.warn(
-                            f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
-                            f"Re-run 'agent reinit {name}' to retry. Operation log: {log.display_path}"
-                        )
-                        raise
-                    except AgentworksError as error:
-                        if error.entity_kind is None and error.entity_name is None:
-                            error.entity_kind = "agent"
-                            error.entity_name = name
-                        raise
-                    except Exception as e:
-                        raise ExternalError(
-                            f"reinitializing agent: {e}",
-                            entity_kind="agent",
-                            entity_name=name,
-                            hint=f"Operation log: {log.display_path}",
-                        ) from e
-                finally:
-                    log.close()
+            sync_ssh_config(config, db)
 
-                # Refresh operator SSH config (declarative rebuild; picks up any
-                # config changes that affect the per-agent block).
-                from agentworks.ssh_config import sync_ssh_config
+        # The section is closed: the terminal outcome line renders at
+        # column 0 via result(), matching the reference create/restart
+        # flows.
+        raise_setup_failures(setup_failures)
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
 
-                sync_ssh_config(config, db)
-
-            # The section is closed: the terminal outcome line renders at
-            # column 0 via result(), matching the reference create/restart
-            # flows.
-            raise_setup_failures(setup_failures)
-            from agentworks.harness_setup.outcomes import setup_completion_suffix
-
-            output.result(f"Agent '{name}' reinitialized{setup_completion_suffix(native_setup)}")
+        output.result(f"Agent '{name}' reinitialized{setup_completion_suffix(native_setup)}")

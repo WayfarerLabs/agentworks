@@ -148,12 +148,12 @@ def delete_session(
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN.
 
     The gate, the secrets, the status and access probes and the confirmation
-    all run before the VM's native mutation guard is taken, and the status
-    probe persists nothing. Under the guard the session row, the VM row, the
+    all run before the session's lock set is taken, and the status probe
+    persists nothing. Under the set the session row, the VM row, the
     consoles holding the session and the outcome of each probe are read
     again, and a change refuses before anything is torn down. The offers to
     delete a console, workspace or agent the delete left empty run after the
-    guard is released.
+    set is released.
     """
     session = _mgr._require_session(db, name)
     _mgr._require_workspace(db, session.workspace_name)
@@ -191,8 +191,8 @@ def delete_session(
     # or it auto-deleted under --yes because this session created it. If
     # the workspace is kept, the grant remains and the still-granted agent
     # stays guarded. Both run after the console cleanup so the "Session
-    # deleted" line has already printed, and after the guard is released;
-    # each delete they trigger takes its own guard and reads its rows again.
+    # deleted" line has already printed, and after the set is released;
+    # each delete they trigger takes its own set and reads its rows again.
     # ``session`` was snapshotted before ``db.delete_session``, so its
     # workspace_name / agent_name / created_* fields are still readable here.
     _cleanup_now_empty_workspace(db, config, session, yes=yes, interaction=interaction)
@@ -208,7 +208,7 @@ def _delete_status_needs_pid_repair(session: SessionRow) -> bool:
     """Whether the row's PID evidence must be repaired, which writes it, before its delete can decide its status.
 
     Repair can also give an old admin row its address, so such a row's
-    status is decided only under the guard.
+    status is decided only under the lock set.
     """
     return not _legacy_running_row(session) and (_mgr._needs_repair(session) or session.socket_path is None)
 
@@ -217,7 +217,7 @@ def _delete_session_status(db: Database, session: SessionRow, *, admin: VMAccess
     """The session's status for its delete, refusing one that is unknown, or broken without ``force``.
 
     It only observes. A row that :func:`_delete_status_needs_pid_repair`
-    flags is repaired (``_ensure_pid``) by the caller first, under the guard.
+    flags is repaired (``_ensure_pid``) by the caller first, under the lock set.
     """
     name = session.name
     if _legacy_running_row(session):
@@ -250,9 +250,11 @@ def _delete_session_runtime(
     yes: bool,
     interaction: TtyInteractionPolicy,
 ) -> list[str]:
-    """Delete one selected definition and its runtime, asking first and acting under the family guard.
+    """Delete one selected definition and its runtime, asking first and acting under its lock set.
 
-    Returns the consoles the session was a member of.
+    The set holds the session, in agent mode its implicit grant (whose
+    membership the delete may remove), and each console holding it, all
+    exclusive. Returns the consoles the session was a member of.
     """
     name = session.name
     selected_session_uuid = session.session_uuid
@@ -261,6 +263,18 @@ def _delete_session_runtime(
 
     # Refuse a row the owner rule rejects before any VM work.
     _mgr.resolve_session_tmux_server(db, session)
+    from agentworks.native_locks import LockRequest, probe_locks
+    from agentworks.native_locks.rows import consoles_holding, session_entity_for, session_grant_entity
+
+    grant = session_grant_entity(db, session)
+    request = LockRequest(
+        exclusive=(
+            session_entity_for(db, session),
+            *(() if grant is None else (grant,)),
+            *consoles_holding(db, [session]),
+        )
+    )
+    probe_locks(db.path, request)
     with _mgr._prepare_vm(
         db,
         config,
@@ -270,7 +284,7 @@ def _delete_session_runtime(
     ) as (ws, vm_node, admin, log):
         vm = vm_node.row
         session = _require_selected_session(db, name, selected_session_uuid)
-        # A row whose PID evidence needs repair is undecided until the guard is held.
+        # A row whose PID evidence needs repair is undecided until the set is held.
         status = (
             None
             if _delete_status_needs_pid_repair(session)
@@ -290,7 +304,7 @@ def _delete_session_runtime(
             raise UserAbort("delete cancelled")
         member_consoles = [c.name for c in db.list_consoles_for_session(name)]
 
-        with vm_node.mutation_guard():
+        with vm_node.locked(request):
             current = _require_selected_session(db, name, selected_session_uuid)
             require_unchanged("session", name, session_fields(session), session_fields(current))
             require_vm_unchanged(db, vm)

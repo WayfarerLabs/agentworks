@@ -50,12 +50,32 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
+    from agentworks.native_locks import LockRequest, NativeLockSet
     from agentworks.resources.registry import Registry
 
     from .templates import ResolvedAgentTemplate
+
+
+def agent_create_request(db: Database, vm: VMRow, name: str, *, grant_all: bool) -> tuple[LockRequest, tuple[str, ...]]:
+    """The lock set of creating agent ``name``, and the workspaces a grant-all agent is granted.
+
+    The account is locked by the Linux user the agent will have, before it
+    exists, so two creates of one name refuse each other. A grant-all agent
+    also takes the grant-all set and a grant for every workspace on the VM;
+    the caller re-checks those workspaces under the set.
+    """
+    from agentworks.agents.manager import derive_linux_user
+    from agentworks.native_locks import LockRequest, account_entity, grant_all_entity, grant_entity
+    from agentworks.native_locks.rows import workspace_entity_for
+
+    account = account_entity(vm.name, derive_linux_user(name))
+    if not grant_all:
+        return LockRequest(exclusive=(account,)), ()
+    workspaces = db.list_workspaces(vm_name=vm.name)
+    grants = tuple(grant_entity(workspace_entity_for(ws), account) for ws in workspaces)
+    return LockRequest(exclusive=(account, grant_all_entity(vm.name), *grants)), tuple(ws.name for ws in workspaces)
 
 
 def realize_agent(
@@ -74,7 +94,7 @@ def realize_agent(
     setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
-    held_native_guard: NativeMutationGuard | None = None,
+    held: NativeLockSet | None = None,
 ) -> AgentRow:
     """Make agent ``name`` real on ``vm``: create and configure the
     Linux user (including the git-credential materials, their write-step
@@ -85,6 +105,10 @@ def realize_agent(
     half-configured user); the caller's realization log never sees a
     half-made agent. Native setup failures join ``setup_failures`` while the
     agent row and completed setup progress are committed. Returns the inserted row.
+
+    Runs under :func:`agent_create_request`'s set: the caller's ``held``
+    set, whose step-7 re-check confirmed the grant-all workspaces it was
+    built from, or its own.
     """
     # DRIFT GUARD (Phase 7, recipe use-gate): this choreography is itself never
     # gated; the recipe gate (``ensure_recipe_enabled``) lives at each COMMAND
@@ -114,9 +138,10 @@ def realize_agent(
             )
 
     from agentworks.harness_setup.lifecycle import require_prepared_setup
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import require_or_acquire
 
-    with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
+    request, _workspaces = agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
+    with require_or_acquire(db.path, request, held=held) as guard:
         require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
         log = OperationLogFile(
             vm.name,

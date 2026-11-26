@@ -556,8 +556,8 @@ def upload_tree(files: Files, local_dir: Path, dest: str) -> None:
 
     One :data:`UPLOAD_TREE_SCRIPT` request carries the tree as a gzip tar
     archive on stdin. It takes no file lock: no Agentworks file operation
-    writes beneath a dotfiles checkout, and every caller holds the VM's
-    native mutation guard. Files are created with the identity's ownership
+    writes beneath a dotfiles checkout, and every caller holds the exclusive
+    lock of the account whose home it writes. Files are created with the identity's ownership
     and umask. A link or another file type at ``dest`` is ``PathRefused``;
     any other failure is ``CommandFailed``, whose stderr names ``tar``'s
     complaint, and leaves ``dest`` as it was.

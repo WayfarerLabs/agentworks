@@ -540,12 +540,13 @@ def test_shell_launch_receives_discovery_env_after_complete_publication(lifecycl
 
 
 def test_session_delete_refuses_while_vm_native_mutation_is_held(lifecycle):
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     lifecycle.restart()
     files = lifecycle.files()
     lifecycle.events.clear()
-    with native_mutation_guard(lifecycle.db.path, "vm1"), pytest.raises(NativeSetupBusyError):
+    with native_locks(lifecycle.db.path, vm_exclusive("vm1")), pytest.raises(NativeLockBusyError):
         manager.delete_session(
             lifecycle.db, lifecycle.config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE
         )

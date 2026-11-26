@@ -11,13 +11,12 @@ from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-from ._helpers import _require_console, guarded_console_selection
+from ._helpers import _require_console, console_request, guarded_console_selection, probe_console
 from .runtime import validate_console_definition
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.db import ConsoleRow, Database, VMRow
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
@@ -29,7 +28,6 @@ def preflight_console_vm(
     registry: Registry,
     vm: VMRow,
     *,
-    held_native_guard: NativeMutationGuard | None = None,
     interaction: TtyInteractionPolicy,
 ) -> LiveVMNode:
     """Check known local VM and provider policies before accepting intent."""
@@ -39,7 +37,7 @@ def preflight_console_vm(
     from agentworks.vms.nodes import live_vm_node
 
     _guard_incomplete_vm(vm)
-    node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
+    node = live_vm_node(db, config, registry, vm)
     preflight_all(
         walk(node),
         RunContext(config=config, operation_scope=_vm_scope(db, vm.name)),
@@ -47,6 +45,20 @@ def preflight_console_vm(
         interaction=interaction,
     )
     return node
+
+
+def _require_intent_unchanged(db: Database, accepted: ConsoleRow) -> ConsoleRow:
+    """Under the final set: the console row and the intent it recorded still stand."""
+    from agentworks.recheck import console_row_fields, require_unchanged
+
+    current = _require_console(db, accepted.name)
+    require_unchanged(
+        "console",
+        accepted.name,
+        (console_row_fields(db, accepted.name), accepted.desired_runtime_state),
+        (console_row_fields(db, current.name), current.desired_runtime_state),
+    )
+    return current
 
 
 def realize_console(
@@ -57,7 +69,16 @@ def realize_console(
     replace_running: bool,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Accept running, prepare infrastructure, then resolve and apply one workload."""
+    """Accept running, prepare infrastructure, then resolve and apply one workload.
+
+    The known-policy preflight runs first; running intent is then recorded
+    under a brief console exclusive, so it survives any later failure. The
+    gate secrets resolve and the VM is observed and, if stopped, booted
+    under a brief vm exclusive, with the console unlocked. The console's
+    final set is held from the pane secrets to the end: it is one of the
+    acquisitions sanctioned to prompt, since which secrets the panes need
+    depends on what is observed under it.
+    """
     import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
@@ -66,68 +87,55 @@ def realize_console(
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
     require_exact_tty_interaction_policy(interaction)
-    with guarded_console_selection(db, name) as (console, guard):
-        validate_console_definition(db, console)
-        vm = db.get_vm(console.vm_name)
-        if vm is None:
-            raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
-        if vm.tailscale_host is None:
-            raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
-        registry = load_request_registry(config, live_database=db)
-        require_vm_ssh_boundary(db, config, vm)
-        node = preflight_console_vm(
-            db,
-            config,
-            registry,
-            vm,
-            held_native_guard=guard,
-            interaction=interaction,
-        )
-        _mc.accept_console_running(db, console=console, held_native_guard=guard)
-        console = _require_console(db, name)
-        if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
-            raise StateError(
-                "console start is blocked by its stopped parent VM", entity_kind="console", entity_name=name
-            )
-        resolver = Resolver(config, registry, interaction=interaction)
-        context = None
-        values: dict[str, str] = {}
-        try:
-            context = prepare_vm_runtime(
+    console = _require_console(db, name)
+    validate_console_definition(db, console)
+    vm = db.get_vm(console.vm_name)
+    if vm is None:
+        raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
+    if vm.tailscale_host is None:
+        raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
+    probe_console(db, name)
+    registry = load_request_registry(config, live_database=db)
+    require_vm_ssh_boundary(db, config, vm)
+    node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
+    with guarded_console_selection(db, name) as (selected, brief):
+        validate_console_definition(db, selected)
+        _mc.accept_console_running(db, console=selected, held=brief)
+    console = _require_console(db, name)
+    if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+        raise StateError("console start is blocked by its stopped parent VM", entity_kind="console", entity_name=name)
+    resolver = Resolver(config, registry, interaction=interaction)
+    context = None
+    values: dict[str, str] = {}
+    try:
+        context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
+        activate_vm_runtime(context)
+        with node.locked(console_request(db, console), prompts=True) as held, context.node.hold_active():
+            console = _require_intent_unchanged(db, console)
+            prepared = _mc.prepare_console_reconcile(
                 db,
                 config,
                 registry,
-                vm,
-                resolve_secret=resolver.resolve_gate,
-                held_native_guard=guard,
-                vm_node=node,
+                console=console,
+                vm=vm,
+                admin=execution.vm_access(vm, config, Admin()),
+                held=held,
+                replace_running=replace_running,
             )
-            activate_vm_runtime(context)
-            with context.node.hold_active():
-                prepared = _mc.prepare_console_reconcile(
-                    db,
-                    config,
-                    registry,
-                    console=console,
-                    vm=vm,
-                    admin=execution.vm_access(vm, config, Admin()),
-                    held_native_guard=guard,
-                    replace_running=replace_running,
-                )
-                resolver.register_targets(prepared.pane_targets, allow_transient_auto_declare=True)
-                resolver.resolve()
-                values = resolver.values
-                _mc.validate_console_values(prepared, values)
-                changed = _mc.execute_console_reconcile(prepared, values=values)
-        finally:
-            values.clear()
-            if context is not None:
-                context.clear_values()
-            resolver.close()
-        if changed:
-            output.result(f"Console '{name}' {'restarted' if replace_running else 'started'}")
-        else:
-            output.result(f"Console '{name}' is already running")
+            resolver.register_targets(prepared.pane_targets, allow_transient_auto_declare=True)
+            resolver.resolve()
+            values = resolver.values
+            _mc.validate_console_values(prepared, values)
+            changed = _mc.execute_console_reconcile(prepared, values=values)
+    finally:
+        values.clear()
+        if context is not None:
+            context.clear_values()
+        resolver.close()
+    if changed:
+        output.result(f"Console '{name}' {'restarted' if replace_running else 'started'}")
+    else:
+        output.result(f"Console '{name}' is already running")
 
 
 def stop_console_runtime(
@@ -137,7 +145,12 @@ def stop_console_runtime(
     name: str,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Accept stopped and tear down using provider observation without activation."""
+    """Accept stopped and tear down using provider observation without activation.
+
+    Stopped intent is recorded under a brief console exclusive; the gate
+    secrets resolve and the VM is observed unlocked; the teardown runs
+    under the console's final set.
+    """
     import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
@@ -146,33 +159,22 @@ def stop_console_runtime(
     from agentworks.vms.manager.runtime import observe_vm_runtime, prepare_vm_runtime
 
     require_exact_tty_interaction_policy(interaction)
-    with guarded_console_selection(db, name) as (console, guard):
-        vm = db.get_vm(console.vm_name)
-        if vm is None:
-            raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
-        registry = load_request_registry(config, live_database=db)
-        node = preflight_console_vm(
-            db,
-            config,
-            registry,
-            vm,
-            held_native_guard=guard,
-            interaction=interaction,
-        )
+    selected = _require_console(db, name)
+    vm = db.get_vm(selected.vm_name)
+    if vm is None:
+        raise NotFoundError(f"VM '{selected.vm_name}' not found", entity_kind="vm", entity_name=selected.vm_name)
+    probe_console(db, name)
+    registry = load_request_registry(config, live_database=db)
+    node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
+    with guarded_console_selection(db, name):
         db.set_console_desired_runtime_state(name, DesiredRuntimeState.STOPPED)
-        console = _require_console(db, name)
-        resolver = Resolver(config, registry, interaction=interaction)
-        context = None
-        try:
-            context = prepare_vm_runtime(
-                db,
-                config,
-                registry,
-                vm,
-                resolve_secret=resolver.resolve_gate,
-                held_native_guard=guard,
-                vm_node=node,
-            )
+    console = _require_console(db, name)
+    resolver = Resolver(config, registry, interaction=interaction)
+    context = None
+    try:
+        context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
+        with node.locked(console_request(db, console), prompts=True) as held:
+            console = _require_intent_unchanged(db, console)
             status = context.observed_status
             if status is VMStatus.UNKNOWN:
                 raise StateError("parent VM power state is unknown", entity_kind="console", entity_name=name)
@@ -181,13 +183,7 @@ def stop_console_runtime(
                 require_vm_ssh_boundary(db, config, vm)
                 admin = execution.vm_access(vm, config, Admin())
             try:
-                prepared = _mc.prepare_console_stop(
-                    db,
-                    console=console,
-                    vm=vm,
-                    admin=admin,
-                    held_native_guard=guard,
-                )
+                prepared = _mc.prepare_console_stop(db, console=console, vm=vm, admin=admin, held=held)
                 resolver.resolve()
                 if admin is None:
                     current_status = observe_vm_runtime(context)
@@ -200,7 +196,7 @@ def stop_console_runtime(
                             console=console,
                             vm=vm,
                             admin=execution.vm_access(vm, config, Admin()),
-                            held_native_guard=guard,
+                            held=held,
                         )
                 _mc.execute_console_stop(prepared)
                 observation_from_parent = prepared.admin is None
@@ -210,11 +206,11 @@ def stop_console_runtime(
                 if observe_vm_runtime(context) not in {VMStatus.STOPPED, VMStatus.DEALLOCATED}:
                     raise
                 observation_from_parent = True
-        finally:
-            if context is not None:
-                context.clear_values()
-            resolver.close()
-        _report_console_stop(name, observation_from_parent=observation_from_parent)
+    finally:
+        if context is not None:
+            context.clear_values()
+        resolver.close()
+    _report_console_stop(name, observation_from_parent=observation_from_parent)
 
 
 def _report_console_stop(name: str, *, observation_from_parent: bool) -> None:
@@ -234,13 +230,20 @@ def attach_running_console(
     name: str,
     interaction: TtyInteractionPolicy,
 ) -> int:
-    """Resolve the gate secrets unguarded, guard the start and the hold's admission, then attach unguarded."""
+    """Resolve the gate secrets and observe the VM unlocked, admit the hold, then attach.
+
+    Console attach is an access command: its whole lock is the admission's
+    brief vm shared (and a brief vm exclusive for a boot), so only a
+    VM-wide operation refuses it.
+    """
     from contextlib import ExitStack
 
     import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
     from agentworks.execution.requests import TerminalCommand
+    from agentworks.native_locks import probe_locks
+    from agentworks.native_locks.rows import admission
     from agentworks.recheck import console_fields, require_unchanged
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.tmux import ProbeStatus
@@ -265,32 +268,33 @@ def attach_running_console(
             registry = load_request_registry(config, live_database=db)
             require_vm_ssh_boundary(db, config, vm)
             node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
-            # The gate secrets resolve, and the VM is observed, before the guard.
+            probe_locks(db.path, admission(vm.name))
+            # The gate secrets resolve, and the VM is observed, with nothing locked.
             resolver = Resolver(config, registry, interaction=interaction)
             context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
-            # The guard spans the start, if the VM needs one, the hold's
-            # admission and the readiness probe, and ends before the attach.
-            with node.mutation_guard():
-                require_unchanged("console", name, read, console_fields(db, name))
-                if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
-                    if context.observed_status is not VMStatus.RUNNING:
-                        raise StateError(
-                            "console attach requires an already-running parent VM with stopped intent",
-                            entity_kind="console",
-                            entity_name=name,
-                        )
-                else:
-                    activate_vm_runtime(context)
-                holds.enter_context(context.node.hold_active())
-                admin = execution.vm_access(vm, config, Admin())
-                canonical, staging = _mc._console_runtime_presence(admin, name)
-                if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
+            # An access command: the VM boots, if it needs to, under a brief vm
+            # exclusive, the hold is admitted under a brief vm shared, and the
+            # readiness probe and the attach run unlocked.
+            require_unchanged("console", name, read, console_fields(db, name))
+            if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+                if context.observed_status is not VMStatus.RUNNING:
                     raise StateError(
-                        f"console '{name}' is not ready to attach",
+                        "console attach requires an already-running parent VM with stopped intent",
                         entity_kind="console",
                         entity_name=name,
-                        hint=f"Run `agw console start {name}`.",
                     )
+            else:
+                activate_vm_runtime(context)
+            holds.enter_context(context.node.hold_active())
+            admin = execution.vm_access(vm, config, Admin())
+            canonical, staging = _mc._console_runtime_presence(admin, name)
+            if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
+                raise StateError(
+                    f"console '{name}' is not ready to attach",
+                    entity_kind="console",
+                    entity_name=name,
+                    hint=f"Run `agw console start {name}`.",
+                )
             return admin.attach(
                 TerminalCommand(("tmux", "attach", "-t", "=" + tmux_session_name(name))),
                 clear_screen_on_exit=clear_screen_on_detach(config.terminal.clear_on_detach),

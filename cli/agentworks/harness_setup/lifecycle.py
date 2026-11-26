@@ -1,7 +1,7 @@
 """Owning-lifecycle composition of native setup inputs and invocations.
 
 Prepare before the command's single secret-resolution boundary. Execute only
-with those prepared inputs and values, under the core mutation's existing guard.
+with those prepared inputs and values, under the core mutation's held lock set.
 Install commands run without this setup environment.
 """
 
@@ -40,9 +40,9 @@ if TYPE_CHECKING:
     from agentworks.execution.files import Files
     from agentworks.execution.requests import RunRequest
     from agentworks.execution.results import Result
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.model import NativeSetupState, SetupComponent
     from agentworks.harness_setup.outcomes import SetupFailure
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources.registry import Registry
     from agentworks.schema import CapabilityConfig
     from agentworks.vms.admin import AdminConfig
@@ -84,7 +84,7 @@ def require_prepared_setup(
     components: tuple[SetupComponent, ...],
     inputs: tuple[SetupInputs, ...],
 ) -> None:
-    """Under the mutation guard, refuse applied-state records added after an unused plan.
+    """Under the held lock set, refuse applied-state records added after an unused plan.
 
     Active plans can read newer prior claims in dispatch. A previously skipped
     component has no prepared env, so it must retry at the eager boundary.
@@ -213,7 +213,7 @@ def apply_vm_setup(
     vm: VMRow,
     values: Mapping[str, str],
     logger: SetupLog,
-    held: NativeMutationGuard,
+    held: NativeLockSet,
     operation: str,
     failures: list[SetupFailure],
 ) -> None:
@@ -274,7 +274,7 @@ def apply_agent_setup(
     username: str,
     values: Mapping[str, str],
     logger: SetupLog,
-    held: NativeMutationGuard,
+    held: NativeLockSet,
     operation: str,
     failures: list[SetupFailure],
     buffered: bool = False,
@@ -325,7 +325,7 @@ def apply_workspace_setup(
     linux_group: str,
     values: Mapping[str, str],
     logger: SetupLog,
-    held: NativeMutationGuard,
+    held: NativeLockSet,
     operation: str,
     failures: list[SetupFailure],
     buffered: bool = True,

@@ -17,9 +17,8 @@ are driven for real.
 
 from __future__ import annotations
 
-import contextlib
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -440,8 +439,11 @@ def test_restart_refuses_a_recreated_session_before_preparation(
     selected = db.get_session("s1")
     assert selected is not None
 
-    @contextlib.contextmanager
-    def _replace_at_guard(*args: object, **kwargs: object) -> Iterator[None]:
+    import agentworks.runtime_state._families as families
+    from agentworks.native_locks import probe_locks as original_probe
+
+    def _replace_at_probe(*args: object, **kwargs: object) -> None:
+        original_probe(*args, **kwargs)  # type: ignore[arg-type]
         db.delete_session("s1")
         db.insert_session(
             "s1",
@@ -451,9 +453,8 @@ def test_restart_refuses_a_recreated_session_before_preparation(
             agent_name="a1",
             socket_path="/tmp/replacement.sock",
         )
-        yield
 
-    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", _replace_at_guard)
+    monkeypatch.setattr(families, "probe_locks", _replace_at_probe)
     monkeypatch.setattr(
         "agentworks.sessions.manager._ensure_pid",
         lambda *args, **kwargs: pytest.fail("identity refusal must precede PID repair"),
@@ -2291,7 +2292,8 @@ def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guar
     """The gate and the boundary resolve run with no guard held; an agent
     replaced in between is not the one the plan read, so nothing is created."""
     from agentworks.errors import StateConflictError
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.sessions.manager import _create, create_session
 
     events: list[str] = []
@@ -2301,7 +2303,7 @@ def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guar
     unguarded: list[bool] = []
 
     def resolve_then_replace_the_agent(*args: Any, **kwargs: Any) -> dict[str, str]:
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             unguarded.append(True)
         values = resolve(*args, **kwargs)
         db.delete_agent("a1")

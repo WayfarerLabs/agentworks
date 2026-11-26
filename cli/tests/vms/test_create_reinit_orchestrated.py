@@ -1467,11 +1467,12 @@ def test_reinit_resolves_its_secrets_with_no_guard_held_and_refuses_a_change_bef
     monkeypatch: pytest.MonkeyPatch,
     _contract_passes: AccessRecorder,
 ) -> None:
-    """Every secret resolves before the VM's guard is taken; a binding that
+    """Every secret resolves before the VM's lock set is taken; a binding that
     changed in between is not what reinit resolved, so it refuses before the
     VM is touched."""
     from agentworks.errors import StateConflictError
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
 
     _seed_provisioned_vm(db)
@@ -1479,7 +1480,7 @@ def test_reinit_resolves_its_secrets_with_no_guard_held_and_refuses_a_change_bef
     unguarded: list[bool] = []
 
     def resolve_then_rebind(self: Resolver) -> None:
-        with native_mutation_guard(db.path, "rvm"):
+        with native_locks(db.path, vm_exclusive("rvm")):
             unguarded.append(True)
         resolve(self)
         db.update_vm_admin_template("rvm", "other")

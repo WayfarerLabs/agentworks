@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-
 import pytest
 
 from agentworks.db import DesiredRuntimeState, SessionStatus, VMStatus
 from agentworks.errors import AgentworksError, StateError, UserAbort
 from agentworks.execution.results import Result
-from agentworks.harness_setup.locking import native_mutation_guard
+from agentworks.native_locks import native_locks
+from agentworks.native_locks.rows import vm_exclusive
+from agentworks.runtime_state import _families as families
 from agentworks.runtime_state import reconcile_session, reconcile_vm
 from agentworks.runtime_state._models import Outcome
 from agentworks.secrets import SecretTarget
@@ -133,26 +133,24 @@ def test_cancellation_retains_accepted_target_and_completed_activation_and_dispo
     assert closed and all(not context._provider_values for context in contexts)
     with pytest.raises(StateError):
         closed[0].get("proxmox-token")
-    with native_mutation_guard(db.path, "box"):
+    with native_locks(db.path, vm_exclusive("box")):
         pass
 
 
-def test_vm_replacement_during_guard_acquisition_precedes_provider_sources(
+def test_vm_replacement_during_the_family_probe_precedes_provider_sources(
     db, make_config, runtime, resolve_counter, monkeypatch
 ):
     seed_vm(db, "box")
     before = db.get_vm("box")
-    original_guard = native_mutation_guard
+    from agentworks.native_locks import probe_locks as original_probe
 
-    @contextmanager
-    def replace_vm(path, name, **kwargs):
-        with original_guard(path, name, **kwargs) as guard:
-            db.delete_workspace("ws-box")
-            db.delete_vm("box")
-            seed_vm(db, "box")
-            yield guard
+    def replace_vm(path, request):
+        original_probe(path, request)
+        db.delete_workspace("ws-box")
+        db.delete_vm("box")
+        seed_vm(db, "box")
 
-    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", replace_vm)
+    monkeypatch.setattr(families, "probe_locks", replace_vm)
     with pytest.raises(StateError):
         reconcile_vm(db, make_config(), name="box", interaction=REFUSE)
     assert db.get_vm("box").vm_uuid != before.vm_uuid
@@ -232,17 +230,19 @@ def test_misbound_member_socket_blocks_the_console_before_its_vm_starts(db, make
     assert not any("tmux" in command for command in commands)
 
 
-def test_busy_console_family_reports_unselected_target_as_unknown(db, make_config, runtime, monkeypatch):
+def test_busy_console_family_reports_the_target_it_read_as_blocked(db, make_config, runtime, monkeypatch):
     from agentworks.runtime_state import reconcile_console
 
     seed_vm(db, "box")
     create_console_record(db, name="view", vm_name="box", session_specs=[], add_admin_shell=True)
     rendered = []
     monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
-    with native_mutation_guard(db.path, "box"), pytest.raises(StateError):
+    with native_locks(db.path, vm_exclusive("box")), pytest.raises(StateError):
         reconcile_console(db, make_config(), name="view", interaction=REFUSE)
     result = next(row for row in rendered if row.kind == "console")
-    assert not result.target_known and result.outcome is Outcome.BLOCKED
+    # The family's rows are read before its set is probed, so the refused target is known.
+    assert result.target_known and result.outcome is Outcome.BLOCKED
+    assert result.desired_runtime_state is DesiredRuntimeState.RUNNING
 
 
 def test_keyboard_interrupt_after_activation_prevents_deferred_provider_stops(db, make_config, runtime, monkeypatch):
@@ -270,7 +270,7 @@ def test_keyboard_interrupt_after_activation_prevents_deferred_provider_stops(db
     assert not any(action in {"session-start", "vm-stop"} for action, _ in runtime[2])
     assert any(row.kind == "vm" and row.name == "work" and row.outcome is Outcome.CHANGED for row in rendered)
     assert any(row.kind == "vm" and row.name == "shutdown" and row.outcome is Outcome.BLOCKED for row in rendered)
-    with native_mutation_guard(db.path, "work"), native_mutation_guard(db.path, "shutdown"):
+    with native_locks(db.path, vm_exclusive("work")), native_locks(db.path, vm_exclusive("shutdown")):
         pass
 
 
@@ -298,7 +298,7 @@ def test_keyboard_interrupt_inside_activation_retains_completed_power_fact(db, m
     assert any(row.kind == "vm" and row.name == "work" and row.outcome is Outcome.CHANGED for row in rendered)
     assert not any(action == "vm-stop" for action, _ in runtime[2])
     assert contexts and all(not context._provider_values for context in contexts)
-    with native_mutation_guard(db.path, "work"), native_mutation_guard(db.path, "shutdown"):
+    with native_locks(db.path, vm_exclusive("work")), native_locks(db.path, vm_exclusive("shutdown")):
         pass
 
 
@@ -414,8 +414,7 @@ def test_preview_binding_failure_isolated_from_healthy_family(db, make_config, r
     rendered = []
     monkeypatch.setattr("agentworks.runtime_state._preview.render_results", lambda rows, **k: rendered.extend(rows))
     monkeypatch.setattr(
-        "agentworks.harness_setup.locking.native_mutation_guard",
-        lambda *a, **k: pytest.fail("dry run acquired mutation guard"),
+        "agentworks.native_locks._sets._acquire", lambda *a, **k: pytest.fail("dry run took a native lock")
     )
     with pytest.raises(StateError):
         reconcile_vm(db, make_config(), all_vms=True, dry_run=True, interaction=REFUSE)

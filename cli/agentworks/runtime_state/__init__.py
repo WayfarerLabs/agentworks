@@ -11,14 +11,13 @@ from ._selection import select_console_scope, select_session_scope, select_vm_sc
 from ._service import run_selected
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
 
-    from ._models import RuntimeSelection, SessionOperation
+    from ._models import RuntimeSelection, SessionDeclaration, SessionOperation
 
 
 def _reconcile(
@@ -68,8 +67,14 @@ def run_session_batch(
     intent: HarnessLaunchIntent,
     running_restart_authorized: frozenset[str],
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard | None = None,
+    declarations: Mapping[str, SessionDeclaration] | None = None,
 ) -> None:
+    """Run ``operation`` on ``sessions`` as one runtime invocation.
+
+    ``declarations`` maps a session to a declaration the batch accepts with
+    its intent, under the family's brief set (``session start --spec``'s
+    layer), so nothing outside the batch locks around it.
+    """
     require_exact_tty_interaction_policy(interaction)
     if not sessions:
         return
@@ -82,5 +87,5 @@ def run_session_batch(
         operation=operation,
         force=force,
         authorized_running=running_restart_authorized,
-        held_native_guard=held_native_guard,
+        declarations=declarations,
     )

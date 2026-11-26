@@ -373,8 +373,9 @@ def create_vm(
     # in either phase to the same operator-facing outcome.
     from contextlib import ExitStack
 
-    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.interrupts import termination_as_interrupt
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     setup_failures: list[SetupFailure] = []
     with ExitStack() as init_stack:
@@ -382,7 +383,8 @@ def create_vm(
         # every interrupt arm below (a cloud's create rolls back its bootstrap
         # allow and its partial VM) and through the stack's own exits.
         init_stack.enter_context(termination_as_interrupt())
-        setup_guard = init_stack.enter_context(native_mutation_guard(db.path, vm_name))
+        # The name is locked before its row exists, so two creates of one name refuse each other.
+        vm_lock = init_stack.enter_context(native_locks(db.path, vm_exclusive(vm_name)))
         from agentworks.harness_setup.lifecycle import require_prepared_setup
 
         require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
@@ -680,7 +682,7 @@ def create_vm(
                 operation=_mgr.VMInitializationOperation.VM_CREATE,
                 setup_failures=setup_failures,
                 setup_inputs=setup_inputs,
-                setup_guard=setup_guard,
+                held=vm_lock,
                 setup_values=resolver.values,
             )
         except (KeyboardInterrupt, UserAbort):

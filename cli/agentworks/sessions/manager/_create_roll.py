@@ -84,7 +84,7 @@ def _realize_ephemerals(
                     setup_values=secret_values,
                     overlay=graph.workspace_overlay,
                     defer_overlay_report=True,
-                    held_native_guard=graph.vm_node.held_native_guard,
+                    held=graph.vm_node.held,
                 )
             except BaseException:
                 if db.get_workspace(plan.workspace_name) is not None:
@@ -120,7 +120,7 @@ def _realize_ephemerals(
                     setup_values=secret_values,
                     overlay=graph.agent_overlay,
                     defer_overlay_report=True,
-                    held_native_guard=graph.vm_node.held_native_guard,
+                    held=graph.vm_node.held,
                 )
             except BaseException:
                 if db.get_agent(plan.agent_name) is not None:
@@ -244,7 +244,14 @@ def _start_session_slice(
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
 
-    with graph.vm_node.mutation_guard(), output.section("Starting Session"):
+    from agentworks.native_locks import LockRequest, account_entity, grant_entity, session_entity, workspace_entity
+
+    workspace_lock = workspace_entity(vm.name, workspace_name)
+    account_lock = account_entity(vm.name, linux_user)
+    session_lock = session_entity(name, workspace=workspace_lock, account=account_lock)
+    grant_lock = () if mode == SessionMode.ADMIN else (grant_entity(workspace_lock, account_lock),)
+    slice_request = LockRequest(exclusive=(session_lock, *grant_lock))
+    with graph.vm_node.locked(slice_request), output.section("Starting Session"):
         output.info(
             f"Starting session '{name}' on workspace '{workspace_name}' ({mode_label}, template: {template.name})..."
         )

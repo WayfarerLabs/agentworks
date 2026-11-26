@@ -419,11 +419,11 @@ def test_a_vm_replaced_before_the_guard_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A VM deleted and recreated under the same name before the guard is not the VM delete confirmed."""
-    from agentworks.harness_setup import locking
+    from agentworks import native_locks as locking
 
     _seed(db)
     counts = _fake_backend(monkeypatch)
-    real_guard = locking.native_mutation_guard
+    real_guard = locking.native_locks
     replacements = []
 
     @contextlib.contextmanager
@@ -434,7 +434,7 @@ def test_a_vm_replaced_before_the_guard_is_refused(
         with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
             yield held
 
-    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_replacement)
+    monkeypatch.setattr(locking, "native_locks", guard_after_a_replacement)
 
     with pytest.raises(StateError) as raised:
         vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -955,7 +955,8 @@ def test_delete_resolves_its_secrets_with_no_guard_held(
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
 
     _seed(db)
@@ -965,7 +966,7 @@ def test_delete_resolves_its_secrets_with_no_guard_held(
     resolved_unguarded: list[bool] = []
 
     def resolve_checking_the_guard(self: Resolver) -> None:
-        with native_mutation_guard(db.path, "dvm"):
+        with native_locks(db.path, vm_exclusive("dvm")):
             resolved_unguarded.append(True)
         resolve(self)
 

@@ -35,7 +35,7 @@ def _forbid_preview_mutations(monkeypatch: pytest.MonkeyPatch) -> None:
         pytest.fail("preview attempted a runtime mutation or guest operation")
 
     for target in (
-        "agentworks.harness_setup.locking.native_mutation_guard",
+        "agentworks.native_locks._sets._acquire",
         "agentworks.execution.vm_access",
         "agentworks.secrets.resolver.Resolver.resolve",
     ):

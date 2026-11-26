@@ -29,8 +29,9 @@ Three properties are load-bearing:
   which governs the command's PLAN.
 - **The node is the authority on auto-start.** Stopped runtime intent
   prohibits automatic power-on. The node checks its current identity and
-  intent under the same VM-family guard used by lifecycle mutations.
-  Hold admission shares that guard because a backend hold can itself boot.
+  intent under the vm exclusive: a brief lock of its own for the boot alone,
+  or the one its operation holds. Hold admission takes a brief vm shared,
+  because a backend hold can itself boot, and releases it before the body.
 - **Gate secrets are delivered just-in-time, with caller ordering explicit.**
   Observing and starting a stopped VM may need the platform's API credential.
   For an ordinary singular command, the gate opens before preflight and

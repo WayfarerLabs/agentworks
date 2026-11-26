@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -9,21 +10,20 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.multi_console as _mc
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import NotFoundError, StateError, ValidationError
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.tmux import ProbeStatus
 
 from ._access import console_access
-from ._helpers import _require_console, _verify_session_on_vm, guarded_console_selection
+from ._helpers import _require_console, _verify_session_on_vm, console_request, guarded_console_selection
 from ._status import ConsoleStatus, classify_console_status
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
     from agentworks.config import Config
     from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, VMRow
     from agentworks.execution.access import VMAccess
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
 
@@ -40,7 +40,7 @@ class ConsoleAction(Enum):
 
 @dataclass(frozen=True)
 class PreparedConsoleReconcile:
-    """A definition and exact runtime observation retained under a family guard.
+    """A definition and exact runtime observation retained under the console's lock.
 
     ``access`` holds the admin's access and, for a build, those of the agents
     whose shell panes it parks, already checked.
@@ -51,7 +51,7 @@ class PreparedConsoleReconcile:
     console: ConsoleRow
     vm: VMRow
     access: ConsoleAccess
-    held_native_guard: NativeMutationGuard
+    held: NativeLockSet
     members: tuple[ConsoleSessionRow, ...]
     layout: str
     canonical: ProbeStatus
@@ -67,13 +67,13 @@ class PreparedConsoleReconcile:
 
 @dataclass(frozen=True)
 class PreparedConsoleStop:
-    """A teardown prepared under a family guard; ``admin`` is ``None`` for a VM the provider reports off."""
+    """A teardown prepared under the console's lock; ``admin`` is ``None`` for a VM the provider reports off."""
 
     db: Database
     console: ConsoleRow
     vm: VMRow
     admin: VMAccess | None
-    held_native_guard: NativeMutationGuard
+    held: NativeLockSet
     members: tuple[ConsoleSessionRow, ...]
     canonical: ProbeStatus
     staging: ProbeStatus
@@ -137,14 +137,21 @@ def accept_console_running(
     db: Database,
     *,
     console: ConsoleRow,
-    held_native_guard: NativeMutationGuard,
+    held: NativeLockSet,
 ) -> None:
-    """Record running intent for ``console``, whose definition the caller validated under the same guard."""
-    with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
+    """Record running intent for ``console``, whose definition the caller validated under the same set."""
+    with _held_console(db, console, held):
         current = _require_console(db, console.name)
         if current != console:
             raise StateError("console definition changed before start acceptance")
         db.set_console_desired_runtime_state(console.name, DesiredRuntimeState.RUNNING)
+
+
+@contextmanager
+def _held_console(db: Database, console: ConsoleRow, held: NativeLockSet) -> Iterator[None]:
+    """Run under the caller's set, which must hold ``console`` exclusive."""
+    held.require(console_request(db, console), database_path=db.path)
+    yield
 
 
 def _presence(admin: VMAccess | None, name: str) -> tuple[ProbeStatus, ProbeStatus]:
@@ -164,17 +171,17 @@ def prepare_console_reconcile(
     console: ConsoleRow,
     vm: VMRow,
     admin: VMAccess,
-    held_native_guard: NativeMutationGuard,
+    held: NativeLockSet,
     replace_running: bool = False,
 ) -> PreparedConsoleReconcile:
     """Observe and collect build requirements without changing tmux state.
 
-    The caller validated the console's definition under the same guard,
+    The caller validated the console's definition under the same set,
     before accepting running intent. A build also checks the direct SSH of
     every agent whose shell panes it will park for, so an agent that
     predates the rollout is refused here.
     """
-    with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
+    with _held_console(db, console, held):
         current = _require_console(db, console.name)
         if current != console or vm.name != console.vm_name:
             raise StateError("console definition changed before runtime preparation")
@@ -199,7 +206,7 @@ def prepare_console_reconcile(
             console,
             vm,
             access,
-            held_native_guard,
+            held,
             members,
             named_console_template(registry).tmux_layout,
             canonical,
@@ -215,10 +222,10 @@ def prepare_console_stop(
     console: ConsoleRow,
     vm: VMRow,
     admin: VMAccess | None,
-    held_native_guard: NativeMutationGuard,
+    held: NativeLockSet,
 ) -> PreparedConsoleStop:
     """Prepare exact teardown; a provider-off VM is represented by no access."""
-    with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
+    with _held_console(db, console, held):
         if _require_console(db, console.name) != console or vm.name != console.vm_name:
             raise StateError("console definition changed before stop preparation")
         canonical, staging = _presence(admin, console.name)
@@ -228,7 +235,7 @@ def prepare_console_stop(
             console,
             vm,
             admin,
-            held_native_guard,
+            held,
             tuple(db.list_console_sessions(console.name)),
             canonical,
             staging,
@@ -267,7 +274,7 @@ def execute_console_reconcile(prepared: PreparedConsoleReconcile, *, values: Map
     """Apply a prepared console action using only supplied workload values."""
     from .attach import _teardown_console_staging
 
-    with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
+    with _held_console(prepared.db, prepared.console, prepared.held):
         _verify_prepared(prepared)
         admin = prepared.admin
         canonical, staging = _presence(admin, prepared.console.name)
@@ -301,7 +308,7 @@ def execute_console_reconcile(prepared: PreparedConsoleReconcile, *, values: Map
 
 def execute_console_stop(prepared: PreparedConsoleStop) -> bool:
     """Execute prepared teardown without resolving secrets or starting a VM."""
-    with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
+    with _held_console(prepared.db, prepared.console, prepared.held):
         _verify_prepared(prepared)
         if prepared.admin is None:
             return False
@@ -312,7 +319,7 @@ def execute_console_stop(prepared: PreparedConsoleStop) -> bool:
 
 def observe_prepared_console(prepared: PreparedConsoleReconcile | PreparedConsoleStop) -> ConsoleStatus:
     """Observe the retained exact names without resolving sources or activating."""
-    with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
+    with _held_console(prepared.db, prepared.console, prepared.held):
         _verify_prepared(prepared)
         canonical, staging = _presence(prepared.admin, prepared.console.name)
         return classify_console_status(

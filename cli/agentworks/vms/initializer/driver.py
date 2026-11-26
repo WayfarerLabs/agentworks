@@ -85,8 +85,8 @@ if TYPE_CHECKING:
     from agentworks.execution.files import Files
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
@@ -165,7 +165,7 @@ def run_initialization(
     operation: VMInitializationOperation,
     setup_failures: list[SetupFailure],
     setup_inputs: tuple[SetupInputs, ...] = (),
-    setup_guard: NativeMutationGuard | None = None,
+    held: NativeLockSet | None = None,
     setup_values: Mapping[str, str] | None = None,
     legacy_conversion: tuple[DesiredOverlayRecord, VersionedPayload] | None = None,
 ) -> None:
@@ -180,11 +180,13 @@ def run_initialization(
     reports them after its remaining command bookkeeping.
 
     ``access`` is the admin's, and every step's requests run on it, bounded
-    by ``STEP_DEADLINE`` through one ``Files``.
+    by ``STEP_DEADLINE`` through one ``Files``. Initialization holds the vm
+    exclusive: the caller's set (``held``), or its own.
     """
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import require_or_acquire
+    from agentworks.native_locks.rows import vm_exclusive
 
-    with native_mutation_guard(db.path, vm_name, held=setup_guard) as guard:
+    with require_or_acquire(db.path, vm_exclusive(vm_name), held=held) as guard:
         from agentworks.harness_setup.lifecycle import require_prepared_setup
 
         require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)

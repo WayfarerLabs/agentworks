@@ -18,7 +18,8 @@ from agentworks.db import (
 )
 from agentworks.errors import AgentworksError, ValidationError
 from agentworks.execution.results import Result
-from agentworks.harness_setup.locking import native_mutation_guard
+from agentworks.native_locks import native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.runtime_state import reconcile_console, reconcile_session, reconcile_vm
 from agentworks.runtime_state._models import Outcome
@@ -240,7 +241,7 @@ def test_dry_run_has_no_native_guard_or_workload_sources(db, make_config, runtim
     powers["box"] = VMStatus.STOPPED
     before = db.get_session("work")
     monkeypatch.setattr(
-        "agentworks.harness_setup.locking.native_mutation_guard", lambda *a, **k: pytest.fail("native guard acquired")
+        "agentworks.native_locks._sets._acquire", lambda *a, **k: pytest.fail("dry run took a native lock")
     )
     monkeypatch.setattr(manager, "prepare_session_launch", lambda *a, **k: pytest.fail("guest readiness invoked"))
     reconcile_session(db, make_config(), name="work", dry_run=True, interaction=REFUSE)
@@ -397,7 +398,7 @@ def test_busy_family_does_not_prevent_independent_start(db, make_config, runtime
     seed_vm(db, "busy")
     seed_vm(db, "good")
     seed_session(db, "work", "good")
-    with native_mutation_guard(db.path, "busy"), pytest.raises(AgentworksError):
+    with native_locks(db.path, vm_exclusive("busy")), pytest.raises(AgentworksError):
         reconcile_vm(db, make_config(), all_vms=True, interaction=REFUSE)
     assert ("session-start", "work") in runtime[2]
 

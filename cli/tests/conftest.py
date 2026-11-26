@@ -7,7 +7,7 @@ import io
 import os
 import sqlite3
 import tempfile
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -276,6 +276,37 @@ def write_cfg(
     if manifests:
         write_manifests(config_dir, *manifests)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _lexical_path_walk(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name workspace path locks from each stored path's spelling in every non-integration test.
+
+    The lookup walk is a guest program the scripted guests do not run, and
+    its resolution is proved by its own tests (``tests/native_locks``), which
+    call it directly. Here a path with no links is assumed: its directories
+    are its proper prefixes and its final path is itself. Integration tests
+    walk the real VM.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return
+    import posixpath
+
+    from agentworks.native_locks import path_walk
+    from agentworks.workspaces import locks
+
+    def lexical(
+        vm: object, config: object, paths: Sequence[str], *, unlink_only: bool
+    ) -> tuple[path_walk.PathWalk, ...]:
+        walks = []
+        for path in paths:
+            final = posixpath.normpath(path)
+            parts = final.strip("/").split("/")
+            directories = tuple("/" + "/".join(parts[:index]) for index in range(1, len(parts)))
+            walks.append(path_walk.PathWalk(path, directories, (), final))
+        return tuple(walks)
+
+    monkeypatch.setattr(locks, "_walk", lexical)
 
 
 @pytest.fixture(autouse=True)
@@ -734,16 +765,28 @@ def normalize_lf(data: bytes) -> bytes:
 
 
 def guarding_node(db: Database, vm: VMRow, **attributes: object) -> SimpleNamespace:
-    """A stand-in live VM node for ``vm``: its ``row``, and a ``mutation_guard`` that takes the real guard.
+    """A stand-in live VM node for ``vm``: its ``row``, and a ``locked`` that takes the real lock set.
 
     ``attributes`` adds whatever else the command under test reaches through
     the node (its ``site``, say).
     """
     from types import SimpleNamespace
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
 
-    return SimpleNamespace(row=vm, mutation_guard=lambda: native_mutation_guard(db.path, vm.name), **attributes)
+    node = SimpleNamespace(row=vm, held=None, **attributes)
+
+    @contextlib.contextmanager
+    def locked(request: object, *, prompts: bool = False) -> Iterator[object]:
+        with native_locks(db.path, request, prompts=prompts) as held:  # type: ignore[arg-type]
+            node.held = held
+            try:
+                yield held
+            finally:
+                node.held = None
+
+    node.locked = locked
+    return node
 
 
 def admitting_boundary(
@@ -752,7 +795,7 @@ def admitting_boundary(
     """A stand-in for ``gated_vm_boundary`` that opens no gate and admits ``vm`` as it was read.
 
     It yields the boundary's shape: a node whose ``row`` is the admitted VM
-    row, which a command compares again under its guard, and no resolver or
+    row, which a command compares again under its lock set, and no resolver or
     context.
     """
     return contextlib.nullcontext((guarding_node(db, vm), None, None))

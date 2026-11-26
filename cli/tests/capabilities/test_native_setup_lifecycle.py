@@ -21,10 +21,11 @@ from agentworks.execution.requests import Command, Script
 from agentworks.execution.results import Completed, Result
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.schema import CapabilityConfig
@@ -200,7 +201,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
     def initialize(self, invocation):
         assert db.get_agent(name) is None and db.get_workspace(name) is None
         assert read_native_setup(db, kind, name).records == ()
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive(vm.name)):
             pass
         assert invocation.environment["TOKEN"] == "private-value"
         assert invocation.environment["VM"] == "parent"
@@ -240,7 +241,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
                 credential_redactions=(),
                 setup_inputs=inputs,
                 setup_values={"setup-token": "private-value"},
-                held_native_guard=guard,
+                held=guard,
             )
         else:
             realize_workspace(
@@ -253,12 +254,12 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
                 template=ResolvedTemplate("default"),
                 setup_inputs=inputs,
                 setup_values={"setup-token": "private-value"},
-                held_native_guard=guard,
+                held=guard,
             )
 
         raise_setup_failures(failures)
 
-    with native_mutation_guard(db.path, vm.name) if nested else nullcontext(None) as guard:
+    with native_locks(db.path, vm_exclusive(vm.name)) if nested else nullcontext(None) as guard:
         if fail_insert:
             with pytest.raises(ExternalError):
                 create()
@@ -388,7 +389,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
             for decl in compute_needed_secrets(registered_targets, registry, allow_transient_auto_declare=True)
         ] == ["env-secret"]
         resolver.register_name.assert_called_once_with("config-secret")
-        with native_mutation_guard(db.path, vm.name) as guard:
+        with native_locks(db.path, vm_exclusive(vm.name)) as guard:
             apply_agent_setup(
                 db,
                 MagicMock(),
@@ -457,7 +458,7 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
     events = []
 
     def core(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm.name):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive(vm.name)):
             pass
         events.append("core")
         return AuthorizedKeysUnproven()

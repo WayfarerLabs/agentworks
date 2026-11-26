@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources import Registry
     from agentworks.vms.nodes import LiveVMNode, VMSiteNode
 
@@ -49,7 +49,7 @@ def prepare_vm_runtime(
     vm: VMRow,
     *,
     resolve_secret: Callable[[str], str],
-    held_native_guard: NativeMutationGuard | None = None,
+    held: NativeLockSet | None = None,
     site_nodes: dict[str, VMSiteNode] | None = None,
     vm_node: LiveVMNode | None = None,
 ) -> VMRuntimeContext:
@@ -59,7 +59,7 @@ def prepare_vm_runtime(
 
     _guard_incomplete_vm(vm)
     if vm_node is None:
-        vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard, site_nodes=site_nodes)
+        vm_node = live_vm_node(db, config, registry, vm, held=held, site_nodes=site_nodes)
     if vm_node.row.vm_uuid != vm.vm_uuid or vm_node.row.name != vm.name:
         raise StateError("prepared VM node does not match selection", entity_kind="vm", entity_name=vm.name)
     vm_node.reload_row()
@@ -116,17 +116,31 @@ def _start_vm_runtime(context: VMRuntimeContext, *, explicit: bool) -> bool:
     differs from an activation two ways. It proceeds on an unknown power
     observation. And it says what it did before the wait, so a failed wait
     still reads as one on a running VM.
-    """
-    import agentworks.vms.manager as manager
 
+    A start holds the vm exclusive (``LiveVMNode.booting``): an explicit
+    start already holds it, and an activation takes it briefly and observes
+    the VM again under it. A running VM is never locked exclusive here.
+    """
     row = _current_vm(context)
     if row.desired_runtime_state is DesiredRuntimeState.STOPPED:
         raise StateError("VM has stopped intent", entity_kind="vm", entity_name=row.name)
     trust.require_record(row.name)
-    platform = context.node.site.platform
     status = observe_vm_runtime(context)
     if status is VMStatus.UNKNOWN and not explicit:
         raise StateError("VM power state is unknown", entity_kind="vm", entity_name=row.name)
+    if status is VMStatus.RUNNING:
+        return _start_and_wait(context, row, status, explicit=explicit)
+    with context.node.booting() as brief:
+        if brief:
+            row = _current_vm(context)
+            status = observe_vm_runtime(context)
+        return _start_and_wait(context, row, status, explicit=explicit)
+
+
+def _start_and_wait(context: VMRuntimeContext, row: VMRow, status: VMStatus, *, explicit: bool) -> bool:
+    import agentworks.vms.manager as manager
+
+    platform = context.node.site.platform
     # Started before the hold: WSL2's keepalive boots a stopped distro as a
     # side effect of holding it, which would make the VM read as running.
     if status is not VMStatus.RUNNING:

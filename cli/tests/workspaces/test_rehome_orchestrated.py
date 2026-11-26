@@ -457,12 +457,13 @@ def test_rehome_observes_without_writing_then_refuses_a_session_started_before_t
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Before the confirmation the sessions check only observes: nothing is
-    repaired or written, and no guard is held. Under the guard PID evidence
+    repaired or written, and nothing is locked. Under the lock set PID evidence
     is repaired and the check runs again, so a session that started after
     the confirmation refuses the rehome before the target is reserved."""
     from agentworks import output as output_mod
     from agentworks.db import SessionStatus
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.sessions import manager as sessions_manager
 
     config = make_config()
@@ -475,9 +476,9 @@ def test_rehome_observes_without_writing_then_refuses_a_session_started_before_t
 
     def guarded() -> bool:
         try:
-            with native_mutation_guard(db.path, "box"):
+            with native_locks(db.path, vm_exclusive("box")):
                 return False
-        except NativeSetupBusyError:
+        except NativeLockBusyError:
             return True
 
     def observe(sessions: list[object], **_kwargs: object) -> dict[str, SessionStatus]:

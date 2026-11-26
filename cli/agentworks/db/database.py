@@ -490,7 +490,7 @@ class Database:
         self._require_target_match(result, "session", name)
 
     def set_console_desired_runtime_state(self, name: str, state: DesiredRuntimeState) -> None:
-        """Write a console selected by the manager under its family guard."""
+        """Write a console selected by the manager under the console's lock."""
         target = _runtime_state(state, "console")
         result = self._conn.execute(
             "UPDATE consoles SET updated_at = CASE WHEN desired_runtime_state IS ? THEN updated_at "

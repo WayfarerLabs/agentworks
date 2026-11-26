@@ -10,10 +10,12 @@ import agentworks.bootstrap as bootstrap
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
-from agentworks.harness_setup.locking import native_mutation_guard
+from agentworks.native_locks import native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests.conftest import guarding_node
 from tests.console_helpers import create_console_record
 from tests.vm_access_support import RecordingVMAccess, install_access_recorder
 
@@ -64,7 +66,7 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held_native_guard=guard,
+            held=guard,
         )
         assert prepared.action is action
         assert calls == (["collect"] if collect else [])
@@ -91,7 +93,7 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held_native_guard=guard,
+            held=guard,
         )
 
 
@@ -114,7 +116,7 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held_native_guard=guard,
+            held=guard,
         )
         assert not changed
         assert mc.execute_console_reconcile(prepared, values={})
@@ -145,7 +147,7 @@ def test_delete_consent_is_asked_unguarded_and_a_member_change_before_the_guard_
     from agentworks import output
 
     def confirm(_prompt):
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             db.add_console_session("con", "alpha", [])
         return True
 
@@ -192,7 +194,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
             console=console,
             vm=_vm(db),
             admin=admin,
-            held_native_guard=guard,
+            held=guard,
         )
         assert mc.execute_console_reconcile(prepared, values={"token": value})
         assert mc.observe_prepared_console(prepared).value == "running"
@@ -294,7 +296,7 @@ def test_stop_off_parent_accepts_without_transport_activation_or_hold(db: Databa
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     calls = []
-    node = SimpleNamespace(hold_active=lambda: pytest.fail("opened a VM hold"))
+    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
     context = SimpleNamespace(node=node, observed_status=VMStatus.STOPPED, clear_values=lambda: calls.append("clear"))
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: context)
@@ -370,14 +372,19 @@ def test_focused_selection_refuses_reparent_before_guarded_reread(db: Database, 
     _seed_vm(db, "vm2")
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
 
+    import agentworks.native_locks as native_locks
+
+    original = native_locks.native_locks
+
     @contextmanager
-    def changing_parent(path, vm_name, *, held=None):
-        assert vm_name == "vm1"
+    def changing_parent(path, request, **kwargs):
+        assert request.vm == "vm1"
         db._conn.execute("UPDATE consoles SET vm_name = 'vm2' WHERE name = 'con'")
         db._conn.commit()
-        yield object()
+        with original(path, request, **kwargs) as held:
+            yield held
 
-    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", changing_parent)
+    monkeypatch.setattr(native_locks, "native_locks", changing_parent)
     with pytest.raises(StateError):
         mc.set_console_desired_runtime_state(db, name="con", state="stopped")
     assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
@@ -394,7 +401,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
 
     _seed_vm(db, with_tailscale=True)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
-    node = SimpleNamespace(hold_active=lambda: pytest.fail("opened hold"))
+    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened hold"))
     context = SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
@@ -471,5 +478,5 @@ def test_missing_host_record_refuses_console_start_before_accepting_intent(
         mc.start_console(db, make_config(), name="con", interaction=TtyInteractionPolicy.REFUSE)
 
     assert (_vm(db), _console(db), _session(db), db.list_console_sessions("con"), db._conn.total_changes) == before
-    with native_mutation_guard(db.path, "vm1"):
+    with native_locks(db.path, vm_exclusive("vm1")):
         pass

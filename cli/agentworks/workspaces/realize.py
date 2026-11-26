@@ -39,9 +39,9 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.templates import ResolvedTemplate
 
@@ -59,7 +59,7 @@ def realize_workspace(
     setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
-    held_native_guard: NativeMutationGuard | None = None,
+    held: NativeLockSet | None = None,
 ) -> Path:
     """Make workspace ``name`` real on ``vm``: create the on-VM
     directory from its RESOLVED template, generate the VS Code
@@ -78,6 +78,10 @@ def realize_workspace(
     mutations can leave reported residue; the caller's realization log never
     marks a half-made workspace complete. Native setup failures join
     ``setup_failures`` while the row and setup progress are committed.
+
+    Runs under the caller's ``held`` set, which also locks the target tree
+    and whose step-7 re-check confirmed the grant-all agents it grants, or
+    under :func:`workspace_create_request`'s set of its own.
     """
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.vms.manager import operation_log
@@ -124,9 +128,10 @@ def realize_workspace(
             )
 
     from agentworks.harness_setup.lifecycle import require_prepared_setup
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import require_or_acquire
+    from agentworks.workspaces.locks import workspace_create_request
 
-    with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
+    with require_or_acquire(db.path, workspace_create_request(db, vm, name)[0], held=held) as guard:
         require_prepared_setup(db, "workspace", name, ("workspace",), () if setup_inputs is None else (setup_inputs,))
         # The log closes exactly once, AFTER any rollback requests have been
         # logged. Closing earlier would write the "Finished" footer before the

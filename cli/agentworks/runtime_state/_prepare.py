@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 from agentworks.db import DesiredRuntimeState, SessionStatus, VMStatus
 from agentworks.errors import StateError, UserAbort
 
+from ._families import held_for, intent_lock
 from ._models import Outcome
 
 if TYPE_CHECKING:
     from agentworks.db import SessionRow
+    from agentworks.native_locks import NativeLockSet
 
     from ._models import Kind, RuntimeInvocation
 
@@ -43,7 +45,8 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
             )
             if target is None:
                 invocation.fail("session", name, "desired state requires adoption", blocked=True)
-            elif target is DesiredRuntimeState.RUNNING:
+            elif target is DesiredRuntimeState.RUNNING and name not in invocation.declarations:
+                # A session with a declaration to accept is prepared from it once it is accepted.
                 invocation.definitions[name] = sessions.prepare_session_definition(
                     invocation.db,
                     invocation.config,
@@ -66,7 +69,7 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
             session
             for name, session in invocation.sessions.items()
             if not invocation.unavailable("session", name)
-            and name in invocation.definitions
+            and (name in invocation.definitions or name in invocation.declarations)
             and invocation.vms[session_vm_name(invocation, session)].desired_runtime_state
             is not DesiredRuntimeState.STOPPED
         ]
@@ -81,58 +84,17 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
                 # Failed guest observation is operational uncertainty, not a local policy refusal.
                 observations = {}
 
-    for name, selected in tuple(invocation.sessions.items()):
-        if invocation.unavailable("session", name):
+    # (d): each family records its intent under a brief hold of its own set,
+    # so the intent survives any later failure; a reconcile records none.
+    for vm_name in sorted(invocation.vms):
+        if vm_name in invocation.failed_families:
             continue
-        try:
-            session = selected
-            vm_name = session_vm_name(invocation, session)
-            vm = invocation.vms[vm_name]
-            target = (
-                DesiredRuntimeState.STOPPED
-                if invocation.operation in {"stop", "stop-all"}
-                else DesiredRuntimeState.RUNNING
-                if invocation.operation is not None
-                else session.desired_runtime_state
-            )
-            assert target is not None
-            if invocation.operation is not None:
-                if target is DesiredRuntimeState.RUNNING:
-                    definition = invocation.definitions[name]
-                    sessions.validate_session_observed_policy(
-                        session,
-                        observations.get(name, SessionStatus.UNKNOWN),
-                        replace_running=definition.replace_running,
-                        force=definition.force,
-                        intent=definition.intent,
-                        running_restart_authorized=definition.running_restart_authorized,
-                    )
-                previous = session.desired_runtime_state
-                session = sessions.accept_session_runtime_state(
-                    invocation.db, session, state=target, held_native_guard=invocation.guards[vm_name]
-                )
-                invocation.sessions[name] = session
-                invocation.record("session", name, desired_runtime_state=target)
-                if previous != target:
-                    invocation.accepted_changes.add(name)
-                    if target is DesiredRuntimeState.RUNNING:
-                        invocation.definitions[name] = sessions.prepare_session_definition(
-                            invocation.db,
-                            invocation.config,
-                            invocation.registry,
-                            session,
-                            vm_node=invocation.nodes[vm_name],
-                            replace_running=invocation.operation == "restart",
-                            force=invocation.force,
-                            intent=invocation.intent,
-                            running_restart_authorized=name in invocation.authorized_running,
-                        )
-            if target is DesiredRuntimeState.RUNNING and vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
-                invocation.fail("session", name, "parent VM has stopped desired state", blocked=True)
-        except UserAbort:
-            raise
-        except Exception as error:
-            invocation.fail("session", name, error, blocked=True)
+        if invocation.operation is None:
+            _accept_family(invocation, vm_name, observations, held=None)
+            continue
+        with intent_lock(invocation, vm_name) as held:
+            if held is not None:
+                _accept_family(invocation, vm_name, observations, held=held)
     for name, console in invocation.consoles.items():
         if invocation.unavailable("console", name):
             continue
@@ -147,6 +109,72 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
                 raise
             except Exception as error:
                 invocation.fail("console", name, error, blocked=True)
+
+
+def _accept_family(
+    invocation: RuntimeInvocation,
+    vm_name: str,
+    observations: dict[str, SessionStatus],
+    *,
+    held: NativeLockSet | None,
+) -> None:
+    """Accept each of the family's sessions: its policy, its declaration and its intent, under ``held``."""
+    import agentworks.sessions.manager as sessions
+
+    vm = invocation.vms[vm_name]
+    for name, selected in tuple(invocation.sessions.items()):
+        if invocation.unavailable("session", name) or session_vm_name(invocation, selected) != vm_name:
+            continue
+        try:
+            session = selected
+            target = (
+                DesiredRuntimeState.STOPPED
+                if invocation.operation in {"stop", "stop-all"}
+                else DesiredRuntimeState.RUNNING
+                if invocation.operation is not None
+                else session.desired_runtime_state
+            )
+            assert target is not None
+            if invocation.operation is not None:
+                assert held is not None
+                if target is DesiredRuntimeState.RUNNING:
+                    sessions.validate_session_observed_policy(
+                        session,
+                        observations.get(name, SessionStatus.UNKNOWN),
+                        replace_running=invocation.operation == "restart",
+                        force=invocation.force,
+                        intent=invocation.intent,
+                        running_restart_authorized=name in invocation.authorized_running,
+                    )
+                previous = session.desired_runtime_state
+                declaration = invocation.declarations.get(name)
+                if declaration is not None:
+                    declaration.accept(session, observations.get(name, SessionStatus.UNKNOWN))
+                session = sessions.accept_session_runtime_state(invocation.db, session, state=target, held=held)
+                invocation.sessions[name] = session
+                invocation.record("session", name, desired_runtime_state=target)
+                if previous != target:
+                    invocation.accepted_changes.add(name)
+                    invocation.replaced_intents[name] = previous
+                if (previous != target or declaration is not None) and target is DesiredRuntimeState.RUNNING:
+                    invocation.definitions[name] = sessions.prepare_session_definition(
+                        invocation.db,
+                        invocation.config,
+                        invocation.registry,
+                        session,
+                        vm_node=invocation.nodes[vm_name],
+                        replace_running=invocation.operation == "restart",
+                        force=invocation.force,
+                        intent=invocation.intent,
+                        running_restart_authorized=name in invocation.authorized_running,
+                    )
+            invocation.accepted_overlays[name] = invocation.db.instance_state.get_desired_overlay("session", name)
+            if target is DesiredRuntimeState.RUNNING and vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+                invocation.fail("session", name, "parent VM has stopped desired state", blocked=True)
+        except UserAbort:
+            raise
+        except Exception as error:
+            invocation.fail("session", name, error, blocked=True)
 
 
 def _needs_running_guest(invocation: RuntimeInvocation, vm_name: str) -> bool:
@@ -217,7 +245,6 @@ def prepare_infrastructure(invocation: RuntimeInvocation) -> None:
                 invocation.registry,
                 vm,
                 resolve_secret=invocation.gate_value,
-                held_native_guard=invocation.guards[name],
                 vm_node=invocation.nodes[name],
             )
             invocation.contexts[name] = context
@@ -360,13 +387,13 @@ def prepare_guest_workloads(invocation: RuntimeInvocation) -> None:
                     console=console,
                     vm=vm,
                     admin=admin,
-                    held_native_guard=invocation.guards[vm.name],
+                    held=held_for(invocation, vm.name),
                 )
                 invocation.console_starts[name] = prepared_console
                 invocation.record("console", name, action=prepared_console.action.value)
             else:
                 prepared_console_stop = consoles.prepare_console_stop(
-                    invocation.db, console=console, vm=vm, admin=admin, held_native_guard=invocation.guards[vm.name]
+                    invocation.db, console=console, vm=vm, admin=admin, held=held_for(invocation, vm.name)
                 )
                 invocation.console_stops[name] = prepared_console_stop
                 invocation.record(

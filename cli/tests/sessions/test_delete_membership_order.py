@@ -78,12 +78,13 @@ def test_a_failed_membership_removal_keeps_the_session_and_grant_rows_for_a_reru
 
 
 def _guard_free(db: Database) -> bool:
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     try:
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             return True
-    except NativeSetupBusyError:
+    except NativeLockBusyError:
         return False
 
 

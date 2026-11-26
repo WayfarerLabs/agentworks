@@ -1,4 +1,4 @@
-"""Local selection and exact guarded resource reloads."""
+"""Local selection and the exact resource reloads its family locks are built from."""
 
 from __future__ import annotations
 
@@ -89,21 +89,20 @@ def seed_results(invocation: RuntimeInvocation) -> None:
         )
 
 
-def acquire_families(invocation: RuntimeInvocation) -> None:
-    from agentworks.harness_setup.locking import native_mutation_guard
+def read_families(invocation: RuntimeInvocation) -> None:
+    """(a): read each selected VM family and its targets again, exactly, before anything is locked.
+
+    The final family sets compare what is read here (``_families``).
+    """
     from agentworks.vms.nodes import live_vm_node
 
     site_nodes: dict[str, VMSiteNode] = {}
     session_routes = dict(invocation.selection.session_routes)
     for selected in sorted(invocation.selection.vms, key=lambda vm: vm.name):
         try:
-            guard = invocation.stack.enter_context(
-                native_mutation_guard(invocation.db.path, selected.name, held=invocation.held_native_guard)
-            )
             current = _vm(invocation.db, selected.name)
             if current.vm_uuid != selected.vm_uuid:
                 raise StateError("VM was replaced during selection", entity_kind="vm", entity_name=selected.name)
-            invocation.guards[current.name] = guard
             invocation.vms[current.name] = current
             if ("vm", current.name) in invocation.results:
                 invocation.results[("vm", current.name)] = replace(
@@ -114,7 +113,6 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
                 invocation.config,
                 invocation.registry,
                 current,
-                held_native_guard=guard,
                 site_nodes=site_nodes,
             )
         except UserAbort:
@@ -140,7 +138,7 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
                 or workspace is None
                 or current_session.workspace_name != selected_session.workspace_name
                 or workspace.vm_name != session_routes[selected_session.name]
-                or workspace.vm_name not in invocation.guards
+                or workspace.vm_name not in invocation.vms
             ):
                 raise StateError(
                     "session identity or parent changed during selection",
@@ -165,7 +163,7 @@ def acquire_families(invocation: RuntimeInvocation) -> None:
         )
     for name, parent in routes:
         current_console = invocation.db.get_console(name)
-        if current_console is None or current_console.vm_name != parent or parent not in invocation.guards:
+        if current_console is None or current_console.vm_name != parent or parent not in invocation.vms:
             invocation.results[("console", name)] = RuntimeResult(
                 kind="console", name=name, desired_runtime_state=None, target_known=False
             )

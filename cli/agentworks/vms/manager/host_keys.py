@@ -23,7 +23,8 @@ from agentworks.errors import ConfigError, ExternalError
 from agentworks.execution import trust
 from agentworks.execution.client import tool_beside_ssh
 from agentworks.execution.trust import HostKey
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.path_rendering import format_host_path
 
 from ._helpers import _require_vm
@@ -47,7 +48,7 @@ class ImportStatus(StrEnum):
     CONFLICT = "conflicts with the stored key"
     NO_ADDRESS = "no tailnet address"
     MALFORMED = "malformed host key, nothing recorded"
-    BUSY = "busy: another operation is changing native state on this VM"
+    BUSY = "busy"
 
 
 @dataclass(frozen=True)
@@ -55,17 +56,21 @@ class HostKeyImport:
     """One VM's import outcome.
 
     ``has_record`` is the store's state afterwards, which is what decides
-    whether the VM is usable, whatever the status.
+    whether the VM is usable, whatever the status. ``blocked_by`` is the
+    refusal of a ``BUSY`` import, naming what holds the VM.
     """
 
     vm_name: str
     status: ImportStatus
     keys_written: int
     has_record: bool
+    blocked_by: str | None = None
 
     def describe(self) -> str:
         if self.status is ImportStatus.IMPORTED:
             return f"{self.status.value} ({output.count(self.keys_written, 'key')})"
+        if self.blocked_by is not None:
+            return f"{self.status.value}: {self.blocked_by}"
         return self.status.value
 
 
@@ -153,12 +158,12 @@ def _import_one(vm: VMRow, keygen: str, source: Path | None) -> HostKeyImport:
 
 
 def _guarded_import(db: Database, name: str, keygen: str, source: Path | None) -> HostKeyImport:
-    """One VM's import under its native mutation guard, read again under it; a held guard is that VM's ``BUSY``."""
+    """One VM's import under its vm exclusive, read again under it; a refusal is that VM's ``BUSY``."""
     try:
-        with native_mutation_guard(db.path, name):
+        with native_locks(db.path, vm_exclusive(name)):
             return _import_one(_require_vm(db, name), keygen, source)
-    except NativeSetupBusyError:
-        return HostKeyImport(name, ImportStatus.BUSY, 0, trust.has_record(name))
+    except NativeLockBusyError as refusal:
+        return HostKeyImport(name, ImportStatus.BUSY, 0, trust.has_record(name), blocked_by=str(refusal))
 
 
 def import_host_keys(
@@ -171,8 +176,8 @@ def import_host_keys(
 ) -> tuple[HostKeyImport, ...]:
     """Import host keys for the named VMs, or for every VM with ``all_vms``, then sync the SSH config.
 
-    Each VM imports under its own native mutation guard; one another
-    operation holds ends ``BUSY`` and the others carry on.
+    Each VM imports under its own vm exclusive; one another operation
+    holds ends ``BUSY``, naming that holder, and the others carry on.
 
     The managed SSH entries are rewritten on every run, whatever was imported
     and whether or not the run fails, so a refused name, a missing source or an

@@ -491,7 +491,8 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
 ) -> None:
     from agentworks import output as output_mod
     from agentworks.errors import StateConflictError
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
 
     config = make_config()
@@ -500,14 +501,14 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     unguarded: list[str] = []
 
     def confirm(message: str, default: bool = False) -> bool:
-        with native_mutation_guard(db.path, "box"):
+        with native_locks(db.path, vm_exclusive("box")):
             unguarded.append("confirm")
         return True
 
     resolve = Resolver.resolve
 
     def resolve_then_a_session_appears(self: Resolver) -> None:
-        with native_mutation_guard(db.path, "box"):
+        with native_locks(db.path, vm_exclusive("box")):
             unguarded.append("resolve")
         resolve(self)
         seed_live_session(db, name="late", ws="ws1")

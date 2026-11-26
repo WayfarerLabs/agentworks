@@ -11,8 +11,9 @@ import pytest
 from agentworks.db import Database, DesiredRuntimeState, SessionStatus, VersionedPayload, VMStatus
 from agentworks.db.instance_state import JsonObject
 from agentworks.errors import AgentworksError, StateError, UserAbort
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.instance_specs import get_instance_overlay, parse_instance_spec
+from agentworks.native_locks import native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.plugins.claude.conversation_probe import ConversationProbe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager
@@ -139,26 +140,26 @@ def test_clear_supersedes_unsupported_selected_overlay(db, make_config, runtime,
         assert value not in rendered
 
 
-def test_valid_spec_survives_downstream_failure_and_reuses_guard(db, make_config, runtime, monkeypatch):
+def test_spec_hands_its_layer_to_the_batch_and_takes_no_lock_of_its_own(db, make_config, runtime, monkeypatch):
     _seed(db)
     entered = []
 
     def fail(*args, **kwargs):
-        guard = kwargs["held_native_guard"]
-        with native_mutation_guard(db.path, "box", held=guard) as reused:
-            assert reused is guard
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
-            pytest.fail("guard was released")
-        entered.append(guard)
+        assert "held" not in kwargs
+        # Nothing is held around the batch: the batch's own sets would refuse otherwise.
+        with native_locks(db.path, vm_exclusive("box")):
+            pass
+        session = db.get_session("work")
+        kwargs["declarations"]["work"].accept(session, SessionStatus.STOPPED)
+        entered.append(session.name)
         raise StateError("fixture launch failure")
 
     monkeypatch.setattr("agentworks.runtime_state.run_session_batch", fail)
     with pytest.raises(StateError):
         manager.start_session(db, make_config(), name="work", spec='{"env":{"NEW":"after"}}', interaction=REFUSE)
+    # The batch accepted the layer, which survives the later failure.
     assert _value(db) == {"env": {"NEW": {"value": "after"}}}
-    assert len(entered) == 1
-    with native_mutation_guard(db.path, "box"):
-        pass
+    assert entered == ["work"]
 
 
 def test_session_replacement_during_consent_preserves_replacement_spec(db, make_config, runtime, monkeypatch):
@@ -183,24 +184,27 @@ def test_session_replacement_during_consent_preserves_replacement_spec(db, make_
     assert runtime[2] == []
 
 
-def test_session_replacement_before_guard_acquisition_refuses_before_the_layer_is_replaced(
+def test_session_replacement_before_intent_acceptance_refuses_before_the_layer_is_replaced(
     db, make_config, runtime, monkeypatch
 ):
-    """The consent is asked before the guard; a session replaced before the
-    guard is not the one it was about, so the launch refuses under it."""
+    """The consent is asked with nothing locked; a session replaced before the
+    batch accepts its intent is not the one it was about, so it refuses there."""
+    import agentworks.runtime_state._families as families
+
     _seed(db)
     before = db.get_session("work")
     asked = []
+    original = native_locks
 
     @contextmanager
-    def replace_at_guard_entry(*args, **kwargs):
-        with native_mutation_guard(*args, **kwargs) as guard:
+    def replace_at_intent_lock(*args, **kwargs):
+        with original(*args, **kwargs) as held:
             db.delete_session("work")
             seed_session(db, "work", "box")
             _put(db, '{"env":{"OTHER":"owner"}}')
-            yield guard
+            yield held
 
-    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", replace_at_guard_entry)
+    monkeypatch.setattr(families, "native_locks", replace_at_intent_lock)
     monkeypatch.setattr(
         manager, "observe_session_statuses", lambda sessions, **k: {s.name: SessionStatus.RUNNING for s in sessions}
     )
@@ -323,10 +327,9 @@ def test_force_new_conflict_preserves_overlay_runtime_and_target(
 def test_restart_consent_is_asked_unguarded_and_a_status_change_before_the_guard_refuses(
     db, make_config, runtime, monkeypatch
 ):
-    from agentworks.errors import StateConflictError
-
     _seed(db)
     before = _value(db)
+    # The consent sees it running; the batch, observing again before it accepts the layer, sees it stopped.
     statuses = iter([SessionStatus.RUNNING, SessionStatus.STOPPED])
     monkeypatch.setattr(
         manager, "observe_session_statuses", lambda sessions, **k: {s.name: next(statuses) for s in sessions}
@@ -334,15 +337,16 @@ def test_restart_consent_is_asked_unguarded_and_a_status_change_before_the_guard
     asked = []
 
     def confirm(*args, **kwargs):
-        with native_mutation_guard(db.path, "box"):
+        with native_locks(db.path, vm_exclusive("box")):
             asked.append(True)
         return True
 
     monkeypatch.setattr("agentworks.output.confirm", confirm)
-    with pytest.raises(StateConflictError):
+    with pytest.raises(StateError) as refused:
         manager.restart_session(
             db, make_config(), name="work", spec='{"env":{"NEW":"after"}}', interaction=TtyInteractionPolicy.ALLOW
         )
+    assert refused.value.entity_name == "work"
     assert asked == [True]
     assert _value(db) == before
     assert runtime[2] == []

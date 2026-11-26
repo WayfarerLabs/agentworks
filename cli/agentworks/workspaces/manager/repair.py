@@ -105,9 +105,10 @@ def repair_workspace(
     its just-in-time values seeding the boundary resolver, and the
     whole SSH convergence body runs inside the held-active span. The
     not-found checks stay pre-boundary: a refusal costs zero prompts,
-    zero resolves, and zero gate events. The native mutation guard is
-    taken after the gate and its secrets, and the workspace row is read
-    again under it.
+    zero resolves, and zero gate events. The lock set (the workspace, the
+    admin's grant and one per granted agent) is probed before the gate and
+    taken after it and its secrets; the workspace row and its granted
+    agents are read again under it.
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import load_request_registry
@@ -135,6 +136,12 @@ def repair_workspace(
         )
     ws_path = stored_workspace_path(ws.workspace_path)
 
+    from agentworks.native_locks import probe_locks
+    from agentworks.workspaces.locks import workspace_grants, workspace_request
+
+    grants = workspace_grants(db, vm, ws)
+    request = workspace_request(ws, *grants)
+    probe_locks(db.path, request)
     with (
         gated_vm_boundary(
             db,
@@ -144,11 +151,12 @@ def repair_workspace(
             scope=_workspace_scope(db, vm, name),
             interaction=interaction,
         ) as (vm_node, _resolver, _ctx),
-        vm_node.mutation_guard(),
+        vm_node.locked(request),
         operation_log(vm.name, "workspace-repair") as log,
     ):
         require_vm_unchanged(db, vm_node.row)
         require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
+        require_unchanged("workspace", name, grants, workspace_grants(db, vm, ws))
         admin = admin_access(vm, config, log)
         ws_group = ws.linux_group
         fixes = 0

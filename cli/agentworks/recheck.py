@@ -1,10 +1,11 @@
-"""What a command compares, once it holds the native mutation guard, with what it read before taking it.
+"""What a command compares, once it holds its native lock set, with what it read before taking it.
 
 A command reads its rows, opens the VM's activation gate, resolves its
-secrets and asks its confirmations with no guard held, so that no prompt
-keeps another operation on the VM waiting. Another command may change those
-rows in between; after acquiring the guard, the command reads them again and
-refuses with ``StateConflictError`` if any field it relied on differs.
+secrets and asks its confirmations with nothing locked, so that no prompt
+keeps another operation waiting. Another command may change those rows in
+between; after acquiring its set (step 7 of the operation sequence), the
+command reads them again and refuses with ``StateConflictError`` if any
+field it relied on differs.
 
 Each ``*_fields`` function names those fields for one row and returns
 ``None`` for a missing row, so presence is compared too. Only identity and
@@ -25,7 +26,7 @@ type Fields = tuple[object, ...] | None
 
 
 def require_unchanged(entity_kind: str, entity_name: str, read: object, current: object) -> None:
-    """Refuse when what the command reads now differs from what it read before it took the guard."""
+    """Refuse when what the command reads now differs from what it read before it took its lock set."""
     if read != current:
         raise StateConflictError(
             f"{entity_kind} '{entity_name}' changed since this command read it",
@@ -66,7 +67,7 @@ def console_row_fields(db: Database, name: str) -> Fields:
     """The console's placement and its admin shell, without its members.
 
     For a command that rewrites a member list from what it reads under the
-    guard, so a member another command added or removed meanwhile is kept.
+    lock, so a member another command added or removed meanwhile is kept.
     """
     console = db.get_console(name)
     return None if console is None else (console.vm_name, console.admin_shell)
@@ -82,7 +83,7 @@ def console_fields(db: Database, name: str) -> Fields:
 
 
 def require_session_unchanged(db: Database, name: str, read: SessionRow | None) -> None:
-    """Refuse when the session row differs from the one the command read before it took the guard."""
+    """Refuse when the session row differs from the one the command read before it took its lock set."""
     require_unchanged("session", name, session_fields(read), session_fields(db.get_session(name)))
 
 

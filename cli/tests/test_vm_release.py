@@ -337,7 +337,8 @@ def test_confirm_release_asks_with_no_guard_held(
     monkeypatch: pytest.MonkeyPatch,
     answer_release: Callable[..., AccessRecorder],
 ) -> None:
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     insert_complete_vm(db)
     db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
@@ -345,7 +346,7 @@ def test_confirm_release_asks_with_no_guard_held(
     asked: list[bool] = []
 
     def confirm(*_args: object, **_kwargs: object) -> bool:
-        with native_mutation_guard(db.path, "box"):
+        with native_locks(db.path, vm_exclusive("box")):
             asked.append(True)
         return True
 
@@ -391,14 +392,15 @@ def test_confirm_release_refuses_while_the_vms_guard_is_held(
     make_config,  # noqa: ANN001
     answer_release: Callable[..., AccessRecorder],
 ) -> None:
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     insert_complete_vm(db)
     db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
     db.update_vm_init_status("box", InitStatus.COMPLETE)
     answer_release(DebianRelease.TRIXIE)
 
-    with native_mutation_guard(db.path, "box"), pytest.raises(NativeSetupBusyError):
+    with native_locks(db.path, vm_exclusive("box")), pytest.raises(NativeLockBusyError):
         confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     vm = db.get_vm("box")

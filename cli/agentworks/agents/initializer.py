@@ -123,7 +123,7 @@ def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shel
             f"cannot recreate agent '{linux_user}': could not read retained home directory UID/GID at '{home}'"
         )
 
-    # Cooperating writers hold the VM mutation guard. Exclusive native
+    # Cooperating writers hold the account's exclusive lock. Exclusive native
     # creation refuses occupied IDs; NSS checks establish the identity used
     # by numeric useradd and by later home/SSH setup, without enumerating NSS.
     try:

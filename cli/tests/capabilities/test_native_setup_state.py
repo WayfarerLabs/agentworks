@@ -9,7 +9,6 @@ from agentworks.artifacts.application import ArtifactDeferral
 from agentworks.db import AppliedStateKey, AppliedStateSlice, Database, VersionedPayload
 from agentworks.db.backup import create_manual_backup, restore_backup
 from agentworks.errors import BackupError, StateError
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import (
     UnsupportedNativeSetupVersionError,
@@ -20,6 +19,8 @@ from agentworks.harness_setup.state import (
     replace_setup_record,
     write_native_setup,
 )
+from agentworks.native_locks import native_locks
+from agentworks.native_locks.rows import vm_exclusive
 
 
 def _state() -> NativeSetupState:
@@ -191,7 +192,7 @@ def test_restore_preserves_native_applied_state_after_setup_releases_database(tm
         )
         expected = db.instance_state.get_applied_slices("agent", "a")
         snapshot = create_manual_backup(db.path)
-        with native_mutation_guard(db.path, "box"):
+        with native_locks(db.path, vm_exclusive("box")):
             write_native_setup(db, "agent", "a", NativeSetupState(), operation="agent-reinit")
             with pytest.raises(BackupError):
                 restore_backup(snapshot, db.path)

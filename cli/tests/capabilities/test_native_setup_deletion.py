@@ -12,9 +12,10 @@ from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import ConnectivityError, StateError
 from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.results import Result, Unknown, UnknownReason
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import write_native_setup
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -63,12 +64,12 @@ def deletion(db, tmp_path, monkeypatch):
     removed = []
 
     def remove_agent(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         removed.append("agent")
 
     def remove_workspace(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         removed.append("workspace")
 
@@ -151,7 +152,7 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
     removed = []
 
     def remove(vm, ctx):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         if outcome == "delete-failed":
             raise ConnectivityError("platform refused")
@@ -173,7 +174,7 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project"), ("vm", "box")])
 def test_deletion_refuses_vm_family_contention_before_native_mutation(db, deletion, kind, name):
-    with native_mutation_guard(db.path, "box"), pytest.raises(NativeSetupBusyError):
+    with native_locks(db.path, vm_exclusive("box")), pytest.raises(NativeLockBusyError):
         if kind == "agent":
             delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         elif kind == "workspace":
@@ -227,9 +228,9 @@ def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deleti
 
     def probe_paths(*args, **kwargs):
         try:
-            with native_mutation_guard(db.path, "box"):
+            with native_locks(db.path, vm_exclusive("box")):
                 guarded.append(False)
-        except NativeSetupBusyError:
+        except NativeLockBusyError:
             guarded.append(True)
             raise Moved from None
 

@@ -39,7 +39,7 @@ def preview_selected(
 
     registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=interaction)
-    # This stack never receives mutation guards, active holds, or transient routes.
+    # This stack never receives lock sets, active holds, or transient routes.
     with ExitStack() as stack:
         invocation = RuntimeInvocation(
             db=db,

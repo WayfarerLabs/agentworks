@@ -226,7 +226,8 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
 
     assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    assert events == ["status", "status", "start", "tailscale"]
+    # The last observation is the boot's own, under its brief vm exclusive.
+    assert events == ["status", "status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert target.attaches() == [(Admin(), ATTACH)]
 
@@ -307,7 +308,8 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
         db, config, console_name="c1", session_name="s1", interaction=TtyInteractionPolicy.REFUSE
     )
 
-    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
+    # The gate ran; the last observation is the boot's own, under its brief vm exclusive.
+    assert events == ["status", "status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert any("has-session -t '=aw-console-c1'" in c for c in commands)
     assert any("list-windows -t '=aw-console-c1'" in c for c in commands)
@@ -321,7 +323,8 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
 def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     db, make_config, target, monkeypatch, resolve_counter, status
 ):
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     config = make_config()
     _seed_vm(db)
@@ -339,7 +342,7 @@ def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     attach = admin.attach
 
     def unlocked_attach(request, **kwargs):
-        with native_mutation_guard(db.path, "box"):
+        with native_locks(db.path, vm_exclusive("box")):
             return attach(request, **kwargs)
 
     admin.attach = unlocked_attach
@@ -361,8 +364,9 @@ def test_named_console_attach_resolves_its_gate_secret_with_no_guard_held(
     target: _Guest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The gate secret resolves before the VM's guard; the start that needs it runs under the guard."""
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    """The gate secret resolves before any lock; the start that needs it runs under a brief vm exclusive."""
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
 
     config = make_config()
@@ -375,9 +379,9 @@ def test_named_console_attach_resolves_its_gate_secret_with_no_guard_held(
 
     def held() -> bool:
         try:
-            with native_mutation_guard(db.path, "box"):
+            with native_locks(db.path, vm_exclusive("box")):
                 return False
-        except NativeSetupBusyError:
+        except NativeLockBusyError:
             return True
 
     def resolve_checking(self: Resolver, name: str) -> str:

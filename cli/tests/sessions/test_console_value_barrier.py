@@ -89,7 +89,7 @@ def test_healthy_or_cleanup_only_validation_skips_unused_environments(
             console=console,
             vm=db.get_vm("vm1"),
             admin=guest.admin(),
-            held_native_guard=guard,
+            held=guard,
         )
         before = list(guest.commands)
         monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: pytest.fail("composed unused admin env"))
@@ -132,7 +132,7 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
             console=console,
             vm=db.get_vm("vm1"),
             admin=guest.admin(),
-            held_native_guard=guard,
+            held=guard,
         )
         before = list(guest.commands)
         monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: calls.append(("standalone",)) or {})

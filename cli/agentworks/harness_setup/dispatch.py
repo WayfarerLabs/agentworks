@@ -25,7 +25,6 @@ from agentworks.capabilities.harness_integration.setup import (
 )
 from agentworks.errors import AgentworksError, ConfigError, ConnectivityError, ExternalError, StateError
 from agentworks.execution.requests import Command
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure, sanitize_setup_error
 from agentworks.harness_setup.state import read_native_setup, replace_setup_record, write_native_setup
@@ -37,8 +36,24 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.inputs import SetupInputs
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.native_locks import LockRequest, NativeLockSet
     from agentworks.resources.registry import Registry
+
+
+def setup_request(invocation: SetupInvocation) -> LockRequest:
+    """The lock an owner's native setup needs: its account, its workspace, or for the VM facet the vm.
+
+    A user facet's tool homes lie inside the account's home, so the account's
+    exclusive covers them; the VM facet's files are VM-wide.
+    """
+    from agentworks.native_locks import LockRequest, account_entity, vm_entity, workspace_entity
+
+    vm = invocation.vm.name
+    if isinstance(invocation, UserSetupInvocation):
+        return LockRequest(exclusive=(account_entity(vm, invocation.username),))
+    if isinstance(invocation, WorkspaceSetupInvocation):
+        return LockRequest(exclusive=(workspace_entity(vm, invocation.workspace_name),))
+    return LockRequest(exclusive=(vm_entity(vm),))
 
 
 class _SetupInfrastructureFailure(Exception):
@@ -88,7 +103,7 @@ def run_setup(
     operation: str,
     failures: list[SetupFailure],
     buffered: bool = False,
-    held: NativeMutationGuard | None = None,
+    held: NativeLockSet | None = None,
     log_warning: Callable[[str], None] | None = None,
 ) -> NativeSetupState:
     """Run desired integration activations, then retire removed activations in prior order.
@@ -101,6 +116,9 @@ def run_setup(
     Existing owners checkpoint confirmed ownership changes before another can run.
     Recoverable integration failures retain that prefix and join the command's
     failure collection; shared infrastructure failures and cancellation abort.
+
+    Setup runs under its owner's lock (:func:`setup_request`): the caller's
+    ``held`` set, which must cover it, or its own.
     """
     from agentworks.artifacts.routing import RoutingResult, inactive_destination, setup_artifacts
 
@@ -113,7 +131,9 @@ def run_setup(
         if inputs.component == "workspace"
         else f"Run 'agw {'agent' if inputs.component == 'agent' else 'vm'} reinit {inputs.name}'."
     )
-    with native_mutation_guard(db.path, invocation.vm.name, held=held):
+    from agentworks.native_locks import require_or_acquire
+
+    with require_or_acquire(db.path, setup_request(invocation), held=held):
         # Validate and bind the complete activation map before its first mutation.
         bound = {}
         for name, selected in inputs.activations.items():

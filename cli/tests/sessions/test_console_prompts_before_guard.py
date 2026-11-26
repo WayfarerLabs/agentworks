@@ -1,4 +1,4 @@
-"""Console edits ask their questions and resolve their secrets before the VM's guard, then re-read under it."""
+"""Console edits ask their questions and resolve their secrets before their lock set, then re-read under it."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ import pytest
 
 from agentworks import output
 from agentworks.errors import StateConflictError
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console as mc
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
@@ -23,9 +24,9 @@ if TYPE_CHECKING:
 
 def _guard_free(db: Database) -> bool:
     try:
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             return True
-    except NativeSetupBusyError:
+    except NativeLockBusyError:
         return False
 
 
