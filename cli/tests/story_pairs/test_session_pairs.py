@@ -9,9 +9,10 @@ from agentworks.native_locks import LockMode
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.vms import manager as vm_manager
-from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.story_pairs._pairs import Pause, labelled
+from tests.native_locks._lock_support import labelled
+from tests.runtime_state.runtime_support import REFUSE, seed_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
+from tests.story_pairs._pairs import Pause
 from tests.vm_access_support import command_line, guest_result, is_command_check, route_vm_access_to_guest
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ def test_a_vm_stop_is_refused_while_a_session_starts_and_names_the_start(
     )
     _pause_launch_of(monkeypatch, "work", pause)
 
-    with labelled(START):
+    with labelled("session", "start"):
         manager.start_session(db, config, name="work", interaction=TtyInteractionPolicy.REFUSE)
 
     refused = pause.result().refusal()
@@ -89,7 +90,7 @@ def test_a_session_start_runs_beside_a_create_of_a_session_sharing_neither_works
     )
     _pause_launch_of(monkeypatch, "new", pause)
 
-    with labelled(("agw", "session", "create")):
+    with labelled("session", "create"):
         manager.create_session(
             db, config, name="new", workspace="ws-box", admin=True, interaction=TtyInteractionPolicy.REFUSE
         )
@@ -122,7 +123,7 @@ def _seed_agent_session(db: Database, name: str) -> None:
 
 def _delete_agent_session_beside(db: Database, config: Config, monkeypatch: pytest.MonkeyPatch, pause: Pause) -> None:
     _pause_at_membership_removal(monkeypatch, pause)
-    with labelled(("agw", "session", "delete")):
+    with labelled("session", "delete"):
         manager.delete_session(db, config, name="work", yes=True, interaction=TtyInteractionPolicy.REFUSE)
     assert db.get_session("work") is None
 

@@ -13,7 +13,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.runtime_state import reconcile_console, reconcile_session, reconcile_vm
 from agentworks.runtime_state._models import Outcome
 from tests.console_helpers import create_console_record
-from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
+from tests.runtime_state.runtime_support import REFUSE, seed_session, seed_vm
 
 if TYPE_CHECKING:
     from agentworks.db import Database

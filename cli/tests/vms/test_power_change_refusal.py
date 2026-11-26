@@ -11,8 +11,8 @@ from agentworks.native_locks import NativeLockBusyError, native_locks
 from agentworks.native_locks.rows import vm_exclusive
 from agentworks.vms import manager as vm_manager
 from agentworks.vms.manager import runtime as vm_runtime
-from tests.runtime_state.test_composition import REFUSE, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
+from tests.runtime_state.runtime_support import REFUSE, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 
 @pytest.mark.parametrize(

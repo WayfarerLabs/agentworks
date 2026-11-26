@@ -12,10 +12,10 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _teardown
 from agentworks.vms import manager as vm_manager
-from tests.runtime_state.test_composition import REFUSE, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.runtime_state.test_public_stop import _running
-from tests.story_pairs._pairs import Pause, labelled
+from tests.native_locks._lock_support import labelled
+from tests.runtime_state.runtime_support import REFUSE, running_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
+from tests.story_pairs._pairs import Pause
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,7 +53,7 @@ def test_a_session_stop_of_another_agent_runs_beside_an_agent_reinit(
     _powers, statuses, _events = runtime
     seed_vm(db, "box")
     db.insert_agent("dev", "box", "agt-dev", template="default")
-    _running(db, statuses, "beside", "box", agent=True)
+    running_session(db, statuses, "beside", "box", agent=True)
     _stop_teardowns_succeed(monkeypatch, statuses)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     config = make_config()
@@ -64,7 +64,7 @@ def test_a_session_stop_of_another_agent_runs_beside_an_agent_reinit(
     )
     _pause_account_setup(monkeypatch, pause)
 
-    with labelled(("agw", "agent", "reinit")):
+    with labelled("agent", "reinit"):
         agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert pause.result().succeeded, pause.result().error
@@ -77,7 +77,7 @@ def test_access_commands_are_admitted_while_an_agent_is_created(
 ) -> None:
     _powers, statuses, _events = runtime
     seed_vm(db, "box")
-    _running(db, statuses, "live", "box")
+    running_session(db, statuses, "live", "box")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     monkeypatch.setattr("agentworks.sessions.tmux.capture_output", lambda *a, **k: "")
     config = make_config()
@@ -101,7 +101,7 @@ def test_access_commands_are_admitted_while_an_agent_is_created(
     _pause_account_setup_at(monkeypatch, lambda: [pause.reached() for pause in access])
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
 
-    with labelled(("agw", "agent", "create")):
+    with labelled("agent", "create"):
         agent_manager.create_agent(db, config, name="new", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
 
     for pause in access:

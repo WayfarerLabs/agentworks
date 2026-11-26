@@ -19,8 +19,8 @@ from agentworks.sessions import manager
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.multi_console._status import ConsoleStatus
 from tests.console_helpers import create_console_record
-from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
+from tests.runtime_state.runtime_support import REFUSE, seed_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 
 @pytest.fixture

@@ -18,9 +18,8 @@ from agentworks.runtime_state import reconcile_session
 from agentworks.sessions import manager, tmux
 from agentworks.sessions.manager import _status
 from tests._runtime_probes import owner_probe_line, server_for
-from tests.runtime_state.test_composition import REFUSE, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.runtime_state.test_public_stop import _running
+from tests.runtime_state.runtime_support import REFUSE, running_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 from tests.vm_access_support import Call, RecordingVMAccess, command_line
 
 if TYPE_CHECKING:
@@ -151,7 +150,7 @@ def _model(db, runtime, monkeypatch) -> _Memory:
     model = _Memory()
     for name, vm in [("work", "box"), ("peer", "other")]:
         seed_vm(db, vm)
-        _running(db, statuses, name, vm)
+        running_session(db, statuses, name, vm)
         db.set_session_run_id(name, str(uuid4()))
         db.record_session_started(name)
         model.add(db.get_session(name), vm)

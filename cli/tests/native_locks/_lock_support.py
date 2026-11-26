@@ -107,6 +107,7 @@ def records(database: Path, vm: str = VM) -> list[Path]:
 
 @contextmanager
 def labelled(*words: str) -> Iterator[None]:
+    """Run the block as the CLI runs ``agw <words>``, so the holder records it writes name that command path."""
     token = operation_label.set(("agw", *words))
     try:
         yield

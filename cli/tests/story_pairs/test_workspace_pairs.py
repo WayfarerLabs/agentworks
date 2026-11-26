@@ -13,8 +13,9 @@ from agentworks.runtime_state import _families as families
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager
 from agentworks.workspaces import manager as workspace_manager
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.story_pairs._pairs import Pause, labelled
+from tests.native_locks._lock_support import labelled
+from tests.runtime_state.runtime_support import runtime as runtime
+from tests.story_pairs._pairs import Pause
 from tests.vm_access_support import command_line, guest_result, is_command_check, route_vm_access_to_guest
 from tests.workspaces._lifecycle_support import Guest, RehomeGuest, reachable, seed, seed_workspace, starts
 from tests.workspaces._lifecycle_support import make_config as make_config
@@ -91,7 +92,7 @@ def test_a_session_start_in_another_workspace_runs_beside_a_workspace_delete(
     pause = Pause(db.path, START, _start(config, "beside"))
     _route(monkeypatch, _PausingAt(Guest(), starts("rm", "-rf", "--", "/srv/ws1"), pause))  # type: ignore[arg-type]
 
-    with labelled(("agw", "workspace", "delete")):
+    with labelled("workspace", "delete"):
         workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=REFUSE)
 
     assert pause.result().succeeded, pause.result().error
@@ -121,7 +122,7 @@ def test_a_session_start_in_a_workspace_being_rehomed_is_refused_naming_the_reho
     _route(monkeypatch, _PausingAt(RehomeGuest(), starts("rsync"), pause))  # type: ignore[arg-type]
 
     rehome = ("agw", "workspace", "rehome")
-    with labelled(rehome):
+    with labelled("workspace", "rehome"):
         workspace_manager.rehome_workspace(db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=REFUSE)
 
     error = pause.result().error

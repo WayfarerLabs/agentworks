@@ -457,7 +457,7 @@ def test_missing_host_record_refuses_console_start_before_accepting_intent(
     from agentworks.execution.errors import TrustMissing
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from tests.runtime_state.test_composition import seed_vm
+    from tests.runtime_state.runtime_support import seed_vm
 
     seed_vm(db, "vm1", target=parent_target)
     _seed_sessions(db, ["alpha"])

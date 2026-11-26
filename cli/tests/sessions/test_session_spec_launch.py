@@ -17,8 +17,8 @@ from agentworks.native_locks.rows import vm_exclusive
 from agentworks.plugins.claude.conversation_probe import ConversationProbe
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager
-from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
+from tests.runtime_state.runtime_support import REFUSE, seed_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 type Runtime = tuple[dict[str, VMStatus], dict[str, SessionStatus], list[tuple[str, str]]]
 

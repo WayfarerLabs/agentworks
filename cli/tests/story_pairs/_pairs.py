@@ -14,7 +14,6 @@ interleaving deterministic.
 from __future__ import annotations
 
 import contextvars
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -22,7 +21,7 @@ from agentworks.db import Database
 from agentworks.native_locks import NativeLockBusyError, operation_label
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -57,16 +56,6 @@ def another_invocation(database: Path, label: tuple[str, ...], operation: Callab
         return Outcome()
 
     return contextvars.Context().run(run)
-
-
-@contextmanager
-def labelled(label: tuple[str, ...]) -> Iterator[None]:
-    """Run the first operation under ``label``, the command path the CLI would record for it."""
-    token = operation_label.set(label)
-    try:
-        yield
-    finally:
-        operation_label.reset(token)
 
 
 class Pause:

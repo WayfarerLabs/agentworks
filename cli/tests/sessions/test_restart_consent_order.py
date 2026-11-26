@@ -11,8 +11,8 @@ from agentworks.native_locks.rows import session_entity_for, vm_exclusive
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _lifecycle
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.runtime_state.test_composition import seed_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
+from tests.runtime_state.runtime_support import seed_session, seed_vm
 
 type Runtime = tuple[dict, dict[str, SessionStatus], list[tuple[str, str]]]
 

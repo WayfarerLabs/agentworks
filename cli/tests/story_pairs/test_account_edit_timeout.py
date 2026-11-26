@@ -23,10 +23,10 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import manager, tmux
 from agentworks.vms import manager as vm_manager
 from tests._runtime_probes import owner_probe_line
-from tests.runtime_state.test_composition import REFUSE, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.runtime_state.test_public_stop import _running
-from tests.story_pairs._pairs import Pause, labelled
+from tests.native_locks._lock_support import labelled
+from tests.runtime_state.runtime_support import REFUSE, running_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
+from tests.story_pairs._pairs import Pause
 from tests.vm_access_support import command_line, guest_result, is_command_check, route_vm_access_to_guest
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ def _seed(db: Database, statuses: dict[str, SessionStatus]) -> None:
     seed_vm(db, "box")
     for agent in ("gone", "other", "third", "runner"):
         db.insert_agent(agent, "box", f"agt-{agent}")
-    _running(db, statuses, "attached", "box")
+    running_session(db, statuses, "attached", "box")
     socket = "/run/agentworks/agent-tmux-sockets/agt-runner/theirs.sock"
     db.insert_session(
         "theirs",
@@ -127,7 +127,7 @@ def test_account_edits_beside_an_agent_removal_holding_shadows_lock_fail_retryab
     }
     route_vm_access_to_guest(monkeypatch, _Shadow(list(meanwhile.values())).answer)
 
-    with labelled(("agw", "agent", "delete")):
+    with labelled("agent", "delete"):
         agent_manager.delete_agent(db, config, name="gone", force=True, yes=True, interaction=REFUSE)
 
     assert db.get_agent("gone") is None

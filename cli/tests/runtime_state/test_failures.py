@@ -20,8 +20,8 @@ from agentworks.sessions.tmux import ProbeStatus
 from agentworks.vms.admin import AdminConfig
 from tests.conftest import ManifestDoc
 from tests.console_helpers import create_console_record
-from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
+from tests.runtime_state.runtime_support import REFUSE, seed_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 from tests.vm_access_support import Call, command_line, is_command_check, route_vm_access_to_guest
 
 
