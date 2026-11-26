@@ -145,6 +145,45 @@ def _native_shell_platform(monkeypatch: pytest.MonkeyPatch, status: int, calls: 
     monkeypatch.setattr(type(platform), "native_shell", native_shell, raising=False)
 
 
+def test_platform_shell_opens_the_native_shell_on_the_row_its_gate_admitted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recover that gave the VM a new address while the gate opened is the row the shell gets."""
+    from agentworks.vms import manager as vm_manager
+    from agentworks.vms.manager import exec as vm_exec
+
+    db = _seed_db(tmp_path)
+    _patch_common(monkeypatch, vm_manager, interactive_log=[])
+    reached: list[str | None] = []
+
+    def native_shell(vm: object, ctx: object) -> int:
+        reached.append(getattr(vm, "tailscale_host", None))
+        return 0
+
+    @contextlib.contextmanager
+    def readdressing_gate(db_: Database, *args: object, **kwargs: object) -> Iterator[tuple[object, None, object]]:
+        db_.update_vm_tailscale("vm1", "100.64.0.77")
+        node = SimpleNamespace(
+            row=db_.get_vm("vm1"), site=SimpleNamespace(platform=SimpleNamespace(native_shell=native_shell))
+        )
+        yield node, None, object()
+
+    monkeypatch.setattr(vm_exec, "gated_vm_platform_channel_boundary", readdressing_gate)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.base.require_native_shell", lambda *a, **k: None)
+
+    vm_manager.shell_vm(
+        db,
+        _make_config(),  # type: ignore[arg-type]
+        "vm1",
+        native_shell=True,
+        interaction=TtyInteractionPolicy.REFUSE,
+    )
+
+    assert reached == ["100.64.0.77"]
+    db.close()
+
+
 def test_platform_shell_opens_the_native_shell_with_no_tailnet_address_and_no_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

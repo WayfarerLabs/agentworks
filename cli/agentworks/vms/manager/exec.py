@@ -200,7 +200,8 @@ def _shell_native(
         ),
     ):
         with guarded_terminal():
-            code = vm_node.site.platform.native_shell(vm, ops_ctx)
+            # The row the gate admitted.
+            code = vm_node.site.platform.native_shell(vm_node.row, ops_ctx)
         # After the guard: its exit pass leaves the alternate screen, which
         # would wipe anything written before it closes.
         if code == _STATUS_CONNECTION_MAY_HAVE_DROPPED:

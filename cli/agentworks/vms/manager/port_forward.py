@@ -67,16 +67,15 @@ def port_forward_vm(
 
     forwards = [Forward(local, remote, address) for local, remote in _parse_port_specs(name, ports)]
 
-    # Print forwarding info
-    for forward in forwards:
-        output.info(f"Forwarding {address}:{forward.local_port} -> {vm.tailscale_host}:{forward.remote_port}")
-    if not verbose:
-        output.info("Use --verbose for detailed SSH output.")
-
     # Run in foreground until interrupted, at the address the gate admitted
     registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(db, config, registry, vm, interaction=interaction) as (vm_node, _resolver, _ctx):
-        access = execution.vm_access(vm_node.row, config, Admin())
+        admitted = vm_node.row
+        for forward in forwards:
+            output.info(f"Forwarding {address}:{forward.local_port} -> {admitted.tailscale_host}:{forward.remote_port}")
+        if not verbose:
+            output.info("Use --verbose for detailed SSH output.")
+        access = execution.vm_access(admitted, config, Admin())
         return _hold_forward(access, forwards, verbose=verbose)
 
 

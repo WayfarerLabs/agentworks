@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db import Database, VMRow
+    from tests.conftest import CapturedOutput
 
 NEW_ADDRESS = "100.64.0.77"
 
@@ -292,3 +293,24 @@ def test_an_access_command_reaches_the_address_the_gate_admitted(
         command(db, make_config())
 
     assert reached == [NEW_ADDRESS]
+
+
+def test_port_forward_names_the_address_the_gate_admitted(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    from agentworks.db import ProvisioningStatus
+
+    seed(db)
+    db.update_vm_provisioning_status("box", ProvisioningStatus.COMPLETE)
+    _readdressed_while_the_gate_probes(db, monkeypatch)
+    monkeypatch.setattr("agentworks.vms.manager.port_forward._hold_forward", lambda *a, **k: 0)
+
+    _vm_port_forward(db, make_config())
+
+    shown = " ".join(message for _role, _level, message in captured_output.lines)
+    assert NEW_ADDRESS in shown
+    assert "100.64.0.9" not in shown
