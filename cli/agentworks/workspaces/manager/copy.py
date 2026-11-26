@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-from agentworks.errors import AgentworksError, AlreadyExistsError, ExternalError, NotFoundError, StateError
+from agentworks.errors import (
+    AgentworksError,
+    AlreadyExistsError,
+    ExternalError,
+    NotFoundError,
+    StateConflictError,
+    StateError,
+)
 from agentworks.execution.requests import Command, FromFile, ToFile
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
@@ -154,11 +161,11 @@ def copy_workspace(
                 "workspace", source_name, workspace_fields(src_ws), workspace_fields(db.get_workspace(source_name))
             )
             if db.get_workspace(dest_name) is not None:
-                raise AlreadyExistsError(
-                    f"workspace '{dest_name}' already exists",
+                raise StateConflictError(
+                    f"workspace '{dest_name}' was created since this command read it",
                     entity_kind="workspace",
                     entity_name=dest_name,
-                    hint="Another command created it after this one started.",
+                    hint="Run the command again with another name.",
                 )
 
             # --- Pack from source ---
