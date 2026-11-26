@@ -16,6 +16,7 @@ from agentworks.errors import (
     AlreadyExistsError,
     ExternalError,
     NotFoundError,
+    StateConflictError,
     StateError,
     UserAbort,
 )
@@ -24,7 +25,7 @@ from agentworks.naming import validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
-from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
+from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_is_unused, agent_scope
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -267,10 +268,16 @@ def delete_agent(
     name: str,
     force: bool = False,
     yes: bool = False,
+    only_if_unused: bool = False,
     vm_node: LiveVMNode | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete an agent from a VM.
+
+    With ``only_if_unused`` it also refuses, under the guard, an agent that
+    has a session or a standing grant (``agent_is_unused``), for the offer
+    to delete an agent a session delete left unused: a grant committed while
+    that offer's delete waited for the guard keeps the agent.
 
     Orchestrated on the standalone path (``vm_node=None``, the command
     root and ``delete_session``'s agent-cleanup call):
@@ -387,6 +394,12 @@ def delete_agent(
             [s.name for s in agent_sessions],
             [s.name for s in db.list_sessions() if s.agent_name == name],
         )
+        if only_if_unused and not agent_is_unused(db, name):
+            raise StateConflictError(
+                f"agent '{name}' has a session or a standing grant again",
+                entity_kind="agent",
+                entity_name=name,
+            )
 
         from agentworks.execution.oplog import OperationLogFile
 

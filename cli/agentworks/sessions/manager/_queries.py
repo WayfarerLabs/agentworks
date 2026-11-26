@@ -192,7 +192,9 @@ def delete_session(
     # the workspace is kept, the grant remains and the still-granted agent
     # stays guarded. Both run after the console cleanup so the "Session
     # deleted" line has already printed, and after the guard is released;
-    # each delete they trigger takes its own guard and reads its rows again.
+    # each delete they trigger takes its own guard, reads its rows again, and
+    # refuses a resource that stopped being the candidate it was offered as
+    # (a grant committed meanwhile keeps it).
     # ``session`` was snapshotted before ``db.delete_session``, so its
     # workspace_name / agent_name / created_* fields are still readable here.
     _cleanup_now_empty_workspace(db, config, session, yes=yes, interaction=interaction)
@@ -425,11 +427,13 @@ def _cleanup_now_empty_workspace(
         # (the grant is preserved) while the interactive offer still fires with
         # the disclosing empty_clause above.
         created=session.created_workspace and not granters,
+        # The delete refuses, under its guard, granters other than these.
         delete=lambda: delete_workspace(
             db,
             config,
             name,
             yes=True,
+            only_with_granters=granters,
             interaction=interaction,
         ),
         manual_command=f"agw workspace delete {name}",
@@ -488,11 +492,13 @@ def _cleanup_now_empty_agent(
         kind="agent",
         name=agent_name,
         created=session.created_agent,
+        # The delete refuses, under its guard, an agent that gained a session or a grant.
         delete=lambda: delete_agent(
             db,
             config,
             name=agent_name,
             yes=True,
+            only_if_unused=True,
             interaction=interaction,
         ),
         manual_command=f"agw agent delete {agent_name}",

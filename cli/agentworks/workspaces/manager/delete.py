@@ -10,9 +10,11 @@ from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAb
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import stored_workspace_path
-from agentworks.workspaces.manager._common import _workspace_scope
+from agentworks.workspaces.manager._common import _workspace_scope, workspace_external_explicit_granters
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.execution.access import VMAccess
@@ -27,10 +29,18 @@ def delete_workspace(
     *,
     force: bool = False,
     yes: bool = False,
+    only_with_granters: Sequence[str] | None = None,
     vm_node: LiveVMNode | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete a workspace.
+
+    With ``only_with_granters`` it also refuses, under the guard, a
+    workspace whose explicit granters
+    (:func:`workspace_external_explicit_granters`) are not exactly those, for
+    the offer to delete a workspace a session delete left empty: the offer
+    named the grants the delete revokes, and a grant committed while its
+    delete waited for the guard is not one of them.
 
     Orchestrated on the standalone path (``vm_node=None``, the command
     root and ``delete_session``'s workspace-cleanup call):
@@ -173,6 +183,10 @@ def delete_workspace(
             require_vm_unchanged(db, vm)
         require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
         require_unchanged("workspace", name, session_names, [s.name for s in db.list_sessions(workspace_name=name)])
+        if only_with_granters is not None:
+            require_unchanged(
+                "workspace", name, list(only_with_granters), workspace_external_explicit_granters(db, name)
+            )
         log = _keepalive_stack.enter_context(operation_log(ws.vm_name, "workspace-delete"))
         output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
         # console_pairs is populated only when we reach the VM; the
