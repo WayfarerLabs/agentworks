@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.errors import StateConflictError
+from agentworks.errors import StateConflictError, StateError
 
 from ._entities import (
     Entity,
@@ -127,9 +127,13 @@ def consoles_holding(db: Database, sessions: Iterable[SessionRow]) -> tuple[Enti
 
 
 def path_entities(vm: str, walk: PathWalk) -> tuple[Entity, tuple[Entity, ...]]:
-    """The walk's final path, held exclusive, and every directory and followed link it recorded, held shared."""
+    """The walk's final path, held exclusive, and every directory and followed link it recorded, held shared.
+
+    A path that resolves to ``/`` is refused as a plain ``StateError``: it
+    names no tree any operation may hold, which is not a change since a read.
+    """
     if walk.final == "/":
-        raise StateConflictError(
+        raise StateError(
             f"workspace path {walk.path!r} on VM '{vm}' resolves to '/'",
             entity_kind="vm",
             entity_name=vm,

@@ -179,6 +179,33 @@ def test_an_offered_agent_keeps_a_grant_committed_while_the_offer_was_answered(
     assert guest.requests == []
 
 
+def test_a_workspace_whose_path_resolves_to_the_root_is_reported_as_a_failed_delete_not_as_kept(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Nothing changed since cleanup chose it, so it warns and names the manual delete."""
+    from agentworks.native_locks.path_walk import PathWalk
+
+    seed(db)
+    reachable(monkeypatch, True)
+    # The guest resolves the stored path to '/', a link to the root, say.
+    monkeypatch.setattr(
+        "agentworks.workspaces.locks._walk",
+        lambda vm, config, paths, **kwargs: tuple(PathWalk(path, (), (), "/") for path in paths),
+    )
+
+    _cleanup_now_empty_workspace(
+        db, make_config(), _deleted_session(), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_workspace("ws1") is not None
+    warnings = [message for role, _level, message in captured_output.lines if role is Role.WARNING]
+    assert any("agw workspace delete ws1" in message for message in warnings)
+
+
 class _AccountsStopGuest(Guest):
     """A healthy guest whose ``pkill`` ends every process of an account being removed."""
 
