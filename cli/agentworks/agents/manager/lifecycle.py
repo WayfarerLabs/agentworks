@@ -398,7 +398,7 @@ def delete_agent(
         )
         if only_if_unused and not agent_is_unused(db, name):
             raise StateConflictError(
-                f"agent '{name}' has a session or a standing grant again",
+                f"agent '{name}' gained a session or a standing grant since it was offered for deletion",
                 entity_kind="agent",
                 entity_name=name,
             )

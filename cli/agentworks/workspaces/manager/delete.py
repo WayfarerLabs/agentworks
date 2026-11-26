@@ -6,7 +6,14 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import SessionMode
-from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.errors import (
+    AgentworksError,
+    NotFoundError,
+    StateConflictError,
+    StateError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import stored_workspace_path
@@ -183,9 +190,12 @@ def delete_workspace(
             require_vm_unchanged(db, vm)
         require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
         require_unchanged("workspace", name, session_names, [s.name for s in db.list_sessions(workspace_name=name)])
-        if only_with_granters is not None:
-            require_unchanged(
-                "workspace", name, list(only_with_granters), workspace_external_explicit_granters(db, name)
+        offered_granters = None if only_with_granters is None else list(only_with_granters)
+        if offered_granters is not None and offered_granters != workspace_external_explicit_granters(db, name):
+            raise StateConflictError(
+                f"the agents holding explicit grants on workspace '{name}' changed since it was offered for deletion",
+                entity_kind="workspace",
+                entity_name=name,
             )
         log = _keepalive_stack.enter_context(operation_log(ws.vm_name, "workspace-delete"))
         output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")

@@ -15,10 +15,12 @@ import pytest
 
 from agentworks import output
 from agentworks.db import SessionRow
+from agentworks.execution.requests import Command
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions.manager._queries import _cleanup_now_empty_agent, _cleanup_now_empty_workspace
-from tests.workspaces._lifecycle_support import Guest, reachable, seed
+from tests.workspaces._lifecycle_support import Guest, argv, reachable, route, seed
 from tests.workspaces._lifecycle_support import guest as guest
 from tests.workspaces._lifecycle_support import make_config as make_config
 from tests.workspaces._lifecycle_support import stub_ssh_identity as stub_ssh_identity
@@ -118,3 +120,32 @@ def test_an_auto_deleted_agent_keeps_a_grant_committed_before_its_guard(
     assert db.get_agent("a1") is not None
     assert db.list_workspace_explicit_granters("ws1") == ["a1"]
     assert guest.requests == []
+
+
+class _AccountsStopGuest(Guest):
+    """A healthy guest whose ``pkill`` ends every process of an account being removed."""
+
+    def respond(self, request: object) -> Result | None:
+        if isinstance(request, Command) and argv(request)[:2] == ("pgrep", "-u"):
+            return Result(Completed(1))
+        return super().respond(request)
+
+
+def test_with_nothing_committed_meanwhile_cleanup_deletes_the_workspace_and_then_the_agent(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed(db)
+    db.insert_agent("a1", "box", "agt-a1", template="default")
+    reachable(monkeypatch, True)
+    route(monkeypatch, _AccountsStopGuest())
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
+    config = make_config()
+    session = _deleted_session(agent_name="a1")
+
+    _cleanup_now_empty_workspace(db, config, session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    _cleanup_now_empty_agent(db, config, session, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is None
+    assert db.get_agent("a1") is None
