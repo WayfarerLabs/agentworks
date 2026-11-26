@@ -10,6 +10,7 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort
+from agentworks.intent_restore import replaced_intent
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import _require_console, console_request, guarded_console_selection, probe_console
@@ -51,15 +52,6 @@ def preflight_console_vm(
     return node
 
 
-def _restore_words(
-    name: str, previous: DesiredRuntimeState | None, recorded: DesiredRuntimeState
-) -> tuple[str, ...] | None:
-    """The command that puts back the intent ``recorded`` replaced: ``()`` for a legacy NULL, ``None`` if unchanged."""
-    if previous is recorded:
-        return None
-    return () if previous is None else ("agw", "console", "set-desired-state", name, previous.value)
-
-
 @contextmanager
 def _final_set(
     node: LiveVMNode, db: Database, console: ConsoleRow, *, restore: tuple[str, ...] | None
@@ -69,6 +61,7 @@ def _final_set(
     A refusal says how to restore the intent this command recorded, if it
     changed one. A member added or removed since ``console`` was read refuses.
     """
+    from agentworks.intent_restore import refused_after_intent
     from agentworks.native_locks import NativeLockBusyError
     from agentworks.recheck import require_request_unchanged
 
@@ -77,8 +70,7 @@ def _final_set(
         try:
             held = stack.enter_context(node.locked(request, prompts=True))
         except NativeLockBusyError as busy:
-            if restore is not None:
-                busy.intent_stays_recorded(restore)
+            refused_after_intent(busy, restore)
             raise
         require_request_unchanged(
             "console", console.name, request, console_request(db, _require_console(db, console.name))
@@ -140,7 +132,7 @@ def realize_console(
     with guarded_console_selection(db, name) as (selected, brief):
         validate_console_definition(db, selected)
         _mc.accept_console_running(db, console=selected, held=brief)
-    restore = _restore_words(name, selected.desired_runtime_state, DesiredRuntimeState.RUNNING)
+    restore = replaced_intent("console", name, selected.desired_runtime_state, DesiredRuntimeState.RUNNING)
     console = _require_console(db, name)
     if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
         raise StateError("console start is blocked by its stopped parent VM", entity_kind="console", entity_name=name)
@@ -209,7 +201,7 @@ def stop_console_runtime(
     with guarded_console_selection(db, name):
         previous = _require_console(db, name).desired_runtime_state
         db.set_console_desired_runtime_state(name, DesiredRuntimeState.STOPPED)
-    restore = _restore_words(name, previous, DesiredRuntimeState.STOPPED)
+    restore = replaced_intent("console", name, previous, DesiredRuntimeState.STOPPED)
     console = _require_console(db, name)
     resolver = Resolver(config, registry, interaction=interaction)
     context = None

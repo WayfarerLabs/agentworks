@@ -164,13 +164,13 @@ refused command fails at once, naming the operation, entity and time that hold i
 operation to finish and retry. A runtime command records its intent under a brief lock, prepares its
 infrastructure (gate secrets, provider observation, a boot) with nothing locked, and only then takes
 its targets for the rest of the run; a target refused at that point keeps the intent already
-recorded, and its result (or, for `console start`, `restart` and `stop`, the refusal) shows the
-`set-desired-state` command that restores the previous one. Workload and pane secrets are still
-asked under the targets' lock, after a line naming what is held. Confirmations and other commands'
-secrets are asked before locking; a command whose rows changed between its question and its lock
-refuses, and running it again asks again about the current state. Admission to a power hold takes
-the VM shared only briefly and is released before the interactive shell, attach, or forwarding body
-runs, so diagnostic access is refused only while a VM-wide operation holds the VM.
+recorded, and its result (or, for `vm start` and `stop` and `console start`, `restart` and `stop`,
+the refusal) shows the `set-desired-state` command that restores the previous one. Workload and pane
+secrets are still asked under the targets' lock, after a line naming what is held. Confirmations and
+other commands' secrets are asked before locking; a command whose rows changed between its question
+and its lock refuses, and running it again asks again about the current state. Admission to a power
+hold takes the VM shared only briefly and is released before the interactive shell, attach, or
+forwarding body runs, so diagnostic access is refused only while a VM-wide operation holds the VM.
 
 On WSL2, a live VM with stopped intent receives no idle-shutdown protection during access **or
 management commands**. A long shell, workspace creation, or agent reinitialization may lose the

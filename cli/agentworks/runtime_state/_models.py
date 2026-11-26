@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 from agentworks import output
 from agentworks.errors import AgentworksError, StateError
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.intent_restore import restore_command, restore_wording
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -173,8 +174,7 @@ class RuntimeInvocation:
         """Block a target whose lock was refused; one whose intent this invocation recorded says how to restore it."""
         self.fail(kind, name, error, blocked=True)
         if kind == "session" and name in self.replaced_intents:
-            previous = self.replaced_intents[name]
-            restore = () if previous is None else ("agw", "session", "set-desired-state", name, previous.value)
+            restore = restore_command("session", name, self.replaced_intents[name])
             self.results[(kind, name)] = replace(self.results[(kind, name)], restore_intent=restore)
 
     def unavailable(self, kind: Kind, name: str) -> bool:
@@ -209,11 +209,8 @@ def render_results(results: tuple[RuntimeResult, ...], *, dry_run: bool = False)
             if result.observation_from_parent
             else ""
         )
-        if result.restore_intent:
-            restore = " ".join(result.restore_intent)
-            reason += f"; the new intent stays recorded; restore the previous one with '{restore}'"
-        elif result.restore_intent is not None:
-            reason += "; the new intent stays recorded"
+        if result.restore_intent is not None:
+            reason += f"; {restore_wording(result.restore_intent)}"
         output.result(
             f"{result.kind} '{result.name}': {outcome} "
             f"({result.action}; desired {target}; observed {observed}{qualification}){reason}"

@@ -77,7 +77,9 @@ def start_vm(
         trust.require_record(name)
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
 
-    _run_power_change(db, config, selected, accept, start_vm_runtime, interaction=interaction)
+    _run_power_change(
+        db, config, selected, DesiredRuntimeState.RUNNING, accept, start_vm_runtime, interaction=interaction
+    )
 
 
 def stop_vm(
@@ -96,7 +98,9 @@ def stop_vm(
     def accept() -> None:
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
 
-    changed = _run_power_change(db, config, selected, accept, stop_vm_runtime, interaction=interaction)
+    changed = _run_power_change(
+        db, config, selected, DesiredRuntimeState.STOPPED, accept, stop_vm_runtime, interaction=interaction
+    )
     if changed:
         output.result(f"VM '{name}' stopped")
     else:
@@ -107,22 +111,27 @@ def _run_power_change(
     db: Database,
     config: Config,
     selected: VMRow,
+    target: DesiredRuntimeState,
     accept: Callable[[], None],
     apply: Callable[[VMRuntimeContext], bool],
     *,
     interaction: TtyInteractionPolicy,
 ) -> bool:
-    """Run a power change: probe, record its intent briefly, prepare unlocked, then apply under the vm exclusive.
+    """Run a power change: record its ``target`` intent briefly, prepare unlocked, then apply under the vm exclusive.
 
     The intent is recorded under a brief vm exclusive of its own before any
     secret resolves, so it survives a failure in the preparation, as it did
     when the whole command ran under one lock. The gate secrets resolve and
     the provider is observed with nothing locked (step 5); the change itself
     runs under the vm exclusive, after the row and the recorded intent are
-    read again.
+    read again. A refusal of that final set says how to restore the intent
+    the brief write replaced, if it changed one.
     """
+    from contextlib import ExitStack
+
     from agentworks.bootstrap import load_request_registry
-    from agentworks.native_locks import native_locks, probe_locks
+    from agentworks.intent_restore import refused_after_intent, replaced_intent
+    from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
@@ -130,19 +139,25 @@ def _run_power_change(
     from .runtime import prepare_vm_runtime
 
     request = vm_exclusive(selected.name)
-    probe_locks(db.path, request)
     registry = load_request_registry(config, live_database=db)
     vm_node = live_vm_node(db, config, registry, selected)
     with native_locks(db.path, request):
         # Before the intent write; prepared runtime's own check comes after it.
-        _guard_incomplete_vm(vm_node.reload_row())
+        current = vm_node.reload_row()
+        _guard_incomplete_vm(current)
         accept()
+    restore = replaced_intent("vm", selected.name, current.desired_runtime_state, target)
     vm = _require_vm(db, selected.name)
     resolver = Resolver(config, registry, interaction=interaction)
     context = None
     try:
         context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=vm_node)
-        with vm_node.locked(request):
+        with ExitStack() as final:
+            try:
+                final.enter_context(vm_node.locked(request))
+            except NativeLockBusyError as busy:
+                refused_after_intent(busy, restore)
+                raise
             # The prepared context compares the row's uuid and the recorded intent.
             return apply(context)
     finally:
