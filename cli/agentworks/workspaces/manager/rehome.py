@@ -36,7 +36,7 @@ from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, WorkspaceRow
+    from agentworks.db import Database, SessionRow, WorkspaceRow
     from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -93,22 +93,20 @@ def rehome_workspace(
     _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes, interaction=interaction)
 
 
-def _refuse_unstopped_sessions(db: Database, config: Config, ws_name: str, *, repair_pids: bool) -> None:
-    """Refuse a rehome while any of the workspace's sessions is not stopped.
+def _refuse_unstopped_sessions(db: Database, config: Config, ws_name: str, sessions: list[SessionRow]) -> None:
+    """Refuse a rehome while any of ``sessions``, the workspace's, is not stopped.
 
-    Without ``repair_pids`` it only observes, persisting nothing, as the
-    check before the confirmation must. Under the guard it first repairs
-    missing PID evidence (``ensure_pids_batch``), which writes the rows.
+    It only observes, persisting nothing. Before the guard the caller passes
+    only the sessions whose status can be decided without repairing their PID
+    evidence; under it, every session once ``ensure_pids_batch`` has repaired
+    that evidence.
     """
     from agentworks.db import PID_STOPPED, SessionStatus
-    from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses
+    from agentworks.sessions.manager import observe_session_statuses
 
-    sessions = db.list_sessions(workspace_name=ws_name)
     if not sessions:
         return
     try:
-        if repair_pids:
-            sessions = ensure_pids_batch(sessions, db=db, config=config)
         status_map = observe_session_statuses(sessions, db=db, config=config)
     except Exception as exc:
         raise ExternalError(
@@ -168,7 +166,8 @@ def _rehome_vm(
     command's ``keep_active``, and the whole move runs inside the
     held-active span. The not-found check and the VM-status guard stay
     pre-boundary. Inside the span and before the native mutation guard,
-    the command only observes: the sessions check persists nothing, the
+    the command only observes: the sessions check persists nothing and
+    leaves a session whose PID evidence needs repair undecided, the
     source / target directory checks need SSH, and the confirm renders
     the stored and new paths. Under the guard the workspace row is read
     again, PID evidence is repaired, and the sessions check and the
@@ -177,6 +176,7 @@ def _rehome_vm(
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.sessions.manager import _needs_repair, ensure_pids_batch
     from agentworks.vms.manager import operation_log
     from agentworks.workspaces.acls import apply_workspace_acls
     from agentworks.workspaces.backends.vm import admin_access, generate_vscode_workspace
@@ -205,7 +205,9 @@ def _rehome_vm(
     ) as (vm_node, _resolver, _ctx):
         vm = vm_node.row
         probe = admin_access(vm, config, None)
-        _refuse_unstopped_sessions(db, config, ws_name, repair_pids=False)
+        # A session whose PID evidence needs repair is undecided until the guard is held.
+        decidable = [s for s in db.list_sessions(workspace_name=ws_name) if not _needs_repair(s)]
+        _refuse_unstopped_sessions(db, config, ws_name, decidable)
         _refuse_unusable_paths(probe, old_path, new_path, ws_name=ws_name)
 
         if not yes:
@@ -223,7 +225,8 @@ def _rehome_vm(
         with native_mutation_guard(db.path, vm.name), operation_log(vm.name, "workspace-rehome") as log:
             require_vm_unchanged(db, vm)
             require_unchanged("workspace", ws_name, workspace_fields(ws), workspace_fields(db.get_workspace(ws_name)))
-            _refuse_unstopped_sessions(db, config, ws_name, repair_pids=True)
+            sessions = ensure_pids_batch(db.list_sessions(workspace_name=ws_name), db=db, config=config)
+            _refuse_unstopped_sessions(db, config, ws_name, sessions)
             _refuse_unusable_paths(probe, old_path, new_path, ws_name=ws_name)
             admin = admin_access(vm, config, log)
             # Reserve exclusively: a preflight check cannot rule out a raced-in

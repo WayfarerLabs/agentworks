@@ -199,27 +199,30 @@ def delete_session(
     _cleanup_now_empty_agent(db, config, session, yes=yes, interaction=interaction)
 
 
-def _delete_session_status(
-    db: Database, session: SessionRow, *, admin: VMAccess, force: bool, repair_pids: bool
-) -> SessionStatus | None:
+def _legacy_running_row(session: SessionRow) -> bool:
+    """A row from before tmux sockets were recorded, with a live PID: it counts as running."""
+    return session.socket_path is None and session.pid is not None and session.pid > 0
+
+
+def _delete_status_needs_pid_repair(session: SessionRow) -> bool:
+    """Whether the row's PID evidence must be repaired, which writes it, before its delete can decide its status.
+
+    Repair can also give an old admin row its address, so such a row's
+    status is decided only under the guard.
+    """
+    return not _legacy_running_row(session) and (_mgr._needs_repair(session) or session.socket_path is None)
+
+
+def _delete_session_status(db: Database, session: SessionRow, *, admin: VMAccess, force: bool) -> SessionStatus:
     """The session's status for its delete, refusing one that is unknown, or broken without ``force``.
 
-    Without ``repair_pids`` it only observes, and a row whose PID evidence
-    needs repair first (which can give an old admin row its address) reads
-    as ``None``: its status is decided under the guard. With ``repair_pids``
-    it first repairs that evidence, which writes the row.
+    It only observes. A row that :func:`_delete_status_needs_pid_repair`
+    flags is repaired (``_ensure_pid``) by the caller first, under the guard.
     """
     name = session.name
-    legacy = session.socket_path is None and session.pid is not None and session.pid > 0
-    if legacy:
+    if _legacy_running_row(session):
         status = SessionStatus.RUNNING
     else:
-        if not repair_pids and (_mgr._needs_repair(session) or session.socket_path is None):
-            return None
-        if repair_pids:
-            session = _mgr._ensure_pid(session, admin=admin, db=db)
-        # Resolved again from the reloaded row: repair can give an old
-        # admin row its dedicated socket.
         status = _mgr.check_session_status(session, admin=admin, server=_mgr.resolve_session_tmux_server(db, session))
     if status == SessionStatus.UNKNOWN:
         raise StateError(
@@ -267,7 +270,12 @@ def _delete_session_runtime(
         interaction=interaction,
     ) as (ws, vm, admin, log):
         session = _require_selected_session(db, name, selected_session_uuid)
-        status = _delete_session_status(db, session, admin=admin, force=force, repair_pids=False)
+        # A row whose PID evidence needs repair is undecided until the guard is held.
+        status = (
+            None
+            if _delete_status_needs_pid_repair(session)
+            else _delete_session_status(db, session, admin=admin, force=force)
+        )
 
         # Pick the destructive-op access BEFORE prompting the operator.
         # For agent sessions, ``_verified_session_access`` probes direct agent
@@ -287,8 +295,10 @@ def _delete_session_runtime(
             require_unchanged("session", name, session_fields(session), session_fields(current))
             require_vm_unchanged(db, vm)
             require_unchanged("session", name, member_consoles, [c.name for c in db.list_consoles_for_session(name)])
-            session = current
-            observed = _delete_session_status(db, session, admin=admin, force=force, repair_pids=True)
+            # Repair writes the row, and can give an old admin row its
+            # dedicated socket, so the status is read from the repaired row.
+            session = _mgr._ensure_pid(current, admin=admin, db=db)
+            observed = _delete_session_status(db, session, admin=admin, force=force)
             if status is not None:
                 require_unchanged("session", name, status, observed)
             status = observed

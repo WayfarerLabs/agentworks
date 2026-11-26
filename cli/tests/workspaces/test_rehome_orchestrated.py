@@ -506,6 +506,49 @@ def test_rehome_observes_without_writing_then_refuses_a_session_started_before_t
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
 
+def test_rehome_leaves_a_session_needing_pid_repair_for_the_guard_to_decide(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A session without PID evidence is not observed before the confirmation;
+    under the guard it is repaired and observed, and a running one refuses."""
+    from agentworks import output as output_mod
+    from agentworks.db import SessionMode, SessionStatus
+    from agentworks.sessions import manager as sessions_manager
+
+    config = make_config()
+    seed(db)
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN)
+    reachable(monkeypatch, True)
+    fake = Guest(fails=(is_occupancy_probe,))
+    route(monkeypatch, fake)
+    events: list[tuple[str, list[str]]] = []
+
+    def observe(sessions: list[object], **_kwargs: object) -> dict[str, SessionStatus]:
+        names = [session.name for session in sessions]  # type: ignore[attr-defined]
+        events.append(("observe", names))
+        return dict.fromkeys(names, SessionStatus.RUNNING)
+
+    def repair(sessions: list[object], **_kwargs: object) -> list[object]:
+        events.append(("repair", [session.name for session in sessions]))  # type: ignore[attr-defined]
+        return sessions
+
+    def confirm(message: str, default: bool = False) -> bool:
+        events.append(("confirm", []))
+        return True
+
+    monkeypatch.setattr(sessions_manager, "observe_session_statuses", observe)
+    monkeypatch.setattr(sessions_manager, "ensure_pids_batch", repair)
+    monkeypatch.setattr(output_mod, "confirm", confirm)
+
+    with pytest.raises(StateError):
+        _rehome(db, config)
+
+    assert events == [("confirm", []), ("repair", ["s1"]), ("observe", ["s1"])]
+    assert not any(starts("mkdir")(request) for request in fake.requests)
+
+
 def test_rehome_refuses_when_the_workspace_changed_before_the_guard(
     db: Database,
     make_config,  # noqa: ANN001
