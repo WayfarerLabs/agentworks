@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.execution.access import VMAccess
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.steps import InitLog
@@ -80,7 +79,6 @@ def _prepare_vm(
     session: SessionRow,
     *,
     operation: str,
-    held_native_guard: NativeMutationGuard | None = None,
     interaction: TtyInteractionPolicy,
 ) -> Iterator[tuple[WorkspaceRow, VMRow, VMAccess, InitLog]]:
     """The singular session ops' composition root (delete / attach /
@@ -118,7 +116,6 @@ def _prepare_vm(
         vm,
         scope=_session_scope(db, session, ws, vm),
         interaction=interaction,
-        held_native_guard=held_native_guard,
     ) as (_node, resolver, _context):
         redactions = tuple(value for value in resolver.values.values() if value)
         with operation_log(vm.name, operation, redactions=redactions) as log:
