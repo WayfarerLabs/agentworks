@@ -112,7 +112,9 @@ def grant_workspaces(
         ) as (vm_node, _resolver, _ctx),
         vm_node.locked(request),
     ):
-        _require_agent_unchanged(db, vm_node.row, agent)
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        _require_agent_unchanged(db, vm, agent)
         require_request_unchanged(
             "vm", vm.name, request, grant_request(db, vm, agent, workspace_names, every=grant_all)
         )
@@ -191,7 +193,9 @@ def revoke_workspaces(
         vm_node.locked(request),
         operation_log(vm.name, "agent-revoke") as log,
     ):
-        _require_agent_unchanged(db, vm_node.row, agent)
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        _require_agent_unchanged(db, vm, agent)
         require_request_unchanged(
             "vm", vm.name, request, grant_request(db, vm, agent, workspace_names, every=revoke_all)
         )

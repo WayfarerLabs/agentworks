@@ -6,13 +6,22 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import SessionMode
-from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.errors import (
+    AgentworksError,
+    NotFoundError,
+    StateConflictError,
+    StateError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import stored_workspace_path
-from agentworks.workspaces.manager._common import _workspace_scope
+from agentworks.workspaces.manager._common import _workspace_scope, workspace_external_explicit_granters
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
     from agentworks.execution.access import VMAccess
@@ -28,10 +37,19 @@ def delete_workspace(
     *,
     force: bool = False,
     yes: bool = False,
+    only_with_granters: Sequence[str] | None = None,
     vm_node: LiveVMNode | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete a workspace.
+
+    With ``only_with_granters`` it refuses a workspace whose explicit
+    granters (:func:`workspace_external_explicit_granters`) are not exactly
+    those when it reads its rows, for the offer to delete a workspace a
+    session delete left empty: the offer named the grants the delete
+    revokes. A grant that comes or goes after that read refuses under the
+    lock set like any other change, since every grant is an entity of the
+    request.
 
     Orchestrated on the standalone path (``vm_node=None``, the command
     root and ``delete_session``'s workspace-cleanup call):
@@ -73,6 +91,13 @@ def delete_workspace(
     except ValidationError:
         stored_path = None
     path_known = stored_path is not None
+
+    if only_with_granters is not None and list(only_with_granters) != workspace_external_explicit_granters(db, name):
+        raise StateConflictError(
+            f"the agents holding explicit grants on workspace '{name}' changed since it was offered for deletion",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
     # Check for sessions
     session_names = [s.name for s in db.list_sessions(workspace_name=name)]

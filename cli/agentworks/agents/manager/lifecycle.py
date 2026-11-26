@@ -16,6 +16,7 @@ from agentworks.errors import (
     AlreadyExistsError,
     ExternalError,
     NotFoundError,
+    StateConflictError,
     StateError,
     UserAbort,
 )
@@ -24,7 +25,7 @@ from agentworks.naming import validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
-from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
+from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_is_unused, agent_scope
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -278,10 +279,18 @@ def delete_agent(
     name: str,
     force: bool = False,
     yes: bool = False,
+    only_if_unused: bool = False,
     vm_node: LiveVMNode | None = None,
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Delete an agent from a VM.
+
+    With ``only_if_unused`` it refuses an agent that is no longer unused
+    (``agent_is_unused``: no session and no standing grant) when it reads its
+    rows, for the offer to delete an agent a session delete left unused. A
+    session, grant or grant-all flag that changes after that read refuses
+    under the lock set like any other change: the sessions and the agent row
+    are compared, and every grant is an entity of the request.
 
     Orchestrated on the standalone path (``vm_node=None``, the command
     root and ``delete_session``'s agent-cleanup call):
@@ -308,6 +317,13 @@ def delete_agent(
     if agent is None:
         raise NotFoundError(
             f"agent '{name}' not found",
+            entity_kind="agent",
+            entity_name=name,
+        )
+
+    if only_if_unused and not agent_is_unused(db, name):
+        raise StateConflictError(
+            f"agent '{name}' gained a session or a standing grant since it was offered for deletion",
             entity_kind="agent",
             entity_name=name,
         )
@@ -397,9 +413,11 @@ def delete_agent(
             held.enter_context(vm_node.hold_active())
             node = vm_node
         held.enter_context(node.locked(request))
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = node.row
         # What the confirmation showed: the agent and the sessions it named,
         # and the lock set as those rows and their grants and consoles build it now.
-        require_vm_unchanged(db, node.row)
+        require_vm_unchanged(db, vm)
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
         require_request_unchanged("agent", name, request, agent_delete_request(db, agent, agent_sessions))
         require_unchanged(

@@ -153,7 +153,9 @@ def repair_workspace(
         vm_node.locked(request),
         operation_log(vm.name, "workspace-repair") as log,
     ):
-        require_vm_unchanged(db, vm_node.row)
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        require_vm_unchanged(db, vm)
         require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
         require_request_unchanged("workspace", name, request, workspace_request(ws, *workspace_grants(db, vm, ws)))
         admin = admin_access(vm, config, log)
