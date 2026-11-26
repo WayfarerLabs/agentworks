@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 import secrets
 import sys
@@ -45,6 +46,9 @@ never holds an argument or option value. Outside the CLI it stays ``("agw",)``.
 RECORD_LOCK_WAIT_SECONDS = 1.0
 """How long a holder waits for its own new record's lock, which a reader's liveness probe holds briefly."""
 
+RECORD_MAX_BYTES = 1 << 20
+"""The most a reader reads of one record; a larger file is not a record this release wrote."""
+
 RECORD_LOCK_OFFSET = 1 << 62
 """The byte a record's lock takes on Windows: past the content, so readers can still read it."""
 
@@ -63,13 +67,12 @@ class HolderInfo:
     mode: LockMode
     held_for: float
     """Seconds the holder had held its set when the refusal read its record."""
-    pid: int
-    """For diagnosis only; liveness never rests on it."""
 
 
 @dataclass(frozen=True)
 class _Record:
     pid: int
+    """For diagnosis by hand only; liveness never rests on it."""
     command: tuple[str, ...]
     acquired: float
     entities: tuple[tuple[str, LockMode], ...]
@@ -160,7 +163,7 @@ def find_holder(directory: Path, refused: Entity, mode: LockMode) -> HolderInfo 
             if key != refused.key or not modes_conflict(held, mode):
                 continue
             if found is None or record.acquired < found[0]:
-                holder = HolderInfo(record.command, key, held, max(0.0, now - record.acquired), record.pid)
+                holder = HolderInfo(record.command, key, held, max(0.0, now - record.acquired))
                 found = (record.acquired, holder)
     return None if found is None else found[1]
 
@@ -190,29 +193,38 @@ def _read_live(path: Path) -> _Record | None:
     """
     try:
         fd = os.open(path, os.O_RDONLY | _BINARY)
-    except (FileNotFoundError, PermissionError):
-        # Gone already, or on Windows being deleted by its holder or another reader.
+    except OSError:
+        # Gone already, being deleted by its holder or another reader on
+        # Windows, or unreadable: the refusal names no holder.
         return None
     try:
         live = not try_lock(fd, LockMode.SHARED, offset=RECORD_LOCK_OFFSET)
         if live:
-            content = _read_all(fd)
+            content = _read_bounded(fd)
         else:
             if sys.platform != "win32":
                 _unlink_quietly(path)
             unlock(fd, offset=RECORD_LOCK_OFFSET)
+    except OSError:
+        # A lock or read the platform refused (ENOLCK, say) leaves the record unread.
+        return None
     finally:
         os.close(fd)
     if not live:
         if sys.platform == "win32":
             _unlink_quietly(path)
         return None
-    return _parse(content)
+    return None if content is None else _parse(content)
 
 
-def _read_all(fd: int) -> bytes:
+def _read_bounded(fd: int) -> bytes | None:
+    """The record's bytes, or ``None`` past :data:`RECORD_MAX_BYTES`."""
     chunks = []
+    size = 0
     while chunk := os.read(fd, 65536):
+        size += len(chunk)
+        if size > RECORD_MAX_BYTES:
+            return None
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -221,12 +233,14 @@ def _parse(content: bytes) -> _Record | None:
     """Validate a record read from disk, which another process wrote and may have left half-written."""
     try:
         data = json.loads(content)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     if not isinstance(data, dict):
         return None
     pid, command, acquired, entities = (data.get(name) for name in ("pid", "command", "acquired", "entities"))
     if not isinstance(pid, int) or isinstance(pid, bool) or not isinstance(acquired, int | float):
+        return None
+    if isinstance(acquired, bool) or not math.isfinite(acquired):
         return None
     if not isinstance(command, list) or not all(isinstance(word, str) for word in command):
         return None

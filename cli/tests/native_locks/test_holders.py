@@ -95,6 +95,35 @@ def test_a_locked_record_that_does_not_parse_is_skipped(database: Path) -> None:
     assert error.holder.command == ("agw",)
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        json.dumps(record_payload("workspace/w", "exclusive", acquired=float("nan"))).encode(),
+        json.dumps(record_payload("workspace/w", "exclusive", acquired=float("-inf"))).encode(),
+        b"[" * 100_000 + b"]" * 100_000,
+        b" " * (records_module.RECORD_MAX_BYTES + 1),
+    ],
+    ids=["nan-acquired", "infinite-acquired", "deeply-nested", "oversized"],
+)
+def test_a_locked_record_a_reader_cannot_trust_is_skipped(database: Path, content: bytes) -> None:
+    with fake_record(database, content, live=True), native_locks(database, EXCLUSIVE_W):
+        error = _refusal(database, EXCLUSIVE_W)
+    assert error.holder is not None
+    assert error.holder.command == ("agw",)
+
+
+def test_a_record_the_platform_will_not_lock_leaves_the_refusal_unnamed(
+    database: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_locks(fd: int, mode: LockMode, *, offset: int = 0) -> bool:
+        raise OSError(errno.ENOLCK, "no locks available")
+
+    with native_locks(database, EXCLUSIVE_W):
+        monkeypatch.setattr(records_module, "try_lock", no_locks)
+        error = _refusal(database, EXCLUSIVE_W)
+    assert error.entity_name == "w" and error.holder is None
+
+
 def test_records_that_do_not_conflict_are_ignored(database: Path) -> None:
     earlier = time.time() - 60
     shared_w = record_payload("workspace/w", "shared", acquired=earlier)
