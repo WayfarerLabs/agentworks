@@ -100,10 +100,15 @@ def realize_workspace(
         # it returns, including unique clone attempts. It preserves and reports
         # unconfirmed or occupied reservations. With workspace_path unset here,
         # this layer must not guess a path and remove that unexplained residue.
-        if workspace_path:
-            delete_vm_workspace(vm, config, workspace_path, workspace_group(name), logger=log)
-        if vscode_path:
-            vscode_path.unlink(missing_ok=True)
+        # The local stub goes whatever the on-VM removal does: that removal
+        # raises when it cannot finish, and the stub must not outlive the row
+        # this rollback never wrote.
+        try:
+            if workspace_path:
+                delete_vm_workspace(vm, config, workspace_path, workspace_group(name), logger=log)
+        finally:
+            if vscode_path:
+                vscode_path.unlink(missing_ok=True)
 
     def _safe_cleanup() -> None:
         # Rollback failures must not mask the original KI/exception. Surface

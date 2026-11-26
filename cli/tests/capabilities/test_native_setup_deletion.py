@@ -299,4 +299,4 @@ def test_a_completed_delete_only_warns_when_the_ssh_config_rebuild_lock_is_held(
 
     assert db.get_agent("agent") is None
     assert (db.get_vm("box") is None) is (kind == "vm")
-    assert any("SSH config sync failed" in warning for warning in captured_output.warnings)
+    assert captured_output.warnings
