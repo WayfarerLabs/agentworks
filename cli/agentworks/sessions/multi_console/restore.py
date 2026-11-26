@@ -33,13 +33,13 @@ from agentworks.sessions.tmux import ProbeStatus, access_run_command, exact_tmux
 from ._helpers import _require_console, tmux_session_name
 from .attach import _active_console_vm, _console_pane_access, _session_linux_user
 from .runtime import validate_console_window
-from .tmux_build import _resolve_workspace_path, _split_shell_pane
+from .tmux_build import _split_shell_pane
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
     from agentworks.config import Config
-    from agentworks.db import ConsoleSessionRow, Database, SessionRow, VMRow
+    from agentworks.db import ConsoleSessionRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.execution.access import VMAccess
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -229,8 +229,8 @@ def _observe_window(
     return _WindowObservation(missing=missing, base_pidx=base_pidx)
 
 
-def _restorable_session(db: Database, session_name: str) -> tuple[SessionRow, str]:
-    """The session and its workspace path, refusing a session or workspace that is gone.
+def _restorable_session(db: Database, session_name: str) -> tuple[SessionRow, WorkspaceRow]:
+    """The session and its workspace, refusing a session or workspace that is gone.
 
     ``_add_session_window`` only warns and skips when either is gone, so
     without this check the operator would get a generic "failed to rebuild"
@@ -244,14 +244,14 @@ def _restorable_session(db: Database, session_name: str) -> tuple[SessionRow, st
             entity_name=session_name,
             hint="Remove the session from the console first.",
         )
-    workspace_path = _resolve_workspace_path(db, session)
-    if workspace_path is None:
+    workspace = db.get_workspace(session.workspace_name)
+    if workspace is None:
         raise StateError(
             f"workspace for session '{session_name}' is missing; cannot restore.",
             entity_kind="session",
             entity_name=session_name,
         )
-    return session, workspace_path
+    return session, workspace
 
 
 def restore_session(
@@ -288,8 +288,9 @@ def restore_session(
     secrets, in one pass, before its first tmux change; a window with nothing
     missing prompts for nothing. Each pane it opens parks a fresh handover.
     All of that runs before the console's family guard is taken; under it
-    the console, the member and the window are read and observed again, and
-    a change refuses before the first tmux change.
+    the console, the member and the window are read and observed again (and,
+    for a restore that opens panes or rebuilds the window, its session and the
+    workspace it starts in), and a change refuses before the first tmux change.
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.recheck import (
@@ -298,6 +299,7 @@ def restore_session(
         require_session_unchanged,
         require_unchanged,
         require_vm_unchanged,
+        workspace_fields,
     )
 
     from ._helpers import guarded_console_selection
@@ -370,7 +372,7 @@ def restore_session(
                 _focus_session_pane(run, q_con, q_win, observed.base_pidx)
                 return
 
-        session, workspace_path = _restorable_session(db, session_name)
+        session, workspace = _restorable_session(db, session_name)
         if observed.base_pidx is None:
             # A rebuilt window binds its attach pane to the session's tmux server; refuse a bad one now.
             validate_console_window(db, member, vm)
@@ -389,8 +391,14 @@ def restore_session(
         values = resolver.values
         try:
             with guarded(run, admin, vm, observed):
-                # The session the window is rebuilt for, as read before the guard.
+                # The session the panes are opened for and the workspace they start in, as read before the guard.
                 require_session_unchanged(db, session_name, session)
+                require_unchanged(
+                    "workspace",
+                    workspace.name,
+                    workspace_fields(workspace),
+                    workspace_fields(db.get_workspace(workspace.name)),
+                )
                 _apply_restore(
                     access,
                     db,
@@ -401,7 +409,7 @@ def restore_session(
                     member=member,
                     observed=observed,
                     session=session,
-                    workspace_path=workspace_path,
+                    workspace_path=workspace.workspace_path,
                 )
         finally:
             values.clear()
