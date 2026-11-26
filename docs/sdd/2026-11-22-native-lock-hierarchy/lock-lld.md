@@ -423,7 +423,8 @@ VM name order, and every surviving family finishes (e) before any family takes i
 that barrier keeps every infrastructure prompt outside the final sets, and lets the one workload
 boundary at (h) hold all of them.
 
-- **(a) Read** the selection (`runtime_state/_selection.py:28-76`).
+- **(a) Read** the selection (`runtime_state/_selection.py:28-76`). Its rows are read here, so a
+  target whose family is refused at (b) is reported as a known, blocked target.
 - **(b) Probe** each family's set; a refusal drops targets as the per-target rule below says.
 - **(c) Confirm early**: restart consent, after its status observation, as today
   (`sessions/manager/_lifecycle.py:404-411`). Console start and restart run their known-policy
@@ -446,7 +447,8 @@ boundary at (h) hold all of them.
   `invocation.gate_value` and `resolver.resolve_gate` (`runtime_state/_models.py:100-104`); the
   provider observation (`runtime.py:74-79`), with no `confirmed_active` fast path on this path; and
   the boot, under a brief `{vm: exclusive}` when the family needs its VM running and the provider
-  reports it stopped (`_prepare.py:247`).
+  reports it stopped (`_prepare.py:247`). The boot observes the VM once more under that set before
+  it starts it, since another command may have started it after the unlocked observation.
 - **(f) Acquire** the family's set, with the vm shared.
 - **(g) Re-check** the existing selection checks (`_selection.py:103-149`), the VM row, that the
   recorded intent still stands, and that each target's desired overlay digest is still the one (d)
@@ -507,10 +509,19 @@ setup it runs is bound to the declaration it prepared. `vm reinit` accepts its d
 under its final vm exclusive (`vms/manager/reinit.py:302-306`), and is unchanged.
 
 `session start --spec` (`sessions/manager/_spec.py:103`) acquires nothing itself. It runs its
-consent probe and confirmation unlocked (step 5; today under its guard, `:133-135`), then passes the
-overlay and `running_restart_authorized` into the batch, which persists the overlay at its own (d)
-alongside the intent and runs the normal family sequence. `run_session_batch(held=)` (`:149`) goes
-away.
+consent probe and confirmation unlocked (step 5; today under its guard, `:133-135`), then passes the batch a session declaration (`runtime_state._models.SessionDeclaration`) and
+`running_restart_authorized`. The declaration carries two parts:
+
+- **The pending live resource.** The batch publishes it through its existing pending publishers
+  before it loads the request registry. The registry therefore reads the new layer rather than the
+  stored one, which this release may be unable to read: an overlay with unsupported fields or
+  version would otherwise fail the registry load, so `--spec '{}'` could not clear it.
+- **An acceptance step.** The batch calls it at its own (d), with its own status observation,
+  persisting the overlay alongside the intent.
+
+The batch then runs the normal family sequence. A status that changed since spec's consent refuses
+at (d) as that target's blocked `StateError`, naming the session's entity, rather than before the
+batch runs. `run_session_batch(held=)` (`:149`) goes away.
 
 ### Prompts under a set
 
@@ -1010,7 +1021,7 @@ read fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_
 | formerly unguarded  | revoke, copy's source VM, `import-host-keys` (a per-VM `BUSY` outcome) and `confirm-release` each refuse while the VM's guard is held, as grant, repair and copy's destination already do                                                                                                                                      |
 | prompts before lock | each moved prompt (the rows of Appendix A.1) is answered with no guard held, and its re-check refuses when the state it showed changed before acquisition                                                                                                                                                                      |
 | rehome re-check     | rehome's step 5 persists nothing; a session started between its confirmation and its acquisition refuses the rehome                                                                                                                                                                                                            |
-| spec start          | `session start --spec` asks its restart consent with no guard held, and refuses at step 7 when the session's status changed meanwhile                                                                                                                                                                                          |
+| spec start          | `session start --spec` asks its restart consent with no guard held; a status changed meanwhile blocks that target at the batch's (d) with a `StateError` naming the session |
 
 ### PR 2, the hierarchy
 
@@ -1043,7 +1054,7 @@ read fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_
 | request validation       | two entities with one key and different parents, given as tuples, are refused before any keyed deduplication                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | prompt ownership         | two invocations in one process: a set one holds neither prints a notice for nor refuses a prompt of the other                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | rollback                 | a failing `session create --new-workspace --new-agent` unwinds without a refusal while unrelated holders exist on the VM                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| spec hand-off            | `session start --spec` hands the overlay to the batch, which persists it with the intent; spec takes no guard of its own and `run_session_batch(held=)` is gone                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| spec hand-off            | `session start --spec` hands the batch a session declaration; the batch's registry reads the pending layer, so clearing an unreadable stored overlay succeeds, and the overlay persists with the intent at (d); spec takes no guard of its own and `run_session_batch(held=)` is gone |
 
 One concurrent pair per FRD story, plus the session-delete pairs, driven through the real manager
 functions with the scripted guest: the first operation is paused at a known guest command (an event
