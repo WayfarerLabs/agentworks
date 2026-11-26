@@ -113,13 +113,13 @@ def _pending(
 
 @pytest.mark.parametrize("kind", ["agent", "workspace"])
 @pytest.mark.parametrize("invalid", ["family", "database", "completed"])
-def test_real_nested_deletion_rejects_wrong_or_completed_guard_tokens(db, tmp_path, kind, invalid):
+def test_real_nested_deletion_rejects_wrong_or_completed_lock_tokens(db, tmp_path, kind, invalid):
     vm = db.insert_vm("vm1", "local", "vm1")
     config = SimpleNamespace(paths=SimpleNamespace(vscode_workspaces=tmp_path))
     path = tmp_path / "different.db" if invalid == "database" else db.path
     family = "other" if invalid == "family" else vm.name
-    with native_locks(path, vm_exclusive(family)) as guard:
-        node = LiveVMNode(db, config, MagicMock(), vm, cast("VMSiteNode", MagicMock()), held=guard)
+    with native_locks(path, vm_exclusive(family)) as lock:
+        node = LiveVMNode(db, config, MagicMock(), vm, cast("VMSiteNode", MagicMock()), held=lock)
         pending = _pending(db, config, "new", node, kind)
         if invalid != "completed":
             with pytest.raises(StateError) as rejected:
@@ -143,9 +143,9 @@ def test_pending_teardown_preserves_user_abort_from_actual_delete_path(db, tmp_p
     monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", lambda *a, **k: MagicMock())
     monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", abort)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", abort)
-    with native_locks(db.path, vm_exclusive(vm.name)) as guard:
+    with native_locks(db.path, vm_exclusive(vm.name)) as lock:
         site = VMSiteNode("local", cast("VMPlatform", _StubPlatform()), (), MagicMock())
-        node = LiveVMNode(db, config, MagicMock(), vm, site, held=guard)
+        node = LiveVMNode(db, config, MagicMock(), vm, site, held=lock)
         pending = _pending(db, config, "new", node, kind)
         with pytest.raises(UserAbort) as caught:
             pending.teardown()

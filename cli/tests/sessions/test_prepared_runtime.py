@@ -64,18 +64,18 @@ def test_pure_setter_preserves_runtime_and_start_identity(tmp_path, monkeypatch)
     db.close()
 
 
-def test_acceptance_reuses_guard_and_refuses_replaced_uuid(tmp_path, monkeypatch):
+def test_acceptance_reuses_lock_and_refuses_replaced_uuid(tmp_path, monkeypatch):
     db, _ = _restart_fixture(tmp_path, monkeypatch)
     selected = _session(db)
-    with native_locks(db.path, vm_exclusive("vm1")) as guard:
-        accepted = accept_session_runtime_state(db, selected, state=DesiredRuntimeState.STOPPED, held=guard)
+    with native_locks(db.path, vm_exclusive("vm1")) as lock:
+        accepted = accept_session_runtime_state(db, selected, state=DesiredRuntimeState.STOPPED, held=lock)
         assert accepted.desired_runtime_state is DesiredRuntimeState.STOPPED
         with pytest.raises(StateError):
             accept_session_runtime_state(
                 db,
                 replace(selected, session_uuid="00000000-0000-0000-0000-000000000000"),
                 state=DesiredRuntimeState.RUNNING,
-                held=guard,
+                held=lock,
             )
     assert _session(db).desired_runtime_state is DesiredRuntimeState.STOPPED
     db.close()

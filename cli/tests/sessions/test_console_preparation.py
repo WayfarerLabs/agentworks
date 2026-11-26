@@ -58,7 +58,7 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
     calls = []
     monkeypatch.setattr(mc, "_console_runtime_presence", lambda *a: (canonical, staging))
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: calls.append("collect") or [])
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, lock):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -66,7 +66,7 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held=guard,
+            held=lock,
         )
         assert prepared.action is action
         assert calls == (["collect"] if collect else [])
@@ -85,7 +85,7 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     monkeypatch.setattr(mc, "_console_runtime_presence", lambda *a: (canonical, staging))
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: pytest.fail("collected secrets"))
-    with mc.guarded_console_selection(db, "con") as (console, guard), pytest.raises(StateError):
+    with mc.locked_console(db, "con") as (console, lock), pytest.raises(StateError):
         mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -93,11 +93,11 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held=guard,
+            held=lock,
         )
 
 
-def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, monkeypatch):
+def test_cleanup_only_preserves_canonical_and_requires_live_lock(db: Database, monkeypatch):
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
@@ -108,7 +108,7 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
     monkeypatch.setattr(attach, "_teardown_console_staging", lambda *a: changed.append("staging"))
     monkeypatch.setattr(mc, "_teardown_console_tmux", lambda *a: pytest.fail("canonical teardown"))
     monkeypatch.setattr(mc, "_build_console_tmux", lambda *a, **kw: pytest.fail("built canonical"))
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, lock):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -116,7 +116,7 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held=guard,
+            held=lock,
         )
         assert not changed
         assert mc.execute_console_reconcile(prepared, values={})
@@ -138,7 +138,7 @@ def test_intent_is_local_kind_strict_and_preserves_members(db: Database):
     assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
-def test_delete_consent_is_asked_unguarded_and_a_member_change_before_the_guard_refuses(db: Database, monkeypatch):
+def test_delete_consent_is_asked_unlocked_and_a_member_change_before_the_lock_refuses(db: Database, monkeypatch):
     from agentworks.errors import StateConflictError
 
     _seed_vm(db)
@@ -186,7 +186,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
     guest = install_scripted_guest(monkeypatch, _ScriptedGuest(model=TmuxModel()))
     admin = guest.admin()
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, lock):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -194,7 +194,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
             console=console,
             vm=_vm(db),
             admin=admin,
-            held=guard,
+            held=lock,
         )
         assert mc.execute_console_reconcile(prepared, values={"token": value})
         assert mc.observe_prepared_console(prepared).value == "running"
@@ -365,7 +365,7 @@ def test_known_preflight_refusal_preserves_console_target(db: Database, scripted
     assert _console(db) == before
 
 
-def test_focused_selection_refuses_reparent_before_guarded_reread(db: Database, monkeypatch):
+def test_focused_selection_refuses_reparent_before_locked_reread(db: Database, monkeypatch):
     from contextlib import contextmanager
 
     _seed_vm(db)

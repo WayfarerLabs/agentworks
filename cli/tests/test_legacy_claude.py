@@ -156,7 +156,7 @@ def test_record_only_doctor_marks_migration_pending_without_source_values(db):
 
 
 @pytest.mark.parametrize("replace_spec", [False, True])
-def test_competing_reinit_cannot_change_desired_state_before_guard(db, make_config, replace_spec):
+def test_competing_reinit_cannot_change_desired_state_before_lock(db, make_config, replace_spec):
     from agentworks.agents.manager import reinit_agent
     from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive

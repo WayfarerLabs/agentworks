@@ -2,7 +2,7 @@
 model: the parity carries the node layer could not prove on its own.
 
 - restart's required-commands probe fires AT PREFLIGHT, before the
-  kill (matching the imperative pre-kill guard), and a missing binary
+  kill (matching the imperative pre-kill lock), and a missing binary
   aborts with the old session still running;
 - create's ephemeral agent defers the probe at preflight and probes
   right after its realization, through the real command;
@@ -774,7 +774,7 @@ def test_indeterminate_post_launch_cleanup_retains_addressable_runtime(
 
 
 def test_restart_probe_fires_at_preflight_before_the_kill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The pre-kill guard, orchestrated: the required-commands probe
+    """The pre-kill lock, orchestrated: the required-commands probe
     fires at PREFLIGHT, strictly before the kill, not merely once
     somewhere in the command."""
     from agentworks.sessions.manager import restart_session
@@ -1822,7 +1822,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     plugin's is refused at the build phase (the gate added beside the harness integration
     gate in ``_build_session_graph``), before any transport or session-row
     write. Proves the newly-added ``--new-agent`` gate fires live, not just that
-    the call site references it textually (the drift guard's job)."""
+    the call site references it textually (the drift lock's job)."""
     from agentworks.plugins import Plugin
     from agentworks.sessions.manager import create_session
 
@@ -2285,11 +2285,11 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     assert events == []
 
 
-def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guard(
+def test_create_resolves_unlocked_then_refuses_an_agent_changed_before_the_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The gate and the boundary resolve run with no guard held; an agent
+    """The gate and the boundary resolve run with nothing locked; an agent
     replaced in between is not the one the plan read, so nothing is created."""
     from agentworks.errors import StateConflictError
     from agentworks.native_locks import native_locks
@@ -2300,11 +2300,11 @@ def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guar
     db = _create_stubs(tmp_path, monkeypatch, events)
     db.insert_agent("a1", "vm1", "agt-a1")
     resolve = _create._preflight_and_resolve
-    unguarded: list[bool] = []
+    unlocked: list[bool] = []
 
     def resolve_then_replace_the_agent(*args: Any, **kwargs: Any) -> dict[str, str]:
         with native_locks(db.path, vm_exclusive("vm1")):
-            unguarded.append(True)
+            unlocked.append(True)
         values = resolve(*args, **kwargs)
         db.delete_agent("a1")
         db.insert_agent("a1", "vm1", "agt-a1-other")
@@ -2322,7 +2322,7 @@ def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guar
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert unguarded == [True]
+    assert unlocked == [True]
     assert db.get_session("s1") is None
     assert not any("new-session" in event for event in events)
     db.close()

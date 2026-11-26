@@ -413,28 +413,28 @@ def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, i
     return error
 
 
-def test_a_vm_replaced_before_the_guard_is_refused(
+def test_a_vm_replaced_before_the_lock_is_refused(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A VM deleted and recreated under the same name before the guard is not the VM delete confirmed."""
+    """A VM deleted and recreated under the same name before the lock is not the VM delete confirmed."""
     from agentworks import native_locks as locking
 
     _seed(db)
     counts = _fake_backend(monkeypatch)
-    real_guard = locking.native_locks
+    real_lock = locking.native_locks
     replacements = []
 
     @contextlib.contextmanager
-    def guard_after_a_replacement(*args: object, **kwargs: object) -> Iterator[object]:
+    def lock_after_a_replacement(*args: object, **kwargs: object) -> Iterator[object]:
         db.delete_vm("dvm")
         _seed(db)
         replacements.append(db.get_vm("dvm"))
-        with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
+        with real_lock(*args, **kwargs) as held:  # type: ignore[arg-type]
             yield held
 
-    monkeypatch.setattr(locking, "native_locks", guard_after_a_replacement)
+    monkeypatch.setattr(locking, "native_locks", lock_after_a_replacement)
 
     with pytest.raises(StateError) as raised:
         vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -950,7 +950,7 @@ def test_delete_removes_the_host_key_record_and_only_warns_when_the_ssh_config_r
     assert any("read-only home" in warning for warning in captured_output.warnings)
 
 
-def test_delete_resolves_its_secrets_with_no_guard_held(
+def test_delete_resolves_its_secrets_with_nothing_locked(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -963,18 +963,18 @@ def test_delete_resolves_its_secrets_with_no_guard_held(
     _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
     resolve = Resolver.resolve
-    resolved_unguarded: list[bool] = []
+    resolved_unlocked: list[bool] = []
 
-    def resolve_checking_the_guard(self: Resolver) -> None:
+    def resolve_checking_the_lock(self: Resolver) -> None:
         with native_locks(db.path, vm_exclusive("dvm")):
-            resolved_unguarded.append(True)
+            resolved_unlocked.append(True)
         resolve(self)
 
-    monkeypatch.setattr(Resolver, "resolve", resolve_checking_the_guard)
+    monkeypatch.setattr(Resolver, "resolve", resolve_checking_the_lock)
 
     vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert resolved_unguarded == [True]
+    assert resolved_unlocked == [True]
     assert db.get_vm("dvm") is None
 
 
@@ -983,7 +983,7 @@ def test_a_child_added_after_the_confirmation_refuses_the_delete(
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The confirmation counted no children; one created before the guard is not what the operator confirmed."""
+    """The confirmation counted no children; one created before the lock is not what the operator confirmed."""
     from agentworks.errors import StateConflictError
 
     _seed(db)

@@ -363,7 +363,7 @@ def add_sessions(
         require_vm_unchanged,
     )
 
-    from ._helpers import guarded_console_selection, probe_console
+    from ._helpers import locked_console, probe_console
 
     console = _require_console(db, console_name)
     read = console_row_fields(db, console_name)
@@ -431,7 +431,7 @@ def add_sessions(
 
     # Every secret is resolved: the console and its VM are read again under its lock,
     # and the transaction below derives positions from the members as they are now.
-    with guarded_console_selection(db, console_name, shared=added) as (_selected_console, _held):
+    with locked_console(db, console_name, shared=added) as (_selected_console, _held):
         require_unchanged("console", console_name, read, console_row_fields(db, console_name))
         require_vm_unchanged(db, vm_row)
         for session_name, session_read in sessions_read.items():
@@ -517,7 +517,7 @@ def remove_sessions(
     """
     from agentworks.recheck import console_fields, require_unchanged
 
-    from ._helpers import guarded_console_selection, probe_console
+    from ._helpers import locked_console, probe_console
 
     def require_members() -> None:
         for n in session_names:
@@ -532,7 +532,7 @@ def remove_sessions(
     require_members()
     read = console_fields(db, console_name)
     probe_console(db, console_name)
-    with guarded_console_selection(db, console_name) as (_selected_console, _held):
+    with locked_console(db, console_name) as (_selected_console, _held):
         require_unchanged("console", console_name, read, console_fields(db, console_name))
         console = _require_console(db, console_name)
         live = _mc._live_access(db, config, console.vm_name)
@@ -583,9 +583,9 @@ def reorder_sessions(
     Short-circuits with an info message and no DB / tmux work when the
     listed sessions are already in the requested order at the requested position.
     """
-    from ._helpers import guarded_console_selection
+    from ._helpers import locked_console
 
-    with guarded_console_selection(db, console_name) as (_selected_console, _held):
+    with locked_console(db, console_name) as (_selected_console, _held):
         console = _require_console(db, console_name)
 
         if to_back and start_index is not None:
@@ -717,7 +717,7 @@ def add_shell(
         require_vm_unchanged,
     )
 
-    from ._helpers import guarded_console_selection, probe_console
+    from ._helpers import locked_console, probe_console
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
@@ -769,7 +769,7 @@ def add_shell(
             )
 
     # Every secret is resolved: the console, its VM and the member are read again under its lock.
-    with guarded_console_selection(db, console_name) as (_selected_console, _held):
+    with locked_console(db, console_name) as (_selected_console, _held):
         require_unchanged("console", console_name, read, console_row_fields(db, console_name))
         if vm_row is not None:
             require_vm_unchanged(db, vm_row)

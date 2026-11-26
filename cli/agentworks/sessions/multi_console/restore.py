@@ -300,7 +300,7 @@ def restore_session(
         require_vm_unchanged,
     )
 
-    from ._helpers import guarded_console_selection, probe_console
+    from ._helpers import locked_console, probe_console
 
     console = _require_console(db, console_name)
     probe_console(db, console_name)
@@ -317,7 +317,7 @@ def restore_session(
     @contextmanager
     def guarded(run: RunCommand, admin: VMAccess, vm: VMRow, observed: _WindowObservation) -> Iterator[None]:
         """The console's exclusive lock, with the console, the member and the window observed again under it."""
-        with guarded_console_selection(db, console_name):
+        with locked_console(db, console_name):
             require_unchanged("console", console_name, read, console_fields(db, console_name))
             require_unchanged(
                 "console",

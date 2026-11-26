@@ -81,14 +81,14 @@ def platform(monkeypatch):
 def _prepared(db, config, vm) -> Iterator[tuple]:
     registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=Policy.REFUSE)
-    with native_locks(db.path, vm_exclusive(vm.name)) as guard:
+    with native_locks(db.path, vm_exclusive(vm.name)) as lock:
         context = prepare_vm_runtime(
             db,
             config,
             registry,
             vm,
             resolve_secret=resolver.resolve_gate,
-            held=guard,
+            held=lock,
         )
         try:
             yield context, resolver
@@ -296,7 +296,7 @@ def test_prepared_provider_operations_reject_invalidated_selection(db, make_conf
 
 
 @pytest.mark.windows
-def test_native_guard_contention_prevents_public_acceptance_and_provider_actions(db, make_config, platform):
+def test_native_lock_contention_prevents_public_acceptance_and_provider_actions(db, make_config, platform):
     config = make_config()
     vm = _seed(db)
     with native_locks(db.path, vm_exclusive("box")):
@@ -380,14 +380,14 @@ def test_shared_failed_infrastructure_uses_one_resolver_attempt_without_prefligh
     resolver = Resolver(config, registry, interaction=Policy.REFUSE)
     try:
         for vm in (first, second):
-            with native_locks(db.path, vm_exclusive(vm.name)) as guard, pytest.raises(SecretUnavailableError):
+            with native_locks(db.path, vm_exclusive(vm.name)) as lock, pytest.raises(SecretUnavailableError):
                 prepare_vm_runtime(
                     db,
                     config,
                     registry,
                     vm,
                     resolve_secret=resolver.resolve_gate,
-                    held=guard,
+                    held=lock,
                 )
         assert resolve_counter == [["proxmox-token"]]
         assert platform[0] == []
@@ -409,14 +409,14 @@ def test_source_free_vm_preflight_still_rejects_dangling_declared_secret(db, mak
         return lookup(kind, name)
 
     monkeypatch.setattr(registry, "lookup", without_secret)
-    with native_locks(db.path, vm_exclusive(vm.name)) as guard, pytest.raises(ConfigError):
+    with native_locks(db.path, vm_exclusive(vm.name)) as lock, pytest.raises(ConfigError):
         prepare_vm_runtime(
             db,
             config,
             registry,
             vm,
             resolve_secret=lambda name: pytest.fail("dangling declaration reached a source"),
-            held=guard,
+            held=lock,
         )
 
 

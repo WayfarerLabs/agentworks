@@ -1,4 +1,4 @@
-"""Existing-session declaration replacement follows the guarded launch lifecycle."""
+"""Existing-session declaration replacement follows the locked launch lifecycle."""
 
 from __future__ import annotations
 
@@ -324,7 +324,7 @@ def test_force_new_conflict_preserves_overlay_runtime_and_target(
     assert runtime[2] == []
 
 
-def test_restart_consent_is_asked_unguarded_and_a_status_change_before_the_guard_refuses(
+def test_restart_consent_is_asked_unlocked_and_a_status_change_before_the_lock_refuses(
     db, make_config, runtime, monkeypatch
 ):
     _seed(db)

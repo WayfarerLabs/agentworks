@@ -845,14 +845,14 @@ def delete_console(
     """
     from agentworks.recheck import console_fields, require_unchanged
 
-    from ._helpers import guarded_console_selection, probe_console
+    from ._helpers import locked_console, probe_console
 
     _require_console(db, name)
     read = console_fields(db, name)
     probe_console(db, name)
     if not yes and not output.confirm(f"Delete console '{name}'?"):
         raise UserAbort("delete cancelled")
-    with guarded_console_selection(db, name) as (console, _held):
+    with locked_console(db, name) as (console, _held):
         require_unchanged("console", name, read, console_fields(db, name))
         console = _require_console(db, name)
         if only_if_empty and db.list_console_sessions(name):

@@ -234,7 +234,7 @@ def test_off_child_stop_never_enters_guest_or_hold(db, make_config, runtime, mon
     assert not events
 
 
-def test_dry_run_has_no_native_guard_or_workload_sources(db, make_config, runtime, monkeypatch):
+def test_dry_run_has_no_native_lock_or_workload_sources(db, make_config, runtime, monkeypatch):
     powers, _, events = runtime
     seed_vm(db, "box")
     seed_session(db, "work", "box")

@@ -41,7 +41,7 @@ def _run(operation: str, db: Database, config: Any, vm_name: str) -> None:
 
 
 @pytest.mark.parametrize("operation,vm_name", [("repair", "box"), ("grant", "box"), ("copy", "box"), ("copy", "box2")])
-def test_group_writes_and_copy_grants_keep_the_destination_guard(
+def test_group_writes_and_copy_grants_keep_the_destination_lock(
     db: Database, make_config: Any, monkeypatch: pytest.MonkeyPatch, operation: str, vm_name: str
 ) -> None:
     config = make_config()
@@ -52,7 +52,7 @@ def test_group_writes_and_copy_grants_keep_the_destination_guard(
     reachable(monkeypatch, True)
     guest = CopyGuest([])
     recorder = install_access_recorder(monkeypatch)
-    guarded_writes: list[object] = []
+    locked_writes: list[object] = []
     group = "ws-ws2" if operation == "copy" else "ws-ws1"
 
     def answer(call: Call) -> Result:
@@ -64,7 +64,7 @@ def test_group_writes_and_copy_grants_keep_the_destination_guard(
             # A cross-VM copy holds its source VM shared across the unpack too.
             with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
                 pass
-            guarded_writes.append(call.request)
+            locked_writes.append(call.request)
         if operation == "repair" and getattr(call.request, "argv", ()) == ("getent", "group", group):
             from agentworks.execution.results import Completed, Result
 
@@ -75,8 +75,8 @@ def test_group_writes_and_copy_grants_keep_the_destination_guard(
     _run(operation, db, config, vm_name)
 
     # Copy creates its group and materializes grant-all membership under the
-    # same body guard. A nested acquisition would instead abort the copy.
-    assert len(guarded_writes) == (2 if operation == "copy" else 1)
+    # same body lock. A nested acquisition would instead abort the copy.
+    assert len(locked_writes) == (2 if operation == "copy" else 1)
     if operation == "copy":
         assert db.get_workspace("ws2") is not None
         assert db.list_agent_grants("dev")
@@ -85,7 +85,7 @@ def test_group_writes_and_copy_grants_keep_the_destination_guard(
 
 
 @pytest.mark.parametrize("operation", ["repair", "grant"])
-def test_contended_guard_refuses_before_guest_or_grant_state_changes(
+def test_contended_lock_refuses_before_guest_or_grant_state_changes(
     db: Database, make_config: Any, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     config = make_config()

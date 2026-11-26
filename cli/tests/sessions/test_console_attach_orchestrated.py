@@ -358,7 +358,7 @@ def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     assert db.get_console("c1") == before_console
 
 
-def test_named_console_attach_resolves_its_gate_secret_with_no_guard_held(
+def test_named_console_attach_resolves_its_gate_secret_with_nothing_locked(
     db: Database,
     make_config,  # noqa: ANN001
     target: _Guest,
@@ -375,7 +375,7 @@ def test_named_console_attach_resolves_its_gate_secret_with_no_guard_held(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
     resolve_gate = Resolver.resolve_gate
-    guarded: list[bool] = []
+    locked: list[bool] = []
 
     def held() -> bool:
         try:
@@ -385,12 +385,12 @@ def test_named_console_attach_resolves_its_gate_secret_with_no_guard_held(
             return True
 
     def resolve_checking(self: Resolver, name: str) -> str:
-        guarded.append(held())
+        locked.append(held())
         return resolve_gate(self, name)
 
     monkeypatch.setattr(Resolver, "resolve_gate", resolve_checking)
-    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: guarded.append(held()))
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: locked.append(held()))
 
     assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    assert guarded == [False, True]
+    assert locked == [False, True]

@@ -319,7 +319,7 @@ def reinit_vm(
 
     try:
         with (
-            contextlib.ExitStack() as guarded,
+            contextlib.ExitStack() as locked,
             activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)),
         ):
             # Credentials and active setup env/config secrets share one eager
@@ -341,7 +341,7 @@ def reinit_vm(
 
             # Every prompt is answered: the vm exclusive is held from here to the
             # end, and what the declarations were resolved from is read again.
-            vm_lock = guarded.enter_context(vm_node.locked(vm_exclusive(name)))
+            vm_lock = locked.enter_context(vm_node.locked(vm_exclusive(name)))
             require_unchanged(
                 "vm",
                 name,

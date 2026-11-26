@@ -1,4 +1,4 @@
-"""Session delete: its questions come before the guard, its re-checks under it, and the last membership goes first."""
+"""Session delete: its questions come before the lock, its re-checks under it, and the last membership goes first."""
 
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def test_a_failed_membership_removal_keeps_the_session_and_grant_rows_for_a_reru
     assert not db.has_any_grant("bot", "ws-vm1")
 
 
-def _guard_free(db: Database) -> bool:
+def _vm_unlocked(db: Database) -> bool:
     from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive
 
@@ -89,14 +89,14 @@ def _guard_free(db: Database) -> bool:
 
 
 @pytest.mark.parametrize("answer", [True, False], ids=["accepted", "declined"])
-def test_delete_asks_both_questions_with_no_guard_held(
+def test_delete_asks_both_questions_with_nothing_locked(
     db: Database,
     scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     answer: bool,
     captured_output: CapturedOutput,
 ) -> None:
-    """The confirmation is asked before the guard and the offer for the console
+    """The confirmation is asked before the lock and the offer for the console
     the delete left empty after it; an accepted console is deleted and a
     declined one is kept without a report."""
     from agentworks.sessions import manager as manager_mod
@@ -107,7 +107,7 @@ def test_delete_asks_both_questions_with_no_guard_held(
     asked: list[tuple[str, bool]] = []
 
     def confirm(message: str, default: bool = False) -> bool:
-        asked.append(("console" if "only" in message else "session", _guard_free(db)))
+        asked.append(("console" if "only" in message else "session", _vm_unlocked(db)))
         return answer if "only" in message else True
 
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
@@ -124,7 +124,7 @@ def test_delete_asks_both_questions_with_no_guard_held(
         assert not any("only" in warning for warning in captured_output.warnings)
 
 
-def test_a_status_that_changed_before_the_guard_refuses_the_delete(
+def test_a_status_that_changed_before_the_lock_refuses_the_delete(
     db: Database,
     scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,

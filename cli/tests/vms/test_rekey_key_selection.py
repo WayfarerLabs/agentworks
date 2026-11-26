@@ -186,7 +186,7 @@ def test_cli_rejects_removed_ignore_env_option() -> None:
 
 
 @pytest.mark.parametrize("target", ["running", "on-demand"])
-def test_forced_prompt_rekey_prompts_unguarded_and_reuses_its_cache_for_racing_activation(
+def test_forced_prompt_rekey_prompts_unlocked_and_reuses_its_cache_for_racing_activation(
     db, make_config, resolve_counter, monkeypatch, target
 ) -> None:
     from agentworks.db import DesiredRuntimeState
@@ -252,7 +252,7 @@ def test_forced_prompt_rekey_prompts_unguarded_and_reuses_its_cache_for_racing_a
         pass
 
 
-def test_forced_prompt_cancellation_preserves_intent_and_holds_no_guard(db, make_config, monkeypatch) -> None:
+def test_forced_prompt_cancellation_preserves_intent_and_holds_no_lock(db, make_config, monkeypatch) -> None:
     from agentworks.db import DesiredRuntimeState
     from agentworks.errors import StateError, UserAbort
     from agentworks.native_locks import native_locks

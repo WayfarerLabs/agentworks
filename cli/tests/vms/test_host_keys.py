@@ -330,7 +330,7 @@ def test_all_continues_past_a_vm_with_a_malformed_key_and_fails_the_report(
     assert render_import(list(outcomes.values())) is False
 
 
-def test_a_vm_whose_guard_is_held_is_busy_and_the_others_carry_on(
+def test_a_vm_whose_lock_is_held_is_busy_and_the_others_carry_on(
     db: Database, tmp_path: Path, keys: list[HostKey], synced: list[object]
 ) -> None:
     from agentworks.native_locks import native_locks

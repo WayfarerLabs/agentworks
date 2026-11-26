@@ -107,7 +107,7 @@ def answer_release(
     )
 
     def answer(release: DebianRelease, *, again: DebianRelease | None = None) -> AccessRecorder:
-        """The release the confirmation shows and, read again under the guard, ``again`` or the same."""
+        """The release the confirmation shows and, read again under the lock, ``again`` or the same."""
         vm_access_recorder.access(vm_name="box").run_outcomes = [os_release(release), os_release(again or release)]
         return vm_access_recorder
 
@@ -331,7 +331,7 @@ def test_confirm_release_reaches_a_vm_whose_initialization_failed(
     )
 
 
-def test_confirm_release_asks_with_no_guard_held(
+def test_confirm_release_asks_with_nothing_locked(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -358,7 +358,7 @@ def test_confirm_release_asks_with_no_guard_held(
 
 
 @pytest.mark.parametrize("what", ["recorded", "live"])
-def test_confirm_release_refuses_when_what_it_showed_changed_before_the_guard(
+def test_confirm_release_refuses_when_what_it_showed_changed_before_the_lock(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -387,7 +387,7 @@ def test_confirm_release_refuses_when_what_it_showed_changed_before_the_guard(
     assert vm.init_status == InitStatus.COMPLETE.value
 
 
-def test_confirm_release_refuses_while_the_vms_guard_is_held(
+def test_confirm_release_refuses_while_the_vms_lock_is_held(
     db: Database,
     make_config,  # noqa: ANN001
     answer_release: Callable[..., AccessRecorder],

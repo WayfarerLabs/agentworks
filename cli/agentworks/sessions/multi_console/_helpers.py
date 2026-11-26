@@ -234,7 +234,7 @@ def probe_console(db: Database, name: str, *, shared: Sequence[Entity] = ()) -> 
 
 
 @contextmanager
-def guarded_console_selection(
+def locked_console(
     db: Database, name: str, *, shared: Sequence[Entity] = ()
 ) -> Iterator[tuple[ConsoleRow, NativeLockSet]]:
     """Select a console under its exclusive lock (:func:`console_request`), refusing a changed parent or membership.

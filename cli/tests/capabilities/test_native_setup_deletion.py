@@ -215,13 +215,13 @@ def test_remote_cleanup_failure_keeps_the_row_for_a_rerun(db, deletion, monkeypa
 
 
 @pytest.mark.parametrize("applied_state", ["none", "claims", "malformed", "future"])
-def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deletion, monkeypatch, applied_state):
+def test_rehome_holds_its_vm_lock_without_interpreting_applied_state(db, deletion, monkeypatch, applied_state):
     from agentworks.workspaces.manager import rehome_workspace
 
     if applied_state != "none":
         _store_applied_state(db, "workspace", "project", applied_state)
     previous = db.instance_state.get_applied_slices("workspace", "project")
-    guarded: list[bool] = []
+    locked: list[bool] = []
 
     class Moved(Exception):
         pass
@@ -229,9 +229,9 @@ def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deleti
     def probe_paths(*args, **kwargs):
         try:
             with native_locks(db.path, vm_exclusive("box")):
-                guarded.append(False)
+                locked.append(False)
         except NativeLockBusyError:
-            guarded.append(True)
+            locked.append(True)
             raise Moved from None
 
     from agentworks.db import InitStatus
@@ -248,8 +248,8 @@ def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deleti
             yes=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
-    # The directory checks run once unguarded, before the confirmation, and again under the guard.
-    assert guarded == [False, True]
+    # The directory checks run once unlocked, before the confirmation, and again under the lock.
+    assert locked == [False, True]
 
     assert db.instance_state.get_applied_slices("workspace", "project") == previous
 

@@ -145,3 +145,14 @@ def test_another_invocations_set_neither_refuses_nor_notices_a_prompt(
         done.set()
         thread.join()
     assert handler.events == ["prompt"]
+
+
+def test_a_confirmation_that_asks_nothing_shows_no_notice(
+    database: Path, handler: _RecordingHandler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(output, "non_interactive", lambda: True)
+    with native_locks(database, RECOVER, prompts=True):
+        assert output.confirm("Continue?") is False
+    with native_locks(database, FAMILY):
+        assert output.confirm("Continue?") is False
+    assert handler.events == []

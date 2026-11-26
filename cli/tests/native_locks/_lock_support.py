@@ -169,7 +169,7 @@ def holder_process(
 
 @contextmanager
 def old_release_process(database: Path) -> Iterator[subprocess.Popen[str]]:
-    """Run today's single-guard algorithm on the VM's file in another process."""
+    """Run today's single-lock algorithm on the VM's file in another process."""
     with _script(_OLD_RELEASE_SCRIPT, str(database), VM) as process:
         yield process
 

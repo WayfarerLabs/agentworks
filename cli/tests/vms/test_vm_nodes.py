@@ -215,7 +215,7 @@ def test_manually_stopped_but_running_out_of_band_proceeds(db: Database, monkeyp
 
 def test_flag_is_reread_before_auto_start(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     """Oracle: a concurrent `vm stop` between the row load and the gate
-    must not be auto-undone (the re-read race guard)."""
+    must not be auto-undone (the re-read race lock)."""
     vm = _seed(db)  # loaded with operator_stopped=False
     db.set_vm_desired_runtime_state(
         "gvm", Target.STOPPED, expected_vm_uuid=next(vm.vm_uuid for vm in db.list_vms() if vm.name == "gvm")
@@ -435,7 +435,7 @@ def test_pending_vm_teardown_deletes_the_row(db: Database) -> None:
 
 
 @pytest.mark.windows
-def test_auto_start_rechecks_power_with_family_guard(db, monkeypatch):
+def test_auto_start_rechecks_power_with_family_lock(db, monkeypatch):
     from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive
 
@@ -458,7 +458,7 @@ def test_auto_start_rechecks_power_with_family_guard(db, monkeypatch):
 
 
 @pytest.mark.windows
-def test_hold_admission_is_guarded_but_interactive_body_is_unlocked(db, monkeypatch):
+def test_hold_admission_is_locked_but_interactive_body_is_unlocked(db, monkeypatch):
     from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive
 
@@ -487,26 +487,26 @@ def test_stopped_live_guest_access_skips_booting_hold_and_admission_can_be_busy(
     platform = _GatePlatform()
     node, _ = _node(db, platform, vm)
     with native_locks(db.path, vm_exclusive(vm.name)), pytest.raises(NativeLockBusyError), node.hold_active():
-        pytest.fail("live diagnostic skipped guarded admission")
+        pytest.fail("live diagnostic skipped locked admission")
     with node.hold_active():
         pass
     assert platform.holds == 0
 
 
 @pytest.mark.windows
-def test_explicit_guard_token_reuses_outer_operation_for_auto_start_and_hold(db, monkeypatch):
+def test_explicit_lock_token_reuses_outer_operation_for_auto_start_and_hold(db, monkeypatch):
     from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive
 
     vm = _seed(db)
     platform = _GatePlatform(status=VMStatus.STOPPED)
-    with native_locks(db.path, vm_exclusive(vm.name)) as guard:
+    with native_locks(db.path, vm_exclusive(vm.name)) as lock:
         site = VMSiteNode("stub", cast("VMPlatform", platform), (), cast("Registry", object()))
-        node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site, held=guard)
+        node = LiveVMNode(db, cast("Config", object()), cast("Registry", object()), vm, site, held=lock)
         monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **k: None)
         node.auto_start(cast("SecretReader", object()))
         with node.hold_active(), pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive(vm.name)):
-            pytest.fail("outer operation guard released")
+            pytest.fail("outer operation lock released")
     assert platform.start_calls == 1
     assert platform.holds == 2
     with pytest.raises(StateError), node.hold_active():

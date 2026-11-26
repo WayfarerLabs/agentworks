@@ -81,7 +81,7 @@ def test_healthy_or_cleanup_only_validation_skips_unused_environments(
         model.seed_session("aw-console-build+con", "partial")
     guest = console_guest_factory(model)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -124,7 +124,7 @@ def test_pure_build_validation_visits_each_new_shell_with_promoted_user(
     guest = console_guest_factory(model)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     calls = []
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, guard):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]

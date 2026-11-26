@@ -627,10 +627,14 @@ def _before_prompt() -> None:
 
 
 def confirm(message: str, default: bool = False) -> bool:
-    """Present a yes/no question. Returns True for yes, False for no."""
-    _before_prompt()
+    """Present a yes/no question. Returns True for yes, False for no.
+
+    A non-interactive invocation answers no without asking, so it shows no
+    held-lock notice and is not refused under a held set.
+    """
     if non_interactive():
         return False
+    _before_prompt()
     return _handler.confirm(message, _current_level(), default)
 
 

@@ -14,7 +14,7 @@ from agentworks.resources.access import named_console_template
 from agentworks.sessions.tmux import ProbeStatus
 
 from ._access import console_access
-from ._helpers import _require_console, _verify_session_on_vm, console_request, guarded_console_selection
+from ._helpers import _require_console, _verify_session_on_vm, console_request, locked_console
 from ._status import ConsoleStatus, classify_console_status
 
 if TYPE_CHECKING:
@@ -129,7 +129,7 @@ def set_console_desired_runtime_state(
         raise ValidationError("invalid console runtime target", entity_kind="console", entity_name=name) from None
     if target is DesiredRuntimeState.ON_DEMAND:
         raise ValidationError("consoles require a running or stopped target", entity_kind="console", entity_name=name)
-    with guarded_console_selection(db, name):
+    with locked_console(db, name):
         db.set_console_desired_runtime_state(name, target)
 
 

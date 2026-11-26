@@ -13,7 +13,7 @@ from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAb
 from agentworks.intent_restore import replaced_intent
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
-from ._helpers import _require_console, console_request, guarded_console_selection, probe_console
+from ._helpers import _require_console, console_request, locked_console, probe_console
 from .runtime import validate_console_definition
 
 if TYPE_CHECKING:
@@ -129,7 +129,7 @@ def realize_console(
     registry = load_request_registry(config, live_database=db)
     require_vm_ssh_boundary(db, config, vm)
     node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
-    with guarded_console_selection(db, name) as (selected, brief):
+    with locked_console(db, name) as (selected, brief):
         validate_console_definition(db, selected)
         _mc.accept_console_running(db, console=selected, held=brief)
     restore = replaced_intent("console", name, selected.desired_runtime_state, DesiredRuntimeState.RUNNING)
@@ -198,7 +198,7 @@ def stop_console_runtime(
     probe_console(db, name)
     registry = load_request_registry(config, live_database=db)
     node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
-    with guarded_console_selection(db, name):
+    with locked_console(db, name):
         previous = _require_console(db, name).desired_runtime_state
         db.set_console_desired_runtime_state(name, DesiredRuntimeState.STOPPED)
     restore = replaced_intent("console", name, previous, DesiredRuntimeState.STOPPED)

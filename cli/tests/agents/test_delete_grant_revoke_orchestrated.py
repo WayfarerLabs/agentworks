@@ -384,7 +384,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
 # -- validation stays pre-gate ------------------------------------------------
 
 
-def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
+def test_delete_sessions_lock_refuses_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -676,7 +676,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
     """Enforce-invariants pin: a teardown must hand ``delete_agent`` the
     agent's OWN vm node. A node for a different VM would hold that VM
     active while the delete body issues SSH + DB work against the agent's
-    real VM, a silent footgun; the guard raises a typed ``StateError``
+    real VM, a silent footgun; the lock raises a typed ``StateError``
     before the hold is ever entered."""
     config = make_config()
     _seed(db)  # a1 on 'box'
@@ -819,7 +819,7 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     assert "agent still has implicit access via sessions to: ws1" in captured_output.warnings
 
 
-def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_added_since(
+def test_delete_asks_and_resolves_with_nothing_locked_then_refuses_a_session_added_since(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeAdminGuest,
@@ -837,18 +837,18 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     _seed(db)
     _seed_workspace(db, vm_name="box", name="ws1")
     _reachable(monkeypatch, True)
-    unguarded: list[str] = []
+    unlocked: list[str] = []
 
     def confirm(message: str, default: bool = False) -> bool:
         with native_locks(db.path, vm_exclusive("box")):
-            unguarded.append("confirm")
+            unlocked.append("confirm")
         return True
 
     resolve = Resolver.resolve
 
     def resolve_then_a_session_appears(self: Resolver) -> None:
         with native_locks(db.path, vm_exclusive("box")):
-            unguarded.append("resolve")
+            unlocked.append("resolve")
         resolve(self)
         _seed_live_session(db, name="late", ws="ws1", agent="a1")
 
@@ -858,7 +858,7 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     with pytest.raises(StateConflictError):
         agent_manager.delete_agent(db, config, name="a1", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert unguarded == ["confirm", "resolve"]
+    assert unlocked == ["confirm", "resolve"]
     assert target.commands == []
     assert db.get_agent("a1") is not None
 

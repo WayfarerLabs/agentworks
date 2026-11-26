@@ -40,8 +40,8 @@ from ._helpers import (
     TMUX_STAGING_PREFIX,
     SessionSpec,
     default_shells,
-    guarded_console_selection,
     infer_vm_from_session_specs,
+    locked_console,
     parse_session_spec,
     running_session_names,
     tmux_session_name,
@@ -186,6 +186,6 @@ __all__ += [
     "set_console_desired_runtime_state",
     "validate_console_values",
     "_validate_console_build_values",
-    "guarded_console_selection",
+    "locked_console",
     "_resolve_admin_env",
 ]
