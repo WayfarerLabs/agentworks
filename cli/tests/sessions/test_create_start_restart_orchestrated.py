@@ -2326,3 +2326,68 @@ def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guar
     assert db.get_session("s1") is None
     assert not any("new-session" in event for event in events)
     db.close()
+
+
+def test_a_failed_compound_create_unwinds_through_the_real_deletes_beside_unrelated_holders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unwind's nested workspace and agent deletes reuse the create's set: unrelated holders on the VM
+    (another workspace, its session and another agent) refuse none of them."""
+    from agentworks.native_locks import LockRequest, account_entity, native_locks, session_entity, workspace_entity
+    from agentworks.sessions import tmux as tmux_mod
+    from agentworks.sessions.manager import create_session
+    from tests.vm_access_support import account_processes_stopped
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    guest = _Target(events)
+    _route_guests(
+        monkeypatch,
+        _Target(events),
+        guest,
+    ).answer = lambda call: account_processes_stopped(call) or guest.answer(call)
+
+    def _realize_workspace(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        # At the path the create planned and locked.
+        db_._conn.execute(
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+            (kwargs["name"], kwargs["vm"].name, f"/srv/{kwargs['name']}", f"ws-{kwargs['name']}"),
+        )
+        db_._conn.commit()
+
+    def _realize_agent(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        db_.insert_agent(kwargs["name"], kwargs["vm"].name, f"agt-{kwargs['name']}")
+
+    monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _realize_workspace)
+    monkeypatch.setattr("agentworks.agents.realize.realize_agent", _realize_agent)
+    monkeypatch.setattr("agentworks.agents.grants.remove_from_workspace_group", lambda *a, **k: None)
+
+    def _explode(*a: object, **k: object) -> None:
+        raise RuntimeError("tmux exploded")
+
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
+    elsewhere = workspace_entity("vm1", "ws1")
+    bystander = account_entity("vm1", "agt-bystander")
+    unrelated = LockRequest(
+        exclusive=(elsewhere, bystander, session_entity("busy", workspace=elsewhere, account=bystander))
+    )
+
+    with native_locks(db.path, unrelated), pytest.raises(RuntimeError, match="tmux exploded"):
+        create_session(
+            db,
+            SimpleNamespace(  # type: ignore[arg-type]
+                session=SimpleNamespace(history_limit=1),
+                paths=SimpleNamespace(vm_workspaces="/srv", vscode_workspaces=tmp_path / "vscode"),
+            ),
+            name="s1",
+            new_workspace=True,
+            new_agent=True,
+            vm_name="vm1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_session("s1") is None
+    assert db.get_agent("s1") is None
+    assert db.get_workspace("s1") is None
+    db.close()

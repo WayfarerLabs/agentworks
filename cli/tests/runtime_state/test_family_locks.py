@@ -175,3 +175,80 @@ def test_a_target_whose_layer_was_replaced_after_its_definition_was_built_fails_
     assert results[("session", "built")].outcome is Outcome.BLOCKED
     assert ("session-start", "built") not in runtime[2]
     assert ("session-start", "kept") in runtime[2]
+
+
+def _reconcile_rows(db, config, monkeypatch, reconcile) -> dict[tuple[str, str], RuntimeResult]:
+    rendered: list = []
+    monkeypatch.setattr("agentworks.runtime_state._service.render_results", lambda rows, **k: rendered.extend(rows))
+    with suppress(StateError):
+        reconcile()
+    return {(row.kind, row.name): row for row in rendered}
+
+
+def test_a_target_held_in_a_weaker_mode_survives_when_only_its_sibling_needed_it_stronger(
+    db, make_config, runtime, monkeypatch
+):
+    from agentworks.runtime_state import reconcile_vm
+    from agentworks.sessions.multi_console._helpers import console_request
+    from tests.console_helpers import create_console_record
+
+    seed_vm(db, "box")
+    seed_session(db, "m", "box", target=DesiredRuntimeState.STOPPED)
+    create_console_record(db, name="c", vm_name="box", session_specs=["m"])
+    create_console_record(db, name="d", vm_name="box", session_specs=["m"])
+    db.set_console_desired_runtime_state("c", DesiredRuntimeState.STOPPED)
+    from agentworks.sessions import multi_console
+    from agentworks.sessions.tmux import ProbeStatus
+
+    # Console c's tmux session is live until torn down, so reconciling it to stopped tears it down.
+    torn_down: list[str] = []
+    monkeypatch.setattr(
+        multi_console,
+        "_console_runtime_presence",
+        lambda admin, name: (ProbeStatus.ABSENT if name in torn_down else ProbeStatus.PRESENT, ProbeStatus.ABSENT),
+    )
+    monkeypatch.setattr(multi_console, "_teardown_console_tmux", lambda admin, name: torn_down.append(name))
+    config = make_config()
+    # Console d's operation holds d exclusive, and so its member m shared.
+    with native_locks(db.path, console_request(db, db.get_console("d"))):
+        results = _reconcile_rows(
+            db, config, monkeypatch, lambda: reconcile_vm(db, config, name="box", interaction=REFUSE)
+        )
+    # d is held, and m needs itself exclusive, so both are dropped; c needs m only shared, so the retry
+    # without them reconciles c.
+    assert results[("console", "d")].outcome is Outcome.BLOCKED
+    assert results[("session", "m")].outcome is Outcome.BLOCKED
+    assert results[("console", "c")].outcome not in {Outcome.BLOCKED, Outcome.FAILED}
+    assert torn_down == ["c"]
+
+
+@pytest.mark.parametrize(
+    ("target", "workspace_create_proceeds"),
+    [(DesiredRuntimeState.RUNNING, True), (DesiredRuntimeState.STOPPED, False)],
+    ids=["running-target", "stopped-target"],
+)
+def test_vm_reconcile_holds_the_vm_shared_unless_it_stops_the_vm(
+    db, make_config, runtime, monkeypatch, target, workspace_create_proceeds
+):
+    from agentworks.native_locks import NativeLockBusyError, probe_locks
+    from agentworks.runtime_state import _service, reconcile_vm
+    from agentworks.workspaces.locks import workspace_create_request
+
+    seed_vm(db, "box", target=target)
+    seed_session(db, "s", "box", target=target)
+    config = make_config()
+    beside: list[bool] = []
+    from agentworks.runtime_state._prepare import prepare_guest_workloads as guest_work
+
+    def under_the_final_sets(invocation):
+        # An unrelated workspace create on the VM, probed while the reconcile holds its final set.
+        try:
+            probe_locks(db.path, workspace_create_request(db, db.get_vm("box"), "unrelated"))
+            beside.append(True)
+        except NativeLockBusyError:
+            beside.append(False)
+        return guest_work(invocation)
+
+    monkeypatch.setattr(_service, "prepare_guest_workloads", under_the_final_sets)
+    _reconcile_rows(db, config, monkeypatch, lambda: reconcile_vm(db, config, name="box", interaction=REFUSE))
+    assert beside == [workspace_create_proceeds]

@@ -1468,3 +1468,39 @@ def test_reinit_binding_line_appears_only_when_the_effective_template_changes(
     (binding,) = [line for line in changed if repr("other") in line]
     assert repr("default") in binding
     assert not any(repr("other") in line for line in unchanged)
+
+
+@pytest.mark.parametrize("change", ["template", "overlay"])
+def test_reinit_refuses_a_declaration_changed_after_its_early_save(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_while_another_reinit_saves(self: Resolver) -> None:
+        # After this reinit saved its declaration and before its final set, another one saves its own.
+        resolve(self)
+        if change == "template":
+            db.update_agent_template("dev", "other")
+        else:
+            db.instance_state.put_desired_overlay(
+                "agent", "dev", parse_instance_spec("agent", '{"shell":"zsh"}').payload
+            )
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_while_another_reinit_saves)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert "agent_name" not in mutation
