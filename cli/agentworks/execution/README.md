@@ -110,12 +110,16 @@ environment value, script source or input reaches the formatter; the log redacts
 registered when it was constructed, at its one sink.
 
 `OperationLogFile(vm_name, command_stem, redactions=(), path=None)` is that log: a file under
-`oplog.LOG_DIR` named `<vm>-<timestamp>-<command_stem>.log` unless the caller names a path, written
-on every call so a partial log survives a crash, and shared safely by threads of one command. Its
-`close()` writes the traceback of the exception in flight, so an operation's own log holds the error
-that ended it. `oplog.vm_logs(vm_name, stem=None)` finds a VM's logs by that exact name, newest
-first, so VM `dev` never claims VM `dev-2`'s logs; `vm logs`, `vm delete`, doctor and the failure
-hints read them through it.
+`oplog.LOG_DIR` named `<vm>-<timestamp>-<pid>-<suffix>-<command_stem>.log` unless the caller names a
+path, written on every call so a partial log survives a crash, and shared safely by threads of one
+command. The process id and a random six-hex-digit suffix keep two operations that start in the same
+second apart, and the file is created with an exclusive open, drawing another suffix when the name
+is taken, so no operation appends to another's log. Its `close()` writes the traceback of the
+exception in flight, so an operation's own log holds the error that ended it.
+`oplog.vm_logs(vm_name, stem=None)` finds a VM's logs by that exact name, or by
+`<vm>-<timestamp>-<command_stem>.log` as earlier releases named them, newest first, so VM `dev`
+never claims VM `dev-2`'s logs; `vm logs`, `vm delete`, doctor and the failure hints read them
+through it.
 
 ## What a request becomes
 
