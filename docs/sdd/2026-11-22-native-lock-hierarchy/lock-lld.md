@@ -19,14 +19,16 @@ A new package `native_locks/` replaces `harness_setup/locking.py` (`native_mutat
 `NativeMutationGuard`, `NativeSetupBusyError`) in one step. The lock serves every native mutation,
 not harness setup, so it moves out of `harness_setup` and its names stop saying "setup".
 
-| Module         | Holds                                                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`  | `LockMode`, `EntityKind`, `Entity`, `LockRequest`, `NativeLockSet`, `native_locks`, `probe_locks`, `NativeLockBusyError`, `operation_label` |
-| `_entities.py` | entity constructors and ancestor closure                                                                                                    |
-| `_os.py`       | the platform calls: open, try-lock shared or exclusive, unlock                                                                              |
-| `_records.py`  | holder records and the holder lookup a refusal uses                                                                                         |
-| `path_walk.py` | the guest lookup walk: a plain-stdlib program and `walk_paths`, returning each stored path's directories, followed links and final path     |
-| `rows.py`      | entity builders from database rows (`session_entity_for(db, row)` and the like)                                                             |
+| Module         | Holds                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`  | the package docstring with the durable rules, and re-exports of the public API: `LockMode`, `EntityKind`, `Entity` and its constructors, `LockRequest`, `NativeLockSet`, `native_locks`, `probe_locks`, `NativeLockBusyError`, `HolderInfo`, `operation_label`, `prompt_notice`, and the platform calls other workstation locks use (`open_lock_file`, `try_lock`, `unlock`) |
+| `_entities.py` | `LockMode`, `EntityKind`, `Entity`, the entity constructors, ancestor closure and `LockRequest`                                                                                                                                                                                                                                                                              |
+| `_sets.py`     | `NativeLockSet`, `native_locks`, `probe_locks`, `NativeLockBusyError` and the prompt check                                                                                                                                                                                                                                                                                   |
+| `_files.py`    | lock-file and record paths for a database and VM                                                                                                                                                                                                                                                                                                                             |
+| `_os.py`       | the platform calls: open, try-lock shared or exclusive, unlock                                                                                                                                                                                                                                                                                                               |
+| `_records.py`  | holder records, `operation_label` and the holder lookup a refusal uses                                                                                                                                                                                                                                                                                                       |
+| `path_walk.py` | the guest lookup walk: a plain-stdlib program and `walk_paths`, returning each stored path's directories, followed links and final path                                                                                                                                                                                                                                      |
+| `rows.py`      | entity builders from database rows (`session_entity_for(db, row)` and the like), written with the call sites                                                                                                                                                                                                                                                                 |
 
 ### Entities
 
@@ -57,16 +59,16 @@ for a top-level directory; a session's parents are exactly one workspace and one
 are one workspace and one account; a console's are the vm and its member sessions; every parent
 belongs to the same vm.
 
-| Constructor                                  | Display key                     | Notes                                              |
-| -------------------------------------------- | ------------------------------- | -------------------------------------------------- |
-| `vm_entity(vm)`                              | `vm/<vm>`                       | the existing vm file                               |
-| `workspace_entity(vm, name)`                 | `workspace/<name>`              |                                                    |
-| `account_entity(vm, linux_user)`             | `account/<linux user>`          | `AgentRow.linux_user` or `VMRow.admin_username`    |
-| `grant_all_entity(vm)`                       | `grant-all`                     | the VM's set of grant-all agents                   |
-| `path_entity(vm, resolved_path)`             | `path/<resolved absolute path>` | one directory tree on the VM, by its resolved path |
-| `grant_entity(workspace, account)`           | `grant/<workspace>+<account>`   | one account's membership in one workspace group    |
-| `session_entity(name, workspace=, account=)` | `session/<name>`                |                                                    |
-| `console_entity(vm, name, members=)`         | `console/<name>`                | members are session entities                       |
+| Constructor                                  | Display key                                                                      | Notes                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `vm_entity(vm)`                              | `vm/<vm>`                                                                        | the existing vm file                               |
+| `workspace_entity(vm, name)`                 | `workspace/<name>`                                                               |                                                    |
+| `account_entity(vm, linux_user)`             | `account/<linux user>`                                                           | `AgentRow.linux_user` or `VMRow.admin_username`    |
+| `grant_all_entity(vm)`                       | `grant-all/<vm>`                                                                 | the VM's set of grant-all agents                   |
+| `path_entity(vm, resolved_path)`             | `path/<resolved absolute path without its leading slash>`, such as `path/data/b` | one directory tree on the VM, by its resolved path |
+| `grant_entity(workspace, account)`           | `grant/<workspace>+<account>`                                                    | one account's membership in one workspace group    |
+| `session_entity(name, workspace=, account=)` | `session/<name>`                                                                 |                                                    |
+| `console_entity(vm, name, members=)`         | `console/<name>`                                                                 | members are session entities                       |
 
 Accounts are keyed by Linux user rather than agent name because the account is the thing on the VM
 (`agents/manager/_common.py:109` derives `agt-<name>` at create; legacy rows keep their stored
@@ -531,10 +533,11 @@ The notice is structural. `native_locks` keeps the sets the current invocation h
 each other's sets), and the prompt helpers (`output.confirm`, `choose`, `pause`, `prompt`,
 `prompt_secret`, `output.py:618-640`, which the resolver's terminal entry uses) call
 `native_locks.prompt_notice()` before they prompt. For each held set marked `prompts=True` that has
-not yet shown it, it prints one `output.info` line naming the set's entities and saying they stay
-locked until the answer is given, then marks the set, so each notice appears once, before that set's
-first prompt. Under any held set not marked `prompts=True` it raises `StateError`: a prompt there is
-a programming error, which the test suite catches.
+not yet shown it, it prints one `output.notice` line, which presentation suppression does not
+silence, naming the set's entities and saying they stay locked until the answer is given, then marks
+the set, so each notice appears once, before that set's first prompt. Under any held set not marked
+`prompts=True` it raises `StateError`: a prompt there is a programming error, which the test suite
+catches.
 
 ## 3. Holder records
 
@@ -599,8 +602,9 @@ and malformed records, keeps those listing `e` in a mode that conflicts with `m`
 acquired earliest. The record is advisory: the OS lock already decided, so a missing record only
 falls back to the generic message.
 
-The R3 error and hint, with the subject the first exclusive entity of the refused request (or
-`vm/<name>` for an admission request):
+The R3 error and hint, with the subject the first exclusive entity of the refused request in lock
+order, or, for a request with no exclusive entity, its first explicitly named shared entity (which
+is `vm/<name>` for an admission request):
 
 ```text
 Error: session/build-42 on VM 'dev' is blocked: `agw workspace rehome` has held workspace/api for 3m12s
@@ -974,15 +978,16 @@ still the old one, so `vm delete` and `vm logs` find logs written before the cha
 ### SSH config rebuild
 
 `agentworks/ssh_config_lock.py` holds `ssh_config_rebuild_lock()`, a per-OS-user exclusive file lock
-at `CONFIG_DIR / ".locks" / "ssh-config"` (`config/validation.py:26`), taken with `native_locks`'
-platform calls by polling the non-blocking try every 50 ms for at most 10 s. It lives outside
-`native_locks` because it is not a native entity lock: it waits, it names no holder, and it guards a
-workstation file. It is per OS user because the SSH config is that user's file whatever the
-database. `sync_ssh_config` (`ssh_config.py:157`) holds it around its whole body, so its database
-reads (`:436`, `:460`) and its writes (`:247`, `:363-381`) are one critical section and the last
-rebuild always reads the latest committed state. A timeout raises `StateError` with the hint
-`agw config sync-ssh-config`; callers keep their current failure handling, and
-`sync_ssh_config_or_warn` turns it into its warning. Nothing inside it acquires a native lock.
+at `CONFIG_DIR / ".locks" / "ssh-config"` (`config/validation.py:26`), taken with the platform calls
+`native_locks` exports (`open_lock_file`, `try_lock`, `unlock`) by polling the non-blocking try
+every 50 ms for at most 10 s. It lives outside `native_locks` because it is not a native entity
+lock: it waits, it names no holder, and it guards a workstation file. It is per OS user because the
+SSH config is that user's file whatever the database. `sync_ssh_config` (`ssh_config.py:157`) holds
+it around its whole body, so its database reads (`:436`, `:460`) and its writes (`:247`, `:363-381`)
+are one critical section and the last rebuild always reads the latest committed state. A timeout
+raises `StateError` with the hint `agw config sync-ssh-config`; callers keep their current failure
+handling, and `sync_ssh_config_or_warn` turns it into its warning. Nothing inside it acquires a
+native lock.
 
 ## 6. Tests
 
