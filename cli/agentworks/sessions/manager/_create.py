@@ -472,7 +472,7 @@ def create_session(
             if graph.pending_workspace is None
             else (walk_trees(vm, config, [graph.pending_workspace.workspace_path]),)
         )
-        with graph.vm_node.locked(with_trees(request, *trees)):
+        with graph.vm_node.locked(with_trees(request, *trees)) as held:
             require_vm_unchanged(db, graph.vm_node.row)
             require_plan_rows_current()
             require_request_unchanged("session", plan.name, request, session_create_request(db, plan))
@@ -508,6 +508,7 @@ def create_session(
                     logger=logger,
                     secret_values=secret_values,
                     setup_failures=setup_failures,
+                    held=held,
                 )
             raise_setup_failures(setup_failures)
 

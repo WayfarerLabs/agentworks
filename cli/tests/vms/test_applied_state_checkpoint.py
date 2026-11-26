@@ -32,6 +32,7 @@ from agentworks.vms.initializer.ssh_keys import (
     AuthorizedKeysUnproven,
     _reconcile_authorized_keys,
 )
+from tests.nested_locks_support import holding_vm
 from tests.ssh_fixtures import write_test_ssh_keypair
 from tests.vm_access_support import Admin, RecordingVMAccess
 
@@ -94,24 +95,26 @@ def _run(
     monkeypatch.setattr("agentworks.vms.initializer.driver._phase_b_setup", lambda *args, **kwargs: None)
     monkeypatch.setattr("agentworks.vms.initializer.driver._reconcile_authorized_keys", run_phase_b)
     active_logger = logger or _Logger()
-    run_initialization(
-        db,
-        config,
-        MagicMock(),
-        MagicMock(),
-        MagicMock(),
-        "box",
-        MagicMock(),
-        (),
-        "/home/agentworks",
-        "agentworks",
-        active_logger,
-        debian_release=DebianRelease.TRIXIE,
-        operation=operation,
-        setup_failures=[] if setup_failures is None else setup_failures,
-        setup_inputs=setup_inputs,
-        legacy_conversion=legacy_conversion,
-    )
+    with holding_vm(db, "box") as held:
+        run_initialization(
+            db,
+            config,
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+            "box",
+            MagicMock(),
+            (),
+            "/home/agentworks",
+            "agentworks",
+            active_logger,
+            debian_release=DebianRelease.TRIXIE,
+            operation=operation,
+            setup_failures=[] if setup_failures is None else setup_failures,
+            setup_inputs=setup_inputs,
+            legacy_conversion=legacy_conversion,
+            held=held,
+        )
     return active_logger
 
 

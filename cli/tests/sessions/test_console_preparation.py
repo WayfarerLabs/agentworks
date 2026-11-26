@@ -15,7 +15,7 @@ from agentworks.native_locks.rows import vm_exclusive
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
-from tests.conftest import guarding_node
+from tests.conftest import locking_node
 from tests.console_helpers import create_console_record
 from tests.vm_access_support import RecordingVMAccess, install_access_recorder
 
@@ -296,7 +296,7 @@ def test_stop_off_parent_accepts_without_transport_activation_or_hold(db: Databa
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     calls = []
-    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
     context = SimpleNamespace(node=node, observed_status=VMStatus.STOPPED, clear_values=lambda: calls.append("clear"))
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: context)
@@ -401,7 +401,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
 
     _seed_vm(db, with_tailscale=True)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
-    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened hold"))
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened hold"))
     context = SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
@@ -510,7 +510,7 @@ def test_a_console_refused_after_recording_its_intent_says_how_to_restore_it(
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     db._conn.execute("UPDATE consoles SET desired_runtime_state = ? WHERE name = 'con'", (previous and previous.value,))
     db._conn.commit()
-    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
     monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
@@ -544,15 +544,18 @@ def test_a_console_start_refuses_a_member_added_as_its_final_set_is_taken(db: Da
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["late"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
-    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
-    lock = node.locked
+    from agentworks import native_locks as locks
 
-    def another_edit_adds_a_member_then_lock(request, **kwargs):
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    lock = locks.native_locks
+
+    def another_edit_adds_a_member_then_lock(*args, **kwargs):
         # Between building the console's request and holding it, another edit adds a member.
-        db.add_console_session("con", "late", [])
-        return lock(request, **kwargs)
+        if db.get_console_session("con", "late") is None:
+            db.add_console_session("con", "late", [])
+        return lock(*args, **kwargs)
 
-    node.locked = another_edit_adds_a_member_then_lock
+    monkeypatch.setattr(locks, "native_locks", another_edit_adds_a_member_then_lock)
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
     monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)

@@ -203,8 +203,9 @@ def delete_vm(
     identifiers. ``UserAbort`` always propagates and keeps the row.
     """
     import agentworks.vms.manager as _mgr
-    from agentworks.native_locks import native_locks, probe_locks
+    from agentworks.native_locks import probe_locks
     from agentworks.native_locks.rows import vm_exclusive
+    from agentworks.vms.nodes import lock_through
 
     require_exact_tty_interaction_policy(interaction)
     vm = _require_vm(db, name)
@@ -269,7 +270,7 @@ def delete_vm(
         bind_failure = None
 
     # A VM whose site could not be bound (``--force``) has no node to lock through.
-    with native_locks(db.path, request) if vm_node is None else vm_node.locked(request):
+    with lock_through(vm_node, db.path, request):
         # What the confirmation showed: the VM and the children it counted.
         require_vm_unchanged(db, vm)
         require_unchanged(

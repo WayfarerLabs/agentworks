@@ -1,6 +1,5 @@
 """Setup shares core ownership, eager inputs, and the owning row's commit."""
 
-from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
@@ -34,6 +33,7 @@ from agentworks.vms.admin import AdminConfig
 from agentworks.vms.templates import resolve_from_dict as resolve_vm
 from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
+from tests.nested_locks_support import holding_vm
 from tests.vm_access_support import answer_destination_identity
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -178,12 +178,11 @@ def native(monkeypatch, tmp_path, vm_access_recorder):
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("kind", ["agent", "workspace"])
 @pytest.mark.parametrize("fail_insert", [False, True])
 @pytest.mark.parametrize("fail_setup", [False, True])
 def test_fresh_owner_buffers_setup_until_atomic_row_commit(
-    db, registry, vm, native, monkeypatch, kind, fail_insert, fail_setup, nested
+    db, registry, vm, native, monkeypatch, kind, fail_insert, fail_setup
 ):
     name = "agent" if kind == "agent" else "project"
     env = _env(TOKEN={"secret": "setup-token"}, AGENTWORKS_SESSION="forged")
@@ -241,7 +240,7 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
                 credential_redactions=(),
                 setup_inputs=inputs,
                 setup_values={"setup-token": "private-value"},
-                held=guard,
+                held=held,
             )
         else:
             realize_workspace(
@@ -254,12 +253,12 @@ def test_fresh_owner_buffers_setup_until_atomic_row_commit(
                 template=ResolvedTemplate("default"),
                 setup_inputs=inputs,
                 setup_values={"setup-token": "private-value"},
-                held=guard,
+                held=held,
             )
 
         raise_setup_failures(failures)
 
-    with native_locks(db.path, vm_exclusive(vm.name)) if nested else nullcontext(None) as guard:
+    with holding_vm(db, vm.name) as held:
         if fail_insert:
             with pytest.raises(ExternalError):
                 create()
@@ -317,7 +316,7 @@ def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm
         raise RuntimeError("competing useradd")
 
     monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", race)
-    with pytest.raises(RuntimeError):
+    with holding_vm(db, vm.name) as held, pytest.raises(RuntimeError):
         realize_agent(
             db,
             MagicMock(),
@@ -328,6 +327,7 @@ def test_failed_exclusive_creation_never_arms_realizer_rollback(db, registry, vm
             template=ResolvedAgentTemplate("default"),
             credential_requests=(),
             credential_redactions=(),
+            held=held,
         )
     native.removed_agent.assert_not_called()
     assert db.get_agent("a") is None and native.loggers[0].closed
@@ -389,7 +389,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
             for decl in compute_needed_secrets(registered_targets, registry, allow_transient_auto_declare=True)
         ] == ["env-secret"]
         resolver.register_name.assert_called_once_with("config-secret")
-        with native_locks(db.path, vm_exclusive(vm.name)) as guard:
+        with holding_vm(db, vm.name) as held:
             apply_agent_setup(
                 db,
                 MagicMock(),
@@ -403,7 +403,7 @@ def test_config_secret_registration_and_delivery_share_actual_owner(db, vm, nati
                     "other-secret": "other-private",
                 },
                 logger=Mock(redactions=()),
-                held=guard,
+                held=held,
                 operation="agent-create",
                 failures=[],
                 buffered=True,
@@ -421,7 +421,7 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
     write_native_setup(db, "agent", "a", later, operation="agent-create")
     exclusive = Mock()
     monkeypatch.setattr("agentworks.agents.initializer.create_new_agent_user", exclusive)
-    with pytest.raises(StateError):
+    with holding_vm(db, vm.name) as held, pytest.raises(StateError):
         realize_agent(
             db,
             MagicMock(),
@@ -433,6 +433,7 @@ def test_applied_state_appearing_after_empty_preparation_refuses_before_core(db,
             credential_requests=(),
             credential_redactions=(),
             setup_inputs=prepared,
+            held=held,
         )
     exclusive.assert_not_called()
     native.removed_agent.assert_not_called()
@@ -519,9 +520,11 @@ def test_vm_and_admin_setup_follow_core_before_terminal_checkpoint(
             setup_inputs=inputs,
             setup_values={"vm-token": "vm-private"},
             setup_failures=failures,
+            held=held,
         )
 
-    run()
+    with holding_vm(db, vm.name) as held:
+        run()
     assert len(failures) == len(failed_components)
     assert events == ["core", "vm", "admin", "keys"]
     logger.close()

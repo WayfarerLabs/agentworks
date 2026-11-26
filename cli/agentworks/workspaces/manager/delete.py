@@ -113,8 +113,8 @@ def delete_workspace(
 
     import contextlib
 
-    from agentworks.native_locks import native_locks
     from agentworks.recheck import require_request_unchanged, require_unchanged, require_vm_unchanged, workspace_fields
+    from agentworks.vms.nodes import lock_through
     from agentworks.workspaces.locks import require_trees_unchanged, walk_trees, with_trees
 
     vm = db.get_vm(ws.vm_name)
@@ -181,7 +181,7 @@ def delete_workspace(
             locked = with_trees(request, trees)
         # A workspace whose VM row is gone, outside a nested teardown, has no
         # node to lock through.
-        _keepalive_stack.enter_context(native_locks(db.path, locked) if node is None else node.locked(locked))
+        _keepalive_stack.enter_context(lock_through(node, db.path, locked))
         # What the confirmation showed: the workspace and the sessions it counted,
         # and the lock set as its grants, sessions and consoles build it now.
         if vm is not None:

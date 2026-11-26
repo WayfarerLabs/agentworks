@@ -22,7 +22,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.ssh_config import sync_ssh_config
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
-from tests.conftest import admitting_boundary, guarding_node
+from tests.conftest import admitting_boundary, locking_node
 from tests.vm_access_support import install_access_recorder
 
 
@@ -161,7 +161,7 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
     def boundary(db, _config, vm, **kwargs):
         if outcome == "binding-failed":
             raise StateError("platform unavailable")
-        return guarding_node(db, vm, site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
+        return locking_node(db, vm, site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
     delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -289,7 +289,7 @@ def test_a_completed_delete_only_warns_when_the_ssh_config_rebuild_lock_is_held(
 
     def boundary(db, _config, vm, **kwargs):
         site = SimpleNamespace(platform=SimpleNamespace(delete=lambda vm, ctx: None))
-        return guarding_node(db, vm, site=site), Mock()
+        return locking_node(db, vm, site=site), Mock()
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
     with ssh_config_lock.ssh_config_rebuild_lock():

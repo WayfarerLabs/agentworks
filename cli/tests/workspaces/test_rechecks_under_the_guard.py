@@ -16,7 +16,7 @@ from agentworks.agents import grants as agent_grants
 from agentworks.errors import StateConflictError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces import manager as workspace_manager
-from tests.conftest import guarding_node
+from tests.conftest import locking_node
 from tests.workspaces._lifecycle_support import Guest, route, seed, seed_workspace
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ def _changing_gate(change: Callable[[Database], object]) -> Callable[..., contex
 
     @contextlib.contextmanager
     def gate(db: Database, _config: object, _registry: object, vm: VMRow, **_kwargs: object) -> Iterator[object]:
-        node = guarding_node(db, vm)
+        node = locking_node(db, vm)
         if not changed:
             changed.append(True)
             change(db)

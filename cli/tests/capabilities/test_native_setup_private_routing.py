@@ -23,7 +23,6 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import ExternalError
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure
@@ -32,6 +31,7 @@ from agentworks.schema import CapabilityConfig
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.artifacts.test_routing import graph
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import run_setup_held
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="isolated Linux user filesystem execution")
 
@@ -103,7 +103,7 @@ def fallback_placements(db, tmp_path, monkeypatch):
         return ArtifactPublication(files=owned)
 
     monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", publish)
-    initial = run_setup(db, fixture.registry, fixture.owners["agent"], user, failures=[], operation="agent-init")
+    initial = run_setup_held(db, fixture.registry, fixture.owners["agent"], user, failures=[], operation="agent-init")
     (record,) = initial.records
     assert record.complete and len(record.artifact_files) == 2
     files = {Path(file.path): Path(file.path).read_bytes() for file in record.artifact_files}
@@ -118,7 +118,7 @@ def _activate_producer(case: SimpleNamespace) -> tuple[SetupInputs, SetupRecord]
         "vm", artifacts=inputs.artifacts, harness_integrations=dict(inputs.activations)
     )
     failures: list[SetupFailure] = []
-    state = run_setup(
+    state = run_setup_held(
         case.fixture.db, case.fixture.registry, inputs, case.machine, failures=failures, operation="vm-reinit"
     )
     assert len(failures) == 1
@@ -152,8 +152,8 @@ def test_failed_producer_restoring_inputs_preserves_existing_user_files(
         ),
     )
     case.control["fail"] = False
-    run_setup(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=[], operation="vm-reinit")
-    run_setup(
+    run_setup_held(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=[], operation="vm-reinit")
+    run_setup_held(
         case.fixture.db,
         case.fixture.registry,
         case.fixture.owners["agent"],
@@ -169,14 +169,16 @@ def test_failed_producer_restoring_inputs_preserves_existing_user_files(
         write_capture(case.fixture.db, "vm", "vm", "vm", captured, operation="vm-reinit")
 
     recapture()
-    run_setup(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=[], operation="vm-reinit")
+    run_setup_held(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=[], operation="vm-reinit")
     hints.update(removed)
     recapture()
     case.control["fail"] = True
     failures: list[SetupFailure] = []
-    run_setup(case.fixture.db, case.fixture.registry, inputs, case.machine, failures=failures, operation="vm-reinit")
+    run_setup_held(
+        case.fixture.db, case.fixture.registry, inputs, case.machine, failures=failures, operation="vm-reinit"
+    )
     assert len(failures) == 1
-    state = run_setup(
+    state = run_setup_held(
         case.fixture.db,
         case.fixture.registry,
         case.fixture.owners["agent"],
@@ -210,7 +212,7 @@ def test_partial_fresh_producer_preserves_both_existing_user_files(fallback_plac
             },
         )
     failures: list[SetupFailure] = []
-    state = run_setup(
+    state = run_setup_held(
         case.fixture.db,
         case.fixture.registry,
         case.fixture.owners["agent"],
@@ -227,11 +229,11 @@ def test_partial_fresh_producer_preserves_both_existing_user_files(fallback_plac
     # A later confirmed handling result authorizes real retirement of only the
     # input the VM now handles, rather than keeping an unknown route forever.
     case.control["fail"] = False
-    confirmed = run_setup(
+    confirmed = run_setup_held(
         case.fixture.db, case.fixture.registry, inputs, case.machine, failures=[], operation="vm-reinit"
     )
     assert confirmed.records[0].complete and confirmed.records[0].artifact_inputs is not None
-    healed = run_setup(
+    healed = run_setup_held(
         case.fixture.db,
         case.fixture.registry,
         case.fixture.owners["agent"],
@@ -257,7 +259,7 @@ def test_unknown_vm_payload_after_clearing_bundles_cannot_retire_user_files(
     if future in ("native", "both"):
         payloads[AppliedStateKey.HARNESS_NATIVE_SETUP] = VersionedPayload(99, {"future": True})
     case.fixture.db.instance_state.replace_applied_slices("vm", "vm", "future", payloads)
-    state = run_setup(
+    state = run_setup_held(
         case.fixture.db,
         case.fixture.registry,
         case.fixture.owners["agent"],

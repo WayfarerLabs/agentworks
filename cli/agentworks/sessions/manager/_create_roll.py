@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow
     from agentworks.execution.access import VMAccess
     from agentworks.harness_setup.outcomes import SetupFailure
+    from agentworks.native_locks import NativeLockSet
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.resources.registry import Registry
     from agentworks.vms.initializer.steps import InitLog
@@ -43,8 +44,9 @@ def _realize_ephemerals(
     secret_values: dict[str, str],
     log: RealizationLog,
     setup_failures: list[SetupFailure],
+    held: NativeLockSet,
 ) -> None:
-    """Realize the pending workspace / agent in dependency order, recording
+    """Realize the pending workspace / agent in dependency order, under the create's ``held`` set, recording
     each completed realization in ``log`` for the reverse-order unwind."""
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.secrets import ScopedSecrets
@@ -84,7 +86,7 @@ def _realize_ephemerals(
                     setup_values=secret_values,
                     overlay=graph.workspace_overlay,
                     defer_overlay_report=True,
-                    held=graph.vm_node.held,
+                    held=held,
                 )
             except BaseException:
                 if db.get_workspace(plan.workspace_name) is not None:
@@ -120,7 +122,7 @@ def _realize_ephemerals(
                     setup_values=secret_values,
                     overlay=graph.agent_overlay,
                     defer_overlay_report=True,
-                    held=graph.vm_node.held,
+                    held=held,
                 )
             except BaseException:
                 if db.get_agent(plan.agent_name) is not None:
@@ -244,14 +246,7 @@ def _start_session_slice(
 
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
 
-    from agentworks.native_locks import LockRequest, account_entity, grant_entity, session_entity, workspace_entity
-
-    workspace_lock = workspace_entity(vm.name, workspace_name)
-    account_lock = account_entity(vm.name, linux_user)
-    session_lock = session_entity(name, workspace=workspace_lock, account=account_lock)
-    grant_lock = () if mode == SessionMode.ADMIN else (grant_entity(workspace_lock, account_lock),)
-    slice_request = LockRequest(exclusive=(session_lock, *grant_lock))
-    with graph.vm_node.locked(slice_request), output.section("Starting Session"):
+    with output.section("Starting Session"):
         output.info(
             f"Starting session '{name}' on workspace '{workspace_name}' ({mode_label}, template: {template.name})..."
         )
@@ -535,8 +530,9 @@ def _roll_forward(
     logger: InitLog,
     secret_values: dict[str, str],
     setup_failures: list[SetupFailure],
+    held: NativeLockSet,
 ) -> None:
-    """Realize the ephemerals then the session slice, unwinding the
+    """Realize the ephemerals then the session slice, under the create's ``held`` set, unwinding the
     realized ephemerals on core failure (rollback level 2). Required setup
     blocks only its session consumer and retains completed owners for repair."""
     from agentworks.orchestration.unwind import RealizationLog
@@ -565,6 +561,7 @@ def _roll_forward(
             secret_values=secret_values,
             log=log,
             setup_failures=setup_failures,
+            held=held,
         )
         _start_session_slice(
             db,

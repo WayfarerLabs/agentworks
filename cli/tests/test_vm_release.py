@@ -20,7 +20,7 @@ from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager.reinit import _warn_newly_observed_legacy
 from agentworks.vms.manager.release import confirm_vm_release, reconcile_release
-from tests.conftest import CapturedOutput, guarding_node
+from tests.conftest import CapturedOutput, locking_node
 from tests.vm_access_support import AccessRecorder
 
 if TYPE_CHECKING:
@@ -102,7 +102,7 @@ def answer_release(
     monkeypatch.setattr(
         "agentworks.vms.manager.boundary.gated_vm_boundary",
         lambda db, _config, _registry, vm, **_kwargs: contextlib.nullcontext(
-            (guarding_node(db, vm), object(), object())
+            (locking_node(db, vm), object(), object())
         ),
     )
 

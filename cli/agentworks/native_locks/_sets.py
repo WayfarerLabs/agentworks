@@ -151,24 +151,6 @@ def native_locks(database_path: Path, request: LockRequest, *, prompts: bool = F
             _release(handles)
 
 
-@contextmanager
-def require_or_acquire(
-    database_path: Path, request: LockRequest, *, held: NativeLockSet | None
-) -> Iterator[NativeLockSet]:
-    """Reuse ``held`` for a nested operation's ``request``, or acquire ``request`` when nothing is held.
-
-    For an operation that runs both nested, under its caller's set, and on
-    its own: nested, it requires ``request`` of the caller's set and acquires
-    nothing; on its own, it acquires ``request`` like :func:`native_locks`.
-    """
-    if held is not None:
-        held.require(request, database_path=database_path)
-        yield held
-        return
-    with native_locks(database_path, request) as acquired:
-        yield acquired
-
-
 def probe_locks(database_path: Path, request: LockRequest) -> None:
     """Try ``request`` without waiting and release it at once, writing no record.
 

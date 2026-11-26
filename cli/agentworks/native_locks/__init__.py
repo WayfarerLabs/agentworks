@@ -55,7 +55,7 @@ from ._entities import (
 )
 from ._os import open_lock_file, try_lock, unlock
 from ._records import HolderInfo, operation_label
-from ._sets import NativeLockBusyError, NativeLockSet, native_locks, probe_locks, prompt_notice, require_or_acquire
+from ._sets import NativeLockBusyError, NativeLockSet, native_locks, probe_locks, prompt_notice
 
 __all__ = [
     "Entity",
@@ -75,7 +75,6 @@ __all__ = [
     "path_entity",
     "probe_locks",
     "prompt_notice",
-    "require_or_acquire",
     "session_entity",
     "try_lock",
     "unlock",

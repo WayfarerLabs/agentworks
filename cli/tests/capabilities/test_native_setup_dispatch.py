@@ -20,7 +20,6 @@ from agentworks.capabilities.harness_integration.setup import (
 )
 from agentworks.db import Database
 from agentworks.errors import ExternalError, StateError
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import Redactor, SetupFailure
@@ -28,6 +27,7 @@ from agentworks.harness_setup.state import read_native_setup, write_native_setup
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
+from tests.nested_locks_support import holding_vm, run_setup_held
 from tests.plugins._fixtures import ConformingHarnessIntegration
 from tests.reachable_data_support import reachable_data
 from tests.vm_access_support import Admin, RecordingVMAccess
@@ -81,7 +81,7 @@ def test_unimplemented_activation_fails_without_successful_record(db, facet_case
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     failures: list[SetupFailure] = []
     with pytest.raises(StateError) as caught:
-        run_setup(db, Mock(), inputs, invocation, failures=failures, operation="fixture-setup", buffered=buffered)
+        run_setup_held(db, Mock(), inputs, invocation, failures=failures, operation="fixture-setup", buffered=buffered)
     assert caught.value.entity_kind == inputs.kind and caught.value.entity_name == inputs.name
     assert failures == []
     assert read_native_setup(db, inputs.kind, inputs.name).records == ()
@@ -94,7 +94,7 @@ def test_inactive_integrations_remain_absent(db, facet_case, monkeypatch):
     monkeypatch.setattr(
         "agentworks.harness_setup.dispatch.destination_id", lambda *a, **k: pytest.fail("no active setup")
     )
-    state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
+    state = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
     assert state.records == read_native_setup(db, inputs.kind, inputs.name).records == ()
     assert cast(RecordingVMAccess, invocation.access).requests() == []
 
@@ -105,7 +105,7 @@ def test_implemented_default_setup_completes_without_native_changes(db, facet_ca
     inputs, invocation = facet_case
     inputs = replace(inputs, activations={integration: CapabilityConfig.model_validate({})})
     for _ in range(2):
-        state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
+        state = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
         (record,) = state.records
         assert record.complete and record.claims == ()
         assert record == read_native_setup(db, inputs.kind, inputs.name).records[0]
@@ -119,7 +119,7 @@ def test_retirement_removes_legacy_claim_free_unsupported_record(db, facet_case)
         component=inputs.component, integration="shell", destination_id="a" * 64, declaration={}, complete=True
     )
     write_native_setup(db, inputs.kind, inputs.name, NativeSetupState(records=(previous,)), operation="fixture-setup")
-    state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
+    state = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
     assert state.records == read_native_setup(db, inputs.kind, inputs.name).records == ()
     assert cast(RecordingVMAccess, invocation.access).requests() == []
 
@@ -179,7 +179,7 @@ def test_failure_checkpoints_prefix_and_retry_completes(setup_case):
     db, inputs, invocation, events, failures = setup_case
     failures.add("first")
     observed: list[SetupFailure] = []
-    run_setup(db, Mock(), inputs, invocation, failures=observed, operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=observed, operation="agent-reinit")
     assert [failure.integration for failure in observed] == ["first"]
     state = read_native_setup(db, "agent", "agent")
     assert [record.integration for record in state.records] == ["first", "second"]
@@ -188,7 +188,7 @@ def test_failure_checkpoints_prefix_and_retry_completes(setup_case):
     assert state.records[0].claims[0].identifier == "first"
     assert events == [("first", False), ("second", False)]
     failures.clear()
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert all(record.complete for record in read_native_setup(db, "agent", "agent").records)
 
 
@@ -221,7 +221,7 @@ def test_an_integration_s_invocation_holds_no_secret_outside_its_declared_ones_a
 
     monkeypatch.setattr(first, "user_init", initialize)
 
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
 
     assert received
     for call in received:
@@ -243,9 +243,9 @@ def test_a_redactor_s_text_form_shows_none_of_its_values(render):
 
 def test_retirement_follows_desired_order_and_preserves_other_records(setup_case):
     db, inputs, invocation, events, _ = setup_case
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     events.clear()
-    run_setup(
+    run_setup_held(
         db,
         Mock(),
         replace(inputs, activations={"second": CapabilityConfig.model_validate({})}),
@@ -273,14 +273,14 @@ def test_checkpoint_failure_stops_before_next_integration(setup_case, monkeypatc
 
     monkeypatch.setattr("agentworks.harness_setup.dispatch.write_native_setup", fail_second)
     with pytest.raises(OSError):
-        run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+        run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert events == [("first", False)]
     assert not read_native_setup(db, "agent", "agent").records[0].complete
 
 
 def test_buffered_creation_does_not_publish_ownerless_applied_state(setup_case):
     db, inputs, invocation, _, _ = setup_case
-    state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-create", buffered=True)
+    state = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-create", buffered=True)
     assert len(state.records) == 2
     assert read_native_setup(db, "agent", "agent").records == ()
 
@@ -311,7 +311,7 @@ def test_setup_scopes_prior_artifact_files_to_the_current_destination(setup_case
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {"updated": True})
     monkeypatch.setattr("agentworks.harness_setup.dispatch.destination_id", lambda *args, **kwargs: destination)
     failures: list[SetupFailure] = []
-    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    state = run_setup_held(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
 
     assert not failures and state == read_native_setup(db, inputs.kind, inputs.name)
     (record,) = state.records
@@ -332,7 +332,7 @@ def test_applied_state_omits_env_values_but_detects_declaration_changes(setup_ca
             vm={}, agent={"LITERAL": EnvEntry("private-literal"), "TOKEN": EnvEntry({"secret": "token-name"})}
         ),
     )
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     record = read_native_setup(db, "agent", "agent").records[0]
     encoded = record.model_dump_json()
     assert "private-literal" not in encoded
@@ -373,7 +373,7 @@ def test_inactive_capture_notice_requires_local_artifacts(db, facet_case, monkey
     inputs = replace(inputs, artifact_snapshot=snapshot)
     warning = Mock()
     monkeypatch.setattr("agentworks.harness_setup.dispatch.output.warn", warning)
-    state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup", buffered=True)
+    state = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup", buffered=True)
     assert warning.call_count == (1 if capture == "nonempty" else 0)
     assert state.records == ()
     assert cast(RecordingVMAccess, invocation.access).requests() == []
@@ -445,10 +445,12 @@ def test_deferral_notice_follows_successful_application(db, facet_case, monkeypa
         )
     if outcome in ("hook-failure", "publication-failure"):
         failures: list[SetupFailure] = []
-        state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="fixture-setup", buffered=True)
+        state = run_setup_held(
+            db, Mock(), inputs, invocation, failures=failures, operation="fixture-setup", buffered=True
+        )
         assert len(failures) == 1 and not state.records[0].complete
     else:
-        state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup", buffered=True)
+        state = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup", buffered=True)
         assert state.records[0].complete == (outcome != "pending-cleanup")
     assert warning.call_count == (
         len({item.destination for item in application.deferred}) if outcome == "deferred" else 0
@@ -490,7 +492,7 @@ def test_vm_publication_uses_root_and_records_skips_without_rerouting(db, facet_
     monkeypatch.setattr("agentworks.artifacts.routing.setup_artifacts", lambda *args: RoutingResult(received(item)))
     monkeypatch.setattr(SetupInputs, "declaration", lambda *args: {})
     inputs = replace(inputs, activations={"applying": CapabilityConfig.model_validate({})})
-    state = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
+    state = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="fixture-setup")
     assert publish.call_args.kwargs["roots"] == ROOT_FILE_DIRECTORIES
     assert publish.call_args.kwargs["root"] is True
     record = state.records[0]
@@ -543,7 +545,7 @@ def test_malformed_obsolete_section_only_blocks_removal_of_entire_activation(db,
         lambda *args, **kwargs: ArtifactPublication(files=(old,), skipped=(skipped,)),
     )
     inputs = replace(inputs, activations={"fixture": CapabilityConfig()} if activated else {})
-    record = run_setup(db, Mock(), inputs, invocation, failures=[], operation="fixture").records[0]
+    record = run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="fixture").records[0]
     assert record.artifact_files == (old,) and record.skipped == (skipped,)
     assert not record.complete and record.pending_cleanup != activated
 
@@ -566,7 +568,7 @@ def test_partial_native_setup_preserves_incomplete_evidence_and_continues_public
     monkeypatch.setattr(first, "user_init", initialize)
     publish = Mock(return_value=ArtifactPublication())
     monkeypatch.setattr("agentworks.harness_setup.dispatch.publish_artifacts", publish)
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert events == [("first", False), ("second", False)]
     assert publish.call_count == 2
     records = read_native_setup(db, "agent", "agent").records
@@ -574,7 +576,7 @@ def test_partial_native_setup_preserves_incomplete_evidence_and_continues_public
     assert records[0].incomplete_reasons == ("fixture native conflict",)
     assert records[0].claims[0].identifier == "first"
     partial = False
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert all(item.complete for item in read_native_setup(db, "agent", "agent").records)
     assert all(not item.incomplete_reasons for item in read_native_setup(db, "agent", "agent").records)
 
@@ -609,14 +611,14 @@ def test_callback_reasons_checkpoint_before_return_and_clear_at_next_attempt(set
     monkeypatch.setattr(first, "user_init", initialize)
     if interrupted:
         failures: list[SetupFailure] = []
-        run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+        run_setup_held(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
         assert len(failures) == 1
         assert events == [("second", False)]
     else:
-        run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+        run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
         assert events == [("first", False), ("second", False)]
     assert read_native_setup(db, "agent", "agent").records[0].incomplete_reasons[:2] == reasons
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     records = read_native_setup(db, "agent", "agent").records
     assert all(record.complete and not record.incomplete_reasons for record in records)
 
@@ -633,7 +635,7 @@ def test_registered_plugin_cannot_checkpoint_invalid_incomplete_reasons(setup_ca
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
     assert len(failures) == 2
     assert events == []
     records = read_native_setup(db, "agent", "agent").records
@@ -646,7 +648,7 @@ def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setu
     from agentworks.capabilities.harness_integration import harness_integration_for
 
     db, inputs, invocation, _, _ = setup_case
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     first = harness_integration_for("first")
     original = first.user_init
     reason = f"plugin-{uuid4().hex}: retained association differs"
@@ -669,13 +671,13 @@ def test_retirement_keeps_callback_diagnostics_until_owning_retry_converges(setu
 
     monkeypatch.setattr(first, "user_init", initialize)
     inputs = replace(inputs, activations={"second": CapabilityConfig()})
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     record = next(item for item in read_native_setup(db, "agent", "agent").records if item.integration == "first")
     assert not record.complete and record.pending_cleanup and not record.claims
     assert record.incomplete_reasons == (reason,)
     assert retirement_calls == 1
     partial = False
-    run_setup(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
+    run_setup_held(db, Mock(), inputs, invocation, failures=[], operation="agent-reinit")
     assert retirement_calls == 2
     assert [record.integration for record in read_native_setup(db, "agent", "agent").records] == ["second"]
 
@@ -694,19 +696,20 @@ def test_a_failed_integration_reaches_the_operation_log_through_a_lifecycle_entr
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *args: "fixture")
     logger = OperationLogFile("agent", "agent-reinit")
     observed: list[SetupFailure] = []
-    apply_agent_setup(
-        db,
-        Mock(),
-        Mock(),
-        inputs=inputs,
-        vm=db.get_vm("vm"),
-        username="user",
-        values={},
-        logger=logger,
-        held=None,
-        operation="agent-reinit",
-        failures=observed,
-    )
+    with holding_vm(db, "vm") as held:
+        apply_agent_setup(
+            db,
+            Mock(),
+            Mock(),
+            inputs=inputs,
+            vm=db.get_vm("vm"),
+            username="user",
+            values={},
+            logger=logger,
+            held=held,
+            operation="agent-reinit",
+            failures=observed,
+        )
     logger.close()
     (failure,) = observed
     assert failure.reason in logger.path.read_text()

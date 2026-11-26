@@ -165,7 +165,7 @@ def run_initialization(
     operation: VMInitializationOperation,
     setup_failures: list[SetupFailure],
     setup_inputs: tuple[SetupInputs, ...] = (),
-    held: NativeLockSet | None = None,
+    held: NativeLockSet,
     setup_values: Mapping[str, str] | None = None,
     legacy_conversion: tuple[DesiredOverlayRecord, VersionedPayload] | None = None,
 ) -> None:
@@ -180,119 +180,118 @@ def run_initialization(
     reports them after its remaining command bookkeeping.
 
     ``access`` is the admin's, and every step's requests run on it, bounded
-    by ``STEP_DEADLINE`` through one ``Files``. Initialization holds the vm
-    exclusive: the caller's set (``held``), or its own.
+    by ``STEP_DEADLINE`` through one ``Files``. Initialization runs under
+    the caller's ``held`` set, which must hold the vm exclusive.
     """
-    from agentworks.native_locks import require_or_acquire
     from agentworks.native_locks.rows import vm_exclusive
 
-    with require_or_acquire(db.path, vm_exclusive(vm_name), held=held) as guard:
-        from agentworks.harness_setup.lifecycle import require_prepared_setup
+    held.require(vm_exclusive(vm_name), database_path=db.path)
+    from agentworks.harness_setup.lifecycle import require_prepared_setup
 
-        require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
-        db.insert_vm_event(vm_name, "init_started")
+    require_prepared_setup(db, "vm", vm_name, ("vm", "admin"), setup_inputs)
+    db.insert_vm_event(vm_name, "init_started")
 
-        files = access.files(deadline=STEP_DEADLINE)
-        try:
-            _phase_b_setup(
-                db,
-                config,
-                registry,
-                vm_template,
-                admin,
-                vm_name,
-                files,
-                credential_requests,
-                home,
-                admin_username,
-                logger,
-                debian_release=debian_release,
-                operation=operation,
-            )
-            if setup_inputs:
-                from agentworks.harness_setup.lifecycle import apply_vm_setup
-
-                vm = db.get_vm(vm_name)
-                assert vm is not None
-                apply_vm_setup(
-                    db,
-                    files,
-                    registry,
-                    inputs=setup_inputs,
-                    vm=vm,
-                    values=setup_values or {},
-                    logger=logger,
-                    held=guard,
-                    operation=operation.value,
-                    failures=setup_failures,
-                )
-            # Terminal guest mutation follows every integration's setup.
-            authorized_keys = _reconcile_authorized_keys(files, config, home, logger)
-        except Exception as e:
-            with db.transaction():
-                db.update_vm_init_status(vm_name, InitStatus.FAILED)
-                db.insert_vm_event(vm_name, "init_failed", logger.sanitize(str(e)))
-            raise
-
-        if isinstance(authorized_keys, AuthorizedKeysUnproven):
-            output.warn(
-                f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
-                "will refuse to connect. If the configured key still works, retry with "
-                f"'agw vm reinit {vm_name}'. Otherwise, run 'agw vm recover {vm_name}', which "
-                "restores the configured key through the platform's own channel, then reinitialize. "
-                "If recovery cannot reach the VM, recreate it."
-            )
-
-        from agentworks.db.instance_state import AppliedStateKey
-        from agentworks.vms.applied_state import build_vm_initialization_slices
-
-        applied_proof = authorized_keys if isinstance(authorized_keys, AuthorizedKeysApplied) else None
-        slices = build_vm_initialization_slices(
-            applied_proof,
-            include_hardware=operation is VMInitializationOperation.VM_CREATE,
+    files = access.files(deadline=STEP_DEADLINE)
+    try:
+        _phase_b_setup(
+            db,
+            config,
+            registry,
+            vm_template,
+            admin,
+            vm_name,
+            files,
+            credential_requests,
+            home,
+            admin_username,
+            logger,
+            debian_release=debian_release,
+            operation=operation,
         )
-        ssh_identity_proven = AppliedStateKey.SSH_IDENTITY in slices
-        if applied_proof is not None and not ssh_identity_proven:
-            # File-system identity cannot be checkpointed atomically with the
-            # remote write. A changed or unreadable carrier leaves the remote
-            # result unknown, so remove any older proof.
-            msg = "configured SSH identity changed or became unavailable after authorized_keys update"
-            logger.warning(msg)
-            output.warn(msg)
+        if setup_inputs:
+            from agentworks.harness_setup.lifecycle import apply_vm_setup
 
-        partial = bool(setup_failures) or logger.has_warnings
-        final_status = InitStatus.PARTIAL if partial else InitStatus.COMPLETE
-        final_event = "init_partial" if partial else "init_complete"
-        details = []
-        if setup_failures:
-            details.append(f"{len(setup_failures)} setup failure(s)")
-        if logger.has_warnings:
-            details.append(f"{len(logger.warnings)} warning(s)")
-        final_detail = "; ".join(details) or None
-
-        # Do not include this checkpoint in the Phase B exception arm above: a
-        # local database failure must roll back the complete terminal result and
-        # propagate, leaving the earlier in-progress evidence intact.
+            vm = db.get_vm(vm_name)
+            assert vm is not None
+            apply_vm_setup(
+                db,
+                files,
+                registry,
+                inputs=setup_inputs,
+                vm=vm,
+                values=setup_values or {},
+                logger=logger,
+                held=held,
+                operation=operation.value,
+                failures=setup_failures,
+            )
+        # Terminal guest mutation follows every integration's setup.
+        authorized_keys = _reconcile_authorized_keys(files, config, home, logger)
+    except Exception as e:
         with db.transaction():
-            if legacy_conversion is not None and final_status is InitStatus.COMPLETE:
-                from agentworks.legacy_claude import checkpoint_conversion
+            db.update_vm_init_status(vm_name, InitStatus.FAILED)
+            db.insert_vm_event(vm_name, "init_failed", logger.sanitize(str(e)))
+        raise
 
-                checkpoint_conversion(db, *legacy_conversion)
-            db.update_vm_init_status(vm_name, final_status)
-            db.insert_vm_event(vm_name, final_event, final_detail)
-            if slices:
-                db.instance_state.replace_applied_slices(
-                    "vm",
-                    vm_name,
-                    operation.value,
-                    slices,
-                )
-            if not ssh_identity_proven:
-                db.instance_state.clear_applied_slice(
-                    "vm",
-                    vm_name,
-                    AppliedStateKey.SSH_IDENTITY,
-                )
+    if isinstance(authorized_keys, AuthorizedKeysUnproven):
+        output.warn(
+            f"SSH identity evidence for VM '{vm_name}' is unknown, so ordinary SSH commands "
+            "will refuse to connect. If the configured key still works, retry with "
+            f"'agw vm reinit {vm_name}'. Otherwise, run 'agw vm recover {vm_name}', which "
+            "restores the configured key through the platform's own channel, then reinitialize. "
+            "If recovery cannot reach the VM, recreate it."
+        )
+
+    from agentworks.db.instance_state import AppliedStateKey
+    from agentworks.vms.applied_state import build_vm_initialization_slices
+
+    applied_proof = authorized_keys if isinstance(authorized_keys, AuthorizedKeysApplied) else None
+    slices = build_vm_initialization_slices(
+        applied_proof,
+        include_hardware=operation is VMInitializationOperation.VM_CREATE,
+    )
+    ssh_identity_proven = AppliedStateKey.SSH_IDENTITY in slices
+    if applied_proof is not None and not ssh_identity_proven:
+        # File-system identity cannot be checkpointed atomically with the
+        # remote write. A changed or unreadable carrier leaves the remote
+        # result unknown, so remove any older proof.
+        msg = "configured SSH identity changed or became unavailable after authorized_keys update"
+        logger.warning(msg)
+        output.warn(msg)
+
+    partial = bool(setup_failures) or logger.has_warnings
+    final_status = InitStatus.PARTIAL if partial else InitStatus.COMPLETE
+    final_event = "init_partial" if partial else "init_complete"
+    details = []
+    if setup_failures:
+        details.append(f"{len(setup_failures)} setup failure(s)")
+    if logger.has_warnings:
+        details.append(f"{len(logger.warnings)} warning(s)")
+    final_detail = "; ".join(details) or None
+
+    # Do not include this checkpoint in the Phase B exception arm above: a
+    # local database failure must roll back the complete terminal result and
+    # propagate, leaving the earlier in-progress evidence intact.
+    with db.transaction():
+        if legacy_conversion is not None and final_status is InitStatus.COMPLETE:
+            from agentworks.legacy_claude import checkpoint_conversion
+
+            checkpoint_conversion(db, *legacy_conversion)
+        db.update_vm_init_status(vm_name, final_status)
+        db.insert_vm_event(vm_name, final_event, final_detail)
+        if slices:
+            db.instance_state.replace_applied_slices(
+                "vm",
+                vm_name,
+                operation.value,
+                slices,
+            )
+        if not ssh_identity_proven:
+            db.instance_state.clear_applied_slice(
+                "vm",
+                vm_name,
+                AppliedStateKey.SSH_IDENTITY,
+            )
 
 
 def _retire_workspace_tmuxinator_projects(db: Database, vm_name: str, files: Files, log: InitLog) -> None:

@@ -38,6 +38,8 @@ from agentworks.execution import trust
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+    from pathlib import Path
 
     from agentworks.capabilities.base import RunContext, SecretReader
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -269,25 +271,19 @@ class LiveVMNode:
         the command checked it, so the command refuses and the operator runs
         it again.
         """
-        from agentworks.native_locks import LockMode, LockRequest, native_locks, vm_entity
+        from agentworks.native_locks import LockMode, LockRequest, vm_entity
 
         vm = vm_entity(self._row.name)
-        if self._held is None:
-            with native_locks(self._db.path, LockRequest(exclusive=(vm,))) as brief:
-                self._held = brief
-                try:
-                    yield True
-                finally:
-                    self._held = None
-            return
-        if not self._held.covers(vm, LockMode.EXCLUSIVE):
+        brief = self._held is None
+        if self._held is not None and not self._held.covers(vm, LockMode.EXCLUSIVE):
             raise StateError(
                 f"VM '{self._row.name}' stopped after this command checked it",
                 entity_kind="vm",
                 entity_name=self._row.name,
                 hint="Run the command again.",
             )
-        yield False
+        with self.locked(LockRequest(exclusive=(vm,))):
+            yield brief
 
     def auto_start(self, gate_secrets: SecretReader) -> None:
         """Start the VM under its exclusive lock (:meth:`booting`), re-reading its row and status there."""
@@ -337,15 +333,11 @@ class LiveVMNode:
         VM-wide operation, which holds the vm exclusive, refuses it. A node
         whose operation already holds a set admits under that.
         """
-        from agentworks.native_locks import LockRequest, native_locks, vm_entity
+        from agentworks.native_locks import LockRequest, vm_entity
 
         admission = LockRequest(shared=(vm_entity(self._row.name),))
         with ExitStack() as holds:
-            with ExitStack() as admitted:
-                if self._held is None:
-                    admitted.enter_context(native_locks(self._db.path, admission))
-                else:
-                    self._held.require(admission, database_path=self._db.path)
+            with self.locked(admission):
                 row = self.reload_row()
                 if row.desired_runtime_state is not DesiredRuntimeState.STOPPED:
                     holds.enter_context(self._site.platform.vm_active(row, config=self._config))
@@ -582,3 +574,14 @@ def pending_vm_node(
     declared credentials), and every edge holder shares those same
     objects (one object per node)."""
     return PendingVMNode(db, name, debian_release, hostname, template, site, credentials)
+
+
+def lock_through(node: LiveVMNode | None, database_path: Path, request: LockRequest) -> AbstractContextManager[object]:
+    """Take ``request`` through ``node`` (:meth:`LiveVMNode.locked`), or directly when there is no node.
+
+    A command whose VM has no node (its site could not be bound, or its row
+    is gone) still locks; with a node, nested operations handed it reuse the set.
+    """
+    from agentworks.native_locks import native_locks
+
+    return native_locks(database_path, request) if node is None else node.locked(request)

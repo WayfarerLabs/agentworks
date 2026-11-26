@@ -28,8 +28,6 @@ from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
-    from types import SimpleNamespace
-
     from agentworks.db import VMRow
     from agentworks.execution.results import Result
     from agentworks.sessions.multi_console import ConsoleAccess
@@ -788,29 +786,29 @@ def change_after_probe(monkeypatch: pytest.MonkeyPatch, change: Callable[[], obj
     return ran
 
 
-def guarding_node(db: Database, vm: VMRow, **attributes: object) -> SimpleNamespace:
-    """A stand-in live VM node for ``vm``: its ``row``, and a ``locked`` that takes the real lock set.
+class LockingNode:
+    """A stand-in live VM node for a VM row: its ``row``, and :class:`LiveVMNode`'s own ``locked`` and ``held``.
 
-    ``attributes`` adds whatever else the command under test reaches through
-    the node (its ``site``, say).
+    Attributes given at construction add whatever else the command under
+    test reaches through the node (its ``site``, say).
     """
-    from types import SimpleNamespace
 
-    from agentworks.native_locks import native_locks
+    from agentworks.vms.nodes import LiveVMNode as _LiveVMNode
 
-    node = SimpleNamespace(row=vm, held=None, **attributes)
+    locked = _LiveVMNode.locked
+    held = _LiveVMNode.held
 
-    @contextlib.contextmanager
-    def locked(request: object, *, prompts: bool = False) -> Iterator[object]:
-        with native_locks(db.path, request, prompts=prompts) as held:  # type: ignore[arg-type]
-            node.held = held
-            try:
-                yield held
-            finally:
-                node.held = None
+    def __init__(self, db: Database, vm: VMRow, **attributes: object) -> None:
+        self._db = db
+        self._held = None
+        self.row = vm
+        for name, value in attributes.items():
+            setattr(self, name, value)
 
-    node.locked = locked
-    return node
+
+def locking_node(db: Database, vm: VMRow, **attributes: object) -> LockingNode:
+    """A :class:`LockingNode` for ``vm``, taking the real lock sets ``locked`` asks for."""
+    return LockingNode(db, vm, **attributes)
 
 
 def admitting_boundary(
@@ -822,7 +820,7 @@ def admitting_boundary(
     row, which a command compares again under its lock set, and no resolver or
     context.
     """
-    return contextlib.nullcontext((guarding_node(db, vm), None, None))
+    return contextlib.nullcontext((locking_node(db, vm), None, None))
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
