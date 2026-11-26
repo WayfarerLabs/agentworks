@@ -284,3 +284,46 @@ def test_a_target_whose_agent_row_went_away_fails_alone(db, make_config, runtime
     results = _start(db, make_config(), ["orphan", "kept"], monkeypatch)
     assert results[("session", "orphan")].outcome is Outcome.FAILED
     assert ("session-start", "kept") in runtime[2]
+
+
+def test_a_console_whose_members_changed_as_its_final_set_was_taken_fails_alone(db, make_config, runtime, monkeypatch):
+    from agentworks.runtime_state import reconcile_vm
+    from agentworks.sessions import multi_console
+    from agentworks.sessions.tmux import ProbeStatus
+    from tests.console_helpers import create_console_record
+
+    # Console c's tmux session is live until torn down, so reconciling it to stopped would tear it down.
+    torn_down: list[str] = []
+    monkeypatch.setattr(
+        multi_console,
+        "_console_runtime_presence",
+        lambda admin, name: (ProbeStatus.ABSENT if name in torn_down else ProbeStatus.PRESENT, ProbeStatus.ABSENT),
+    )
+    monkeypatch.setattr(multi_console, "_teardown_console_tmux", lambda admin, name: torn_down.append(name))
+    seed_vm(db, "box")
+    seed_session(db, "m", "box", target=DesiredRuntimeState.STOPPED)
+    seed_session(db, "late", "box", target=DesiredRuntimeState.STOPPED)
+    create_console_record(db, name="c", vm_name="box", session_specs=["m"])
+    db.set_console_desired_runtime_state("c", DesiredRuntimeState.STOPPED)
+    request = families._request
+    final_sets: list[bool] = []
+
+    def acquire_final_sets(invocation):
+        final_sets.append(True)
+        return original_final(invocation)
+
+    def built_then_a_member_is_added(invocation, vm_name, targets):
+        # Between building the family's final request and holding it, another edit adds a member to c.
+        built = request(invocation, vm_name, targets)
+        if final_sets and db.get_console_session("c", "late") is None:
+            db.add_console_session("c", "late", [])
+        return built
+
+    original_final = families.acquire_final_sets
+    monkeypatch.setattr("agentworks.runtime_state._service.acquire_final_sets", acquire_final_sets)
+    monkeypatch.setattr(families, "_request", built_then_a_member_is_added)
+    config = make_config()
+    results = _reconcile_rows(db, config, monkeypatch, lambda: reconcile_vm(db, config, name="box", interaction=REFUSE))
+    assert results[("console", "c")].outcome is Outcome.BLOCKED
+    assert torn_down == []
+    assert results[("session", "m")].outcome not in {Outcome.BLOCKED, Outcome.FAILED}

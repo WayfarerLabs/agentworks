@@ -1504,3 +1504,51 @@ def test_reinit_refuses_a_declaration_changed_after_its_early_save(
         agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
 
     assert "agent_name" not in mutation
+
+
+def test_create_grant_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed_vm(db)
+    _add_workspace(db, "ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _add_workspace(db, "late"))
+
+    with pytest.raises(StateConflictError):
+        agent_manager.create_agent(
+            db, config, name="dev", vm_name="box", grant_all_workspaces=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    assert db.get_agent("dev") is None
+    assert mutation == {}
+
+
+def test_reinit_refuses_a_grant_added_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, ["ws1"])
+    _add_workspace(db, "ws2")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: db.insert_agent_grant("dev", "ws2", "explicit"))
+
+    with pytest.raises(StateConflictError):
+        agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert mutation == {}

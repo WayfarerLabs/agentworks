@@ -892,6 +892,33 @@ def test_grant_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
     assert not any(c.startswith("usermod") for c in target.commands)
 
 
+def test_revoke_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A named revoke locks the grants it names whatever the rows say; ``--all`` locks every workspace it reads."""
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    db.insert_agent_grant("a1", "ws1", "explicit")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _seed_workspace(db, vm_name="box", name="late"))
+
+    with pytest.raises(StateConflictError):
+        agent_grants.revoke_workspaces(
+            db, config, agent_name="a1", workspace_names=[], revoke_all=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    assert db.has_any_grant("a1", "ws1")
+    assert not any(c.startswith("usermod") for c in target.commands)
+
+
 def test_delete_refuses_a_grant_added_between_its_probe_and_its_lock(
     db: Database,
     make_config,  # noqa: ANN001
