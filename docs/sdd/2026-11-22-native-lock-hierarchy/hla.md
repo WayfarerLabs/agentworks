@@ -203,10 +203,11 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   that directory. Settings writes there are compare-and-swaps, but plugin and marketplace setup runs
   the native tool's own CLI, which is not, and today only the VM lock keeps two accounts' setups
   apart. So such a directory is locked exclusive as a `path`. It is what the account's login
-  exports, which may not exist yet or may change during the operation, so it is predicted before
-  locking from the declared environment (and, for a reinit, the current login), and the setup checks
-  the directory it actually finds is covered before running the native tool; one that is not is left
-  unreconciled and reported incomplete, with `agent reinit` as the repair.
+  exports, which may not exist yet or may change during the operation, or what an earlier setup
+  recorded, for an integration being retired. So it is predicted before locking from the declared
+  environment, the recorded setup and, for a reinit, the current login, and wherever the setup opens
+  the native tool on a real home it first checks that the directory is covered; one that is not is
+  left unreconciled and reported incomplete, with `agent reinit` as the repair.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
