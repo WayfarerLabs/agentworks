@@ -396,6 +396,8 @@ def delete_agent(
             [s.name for s in agent_sessions],
             [s.name for s in db.list_sessions() if s.agent_name == name],
         )
+        # The sessions torn down below, as their rows are now; their names are the ones confirmed.
+        agent_sessions = [s for s in db.list_sessions() if s.agent_name == name]
         if only_if_unused and not agent_is_unused(db, name):
             raise StateConflictError(
                 f"agent '{name}' gained a session or a standing grant since it was offered for deletion",
