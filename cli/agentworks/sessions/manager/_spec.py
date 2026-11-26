@@ -149,14 +149,15 @@ def launch_with_spec(
         probe_restart_target(db, session)
         authorized = observed_running(session)
         _confirm_running_restart([name] if authorized else [], yes=yes, interaction=interaction)
-    outcomes: list[OverlayOutcome] = []
+    outcome: OverlayOutcome | None = None
 
-    def accept(current: SessionRow, status: SessionStatus) -> None:
+    def accept(status: SessionStatus) -> None:
         # Against the session and status as this command read them before its consent, not as the batch read them.
+        nonlocal outcome
         if operation == "restart":
             require_unchanged("session", name, authorized, status is SessionStatus.RUNNING)
         with db.transaction():
-            outcomes.append(_persist_spec(db, _current_session(db, session, vm), overlay))
+            outcome = _persist_spec(db, _current_session(db, session, vm), overlay)
 
     try:
         run_session_batch(
@@ -171,5 +172,5 @@ def launch_with_spec(
             declarations={name: SessionDeclaration(pending, accept)},
         )
     finally:
-        for outcome in outcomes:
+        if outcome is not None:
             render_overlay_outcome(outcome)

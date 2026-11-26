@@ -58,13 +58,13 @@ class SessionDeclaration:
     ``pending`` is the session as the declaration publishes it; the
     invocation's registry carries it in place of the stored layer, which may
     be one this release cannot read. ``accept`` replaces the stored layer
-    under the family's intent set, given the session as read there and the
-    status observed before it, and refuses if either is not what the
-    declaring command confirmed.
+    under the family's intent set, given the status observed before it,
+    and refuses if that or the session is not what the declaring command
+    confirmed.
     """
 
     pending: LiveResource
-    accept: Callable[[SessionRow, SessionStatus], None]
+    accept: Callable[[SessionStatus], None]
 
 
 @dataclass(frozen=True, kw_only=True)

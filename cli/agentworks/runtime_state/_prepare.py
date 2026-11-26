@@ -141,7 +141,7 @@ def _accept_family(
                 previous = (stored or session).desired_runtime_state
                 declaration = invocation.declarations.get(name)
                 if declaration is not None:
-                    declaration.accept(session, observations.get(name, SessionStatus.UNKNOWN))
+                    declaration.accept(observations.get(name, SessionStatus.UNKNOWN))
                 session = sessions.accept_session_runtime_state(invocation.db, session, state=target, held=held)
                 invocation.sessions[name] = session
                 invocation.record("session", name, desired_runtime_state=target)

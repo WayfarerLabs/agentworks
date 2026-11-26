@@ -150,7 +150,7 @@ def test_spec_hands_its_layer_to_the_batch_and_takes_no_lock_of_its_own(db, make
         with native_locks(db.path, vm_exclusive("box")):
             pass
         session = db.get_session("work")
-        kwargs["declarations"]["work"].accept(session, SessionStatus.STOPPED)
+        kwargs["declarations"]["work"].accept(SessionStatus.STOPPED)
         entered.append(session.name)
         raise StateError("fixture launch failure")
 

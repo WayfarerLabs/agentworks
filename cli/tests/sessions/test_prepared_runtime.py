@@ -478,7 +478,7 @@ def test_delete_consent_cannot_adopt_same_name_replacement(tmp_path, monkeypatch
         )
         return True
 
-    monkeypatch.setattr("agentworks.sessions.manager._queries.output.confirm", replace_while_confirming)
+    monkeypatch.setattr("agentworks.sessions.manager._delete.output.confirm", replace_while_confirming)
     monkeypatch.setattr(
         "agentworks.artifacts.session.cleanup_session_artifacts",
         lambda *a, **k: pytest.fail("replacement artifacts removed"),

@@ -66,17 +66,34 @@ def grant_entity_for(workspace: WorkspaceRow, account: Entity) -> Entity:
 
 def session_entity_for(db: Database, session: SessionRow) -> Entity:
     """A session below its workspace and its account: its agent's, or the VM admin's in admin mode."""
-    workspace = db.get_workspace(session.workspace_name)
-    if workspace is None:
-        raise _vanished("workspace", session.workspace_name)
-    return session_entity(session.name, workspace=workspace_entity_for(workspace), account=session_account(db, session))
+    workspace = _workspace_of(db, session)
+    return session_entity(
+        session.name, workspace=workspace_entity_for(workspace), account=_account_in(db, session, workspace)
+    )
 
 
 def session_account(db: Database, session: SessionRow) -> Entity:
     """The account a session runs as."""
+    return _account_in(db, session, _workspace_of(db, session))
+
+
+def session_grant_entity(db: Database, session: SessionRow) -> Entity | None:
+    """The implicit grant an agent-mode session holds on its workspace, or ``None`` in admin mode."""
+    if session.agent_name is None:
+        return None
+    workspace = _workspace_of(db, session)
+    return grant_entity_for(workspace, _account_in(db, session, workspace))
+
+
+def _workspace_of(db: Database, session: SessionRow) -> WorkspaceRow:
     workspace = db.get_workspace(session.workspace_name)
     if workspace is None:
         raise _vanished("workspace", session.workspace_name)
+    return workspace
+
+
+def _account_in(db: Database, session: SessionRow, workspace: WorkspaceRow) -> Entity:
+    """The account ``session`` runs as, on ``workspace``'s VM."""
     if session.agent_name is not None:
         agent = db.get_agent(session.agent_name)
         if agent is None:
@@ -86,16 +103,6 @@ def session_account(db: Database, session: SessionRow) -> Entity:
     if vm is None:
         raise _vanished("vm", workspace.vm_name)
     return admin_account_entity(vm)
-
-
-def session_grant_entity(db: Database, session: SessionRow) -> Entity | None:
-    """The implicit grant an agent-mode session holds on its workspace, or ``None`` in admin mode."""
-    if session.agent_name is None:
-        return None
-    workspace = db.get_workspace(session.workspace_name)
-    if workspace is None:
-        raise _vanished("workspace", session.workspace_name)
-    return grant_entity_for(workspace, session_account(db, session))
 
 
 def console_entity_for(db: Database, console: ConsoleRow) -> Entity:

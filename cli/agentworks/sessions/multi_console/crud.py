@@ -517,7 +517,7 @@ def remove_sessions(
     """
     from agentworks.recheck import console_fields, require_unchanged
 
-    from ._helpers import locked_console, probe_console
+    from ._helpers import locked_console
 
     def require_members() -> None:
         for n in session_names:
@@ -531,7 +531,6 @@ def remove_sessions(
     _require_console(db, console_name)
     require_members()
     read = console_fields(db, console_name)
-    probe_console(db, console_name)
     with locked_console(db, console_name) as (_selected_console, _held):
         require_unchanged("console", console_name, read, console_fields(db, console_name))
         console = _require_console(db, console_name)

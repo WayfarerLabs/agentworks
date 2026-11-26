@@ -18,6 +18,9 @@ from __future__ import annotations
 from ._create import (
     create_session as create_session,
 )
+from ._delete import (
+    delete_session as delete_session,
+)
 from ._env import (
     _display_harness_integration as _display_harness_integration,
 )
@@ -122,9 +125,6 @@ from ._prompts import (
 )
 from ._queries import (
     attach_session as attach_session,
-)
-from ._queries import (
-    delete_session as delete_session,
 )
 from ._queries import (
     describe_session as describe_session,

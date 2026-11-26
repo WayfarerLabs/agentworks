@@ -123,9 +123,12 @@ def _create_missing_agent_user(admin: VMAccess, linux_user: str, home: str, shel
             f"cannot recreate agent '{linux_user}': could not read retained home directory UID/GID at '{home}'"
         )
 
-    # Cooperating writers hold the account's exclusive lock. Exclusive native
-    # creation refuses occupied IDs; NSS checks establish the identity used
-    # by numeric useradd and by later home/SSH setup, without enumerating NSS.
+    # This command holds only this account's exclusive lock, so other
+    # accounts are created beside it. What keeps two creations from sharing
+    # an ID is exclusive creation: groupadd -g and useradd -u refuse an ID
+    # already in use, so the second fails rather than colliding. NSS checks
+    # establish the identity used by numeric useradd and by later home/SSH
+    # setup, without enumerating NSS.
     try:
         admin.run(Command(("groupadd", "-g", gid, linux_user), elevated=True), check=True)
         _require_retained_group(admin, linux_user, gid)
