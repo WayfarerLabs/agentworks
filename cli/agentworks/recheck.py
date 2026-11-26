@@ -57,6 +57,16 @@ def session_fields(row: SessionRow | None) -> Fields:
     return None if row is None else (row.session_uuid, row.workspace_name, row.agent_name, row.mode)
 
 
+def console_row_fields(db: Database, name: str) -> Fields:
+    """The console's placement and its admin shell, without its members.
+
+    For a command that rewrites a member list from what it reads under the
+    guard, so a member another command added or removed meanwhile is kept.
+    """
+    console = db.get_console(name)
+    return None if console is None else (console.vm_name, console.admin_shell)
+
+
 def console_fields(db: Database, name: str) -> Fields:
     """The console's placement, its admin shell and its ordered member sessions."""
     console = db.get_console(name)

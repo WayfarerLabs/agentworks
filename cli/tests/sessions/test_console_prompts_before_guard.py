@@ -99,19 +99,41 @@ def test_add_shell_resolves_unguarded_and_appends_to_the_list_read_under_the_gua
     assert member.shells == [{"cwd": "other", "admin": False}, {"cwd": "src", "admin": False}]
 
 
-def test_add_sessions_resolves_unguarded_and_refuses_a_member_change_before_the_guard(
+def test_add_sessions_resolves_unguarded_and_keeps_a_member_added_before_the_guard(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Positions come from the member list read under the guard, so a concurrent addition is kept."""
     _seed_vm(db)
     _seed_sessions(db, ["a", "b", "c"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
     during: list[bool] = []
     _resolving(db, monkeypatch, during, then=lambda: db.add_console_session("con", "c", []))
 
+    mc.add_sessions(
+        db, _StubConfig(), console_name="con", session_specs=["b+1"], interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert during == [True]
+    assert [m.session_name for m in db.list_console_sessions("con")] == ["a", "c", "b"]
+
+
+def test_add_sessions_refuses_a_console_replaced_before_the_guard(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    during: list[bool] = []
+
+    def replace_the_console() -> None:
+        db.delete_console("con")
+        create_console_record(db, name="con", vm_name="vm1", session_specs=["a"], add_admin_shell=True)
+
+    _resolving(db, monkeypatch, during, then=replace_the_console)
+
     with pytest.raises(StateConflictError):
         mc.add_sessions(
             db, _StubConfig(), console_name="con", session_specs=["b+1"], interaction=TtyInteractionPolicy.REFUSE
         )
 
-    assert during == [True]
-    assert [m.session_name for m in db.list_console_sessions("con")] == ["a", "c"]
+    assert [m.session_name for m in db.list_console_sessions("con")] == ["a"]

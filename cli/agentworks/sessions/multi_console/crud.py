@@ -347,16 +347,17 @@ def add_sessions(
     members retain their relative order. The DB mutation is atomic; if the
     console's tmux session is live, the windows are also added immediately
     (best-effort). The added shells' secrets resolve before the family guard
-    is taken; under it the console, its members and its VM are read again,
-    and a change refuses.
+    is taken; under it the console and its VM are read again, a change
+    refuses, and the positions are derived from the member list as read
+    there, so a member another command added meanwhile is kept.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.recheck import console_fields, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import console_row_fields, require_unchanged, require_vm_unchanged
 
     from ._helpers import guarded_console_selection
 
     console = _require_console(db, console_name)
-    read = console_fields(db, console_name)
+    read = console_row_fields(db, console_name)
     preflight_member_count = len(db.list_console_sessions(console_name))
     preflight_index = preflight_member_count if start_index is None else start_index
     if not 0 <= preflight_index <= preflight_member_count:
@@ -415,9 +416,10 @@ def add_sessions(
             interaction=interaction,
         )
 
-    # Every secret is resolved: the console and its VM are read again under the guard.
+    # Every secret is resolved: the console and its VM are read again under the guard,
+    # and the transaction below derives positions from the members as they are now.
     with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
-        require_unchanged("console", console_name, read, console_fields(db, console_name))
+        require_unchanged("console", console_name, read, console_row_fields(db, console_name))
         require_vm_unchanged(db, vm_row)
         with db.transaction():
             current_order = [member.session_name for member in db.list_console_sessions(console_name)]
@@ -688,17 +690,17 @@ def add_shell(
     console is live, also splits the pane immediately (best-effort).
 
     The pane's secrets resolve before the family guard is taken; under it
-    the console, its members and its VM are read again, a change refuses,
-    and the shell is appended to the member's shell list as read there.
+    the console and its VM are read again, a change refuses, and the shell
+    is appended to the member's shell list as read there.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.recheck import console_fields, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import console_row_fields, require_unchanged, require_vm_unchanged
 
     from ._helpers import guarded_console_selection
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
-    read = console_fields(db, console_name)
+    read = console_row_fields(db, console_name)
     cs = _require_member(db, console_name, session_name)
 
     registry = load_request_registry(config, live_database=db)
@@ -746,7 +748,7 @@ def add_shell(
 
     # Every secret is resolved: the console, its VM and the member are read again under the guard.
     with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
-        require_unchanged("console", console_name, read, console_fields(db, console_name))
+        require_unchanged("console", console_name, read, console_row_fields(db, console_name))
         if vm_row is not None:
             require_vm_unchanged(db, vm_row)
         # The shell list is the one read under the guard, so a concurrent append is kept.
