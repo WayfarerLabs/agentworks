@@ -107,18 +107,17 @@ def _publish_pending_plan(
 
 
 def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
-    """Reload the VM row and require that it still exists and has an address.
+    """Reload the VM row the plan read, before create builds its graph, and require that it still exists.
 
-    The row the plan read can be stale: an ``agw vm recover`` or
-    ``vm rekey`` that finished since may have updated
-    ``vms.tailscale_host``, and without the reload the address check
-    below could spuriously raise. Create reloads it before building its
-    graph, inside the activation gate, whose start records
-    ``last_started_at``, and once more under its lock set, where it is
-    compared with the plan. (The pre-create SecretTarget read only
-    ``vm.template``, which a refresh cannot change, so the pre-refresh row
-    was safe to target; the nodes keep their construction row, whose
-    identity fields a refresh cannot change either.)
+    The plan's row can be stale: an ``agw vm recover`` or ``vm rekey`` that
+    finished since may have updated ``vms.tailscale_host``, and without the
+    reload the address check could spuriously raise. Inside the activation
+    gate create runs on the row the gate admitted instead
+    (:func:`_require_addressed`), which its lock set compares with the
+    database. (The pre-create SecretTarget read only ``vm.template``, which
+    a refresh cannot change, so the pre-refresh row was safe to target; the
+    nodes keep their construction row, whose identity fields a refresh
+    cannot change either.)
     """
     refreshed_vm = db.get_vm(target_vm_name)
     if refreshed_vm is None:
@@ -127,13 +126,18 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
             entity_kind="vm",
             entity_name=target_vm_name,
         )
-    if refreshed_vm.tailscale_host is None:
+    return _require_addressed(refreshed_vm)
+
+
+def _require_addressed(vm: VMRow) -> VMRow:
+    """``vm``, which must have a Tailscale address for create to reach it."""
+    if vm.tailscale_host is None:
         raise StateError(
-            f"VM '{refreshed_vm.name}' has no Tailscale address",
+            f"VM '{vm.name}' has no Tailscale address",
             entity_kind="vm",
-            entity_name=refreshed_vm.name,
+            entity_name=vm.name,
         )
-    return refreshed_vm
+    return vm
 
 
 def _preflight_and_resolve(
@@ -447,7 +451,8 @@ def create_session(
     probe_locks(db.path, request)
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
-        vm = _reload_vm(db, plan.target_vm_name)
+        # The row the gate admitted, which refused a deleted or replaced VM, and the one the set compares.
+        vm = _require_addressed(graph.vm_node.row)
         # Preflight precedes secret resolution and carries no workload values.
         secret_values = _preflight_and_resolve(
             db,
@@ -474,7 +479,7 @@ def create_session(
             else (walk_trees(vm, config, [graph.pending_workspace.workspace_path]),)
         )
         with graph.vm_node.locked(with_trees(request, *trees)) as held:
-            require_vm_unchanged(db, graph.vm_node.row)
+            require_vm_unchanged(db, vm)
             require_plan_rows_current()
             require_request_unchanged("session", plan.name, request, session_create_request(db, plan))
             for tree in trees:
