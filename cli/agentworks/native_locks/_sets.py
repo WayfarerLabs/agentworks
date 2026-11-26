@@ -30,8 +30,10 @@ class NativeLockBusyError(StateError):
     ``entity`` is the refused entity (also named by ``entity_kind`` and
     ``entity_name``), ``mode`` the mode this operation asked for it, and
     ``holder`` the live holder its record names, or ``None`` when no record
-    names one (an older agw, or a holder that is releasing). Code reads these fields; the message is for
-    people.
+    names one (an older agw, or a holder that is releasing).
+    ``restore_intent`` is set on a refusal that came after the command
+    recorded a new intent (:meth:`intent_stays_recorded`), and is ``None``
+    otherwise. Code reads these fields; the message is for people.
     """
 
     def __init__(self, request: LockRequest, refused: Entity, mode: LockMode, holder: HolderInfo | None) -> None:
@@ -51,6 +53,19 @@ class NativeLockBusyError(StateError):
         self.entity = refused
         self.mode = mode
         self.holder = holder
+        self.restore_intent: tuple[str, ...] | None = None
+
+    def intent_stays_recorded(self, restore: tuple[str, ...]) -> None:
+        """Mark this refusal as one after the command recorded a new intent, which stays recorded.
+
+        ``restore`` is the command that puts back the intent it replaced, or
+        ``()`` when that intent has no public form.
+        """
+        self.restore_intent = restore
+        if restore:
+            self.add_hint(f"The new intent stays recorded; restore the previous one with '{' '.join(restore)}'.")
+        else:
+            self.add_hint("The new intent stays recorded.")
 
 
 def format_duration(seconds: float) -> str:

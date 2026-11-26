@@ -480,3 +480,54 @@ def test_missing_host_record_refuses_console_start_before_accepting_intent(
     assert (_vm(db), _console(db), _session(db), db.list_console_sessions("con"), db._conn.total_changes) == before
     with native_locks(db.path, vm_exclusive("vm1")):
         pass
+
+
+@pytest.mark.parametrize(
+    ("operation", "previous", "restore"),
+    [
+        ("start", DesiredRuntimeState.STOPPED, ("agw", "console", "set-desired-state", "con", "stopped")),
+        ("start", None, ()),
+        ("start", DesiredRuntimeState.RUNNING, None),
+        ("stop", DesiredRuntimeState.RUNNING, ("agw", "console", "set-desired-state", "con", "running")),
+        ("stop", None, ()),
+        ("stop", DesiredRuntimeState.STOPPED, None),
+    ],
+    ids=["start-stopped", "start-legacy-null", "start-unchanged", "stop-running", "stop-legacy-null", "stop-unchanged"],
+)
+def test_a_console_refused_after_recording_its_intent_says_how_to_restore_it(
+    db: Database, monkeypatch, operation, previous, restore
+):
+    from contextlib import ExitStack
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.native_locks import NativeLockBusyError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.multi_console._helpers import console_request
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    db._conn.execute("UPDATE consoles SET desired_runtime_state = ? WHERE name = 'con'", (previous and previous.value,))
+    db._conn.commit()
+    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    with ExitStack() as other_operation:
+
+        def prepare_then_another_operation_takes_the_console(*args, **kwargs):
+            # Between the brief intent write and the final set, another operation takes the console.
+            other_operation.enter_context(native_locks(db.path, console_request(db, _console(db))))
+            return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+        monkeypatch.setattr(
+            "agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_another_operation_takes_the_console
+        )
+        command = mc.start_console if operation == "start" else mc.stop_console
+        with pytest.raises(NativeLockBusyError) as refused:
+            command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "console"
+    assert refused.value.restore_intent == restore
+    recorded = DesiredRuntimeState.RUNNING if operation == "start" else DesiredRuntimeState.STOPPED
+    assert _console(db).desired_runtime_state is recorded
