@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateConflictError
 
 if TYPE_CHECKING:
-    from agentworks.db import AgentRow, Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.db import AgentRow, ConsoleSessionRow, Database, SessionRow, VMRow, WorkspaceRow
 
 type Fields = tuple[object, ...] | None
 
@@ -57,6 +57,11 @@ def session_fields(row: SessionRow | None) -> Fields:
     return None if row is None else (row.session_uuid, row.workspace_name, row.agent_name, row.mode)
 
 
+def console_member_fields(row: ConsoleSessionRow | None) -> Fields:
+    """A console member's place in its console and its configured shells, what a window is rebuilt from."""
+    return None if row is None else (row.position, row.shells)
+
+
 def console_row_fields(db: Database, name: str) -> Fields:
     """The console's placement and its admin shell, without its members.
 
@@ -74,6 +79,11 @@ def console_fields(db: Database, name: str) -> Fields:
         return None
     members = tuple(member.session_name for member in db.list_console_sessions(name))
     return (console.vm_name, console.admin_shell, members)
+
+
+def require_session_unchanged(db: Database, name: str, read: SessionRow | None) -> None:
+    """Refuse when the session row differs from the one the command read before it took the guard."""
+    require_unchanged("session", name, session_fields(read), session_fields(db.get_session(name)))
 
 
 def require_vm_unchanged(db: Database, admitted: VMRow) -> None:

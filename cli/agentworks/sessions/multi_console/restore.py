@@ -292,7 +292,13 @@ def restore_session(
     a change refuses before the first tmux change.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.recheck import console_fields, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import (
+        console_fields,
+        console_member_fields,
+        require_session_unchanged,
+        require_unchanged,
+        require_vm_unchanged,
+    )
 
     from ._helpers import guarded_console_selection
 
@@ -312,7 +318,12 @@ def restore_session(
         """The console's guard, with the console, the member and the window observed again under it."""
         with guarded_console_selection(db, console_name):
             require_unchanged("console", console_name, read, console_fields(db, console_name))
-            require_unchanged("console", console_name, member, db.get_console_session(console_name, session_name))
+            require_unchanged(
+                "console",
+                console_name,
+                console_member_fields(member),
+                console_member_fields(db.get_console_session(console_name, session_name)),
+            )
             require_vm_unchanged(db, vm)
             again = _observe_window(run, admin, console_name=console_name, vm_name=vm.name, member=member)
             require_unchanged("console", console_name, observed, again)
@@ -378,6 +389,8 @@ def restore_session(
         values = resolver.values
         try:
             with guarded(run, admin, vm, observed):
+                # The session the window is rebuilt for, as read before the guard.
+                require_session_unchanged(db, session_name, session)
                 _apply_restore(
                     access,
                     db,

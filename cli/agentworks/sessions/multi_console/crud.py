@@ -168,7 +168,7 @@ def create_console(
     Live filtering (e.g. ``--all-running``) is resolved by the CLI layer into
     an explicit list of session names before calling this function.
     """
-    from agentworks.recheck import require_unchanged, require_vm_unchanged, session_fields
+    from agentworks.recheck import require_session_unchanged, require_vm_unchanged
 
     validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
 
@@ -273,13 +273,8 @@ def create_console(
                         hint="Run the command again with another name.",
                     )
                 require_vm_unchanged(db, vm)
-                for member in definition.members:
-                    require_unchanged(
-                        "session",
-                        member.session_name,
-                        session_fields(sessions_read[member.session_name]),
-                        session_fields(db.get_session(member.session_name)),
-                    )
+                for session_name, session_read in sessions_read.items():
+                    require_session_unchanged(db, session_name, session_read)
                 _mc._teardown_console_tmux(admin, name)
                 with db.transaction():
                     db.insert_console(name, vm_name, admin_shell=add_admin_shell)
@@ -352,7 +347,12 @@ def add_sessions(
     there, so a member another command added meanwhile is kept.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.recheck import console_row_fields, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import (
+        console_row_fields,
+        require_session_unchanged,
+        require_unchanged,
+        require_vm_unchanged,
+    )
 
     from ._helpers import guarded_console_selection
 
@@ -379,6 +379,8 @@ def add_sessions(
         for position, spec in enumerate(specs)
     )
 
+    # The sessions the new windows are built for, as read before their secrets resolve.
+    sessions_read = {member.session_name: db.get_session(member.session_name) for member in new_members}
     for member in new_members:
         if db.get_console_session(console_name, member.session_name) is not None:
             raise AlreadyExistsError(
@@ -421,6 +423,8 @@ def add_sessions(
     with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
         require_unchanged("console", console_name, read, console_row_fields(db, console_name))
         require_vm_unchanged(db, vm_row)
+        for session_name, session_read in sessions_read.items():
+            require_session_unchanged(db, session_name, session_read)
         with db.transaction():
             current_order = [member.session_name for member in db.list_console_sessions(console_name)]
             current_names = set(current_order)
@@ -694,7 +698,12 @@ def add_shell(
     is appended to the member's shell list as read there.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.recheck import console_row_fields, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import (
+        console_row_fields,
+        require_session_unchanged,
+        require_unchanged,
+        require_vm_unchanged,
+    )
 
     from ._helpers import guarded_console_selection
 
@@ -751,6 +760,7 @@ def add_shell(
         require_unchanged("console", console_name, read, console_row_fields(db, console_name))
         if vm_row is not None:
             require_vm_unchanged(db, vm_row)
+        require_session_unchanged(db, session_name, session_row)
         # The shell list is the one read under the guard, so a concurrent append is kept.
         cs = _require_member(db, console_name, session_name)
         new_shells = [*cs.shells, new_shell]

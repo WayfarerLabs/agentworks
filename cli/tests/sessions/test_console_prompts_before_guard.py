@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pytest
 
@@ -15,6 +16,8 @@ from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_regist
 from tests.console_helpers import create_console_record
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.db import Database
 
 
@@ -138,3 +141,43 @@ def test_add_sessions_refuses_a_console_replaced_before_the_guard(
         )
 
     assert [m.session_name for m in db.list_console_sessions("con")] == ["a"]
+
+
+def _replace_session(db: Database, name: str) -> None:
+    """Give the session row a new identity, keeping its console memberships."""
+    db._conn.execute("UPDATE sessions SET session_uuid = ? WHERE name = ?", (str(uuid4()), name))
+    db._conn.commit()
+
+
+@pytest.mark.parametrize(
+    "change", [lambda db: db.delete_session("b"), lambda db: _replace_session(db, "b")], ids=["deleted", "replaced"]
+)
+def test_add_sessions_refuses_a_session_changed_before_the_guard(
+    db: Database, monkeypatch: pytest.MonkeyPatch, change: Callable[[Database], None]
+) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    _resolving(db, monkeypatch, [], then=lambda: change(db))
+
+    with pytest.raises(StateConflictError):
+        mc.add_sessions(
+            db, _StubConfig(), console_name="con", session_specs=["b+1"], interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert [m.session_name for m in db.list_console_sessions("con")] == ["a"]
+
+
+def test_add_shell_refuses_a_session_replaced_before_the_guard(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_vm(db)
+    _seed_sessions(db, ["a"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    _resolving(db, monkeypatch, [], then=lambda: _replace_session(db, "a"))
+
+    with pytest.raises(StateConflictError):
+        mc.add_shell(
+            db, _StubConfig(), console_name="con", session_name="a", cwd="src", interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    member = db.get_console_session("con", "a")
+    assert member is not None and member.shells == []
