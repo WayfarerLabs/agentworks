@@ -817,3 +817,46 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     assert not any("ws-ws1" in c for c in target.commands)
     assert "All explicit grants revoked for agent 'a1'" in captured_output.info
     assert "agent still has implicit access via sessions to: ws1" in captured_output.warnings
+
+
+def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_added_since(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The confirmation named no sessions; one created after it is not what
+    the operator confirmed, so the delete refuses before any VM work."""
+    from agentworks import output as output_mod
+    from agentworks.errors import StateConflictError
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    unguarded: list[str] = []
+
+    def confirm(message: str, default: bool = False) -> bool:
+        with native_mutation_guard(db.path, "box"):
+            unguarded.append("confirm")
+        return True
+
+    resolve = Resolver.resolve
+
+    def resolve_then_a_session_appears(self: Resolver) -> None:
+        with native_mutation_guard(db.path, "box"):
+            unguarded.append("resolve")
+        resolve(self)
+        _seed_live_session(db, name="late", ws="ws1", agent="a1")
+
+    monkeypatch.setattr(output_mod, "confirm", confirm)
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_a_session_appears)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.delete_agent(db, config, name="a1", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert unguarded == ["confirm", "resolve"]
+    assert target.commands == []
+    assert db.get_agent("a1") is not None

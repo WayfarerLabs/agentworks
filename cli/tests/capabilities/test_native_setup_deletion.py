@@ -1,6 +1,5 @@
 """Parent deletion ignores native applied-state records while excluding concurrent setup."""
 
-from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -49,8 +48,8 @@ def deletion(db, tmp_path, monkeypatch):
     registry.add("harness-integration", "shell", HarnessIntegrationEntry("shell", origin), origin)
     registry.finalize()
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *a, **k: registry)
-    monkeypatch.setattr("agentworks.agents.manager.lifecycle.gated_vm_boundary", lambda *a, **k: nullcontext())
-    monkeypatch.setattr("agentworks.workspaces.manager.delete.gated_vm_boundary", lambda *a, **k: nullcontext())
+    monkeypatch.setattr("agentworks.agents.manager.lifecycle.gated_vm_boundary", admitting_boundary)
+    monkeypatch.setattr("agentworks.workspaces.manager.delete.gated_vm_boundary", admitting_boundary)
     # Session teardown and console cleanup run on the admin's access.
     install_access_recorder(monkeypatch)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")

@@ -27,8 +27,6 @@ from agentworks.vms.manager import gated_vm_boundary
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
     from pydantic import BaseModel
 
     from agentworks.agents.template import AgentTemplate
@@ -326,122 +324,139 @@ def delete_agent(
 
     vm = _require_vm(db, agent.vm_name)
 
+    import contextlib
+
     from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
 
-    with native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard) as guard:
-        from agentworks.execution.oplog import OperationLogFile
+    with contextlib.ExitStack() as held:
+        # Refuse a session row the owner rule rejects before any VM work.
+        from agentworks.sessions.manager import resolve_session_tmux_server
 
-        log = OperationLogFile(vm.name, "agent-delete")
-        try:
-            output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
-            # Refuse a session row the owner rule rejects before any VM work.
-            from agentworks.sessions.manager import resolve_session_tmux_server
+        for session in agent_sessions:
+            resolve_session_tmux_server(db, session)
+        if vm_node is None:
+            # The standalone composition root: build the boundary here. Its
+            # secrets resolve before the guard below.
+            from agentworks.bootstrap import load_request_registry
 
-            for session in agent_sessions:
-                resolve_session_tmux_server(db, session)
-            if vm_node is None:
-                # The standalone composition root: build the boundary here.
-                from agentworks.bootstrap import load_request_registry
-
-                registry = load_request_registry(config, live_database=db)
-                boundary: AbstractContextManager[object] = gated_vm_boundary(
+            registry = load_request_registry(config, live_database=db)
+            admitted, _resolver, _ctx = held.enter_context(
+                gated_vm_boundary(
                     db,
                     config,
                     registry,
                     vm,
                     scope=agent_scope(db, vm.name, name),
                     interaction=interaction,
-                    held_native_guard=guard,
                 )
-            else:
-                # The nested-teardown path: the caller's composition already
-                # converged the VM and holds its activation gate open across
-                # this unwind, so we compose no second boundary and resolve
-                # nothing; we re-enter only the keepalive hold, reaching the
-                # platform through the node's own site edge.
-                #
-                # That hold keeps the NODE's VM active, but the delete body
-                # issues its SSH + DB work against the agent's own VM (``vm``,
-                # the agent row's ``vm_name``). Enforce that they are the same
-                # VM: a mismatched node would silently hold one VM active while
-                # operating on another. Unreachable today (the pending nodes
-                # always pass their own ``self._vm``), so this is a loud guard
-                # on a teardown-wiring bug, not a runtime branch we expect to
-                # take.
-                if vm_node.row.name != vm.name:
+            )
+            admitted_vm = admitted.row
+        else:
+            # The nested-teardown path: the caller's composition already
+            # converged the VM and holds its activation gate open across
+            # this unwind, so we compose no second boundary and resolve
+            # nothing; we re-enter only the keepalive hold, reaching the
+            # platform through the node's own site edge.
+            #
+            # That hold keeps the NODE's VM active, but the delete body
+            # issues its SSH + DB work against the agent's own VM (``vm``,
+            # the agent row's ``vm_name``). Enforce that they are the same
+            # VM: a mismatched node would silently hold one VM active while
+            # operating on another. Unreachable today (the pending nodes
+            # always pass their own ``self._vm``), so this is a loud guard
+            # on a teardown-wiring bug, not a runtime branch we expect to
+            # take.
+            if vm_node.row.name != vm.name:
+                raise StateError(
+                    f"nested teardown of agent '{name}' was handed a VM "
+                    f"node for '{vm_node.row.name}', but the agent is on "
+                    f"'{vm.name}'; the node handed to a teardown must be the "
+                    f"entity's own VM node (teardown-wiring bug).",
+                    entity_kind="agent",
+                    entity_name=name,
+                )
+            held.enter_context(vm_node.hold_active())
+            admitted_vm = vm_node.row
+        held.enter_context(
+            native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard)
+        )
+        # What the confirmation showed: the agent and the sessions it named.
+        require_vm_unchanged(db, admitted_vm)
+        require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
+        require_unchanged(
+            "agent",
+            name,
+            [s.name for s in agent_sessions],
+            [s.name for s in db.list_sessions() if s.agent_name == name],
+        )
+
+        from agentworks.execution.oplog import OperationLogFile
+
+        log = OperationLogFile(vm.name, "agent-delete")
+        try:
+            output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
+            # Kill running sessions for this agent (status-aware)
+            if agent_sessions:
+                import agentworks.execution as execution
+                from agentworks.execution.access import Admin
+                from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
+
+                # The admin tears the agent's sessions down as the agent and owns the console windows.
+                admin = execution.vm_access(vm, config, Admin(), log=log.record)
+                agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
+                # Snapshot console memberships before db.delete_session cascades them.
+                console_pairs = [(c.name, s.name) for s in agent_sessions for c in db.list_consoles_for_session(s.name)]
+                unstoppable: list[str] = []
+                for session in agent_sessions:
+                    try:
+                        _teardown_session(
+                            session,
+                            access=admin,
+                            target_owns_session=False,
+                            db=db,
+                            force=True,
+                            legacy_running_authorized=True,
+                        )
+                    except Exception:
+                        unstoppable.append(session.name)
+                if unstoppable:
                     raise StateError(
-                        f"nested teardown of agent '{name}' was handed a VM "
-                        f"node for '{vm_node.row.name}', but the agent is on "
-                        f"'{vm.name}'; the node handed to a teardown must be the "
-                        f"entity's own VM node (teardown-wiring bug).",
+                        f"cannot delete agent '{name}': {len(unstoppable)} session(s) could not be stopped "
+                        f"({', '.join(unstoppable)}).",
                         entity_kind="agent",
                         entity_name=name,
+                        hint="Resolve the stuck sessions manually before retrying.",
                     )
-                boundary = vm_node.hold_active(held_native_guard=guard)
-            with boundary:
-                # Kill running sessions for this agent (status-aware)
-                if agent_sessions:
-                    import agentworks.execution as execution
-                    from agentworks.execution.access import Admin
-                    from agentworks.sessions.manager import _teardown_session, ensure_pids_batch
+                for session in agent_sessions:
+                    db.delete_session(session.name)
+                output.detail(f"Deleted {len(agent_sessions)} session(s)")
 
-                    # The admin tears the agent's sessions down as the agent and owns the console windows.
-                    admin = execution.vm_access(vm, config, Admin(), log=log.record)
-                    agent_sessions = ensure_pids_batch(agent_sessions, db=db, config=config)
-                    # Snapshot console memberships before db.delete_session cascades them.
-                    console_pairs = [
-                        (c.name, s.name) for s in agent_sessions for c in db.list_consoles_for_session(s.name)
-                    ]
-                    unstoppable: list[str] = []
-                    for session in agent_sessions:
-                        try:
-                            _teardown_session(
-                                session,
-                                access=admin,
-                                target_owns_session=False,
-                                db=db,
-                                force=True,
-                                legacy_running_authorized=True,
-                            )
-                        except Exception:
-                            unstoppable.append(session.name)
-                    if unstoppable:
-                        raise StateError(
-                            f"cannot delete agent '{name}': {len(unstoppable)} session(s) could not be stopped "
-                            f"({', '.join(unstoppable)}).",
-                            entity_kind="agent",
-                            entity_name=name,
-                            hint="Resolve the stuck sessions manually before retrying.",
-                        )
-                    for session in agent_sessions:
-                        db.delete_session(session.name)
-                    output.detail(f"Deleted {len(agent_sessions)} session(s)")
+                # Best-effort: take down dangling 'Waiting for session...' windows in
+                # any console that listed one of these sessions.
+                if console_pairs:
+                    from agentworks.sessions.multi_console import kill_session_windows
 
-                    # Best-effort: take down dangling 'Waiting for session...' windows in
-                    # any console that listed one of these sessions.
-                    if console_pairs:
-                        from agentworks.sessions.multi_console import kill_session_windows
+                    kill_session_windows(admin, pairs=console_pairs)
 
-                        kill_session_windows(admin, pairs=console_pairs)
+            # Remove from all workspace groups
+            from agentworks.agents.grants import remove_from_workspace_group
+            from agentworks.agents.initializer import delete_agent_on_vm
 
-                # Remove from all workspace groups
-                from agentworks.agents.grants import remove_from_workspace_group
-                from agentworks.agents.initializer import delete_agent_on_vm
+            granted_workspaces = db.list_granted_workspaces(name)
+            for ws_name in granted_workspaces:
+                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
 
-                granted_workspaces = db.list_granted_workspaces(name)
-                for ws_name in granted_workspaces:
-                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
+            delete_agent_on_vm(vm, config, agent.linux_user, logger=log)
 
-                delete_agent_on_vm(vm, config, agent.linux_user, logger=log)
+            db.delete_agent(name)
 
-                db.delete_agent(name)
+            # Refresh operator SSH config so the per-agent block disappears.
+            from agentworks.ssh_config import sync_ssh_config
 
-                # Refresh operator SSH config so the per-agent block disappears.
-                from agentworks.ssh_config import sync_ssh_config
+            sync_ssh_config(config, db)
 
-                sync_ssh_config(config, db)
-
-                output.info(f"Agent '{name}' deleted")
+            output.info(f"Agent '{name}' deleted")
 
         finally:
             log.close()

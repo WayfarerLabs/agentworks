@@ -74,7 +74,8 @@ def delete_workspace(
     path_known = stored_path is not None
 
     # Check for sessions
-    session_count = len(db.list_sessions(workspace_name=name))
+    session_names = [s.name for s in db.list_sessions(workspace_name=name)]
+    session_count = len(session_names)
     if session_count > 0 and not force:
         raise StateError(
             f"workspace '{name}' has {session_count} session(s).",
@@ -102,167 +103,171 @@ def delete_workspace(
         if not output.confirm(msg):
             raise UserAbort("delete cancelled")
 
+    import contextlib
+
     from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
 
-    with native_mutation_guard(
-        db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard
-    ) as guard:
-        import contextlib
+    vm = db.get_vm(ws.vm_name)
+    if vm is not None:
+        # Refuse a session row the owner rule rejects before any VM work.
+        from agentworks.sessions.manager import resolve_session_tmux_server
 
-        with operation_log(ws.vm_name, "workspace-delete") as log:
-            output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
+        for session in db.list_sessions(workspace_name=name):
+            resolve_session_tmux_server(db, session)
+    with contextlib.ExitStack() as _keepalive_stack:
+        if vm is not None:
+            if vm_node is None:
+                # The standalone composition root: build the boundary here.
+                # Its secrets resolve before the guard below.
+                from agentworks.bootstrap import load_request_registry
 
-            # Kill running sessions (status-aware) and delete session records
-            vm = db.get_vm(ws.vm_name)
-            # console_pairs is populated only when we reach the VM; the
-            # post-delete cleanup is best-effort and skips when admin is None.
-            admin: VMAccess | None = None
-            console_pairs: list[tuple[str, str]] = []
-            if vm is not None:
-                # Refuse a session row the owner rule rejects before any VM work.
-                from agentworks.sessions.manager import resolve_session_tmux_server
-
-                for session in db.list_sessions(workspace_name=name):
-                    resolve_session_tmux_server(db, session)
-            with contextlib.ExitStack() as _keepalive_stack:
-                if vm is not None:
-                    if vm_node is None:
-                        # The standalone composition root: build the boundary here.
-                        from agentworks.bootstrap import load_request_registry
-
-                        registry = load_request_registry(config, live_database=db)
-                        _keepalive_stack.enter_context(
-                            gated_vm_boundary(
-                                db,
-                                config,
-                                registry,
-                                vm,
-                                scope=_workspace_scope(db, vm, name),
-                                interaction=interaction,
-                                held_native_guard=guard,
-                            )
-                        )
-                    else:
-                        # The nested-teardown path: the caller's composition
-                        # already converged the VM and holds its activation gate
-                        # open across this unwind, so we compose no second
-                        # boundary and resolve nothing; we re-enter only the
-                        # keepalive hold, reaching the platform through the
-                        # node's own site edge.
-                        #
-                        # That hold keeps the NODE's VM active, but the delete
-                        # body issues its SSH + DB work against the workspace's
-                        # own VM (``ws.vm_name``). Enforce that they are the same
-                        # VM: a mismatched node would silently hold one VM active
-                        # while operating on another. Unreachable today (the
-                        # pending nodes always pass their own ``self._vm``), so
-                        # this is a loud guard on a teardown-wiring bug, not a
-                        # runtime branch we expect to take.
-                        if vm_node.row.name != ws.vm_name:
-                            raise StateError(
-                                f"nested teardown of workspace '{name}' was "
-                                f"handed a VM node for '{vm_node.row.name}', but "
-                                f"the workspace is on '{ws.vm_name}'; the node "
-                                f"handed to a teardown must be the entity's own "
-                                f"VM node (teardown-wiring bug).",
-                                entity_kind="workspace",
-                                entity_name=name,
-                            )
-                        _keepalive_stack.enter_context(vm_node.hold_active(held_native_guard=guard))
-
-                if vm is not None and vm.tailscale_host is not None:
-                    from agentworks.sessions.manager import (
-                        _identity_access,
-                        _teardown_session,
-                        ensure_pids_batch,
-                    )
-
-                    # The admin tears an agent's session down as that agent and owns the console windows.
-                    admin = _identity_access(vm, config, None, logger=log)
-                    sessions = db.list_sessions(workspace_name=name)
-                    sessions = ensure_pids_batch(sessions, db=db, config=config)
-                    # Snapshot console memberships before the FK cascade clears them.
-                    console_pairs = [(c.name, s.name) for s in sessions for c in db.list_consoles_for_session(s.name)]
-                    unstoppable: list[str] = []
-                    for session in sessions:
-                        try:
-                            _teardown_session(
-                                session,
-                                access=admin,
-                                target_owns_session=session.mode == SessionMode.ADMIN.value,
-                                db=db,
-                                force=True,
-                                legacy_running_authorized=True,
-                            )
-                        except Exception:
-                            unstoppable.append(session.name)
-                    if unstoppable:
-                        raise StateError(
-                            f"cannot delete workspace '{name}': {len(unstoppable)} session(s) could not be stopped "
-                            f"({', '.join(unstoppable)}).",
-                            entity_kind="workspace",
-                            entity_name=name,
-                            hint="Resolve the stuck sessions manually before retrying.",
-                        )
-                if vm is not None and path_known:
-                    from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
-                    from agentworks.sessions.manager import _identity_access
-
-                    cleanup_workspace_excludes(
+                registry = load_request_registry(config, live_database=db)
+                admitted, _resolver, _ctx = _keepalive_stack.enter_context(
+                    gated_vm_boundary(
                         db,
-                        ws,
-                        lambda: _identity_access(vm, config, None, logger=log),
-                        redactions=log.redactions,
+                        config,
+                        registry,
+                        vm,
+                        scope=_workspace_scope(db, vm, name),
+                        interaction=interaction,
                     )
-                if vm is not None and admin is not None:
-                    from agentworks.artifacts.session import cleanup_session_artifacts
-                    from agentworks.harness_setup.state import read_native_setup
-                    from agentworks.sessions.manager import _session_access
+                )
+                vm = admitted.row
+            else:
+                # The nested-teardown path: the caller's composition
+                # already converged the VM and holds its activation gate
+                # open across this unwind, so we compose no second
+                # boundary and resolve nothing; we re-enter only the
+                # keepalive hold, reaching the platform through the
+                # node's own site edge.
+                #
+                # That hold keeps the NODE's VM active, but the delete
+                # body issues its SSH + DB work against the workspace's
+                # own VM (``ws.vm_name``). Enforce that they are the same
+                # VM: a mismatched node would silently hold one VM active
+                # while operating on another. Unreachable today (the
+                # pending nodes always pass their own ``self._vm``), so
+                # this is a loud guard on a teardown-wiring bug, not a
+                # runtime branch we expect to take.
+                if vm_node.row.name != ws.vm_name:
+                    raise StateError(
+                        f"nested teardown of workspace '{name}' was "
+                        f"handed a VM node for '{vm_node.row.name}', but "
+                        f"the workspace is on '{ws.vm_name}'; the node "
+                        f"handed to a teardown must be the entity's own "
+                        f"VM node (teardown-wiring bug).",
+                        entity_kind="workspace",
+                        entity_name=name,
+                    )
+                _keepalive_stack.enter_context(vm_node.hold_active())
+                vm = vm_node.row
+        _keepalive_stack.enter_context(
+            native_mutation_guard(db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard)
+        )
+        # What the confirmation showed: the workspace and the sessions it counted.
+        if vm is not None:
+            require_vm_unchanged(db, vm)
+        require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
+        require_unchanged("workspace", name, session_names, [s.name for s in db.list_sessions(workspace_name=name)])
+        log = _keepalive_stack.enter_context(operation_log(ws.vm_name, "workspace-delete"))
+        output.info(f"Deleting workspace '{name}' on VM '{ws.vm_name}'...")
+        # console_pairs is populated only when we reach the VM; the
+        # post-delete cleanup is best-effort and skips when admin is None.
+        admin: VMAccess | None = None
+        console_pairs: list[tuple[str, str]] = []
+        if vm is not None and vm.tailscale_host is not None:
+            from agentworks.sessions.manager import (
+                _identity_access,
+                _teardown_session,
+                ensure_pids_batch,
+            )
 
-                    for session in db.list_sessions(workspace_name=name):
-                        try:
-                            if not any(
-                                record.artifact_files
-                                for record in read_native_setup(db, "session", session.name).records
-                            ):
-                                continue
-                            cleanup_session_artifacts(
-                                db, session, _session_access(session, vm=vm, config=config, db=db, logger=log)
-                            )
-                        except Exception:
-                            output.warn(
-                                f"Private artifact cleanup for session '{session.name}' could not finish. "
-                                f"Check ~/{AGENTWORKS_ARTIFACTS}/session/{session.session_uuid} in that session user's "
-                                "home; remaining files will no longer have managed cleanup evidence after deletion."
-                            )
-                db.delete_sessions_for_workspace(name)
+            # The admin tears an agent's session down as that agent and owns the console windows.
+            admin = _identity_access(vm, config, None, logger=log)
+            sessions = db.list_sessions(workspace_name=name)
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
+            # Snapshot console memberships before the FK cascade clears them.
+            console_pairs = [(c.name, s.name) for s in sessions for c in db.list_consoles_for_session(s.name)]
+            unstoppable: list[str] = []
+            for session in sessions:
+                try:
+                    _teardown_session(
+                        session,
+                        access=admin,
+                        target_owns_session=session.mode == SessionMode.ADMIN.value,
+                        db=db,
+                        force=True,
+                        legacy_running_authorized=True,
+                    )
+                except Exception:
+                    unstoppable.append(session.name)
+            if unstoppable:
+                raise StateError(
+                    f"cannot delete workspace '{name}': {len(unstoppable)} session(s) could not be stopped "
+                    f"({', '.join(unstoppable)}).",
+                    entity_kind="workspace",
+                    entity_name=name,
+                    hint="Resolve the stuck sessions manually before retrying.",
+                )
+        if vm is not None and path_known:
+            from agentworks.harness_setup.cleanup import cleanup_workspace_excludes
+            from agentworks.sessions.manager import _identity_access
 
-                # Best-effort: take down dangling 'Waiting for session...' windows in any
-                # console that listed one of these sessions. Skips when the VM was
-                # not reached (VM down or never had a tailnet host).
-                if admin is not None and console_pairs:
-                    from agentworks.sessions.multi_console import kill_session_windows
+            cleanup_workspace_excludes(
+                db,
+                ws,
+                lambda: _identity_access(vm, config, None, logger=log),
+                redactions=log.redactions,
+            )
+        if vm is not None and admin is not None:
+            from agentworks.artifacts.session import cleanup_session_artifacts
+            from agentworks.harness_setup.state import read_native_setup
+            from agentworks.sessions.manager import _session_access
 
-                    kill_session_windows(admin, pairs=console_pairs)
+            for session in db.list_sessions(workspace_name=name):
+                try:
+                    if not any(
+                        record.artifact_files for record in read_native_setup(db, "session", session.name).records
+                    ):
+                        continue
+                    cleanup_session_artifacts(
+                        db, session, _session_access(session, vm=vm, config=config, db=db, logger=log)
+                    )
+                except Exception:
+                    output.warn(
+                        f"Private artifact cleanup for session '{session.name}' could not finish. "
+                        f"Check ~/{AGENTWORKS_ARTIFACTS}/session/{session.session_uuid} in that session user's "
+                        "home; remaining files will no longer have managed cleanup evidence after deletion."
+                    )
+        db.delete_sessions_for_workspace(name)
 
-                # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
-                if vm is not None:
-                    from agentworks.agents.grants import revoke_workspace_grants
+        # Best-effort: take down dangling 'Waiting for session...' windows in any
+        # console that listed one of these sessions. Skips when the VM was
+        # not reached (VM down or never had a tailnet host).
+        if admin is not None and console_pairs:
+            from agentworks.sessions.multi_console import kill_session_windows
 
-                    revoke_workspace_grants(db, config, name, vm)
+            kill_session_windows(admin, pairs=console_pairs)
 
-                if vm is not None and stored_path is not None:
-                    from agentworks.workspaces.backends.vm import delete_vm_workspace
+        # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
+        if vm is not None:
+            from agentworks.agents.grants import revoke_workspace_grants
 
-                    delete_vm_workspace(vm, config, stored_path, ws.linux_group, logger=log)
-                elif vm is not None:
-                    from agentworks.workspaces.backends.vm import delete_vm_workspace_keeping_files
+            revoke_workspace_grants(db, config, name, vm)
 
-                    delete_vm_workspace_keeping_files(vm, config, ws.linux_group, logger=log)
+        if vm is not None and stored_path is not None:
+            from agentworks.workspaces.backends.vm import delete_vm_workspace
 
-                # Remove .code-workspace file
-                vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"
-                vscode_path.unlink(missing_ok=True)
+            delete_vm_workspace(vm, config, stored_path, ws.linux_group, logger=log)
+        elif vm is not None:
+            from agentworks.workspaces.backends.vm import delete_vm_workspace_keeping_files
 
-                db.delete_workspace(name)
-                output.info(f"Workspace '{name}' deleted")
+            delete_vm_workspace_keeping_files(vm, config, ws.linux_group, logger=log)
+
+        # Remove .code-workspace file
+        vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"
+        vscode_path.unlink(missing_ok=True)
+
+        db.delete_workspace(name)
+        output.info(f"Workspace '{name}' deleted")

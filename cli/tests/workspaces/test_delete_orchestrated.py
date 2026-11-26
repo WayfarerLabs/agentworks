@@ -458,3 +458,43 @@ def test_delete_of_a_stored_trailing_slash_removes_the_link_not_its_target(
     assert not link.is_symlink()
     assert (physical / "kept").read_text() == "contents"
     assert db.get_workspace("ws1") is None
+
+
+def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_added_since(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import output as output_mod
+    from agentworks.errors import StateConflictError
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    seed(db)
+    reachable(monkeypatch, True)
+    unguarded: list[str] = []
+
+    def confirm(message: str, default: bool = False) -> bool:
+        with native_mutation_guard(db.path, "box"):
+            unguarded.append("confirm")
+        return True
+
+    resolve = Resolver.resolve
+
+    def resolve_then_a_session_appears(self: Resolver) -> None:
+        with native_mutation_guard(db.path, "box"):
+            unguarded.append("resolve")
+        resolve(self)
+        seed_live_session(db, name="late", ws="ws1")
+
+    monkeypatch.setattr(output_mod, "confirm", confirm)
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_a_session_appears)
+
+    with pytest.raises(StateConflictError):
+        workspace_manager.delete_workspace(db, config, "ws1", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert unguarded == ["confirm", "resolve"]
+    assert guest.requests == []
+    assert db.get_workspace("ws1") is not None
