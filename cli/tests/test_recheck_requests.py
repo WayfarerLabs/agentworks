@@ -15,8 +15,6 @@ from agentworks.native_locks import (
 )
 from agentworks.recheck import require_request_unchanged
 
-pytestmark = pytest.mark.windows
-
 WORKSPACE = workspace_entity("box", "ws")
 ACCOUNT = account_entity("box", "admin")
 

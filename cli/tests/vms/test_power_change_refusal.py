@@ -15,6 +15,8 @@ from agentworks.vms.manager import runtime as vm_runtime
 from tests.runtime_state.runtime_support import REFUSE, seed_vm
 from tests.runtime_state.runtime_support import runtime as runtime
 
+pytestmark = pytest.mark.windows
+
 
 @pytest.mark.parametrize(
     ("operation", "previous", "restore"),
