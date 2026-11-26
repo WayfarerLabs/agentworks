@@ -9,7 +9,9 @@ that resource with one consistent shape:
 - ``--yes`` otherwise: REPORT it is now empty and name the manual delete
   command, but leave it in place.
 - ordinary delete failures warn and continue after the primary work succeeded.
-  Cancellation always propagates.
+  A delete that refuses because the resource changed since it was chosen
+  (``StateConflictError``) kept it on purpose, so it is reported as kept,
+  with no command to delete it. Cancellation always propagates.
 
 :func:`cleanup_now_empty_resource` is the single home for that shape. It was
 extracted from three near-identical copies in the sessions manager (the
@@ -19,7 +21,7 @@ and should call it as-is with ``created=False`` (a console is never
 session-created, so it never auto-deletes under ``--yes``).
 
 The module imports only :mod:`agentworks.output` and
-:class:`agentworks.errors.AgentworksError`, so both ``sessions.manager`` and
+:mod:`agentworks.errors`, so both ``sessions.manager`` and
 ``sessions.multi_console`` can import it without an import cycle.
 """
 
@@ -28,7 +30,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import AgentworksError, UserAbort
+from agentworks.errors import AgentworksError, StateConflictError, UserAbort
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,7 +64,8 @@ def cleanup_now_empty_resource(
             console (never session-created), which routes it to report-but-keep
             under ``--yes`` without a special case.
         delete: Performs the delete (already bound with ``yes=True`` and the
-            real deleter). Any :class:`AgentworksError` it raises is caught and
+            real deleter). A :class:`StateConflictError` it raises reports the
+            resource as kept; any other :class:`AgentworksError` is caught and
             downgraded to a warning; cancellation and other exceptions propagate.
         manual_command: The command to name in report / failure messages, e.g.
             ``"agw workspace delete ws-1"``.
@@ -82,6 +85,9 @@ def cleanup_now_empty_resource(
             delete()
         except UserAbort:
             raise
+        except StateConflictError as exc:
+            # The delete refused under its guard: what was chosen changed, so it stays.
+            output.info(f"{noun} '{name}' was kept: it changed since cleanup chose it ({exc}).")
         except AgentworksError as exc:
             output.warn(f"Could not delete empty {kind} '{name}': {exc}. Remove it with '{manual_command}'.")
 

@@ -15,10 +15,13 @@ import pytest
 
 from agentworks import output
 from agentworks.db import SessionRow
+from agentworks.errors import AgentworksError, ConnectivityError, StateConflictError
 from agentworks.execution.requests import Command
 from agentworks.execution.results import Completed, Result
+from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
+from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.manager._queries import _cleanup_now_empty_agent, _cleanup_now_empty_workspace
 from tests.workspaces._lifecycle_support import Guest, argv, reachable, route, seed
 from tests.workspaces._lifecycle_support import guest as guest
@@ -29,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db import Database
+    from tests.conftest import CapturedOutput
 
 
 def _deleted_session(*, agent_name: str | None = None) -> SessionRow:
@@ -149,3 +153,30 @@ def test_with_nothing_committed_meanwhile_cleanup_deletes_the_workspace_and_then
 
     assert db.get_workspace("ws1") is None
     assert db.get_agent("a1") is None
+
+
+@pytest.mark.parametrize(
+    ("refusal", "warned"),
+    [(StateConflictError("changed"), False), (ConnectivityError("unreachable"), True)],
+    ids=["changed-since-chosen", "failed"],
+)
+def test_a_delete_refused_as_changed_reports_the_resource_kept_and_any_other_failure_warns(
+    captured_output: CapturedOutput, refusal: AgentworksError, warned: bool
+) -> None:
+    """A conflict kept the resource on purpose, so nothing warns or offers a command to delete it."""
+
+    def delete() -> None:
+        raise refusal
+
+    cleanup_now_empty_resource(
+        kind="workspace",
+        name="ws1",
+        created=True,
+        delete=delete,
+        manual_command="agw workspace delete ws1",
+        yes=True,
+        empty_clause="now has no sessions",
+        report_clause="now has no sessions",
+    )
+
+    assert any(role is Role.WARNING for role, _level, _message in captured_output.lines) is warned
