@@ -941,3 +941,47 @@ def test_delete_refuses_a_grant_added_between_its_probe_and_its_lock(
     assert ran
     assert db.get_agent("a1") is not None
     assert not any("userdel" in c for c in target.commands)
+
+
+def test_delete_tears_down_the_session_rows_as_they_are_under_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    synced: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A session whose recorded runtime changed after the confirmation is torn down by its current row."""
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions import manager as sessions_manager
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _seed_live_session(db, name="s1", ws="ws1", agent="a1")
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_session_restarts(self: Resolver) -> None:
+        resolve(self)
+        before = db.get_session("s1")
+        assert before is not None
+        db.update_session_runtime(
+            "s1",
+            socket_path=before.socket_path,
+            pid=5151,
+            boot_id=before.boot_id,
+            tmux_server_start_ticks=before.tmux_server_start_ticks,
+        )
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_session_restarts)
+    monkeypatch.setattr(sessions_manager, "ensure_pids_batch", lambda sessions, **k: sessions)
+    torn_down: list[int | None] = []
+
+    monkeypatch.setattr(
+        sessions_manager, "_teardown_session", lambda session, **k: torn_down.append(getattr(session, "pid", None))
+    )
+
+    agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert torn_down == [5151]
+    assert db.get_agent("a1") is None

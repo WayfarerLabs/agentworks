@@ -56,6 +56,7 @@ from .attach import (
     _session_linux_user,
 )
 from .runtime import validate_console_window
+from .secrets_env import _require_pane_secrets_resolved
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
@@ -266,14 +267,6 @@ def create_console(
         access = _console_pane_access(db, config, vm, admin, resolver=resolver, members=definition.members)
         secret_values = resolver.values
         try:
-            _mc._validate_console_build_values(
-                db,
-                registry,
-                console=definition,
-                vm=vm,
-                members=definition.members,
-                values=secret_values,
-            )
             # Every secret is resolved: the console's set is taken before the first
             # change, and what the definition was built from is read again.
             with vm_node.locked(create_request):
@@ -287,6 +280,22 @@ def create_console(
                 require_vm_unchanged(db, vm)
                 for session_name, session_read in sessions_read.items():
                     require_session_unchanged(db, session_name, session_read)
+                _require_pane_secrets_resolved(
+                    _mc._console_build_secret_targets(
+                        db, registry, console=definition, vm=vm, members=definition.members
+                    ),
+                    secret_values,
+                    console_name=name,
+                )
+                # Every new shell's environment composes from the rows as they are under the lock.
+                _mc._validate_console_build_values(
+                    db,
+                    registry,
+                    console=definition,
+                    vm=vm,
+                    members=definition.members,
+                    values=secret_values,
+                )
                 _mc._teardown_console_tmux(admin, name)
                 with db.transaction():
                     db.insert_console(name, vm_name, admin_shell=add_admin_shell)
@@ -444,6 +453,17 @@ def add_sessions(
             require_session_unchanged(db, session_name, session_read)
         # The console's tmux as it is now: one started or stopped while the secrets resolved is synced accordingly.
         sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
+        if sync.access is not None:
+            # The running console's new panes compose from the rows as they are now.
+            _require_pane_secrets_resolved(
+                [
+                    target
+                    for member in new_members
+                    for target in _mc._member_secret_targets(db, registry, vm=vm_row, member=member)
+                ],
+                secret_values,
+                console_name=console_name,
+            )
         with db.transaction():
             current_order = [member.session_name for member in db.list_console_sessions(console_name)]
             current_names = set(current_order)
@@ -787,6 +807,14 @@ def add_shell(
         new_shells = [*cs.shells, new_shell]
         # The console's tmux as it is now: one started or stopped while the secret resolved is synced accordingly.
         sync = _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
+        if sync.access is not None and session_row is not None and vm_row is not None:
+            # The running console's new pane composes from the rows as they are now.
+            pane_now = _mc._pane_secret_target(
+                db, registry, vm=vm_row, session=session_row, is_admin_pane=runs_as_admin
+            )
+            _require_pane_secrets_resolved(
+                [] if pane_now is None else [pane_now], secret_values, console_name=console_name
+            )
         db.update_console_shells(console_name, session_name, new_shells)
         user_tag = "admin" if runs_as_admin else "agent"
         output.result(

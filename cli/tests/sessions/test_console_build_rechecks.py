@@ -112,8 +112,14 @@ def test_create_refuses_what_changed_before_its_lock(
 # -- restore-session -----------------------------------------------------------
 
 
-def _restorable(db: Database, monkeypatch: pytest.MonkeyPatch) -> TmuxModel:
-    """Console ``con`` whose member ``b`` configures three shells, with the window missing the middle one."""
+def _restorable(
+    db: Database, monkeypatch: pytest.MonkeyPatch, *, window: bool = True, real_targets: bool = False
+) -> TmuxModel:
+    """Console ``con`` whose member ``b`` configures three shells, with the window missing the middle one.
+
+    Without ``window`` the whole window is missing. With ``real_targets`` the
+    panes' secret targets come from the stored bindings rather than a stub.
+    """
     _seed_vm(db, with_tailscale=True)
     _seed_sessions(db, ["a", "b"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["a", "b+3"])
@@ -122,10 +128,12 @@ def _restorable(db: Database, monkeypatch: pytest.MonkeyPatch) -> TmuxModel:
     def targets(*_args: object, member: ConsoleSessionRow, **_kwargs: object) -> list[SecretTarget]:
         return [SecretTarget(vm={}, label=f"console-pane:{shell['cwd']}") for shell in member.shells]
 
-    monkeypatch.setattr(mc, "_member_secret_targets", targets)
+    if not real_targets:
+        monkeypatch.setattr(mc, "_member_secret_targets", targets)
     model = TmuxModel()
     model.seed_session(CON, "a")
-    model.seed_window(CON, "b", pane_tags=(None, 0, 2))
+    if window:
+        model.seed_window(CON, "b", pane_tags=(None, 0, 2))
     return model
 
 
@@ -153,9 +161,8 @@ def test_restore_resolves_with_nothing_locked(
         lambda db, model: _replace_session(db, "b"),
         lambda db, model: db.update_vm_tailscale("vm1", "100.64.0.250"),
         lambda db, model: model.kill_window(CON, "b"),
-        lambda db, model: db.update_workspace_path("ws-vm1", "/home/me/rehomed"),
     ],
-    ids=["member-shells-changed", "session-replaced", "vm-changed", "window-changed", "workspace-rehomed"],
+    ids=["member-shells-changed", "session-replaced", "vm-changed", "window-changed"],
 )
 def test_restore_refuses_what_changed_before_its_lock(
     db: Database,
@@ -172,11 +179,12 @@ def test_restore_refuses_what_changed_before_its_lock(
         _restore(db)
 
 
+@pytest.mark.parametrize("window", [True, False], ids=["missing-panes", "missing-window"])
 def test_restore_opens_no_pane_in_a_workspace_rehomed_while_its_secrets_resolved(
-    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch, window: bool
 ) -> None:
     """The panes would start in the path read before the rehome; the restore refuses and leaves tmux as it was."""
-    model = _restorable(db, monkeypatch)
+    model = _restorable(db, monkeypatch, window=window)
     console_guest_factory(model)
     _resolving(db, monkeypatch, then=lambda: db.update_workspace_path("ws-vm1", "/home/me/rehomed"))
     before = model.pane_rows(CON, "b")
@@ -185,3 +193,39 @@ def test_restore_opens_no_pane_in_a_workspace_rehomed_while_its_secrets_resolved
         _restore(db)
 
     assert model.pane_rows(CON, "b") == before
+
+
+def _rebind_admin_env_to_a_new_secret(db: Database) -> None:
+    """What ``vm reinit --admin-spec`` saves: an admin layer whose env references a secret nothing resolved yet."""
+    from agentworks.instance_specs import parse_admin_instance_spec, replace_vm_admin_overlay
+
+    replace_vm_admin_overlay(db, "vm1", parse_admin_instance_spec('{"env": {"TOKEN": {"secret": "new-token"}}}'))
+
+
+def test_restore_refuses_panes_whose_env_gained_a_secret_while_its_secrets_resolved(
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = _restorable(db, monkeypatch, real_targets=True)
+    console_guest_factory(model)
+    _resolving(db, monkeypatch, then=lambda: _rebind_admin_env_to_a_new_secret(db))
+    before = model.pane_rows(CON, "b")
+
+    with pytest.raises(StateConflictError):
+        _restore(db)
+
+    assert model.pane_rows(CON, "b") == before
+
+
+def test_create_refuses_panes_whose_env_gained_a_secret_while_its_secrets_resolved(
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    guest = console_guest_factory(TmuxModel())
+    _resolving(db, monkeypatch, then=lambda: _rebind_admin_env_to_a_new_secret(db))
+
+    with pytest.raises(StateConflictError):
+        _create(db)
+
+    assert db.get_console("con") is None
+    assert not any("new-session" in command for command in guest.commands)

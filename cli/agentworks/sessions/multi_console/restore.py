@@ -33,6 +33,7 @@ from agentworks.sessions.tmux import ProbeStatus, access_run_command, exact_tmux
 from ._helpers import _require_console, tmux_session_name
 from .attach import _active_console_vm, _console_pane_access, _session_linux_user
 from .runtime import validate_console_window
+from .secrets_env import _require_pane_secrets_resolved
 from .tmux_build import _split_shell_pane
 
 if TYPE_CHECKING:
@@ -399,6 +400,9 @@ def restore_session(
                     workspace.name,
                     workspace_fields(workspace),
                     workspace_fields(db.get_workspace(workspace.name)),
+                )
+                _require_pane_secrets_resolved(
+                    _mc._member_secret_targets(db, registry, vm=vm, member=opening), values, console_name=console_name
                 )
                 _apply_restore(
                     access,

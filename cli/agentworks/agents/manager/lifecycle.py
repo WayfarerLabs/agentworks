@@ -428,6 +428,8 @@ def delete_agent(
             [s.name for s in agent_sessions],
             [s.name for s in db.list_sessions() if s.agent_name == name],
         )
+        # The sessions torn down below, as their rows are now; their names are the ones confirmed.
+        agent_sessions = [s for s in db.list_sessions() if s.agent_name == name]
 
         from agentworks.execution.oplog import OperationLogFile
 
