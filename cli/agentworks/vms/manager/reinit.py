@@ -21,7 +21,6 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.errors import StateError
 from agentworks.execution.access import Admin, Agent
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 from agentworks.linux_users import managed_home
 from agentworks.recheck import require_unchanged, vm_fields
@@ -33,6 +32,7 @@ from .boundary import _warn_legacy_release
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.db.instance_state import DesiredOverlayRecord
     from agentworks.debian import DebianRelease
     from agentworks.execution.access import VMAccess
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -81,7 +81,7 @@ def reinit_vm(
     # resources are published only once this VM's candidate is known (below).
     registry = load_request_registry(config, include_live_resources=False)
 
-    vm = read_vm = _require_vm(db, name)
+    vm = _require_vm(db, name)
     if vm.debian_release is not None:
         _warn_legacy_release(vm)
 
@@ -338,12 +338,12 @@ def reinit_vm(
 
             # Every prompt is answered: the VM's guard is held from here to the
             # end, and what the declarations were resolved from is read again.
-            guard = guarded.enter_context(native_mutation_guard(db.path, name))
+            guard = guarded.enter_context(vm_node.mutation_guard())
             require_unchanged(
                 "vm",
                 name,
-                (vm_fields(vm_node.row), read_vm.template, read_vm.admin_template, original_overlay),
-                _reinit_inputs(db, name),
+                _reinit_inputs(vm_node.row, original_overlay),
+                _reinit_inputs(db.get_vm(name), db.instance_state.get_desired_overlay("vm", name)),
             )
 
             # No command-root runup at reinit: reinit reaches the VM over
@@ -445,17 +445,9 @@ def reinit_vm(
         output.result(f"VM '{name}' reinitialized{suffix}.")
 
 
-def _reinit_inputs(db: Database, name: str) -> tuple[object, ...]:
-    """What reinit's declarations are resolved from, as read under its guard: the VM row and its stored bindings."""
-    current = db.get_vm(name)
-    if current is None:
-        return (None,)
-    return (
-        vm_fields(current),
-        current.template,
-        current.admin_template,
-        db.instance_state.get_desired_overlay("vm", name),
-    )
+def _reinit_inputs(row: VMRow | None, overlay: DesiredOverlayRecord | None) -> tuple[object, ...] | None:
+    """What reinit's declarations are resolved from: the VM's identity and intent, bindings and stored overlay."""
+    return None if row is None else (vm_fields(row), row.template, row.admin_template, overlay)
 
 
 def _warn_newly_observed_legacy(vm: VMRow, observed: DebianRelease) -> None:
