@@ -105,6 +105,8 @@ def runtime(monkeypatch):
     monkeypatch.setattr(ProxmoxPlatform, "stop", stop)
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", hold)
     monkeypatch.setattr("agentworks.vms.manager._await_tailnet", lambda *a, **k: None)
+    # The workstation's own Tailscale check: CI runners have no tailscale binary.
+    monkeypatch.setattr("agentworks.vms.manager.verify_tailscale_available", lambda: None)
     monkeypatch.setattr(manager, "check_session_status", lambda row, **k: statuses.get(row.name, SessionStatus.STOPPED))
     monkeypatch.setattr(
         manager,
