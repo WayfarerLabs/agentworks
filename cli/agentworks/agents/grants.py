@@ -197,7 +197,6 @@ def revoke_workspaces(
                 else:
                     remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
                 db.delete_agent_grant(agent_name, ws_name, "explicit")
-            db.delete_explicit_grants(agent_name)
             output.result(f"All explicit grants revoked for agent '{agent_name}'")
             if remaining_implicit:
                 output.warn(f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}")
