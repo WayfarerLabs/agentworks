@@ -1160,8 +1160,10 @@ still recorded, and rerunning it retries the removal.
 confirmation prompt. It signals the agent's processes and waits up to 5 seconds for them to end
 before it removes the Linux user and its home with `userdel -r`. A process that is still running, or
 a removal that fails (a `userdel` hook that vetoes it, or a home that cannot be removed), fails the
-delete with the agent still recorded, so rerunning `agent delete` retries the removal; an account
-already gone from the VM counts as removed.
+delete with the agent still recorded, so rerunning `agent delete` retries the removal; the error
+names the tool, and `agw vm logs <vm>` has its output. An account already gone from the VM counts as
+removed. When its home is still there (an earlier removal that failed on the home), the delete warns
+and names it: an agent of the same name cannot be created until you remove it.
 
 `agw agent shell` / `agw agent exec` are Agentworks-wrapped entry points; for raw SSH access to an
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under

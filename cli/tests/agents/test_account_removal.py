@@ -18,6 +18,7 @@ from agentworks.agents import manager as agent_manager
 from agentworks.errors import ExternalError, StateError
 from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Command
+from agentworks.linux_users import managed_home
 from agentworks.secrets.policy import TtyInteractionPolicy
 from tests.agents.test_delete_grant_revoke_orchestrated import _reachable, _seed
 from tests.vm_access_support import Call, guest_result, is_command_check, route_vm_access_to_guest
@@ -52,6 +53,8 @@ class _AccountGuest:
 
     def answer(self, call: Call) -> Result | None:
         request = call.request
+        if request == agent_initializer._home_entry(managed_home("agt-a1")):
+            return guest_result(0 if self.home else 1)
         if is_command_check(request) or not isinstance(request, Command):
             return None
         argv = request.argv
@@ -100,9 +103,10 @@ def test_a_process_that_outlives_the_wait_refuses_the_removal_and_keeps_the_row(
 ) -> None:
     guest.alive_polls = None
 
-    with pytest.raises(StateError):
+    with pytest.raises(StateError) as raised:
         _delete(db, config)
 
+    assert (raised.value.entity_kind, raised.value.entity_name) == ("agent", "a1")
     assert not guest.ran("userdel")
     assert guest.account and guest.home and guest.spool
     assert db.get_agent("a1") is not None
@@ -119,7 +123,9 @@ def test_processes_that_end_within_the_wait_let_the_removal_proceed(
     assert db.get_agent("a1") is None
 
 
-def test_an_account_already_gone_drops_the_row(db: Database, config: Any, guest: _AccountGuest) -> None:
+def test_an_account_already_gone_drops_the_row(
+    db: Database, config: Any, guest: _AccountGuest, captured_output: CapturedOutput
+) -> None:
     """``pgrep`` exits 2 for the missing user and ``userdel`` 6, and both count as done."""
     guest.account = guest.home = guest.spool = False
 
@@ -127,6 +133,20 @@ def test_an_account_already_gone_drops_the_row(db: Database, config: Any, guest:
 
     assert guest.ran("userdel")
     assert db.get_agent("a1") is None
+    assert not any(managed_home("agt-a1") in warning for warning in captured_output.warnings)
+
+
+def test_an_account_gone_with_its_home_left_drops_the_row_and_names_the_home(
+    db: Database, config: Any, guest: _AccountGuest, captured_output: CapturedOutput
+) -> None:
+    """An earlier ``userdel -r`` removed the account and failed on the home (exit 12); the rerun's exit 6 drops
+    the row and names what remains."""
+    guest.account = False
+
+    _delete(db, config)
+
+    assert db.get_agent("a1") is None
+    assert any(managed_home("agt-a1") in warning for warning in captured_output.warnings)
 
 
 @pytest.mark.parametrize("status", [1, 12], ids=["pre-hook-veto", "home-not-removed"])

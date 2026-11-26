@@ -440,11 +440,13 @@ def delete_agent(
             from agentworks.agents.grants import remove_from_workspace_group
             from agentworks.agents.initializer import delete_agent_on_vm
 
-            granted_workspaces = db.list_granted_workspaces(name)
-            for ws_name in granted_workspaces:
-                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
-
-            delete_agent_on_vm(vm, config, agent.linux_user, logger=log)
+            try:
+                for ws_name in db.list_granted_workspaces(name):
+                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
+                delete_agent_on_vm(vm, config, agent.linux_user, agent_name=name, logger=log)
+            except AgentworksError as error:
+                error.add_hint(f"The agent's row was kept; run 'agw agent delete {name}' again.")
+                raise
 
             db.delete_agent(name)
 

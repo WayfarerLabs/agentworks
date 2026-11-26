@@ -582,7 +582,7 @@ def _delete_on_recorder(
 
     with contextlib.suppress(CommandFailed):
         agent_initializer.delete_agent_on_vm(
-            vm, config, "agt-a1", logger=OperationLogFile("box", "test-delete-socket-dir")
+            vm, config, "agt-a1", agent_name="a1", logger=OperationLogFile("box", "test-delete-socket-dir")
         )
 
     requests = recorder.requests("run")

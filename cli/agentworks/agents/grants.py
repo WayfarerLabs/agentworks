@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.manager import agent_scope
-from agentworks.errors import NotFoundError, ValidationError
+from agentworks.errors import AgentworksError, NotFoundError, ValidationError
 from agentworks.execution.requests import Command
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
-from agentworks.vms.manager import gated_vm_boundary
+from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import ensure_group, remove_group_member
 
 if TYPE_CHECKING:
@@ -177,8 +177,20 @@ def revoke_workspaces(
             interaction=interaction,
         ) as (vm_node, _resolver, _ctx),
         vm_node.mutation_guard(),
+        operation_log(vm.name, "agent-revoke") as log,
     ):
         _require_agent_unchanged(db, vm_node.row, agent)
+
+        def remove_membership(ws_name: str) -> None:
+            """Remove the agent from ``ws_name``'s group, before its last grant row there goes."""
+            try:
+                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
+            except AgentworksError as error:
+                error.add_hint(
+                    f"The grant on '{ws_name}' was kept; run the same 'agw agent revoke-workspaces' command again."
+                )
+                raise
+
         if revoke_all:
             # Snapshot the granted workspaces BEFORE deleting any rows.
             # Taking it afterwards missed explicitly-granted-only
@@ -194,7 +206,7 @@ def revoke_workspaces(
                 if holds_other_grant(db, agent_name, ws_name, grant_type="explicit"):
                     remaining_implicit.append(ws_name)
                 else:
-                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
+                    remove_membership(ws_name)
                 db.delete_agent_grant(agent_name, ws_name, "explicit")
             output.result(f"All explicit grants revoked for agent '{agent_name}'")
             if remaining_implicit:
@@ -206,7 +218,7 @@ def revoke_workspaces(
                 db.delete_agent_grant(agent_name, ws_name, "explicit")
                 output.info(f"Revoked: {ws_name} (still has implicit access via sessions)")
             else:
-                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
+                remove_membership(ws_name)
                 db.delete_agent_grant(agent_name, ws_name, "explicit")
                 output.info(f"Revoked: {ws_name}")
         output.result(f"Revoked {output.count(len(workspace_names), 'workspace grant')} from agent '{agent_name}'")
@@ -225,8 +237,6 @@ def revoke_workspace_grants(
     """
     # Find agents that have grants for this workspace
     # We need to remove group membership for each
-    from agentworks.vms.manager import operation_log
-
     with operation_log(vm.name, "workspace-delete-grants") as log:
         for agent in db.list_agents(vm_name=vm.name):
             if db.has_any_grant(agent.name, ws_name):

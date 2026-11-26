@@ -34,6 +34,7 @@ from agentworks.vms.initializer.shell_env import (
     _write_agentworks_rc,
 )
 from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure
+from agentworks.workspaces.guest import REQUEST_FAILURES
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -67,15 +68,11 @@ def create_new_agent_user(
     useradd fails exclusively; the caller must not delete anything on that failure.
     Existing DB-owned agents instead use create_agent_on_vm's convergence path.
     """
-    import shlex
-
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
-    home = managed_home(linux_user)
     account = passwd_lookup(linux_user)
-    home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
     if (
         probe_presence(admin, account, absent_status=GETENT_NOT_FOUND_STATUS) is not None
-        or probe_presence(admin, home_entry, absent_status=TEST_FALSE_STATUS) is not None
+        or probe_presence(admin, _home_entry(managed_home(linux_user)), absent_status=TEST_FALSE_STATUS) is not None
     ):
         raise StateError(
             f"cannot create agent: unowned user or home already exists for '{linux_user}'",
@@ -84,6 +81,13 @@ def create_new_agent_user(
             hint="Choose another agent name or remove the unowned native account and home first.",
         )
     admin.run(Command(("useradd", "-m", "-U", "-s", f"/bin/{shell}", linux_user), elevated=True), check=True)
+
+
+def _home_entry(home: str) -> Script:
+    """Exits 0 when anything, a dangling link included, is at the home path ``home``, as root."""
+    import shlex
+
+    return Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
 
 
 def _require_retained_group(admin: VMAccess, linux_user: str, gid: str) -> None:
@@ -460,7 +464,10 @@ ACCOUNT_STOP_SECONDS = 5.0
 ACCOUNT_STOP_POLL_SECONDS = 0.25
 """Seconds between checks for the account's processes while removal waits."""
 
-USERDEL_REMOVED_STATUSES = frozenset({0, 6})
+USERDEL_ACCOUNT_ABSENT_STATUS = 6
+"""The ``userdel -r`` status for an account that does not exist."""
+
+USERDEL_REMOVED_STATUSES = frozenset({0, USERDEL_ACCOUNT_ABSENT_STATUS})
 """The ``userdel -r`` statuses after which the account is gone: 0, removed; 6, it did not exist."""
 
 
@@ -469,18 +476,22 @@ def delete_agent_on_vm(
     config: Config,
     linux_user: str,
     *,
+    agent_name: str,
     logger: InitLog | None = None,
 ) -> None:
-    """Remove an agent Linux user from a VM, along with related on-VM
+    """Remove agent ``agent_name``'s Linux user from a VM, along with related on-VM
     state: their processes are stopped, the per-agent tmux socket
     directory is cleaned up, and the user and home directory are removed.
 
-    Runs as root on the admin's access. Any failure raises its typed error
-    and leaves the account for a rerun: a process still alive
-    :data:`ACCOUNT_STOP_SECONDS` after the signal refuses the removal
-    before ``userdel`` runs, and a ``userdel -r`` status outside
-    :data:`USERDEL_REMOVED_STATUSES` raises ``CommandFailed``. A caller that
-    tracks the account in a row drops it only once this returns.
+    Runs as root on the admin's access. Any failure raises its typed error,
+    with a hint naming the tool and where its output is, and leaves the
+    account for a rerun: a process still alive :data:`ACCOUNT_STOP_SECONDS`
+    after the signal refuses the removal before ``userdel`` runs, and a
+    ``userdel -r`` status outside :data:`USERDEL_REMOVED_STATUSES` raises
+    ``CommandFailed``. When the account was already gone but its home is
+    not (an earlier ``userdel -r`` that removed the account and failed on
+    the home), it warns and names the home. A caller that tracks the
+    account in a row drops it only once this returns.
     """
     from agentworks.sessions.tmux import agent_socket_dir
 
@@ -498,16 +509,38 @@ def delete_agent_on_vm(
     # removes, and the sockets are already dead from the pkill above, so
     # this ordering is safe.
     admin.run(Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True)).require_completed(vm.name)
-    _await_account_stopped(admin, vm.name, linux_user)
+    _await_account_stopped(admin, vm.name, linux_user, agent_name=agent_name)
     # Remove the user and their home directory
     request = Command(("userdel", "-r", linux_user), elevated=True)
     result = admin.run(request)
     status = result.require_completed(vm.name)
     if status not in USERDEL_REMOVED_STATUSES:
-        raise CommandFailed(vm.name, status, result, streams_logged=request.log_streams)
+        error = CommandFailed(vm.name, status, result, streams_logged=request.log_streams)
+        error.add_hint(
+            f"'userdel -r {linux_user}' did not remove the Linux user and its home; "
+            f"run 'agw vm logs {vm.name}' for its output."
+        )
+        raise error
+    if status == USERDEL_ACCOUNT_ABSENT_STATUS:
+        _warn_leftover_home(admin, vm.name, linux_user)
 
 
-def _await_account_stopped(admin: VMAccess, vm_name: str, linux_user: str) -> None:
+def _warn_leftover_home(admin: VMAccess, vm_name: str, linux_user: str) -> None:
+    """Warn when the account was already gone but its home remains, which refuses a new agent of the same name."""
+    home = managed_home(linux_user)
+    try:
+        present = probe_presence(admin, _home_entry(home), absent_status=TEST_FALSE_STATUS) is not None
+    except REQUEST_FAILURES:
+        output.warn(f"Linux user '{linux_user}' was already gone; could not check whether its home {home} remains.")
+        return
+    if present:
+        output.warn(
+            f"Linux user '{linux_user}' was already gone, but its home {home} remains on VM '{vm_name}'. "
+            "Inspect it and remove it; an agent of the same name cannot be created while it is there."
+        )
+
+
+def _await_account_stopped(admin: VMAccess, vm_name: str, linux_user: str, *, agent_name: str) -> None:
     """Wait for ``pkill``'s signal to end the account's processes, raising when one outlives the wait.
 
     ``pgrep -u`` exits 0 while a process runs, 1 when none does and 2 when
@@ -525,9 +558,13 @@ def _await_account_stopped(admin: VMAccess, vm_name: str, linux_user: str) -> No
             raise CommandFailed(vm_name, status, result, streams_logged=request.log_streams)
         if deadline.expired:
             raise StateError(
-                f"account '{linux_user}' still has running processes on VM '{vm_name}', so it was not removed",
-                entity_kind="vm",
-                entity_name=vm_name,
-                hint="Stop the account's processes, then run the delete again.",
+                f"agent '{agent_name}' still has processes running as '{linux_user}' on VM '{vm_name}', "
+                "so its Linux user was not removed",
+                entity_kind="agent",
+                entity_name=agent_name,
+                hint=(
+                    f"Stop the processes 'pgrep -u {linux_user}' lists on the VM "
+                    f"('agw vm logs {vm_name}' has its output)."
+                ),
             )
         time.sleep(ACCOUNT_STOP_POLL_SECONDS)

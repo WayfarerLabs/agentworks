@@ -333,7 +333,13 @@ def _delete_session_runtime(
                     db, session.agent_name, session.workspace_name, grant_type="implicit", session_name=name
                 )
                 if agent and last_grant:
-                    remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
+                    try:
+                        remove_from_workspace_group(
+                            vm, config, db, agent.linux_user, session.workspace_name, logger=log
+                        )
+                    except AgentworksError as error:
+                        error.add_hint(f"The session and its grant were kept; run 'agw session delete {name}' again.")
+                        raise
             # The FK cascade on console_sessions removes the memberships with the row.
             db.delete_session(name)
             if session.agent_name:

@@ -131,14 +131,19 @@ def remove_group_member(access: VMAccess, user: str, group: str) -> None:
     ``usermod -r -G`` edits the group file under shadow's lock after reading
     it, so removals of different users from one group never restore each
     other's member. A status outside :data:`GROUP_MEMBER_ABSENT_STATUSES`
-    raises ``CommandFailed``; an outcome that is not a completion raises its
-    typed error.
+    raises ``CommandFailed``, its hint naming the command and where its
+    output is; an outcome that is not a completion raises its typed error.
     """
     request = Command(("usermod", "-r", "-G", group, user), elevated=True)
     result = access.run(request)
     status = result.require_completed(access.vm_name)
     if status not in GROUP_MEMBER_ABSENT_STATUSES:
-        raise CommandFailed(access.vm_name, status, result, streams_logged=request.log_streams)
+        error = CommandFailed(access.vm_name, status, result, streams_logged=request.log_streams)
+        error.add_hint(
+            f"'usermod -r -G {group} {user}' did not remove the membership; "
+            f"run 'agw vm logs {access.vm_name}' for its output."
+        )
+        raise error
 
 
 def open_parent_traversal(path: str) -> Script:
