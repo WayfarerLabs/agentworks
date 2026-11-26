@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import shlex
 from collections import Counter
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -36,10 +36,10 @@ from .runtime import validate_console_window
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
     from agentworks.config import Config
-    from agentworks.db import ConsoleSessionRow, Database, SessionRow
+    from agentworks.db import ConsoleSessionRow, Database, SessionRow, VMRow
     from agentworks.execution.access import VMAccess
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -287,49 +287,64 @@ def restore_session(
     checks the agents of only the panes it will open and resolves only their
     secrets, in one pass, before its first tmux change; a window with nothing
     missing prompts for nothing. Each pane it opens parks a fresh handover.
+    All of that runs before the console's family guard is taken; under it
+    the console, the member and the window are read and observed again, and
+    a change refuses before the first tmux change.
     """
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.recheck import console_fields, require_unchanged, require_vm_unchanged
+
     from ._helpers import guarded_console_selection
 
-    with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
-        from agentworks.bootstrap import load_request_registry
+    console = _require_console(db, console_name)
+    registry = load_request_registry(config, live_database=db)
+    member = db.get_console_session(console_name, session_name)
+    if member is None:
+        raise NotFoundError(
+            f"session '{session_name}' is not a member of console '{console_name}'",
+            entity_kind="console-member",
+            entity_name=session_name,
+        )
+    read = console_fields(db, console_name)
 
-        console = _require_console(db, console_name)
-        registry = load_request_registry(config, live_database=db)
-        member = db.get_console_session(console_name, session_name)
-        if member is None:
-            raise NotFoundError(
-                f"session '{session_name}' is not a member of console '{console_name}'",
-                entity_kind="console-member",
-                entity_name=session_name,
-            )
+    @contextmanager
+    def guarded(run: RunCommand, admin: VMAccess, vm: VMRow, observed: _WindowObservation) -> Iterator[None]:
+        """The console's guard, with the console, the member and the window observed again under it."""
+        with guarded_console_selection(db, console_name):
+            require_unchanged("console", console_name, read, console_fields(db, console_name))
+            require_unchanged("console", console_name, member, db.get_console_session(console_name, session_name))
+            require_vm_unchanged(db, vm)
+            again = _observe_window(run, admin, console_name=console_name, vm_name=vm.name, member=member)
+            require_unchanged("console", console_name, observed, again)
+            yield
 
-        # restore_session raises StateError/ExternalError on failure, so it's
-        # not a best-effort op (those are exempted from the keepalive sweep by
-        # base.VMPlatform.vm_active's docstring). The gate's held-active span
-        # wraps the SSH-heavy body so a freshly booted WSL2 distro doesn't
-        # idle out between the window probe and the pane reconciliation.
-        from agentworks.secrets.resolver import Resolver
+    # restore_session raises StateError/ExternalError on failure, so it's
+    # not a best-effort op (those are exempted from the keepalive sweep by
+    # base.VMPlatform.vm_active's docstring). The gate's held-active span
+    # wraps the SSH-heavy body so a freshly booted WSL2 distro doesn't
+    # idle out between the window probe and the pane reconciliation.
+    from agentworks.secrets.resolver import Resolver
 
-        with (
-            closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _active_console_vm(
-                db,
-                config,
-                console.vm_name,
-                registry=registry,
-                interaction=interaction,
-                resolver=resolver,
-                held_native_guard=held_native_guard,
-                # Restore learns which panes it opens only from the active VM.
-                targets=None,
-            ) as (vm, admin),
-        ):
-            run = access_run_command(admin, deadline=None, elevated=False)
-            observed = _observe_window(run, admin, console_name=console_name, vm_name=vm.name, member=member)
-            q_con = exact_tmux_target(tmux_session_name(console_name))
-            q_win = shlex.quote(session_name)
+    with (
+        closing(Resolver(config, registry, interaction=interaction)) as resolver,
+        _active_console_vm(
+            db,
+            config,
+            console.vm_name,
+            registry=registry,
+            interaction=interaction,
+            resolver=resolver,
+            # Restore learns which panes it opens only from the active VM.
+            targets=None,
+        ) as (vm, admin),
+    ):
+        run = access_run_command(admin, deadline=None, elevated=False)
+        observed = _observe_window(run, admin, console_name=console_name, vm_name=vm.name, member=member)
+        q_con = exact_tmux_target(tmux_session_name(console_name))
+        q_win = shlex.quote(session_name)
 
-            if observed.base_pidx is not None and not observed.missing:
+        if observed.base_pidx is not None and not observed.missing:
+            with guarded(run, admin, vm, observed):
                 window_order_changed = _reconcile_configured_window_order(db, run, console_name)
                 if window_order_changed:
                     output.result(f"Restored configured window order in console '{console_name}'.")
@@ -343,24 +358,25 @@ def restore_session(
                 _focus_session_pane(run, q_con, q_win, observed.base_pidx)
                 return
 
-            session, workspace_path = _restorable_session(db, session_name)
-            if observed.base_pidx is None:
-                # A rebuilt window binds its attach pane to the session's tmux server; refuse a bad one now.
-                validate_console_window(db, member, vm)
-            # Exactly the panes this restore opens: their agents are checked and
-            # their secrets resolve, and nothing else's.
-            opening = replace(member, shells=[member.shells[cidx] for cidx in observed.missing])
-            access = _console_pane_access(
-                db,
-                config,
-                vm,
-                admin,
-                resolver=resolver,
-                members=[opening],
-                targets=_mc._member_secret_targets(db, registry, vm=vm, member=opening),
-            )
-            values = resolver.values
-            try:
+        session, workspace_path = _restorable_session(db, session_name)
+        if observed.base_pidx is None:
+            # A rebuilt window binds its attach pane to the session's tmux server; refuse a bad one now.
+            validate_console_window(db, member, vm)
+        # Exactly the panes this restore opens: their agents are checked and
+        # their secrets resolve, and nothing else's.
+        opening = replace(member, shells=[member.shells[cidx] for cidx in observed.missing])
+        access = _console_pane_access(
+            db,
+            config,
+            vm,
+            admin,
+            resolver=resolver,
+            members=[opening],
+            targets=_mc._member_secret_targets(db, registry, vm=vm, member=opening),
+        )
+        values = resolver.values
+        try:
+            with guarded(run, admin, vm, observed):
                 _apply_restore(
                     access,
                     db,
@@ -373,8 +389,8 @@ def restore_session(
                     session=session,
                     workspace_path=workspace_path,
                 )
-            finally:
-                values.clear()
+        finally:
+            values.clear()
 
 
 def _apply_restore(

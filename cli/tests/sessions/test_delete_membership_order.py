@@ -1,12 +1,12 @@
-"""Session delete removes the agent's last workspace membership before it deletes the session and grant rows."""
+"""Session delete: its questions come before the guard, its re-checks under it, and the last membership goes first."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentworks.db import SessionStatus
+from agentworks.db import SessionMode, SessionStatus
 from agentworks.execution.errors import CommandFailed
 from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -15,7 +15,7 @@ from tests.sessions.test_delete_resource_cleanup import _prep_delete_session
 
 if TYPE_CHECKING:
     from agentworks.db import Database
-    from tests.conftest import _ScriptedGuest
+    from tests.conftest import CapturedOutput, _ScriptedGuest
 
 
 def _agent_session(db: Database) -> None:
@@ -75,3 +75,112 @@ def test_a_failed_membership_removal_keeps_the_session_and_grant_rows_for_a_reru
     assert removed == ["ws-vm1"]
     assert db.get_session("s") is None
     assert not db.has_any_grant("bot", "ws-vm1")
+
+
+def _guard_free(db: Database) -> bool:
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    try:
+        with native_mutation_guard(db.path, "vm1"):
+            return True
+    except NativeSetupBusyError:
+        return False
+
+
+@pytest.mark.parametrize("answer", [True, False], ids=["accepted", "declined"])
+def test_delete_asks_both_questions_unguarded_and_settles_the_console_it_offered(
+    db: Database,
+    scripted_guest: _ScriptedGuest,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: bool,
+    captured_output: CapturedOutput,
+) -> None:
+    """The confirmation and the offer for a console the delete will leave
+    empty are asked with no guard held; under it, an accepted console that is
+    empty is deleted and a declined one is kept without a report."""
+    from agentworks.sessions import manager as manager_mod
+
+    _prep_delete_session(db, monkeypatch)
+    db.insert_console("only", "vm1")
+    db.add_console_session("only", "s", [])
+    asked: list[tuple[str, bool]] = []
+
+    def confirm(message: str, default: bool = False) -> bool:
+        asked.append(("console" if "only" in message else "session", _guard_free(db)))
+        return answer if "only" in message else True
+
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", confirm)
+    monkeypatch.setattr("agentworks.workspaces.manager.delete_workspace", lambda *a, **k: None)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert asked[:2] == [("session", True), ("console", True)]
+    assert db.get_session("s") is None
+    assert (db.get_console("only") is None) is answer
+    if not answer:
+        # Declined, so kept without a report.
+        assert not any("only" in warning for warning in captured_output.warnings)
+
+
+def test_a_console_left_empty_without_an_offer_is_kept_and_reported(
+    db: Database,
+    scripted_guest: _ScriptedGuest,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """The console had another member when the delete asked, so it was offered
+    nothing; that member left before the guard, and the emptied console is kept."""
+    from agentworks.sessions import manager as manager_mod
+
+    _prep_delete_session(db, monkeypatch)
+    db.insert_session(
+        "t", "ws-vm1", "default", SessionMode.ADMIN, socket_path="/run/agentworks/admin-tmux-sockets/admin/t.sock"
+    )
+    db.insert_console("pair", "vm1")
+    db.add_console_session("pair", "s", [])
+    db.add_console_session("pair", "t", [])
+
+    from agentworks import recheck
+
+    def confirm(message: str, default: bool = False) -> bool:
+        assert "pair" not in message
+        return True
+
+    require_vm_unchanged = recheck.require_vm_unchanged
+
+    def the_other_member_left_before_the_guard(*args: Any, **kwargs: Any) -> None:
+        # The first re-check under the guard: the other member has left by now.
+        db.remove_console_session("pair", "t")
+        require_vm_unchanged(*args, **kwargs)
+
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.output.confirm", confirm)
+    monkeypatch.setattr(recheck, "require_vm_unchanged", the_other_member_left_before_the_guard)
+
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_session("s") is None
+    assert db.get_console("pair") is not None
+    assert any("pair" in warning for warning in captured_output.warnings)
+
+
+def test_a_status_that_changed_before_the_guard_refuses_the_delete(
+    db: Database,
+    scripted_guest: _ScriptedGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.sessions import manager as manager_mod
+
+    _prep_delete_session(db, monkeypatch)
+    statuses = iter([SessionStatus.STOPPED, SessionStatus.RUNNING])
+    monkeypatch.setattr(manager_mod, "check_session_status", lambda *a, **k: next(statuses))
+    torn_down: list[str] = []
+    monkeypatch.setattr(manager_mod, "_teardown_session", lambda session, **k: torn_down.append(session.name))
+
+    with pytest.raises(StateConflictError):
+        manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert torn_down == []
+    assert db.get_session("s") is not None

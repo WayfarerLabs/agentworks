@@ -29,7 +29,7 @@ def preflight_console_vm(
     registry: Registry,
     vm: VMRow,
     *,
-    held_native_guard: NativeMutationGuard,
+    held_native_guard: NativeMutationGuard | None = None,
     interaction: TtyInteractionPolicy,
 ) -> LiveVMNode:
     """Check known local VM and provider policies before accepting intent."""
@@ -234,13 +234,14 @@ def attach_running_console(
     name: str,
     interaction: TtyInteractionPolicy,
 ) -> int:
-    """Guard runtime preparation, then release the family during interaction."""
+    """Resolve the gate secrets unguarded, guard the start and the hold's admission, then attach unguarded."""
     from contextlib import ExitStack
 
     import agentworks.execution as execution
     from agentworks.bootstrap import load_request_registry
     from agentworks.execution.access import Admin
     from agentworks.execution.requests import TerminalCommand
+    from agentworks.recheck import console_fields, require_unchanged
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.tmux import ProbeStatus
     from agentworks.terminal import clear_screen_on_detach
@@ -254,34 +255,23 @@ def attach_running_console(
     resolver = None
     try:
         with ExitStack() as holds:
-            with guarded_console_selection(db, name) as (console, guard):
-                vm = db.get_vm(console.vm_name)
-                if vm is None:
-                    raise NotFoundError(
-                        f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name
-                    )
-                if vm.tailscale_host is None:
-                    raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
-                registry = load_request_registry(config, live_database=db)
-                require_vm_ssh_boundary(db, config, vm)
-                node = preflight_console_vm(
-                    db,
-                    config,
-                    registry,
-                    vm,
-                    held_native_guard=guard,
-                    interaction=interaction,
-                )
-                resolver = Resolver(config, registry, interaction=interaction)
-                context = prepare_vm_runtime(
-                    db,
-                    config,
-                    registry,
-                    vm,
-                    resolve_secret=resolver.resolve_gate,
-                    held_native_guard=guard,
-                    vm_node=node,
-                )
+            console = _require_console(db, name)
+            read = console_fields(db, name)
+            vm = db.get_vm(console.vm_name)
+            if vm is None:
+                raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
+            if vm.tailscale_host is None:
+                raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
+            registry = load_request_registry(config, live_database=db)
+            require_vm_ssh_boundary(db, config, vm)
+            node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
+            # The gate secrets resolve, and the VM is observed, before the guard.
+            resolver = Resolver(config, registry, interaction=interaction)
+            context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
+            # The guard spans the start, if the VM needs one, the hold's
+            # admission and the readiness probe, and ends before the attach.
+            with node.mutation_guard():
+                require_unchanged("console", name, read, console_fields(db, name))
                 if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
                     if context.observed_status is not VMStatus.RUNNING:
                         raise StateError(

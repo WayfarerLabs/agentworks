@@ -76,15 +76,6 @@ def cleanup_now_empty_resource(
             console offer and report wordings differ from each other.
     """
     noun = kind.capitalize()
-
-    def _run_delete() -> None:
-        try:
-            delete()
-        except UserAbort:
-            raise
-        except AgentworksError as exc:
-            output.warn(f"Could not delete empty {kind} '{name}': {exc}. Remove it with '{manual_command}'.")
-
     # The offer only fires when a prompt can actually be answered: without a
     # TTY (and without --yes) confirm() would EOF into UserAbort AFTER the
     # primary command already mutated state, so a scripted caller degrades to
@@ -95,9 +86,39 @@ def cleanup_now_empty_resource(
         # a short provenance cue so the operator recognizes what they made.
         provenance = "(created with this session) " if created else ""
         if output.confirm(f"{noun} '{name}' {provenance}{empty_clause}. Delete it?"):
-            _run_delete()
+            delete_or_warn(kind=kind, name=name, delete=delete, manual_command=manual_command)
     elif yes and created:
         output.detail(f"Deleting {kind} '{name}' (created with this session)...")
-        _run_delete()
+        delete_or_warn(kind=kind, name=name, delete=delete, manual_command=manual_command)
     else:
-        output.warn(f"{noun} '{name}' {report_clause}; delete it with '{manual_command}' if it is no longer needed.")
+        report_left_empty(kind=kind, name=name, manual_command=manual_command, report_clause=report_clause)
+
+
+def offer_delete_when_empty(*, kind: str, name: str, yes: bool, empty_clause: str) -> bool | None:
+    """Ask, before the command changes anything, whether to delete a resource its change will leave empty.
+
+    Returns the answer, or ``None`` when nothing was asked: under ``--yes``,
+    or without a terminal to answer on, the resource is kept and reported
+    instead (:func:`report_left_empty`). For a command that asks before it
+    takes the native mutation guard and settles the resource under it.
+    """
+    if yes or not output.is_interactive():
+        return None
+    return output.confirm(f"{kind.capitalize()} '{name}' {empty_clause}. Delete it?")
+
+
+def delete_or_warn(*, kind: str, name: str, delete: Callable[[], None], manual_command: str) -> None:
+    """Run ``delete``, turning an ordinary failure into a warning naming ``manual_command``; cancellation propagates."""
+    try:
+        delete()
+    except UserAbort:
+        raise
+    except AgentworksError as exc:
+        output.warn(f"Could not delete empty {kind} '{name}': {exc}. Remove it with '{manual_command}'.")
+
+
+def report_left_empty(*, kind: str, name: str, manual_command: str, report_clause: str) -> None:
+    """Say a kept resource is empty and how to delete it."""
+    output.warn(
+        f"{kind.capitalize()} '{name}' {report_clause}; delete it with '{manual_command}' if it is no longer needed."
+    )
