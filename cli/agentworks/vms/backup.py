@@ -78,7 +78,7 @@ def backup_vm(
     execution.resolve_ssh()
     registry = load_request_registry(config, live_database=db)
 
-    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
+    with gated_vm_boundary(db, config, registry, vm, interaction=interaction) as (vm_node, _resolver, _ctx):
         # Create backup directory first so the log goes inside it
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_name = f"{vm_name}-{timestamp}"
@@ -87,7 +87,8 @@ def backup_vm(
 
         # The log closes, with its footer, however the body ends, and any failure records backup_failed.
         with operation_log(vm_name, "vm-backup", path=backup_dir / "backup.log") as log:
-            access = execution.vm_access(vm, config, Admin(), log=log.record)
+            # The row the gate admitted.
+            access = execution.vm_access(vm_node.row, config, Admin(), log=log.record)
             db.insert_vm_event(vm_name, "backup_started")
             try:
                 return _back_up(db, access, vm_name, timestamp, backup_dir)

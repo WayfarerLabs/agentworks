@@ -73,11 +73,10 @@ def port_forward_vm(
     if not verbose:
         output.info("Use --verbose for detailed SSH output.")
 
-    access = execution.vm_access(vm, config, Admin())
-
-    # Run in foreground until interrupted
+    # Run in foreground until interrupted, at the address the gate admitted
     registry = load_request_registry(config, live_database=db)
-    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
+    with gated_vm_boundary(db, config, registry, vm, interaction=interaction) as (vm_node, _resolver, _ctx):
+        access = execution.vm_access(vm_node.row, config, Admin())
         return _hold_forward(access, forwards, verbose=verbose)
 
 

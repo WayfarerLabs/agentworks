@@ -125,8 +125,11 @@ def shell_vm(
         vm,
         targets=[_mgr._vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
         interaction=interaction,
-    ) as (_vm_node, resolver, _ops_ctx):
+    ) as (vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
+
+        # The body runs on the row the gate admitted.
+        vm = vm_node.row
 
         ctx = ResourceContext(
             vm_name=vm.name,
@@ -282,8 +285,11 @@ def exec_vm(
         vm,
         targets=[_mgr._vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
         interaction=interaction,
-    ) as (_vm_node, resolver, _ops_ctx):
+    ) as (vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
+
+        # The body runs on the row the gate admitted.
+        vm = vm_node.row
 
         ctx = ResourceContext(
             vm_name=vm.name,

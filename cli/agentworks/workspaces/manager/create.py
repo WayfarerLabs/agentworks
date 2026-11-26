@@ -317,9 +317,11 @@ def create_workspace(
         )
         from agentworks.workspaces.realize import realize_workspace
 
+        # The walk and the body run on the row the gate admitted, the one compared under the set.
+        vm = vm_node.row
         trees = walk_trees(vm, config, [pending_workspace.workspace_path])
         held = stack.enter_context(vm_node.locked(with_trees(request, trees)))
-        require_vm_unchanged(db, vm_node.row)
+        require_vm_unchanged(db, vm)
         require_unchanged("workspace", ws_name, None, workspace_fields(db.get_workspace(ws_name)))
         require_request_unchanged("vm", vm.name, request, workspace_create_request(db, vm, ws_name))
         require_trees_unchanged(vm, config, trees)

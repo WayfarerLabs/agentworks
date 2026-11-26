@@ -236,7 +236,9 @@ def create_agent(
             from agentworks.agents.realize import realize_agent
             from agentworks.recheck import require_request_unchanged, require_vm_unchanged
 
-            require_vm_unchanged(db, vm_node.row)
+            # The body runs on the row the gate admitted, the one compared here.
+            vm = vm_node.row
+            require_vm_unchanged(db, vm)
             require_request_unchanged(
                 "agent", name, request, agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
             )
@@ -736,7 +738,9 @@ def reinit_agent(
         # Every prompt is answered: the final set is held from here, and what
         # the setup was prepared from is read again under it.
         held = stack.enter_context(vm_node.locked(request))
-        require_vm_unchanged(db, vm_node.row)
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        require_vm_unchanged(db, vm)
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
         require_unchanged("agent", name, saved_declaration, _reinit_declaration(db, name))
         require_request_unchanged("agent", name, request, agent_reinit_request(db, agent))
