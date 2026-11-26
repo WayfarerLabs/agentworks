@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 import agentworks.sessions.multi_console as _mc
-from agentworks.errors import NotFoundError
+from agentworks.errors import NotFoundError, StateConflictError
 
 from .attach import _pane_runs_as_admin, _session_linux_user
 
@@ -228,6 +228,33 @@ def _member_secret_targets(
         if pane is not None:
             targets.append(pane)
     return targets
+
+
+def _require_pane_secrets_resolved(
+    targets: Sequence[SecretTarget],
+    values: Mapping[str, str],
+    *,
+    console_name: str,
+) -> None:
+    """Refuse panes whose environment now references a secret the command did not resolve.
+
+    A console command resolves its pane secrets before taking the guard, and
+    composes the panes' environments under it from the rows as they are
+    then. Under the guard it builds the panes' targets again from those rows
+    and calls this before its first change: a template or overlay rebound in
+    between may reference a secret no prompt asked for, which composing would
+    otherwise meet only after the console changed. A rebinding that needs no
+    new secret passes. It reads only ``values`` and never prompts.
+    """
+    for target in targets:
+        for entry in target.effective_env().values():
+            if entry.secret is not None and entry.secret not in values:
+                raise StateConflictError(
+                    f"console '{console_name}' changed since this command read it",
+                    entity_kind="console",
+                    entity_name=console_name,
+                    hint="Run the command again.",
+                )
 
 
 def _resolve_pane_env(

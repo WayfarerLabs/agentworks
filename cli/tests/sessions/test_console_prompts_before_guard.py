@@ -10,6 +10,7 @@ import pytest
 from agentworks import output
 from agentworks.errors import StateConflictError
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.secrets import SecretTarget
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.multi_console import crud
@@ -40,8 +41,8 @@ def _resolving(db: Database, monkeypatch: pytest.MonkeyPatch, during: list[bool]
             then()
         return {}
 
-    monkeypatch.setattr(mc, "_pane_secret_target", lambda *a, **k: object())
-    monkeypatch.setattr(mc, "_member_secret_targets", lambda *a, **k: [object()])
+    monkeypatch.setattr(mc, "_pane_secret_target", lambda *a, **k: SecretTarget(vm={}))
+    monkeypatch.setattr(mc, "_member_secret_targets", lambda *a, **k: [SecretTarget(vm={})])
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", resolve)
 
 
