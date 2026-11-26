@@ -170,7 +170,7 @@ def _parse(vm_name: str, paths: Sequence[str], stdout: bytes) -> tuple[PathWalk,
     links: list[str] = []
     for record in records:
         kind, name = record[:1], record[1:]
-        if not name.startswith("/") or len(walks) == len(paths):
+        if not _normalized(name) or len(walks) == len(paths):
             raise malformed
         if kind == "D":
             directories.append(name)
@@ -184,3 +184,10 @@ def _parse(vm_name: str, paths: Sequence[str], stdout: bytes) -> tuple[PathWalk,
     if len(walks) != len(paths) or directories or links:
         raise malformed
     return tuple(walks)
+
+
+def _normalized(name: str) -> bool:
+    """Whether ``name`` is an absolute path in normal form: ``/``, or components none empty, ``.`` or ``..``."""
+    if name == "/":
+        return True
+    return name.startswith("/") and all(part not in {"", ".", ".."} for part in name[1:].split("/"))

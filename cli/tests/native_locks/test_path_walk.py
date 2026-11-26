@@ -137,3 +137,14 @@ def test_unlink_only_follows_links_before_the_last_name_and_walks_a_final_dotdot
         PathWalk("/data/x/..", ("/data", "/p", "/p/q"), ("/data/x",), "/p"),
         PathWalk("/data/x/inner", ("/data", "/p", "/p/q"), ("/data/x",), "/p/q/inner"),
     ]
+
+
+@pytest.mark.parametrize("name", ["", "relative", "/a//b", "/a/./b", "/a/../b", "/a/"])
+@pytest.mark.parametrize("kind", ["D", "L", "F"])
+def test_a_walk_reporting_a_name_not_in_normal_form_refuses_as_malformed(kind: str, name: str) -> None:
+    access = RecordingVMAccess([], Admin())
+    final = "" if kind == "F" else "F/a/b\0"
+    access.answer = lambda call: Result(Completed(0), f"{kind}{name}\0{final}".encode())
+    with pytest.raises(StateError) as refused:
+        walk_paths(access, ["/a/b"])
+    assert type(refused.value) is StateError
