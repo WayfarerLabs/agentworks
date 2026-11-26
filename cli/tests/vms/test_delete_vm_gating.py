@@ -928,7 +928,7 @@ def test_backend_delete_failure_keeps_the_host_key_record(
     assert trust.has_record("dvm")
 
 
-def test_delete_removes_the_host_key_record_even_when_the_ssh_config_rebuild_fails(
+def test_delete_removes_the_host_key_record_and_only_warns_when_the_ssh_config_rebuild_fails(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -943,11 +943,11 @@ def test_delete_removes_the_host_key_record_even_when_the_ssh_config_rebuild_fai
 
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", _boom)
 
-    with pytest.raises(RuntimeError):
-        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
     assert not trust.has_record("dvm")
+    assert any("read-only home" in warning for warning in captured_output.warnings)
 
 
 def test_delete_resolves_its_secrets_with_no_guard_held(

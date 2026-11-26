@@ -449,9 +449,9 @@ def delete_agent(
             db.delete_agent(name)
 
             # Refresh operator SSH config so the per-agent block disappears.
-            from agentworks.ssh_config import sync_ssh_config
+            from agentworks.ssh_config import sync_ssh_config_or_warn
 
-            sync_ssh_config(config, db)
+            sync_ssh_config_or_warn(config, db)
 
             output.info(f"Agent '{name}' deleted")
 

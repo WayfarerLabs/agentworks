@@ -329,16 +329,17 @@ def delete_vm(
         # Remove from DB (cascades workspaces and agents), then rebuild SSH config
         db.delete_vm(name)
 
-        from agentworks.ssh_config import sync_ssh_config
+        from agentworks.ssh_config import sync_ssh_config_or_warn
 
-        # The store file goes whenever the VM's row goes, even if the SSH config
-        # rebuild raises. Reaching here means the platform delete succeeded (it
-        # raises, keeping the row and the record, when it cannot remove the
+        # The store file goes whenever the VM's row goes, and the SSH config is
+        # rebuilt even if that removal raises; a failed rebuild only warns, as
+        # the delete is done. Reaching here means the platform delete succeeded
+        # (it raises, keeping the row and the record, when it cannot remove the
         # backend VM) or --force removed a row whose backend was not deleted.
         try:
             trust.remove(name)
         finally:
-            sync_ssh_config(config, db)
+            sync_ssh_config_or_warn(config, db)
         output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
 
 
@@ -418,7 +419,7 @@ def rekey_vm(
     from agentworks.execution.access import Admin
     from agentworks.execution.root_script import ChannelUnreachable
     from agentworks.orchestration.activation import activation_gate
-    from agentworks.ssh_config import sync_ssh_config
+    from agentworks.ssh_config import sync_ssh_config_or_warn
     from agentworks.vms import recovery
 
     require_exact_tty_interaction_policy(interaction)
@@ -505,7 +506,7 @@ def rekey_vm(
             # Update DB and SSH config with the new IP (correct regardless of
             # reachability: the old IP is definitely dead after logout)
             db.update_vm_tailscale(name, new_ip)
-            sync_ssh_config(config, db)
+            sync_ssh_config_or_warn(config, db)
             db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
 
             # If the operator needs to share the VM back, pause before connectivity check

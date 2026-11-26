@@ -230,7 +230,7 @@ def _reestablish_trust(db: Database, config: Config, vm: VMRow, platform: VMPlat
     verified: the operator compares the fingerprints with the VM's console. A
     refusal records nothing and stops.
     """
-    from agentworks.ssh_config import sync_ssh_config
+    from agentworks.ssh_config import sync_ssh_config_or_warn
 
     keys = platform.read_host_keys(vm, ctx)
     output.info(f"VM '{vm.name}' has no recorded host key. It reports:")
@@ -240,4 +240,4 @@ def _reestablish_trust(db: Database, config: Config, vm: VMRow, platform: VMPlat
     if not output.confirm(f"Record these host keys for VM '{vm.name}'?", default=False):
         raise UserAbort("host keys not recorded")
     trust.write_records(vm.name, keys)
-    sync_ssh_config(config, db)
+    sync_ssh_config_or_warn(config, db)

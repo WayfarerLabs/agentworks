@@ -18,6 +18,7 @@ from agentworks.harness_setup.state import write_native_setup
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.ssh_config import sync_ssh_config
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
 from tests.conftest import admitting_boundary, guarding_node
@@ -274,3 +275,29 @@ def test_workspace_delete_keeps_parent_policy_for_unreadable_session_artifacts(
     delete_workspace(db, deletion.config, "project", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
     assert db.get_workspace("project") is None and db.get_session("session") is None
     assert deletion.removed == ["workspace"]
+
+
+@pytest.mark.parametrize("kind", ["agent", "vm"])
+def test_a_completed_delete_only_warns_when_the_ssh_config_rebuild_lock_is_held(
+    db, deletion, monkeypatch, captured_output, kind
+):
+    """The rows are gone once the rebuild runs, so a rebuild that cannot take its turn warns instead of failing."""
+    from agentworks import ssh_config_lock
+
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", sync_ssh_config)
+    monkeypatch.setattr(ssh_config_lock, "WAIT_SECONDS", 0.05)
+
+    def boundary(db, _config, vm, **kwargs):
+        site = SimpleNamespace(platform=SimpleNamespace(delete=lambda vm, ctx: None))
+        return guarding_node(db, vm, site=site), Mock()
+
+    monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
+    with ssh_config_lock.ssh_config_rebuild_lock():
+        if kind == "agent":
+            delete_agent(db, deletion.config, name="agent", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        else:
+            delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_agent("agent") is None
+    assert (db.get_vm("box") is None) is (kind == "vm")
+    assert any("SSH config sync failed" in warning for warning in captured_output.warnings)
