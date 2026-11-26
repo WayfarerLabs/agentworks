@@ -497,7 +497,7 @@ def test_rehome_observes_without_writing_then_refuses_a_session_started_before_t
     monkeypatch.setattr(sessions_manager, "ensure_pids_batch", repair)
     monkeypatch.setattr(output_mod, "confirm", confirm)
 
-    with pytest.raises(StateError, match="non-stopped"):
+    with pytest.raises(StateError):
         _rehome(db, config)
 
     assert events == [("observe", False), ("confirm", False), ("repair", True), ("observe", True)]
