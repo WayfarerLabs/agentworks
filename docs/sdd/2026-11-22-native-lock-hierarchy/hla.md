@@ -49,8 +49,8 @@ graph TD
 - **vm**: the VM itself: power, provider state, trust records, VM-wide initialization.
 - **workspace** and **account**: a workspace directory with its group, and an account on the VM (an
   agent's, or the admin's). An account's lock covers the account, its home, its socket directory and
-  its harness setup; a native tool home the setup is pointed at outside the account's home is locked
-  as a path ([Shared state across entities](#shared-state-across-entities-r5)).
+  its harness setup; the native tool home the setup writes is also locked as a path
+  ([Shared state across entities](#shared-state-across-entities-r5)).
 - **session**: one session, below both its workspace and its account.
 - **grant**: one agent's membership in one workspace's group, below both. Grant and revoke, the
   implicit grant of session create, and grant-all materialization lock it.
@@ -202,12 +202,14 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   the account's home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`), and two accounts may share
   that directory. Settings writes there are compare-and-swaps, but plugin and marketplace setup runs
   the native tool's own CLI, which is not, and today only the VM lock keeps two accounts' setups
-  apart. So such a directory is locked exclusive as a `path`. It is what the account's login
-  exports, which may not exist yet or may change during the operation, or what an earlier setup
-  recorded, for an integration being retired. So it is predicted before locking from the declared
-  environment, the recorded setup and, for a reinit, the current login, and wherever the setup opens
-  the native tool on a real home it first checks that the directory is covered; one that is not is
-  left unreconciled and reported incomplete, with `agent reinit` as the repair.
+  apart. So every agent's tool home is locked exclusive as a `path`, inside the account's home or
+  not, since a directory inside one account's home can be shared with another. It is what the
+  account's login exports, which may not exist yet or may change during the operation, or what an
+  earlier setup recorded, for an integration being retired. So it is predicted before locking from
+  the declared environment, the recorded setup and, for a reinit, the current login, and before the
+  setup's first write to it (settings, MCP entries or the native tool) the setup checks that the
+  directory it settled on is covered; one that is not is left unwritten and reported incomplete,
+  with `agent reinit` as the repair.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
