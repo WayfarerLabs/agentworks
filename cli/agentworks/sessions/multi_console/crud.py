@@ -120,10 +120,14 @@ def _probe_live_sync(
     """Probe the console's live tmux and, when it is running, check the agents of ``members``' shell panes.
 
     The probe is read-only. Only a running console has panes to park, so only
-    then does ``console_access`` check each agent's direct SSH, here, before
-    the edit resolves or records anything; a refused agent stops it with its
-    reinit hint. Otherwise the edit is recorded and the live sync stays best
-    effort (``_LiveSync.running``).
+    then does ``console_access`` check each agent's direct SSH; a refused
+    agent stops the edit with its reinit hint. Otherwise the edit is recorded
+    and the live sync stays best effort (``_LiveSync.running``).
+
+    An edit probes twice. Before its secrets resolve, so a refused agent
+    stops it before any prompt; and again under the guard, before it records
+    anything, because another command may start or stop the console while
+    the secrets resolve. The live sync acts on the second probe only.
     """
     live = _mc._live_access(db, config, vm_name)
     if live is None:
@@ -343,8 +347,9 @@ def add_sessions(
     console's tmux session is live, the windows are also added immediately
     (best-effort). The added shells' secrets resolve before the family guard
     is taken; under it the console and its VM are read again, a change
-    refuses, and the positions are derived from the member list as read
-    there, so a member another command added meanwhile is kept.
+    refuses, the positions are derived from the member list as read there,
+    so a member another command added meanwhile is kept, and the console's
+    tmux is probed again for the live sync.
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.recheck import (
@@ -391,7 +396,8 @@ def add_sessions(
         validate_console_window(db, member, vm_row)
 
     registry = load_request_registry(config, live_database=db)
-    sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
+    # A running console's pane agents are checked before any secret is asked for.
+    _probe_live_sync(db, config, console_name, console.vm_name, new_members)
 
     # Eager-prompting orchestration: when any spec carries shells > 0 the
     # live-attach path below will open new shells via _add_session_window.
@@ -425,6 +431,8 @@ def add_sessions(
         require_vm_unchanged(db, vm_row)
         for session_name, session_read in sessions_read.items():
             require_session_unchanged(db, session_name, session_read)
+        # The console's tmux as it is now: one started or stopped while the secrets resolved is synced accordingly.
+        sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
         with db.transaction():
             current_order = [member.session_name for member in db.list_console_sessions(console_name)]
             current_names = set(current_order)
@@ -694,8 +702,9 @@ def add_shell(
     console is live, also splits the pane immediately (best-effort).
 
     The pane's secrets resolve before the family guard is taken; under it
-    the console and its VM are read again, a change refuses, and the shell
-    is appended to the member's shell list as read there.
+    the console and its VM are read again, a change refuses, the shell is
+    appended to the member's shell list as read there, and the console's
+    tmux is probed again for the live sync.
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.recheck import (
@@ -714,8 +723,8 @@ def add_shell(
 
     registry = load_request_registry(config, live_database=db)
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
-    new_shells = [*cs.shells, new_shell]
-    sync = _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
+    # A running console's pane agent is checked before any secret is asked for.
+    _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
 
     # Eager-prompting orchestration: resolve any
     # secrets referenced by this pane's env chain BEFORE the DB write +
@@ -764,6 +773,8 @@ def add_shell(
         # The shell list is the one read under the guard, so a concurrent append is kept.
         cs = _require_member(db, console_name, session_name)
         new_shells = [*cs.shells, new_shell]
+        # The console's tmux as it is now: one started or stopped while the secret resolved is synced accordingly.
+        sync = _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
         db.update_console_shells(console_name, session_name, new_shells)
         user_tag = "admin" if runs_as_admin else "agent"
         output.result(

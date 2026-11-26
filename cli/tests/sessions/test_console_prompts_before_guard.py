@@ -12,6 +12,8 @@ from agentworks.errors import StateConflictError
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions import multi_console as mc
+from agentworks.sessions.multi_console import crud
+from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
 from tests.console_helpers import create_console_record
 
@@ -181,3 +183,57 @@ def test_add_shell_refuses_a_session_replaced_before_the_guard(db: Database, mon
 
     member = db.get_console_session("con", "a")
     assert member is not None and member.shells == []
+
+
+_STARTED = (ProbeStatus.ABSENT, ProbeStatus.PRESENT)
+_STOPPED = (ProbeStatus.PRESENT, ProbeStatus.ABSENT)
+
+
+def _live_console(db: Database, monkeypatch: pytest.MonkeyPatch, presence: list[ProbeStatus]) -> list[str]:
+    """Give the console a live VM whose tmux presence is ``presence[0]``, and record the windows and panes synced."""
+    vm = db.get_vm("vm1")
+    monkeypatch.setattr(mc, "_live_access", lambda *a, **k: (vm, object()))
+    monkeypatch.setattr(mc, "_console_tmux_presence", lambda *a, **k: presence[0])
+    synced: list[str] = []
+    monkeypatch.setattr(mc, "_add_session_window", lambda *a, member, **k: synced.append(member.session_name))
+    monkeypatch.setattr(crud, "_split_shell_pane", lambda *a, window_name, **k: synced.append(window_name))
+    monkeypatch.setattr(crud, "_resolve_workspace_path", lambda *a, **k: "/home/me/vm1")
+    for tmux_step in ("access_run_command", "_reorder_session_windows", "_reorder_shell_panes", "_apply_layout"):
+        monkeypatch.setattr(crud, tmux_step, lambda *a, **k: None)
+    return synced
+
+
+@pytest.mark.parametrize(("before", "after"), [_STARTED, _STOPPED], ids=["started", "stopped"])
+def test_add_sessions_syncs_the_console_as_it_is_under_the_guard(
+    db: Database, monkeypatch: pytest.MonkeyPatch, before: ProbeStatus, after: ProbeStatus
+) -> None:
+    """A console started or stopped while the secrets resolved gets its new windows only if it runs now."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    presence = [before]
+    synced = _live_console(db, monkeypatch, presence)
+    _resolving(db, monkeypatch, [], then=lambda: presence.__setitem__(0, after))
+
+    mc.add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"], interaction=TtyInteractionPolicy.REFUSE)
+
+    assert synced == (["b"] if after is ProbeStatus.PRESENT else [])
+
+
+@pytest.mark.parametrize(("before", "after"), [_STARTED, _STOPPED], ids=["started", "stopped"])
+def test_add_shell_syncs_the_console_as_it_is_under_the_guard(
+    db: Database, monkeypatch: pytest.MonkeyPatch, before: ProbeStatus, after: ProbeStatus
+) -> None:
+    """A console started or stopped while the secret resolved gets its new pane only if it runs now."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    presence = [before]
+    synced = _live_console(db, monkeypatch, presence)
+    _resolving(db, monkeypatch, [], then=lambda: presence.__setitem__(0, after))
+
+    mc.add_shell(
+        db, _StubConfig(), console_name="con", session_name="a", cwd="src", interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert synced == (["a"] if after is ProbeStatus.PRESENT else [])
