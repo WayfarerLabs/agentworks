@@ -272,6 +272,8 @@ def attach_running_console(
             # admission and the readiness probe, and ends before the attach.
             with node.mutation_guard():
                 require_unchanged("console", name, read, console_fields(db, name))
+                # The VM's intent and address as they are under the guard, not as read before the secrets.
+                vm = context.node.reload_row()
                 if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
                     if context.observed_status is not VMStatus.RUNNING:
                         raise StateError(
@@ -282,7 +284,8 @@ def attach_running_console(
                 else:
                     activate_vm_runtime(context)
                 holds.enter_context(context.node.hold_active())
-                admin = execution.vm_access(vm, config, Admin())
+                # The row the hold admitted.
+                admin = execution.vm_access(context.node.row, config, Admin())
                 canonical, staging = _mc._console_runtime_presence(admin, name)
                 if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
                     raise StateError(

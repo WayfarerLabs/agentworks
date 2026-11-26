@@ -385,8 +385,10 @@ def delete_agent(
             held.enter_context(vm_node.hold_active())
             node = vm_node
         held.enter_context(node.mutation_guard())
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = node.row
         # What the confirmation showed: the agent and the sessions it named.
-        require_vm_unchanged(db, node.row)
+        require_vm_unchanged(db, vm)
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
         require_unchanged(
             "agent",

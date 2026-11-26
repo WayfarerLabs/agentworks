@@ -106,7 +106,9 @@ def grant_workspaces(
         ) as (vm_node, _resolver, _ctx),
         vm_node.mutation_guard(),
     ):
-        _require_agent_unchanged(db, vm_node.row, agent)
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        _require_agent_unchanged(db, vm, agent)
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
             # Add to all existing workspace groups on this VM
@@ -179,7 +181,9 @@ def revoke_workspaces(
         vm_node.mutation_guard(),
         operation_log(vm.name, "agent-revoke") as log,
     ):
-        _require_agent_unchanged(db, vm_node.row, agent)
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        _require_agent_unchanged(db, vm, agent)
 
         def remove_membership(ws_name: str) -> None:
             """Remove the agent from ``ws_name``'s group, before its last grant row there goes."""
