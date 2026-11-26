@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import get_db
 from agentworks.path_rendering import format_host_path
 
 config_app = typer.Typer(
+    cls=CommandPathGroup,
     name="config",
     help="Configuration utilities.",
     no_args_is_help=True,

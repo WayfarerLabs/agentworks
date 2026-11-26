@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Annotated, cast
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import get_db, load_completion_registry, ordinary_tty_interaction_access, parse_csv_sort
 from agentworks.machine_output import OutputFormat
 
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from agentworks.resources.inspect import OriginFilter
 
 resource_app = typer.Typer(
+    cls=CommandPathGroup,
     name="resource",
     help="Inventory, inspect, explain, author, and edit Resource Registry entries.",
     no_args_is_help=True,

@@ -6,12 +6,13 @@ from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import get_db
 from agentworks.machine_output import OutputFormat
 from agentworks.resources.graph_query import GraphDirection
 
 graph_app = typer.Typer(
+    cls=CommandPathGroup,
     name="graph",
     help="Query declared and live resource relationships.",
     no_args_is_help=True,

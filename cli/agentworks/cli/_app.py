@@ -2,21 +2,55 @@
 
 Lives apart from `commands/` so command modules can import the root `app`
 (and the interactivity helpers) without a circular import. State that needs
-to be reachable from anywhere in the CLI -- the `--non-interactive` and
-`--debug` flags -- is kept here as module-level booleans.
+to be reachable from anywhere in the CLI (the `--non-interactive` and
+`--debug` flags) is kept here as module-level booleans.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
+from typer.core import TyperGroup
+
+from agentworks.native_locks import operation_label
+
+if TYPE_CHECKING:
+    from typer._click import Command, Context
+
+
+class CommandPathGroup(TyperGroup):
+    """The group class of every Typer app here: it names the running command for native lock holders.
+
+    Each resolved subcommand name is appended to
+    ``native_locks.operation_label``, so a holder record names the command
+    path (``agw workspace rehome``) and never an argument or option value.
+    The root group starts the path at ``agw`` and restores the previous
+    label when the invocation ends.
+    """
+
+    def invoke(self, ctx: Context) -> Any:
+        if ctx.parent is not None:
+            return super().invoke(ctx)
+        token = operation_label.set(("agw",))
+        try:
+            return super().invoke(ctx)
+        finally:
+            operation_label.reset(token)
+
+    def resolve_command(self, ctx: Context, args: list[str]) -> tuple[str | None, Command | None, list[str]]:
+        name, command, remaining = super().resolve_command(ctx, args)
+        if command is not None and command.name is not None:
+            operation_label.set((*operation_label.get(), command.name))
+        return name, command, remaining
+
 
 app = typer.Typer(
     name="agentworks",
     help="Orchestrate workspace lifecycle across multiple compute targets.",
+    cls=CommandPathGroup,
     no_args_is_help=True,
     # Suppress typer's generic --install-completion / --show-completion flags
     # in favor of the project's hand-rolled `agw completion show|install`

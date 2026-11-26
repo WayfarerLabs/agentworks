@@ -7,9 +7,10 @@ from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 
 completion_app = typer.Typer(
+    cls=CommandPathGroup,
     name="completion",
     help="Generate or install shell completions.",
     no_args_is_help=True,
