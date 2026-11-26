@@ -167,7 +167,16 @@ def _recheck(invocation: RuntimeInvocation, vm_name: str, held: NativeLockSet) -
         try:
             # The members as they are now, against the ones the console was locked with.
             members_now = console_entity_for(db, current_console)
-            locked = next(entity for entity in held.modes if entity == members_now)
+        except StateConflictError as error:
+            invocation.refuse("console", name, error)
+            continue
+        locked = next((entity for entity in held.modes if entity == members_now), None)
+        if locked is None:
+            # Every live console target is in the family's set, so this is a wiring bug.
+            raise StateError(
+                f"console '{name}' was re-checked without its lock", entity_kind="console", entity_name=name
+            )
+        try:
             require_request_unchanged(
                 "console", name, LockRequest(exclusive=(locked,)), LockRequest(exclusive=(members_now,))
             )
