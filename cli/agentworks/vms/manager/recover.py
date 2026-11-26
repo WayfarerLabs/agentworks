@@ -77,22 +77,22 @@ def recover_vm(db: Database, config: Config, name: str, *, interaction: TtyInter
     prepared = prepare_configured_ssh_identity(config.operator.ssh_public_key, config.operator.ssh_private_key)
     authorized_keys = authorized_keys_content(prepared.public_text, config.operator.extra_ssh_public_keys)
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import require_vm_unchanged
 
-    # The VM family's guard spans the repair, as it does every lifecycle change;
-    # the live node's hold shares it.
-    with native_mutation_guard(db.path, name) as guard, contextlib.ExitStack() as cleanup:
+    with contextlib.ExitStack() as cleanup:
+        # The secrets resolve before the VM's guard. The guard then spans the
+        # repair, as it does every lifecycle change, and the live node's hold
+        # shares it; the host-key confirmation is asked under it, since it is
+        # about the keys this repair reads.
+        vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(db, config, vm, interaction=interaction)
+        cleanup.callback(resolver.close)
+        cleanup.enter_context(vm_node.mutation_guard())
+        require_vm_unchanged(db, vm)
         selected = _require_vm(db, name)
-        if selected.vm_uuid != vm.vm_uuid:
-            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
         if (selected.provisioning_status, selected.init_status) != (vm.provisioning_status, vm.init_status):
             # Only a status that changed before the guard needs checking again.
             _guard_incomplete_vm(selected, allow_failed_init=True)
         vm = selected
-        vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
-            db, config, vm, interaction=interaction, held_native_guard=guard
-        )
-        cleanup.callback(resolver.close)
         platform = vm_node.site.platform
         status = platform.status(vm, ops_ctx)
         _require_known_power_state(status, name)

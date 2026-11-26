@@ -298,7 +298,7 @@ def _auth_key_boundary(
     secret: str | None = None,
     prompt: bool = False,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard,
+    held_native_guard: NativeMutationGuard | None = None,
 ) -> tuple[LiveVMNode, Resolver, RunContext, str]:
     """The composition root of a command whose planned op spends a Tailscale auth
     key (``vm rekey``, ``agw vm recover``).
@@ -312,8 +312,10 @@ def _auth_key_boundary(
     this call only (the persisted template is untouched); ``prompt`` routes the
     key alone to terminal entry, bypassing its configured sources, while every
     other secret resolves normally. The caller rejects the two together.
-    ``held_native_guard`` is the VM family guard the caller holds for the
-    whole command, which the live node's gate and hold share. Returns the live
+    ``held_native_guard`` is a VM family guard the caller already holds, which
+    the live node's gate and hold share; a caller that resolves before taking
+    the guard passes none and takes it through ``vm_node.mutation_guard()``,
+    so every prompt here precedes it. Returns the live
     node, the resolver (whose cache a later gate serves, and which the caller
     closes), the op-start context and the line-safe auth key; a failure here
     closes the resolver itself.

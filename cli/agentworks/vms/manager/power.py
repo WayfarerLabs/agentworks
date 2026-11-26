@@ -405,7 +405,10 @@ def rekey_vm(
 
     ``secret`` selects a declared replacement key for this operation only;
     ``prompt`` forces terminal entry of the template's key instead. Both are
-    checked here, before anything is touched, and applied in the boundary.
+    checked here, before anything is touched, and applied in the boundary,
+    which resolves before the native mutation guard is taken. Only
+    ``--wait-for-share``'s pause asks anything under the guard: it is about
+    the rekey in progress.
     """
     import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
@@ -423,31 +426,33 @@ def rekey_vm(
     if secret is not None:
         validate_name(secret, max_length=MAX_SECRET_NAME_LENGTH)
 
+    from agentworks.recheck import require_vm_unchanged
+
     vm = _require_vm(db, name)
-    from agentworks.harness_setup.locking import native_mutation_guard
+    _guard_incomplete_vm(vm)
+    _warn_legacy_release(vm)
+    # Before the auth key resolves: a rekey with no host-key record would spend
+    # the new key and record the new address before its reconnect check raised.
+    trust.require_record(name)
+    # The settle reads the new address from the VM, but the final wait reaches
+    # it over the tailnet, so a workstation off Tailscale is refused before the
+    # key is spent, as recover refuses it.
+    _mgr.verify_tailscale_available()
+    # The final wait runs through agentworks.execution: an unsupported client
+    # refuses before a secret or the platform is touched.
+    execution.resolve_ssh()
 
-    with native_mutation_guard(db.path, name) as guard, contextlib.ExitStack() as cleanup:
-        selected = _require_vm(db, name)
-        if selected.vm_uuid != vm.vm_uuid:
-            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
-        vm = selected
-        _guard_incomplete_vm(vm)
-        _warn_legacy_release(vm)
-        # Before the auth key resolves: a rekey with no host-key record would spend
-        # the new key and record the new address before its reconnect check raised.
-        trust.require_record(name)
-        # The settle reads the new address from the VM, but the final wait reaches
-        # it over the tailnet, so a workstation off Tailscale is refused before the
-        # key is spent, as recover refuses it.
-        _mgr.verify_tailscale_available()
-        # The final wait runs through agentworks.execution: an unsupported client
-        # refuses before a secret or the platform is touched.
-        execution.resolve_ssh()
-
+    with contextlib.ExitStack() as cleanup:
+        # The auth key and the site's secrets resolve, with ``--prompt``'s entry,
+        # before the VM's guard; under it the VM row is read again.
         vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
-            db, config, vm, secret=secret, prompt=prompt, interaction=interaction, held_native_guard=guard
+            db, config, vm, secret=secret, prompt=prompt, interaction=interaction
         )
         cleanup.callback(resolver.close)
+        cleanup.enter_context(vm_node.mutation_guard())
+        require_vm_unchanged(db, vm)
+        vm = _require_vm(db, name)
+        _guard_incomplete_vm(vm)
         platform = vm_node.site.platform
         status = platform.status(vm, ops_ctx)
         _require_known_power_state(status, name)
