@@ -54,7 +54,8 @@ and the instance spec merge entries by key, as `env` and agent artifacts do.
   scopes. Written as root, so that system paths are reachable.
 - **Workspace:** paths relative to the workspace root, shared with the workspace's group, and
   excluded from Git through the clone's local exclude file.
-- **User (the admin or an agent):** paths relative to that user's home, private to that user.
+- **Admin and agent:** paths relative to that account's home, private to it. These are two scopes;
+  they share only the shape of their place, as they share the harness `user` facet.
 
 A path that leaves its scope's place is refused when the declaration loads. Because each scope has
 its own place, two scopes cannot declare the same file.
