@@ -87,14 +87,14 @@ def test_create_rollback_removes_the_fresh_workspace_group(
     assert db.get_workspace("ws1") is None
 
 
-def test_create_rollback_tolerates_a_group_removal_failure(
+def test_create_rollback_warns_on_a_group_removal_failure_without_masking_the_create_error(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
     """A group removal that fails during create rollback does not mask the
-    original create error, nor turn the rollback itself into a warning."""
+    original create error; the rollback reports what it could not remove."""
     fake = Guest(fails=(is_occupancy_probe, REMOVE_GROUP))
     route(monkeypatch, fake)
     seed_vm_only(db)
@@ -106,7 +106,7 @@ def test_create_rollback_tolerates_a_group_removal_failure(
 
     assert REMOVE_GROUP in fake.argvs()
     assert db.get_workspace("ws1") is None
-    assert not any("rollback during workspace create" in w for w in captured_output.warnings)
+    assert captured_output.warnings
 
 
 def test_create_rollback_on_clone_failure_leaves_no_residue(

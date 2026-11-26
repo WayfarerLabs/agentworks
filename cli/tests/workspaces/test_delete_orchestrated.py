@@ -20,7 +20,7 @@ from agentworks.db import InitStatus, VMStatus
 from agentworks.errors import StateError, UserAbort
 from agentworks.execution import trust
 from agentworks.execution.access import Admin
-from agentworks.execution.errors import TrustMissing
+from agentworks.execution.errors import CommandFailed, TrustMissing
 from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
@@ -221,28 +221,51 @@ def test_delete_group_removal_uses_the_recorded_linux_group(
     assert removals == [("/usr/sbin/groupdel", "ws--legacy")]
 
 
-def test_delete_group_removal_failure_does_not_break_the_delete(
+class _GroupAlreadyGoneGuest(Guest):
+    """``groupdel`` exits 6: the group did not exist."""
+
+    def respond(self, request: object) -> Result | None:
+        if argv(request) == REMOVE_GROUP:
+            return Result(Completed(6))
+        return super().respond(request)
+
+
+def test_delete_of_a_workspace_whose_group_is_already_gone_finishes(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
 ) -> None:
-    """A group the removal cannot remove (already gone, or refused) is
-    tolerated: its non-zero exit never raises, the delete still finishes (row
-    gone, success reported), and no 'remote cleanup failed' warning fires."""
-    fake = Guest(fails=(REMOVE_GROUP,))
+    fake = _GroupAlreadyGoneGuest()
     route(monkeypatch, fake)
-
-    config = make_config()
     seed(db)
     reachable(monkeypatch, True)
 
-    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+    workspace_manager.delete_workspace(db, make_config(), "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert REMOVE_GROUP in fake.argvs()
     assert db.get_workspace("ws1") is None
-    assert "Workspace 'ws1' deleted" in captured_output.info
-    assert not any("remote cleanup failed" in w for w in captured_output.warnings)
+
+
+@pytest.mark.parametrize("failing", [REMOVE_DIRECTORY, REMOVE_GROUP], ids=["rm", "groupdel"])
+def test_a_failed_removal_keeps_the_workspace_row_and_a_rerun_retries(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    failing: tuple[str, ...],
+) -> None:
+    route(monkeypatch, Guest(fails=(failing,)))
+    seed(db)
+    reachable(monkeypatch, True)
+
+    with pytest.raises(CommandFailed):
+        workspace_manager.delete_workspace(db, make_config(), "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is not None
+
+    route(monkeypatch, Guest())
+    workspace_manager.delete_workspace(db, make_config(), "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_workspace("ws1") is None
 
 
 # -- stored paths the file operations cannot address --------------------------

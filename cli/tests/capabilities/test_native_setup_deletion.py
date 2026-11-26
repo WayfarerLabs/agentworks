@@ -194,14 +194,12 @@ def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
 
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
-def test_remote_cleanup_failure_keeps_the_agent_and_best_effort_workspace_deletion(
-    db, deletion, monkeypatch, kind, name
-):
+def test_remote_cleanup_failure_keeps_the_row_for_a_rerun(db, deletion, monkeypatch, kind, name):
+    """An account or workspace that was not confirmed removed keeps its row, so a rerun retries the removal."""
     _store_applied_state(db, kind, name, "claims")
     # The user delete and the workspace's own removal run on the admin's access.
     install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
     if kind == "agent":
-        # An account that was not confirmed removed keeps its row for a rerun.
         monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
         with pytest.raises(ExecutionIncomplete):
             delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -209,8 +207,9 @@ def test_remote_cleanup_failure_keeps_the_agent_and_best_effort_workspace_deleti
     else:
         monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", deletion.delete_vm_workspace)
         db.update_vm_tailscale("box", "box")
-        delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert db.get_workspace(name) is None
+        with pytest.raises(ExecutionIncomplete):
+            delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert db.get_workspace(name) is not None
     assert deletion.logs[0].closed
 
 

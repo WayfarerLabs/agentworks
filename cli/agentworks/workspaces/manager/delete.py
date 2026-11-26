@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import SessionMode
-from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.vms.home_layout import AGENTWORKS_ARTIFACTS
 from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import stored_workspace_path
@@ -253,20 +253,22 @@ def delete_workspace(
 
             kill_session_windows(admin, pairs=console_pairs)
 
-        # Revoke agent workspace grants (agents are VM-scoped, not deleted with workspaces)
+        # Revoke agent workspace grants (agents are VM-scoped, not deleted with
+        # workspaces), then remove the workspace from the VM. A removal that
+        # fails raises with the workspace's row kept, so a rerun retries it.
         if vm is not None:
             from agentworks.agents.grants import revoke_workspace_grants
+            from agentworks.workspaces.backends.vm import delete_vm_workspace, delete_vm_workspace_keeping_files
 
-            revoke_workspace_grants(db, config, name, vm)
-
-        if vm is not None and stored_path is not None:
-            from agentworks.workspaces.backends.vm import delete_vm_workspace
-
-            delete_vm_workspace(vm, config, stored_path, ws.linux_group, logger=log)
-        elif vm is not None:
-            from agentworks.workspaces.backends.vm import delete_vm_workspace_keeping_files
-
-            delete_vm_workspace_keeping_files(vm, config, ws.linux_group, logger=log)
+            try:
+                revoke_workspace_grants(db, config, name, vm)
+                if stored_path is not None:
+                    delete_vm_workspace(vm, config, stored_path, ws.linux_group, logger=log)
+                else:
+                    delete_vm_workspace_keeping_files(vm, config, ws.linux_group, logger=log)
+            except AgentworksError as error:
+                error.add_hint(f"The workspace's row was kept; run 'agw workspace delete {name}' again.")
+                raise
 
         # Remove .code-workspace file
         vscode_path = config.paths.vscode_workspaces / f"{name}.code-workspace"

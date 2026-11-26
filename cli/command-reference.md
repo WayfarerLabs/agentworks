@@ -1101,7 +1101,10 @@ the filter is an error, not an empty result.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Its confirmation warns that workspace files, uncommitted changes, stashes and
-commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt.
+commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt. When the
+workspace's directory or its Linux group cannot be removed from the VM (a group already gone counts
+as removed), the delete fails with the workspace still recorded, so rerunning `workspace delete`
+retries the removal; `agw vm logs <vm>` has the failed command's output.
 
 There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
 shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
