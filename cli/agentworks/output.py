@@ -615,8 +615,20 @@ def error(message: str) -> None:
     _handler.emit(Role.ERROR, message, 0)
 
 
+def _before_prompt() -> None:
+    """Check the native locks this invocation holds before any prompt.
+
+    Shows the notice of a set acquired to prompt, and raises ``StateError``
+    under any other held set (``native_locks.prompt_notice``).
+    """
+    from agentworks import native_locks
+
+    native_locks.prompt_notice()
+
+
 def confirm(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
+    _before_prompt()
     if non_interactive():
         return False
     return _handler.confirm(message, _current_level(), default)
@@ -624,21 +636,25 @@ def confirm(message: str, default: bool = False) -> bool:
 
 def choose(message: str, options: list[str]) -> int:
     """Present a list of options. Returns the index of the selected option."""
+    _before_prompt()
     return _handler.choose(message, options, _current_level())
 
 
 def pause(message: str) -> None:
     """Wait for user acknowledgment (press Enter)."""
+    _before_prompt()
     _handler.pause(message, _current_level())
 
 
 def prompt(label: str, default: str | None = None) -> str:
     """Collect a string value. Returns default if user enters nothing."""
+    _before_prompt()
     return _handler.prompt(label, _current_level(), default)
 
 
 def prompt_secret(label: str, hint: str | None = None) -> str:
     """Collect a secret value with masked input. Rejects empty values."""
+    _before_prompt()
     return _handler.prompt_secret(label, _current_level(), hint)
 
 
