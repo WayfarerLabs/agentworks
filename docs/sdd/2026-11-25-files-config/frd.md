@@ -1,7 +1,7 @@
 # Files config
 
-Status: draft, awaiting the operator's acceptance. R3 and R5 follow the operator's 2026-11-25
-rulings; R8 is drafted under the lead's recommended answer to an ask that is still open.
+Status: draft, awaiting the operator's acceptance. R3, R5 and R8 to R10 follow the operator's
+2026-11-25 and 2026-11-26 rulings.
 
 ## Purpose
 
@@ -11,9 +11,11 @@ key, a certificate, a settings file. Values like these are often multiline or la
 environment variable can carry, and the tool reads them from a path. Operators write such files by
 hand today, which bypasses secret resolution, redaction, inspection and cleanup.
 
-Agentworks should place declared files on a VM the way it exports declared environment variables:
-named in the same declarations, with plaintext or secret content, owned by a scope, and inspectable
-without revealing what they hold.
+Agentworks should place declared files on a VM: named in the same declarations as environment
+variables, with plaintext or secret content, owned by a scope, and inspectable without revealing
+what they hold. Files are new, so they are built declaratively from the start: a scope's declared
+files take effect when the scope is applied, and a change not yet applied is visible. Once files
+have demonstrated that model, `env` moves onto it in a follow-up.
 
 ## Operator and stories
 
@@ -25,6 +27,8 @@ and uses secrets from their configured sources.
 - Give a workspace a shared, non-secret tool config at its root, kept out of `git status`.
 - Change a secret in the vault, re-apply the owning scope, and have the file follow.
 - Remove a file from a template, re-apply, and have the file gone.
+- Edit a template's files and see, before applying, which scopes have changes pending and what they
+  are.
 - See which files a scope declares, where they go, and whether they are current, without seeing
   their content.
 
@@ -80,16 +84,32 @@ reports a scope whose files are not current, by path, never by value.
 The operator can list a scope's declared files with each destination, content kind (plaintext,
 secret or source), mode and status, without any command revealing content.
 
-### R8. One contribution model
+### R8. Declarative application
 
-Each file is recorded as a contribution attributed to the owner that declared it, so that other
-producers can contribute files later without a second lifecycle. Templates and instance specs are
-the only producer in this effort.
+Applying a scope collects its file contributions into the scope's applied set and makes the VM match
+it. Each entry records its owner (the template or instance spec that declared it), its destination
+and mode, and a reference to its content: a plaintext value's digest, a secret's name, or a source
+reference, never a secret's value. Between applications, a change to the declarations changes
+nothing on the VM. Templates and instance specs are the only producers in this effort.
+
+### R9. Pending changes are visible
+
+When a scope's declared files differ from its applied set, inspection reports the scope as having
+unapplied changes, naming each added, changed and removed path and the command that applies them,
+and a command that runs against that scope warns once. A secret whose value changed in its source,
+under the same name, is not a declaration change; applying the scope picks the new value up.
+
+### R10. A model `env` can follow
+
+The applied set, its comparison with the declarations, and its warnings are not specific to files,
+so that `env` can later move onto the same model: an applied set of references, with secrets still
+resolved when they are used.
 
 ## Out of scope
 
 - Files at session scope, and per-launch delivery to tmpfs.
-- Moving `env` onto the contribution model, or any producer other than templates and instance specs.
+- Moving `env` onto the declarative model, which follows once files have demonstrated it, and any
+  producer other than templates and instance specs.
 - Directories, archives, and syncing files back from the VM.
 - Changing how `env` delivers secrets.
 
@@ -152,4 +172,30 @@ in this effort, the operator asked:]
 > How much bigger is the full emitter model?
 
 [The lead sized the full model at roughly two to three times this effort, almost all of it in moving
-`env` and its producers onto the model, and asked again. That ask is open.]
+`env` and its producers onto the model, and asked again. The operator answered:]
+
+> Yeah, so I think the tough thing here is that the emitter model should move how changes land.
+>
+> Today, a change to an env declaration takes effect on the next operation.
+>
+> Properly done, I think the emitter model would change that. Init would basically collect all env
+> (files). In my mind, these remain references where they are that (secrets, files). And then the
+> operations would simply use the last applied set of env and files.
+>
+> While I think this is technically pure, it definitely could get confusing.
+>
+> This also really starts to raise questions about a move to being even more declarative with
+> commands and warnings about unapplied changes.
+>
+> Thoughts?
+
+### 2026-11-26
+
+[Offered files landing on apply with env kept live and the declarative question left to its own
+effort, seeding that effort first, or folding env into this one, the operator chose "Do the
+declarative move first" and wrote:]
+
+> Let's do files in the proper declarative model. They're new so we're not breaking anything. And
+> then once that is demonstrated, we port env over.
+>
+> Does that make sense? Please push back if it doesn't.
