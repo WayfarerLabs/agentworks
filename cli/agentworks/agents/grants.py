@@ -21,7 +21,6 @@ from agentworks import output
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.execution.requests import Command
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
 from agentworks.vms.manager import gated_vm_boundary
@@ -105,7 +104,7 @@ def grant_workspaces(
             scope=agent_scope(db, vm.name, agent_name),
             interaction=interaction,
         ) as (vm_node, _resolver, _ctx),
-        native_mutation_guard(db.path, vm.name),
+        vm_node.mutation_guard(),
     ):
         _require_agent_unchanged(db, vm_node.row, agent)
         if grant_all:
@@ -177,7 +176,7 @@ def revoke_workspaces(
             scope=agent_scope(db, vm.name, agent_name),
             interaction=interaction,
         ) as (vm_node, _resolver, _ctx),
-        native_mutation_guard(db.path, vm.name),
+        vm_node.mutation_guard(),
     ):
         _require_agent_unchanged(db, vm_node.row, agent)
         if revoke_all:

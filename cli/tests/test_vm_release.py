@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 from dataclasses import replace
 from enum import StrEnum
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -21,7 +20,7 @@ from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager.reinit import _warn_newly_observed_legacy
 from agentworks.vms.manager.release import confirm_vm_release, reconcile_release
-from tests.conftest import CapturedOutput
+from tests.conftest import CapturedOutput, guarding_node
 from tests.vm_access_support import AccessRecorder
 
 if TYPE_CHECKING:
@@ -102,8 +101,8 @@ def answer_release(
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         "agentworks.vms.manager.boundary.gated_vm_boundary",
-        lambda _db, _config, _registry, vm, **_kwargs: contextlib.nullcontext(
-            (SimpleNamespace(row=vm), object(), object())
+        lambda db, _config, _registry, vm, **_kwargs: contextlib.nullcontext(
+            (guarding_node(db, vm), object(), object())
         ),
     )
 

@@ -243,7 +243,8 @@ def delete_vm(
     else:
         bind_failure = None
 
-    with native_mutation_guard(db.path, vm.name) as guard:
+    # A VM whose site could not be bound (``--force``) has no node to take the guard through.
+    with native_mutation_guard(db.path, vm.name) if vm_node is None else vm_node.mutation_guard():
         # What the confirmation showed: the VM and the children it counted.
         require_vm_unchanged(db, vm)
         require_unchanged(
@@ -274,7 +275,7 @@ def delete_vm(
             if vm.tailscale_host:
                 logout_ran = False
                 try:
-                    with vm_node.hold_active(held_native_guard=guard):
+                    with vm_node.hold_active():
                         not_logged_out = _mgr._tailscale_logout(vm, platform, ops_ctx)
                         logout_ran = True
                 except UserAbort:

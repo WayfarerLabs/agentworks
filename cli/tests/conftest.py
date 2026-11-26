@@ -28,6 +28,8 @@ from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
+    from types import SimpleNamespace
+
     from agentworks.db import VMRow
     from agentworks.execution.results import Result
     from agentworks.sessions.multi_console import ConsoleAccess
@@ -731,8 +733,21 @@ def normalize_lf(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n")
 
 
+def guarding_node(db: Database, vm: VMRow, **attributes: object) -> SimpleNamespace:
+    """A stand-in live VM node for ``vm``: its ``row``, and a ``mutation_guard`` that takes the real guard.
+
+    ``attributes`` adds whatever else the command under test reaches through
+    the node (its ``site``, say).
+    """
+    from types import SimpleNamespace
+
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    return SimpleNamespace(row=vm, mutation_guard=lambda: native_mutation_guard(db.path, vm.name), **attributes)
+
+
 def admitting_boundary(
-    _db: object, _config: object, _registry: object, vm: object, **_kwargs: object
+    db: Database, _config: object, _registry: object, vm: VMRow, **_kwargs: object
 ) -> contextlib.AbstractContextManager[tuple[object, None, None]]:
     """A stand-in for ``gated_vm_boundary`` that opens no gate and admits ``vm`` as it was read.
 
@@ -740,9 +755,7 @@ def admitting_boundary(
     row, which a command compares again under its guard, and no resolver or
     context.
     """
-    from types import SimpleNamespace
-
-    return contextlib.nullcontext((SimpleNamespace(row=vm), None, None))
+    return contextlib.nullcontext((guarding_node(db, vm), None, None))
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:

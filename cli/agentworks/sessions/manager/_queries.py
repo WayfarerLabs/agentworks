@@ -256,7 +256,6 @@ def _delete_session_runtime(
     """
     name = session.name
     selected_session_uuid = session.session_uuid
-    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.recheck import require_unchanged, require_vm_unchanged, session_fields
     from agentworks.sessions.manager._lifecycle import _require_selected_session
 
@@ -268,7 +267,8 @@ def _delete_session_runtime(
         session,
         operation="session-delete",
         interaction=interaction,
-    ) as (ws, vm, admin, log):
+    ) as (ws, vm_node, admin, log):
+        vm = vm_node.row
         session = _require_selected_session(db, name, selected_session_uuid)
         # A row whose PID evidence needs repair is undecided until the guard is held.
         status = (
@@ -290,7 +290,7 @@ def _delete_session_runtime(
             raise UserAbort("delete cancelled")
         member_consoles = [c.name for c in db.list_consoles_for_session(name)]
 
-        with native_mutation_guard(db.path, vm.name):
+        with vm_node.mutation_guard():
             current = _require_selected_session(db, name, selected_session_uuid)
             require_unchanged("session", name, session_fields(session), session_fields(current))
             require_vm_unchanged(db, vm)
@@ -979,7 +979,7 @@ def attach_session(
         session,
         operation="session-attach",
         interaction=interaction,
-    ) as (_ws, _vm, admin, _log):
+    ) as (_ws, _vm_node, admin, _log):
         status = _mgr.check_session_status(session, admin=admin, server=server)
 
         if status == SessionStatus.STOPPED:

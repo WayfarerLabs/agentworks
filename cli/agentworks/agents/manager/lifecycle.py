@@ -326,7 +326,6 @@ def delete_agent(
 
     import contextlib
 
-    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
 
     with contextlib.ExitStack() as held:
@@ -351,7 +350,7 @@ def delete_agent(
                     interaction=interaction,
                 )
             )
-            admitted_vm = admitted.row
+            node = admitted
         else:
             # The nested-teardown path: the caller's composition already
             # converged the VM and holds its activation gate open across
@@ -377,12 +376,10 @@ def delete_agent(
                     entity_name=name,
                 )
             held.enter_context(vm_node.hold_active())
-            admitted_vm = vm_node.row
-        held.enter_context(
-            native_mutation_guard(db.path, vm.name, held=None if vm_node is None else vm_node.held_native_guard)
-        )
+            node = vm_node
+        held.enter_context(node.mutation_guard())
         # What the confirmation showed: the agent and the sessions it named.
-        require_vm_unchanged(db, admitted_vm)
+        require_vm_unchanged(db, node.row)
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
         require_unchanged(
             "agent",

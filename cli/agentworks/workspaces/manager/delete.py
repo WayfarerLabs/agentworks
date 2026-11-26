@@ -116,6 +116,7 @@ def delete_workspace(
         for session in db.list_sessions(workspace_name=name):
             resolve_session_tmux_server(db, session)
     with contextlib.ExitStack() as _keepalive_stack:
+        node = vm_node
         if vm is not None:
             if vm_node is None:
                 # The standalone composition root: build the boundary here.
@@ -123,7 +124,7 @@ def delete_workspace(
                 from agentworks.bootstrap import load_request_registry
 
                 registry = load_request_registry(config, live_database=db)
-                admitted, _resolver, _ctx = _keepalive_stack.enter_context(
+                node, _resolver, _ctx = _keepalive_stack.enter_context(
                     gated_vm_boundary(
                         db,
                         config,
@@ -133,7 +134,7 @@ def delete_workspace(
                         interaction=interaction,
                     )
                 )
-                vm = admitted.row
+                vm = node.row
             else:
                 # The nested-teardown path: the caller's composition
                 # already converged the VM and holds its activation gate
@@ -162,8 +163,10 @@ def delete_workspace(
                     )
                 _keepalive_stack.enter_context(vm_node.hold_active())
                 vm = vm_node.row
+        # A workspace whose VM row is gone, outside a nested teardown, has no
+        # node to take the guard through.
         _keepalive_stack.enter_context(
-            native_mutation_guard(db.path, ws.vm_name, held=None if vm_node is None else vm_node.held_native_guard)
+            native_mutation_guard(db.path, ws.vm_name) if node is None else node.mutation_guard()
         )
         # What the confirmation showed: the workspace and the sessions it counted.
         if vm is not None:

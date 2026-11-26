@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.db import InitStatus
 from agentworks.errors import StateError, UserAbort
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.recheck import require_unchanged, vm_release_fields
 
 if TYPE_CHECKING:
@@ -93,7 +92,7 @@ def confirm_vm_release(
 
         # The answer is given; what it was about is read and observed again
         # under the guard before anything is written.
-        with native_mutation_guard(db.path, name):
+        with vm_node.mutation_guard():
             require_unchanged("vm", name, vm_release_fields(admitted), vm_release_fields(db.get_vm(name)))
             require_unchanged(
                 "vm", name, observed, observe_release(execution.vm_access(admitted, config, Admin()), expected=None)

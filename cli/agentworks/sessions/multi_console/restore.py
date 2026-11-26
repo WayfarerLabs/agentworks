@@ -336,8 +336,9 @@ def restore_session(
             resolver=resolver,
             # Restore learns which panes it opens only from the active VM.
             targets=None,
-        ) as (vm, admin),
+        ) as (vm_node, admin),
     ):
+        vm = vm_node.row
         run = access_run_command(admin, deadline=None, elevated=False)
         observed = _observe_window(run, admin, console_name=console_name, vm_name=vm.name, member=member)
         q_con = exact_tmux_target(tmux_session_name(console_name))

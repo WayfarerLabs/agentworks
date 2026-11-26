@@ -175,7 +175,6 @@ def _rehome_vm(
     change between the confirmation and the guard.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.sessions.manager import _needs_repair, ensure_pids_batch
     from agentworks.vms.manager import operation_log
     from agentworks.workspaces.acls import apply_workspace_acls
@@ -222,7 +221,7 @@ def _rehome_vm(
                 raise UserAbort("rehome cancelled")
 
         # The log closes exactly once, however the move ends.
-        with native_mutation_guard(db.path, vm.name), operation_log(vm.name, "workspace-rehome") as log:
+        with vm_node.mutation_guard(), operation_log(vm.name, "workspace-rehome") as log:
             require_vm_unchanged(db, vm)
             require_unchanged("workspace", ws_name, workspace_fields(ws), workspace_fields(db.get_workspace(ws_name)))
             sessions = ensure_pids_batch(db.list_sessions(workspace_name=ws_name), db=db, config=config)

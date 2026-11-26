@@ -9,7 +9,6 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AgentworksError, AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.execution.requests import Command, FromFile, ToFile
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
 from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
@@ -118,7 +117,7 @@ def copy_workspace(
                     interaction=interaction,
                 )
             )
-            admitted = {src_vm.name: src_node.row}
+            nodes = {src_vm.name: src_node}
             if dest_vm.name != src_vm.name:
                 dest_node, _resolver, _ctx = _keepalive_stack.enter_context(
                     gated_vm_boundary(
@@ -130,12 +129,12 @@ def copy_workspace(
                         interaction=interaction,
                     )
                 )
-                admitted[dest_vm.name] = dest_node.row
+                nodes[dest_vm.name] = dest_node
             # Same VM: the source boundary and held span above already
             # gate and hold it; a second boundary would re-run the
             # resolve pass. The rows the gates admitted carry any address
             # a boot recorded.
-            src_vm, dest_vm = admitted[src_vm.name], admitted[dest_vm.name]
+            src_vm, dest_vm = nodes[src_vm.name].row, nodes[dest_vm.name].row
             for vm in (src_vm, dest_vm):
                 if vm.tailscale_host is None:
                     raise StateError(
@@ -147,10 +146,10 @@ def copy_workspace(
             # One guard per VM, taken in VM name order once both are admitted,
             # and held across the pack and the unpack: the source cannot be
             # changed under the read, nor the destination under the write.
-            for guarded in sorted(admitted):
-                _keepalive_stack.enter_context(native_mutation_guard(db.path, guarded))
-            for row in admitted.values():
-                require_vm_unchanged(db, row)
+            for guarded in sorted(nodes):
+                _keepalive_stack.enter_context(nodes[guarded].mutation_guard())
+            for node in nodes.values():
+                require_vm_unchanged(db, node.row)
             require_unchanged(
                 "workspace", source_name, workspace_fields(src_ws), workspace_fields(db.get_workspace(source_name))
             )

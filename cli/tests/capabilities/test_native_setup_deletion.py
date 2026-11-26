@@ -20,7 +20,7 @@ from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
-from tests.conftest import admitting_boundary
+from tests.conftest import admitting_boundary, guarding_node
 from tests.vm_access_support import install_access_recorder
 
 
@@ -156,10 +156,10 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
             raise ConnectivityError("platform refused")
         removed.append(vm.name)
 
-    def boundary(*args, **kwargs):
+    def boundary(db, _config, vm, **kwargs):
         if outcome == "binding-failed":
             raise StateError("platform unavailable")
-        return SimpleNamespace(site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
+        return guarding_node(db, vm, site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
     delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)

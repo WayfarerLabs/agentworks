@@ -157,6 +157,8 @@ class LiveVMNode:
     def mutation_guard(self) -> Iterator[NativeMutationGuard]:
         """Take this VM's native mutation guard for the rest of the operation, once its prompts are done.
 
+        The one rule: a command holding a live VM node takes the guard
+        through this, never through ``native_mutation_guard`` directly.
         A command opens the gate and resolves its secrets with no guard
         held, then enters this; until it leaves, the node's later
         admissions and starts, and the nested cleanup handed the node,

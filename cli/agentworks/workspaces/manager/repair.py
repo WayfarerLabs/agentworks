@@ -13,7 +13,6 @@ from agentworks import output
 from agentworks.errors import NotFoundError
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, CaptureOutput, Command
 from agentworks.execution.results import Completed
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
@@ -145,7 +144,7 @@ def repair_workspace(
             scope=_workspace_scope(db, vm, name),
             interaction=interaction,
         ) as (vm_node, _resolver, _ctx),
-        native_mutation_guard(db.path, vm.name),
+        vm_node.mutation_guard(),
         operation_log(vm.name, "workspace-repair") as log,
     ):
         require_vm_unchanged(db, vm_node.row)

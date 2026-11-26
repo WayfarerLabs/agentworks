@@ -168,7 +168,6 @@ def create_console(
     Live filtering (e.g. ``--all-running``) is resolved by the CLI layer into
     an explicit list of session names before calling this function.
     """
-    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.recheck import require_unchanged, require_vm_unchanged, session_fields
 
     validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
@@ -249,8 +248,9 @@ def create_console(
             targets=lambda vm: _mc._console_build_secret_targets(
                 db, registry, console=definition, vm=vm, members=definition.members
             ),
-        ) as (vm, admin),
+        ) as (vm_node, admin),
     ):
+        vm = vm_node.row
         access = _console_pane_access(db, config, vm, admin, resolver=resolver, members=definition.members)
         secret_values = resolver.values
         try:
@@ -264,7 +264,7 @@ def create_console(
             )
             # Every secret is resolved: the VM's guard is taken before the first
             # change, and what the definition was built from is read again.
-            with native_mutation_guard(db.path, vm_name):
+            with vm_node.mutation_guard():
                 if db.get_console(name) is not None:
                     raise StateConflictError(
                         f"console '{name}' was created since this command read it",

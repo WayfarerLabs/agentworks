@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.manager import SessionTmuxServer
+    from agentworks.vms.nodes import LiveVMNode
 
     from ._access import ConsoleAccess
 
@@ -409,8 +410,8 @@ def _active_console_vm(
     interaction: TtyInteractionPolicy,
     resolver: Resolver,
     targets: Callable[[VMRow], Sequence[SecretTarget]] | None,
-) -> Iterator[tuple[VMRow, VMAccess]]:
-    """Activate the console's VM and yield its row and the admin's access, held active, with no guard held.
+) -> Iterator[tuple[LiveVMNode, VMAccess]]:
+    """Activate the console's VM and yield its live node and the admin's access, held active, with no guard held.
 
     The missing-VM and missing-address refusals come first, with nothing
     resolved. ``targets``, when the operation knows its panes before it
@@ -422,7 +423,8 @@ def _active_console_vm(
     needs starting, and the hold admitted. The caller then observes
     read-only, decides what it will change, calls
     :func:`_console_pane_access` for exactly the panes it will open, and
-    takes the guard itself before its first change.
+    takes the guard itself before its first change. The node's row is the
+    one the hold admitted, with any address a start recorded.
     """
     import agentworks.execution as execution
     from agentworks.execution.access import Admin
@@ -447,9 +449,7 @@ def _active_console_vm(
             with node.mutation_guard():
                 activate_vm_runtime(context)
                 holds.enter_context(context.node.hold_active())
-            # The row the hold admitted, with any address a start recorded.
-            admitted = context.node.row
-            yield admitted, execution.vm_access(admitted, config, Admin())
+            yield context.node, execution.vm_access(context.node.row, config, Admin())
     finally:
         if context is not None:
             context.clear_values()
