@@ -373,18 +373,18 @@ with protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that
 config references. VM/admin setup binds references to the live VM owner; agent and workspace setup
 bind to their respective live owners, including resources still pending during session creation.
 
-A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
-Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
-applied-state records remain buffered until the owner row and desired overlay commit atomically. A
-core creation failure cleans up the newly owned native resource. A valid setup facet's domain or
-transport failure instead preserves confirmed progress, records the current failure and lets
-independent facets and core bookkeeping finish. The command reports collected failures at its outer
-boundary with a failing exit status; newly created owners and their partial records remain. Shared
-persistence failures, cancellation, invalid activation preflight and unexpected internal errors
-still abort immediately. Fresh agent creation refuses an existing unowned Linux account or home
-before arming rollback. Existing agents retain the create-or-converge reinit path. VM/admin setup
-finishes before the final VM initialization and SSH-identity checkpoint, even with collected facet
-failures. See
+The owner's native lock (its VM, account or workspace, exclusive) spans core provisioning,
+integration setup, and failed-create cleanup. Setup checkpoints record confirmed native claims
+through instance state. Fresh agent and workspace applied-state records remain buffered until the
+owner row and desired overlay commit atomically. A core creation failure cleans up the newly owned
+native resource. A valid setup facet's domain or transport failure instead preserves confirmed
+progress, records the current failure and lets independent facets and core bookkeeping finish. The
+command reports collected failures at its outer boundary with a failing exit status; newly created
+owners and their partial records remain. Shared persistence failures, cancellation, invalid
+activation preflight and unexpected internal errors still abort immediately. Fresh agent creation
+refuses an existing unowned Linux account or home before arming rollback. Existing agents retain the
+create-or-converge reinit path. VM/admin setup finishes before the final VM initialization and
+SSH-identity checkpoint, even with collected facet failures. See
 [reconciling setup](../../../../docs/guides/harness-facets.md#inspecting-and-reconciling-setup) for
 inspection and repair.
 

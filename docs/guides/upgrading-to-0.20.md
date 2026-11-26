@@ -860,6 +860,24 @@ new connection layer, so they need what [What these commands need](#what-these-c
   create's rollback included, with the exit status it would have had. Output redirected to a file
   that cannot be written, such as on a full disk, still fails the command.
 
+## Operations lock what they change
+
+Earlier releases let one command at a time change anything on a VM: a second command failed with
+`another operation is changing native state on this VM`, even when the two touched unrelated
+workspaces, agents or sessions, and access commands such as `vm shell` and `session attach` failed
+for as long as any long operation ran. This release locks the VM, each workspace, each account (an
+agent's or the admin's), each session, and the grants, consoles and workspace directory trees
+between them, so commands on unrelated parts of a VM run together. A command is refused only by an
+operation that changes something it depends on, and access commands only by a VM-wide one
+(`vm stop`, `delete`, `rekey`, `recover`, `reinit`). Refusals still fail at once, and now name the
+operation, the entity it holds and for how long (see the busy paragraph of the
+[command reference](../../cli/command-reference.md)).
+
+An older `agw` still running during the upgrade, in another terminal or by a script, still excludes
+and is excluded by this release on the same VM, so nothing races; its refusals of 0.20 commands keep
+the old message, and 0.20's refusals of it name no holder. Let such commands finish, or stop them,
+before relying on concurrent work.
+
 ## Workspace tmuxinator projects are removed
 
 Agentworks no longer generates a tmuxinator project for each workspace. No command has started one

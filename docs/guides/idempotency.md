@@ -126,10 +126,13 @@ UID/GID or recursively changes retained ownership. Named and numeric identity lo
 before the recreated account receives home permissions or SSH setup.
 
 Native account/group writers in agent create/reinit, workspace create/repair/copy, and explicit
-workspace grants share a local guard keyed by the state database path and VM name. Contention aborts
-the operation with retry guidance. This coordinates cooperating commands using that database; guest
-administrators and commands from another control-plane database remain outside this guard. Identity
-lookups do not establish global NSS uniqueness.
+workspace grants lock what they change locally, keyed by the state database path and VM name: the
+account, the workspace, or the account's membership in the workspace's group. Two writers of the
+same account, workspace or membership refuse each other with retry guidance; writers of different
+ones on one VM run together, relying on the guest's own account-file locking for the shared account
+and group files. This coordinates cooperating commands using that database; guest administrators and
+commands from another control-plane database remain outside these locks. Identity lookups do not
+establish global NSS uniqueness.
 
 The user step is detection-based and reports the true outcome (it is verifying, not blindly
 creating): it probes the agent user with `getent passwd` first, then reports `Created agent user`
@@ -307,13 +310,14 @@ individually while other setup continues. See [native harness setup](native-harn
 collision and retirement behavior, and [migrating Claude setup](migrating-claude-setup.md) for old
 declarations and stored overlays.
 
-Setup and parent deletion share a VM-family mutation guard. Parent deletion uses the existing core
-lifecycle and clears setup records in its database transaction; it does not first uninstall native
-plugins. Workspace deletion attempts exact owned Git-exclusion retirement through existing state;
-unresolved cleanup warns without adding a deletion prerequisite. Rehome uses the known old/new owner
-paths to reconcile those exclusions where safe. It moves project settings without rerunning facets
-or relocating general native setup records. Readiness still checks whether recorded setup matches
-the current destination. Existing workspaces have no harness reinit operation.
+Setup and parent deletion take their owner's lock (the VM, the account or the workspace), so they
+cannot race on one owner. Parent deletion uses the existing core lifecycle and clears setup records
+in its database transaction; it does not first uninstall native plugins. Workspace deletion attempts
+exact owned Git-exclusion retirement through existing state; unresolved cleanup warns without adding
+a deletion prerequisite. Rehome uses the known old/new owner paths to reconcile those exclusions
+where safe. It moves project settings without rerunning facets or relocating general native setup
+records. Readiness still checks whether recorded setup matches the current destination. Existing
+workspaces have no harness reinit operation.
 
 [Harness facets](harness-facets.md) explains configuration, owning scopes, environment composition,
 and required versus recommended session prerequisites.
