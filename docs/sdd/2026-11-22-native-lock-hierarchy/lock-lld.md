@@ -658,16 +658,16 @@ paths. The only fields are the ones above.
 A command compares only what it read, and only these fields, never whole rows (timestamps and
 recorded pids change under ordinary use):
 
-| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                            |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`; `confirm-release` adds `debian_release`                                                                                                                                                              |
-| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                       |
-| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                       |
-| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded and the desired overlay digest (`db.instance_state.get_desired_overlay`) they accepted                               |
-| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names                                                                                                                                                                                       |
-| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes |
-| path entities                     | the lookup walk's recorded directories and final path for each stored path, walked again on the guest                                                                                                                                                      |
-| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status                                                 |
+| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`; `confirm-release` adds `debian_release`; `vm reinit` adds `template`, `admin_template` and the stored overlay it read                                                                                   |
+| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                          |
+| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                          |
+| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded and the desired overlay digest (`db.instance_state.get_desired_overlay`) they accepted                                  |
+| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names; a command that rewrites the list from the read under the set (`add-sessions`, `add-shell`) compares only the console row, and compares each session it adds by its session row's fields |
+| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes    |
+| path entities                     | the lookup walk's recorded directories and final path for each stored path, walked again on the guest                                                                                                                                                         |
+| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status                                                    |
 
 ### Lock sets
 
@@ -729,12 +729,12 @@ concurrent `session create` for the same pair and a `revoke-workspaces` of it. W
 the agent's last on the workspace, the membership is removed before the session and grant rows are
 deleted ([Account files](#account-files)). Removing a console member changes the console, so it
 holds each console holding the session exclusive, with the console's other members shared. Its
-confirmation (`_queries.py:227`) and the empty-console offer are step 5, after its status and access
-probes; the offer is phrased as "will be empty", and under the set a consented console is deleted
-only if it is still empty, while one that became empty without an offer is kept with a note. The
-workspace and agent follow-on offers (`_queries.py:159-160`) run after the set is released; the
-deletes they trigger run their own sequence, whose re-check refuses if the workspace or agent is no
-longer empty.
+confirmation (`_queries.py:227`) is step 5, after its status and access probes. A status that needs
+a PID repair cannot be read before the set; it is left undecided there, and the repair and the
+decision run under the set. The empty-console, workspace and agent follow-on offers run after the
+set is released, all in one shape: the delete each triggers runs its own sequence, whose re-check
+refuses if the console, workspace or agent is no longer empty. `console remove-sessions` offers the
+same way.
 
 **Workspace repair.** Besides restoring the admin's and each granted agent's membership, repair
 removes guest members of the workspace group who hold no grant (`workspaces/manager/repair.py:329`).
@@ -852,7 +852,7 @@ the two operations do not overlap in time. That is not a locking question, and i
 | the grant-all agents and the workspaces  | the grant-all entity                                                                                                                                                                                                                                                                                                                                                |
 | workspace directory trees                | `path` entities: the walk's final path exclusive and every directory it looked a name up in shared, for whoever creates, fills, removes or recursively reads the tree ([Workspace paths, section 4](#rows-that-need-more-than-a-line)); the exact-target `mkdir` in create (`workspaces/backends/vm.py:127`) and rehome (`rehome.py:228`) still reserves the target |
 | console membership                       | the console entity, with its members as parents                                                                                                                                                                                                                                                                                                                     |
-| the dpkg lock                            | workspace repair's `acl` install (`workspaces/manager/repair.py:158`) gains `-o DPkg::Lock::Timeout=120`, as `vms/recovery.py:117-118` uses, since two repairs of different workspaces can now run at once                                                                                                                                                          |
+| the dpkg lock                            | workspace repair's `acl` install (`workspaces/manager/repair.py:158`) gains `-o DPkg::Lock::Timeout=120` inside a 180 s install deadline, as `vms/recovery.py:117-118` uses, since two repairs of different workspaces can now run at once                                                                                                                          |
 | operation logs                           | each log gets a unique name created with an exclusive open ([Operation logs](#operation-logs))                                                                                                                                                                                                                                                                      |
 | operator SSH config                      | the SSH config rebuild mutex ([below](#ssh-config-rebuild))                                                                                                                                                                                                                                                                                                         |
 | host-key store                           | per-VM file written atomically (`execution/trust.py:242-261`) under the vm exclusive                                                                                                                                                                                                                                                                                |
@@ -903,7 +903,9 @@ the grant row only after the removal succeeds. Today session delete deletes its 
 grant rows and then removes the membership best effort (`sessions/manager/_queries.py:249-262`), as
 do revoke (`agents/grants.py:176-224`) and the session node (`sessions/nodes.py:286-291`); a failed
 removal then leaves a member with no grant row to retry from. With the removal first, a failure
-leaves the rows in place and rerunning the command retries it.
+leaves the rows in place and rerunning the command retries it. The session node's rollback, which
+removes a session it just created, keeps both the session and the grant row when the removal fails
+and warns, so that the session can be deleted again.
 
 ### Agent account removal
 
@@ -1154,9 +1156,9 @@ delivery list names the same set.
     spanning a body.
   - `cli/agentworks/orchestration/README.md:166-170`: held sets replace the family guard and token;
     the operation sequence.
-  - `docs/guides/upgrading-to-0.20.md`: operations below the VM now run concurrently, a refusal
-    names its holder, and an older agw still running during the upgrade interlocks safely but
-    reports busy without naming holders.
+  - the upgrade guide of the release PR 2 ships in (0.20.0 ships before it): operations below the VM
+    now run concurrently, a refusal names its holder, and an older agw still running during the
+    upgrade interlocks safely but reports busy without naming holders.
   - `docs/guides/desired-runtime-state.md:154`, `:163-165`.
   - `docs/guides/native-harness-setup.md:336-340`, `docs/guides/harness-facets.md:400`,
     `docs/guides/idempotency.md:298`, `cli/agentworks/db/README.md:138`,
@@ -1187,44 +1189,58 @@ No sample-config or completion change: the waits are constants and the command t
   (`agents/grants.py:97`, `workspaces/manager/repair.py:133`, `workspaces/manager/copy.py:169`).
 - Rehome's pre-confirmation sessions check becomes pure observation, with its PID repair under the
   guard.
-- Prompts before acquisition: every row of Appendix A.1, with the step-7 re-checks of what each
-  prompt showed, `session start --spec`'s consent and overlay hand-off, and the deletion of
-  `delete_console_record`.
+- Workspace delete keeps its row when `rm -rf` or `groupdel` fails (`groupdel` exit 6 counts as
+  removed), so a rerun retries, as agent delete does.
+- Prompts before acquisition: every row of Appendix A.1 except those it moves to PR 2, with the
+  step-7 re-checks of what each prompt showed, `session start --spec`'s consent, and the deletion of
+  `delete_console_record`. The empty-console offer joins the workspace and agent offers after the
+  guard is released.
 
 **PR 2, the hierarchy.** The `native_locks` package replaces `harness_setup/locking.py` in one step:
 entities and requests at every site of Appendix A.2 (with the bulk grant pairs, the `path` entities
 and the guest lookup walk, and the console list rule), the probe, the brief boot exclusive and
-shared admission, the runtime families' intent acquisition and the per-target retry rule with
-`restore_intent`, holder records and the R3 message, the per-invocation structural prompt notice
-with `prompts=True`, the restart and agent reinit declaration checks, and the family barrier.
+shared admission, the runtime families' intent acquisition with the prompt moves Appendix A.1 defers
+to it, and the per-target retry rule with `restore_intent`, holder records and the R3 message, the
+per-invocation structural prompt notice with `prompts=True`, the restart and agent reinit
+declaration checks, and the family barrier.
 
 ## Appendix A: implementation checklist
 
 ### A.1 PR 1: prompts to move before the guard
 
-| Command                                            | Under the guard today                                                                                                                                                                                                  | Moves to                                                              |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `vm reinit`                                        | gate and boundary secrets (`vms/manager/reinit.py:315`, `:331`), guard `:71`                                                                                                                                           | steps 4 and 5                                                         |
-| `vm start`, `stop`                                 | gate secrets (`vms/manager/runtime.py:73`), guard `vms/manager/power.py:73`, `:117`                                                                                                                                    | step 5                                                                |
-| `vm delete`                                        | boundary secrets (`vms/manager/boundary.py:289`), guard `power.py:218`                                                                                                                                                 | step 5                                                                |
-| `vm rekey`                                         | auth key and `--prompt` (`boundary.py:346`, `:361`), guard `power.py:412`; `--wait-for-share` stays (`:490`)                                                                                                           | step 5                                                                |
-| `vm recover`                                       | secrets (`boundary.py:361`), guard `vms/manager/recover.py:84`; host-key confirm stays (`recover.py:240`)                                                                                                              | step 5                                                                |
-| `vm confirm-release`                               | none; its confirm (`vms/manager/release.py:79`) precedes the new guard                                                                                                                                                 | step 5                                                                |
-| `console attach`                                   | `require_vm_ssh_boundary`, gate secrets (`prepare_vm_runtime`) and a possible boot (`activate_vm_runtime`), all under the guard at `sessions/multi_console/lifecycle.py:257` until `:303`, before the attach at `:304` | gate secrets to step 4; the boot moves out of the guard in PR 2       |
-| `agent reinit`                                     | gate and boundary secrets (`agents/manager/lifecycle.py:658`, `:666`), guard `:504`                                                                                                                                    | steps 4 and 5                                                         |
-| `agent delete`                                     | boundary secrets, guard `lifecycle.py:331`; its session list is read before the guard (`:307`)                                                                                                                         | step 5; step 7 compares the session names                             |
-| `workspace delete`                                 | boundary secrets (`workspaces/manager/delete.py:134-142`), guard `:106`                                                                                                                                                | step 5                                                                |
-| `workspace rehome`                                 | sessions check, which also persists a PID repair (`workspaces/manager/rehome.py:101-123`), confirm (`:217`), secrets (`:181-189`), guard `:96`                                                                         | step 5 as pure observation; the repair and the check re-run at step 7 |
-| `session create`                                   | gate and boundary secrets (`sessions/manager/_create.py:414-417`), guard `:377`                                                                                                                                        | steps 4 and 5                                                         |
-| `session start --spec`                             | restart consent (`sessions/manager/_spec.py:133-135`), guard `:128`                                                                                                                                                    | step 5; overlay handed to the batch                                   |
-| `session delete`                                   | confirm (`sessions/manager/_queries.py:227`), empty-console offer (`:295`, `sessions/_resource_cleanup.py:97`), secrets, guard `:154`                                                                                  | step 5                                                                |
-| `console create`                                   | gate and pane secrets (`sessions/multi_console/attach.py:453`, `:495`), guard `multi_console/crud.py:163`                                                                                                              | steps 4 and 5                                                         |
-| `console start`, `restart`, `stop`                 | gate secrets (`multi_console/lifecycle.py:96`, `:167`), guard `:69`, `:149`; pane secrets stay (`:117-118`, `:191`)                                                                                                    | runtime path (e)                                                      |
-| `console delete`                                   | confirm (`multi_console/attach.py:856`), guard `:854`                                                                                                                                                                  | step 5                                                                |
-| `console add-sessions`, `add-shell`                | pane secrets (`crud.py:379`, `:696`), guards `:325`, `:648`                                                                                                                                                            | step 5; members re-checked at step 7                                  |
-| `console remove-sessions`                          | empty-console offer (`crud.py:494`), guard `:466`                                                                                                                                                                      | step 5                                                                |
-| `console restore-session`                          | gate and pane secrets (`multi_console/restore.py:353`), guard `:293`                                                                                                                                                   | steps 4 and 5                                                         |
-| `vm reconcile`, session batch, `console reconcile` | gate secrets (`runtime_state/_prepare.py:213-221`), guard `runtime_state/_selection.py:101`; workload union stays (`_execute.py:45`)                                                                                   | runtime path (e)                                                      |
+| Command                                                                      | Under the guard today                                                                                                                                                                                                  | Moves to                                                              |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `vm reinit`                                                                  | gate and boundary secrets (`vms/manager/reinit.py:315`, `:331`), guard `:71`                                                                                                                                           | steps 4 and 5                                                         |
+| `vm delete`                                                                  | boundary secrets (`vms/manager/boundary.py:289`), guard `power.py:218`                                                                                                                                                 | step 5                                                                |
+| `vm rekey`                                                                   | auth key and `--prompt` (`boundary.py:346`, `:361`), guard `power.py:412`; `--wait-for-share` stays (`:490`)                                                                                                           | step 5                                                                |
+| `vm recover`                                                                 | secrets (`boundary.py:361`), guard `vms/manager/recover.py:84`; host-key confirm stays (`recover.py:240`)                                                                                                              | step 5                                                                |
+| `vm confirm-release`                                                         | none; its confirm (`vms/manager/release.py:79`) precedes the new guard                                                                                                                                                 | step 5                                                                |
+| `console attach`                                                             | `require_vm_ssh_boundary`, gate secrets (`prepare_vm_runtime`) and a possible boot (`activate_vm_runtime`), all under the guard at `sessions/multi_console/lifecycle.py:257` until `:303`, before the attach at `:304` | gate secrets to step 4; the boot moves out of the guard in PR 2       |
+| `agent delete`                                                               | boundary secrets, guard `lifecycle.py:331`; its session list is read before the guard (`:307`)                                                                                                                         | step 5; step 7 compares the session names                             |
+| `workspace delete`                                                           | boundary secrets (`workspaces/manager/delete.py:134-142`), guard `:106`                                                                                                                                                | step 5                                                                |
+| `workspace rehome`                                                           | sessions check, which also persists a PID repair (`workspaces/manager/rehome.py:101-123`), confirm (`:217`), secrets (`:181-189`), guard `:96`                                                                         | step 5 as pure observation; the repair and the check re-run at step 7 |
+| `session create`                                                             | gate and boundary secrets (`sessions/manager/_create.py:414-417`), guard `:377`                                                                                                                                        | steps 4 and 5                                                         |
+| `session start --spec`                                                       | restart consent (`sessions/manager/_spec.py:133-135`), guard `:128`; its overlay hand-off to the batch is PR 2's                                                                                                       | step 5; overlay handed to the batch                                   |
+| `session delete`                                                             | confirm (`sessions/manager/_queries.py:227`), secrets, guard `:154`; the empty-console offer (`:295`, `sessions/_resource_cleanup.py:97`) moves after the guard is released                                            | step 5                                                                |
+| `console create`                                                             | gate and pane secrets (`sessions/multi_console/attach.py:453`, `:495`), guard `multi_console/crud.py:163`                                                                                                              | steps 4 and 5                                                         |
+| `console delete`                                                             | confirm (`multi_console/attach.py:856`), guard `:854`                                                                                                                                                                  | step 5                                                                |
+| `console add-sessions`, `add-shell`                                          | pane secrets (`crud.py:379`, `:696`), guards `:325`, `:648`                                                                                                                                                            | step 5; members re-checked at step 7                                  |
+| `console remove-sessions`                                                    | guard `:466`; the empty-console offer (`crud.py:494`) moves after the guard is released                                                                                                                                | step 5                                                                |
+| `console restore-session`                                                    | gate and pane secrets (`multi_console/restore.py:353`), guard `:293`                                                                                                                                                   | steps 4 and 5                                                         |
+| `agent grant-workspaces`, `revoke`, `workspace repair`, `copy`'s destination | gate secrets, resolved inside the guards #956 added and PR 1 adds (`agents/grants.py:97`, `:130`; `workspaces/manager/repair.py:133`; `copy.py:169`)                                                                   | step 5, after the gate, with step 7's re-check                        |
+
+**Moved to PR 2.** These rows write intent or a declaration that must precede their prompts, under a
+brief acquisition of their own (section 2's intent acquisition for runtime families, and agent
+reinit's brief account exclusive). Under today's single guard that would mean building the two-phase
+sequence twice, so they move with that acquisition. `session start --spec`'s overlay hand-off to the
+batch and the removal of `run_session_batch(held=)` depend on the batch row and move with it.
+
+| Command                                            | Under the guard today                                                                                               | Moves to                                         |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `vm start`, `stop`                                 | gate secrets (`vms/manager/runtime.py:73`), guard `vms/manager/power.py:74`, `:118`                                 | step 5, after the intent acquisition             |
+| `agent reinit`                                     | gate and boundary secrets (`agents/manager/lifecycle.py:621`, `:664`), guard `:519`; the early template save `:587` | steps 4 and 5, after the brief account exclusive |
+| `console start`, `restart`, `stop`                 | gate secrets, guard `sessions/multi_console/lifecycle.py:69`, `:149`; pane secrets stay                             | step 5, after the intent acquisition             |
+| `vm reconcile`, session batch, `console reconcile` | gate secrets (`runtime_state/_prepare.py:219`), guard `runtime_state/_selection.py:101`; workload union stays       | runtime path (e)                                 |
 
 ### A.2 PR 2: acquisition sites
 
