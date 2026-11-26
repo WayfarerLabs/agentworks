@@ -22,6 +22,7 @@ from agentworks.workspaces.guest import (
     REQUEST_FAILURES,
     ensure_group,
     open_parent_traversal,
+    remove_group_member,
     stored_workspace_path,
 )
 from agentworks.workspaces.manager._common import _workspace_scope
@@ -329,7 +330,7 @@ def repair_workspace(
             # Remove agents that shouldn't be there
             to_remove = current_members - granted_agents
             for user in sorted(to_remove):
-                status(admin, Command(("gpasswd", "-d", user, ws_group), elevated=True))
+                remove_group_member(admin, user, ws_group)
                 output.detail(f"Fixed: removed {user} from {ws_group}")
                 fixes += 1
 

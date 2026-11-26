@@ -1175,7 +1175,7 @@ def test_reinit_reconcile_is_idempotent_across_repeated_reinits(
     captured_output,  # noqa: ANN001
 ) -> None:
     """The reconcile runs on every reinit and is safe to repeat because it is
-    idempotent: ``add_to_workspace_group`` is ``getent || groupadd`` then
+    idempotent: ``add_to_workspace_group`` is ``groupadd -f`` then
     ``usermod -aG``, a no-op once membership holds. A second reinit still
     invokes it, completes cleanly, and duplicates no grant rows."""
     config = make_config()

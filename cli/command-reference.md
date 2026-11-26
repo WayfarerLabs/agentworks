@@ -1143,6 +1143,12 @@ exec variant runs the command from the workspace directory. A workspace on a dif
 rejected with a `ValidationError`; a workspace the agent lacks access to raises `AuthorizationError`
 with a hint to run `agent grant-workspaces`.
 
+An agent's access to a workspace is a grant in the database plus membership in the workspace's
+Linux group. A command that drops the agent's last grant on a workspace (`agent revoke-workspaces`,
+or `session delete` of the agent's last session there) removes the membership first and drops the
+grant only once that succeeds. When the removal fails, the command fails with the grant (and the
+session) still recorded, and rerunning it retries the removal.
+
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
 

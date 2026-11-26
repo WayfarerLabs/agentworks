@@ -543,7 +543,7 @@ def test_delete_choreography_end_to_end_standalone(
     agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("tmux -S /run/agentworks/agent-tmux-sockets/agt-a1/s1.sock kill-server" in c for c in target.commands)
-    assert any("gpasswd -d agt-a1 ws-ws1" in c for c in target.commands)
+    assert any("usermod -r -G ws-ws1 agt-a1" in c for c in target.commands)
     assert any("pkill -u agt-a1" in c for c in target.commands)
     assert any("userdel -r agt-a1" in c for c in target.commands)
     assert any("rm -rf -- /run/agentworks/agent-tmux-sockets/agt-a1" in c for c in target.commands)
@@ -768,7 +768,7 @@ def test_revoke_named_workspace_with_implicit_access_keeps_membership(
     )
 
     assert db.has_any_grant("a1", "ws1")  # the implicit grant survives
-    assert not any("gpasswd" in c for c in target.commands)
+    assert not any(c.startswith("usermod -r") for c in target.commands)
     assert "Revoked: ws1 (still has implicit access via sessions)" in captured_output.info
 
 
@@ -809,7 +809,7 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     assert not db.has_any_grant("a1", "ws2")
     # ws2's only grant was explicit, so with it gone the agent is removed
     # from ws2's group; ws1 still has its implicit grant, so it is not.
-    assert any("gpasswd -d agt-a1 ws-ws2" in c for c in target.commands)
+    assert any("usermod -r -G ws-ws2 agt-a1" in c for c in target.commands)
     assert not any("ws-ws1" in c for c in target.commands)
     assert "All explicit grants revoked for agent 'a1'" in captured_output.info
     assert "agent still has implicit access via sessions to: ws1" in captured_output.warnings

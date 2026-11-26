@@ -24,7 +24,7 @@ from agentworks.execution.requests import Command
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.vms.manager import gated_vm_boundary
-from agentworks.workspaces.guest import ensure_group
+from agentworks.workspaces.guest import ensure_group, remove_group_member
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -180,26 +180,29 @@ def revoke_workspaces(
             # membership survived the revoke; issue #189).
             granted = db.list_granted_workspaces(agent_name)
             db.update_agent_grant_all(agent_name, False)
-            db.delete_explicit_grants(agent_name)
-            # Remove from groups where no grant (implicit or grant-all) remains
+            # Where the explicit grant is the last one, the membership goes
+            # before the row, so a failed removal keeps the row to retry from.
             remaining_implicit: list[str] = []
             for ws_name in granted:
-                if db.has_any_grant(agent_name, ws_name):
+                if holds_other_grant(db, agent_name, ws_name, grant_type="explicit"):
                     remaining_implicit.append(ws_name)
                 else:
                     remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
+                db.delete_agent_grant(agent_name, ws_name, "explicit")
+            db.delete_explicit_grants(agent_name)
             output.result(f"All explicit grants revoked for agent '{agent_name}'")
             if remaining_implicit:
                 output.warn(f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}")
             return
 
         for ws_name in workspace_names:
-            db.delete_agent_grant(agent_name, ws_name, "explicit")
-            if not db.has_any_grant(agent_name, ws_name):
-                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-                output.info(f"Revoked: {ws_name}")
-            else:
+            if holds_other_grant(db, agent_name, ws_name, grant_type="explicit"):
+                db.delete_agent_grant(agent_name, ws_name, "explicit")
                 output.info(f"Revoked: {ws_name} (still has implicit access via sessions)")
+            else:
+                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
+                db.delete_agent_grant(agent_name, ws_name, "explicit")
+                output.info(f"Revoked: {ws_name}")
         output.result(f"Revoked {output.count(len(workspace_names), 'workspace grant')} from agent '{agent_name}'")
 
 
@@ -273,14 +276,34 @@ def remove_from_workspace_group(
 ) -> None:
     """Remove an agent user from a workspace's Linux group, as root on the admin's access.
 
-    The status is not read: the user may not be a member. An outcome that is
-    not a completion raises its typed error.
+    A user who is not a member, or whose account or group is gone, counts as
+    removed; any other failure raises its typed error
+    (:func:`~agentworks.workspaces.guest.remove_group_member`). A caller that
+    drops the agent's last grant on the workspace calls this first and deletes
+    the grant row only once it returns, so a failure leaves the row for a
+    rerun to retry from.
     """
     from agentworks.workspaces.backends.vm import admin_access
 
     admin = admin_access(vm, config, logger)
-    ws_grp = _resolve_ws_group(db, workspace_name)
-    admin.run(Command(("gpasswd", "-d", linux_user, ws_grp), elevated=True)).require_completed(vm.name)
+    remove_group_member(admin, linux_user, _resolve_ws_group(db, workspace_name))
+
+
+def holds_other_grant(
+    db: Database, agent_name: str, workspace_name: str, *, grant_type: str, session_name: str | None = None
+) -> bool:
+    """Whether the agent keeps a grant on the workspace besides the named one.
+
+    The named grant is the ``(grant_type, session_name)`` row a caller is about
+    to delete; whether it exists does not matter. ``False`` means deleting it
+    drops the agent's last grant there, so the caller removes the membership
+    first.
+    """
+    return any(
+        (grant.grant_type, grant.session_name) != (grant_type, session_name)
+        for grant in db.list_agent_grants(agent_name)
+        if grant.workspace_name == workspace_name
+    )
 
 
 # -- Grant-all materialization ---------------------------------------------

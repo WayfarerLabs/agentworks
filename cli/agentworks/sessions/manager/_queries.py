@@ -248,18 +248,22 @@ def _delete_session_runtime(
 
             cleanup_session_artifacts(db, session, owner)
             _require_selected_session(db, name, selected_session_uuid)
-            db.delete_session(name)
 
-            # Clean up implicit grant for this session
+            # When the session's implicit grant is the agent's last on the
+            # workspace, the membership goes first: a failed removal raises
+            # with the session and grant rows in place, so a rerun retries it.
+            if session.agent_name:
+                from agentworks.agents.grants import holds_other_grant, remove_from_workspace_group
+
+                agent = db.get_agent(session.agent_name)
+                last_grant = not holds_other_grant(
+                    db, session.agent_name, session.workspace_name, grant_type="implicit", session_name=name
+                )
+                if agent and last_grant:
+                    remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
+            db.delete_session(name)
             if session.agent_name:
                 db.delete_agent_grant(session.agent_name, session.workspace_name, "implicit", session_name=name)
-                # If no grants remain, remove from workspace group
-                if not db.has_any_grant(session.agent_name, session.workspace_name):
-                    from agentworks.agents.grants import remove_from_workspace_group
-
-                    agent = db.get_agent(session.agent_name)
-                    if agent:
-                        remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
             # Best-effort console cleanup runs after all DB / workspace state has
             # settled. Stale tmux windows are recoverable cosmetic noise; if the
