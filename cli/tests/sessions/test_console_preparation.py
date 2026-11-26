@@ -533,6 +533,85 @@ def test_a_console_refused_after_recording_its_intent_says_how_to_restore_it(
     assert _console(db).desired_runtime_state is recorded
 
 
+@pytest.mark.parametrize(
+    ("operation", "restore"),
+    [
+        ("start", ("agw", "console", "set-desired-state", "con", "stopped")),
+        ("stop", ("agw", "console", "set-desired-state", "con", "running")),
+    ],
+    ids=["start", "stop"],
+)
+def test_a_console_whose_vm_changed_before_its_final_set_refuses_and_says_how_to_restore_its_intent(
+    db: Database, monkeypatch, operation, restore
+):
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+
+    def prepare_then_the_vm_is_readdressed(*args, **kwargs):
+        # A rekey or recover lands after the gate admitted the row and before the final set.
+        db.update_vm_tailscale("vm1", "100.64.0.77")
+        return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+    monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_the_vm_is_readdressed)
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(StateConflictError) as refused:
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "vm"
+    assert refused.value.restore_intent == restore
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_runtime_command_runs_on_the_vm_row_its_gate_admitted(db: Database, monkeypatch, operation):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    class _Stop(Exception):
+        pass
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=nullcontext)
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+
+    def readdressed_before_the_gate_admits_it(*args, **kwargs):
+        # A rekey or recover lands after the command read the VM; the gate admits the new row.
+        db.update_vm_tailscale("vm1", "100.64.0.77")
+        node.row = _vm(db)
+        return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+    monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", readdressed_before_the_gate_admits_it)
+    reached: list[str | None] = []
+
+    def vm_access(vm, *args, **kwargs):
+        reached.append(vm.tailscale_host)
+        raise _Stop
+
+    monkeypatch.setattr("agentworks.execution.vm_access", vm_access)
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(_Stop):
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert reached == ["100.64.0.77"]
+
+
 def test_a_console_start_refuses_a_member_added_as_its_final_set_is_taken(db: Database, monkeypatch):
     from types import SimpleNamespace
 

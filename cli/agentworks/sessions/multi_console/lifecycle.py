@@ -9,7 +9,7 @@ import agentworks.sessions.multi_console as _mc
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import DesiredRuntimeState, VMStatus
-from agentworks.errors import AgentworksError, NotFoundError, StateError, UserAbort
+from agentworks.errors import AgentworksError, NotFoundError, StateConflictError, StateError, UserAbort
 from agentworks.intent_restore import replaced_intent
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
@@ -55,27 +55,31 @@ def preflight_console_vm(
 @contextmanager
 def _final_set(
     node: LiveVMNode, db: Database, console: ConsoleRow, *, restore: tuple[str, ...] | None
-) -> Iterator[NativeLockSet]:
-    """The console's final set, its members read again under it.
+) -> Iterator[tuple[NativeLockSet, ConsoleRow]]:
+    """The console's final set, and the console as it reads under it.
 
-    A refusal says how to restore the intent this command recorded, if it
-    changed one. A member added or removed since ``console`` was read refuses.
+    Under the set the VM row the gate admitted, the console's members and
+    the intent this command recorded are read again, and a change refuses.
+    A refusal, busy or changed, says how to restore that intent, if the
+    command changed it.
     """
     from agentworks.intent_restore import refused_after_intent
     from agentworks.native_locks import NativeLockBusyError
-    from agentworks.recheck import require_request_unchanged
+    from agentworks.recheck import require_request_unchanged, require_vm_unchanged
 
     request = console_request(db, console)
     with ExitStack() as stack:
         try:
             held = stack.enter_context(node.locked(request, prompts=True))
-        except NativeLockBusyError as busy:
-            refused_after_intent(busy, restore)
+            require_vm_unchanged(db, node.row)
+            require_request_unchanged(
+                "console", console.name, request, console_request(db, _require_console(db, console.name))
+            )
+            current = _require_intent_unchanged(db, console)
+        except (NativeLockBusyError, StateConflictError) as refused:
+            refused_after_intent(refused, restore)
             raise
-        require_request_unchanged(
-            "console", console.name, request, console_request(db, _require_console(db, console.name))
-        )
-        yield held
+        yield held, current
 
 
 def _require_intent_unchanged(db: Database, accepted: ConsoleRow) -> ConsoleRow:
@@ -142,8 +146,9 @@ def realize_console(
     try:
         context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
         activate_vm_runtime(context)
-        with _final_set(node, db, console, restore=restore) as held, context.node.hold_active():
-            console = _require_intent_unchanged(db, console)
+        with _final_set(node, db, console, restore=restore) as (held, console), context.node.hold_active():
+            # The body runs on the row the hold admitted.
+            vm = context.node.row
             prepared = _mc.prepare_console_reconcile(
                 db,
                 config,
@@ -207,8 +212,9 @@ def stop_console_runtime(
     context = None
     try:
         context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
-        with _final_set(node, db, console, restore=restore) as held:
-            console = _require_intent_unchanged(db, console)
+        with _final_set(node, db, console, restore=restore) as (held, console):
+            # The body runs on the row the gate admitted, the one the final set compared.
+            vm = context.node.row
             status = context.observed_status
             if status is VMStatus.UNKNOWN:
                 raise StateError("parent VM power state is unknown", entity_kind="console", entity_name=name)

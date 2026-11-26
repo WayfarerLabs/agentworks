@@ -1,4 +1,4 @@
-"""vm start and stop refused at their final set keep the intent they recorded and say how to restore it."""
+"""vm start and stop refused at their final set, busy or changed, keep their recorded intent and say how to undo it."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from contextlib import ExitStack
 import pytest
 
 from agentworks.db import DesiredRuntimeState
+from agentworks.errors import StateConflictError
 from agentworks.native_locks import NativeLockBusyError, native_locks
 from agentworks.native_locks.rows import vm_exclusive
 from agentworks.vms import manager as vm_manager
@@ -45,4 +46,32 @@ def test_a_power_change_refused_after_recording_its_intent_says_how_to_restore_i
     recorded = DesiredRuntimeState.STOPPED if operation == "stop" else DesiredRuntimeState.RUNNING
     vm = db.get_vm("box")
     assert vm is not None and vm.desired_runtime_state is recorded
+    assert ("vm-stop", "box") not in runtime[2] and ("vm-start", "box") not in runtime[2]
+
+
+@pytest.mark.parametrize(
+    ("operation", "previous", "restore"),
+    [
+        ("stop", DesiredRuntimeState.RUNNING, ("agw", "vm", "set-desired-state", "box", "running")),
+        ("start", DesiredRuntimeState.STOPPED, ("agw", "vm", "set-desired-state", "box", "stopped")),
+    ],
+    ids=["stop-running", "start-stopped"],
+)
+def test_a_power_change_whose_vm_changed_before_its_final_set_refuses_and_says_how_to_restore_it(
+    db, make_config, runtime, monkeypatch: pytest.MonkeyPatch, operation, previous, restore
+) -> None:
+    seed_vm(db, "box", target=previous)
+    prepare = vm_runtime.prepare_vm_runtime
+
+    def prepare_then_the_vm_is_readdressed(*args, **kwargs):
+        # A rekey or recover lands after the preparation admitted the row and before the final set.
+        context = prepare(*args, **kwargs)
+        db.update_vm_tailscale("box", "100.64.0.77")
+        return context
+
+    monkeypatch.setattr(vm_runtime, "prepare_vm_runtime", prepare_then_the_vm_is_readdressed)
+    command = vm_manager.stop_vm if operation == "stop" else vm_manager.start_vm
+    with pytest.raises(StateConflictError) as refused:
+        command(db, make_config(), "box", interaction=REFUSE)
+    assert refused.value.restore_intent == restore
     assert ("vm-stop", "box") not in runtime[2] and ("vm-start", "box") not in runtime[2]

@@ -108,7 +108,12 @@ class StateConflictError(StateError):
     """Persisted state no longer matches the snapshot an operation prepared.
 
     Callers must not continue with that stale selection after this failure.
+    A command that recorded a new intent before this refusal may set
+    ``restore_intent``, the command words that put back the intent it
+    replaced (:mod:`agentworks.intent_restore`).
     """
+
+    restore_intent: tuple[str, ...] | None = None
 
 
 class MigrationBlockedError(StateError):

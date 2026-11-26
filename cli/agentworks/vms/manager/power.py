@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import DesiredRuntimeState, VMStatus
-from agentworks.errors import AgentworksError, StateError, UserAbort, ValidationError
+from agentworks.errors import AgentworksError, StateConflictError, StateError, UserAbort, ValidationError
 from agentworks.execution import trust
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
@@ -123,9 +123,10 @@ def _run_power_change(
     secret resolves, so it survives a failure in the preparation, as it did
     when the whole command ran under one lock. The gate secrets resolve and
     the provider is observed with nothing locked (step 5); the change itself
-    runs under the vm exclusive, after the row and the recorded intent are
-    read again. A refusal of that final set says how to restore the intent
-    the brief write replaced, if it changed one.
+    runs under the vm exclusive, after the row the preparation admitted is
+    compared with the database. A refusal of that final set, busy or
+    changed, says how to restore the intent the brief write replaced, if it
+    changed one.
     """
     from contextlib import ExitStack
 
@@ -133,6 +134,7 @@ def _run_power_change(
     from agentworks.intent_restore import refused_after_intent, replaced_intent
     from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive
+    from agentworks.recheck import require_vm_unchanged
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
@@ -155,10 +157,10 @@ def _run_power_change(
         with ExitStack() as final:
             try:
                 final.enter_context(vm_node.locked(request))
-            except NativeLockBusyError as busy:
-                refused_after_intent(busy, restore)
+                require_vm_unchanged(db, vm_node.row)
+            except (NativeLockBusyError, StateConflictError) as refused:
+                refused_after_intent(refused, restore)
                 raise
-            # The prepared context compares the row's uuid and the recorded intent.
             return apply(context)
     finally:
         if context is not None:
