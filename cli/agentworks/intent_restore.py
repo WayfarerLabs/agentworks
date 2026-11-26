@@ -5,7 +5,8 @@ later, so a refusal there, busy or changed, leaves the new intent
 recorded. That is the contract, and the refusal says so: it carries the
 ``set-desired-state`` command that restores the intent it replaced, or
 ``()`` when that intent has no public form (a legacy NULL, which
-``set-desired-state`` cannot write).
+``set-desired-state`` cannot write), as long as the intent it recorded
+still stands (:func:`while_recorded`).
 """
 
 from __future__ import annotations
@@ -30,6 +31,18 @@ def replaced_intent(
 ) -> tuple[str, ...] | None:
     """:func:`restore_command` for an intent ``recorded`` replaced, or ``None`` when it changed nothing."""
     return None if previous is recorded else restore_command(kind, name, previous)
+
+
+def while_recorded(
+    restore: tuple[str, ...] | None, *, recorded: DesiredRuntimeState | None, current: DesiredRuntimeState | None
+) -> tuple[str, ...] | None:
+    """``restore`` while ``current``, the stored intent, is still the one its command ``recorded``.
+
+    Once another command replaced that intent there is nothing to restore,
+    and saying the new intent stays recorded would be false, so the refusal
+    carries no words.
+    """
+    return restore if current is recorded else None
 
 
 def restore_wording(restore: tuple[str, ...]) -> str:

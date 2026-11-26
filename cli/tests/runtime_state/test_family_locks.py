@@ -129,6 +129,29 @@ def test_no_family_takes_its_final_set_before_every_family_prepared_its_infrastr
     assert {name for action, name in runtime[2] if action == "session-start"} == {"on-a", "on-b"}
 
 
+def test_a_target_whose_intent_another_command_replaced_gives_no_restore_words(db, make_config, runtime, monkeypatch):
+    seed_vm(db, "box")
+    seed_session(db, "late", "box", target=DesiredRuntimeState.STOPPED)
+    import agentworks.vms.manager as vms
+
+    original_prepare = vms.prepare_vm_runtime
+
+    def prepare_then_another_command_records_the_old_intent(*args, **kwargs):
+        # Between intent acceptance (d) and the final set, another command puts the old intent back.
+        late = db.get_session("late")
+        db.set_session_desired_runtime_state(
+            "late", DesiredRuntimeState.STOPPED, expected_session_uuid=late.session_uuid
+        )
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(vms, "prepare_vm_runtime", prepare_then_another_command_records_the_old_intent)
+    results = _start(db, make_config(), ["late"], monkeypatch)
+    result = results[("session", "late")]
+    assert result.outcome is Outcome.BLOCKED
+    assert result.restore_intent is None
+    assert ("session-start", "late") not in runtime[2]
+
+
 def test_a_target_whose_declaration_changed_after_acceptance_fails_alone(db, make_config, runtime, monkeypatch):
     seed_vm(db, "box")
     seed_session(db, "changed", "box", target=DesiredRuntimeState.STOPPED)

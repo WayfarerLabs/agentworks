@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 from agentworks import output
 from agentworks.errors import AgentworksError, StateError
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
-from agentworks.intent_restore import restore_command, restore_wording
+from agentworks.intent_restore import restore_command, restore_wording, while_recorded
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -171,11 +171,17 @@ class RuntimeInvocation:
         self.record(kind, name, outcome=Outcome.BLOCKED if blocked else Outcome.FAILED, reason=reason)
 
     def refuse(self, kind: Kind, name: str, error: Exception) -> None:
-        """Block a target whose lock was refused; one whose intent this invocation recorded says how to restore it."""
+        """Block a target whose lock was refused; one whose recorded intent still stands says how to undo it."""
         self.fail(kind, name, error, blocked=True)
         if kind == "session" and name in self.replaced_intents:
-            restore = restore_command("session", name, self.replaced_intents[name])
-            self.results[(kind, name)] = replace(self.results[(kind, name)], restore_intent=restore)
+            stored = self.db.get_session(name)
+            restore = while_recorded(
+                restore_command("session", name, self.replaced_intents[name]),
+                recorded=self.sessions[name].desired_runtime_state,
+                current=None if stored is None else stored.desired_runtime_state,
+            )
+            if restore is not None:
+                self.results[(kind, name)] = replace(self.results[(kind, name)], restore_intent=restore)
 
     def unavailable(self, kind: Kind, name: str) -> bool:
         return self.results[(kind, name)].outcome in {Outcome.BLOCKED, Outcome.FAILED}

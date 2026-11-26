@@ -573,6 +573,47 @@ def test_a_console_whose_vm_changed_before_its_final_set_refuses_and_says_how_to
     assert refused.value.restore_intent == restore
 
 
+@pytest.mark.parametrize("busy", [False, True], ids=["changed", "busy"])
+@pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_whose_intent_another_command_replaced_gives_no_restore_words(
+    db: Database, monkeypatch, operation, busy
+):
+    from contextlib import ExitStack
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.multi_console._helpers import console_request
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    with ExitStack() as other_operation:
+
+        def prepare_then_another_command_records_the_old_intent(*args, **kwargs):
+            # After the brief write, another command puts the old intent back (and, if busy, still holds the console).
+            db.set_console_desired_runtime_state("con", previous)
+            if busy:
+                other_operation.enter_context(native_locks(db.path, console_request(db, _console(db))))
+            return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+        monkeypatch.setattr(
+            "agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_another_command_records_the_old_intent
+        )
+        command = mc.start_console if operation == "start" else mc.stop_console
+        with pytest.raises(StateError) as refused:
+            command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert getattr(refused.value, "restore_intent", None) is None
+    assert refused.value.entity_kind == "console"
+
+
 @pytest.mark.parametrize("operation", ["start", "stop"])
 def test_a_console_runtime_command_runs_on_the_vm_row_its_gate_admitted(db: Database, monkeypatch, operation):
     from contextlib import nullcontext

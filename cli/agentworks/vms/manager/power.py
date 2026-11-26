@@ -123,15 +123,15 @@ def _run_power_change(
     secret resolves, so it survives a failure in the preparation, as it did
     when the whole command ran under one lock. The gate secrets resolve and
     the provider is observed with nothing locked (step 5); the change itself
-    runs under the vm exclusive, after the row the preparation admitted is
+    runs under the vm exclusive, after the row the preparation last read is
     compared with the database. A refusal of that final set, busy or
-    changed, says how to restore the intent the brief write replaced, if it
-    changed one.
+    changed, says how to restore the intent the brief write replaced, while
+    the one it recorded still stands.
     """
     from contextlib import ExitStack
 
     from agentworks.bootstrap import load_request_registry
-    from agentworks.intent_restore import refused_after_intent, replaced_intent
+    from agentworks.intent_restore import refused_after_intent, replaced_intent, while_recorded
     from agentworks.native_locks import NativeLockBusyError, native_locks
     from agentworks.native_locks.rows import vm_exclusive
     from agentworks.recheck import require_vm_unchanged
@@ -159,7 +159,9 @@ def _run_power_change(
                 final.enter_context(vm_node.locked(request))
                 require_vm_unchanged(db, vm_node.row)
             except (NativeLockBusyError, StateConflictError) as refused:
-                refused_after_intent(refused, restore)
+                stored = db.get_vm(selected.name)
+                intent = None if stored is None else stored.desired_runtime_state
+                refused_after_intent(refused, while_recorded(restore, recorded=target, current=intent))
                 raise
             return apply(context)
     finally:
