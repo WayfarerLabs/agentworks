@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +18,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces.manager import rehome_workspace
 from tests.artifacts.test_workspace_exclusion_rehome import RehomeGuest
 from tests.capabilities.test_native_setup_deletion import deletion as deletion
+from tests.conftest import admitting_boundary
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -104,7 +104,7 @@ def rehome_case(db: Database, deletion, tmp_path: Path, monkeypatch: pytest.Monk
     db.update_vm_tailscale("box", "box")
     db.update_workspace_path("project", str(target.source))
     monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
-    monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", lambda *a, **k: nullcontext())
+    monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", admitting_boundary)
     monkeypatch.setattr("agentworks.workspaces.acls.apply_workspace_acls", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", lambda *a, **k: tmp_path / "x")
     return RehomeCase(target, deletion.config)

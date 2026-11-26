@@ -731,6 +731,20 @@ def normalize_lf(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n")
 
 
+def admitting_boundary(
+    _db: object, _config: object, _registry: object, vm: object, **_kwargs: object
+) -> contextlib.AbstractContextManager[tuple[object, None, None]]:
+    """A stand-in for ``gated_vm_boundary`` that opens no gate and admits ``vm`` as it was read.
+
+    It yields the boundary's shape: a node whose ``row`` is the admitted VM
+    row, which a command compares again under its guard, and no resolver or
+    context.
+    """
+    from types import SimpleNamespace
+
+    return contextlib.nullcontext((SimpleNamespace(row=vm), None, None))
+
+
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:
     """Stub the orchestrated activation gate so tests that exercise
     transport / rollback / env plumbing neither construct real platforms

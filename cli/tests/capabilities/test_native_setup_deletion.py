@@ -11,6 +11,7 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import ConnectivityError, StateError
+from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.results import Result, Unknown, UnknownReason
 from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
@@ -20,6 +21,7 @@ from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
+from tests.conftest import admitting_boundary
 from tests.vm_access_support import install_access_recorder
 
 
@@ -192,14 +194,18 @@ def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
 
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
-def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, deletion, monkeypatch, kind, name):
+def test_remote_cleanup_failure_keeps_the_agent_and_best_effort_workspace_deletion(
+    db, deletion, monkeypatch, kind, name
+):
     _store_applied_state(db, kind, name, "claims")
     # The user delete and the workspace's own removal run on the admin's access.
     install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
     if kind == "agent":
+        # An account that was not confirmed removed keeps its row for a rerun.
         monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
-        delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert db.get_agent(name) is None
+        with pytest.raises(ExecutionIncomplete):
+            delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert db.get_agent(name) is not None
     else:
         monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", deletion.delete_vm_workspace)
         db.update_vm_tailscale("box", "box")
@@ -215,18 +221,35 @@ def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deleti
     if applied_state != "none":
         _store_applied_state(db, "workspace", "project", applied_state)
     previous = db.instance_state.get_applied_slices("workspace", "project")
-    calls = []
+    guarded: list[bool] = []
 
-    def move(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
-            pass
-        calls.append("move")
+    class Moved(Exception):
+        pass
 
-    monkeypatch.setattr("agentworks.workspaces.manager.rehome._rehome_vm", move)
-    rehome_workspace(
-        db, deletion.config, "project", target_path="/new/project", yes=True, interaction=TtyInteractionPolicy.REFUSE
-    )
-    assert calls == ["move"]
+    def probe_paths(*args, **kwargs):
+        try:
+            with native_mutation_guard(db.path, "box"):
+                guarded.append(False)
+        except NativeSetupBusyError:
+            guarded.append(True)
+            raise Moved from None
+
+    from agentworks.db import InitStatus
+
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", admitting_boundary)
+    monkeypatch.setattr("agentworks.workspaces.manager.rehome._refuse_unusable_paths", probe_paths)
+    with pytest.raises(Moved):
+        rehome_workspace(
+            db,
+            deletion.config,
+            "project",
+            target_path="/new/project",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    # The directory checks run once unguarded, before the confirmation, and again under the guard.
+    assert guarded == [False, True]
 
     assert db.instance_state.get_applied_slices("workspace", "project") == previous
 

@@ -17,6 +17,7 @@ from agentworks.errors import (
 from agentworks.execution.files import guest_path
 from agentworks.execution.requests import Command
 from agentworks.path_rendering import format_host_path
+from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 from agentworks.vms.initializer.steps import describe_failure
@@ -37,7 +38,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
     from agentworks.execution.access import VMAccess
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.secrets.policy import TtyInteractionPolicy
 
 
@@ -60,10 +60,9 @@ def rehome_workspace(
 ) -> None:
     """Move a workspace to a new directory path.
 
-    ``interaction`` is checked first, ahead of the session-status guard:
-    the guard reaches the VM and repairs stored PIDs, and the
-    boundary that would otherwise reject the policy is past all of it, so
-    a rejected rehome would already have touched the VM and the rows.
+    ``interaction`` is checked first, ahead of the activation gate and the
+    sessions check, which reach the VM: a policy the boundary would reject
+    refuses before anything is touched.
     """
     require_exact_tty_interaction_policy(interaction)
     ws = db.get_workspace(name)
@@ -91,48 +90,65 @@ def rehome_workspace(
     # As spelled here, before anything runs; as the guest resolves them, inside the span.
     _refuse_overlap(old_path, new_path, ws_name=name)
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes, interaction=interaction)
 
-    with native_mutation_guard(db.path, ws.vm_name) as guard:
-        # Block unless all sessions are STOPPED
-        from agentworks.db import PID_STOPPED, SessionStatus
-        from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses
 
-        sessions = db.list_sessions(workspace_name=name)
-        if sessions:
-            try:
-                sessions = ensure_pids_batch(sessions, db=db, config=config)
-                status_map = observe_session_statuses(sessions, db=db, config=config)
-            except Exception as exc:
-                raise ExternalError(
-                    f"cannot verify session status for workspace '{name}' (VM may be unreachable): {exc}",
-                    entity_kind="workspace",
-                    entity_name=name,
-                ) from exc
-            not_stopped = [
-                s
-                for s in sessions
-                if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
-            ]
-            if not_stopped:
-                names = ", ".join(s.name for s in not_stopped)
-                raise StateError(
-                    f"workspace '{name}' has {len(not_stopped)} non-stopped session(s) ({names}).",
-                    entity_kind="workspace",
-                    entity_name=name,
-                    hint="Stop or delete the listed sessions first.",
-                )
+def _refuse_unstopped_sessions(db: Database, config: Config, ws_name: str, *, repair_pids: bool) -> None:
+    """Refuse a rehome while any of the workspace's sessions is not stopped.
 
-        _rehome_vm(
-            db,
-            config,
-            ws,
-            new_path,
-            remove_old=remove_old,
-            yes=yes,
-            interaction=interaction,
-            held_native_guard=guard,
+    Without ``repair_pids`` it only observes, persisting nothing, as the
+    check before the confirmation must. Under the guard it first repairs
+    missing PID evidence (``ensure_pids_batch``), which writes the rows.
+    """
+    from agentworks.db import PID_STOPPED, SessionStatus
+    from agentworks.sessions.manager import ensure_pids_batch, observe_session_statuses
+
+    sessions = db.list_sessions(workspace_name=ws_name)
+    if not sessions:
+        return
+    try:
+        if repair_pids:
+            sessions = ensure_pids_batch(sessions, db=db, config=config)
+        status_map = observe_session_statuses(sessions, db=db, config=config)
+    except Exception as exc:
+        raise ExternalError(
+            f"cannot verify session status for workspace '{ws_name}' (VM may be unreachable): {exc}",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        ) from exc
+    not_stopped = [
+        s
+        for s in sessions
+        if s.pid != PID_STOPPED and status_map.get(s.name, SessionStatus.UNKNOWN) != SessionStatus.STOPPED
+    ]
+    if not_stopped:
+        names = ", ".join(s.name for s in not_stopped)
+        raise StateError(
+            f"workspace '{ws_name}' has {len(not_stopped)} non-stopped session(s) ({names}).",
+            entity_kind="workspace",
+            entity_name=ws_name,
+            hint="Stop or delete the listed sessions first.",
         )
+
+
+def _refuse_unusable_paths(probe: VMAccess, old_path: str, new_path: str, *, ws_name: str) -> None:
+    """Refuse a missing source, an occupied target, or paths the guest resolves into each other."""
+    if not _is_directory(probe, old_path):
+        raise StateError(
+            f"source directory {old_path} does not exist on VM",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
+    # Anything at the target, a dangling link included, refuses it, as create and copy refuse theirs.
+    if probe_presence(probe, path_occupied(new_path), absent_status=TEST_FALSE_STATUS) is not None:
+        raise StateError(
+            f"target path {new_path} is occupied on VM",
+            entity_kind="workspace",
+            entity_name=ws_name,
+        )
+    # A link can make different spellings one directory, and the copy would
+    # then write into its own source before --remove-old removes it.
+    _refuse_overlap(*_resolved_paths(probe, old_path, new_path), ws_name=ws_name)
 
 
 def _rehome_vm(
@@ -144,7 +160,6 @@ def _rehome_vm(
     remove_old: bool,
     yes: bool,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard,
 ) -> None:
     """Rehome a VM workspace.
 
@@ -152,14 +167,16 @@ def _rehome_vm(
     the graph is the live VM alone, the activation gate replaces this
     command's ``keep_active``, and the whole move runs inside the
     held-active span. The not-found check and the VM-status guard stay
-    pre-boundary; the source / target directory existence checks and
-    the confirm prompt stay INSIDE the span exactly where they were:
-    the checks need SSH (inherently post-gate) and the confirm renders
-    their results, so they cannot move earlier without changing what
-    the operator confirms.
+    pre-boundary. Inside the span and before the native mutation guard,
+    the command only observes: the sessions check persists nothing, the
+    source / target directory checks need SSH, and the confirm renders
+    the stored and new paths. Under the guard the workspace row is read
+    again, PID evidence is repaired, and the sessions check and the
+    directory checks run again, since a session can start or a path can
+    change between the confirmation and the guard.
     """
-
     from agentworks.bootstrap import load_request_registry
+    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.vms.manager import operation_log
     from agentworks.workspaces.acls import apply_workspace_acls
     from agentworks.workspaces.backends.vm import admin_access, generate_vscode_workspace
@@ -185,26 +202,11 @@ def _rehome_vm(
         vm,
         scope=_workspace_scope(db, vm, ws_name),
         interaction=interaction,
-        held_native_guard=held_native_guard,
-    ):
+    ) as (vm_node, _resolver, _ctx):
+        vm = vm_node.row
         probe = admin_access(vm, config, None)
-
-        if not _is_directory(probe, old_path):
-            raise StateError(
-                f"source directory {old_path} does not exist on VM",
-                entity_kind="workspace",
-                entity_name=ws_name,
-            )
-        # Anything at the target, a dangling link included, refuses it, as create and copy refuse theirs.
-        if probe_presence(probe, path_occupied(new_path), absent_status=TEST_FALSE_STATUS) is not None:
-            raise StateError(
-                f"target path {new_path} is occupied on VM",
-                entity_kind="workspace",
-                entity_name=ws_name,
-            )
-        # A link can make different spellings one directory, and the copy would
-        # then write into its own source before --remove-old removes it.
-        _refuse_overlap(*_resolved_paths(probe, old_path, new_path), ws_name=ws_name)
+        _refuse_unstopped_sessions(db, config, ws_name, repair_pids=False)
+        _refuse_unusable_paths(probe, old_path, new_path, ws_name=ws_name)
 
         if not yes:
             output.info(f"Rehome workspace '{ws_name}':")
@@ -218,7 +220,11 @@ def _rehome_vm(
                 raise UserAbort("rehome cancelled")
 
         # The log closes exactly once, however the move ends.
-        with operation_log(vm.name, "workspace-rehome") as log:
+        with native_mutation_guard(db.path, vm.name), operation_log(vm.name, "workspace-rehome") as log:
+            require_vm_unchanged(db, vm)
+            require_unchanged("workspace", ws_name, workspace_fields(ws), workspace_fields(db.get_workspace(ws_name)))
+            _refuse_unstopped_sessions(db, config, ws_name, repair_pids=True)
+            _refuse_unusable_paths(probe, old_path, new_path, ws_name=ws_name)
             admin = admin_access(vm, config, log)
             # Reserve exclusively: a preflight check cannot rule out a raced-in
             # target, and an unanswered mkdir does not establish ownership.

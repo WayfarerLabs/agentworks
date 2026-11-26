@@ -67,10 +67,10 @@ def test_rehome_non_enum_policy_raises_before_any_session_probe(
     guest: Guest,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The session-status guard reaches the VM and writes repaired PIDs, and
-    the boundary that would otherwise reject the policy sits past all of it.
-    The check at the top of ``rehome_workspace`` is what keeps a rejected
-    rehome from touching the VM first."""
+    """The gate and the sessions check reach the VM, and the boundary that
+    would otherwise reject the policy sits past them. The check at the top
+    of ``rehome_workspace`` is what keeps a rejected rehome from touching
+    the VM first."""
     from agentworks.sessions import manager as sessions_manager
 
     config = make_config()
@@ -446,3 +446,87 @@ def test_first_repair_after_rehome_is_a_noop(
     assert "OK: ACLs" in captured_output.detail
     assert not any(line.startswith("Fixed:") for line in captured_output.detail)
     assert "\nNo issues found" in captured_output.info
+
+
+# -- observation before the guard, the re-check under it ------
+
+
+def test_rehome_observes_without_writing_then_refuses_a_session_started_before_the_guard(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Before the confirmation the sessions check only observes: nothing is
+    repaired or written, and no guard is held. Under the guard PID evidence
+    is repaired and the check runs again, so a session that started after
+    the confirmation refuses the rehome before the target is reserved."""
+    from agentworks import output as output_mod
+    from agentworks.db import SessionStatus
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.sessions import manager as sessions_manager
+
+    config = make_config()
+    seed(db)
+    seed_live_session(db, name="s1", ws="ws1")
+    reachable(monkeypatch, True)
+    fake = Guest(fails=(is_occupancy_probe,))
+    route(monkeypatch, fake)
+    events: list[tuple[str, bool]] = []
+
+    def guarded() -> bool:
+        try:
+            with native_mutation_guard(db.path, "box"):
+                return False
+        except NativeSetupBusyError:
+            return True
+
+    def observe(sessions: list[object], **_kwargs: object) -> dict[str, SessionStatus]:
+        events.append(("observe", guarded()))
+        started = sum(name == "observe" for name, _ in events) > 1
+        return {session.name: SessionStatus.RUNNING if started else SessionStatus.STOPPED for session in sessions}  # type: ignore[attr-defined]
+
+    def repair(sessions: list[object], **_kwargs: object) -> list[object]:
+        events.append(("repair", guarded()))
+        return sessions
+
+    def confirm(message: str, default: bool = False) -> bool:
+        events.append(("confirm", guarded()))
+        return True
+
+    monkeypatch.setattr(sessions_manager, "observe_session_statuses", observe)
+    monkeypatch.setattr(sessions_manager, "ensure_pids_batch", repair)
+    monkeypatch.setattr(output_mod, "confirm", confirm)
+
+    with pytest.raises(StateError, match="non-stopped"):
+        _rehome(db, config)
+
+    assert events == [("observe", False), ("confirm", False), ("repair", True), ("observe", True)]
+    assert not any(starts("mkdir")(request) for request in fake.requests)
+    ws = db.get_workspace("ws1")
+    assert ws is not None and ws.workspace_path == "/srv/ws1"
+
+
+def test_rehome_refuses_when_the_workspace_changed_before_the_guard(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import output as output_mod
+    from agentworks.errors import StateConflictError
+
+    config = make_config()
+    seed(db)
+    reachable(monkeypatch, True)
+    fake = Guest(fails=(is_occupancy_probe,))
+    route(monkeypatch, fake)
+
+    def confirm(message: str, default: bool = False) -> bool:
+        db.update_workspace_path("ws1", "/elsewhere/ws1")
+        return True
+
+    monkeypatch.setattr(output_mod, "confirm", confirm)
+
+    with pytest.raises(StateConflictError):
+        _rehome(db, config)
+
+    assert not any(starts("mkdir")(request) for request in fake.requests)
