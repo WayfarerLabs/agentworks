@@ -130,3 +130,24 @@ defects, and offered one final round then merge, merging and carrying the fixes 
 implementation PRs, or more iteration, the operator chose:]
 
 > One final round, then merge
+
+### 2026-11-26
+
+[Asked whether to fix the two Important findings of the integration report on 6cc1791db before
+merge, or merge and carry them into the implementation PRs, the operator chose "Fix now, then merge"
+and wrote:]
+
+> And then please just get started on the implementation immediately, stacked on 949. Standard rules
+> apply. Up to 3 PR feedback/fix rounds if needed. Always wait for the integration test results
+> (which may take several hours) before iterating.
+
+[Asked how to protect a harness tool home that two agents might share, and offered one VM-level lock
+for agent harness setup, continuing with a per-directory lock, or refusing shared tool homes, the
+operator chose "Refuse shared tool homes" and wrote:]
+
+> What do we actually lose with this?
+>
+> In my mind, any user-level tool should only write to the user's home subtree. The lock is but one
+> symptom of this not being true.
+>
+> As always the answer is to simplify I think.
