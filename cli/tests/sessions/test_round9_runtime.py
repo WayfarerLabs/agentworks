@@ -108,6 +108,8 @@ def test_known_pre_spawn_failure_can_retry_in_same_boot(tmp_path, monkeypatch, n
         db = _create_stubs(tmp_path, monkeypatch, [])
         db.insert_agent("a1", "vm1", "agt-a1")
         options = {"workspace": "ws1", "agent": "a1"}
+        # This machine has no usermod; the rollback's membership removal is not under test.
+        monkeypatch.setattr("agentworks.agents.grants.remove_from_workspace_group", lambda *a, **k: None)
     else:
         db, _ = _restart_fixture(tmp_path, monkeypatch, status=SessionStatus.STOPPED)
         options = {}

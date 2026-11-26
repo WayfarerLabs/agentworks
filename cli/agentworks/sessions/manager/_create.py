@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import DesiredRuntimeState
-from agentworks.errors import StateError
+from agentworks.errors import StateConflictError, StateError
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 
 from ._create_build import _build_session_graph
@@ -372,10 +372,10 @@ def create_session(
     # gate).
     from dataclasses import replace
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged, workspace_fields
 
-    with native_mutation_guard(db.path, plan.target_vm_name) as guard:
-        current_vm = _reload_vm(db, plan.target_vm_name)
+    def require_plan_current(current_vm: VMRow) -> None:
+        """The VM, and the workspace and agent the plan names, are as the plan read them."""
         if current_vm.vm_uuid != plan.vm.vm_uuid:
             raise StateError("session VM changed during preparation", entity_kind="vm", entity_name=plan.target_vm_name)
         if current_vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
@@ -384,44 +384,74 @@ def create_session(
                 entity_kind="vm",
                 entity_name=current_vm.name,
             )
-        plan = replace(plan, vm=current_vm)
-        graph = _build_session_graph(
+        require_unchanged(
+            "workspace",
+            plan.workspace_name,
+            workspace_fields(plan.existing_ws),
+            workspace_fields(db.get_workspace(plan.workspace_name)),
+        )
+        if plan.agent_name is not None:
+            require_unchanged(
+                "agent",
+                plan.agent_name,
+                agent_fields(plan.existing_agent),
+                agent_fields(db.get_agent(plan.agent_name)),
+            )
+
+    current_vm = _reload_vm(db, plan.target_vm_name)
+    require_plan_current(current_vm)
+    plan = replace(plan, vm=current_vm)
+    graph = _build_session_graph(
+        db,
+        config,
+        registry=registry,
+        plan=plan,
+        template_name=template_name,
+        session_overlay=session_overlay,
+        workspace_overlay=workspace_overlay,
+        agent_overlay=agent_overlay,
+        interaction=interaction,
+    )
+
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+
+    # The activation gate replaces this command's imperative
+    # ensure_active + vm_active holds: opened once, before the
+    # preflight sweep (so every probe reaches a live target), held
+    # through the whole command, with its just-in-time values seeding
+    # the boundary resolver so nothing resolves or prompts twice.
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, graph.vm_node.row)
+    with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
+        vm = _reload_vm(db, plan.target_vm_name)
+        # Preflight precedes secret resolution and carries no workload values.
+        secret_values = _preflight_and_resolve(
             db,
             config,
-            registry=registry,
             plan=plan,
-            template_name=template_name,
-            session_overlay=session_overlay,
-            workspace_overlay=workspace_overlay,
-            agent_overlay=agent_overlay,
+            graph=graph,
+            vm=vm,
             interaction=interaction,
-            held_native_guard=guard,
         )
 
-        from agentworks.orchestration.activation import (
-            activation_gate,
-            gate_secret_resolver,
-        )
-
-        # The activation gate replaces this command's imperative
-        # ensure_active + vm_active holds: opened once, before the
-        # preflight sweep (so every probe reaches a live target), held
-        # through the whole command, with its just-in-time values seeding
-        # the boundary resolver so nothing resolves or prompts twice.
-        from agentworks.vms.manager import require_vm_ssh_boundary
-
-        require_vm_ssh_boundary(db, config, graph.vm_node.row)
-        with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
-            vm = _reload_vm(db, plan.target_vm_name)
-            # Preflight precedes secret resolution and carries no workload values.
-            secret_values = _preflight_and_resolve(
-                db,
-                config,
-                plan=plan,
-                graph=graph,
-                vm=vm,
-                interaction=interaction,
-            )
+        # Every prompt is answered: the VM's guard is held from here through
+        # the roll-forward and any rollback, which share it through the
+        # graph, and what the plan read is read again under it.
+        with graph.vm_node.mutation_guard() as guard:
+            graph = replace(graph, held_native_guard=guard)
+            require_vm_unchanged(db, graph.vm_node.row)
+            require_plan_current(_reload_vm(db, plan.target_vm_name))
+            if db.get_session(plan.name) is not None:
+                raise StateConflictError(
+                    f"session '{plan.name}' was created since this command read it",
+                    entity_kind="session",
+                    entity_name=plan.name,
+                    hint="Run the command again with another name.",
+                )
 
             # ===== Dependency-ordered roll-forward (S11) ========================
             #
