@@ -64,13 +64,14 @@ def delete_workspace(
     # A stored path that names no one directory (a '~' row the state migration
     # left relative) is never acted on: the row, its sessions, grants and group
     # still go, so the name can be reused, and the VM's files are left for the
-    # operator to check.
+    # operator to check. The removal takes the normalized path, never the raw
+    # spelling: a stored trailing slash would make ``rm`` follow a final link
+    # and empty its target instead of removing the link.
     try:
-        stored_workspace_path(ws.workspace_path)
+        stored_path: str | None = stored_workspace_path(ws.workspace_path)
     except ValidationError:
-        path_known = False
-    else:
-        path_known = True
+        stored_path = None
+    path_known = stored_path is not None
 
     # Check for sessions
     session_count = len(db.list_sessions(workspace_name=name))
@@ -250,10 +251,10 @@ def delete_workspace(
 
                     revoke_workspace_grants(db, config, name, vm)
 
-                if vm is not None and path_known:
+                if vm is not None and stored_path is not None:
                     from agentworks.workspaces.backends.vm import delete_vm_workspace
 
-                    delete_vm_workspace(vm, config, ws.workspace_path, ws.linux_group, logger=log)
+                    delete_vm_workspace(vm, config, stored_path, ws.linux_group, logger=log)
                 elif vm is not None:
                     from agentworks.workspaces.backends.vm import delete_vm_workspace_keeping_files
 

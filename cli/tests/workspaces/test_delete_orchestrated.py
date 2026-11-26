@@ -10,6 +10,8 @@ without a VM row.
 from __future__ import annotations
 
 import contextlib
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,6 +21,7 @@ from agentworks.errors import StateError, UserAbort
 from agentworks.execution import trust
 from agentworks.execution.access import Admin
 from agentworks.execution.errors import TrustMissing
+from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
 from agentworks.workspaces import manager as workspace_manager
@@ -26,6 +29,7 @@ from tests.conftest import seed_vm_trust
 from tests.workspaces._lifecycle_support import (
     Guest,
     arguments,
+    argv,
     no_gate,
     node_holding,
     reachable,
@@ -40,6 +44,8 @@ from tests.workspaces._lifecycle_support import make_config as make_config
 from tests.workspaces._lifecycle_support import stub_ssh_identity as stub_ssh_identity
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.db import Database
     from tests.conftest import CapturedOutput
 
@@ -413,3 +419,42 @@ def test_delete_tears_down_a_live_session_on_the_admins_access_before_the_direct
 
     assert torn_down == [("s1", Admin(), True)]
     assert REMOVE_DIRECTORY in guest.argvs()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the removal against a POSIX symbolic link")
+def test_delete_of_a_stored_trailing_slash_removes_the_link_not_its_target(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A workspace stored as ``<dir>/link/``, a link to a non-empty directory:
+    the delete's removal runs on this machine against that tree, and removes
+    the link while the directory and its contents remain."""
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    (physical / "kept").write_text("contents")
+    (tmp_path / "front").mkdir()
+    link = tmp_path / "front" / "link"
+    link.symlink_to(physical, target_is_directory=True)
+
+    class _LocalRemoval(Guest):
+        def respond(self, request: object) -> Result | None:
+            if starts("rm", "-rf", "--")(request):
+                completed = subprocess.run(argv(request), check=False)
+                return Result(Completed(completed.returncode))
+            return None
+
+    route(monkeypatch, _LocalRemoval())
+    config = make_config()
+    seed(db, ws="other")
+    db.insert_workspace(
+        "ws1", vm_name="box", workspace_path=f"{link.as_posix()}/", template="default", linux_group="ws-ws1"
+    )
+    reachable(monkeypatch, True)
+
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert not link.is_symlink()
+    assert (physical / "kept").read_text() == "contents"
+    assert db.get_workspace("ws1") is None
