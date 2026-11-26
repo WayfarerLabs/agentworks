@@ -501,7 +501,10 @@ binding remains if setup fails"). It does that write under a brief `{account: ex
 shared) after its probe, releases, runs the gate and preparation from the declaration it saved, and
 at step 7 compares the agent's template and desired overlay digest with what it saved, so the guest
 setup it runs is bound to the declaration it prepared. `vm reinit` accepts its declarations later,
-under its final vm exclusive (`vms/manager/reinit.py:302-306`), and is unchanged.
+under its final vm exclusive (`vms/manager/reinit.py:302-306`). It prepares its recipe from its
+step-1 read of the VM row and stored overlay, before its unlocked gate, so step 7 compares the
+template, admin template and overlay it prepared from with the database, never a row the gate
+refreshed: a binding another reinit saved meanwhile refuses it.
 
 `session start --spec` (`sessions/manager/_spec.py:103`) acquires nothing itself. It runs its
 consent probe and confirmation unlocked (step 5; today under its guard, `:133-135`), then passes the
