@@ -23,6 +23,7 @@ from agentworks.errors import ConfigError, ExternalError
 from agentworks.execution import trust
 from agentworks.execution.client import tool_beside_ssh
 from agentworks.execution.trust import HostKey
+from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.path_rendering import format_host_path
 
 from ._helpers import _require_vm
@@ -46,6 +47,7 @@ class ImportStatus(StrEnum):
     CONFLICT = "conflicts with the stored key"
     NO_ADDRESS = "no tailnet address"
     MALFORMED = "malformed host key, nothing recorded"
+    BUSY = "busy: another operation is changing native state on this VM"
 
 
 @dataclass(frozen=True)
@@ -150,6 +152,15 @@ def _import_one(vm: VMRow, keygen: str, source: Path | None) -> HostKeyImport:
     return outcome(ImportStatus.IMPORTED, len(matches.keys))
 
 
+def _guarded_import(db: Database, name: str, keygen: str, source: Path | None) -> HostKeyImport:
+    """One VM's import under its native mutation guard, read again under it; a held guard is that VM's ``BUSY``."""
+    try:
+        with native_mutation_guard(db.path, name):
+            return _import_one(_require_vm(db, name), keygen, source)
+    except NativeSetupBusyError:
+        return HostKeyImport(name, ImportStatus.BUSY, 0, trust.has_record(name))
+
+
 def import_host_keys(
     db: Database,
     config: Config,
@@ -159,6 +170,9 @@ def import_host_keys(
     known_hosts: Path | None,
 ) -> tuple[HostKeyImport, ...]:
     """Import host keys for the named VMs, or for every VM with ``all_vms``, then sync the SSH config.
+
+    Each VM imports under its own native mutation guard; one another
+    operation holds ends ``BUSY`` and the others carry on.
 
     The managed SSH entries are rewritten on every run, whatever was imported
     and whether or not the run fails, so a refused name, a missing source or an
@@ -182,7 +196,7 @@ def import_host_keys(
 
         keygen = locate_ssh_keygen() if source is not None else ""
         for vm in vms:
-            outcomes.append(_import_one(vm, keygen, source))
+            outcomes.append(_guarded_import(db, vm.name, keygen, source))
     finally:
         # Whatever was imported before a later VM failed is covered too.
         from agentworks.ssh_config import sync_ssh_config_or_warn

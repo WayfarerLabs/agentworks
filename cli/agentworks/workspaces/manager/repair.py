@@ -14,6 +14,7 @@ from agentworks.errors import NotFoundError
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, CaptureOutput, Command
 from agentworks.execution.results import Completed
 from agentworks.harness_setup.locking import native_mutation_guard
+from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
@@ -105,7 +106,9 @@ def repair_workspace(
     its just-in-time values seeding the boundary resolver, and the
     whole SSH convergence body runs inside the held-active span. The
     not-found checks stay pre-boundary: a refusal costs zero prompts,
-    zero resolves, and zero gate events.
+    zero resolves, and zero gate events. The native mutation guard is
+    taken after the gate and its secrets, and the workspace row is read
+    again under it.
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import load_request_registry
@@ -134,7 +137,6 @@ def repair_workspace(
     ws_path = stored_workspace_path(ws.workspace_path)
 
     with (
-        native_mutation_guard(db.path, vm.name) as guard,
         gated_vm_boundary(
             db,
             config,
@@ -142,10 +144,12 @@ def repair_workspace(
             vm,
             scope=_workspace_scope(db, vm, name),
             interaction=interaction,
-            held_native_guard=guard,
-        ),
+        ) as (vm_node, _resolver, _ctx),
+        native_mutation_guard(db.path, vm.name),
         operation_log(vm.name, "workspace-repair") as log,
     ):
+        require_vm_unchanged(db, vm_node.row)
+        require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
         admin = admin_access(vm, config, log)
         ws_group = ws.linux_group
         fixes = 0

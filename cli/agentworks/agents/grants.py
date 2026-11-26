@@ -23,12 +23,13 @@ from agentworks.errors import NotFoundError, ValidationError
 from agentworks.execution.requests import Command
 from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
+from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.guest import ensure_group, remove_group_member
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import AgentRow, Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.phase_a import OperationLog
 
@@ -71,7 +72,9 @@ def grant_workspaces(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the group-membership SSH work. The
     empty-request and unknown-agent validations stay pre-gate: they
-    fail with zero prompts and zero VM starts.
+    fail with zero prompts and zero VM starts. The native mutation
+    guard is taken after the gate and its secrets, and the agent row
+    is read again under it.
     """
     if not grant_all and not workspace_names:
         raise ValidationError(
@@ -94,7 +97,6 @@ def grant_workspaces(
 
     registry = load_request_registry(config, live_database=db)
     with (
-        native_mutation_guard(db.path, vm.name) as guard,
         gated_vm_boundary(
             db,
             config,
@@ -102,9 +104,10 @@ def grant_workspaces(
             vm,
             scope=agent_scope(db, vm.name, agent_name),
             interaction=interaction,
-            held_native_guard=guard,
-        ),
+        ) as (vm_node, _resolver, _ctx),
+        native_mutation_guard(db.path, vm.name),
     ):
+        _require_agent_unchanged(db, vm_node.row, agent)
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
             # Add to all existing workspace groups on this VM
@@ -141,8 +144,9 @@ def revoke_workspaces(
     Orchestrated (``vms.manager.gated_vm_boundary``), mirroring
     :func:`grant_workspaces`: live-VM graph, no env-chain targets, the
     gate open before the preflight sweep, the held-active span
-    covering the group-membership SSH work, and the empty-request /
-    unknown-agent validations pre-gate.
+    covering the group-membership SSH work, the empty-request /
+    unknown-agent validations pre-gate, and the native mutation guard
+    taken after the gate.
     """
     if not revoke_all and not workspace_names:
         raise ValidationError(
@@ -164,14 +168,18 @@ def revoke_workspaces(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config, live_database=db)
-    with gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        scope=agent_scope(db, vm.name, agent_name),
-        interaction=interaction,
+    with (
+        gated_vm_boundary(
+            db,
+            config,
+            registry,
+            vm,
+            scope=agent_scope(db, vm.name, agent_name),
+            interaction=interaction,
+        ) as (vm_node, _resolver, _ctx),
+        native_mutation_guard(db.path, vm.name),
     ):
+        _require_agent_unchanged(db, vm_node.row, agent)
         if revoke_all:
             # Snapshot the granted workspaces BEFORE deleting any rows.
             # Taking it afterwards missed explicitly-granted-only
@@ -411,6 +419,12 @@ def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> Non
 
 
 # -- Helpers ---------------------------------------------------------------
+
+
+def _require_agent_unchanged(db: Database, admitted: VMRow, agent: AgentRow) -> None:
+    """Under the guard: the VM the gate admitted and the agent read before it are still the same."""
+    require_vm_unchanged(db, admitted)
+    require_unchanged("agent", agent.name, agent_fields(agent), agent_fields(db.get_agent(agent.name)))
 
 
 def _require_vm(db: Database, vm_name: str) -> VMRow:

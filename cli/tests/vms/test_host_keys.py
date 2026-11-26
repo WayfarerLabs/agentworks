@@ -330,6 +330,27 @@ def test_all_continues_past_a_vm_with_a_malformed_key_and_fails_the_report(
     assert render_import(list(outcomes.values())) is False
 
 
+def test_a_vm_whose_guard_is_held_is_busy_and_the_others_carry_on(
+    db: Database, tmp_path: Path, keys: list[HostKey], synced: list[object]
+) -> None:
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    _vm(db, "held", "100.64.0.1")
+    _vm(db, "free", "100.64.0.2")
+    source = tmp_path / "known_hosts"
+    source.write_text(_line("100.64.0.1", keys[0]) + _line("100.64.0.2", keys[1]))
+
+    with native_mutation_guard(db.path, "held"):
+        outcomes = _run(db, all_vms=True, known_hosts=source)
+
+    assert outcomes["held"].status is ImportStatus.BUSY
+    assert trust.stored_keys("held") == ()
+    assert outcomes["free"].status is ImportStatus.IMPORTED
+    assert trust.stored_keys("free") == (keys[1],)
+    assert render_import(list(outcomes.values())) is False
+    assert len(synced) == 1
+
+
 # -- Which ssh-keygen runs -----------------------------------------------------------------------
 
 

@@ -1045,9 +1045,12 @@ already has a record is never changed; the report says `already current` or
 for that VM (`trust marker present`).
 
 Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
-`trust marker present`, `conflicts with the stored key`, or `no tailnet address`. The command exits
-non-zero while any selected VM ends without a record, with `--all` as well. Every run then rewrites
-the managed SSH config entries, whatever it imported.
+`trust marker present`, `conflicts with the stored key`, `no tailnet address`,
+`malformed host key, nothing recorded`, or `busy: another operation is changing native state on this
+VM`. Each VM is imported under its native mutation guard, so a VM another command is changing is
+reported busy and left as it was while the others carry on; run the import again for it once that
+command finishes. The command exits non-zero while any selected VM ends without a record, with
+`--all` as well. Every run then rewrites the managed SSH config entries, whatever it imported.
 
 For a VM with no matching entry, verify its host key fingerprints against its console or provider,
 gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned
