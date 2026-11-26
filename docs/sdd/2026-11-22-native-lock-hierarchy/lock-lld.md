@@ -474,11 +474,14 @@ Consequences:
   today: intent is the desired state, and the next start or reconcile converges it. The refusal
   tells the operator: each blocked target's `RuntimeResult` gains `restore_intent`, the command
   words that put back the intent it replaced (for example
-  `("agw", "session", "set-desired-state", <name>, <previous>)`, or the console's), and the rendered
-  result says the intent was recorded and shows that command. When the replaced value has no public
-  form (a legacy NULL desired state, which `set-desired-state` cannot write since it accepts only
-  running and stopped), `restore_intent` is empty and the result says only that the new intent stays
-  accepted.
+  `("agw", "session", "set-desired-state", <name>, <previous>)`), and the rendered result says the
+  intent was recorded and shows that command. When the replaced value has no public form (a legacy
+  NULL desired state, which `set-desired-state` cannot write since it accepts only running and
+  stopped), `restore_intent` is empty and the result says only that the new intent stays accepted.
+  Batches record session intent only. Console start, restart and stop record a console's intent
+  under their own brief set, so a refusal of their final set carries the same words
+  (`("agw", "console", "set-desired-state", <name>, <previous>)`, or empty) on the
+  `NativeLockBusyError` it raises, set only when the brief write changed the intent.
 - **Per-target and per-family failure.** One rule covers every acquisition of the sequence: when an
   acquisition at (b), (d) or (f) is refused at an entity other than the vm, the family drops every
   target whose request needs that entity in the refused mode (so two targets that need one refused
