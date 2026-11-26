@@ -56,8 +56,8 @@ print(json.dumps([os.path.realpath(path) for path in json.load(sys.stdin)]))
 """
 
 
-class NativeRootOutsideHomeError(ConfigError):
-    """A native tool home whose physical path lies outside the account's physical HOME.
+class NativeRootNotBeneathHomeError(ConfigError):
+    """A native tool home whose physical path is not beneath the account's physical HOME: outside it, or HOME itself.
 
     Each account's tool homes stay inside its own HOME so that the account's
     lock covers them: the native CLIs' writes are not compare-and-swaps, so a
@@ -73,8 +73,8 @@ def resolve_user_layout(
     The observation is a Python program run after the account's login and
     interactive startup, as the native workload's environment is built, with
     its request on stdin. The root is compared by its physical path, links
-    followed, against the physical HOME, and one outside it raises
-    :class:`NativeRootOutsideHomeError`. The layout keeps the root's observed
+    followed, against the physical HOME, and one not beneath it raises
+    :class:`NativeRootNotBeneathHomeError`. The layout keeps the root's observed
     spelling, which ownership claims record.
     """
     variable, default = NATIVE_USER_DIRECTORIES[tool]
@@ -108,11 +108,13 @@ def resolve_user_layout(
         raise ConfigError("Native user configuration locations must be absolute normalized paths") from None
     if not _inside(physical_root, physical_home):
         resolved = "" if physical_root == layout.root else f" (resolving to {physical_root!r})"
-        raise NativeRootOutsideHomeError(
-            f"Native {tool} home {layout.root!r}{resolved} is outside HOME {physical_home!r}",
+        where = "is HOME itself" if physical_root == physical_home.rstrip("/") else "is outside HOME"
+        raise NativeRootNotBeneathHomeError(
+            f"Native {tool} home {layout.root!r}{resolved} {where} ({physical_home!r}); "
+            "it must be a directory beneath it",
             hint=(
-                f"Keep the native home inside HOME: point {variable} beneath HOME, or replace the link that leads "
-                "outside it, and retry the owning setup."
+                f"Point {variable} at a directory beneath HOME, or replace the link that leads outside it, "
+                "and retry the owning setup."
             ),
         )
     return layout
@@ -154,7 +156,7 @@ def user_layout(tool: NativeLayoutTool, invocation: UserSetupInvocation) -> Nati
         return resolve_user_layout(
             tool, invocation.access, home=invocation.home, environment=invocation.request_environment()
         )
-    except NativeRootOutsideHomeError as error:
+    except NativeRootNotBeneathHomeError as error:
         invocation.report_incomplete(f"{error}. {error.hint}")
         return None
     except (ConfigError, ConnectivityError, ExternalError):

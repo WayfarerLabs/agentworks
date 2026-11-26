@@ -13,7 +13,11 @@ from unittest.mock import Mock
 import pytest
 
 from agentworks.artifacts.model import ArtifactType
-from agentworks.artifacts.native.layout import NATIVE_USER_DIRECTORIES, NativeRootOutsideHomeError, resolve_user_layout
+from agentworks.artifacts.native.layout import (
+    NATIVE_USER_DIRECTORIES,
+    NativeRootNotBeneathHomeError,
+    resolve_user_layout,
+)
 from agentworks.capabilities.harness_integration.settings import serialize_settings
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.plugins._harness_native.native_cli import NativeMarket, NativePlugin, identity
@@ -117,7 +121,7 @@ def test_a_root_not_beneath_the_physical_home_is_refused(target, tool, case):
         target.environment["HOME"] = str(home)
         root = target.root / "native"
     profile(target, tool, root)
-    with pytest.raises(NativeRootOutsideHomeError, match=str(root)):
+    with pytest.raises(NativeRootNotBeneathHomeError, match=str(root)):
         resolve_user_layout(tool, target.access(), home=str(home), environment={})
 
 
