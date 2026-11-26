@@ -377,10 +377,10 @@ sanctioned acquisitions below):
    confirmations that render probe results. Nothing is locked.
 6. **Acquire** the request once, with the vm shared.
 7. **Re-check** under the set the fields of [What step 7 compares](#what-step-7-compares), against
-   what step 4 admitted for the VM row (or what step 1 read, for a command that skips step 4) and
-   what steps 1 and 5 read for everything else. A `vm stop`, `delete`, `rekey` or `recover` that ran
-   in between shows here. Any difference refuses with `StateConflictError` ("changed since this
-   command read it", hint "Run the command again.").
+   what step 4 admitted for the VM row (or what step 1 read, for a command that skips step 4 or runs
+   on its step-1 read (`vm reinit`)) and what steps 1 and 5 read for everything else. A `vm stop`,
+   `delete`, `rekey` or `recover` that ran in between shows here. Any difference refuses with
+   `StateConflictError` ("changed since this command read it", hint "Run the command again.").
 8. **Run** the body; nested operations call `held.require`.
 
 **Needs the VM running** means every command that opens the activation gate today
@@ -501,7 +501,10 @@ binding remains if setup fails"). It does that write under a brief `{account: ex
 shared) after its probe, releases, runs the gate and preparation from the declaration it saved, and
 at step 7 compares the agent's template and desired overlay digest with what it saved, so the guest
 setup it runs is bound to the declaration it prepared. `vm reinit` accepts its declarations later,
-under its final vm exclusive (`vms/manager/reinit.py:302-306`), and is unchanged.
+under its final vm exclusive (`vms/manager/reinit.py:302-306`). It prepares its recipe from its
+step-1 read of the VM row and stored overlay, before its unlocked gate, so step 7 compares the
+template, admin template and overlay it prepared from with the database, never a row the gate
+refreshed: a binding another reinit saved meanwhile refuses it.
 
 `session start --spec` (`sessions/manager/_spec.py:103`) acquires nothing itself. It runs its
 consent probe and confirmation unlocked (step 5; today under its guard, `:133-135`), then passes the
@@ -521,8 +524,9 @@ anyway; the third holds only its family's or console's set (for `vm reconcile`, 
 the vm shared, or the vm exclusive when the VM's target is stopped). These call sites acquire with
 `native_locks(db, request, prompts=True)`. Every other console command that resolves pane secrets
 (`console create`, `add-sessions`, `add-shell`, `restore-session`: `multi_console/attach.py:495`,
-`crud.py:379`, `:696`, `restore.py:353`) resolves them at step 5 and re-checks its console and
-members at step 7.
+`crud.py:379`, `:696`, `restore.py:353`) resolves them at step 5 and re-checks at step 7 what it
+resolved them for: its console row, the sessions it adds or restores, and for `console create` and
+`restore-session` the members they rebuild from.
 
 The notice is structural. `native_locks` keeps the sets the current invocation holds, in a
 `ContextVar` (so two invocations sharing one process, such as concurrent tests or threads, never see
@@ -658,16 +662,16 @@ paths. The only fields are the ones above.
 A command compares only what it read, and only these fields, never whole rows (timestamps and
 recorded pids change under ordinary use):
 
-| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                            |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`; `confirm-release` adds `debian_release`                                                                                                                                                              |
-| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                       |
-| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                       |
-| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded and the desired overlay digest (`db.instance_state.get_desired_overlay`) they accepted                               |
-| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names                                                                                                                                                                                       |
-| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes |
-| path entities                     | the lookup walk's recorded directories and final path for each stored path, walked again on the guest                                                                                                                                                      |
-| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status                                                 |
+| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`; `confirm-release` adds `debian_release`; `vm reinit` adds `template`, `admin_template` and the stored overlay, and compares these fields with its step-1 read, which it runs on                                                                                                                                                                                           |
+| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                                                                                                                                                                                            |
+| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                                                                                                                                                                                            |
+| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded and the desired overlay digest (`db.instance_state.get_desired_overlay`) they accepted                                                                                                                                                                                                    |
+| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names; a command that rewrites the list from the read under the set (`add-sessions`, `add-shell`) compares only the console row, and compares each session it adds by its session row's fields                                                                                                                                                                   |
+| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes                                                                                                                                                                      |
+| path entities                     | the lookup walk's recorded directories and final path for each stored path, walked again on the guest                                                                                                                                                                                                                                                                                                                           |
+| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status. `console add-sessions` and `add-shell` instead re-observe the console's tmux presence under the lock and sync to what they find, since nothing prepared before the lock (secrets, members, positions) depends on it |
 
 ### Lock sets
 
