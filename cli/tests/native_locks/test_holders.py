@@ -100,10 +100,11 @@ def test_a_locked_record_that_does_not_parse_is_skipped(database: Path) -> None:
     [
         json.dumps(record_payload("workspace/w", "exclusive", acquired=float("nan"))).encode(),
         json.dumps(record_payload("workspace/w", "exclusive", acquired=float("-inf"))).encode(),
+        json.dumps(record_payload("workspace/w", "exclusive", acquired=10**400)).encode(),
         b"[" * 100_000 + b"]" * 100_000,
         b" " * (records_module.RECORD_MAX_BYTES + 1),
     ],
-    ids=["nan-acquired", "infinite-acquired", "deeply-nested", "oversized"],
+    ids=["nan-acquired", "infinite-acquired", "overflowing-acquired", "deeply-nested", "oversized"],
 )
 def test_a_locked_record_a_reader_cannot_trust_is_skipped(database: Path, content: bytes) -> None:
     with fake_record(database, content, live=True), native_locks(database, EXCLUSIVE_W):

@@ -240,7 +240,14 @@ def _parse(content: bytes) -> _Record | None:
     pid, command, acquired, entities = (data.get(name) for name in ("pid", "command", "acquired", "entities"))
     if not isinstance(pid, int) or isinstance(pid, bool) or not isinstance(acquired, int | float):
         return None
-    if isinstance(acquired, bool) or not math.isfinite(acquired):
+    if isinstance(acquired, bool):
+        return None
+    try:
+        acquired_at = float(acquired)
+    except OverflowError:
+        # A JSON integer too large for a float, such as 10**400.
+        return None
+    if not math.isfinite(acquired_at):
         return None
     if not isinstance(command, list) or not all(isinstance(word, str) for word in command):
         return None
@@ -254,7 +261,7 @@ def _parse(content: bytes) -> _Record | None:
         if not isinstance(key, str) or not isinstance(mode_name, str) or mode_name not in _MODES_BY_NAME:
             return None
         held.append((key, _MODES_BY_NAME[mode_name]))
-    return _Record(pid, tuple(command), float(acquired), tuple(held))
+    return _Record(pid, tuple(command), acquired_at, tuple(held))
 
 
 def _unlink_quietly(path: Path) -> None:
