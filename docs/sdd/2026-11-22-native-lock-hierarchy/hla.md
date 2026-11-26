@@ -49,7 +49,8 @@ graph TD
 - **vm**: the VM itself: power, provider state, trust records, VM-wide initialization.
 - **workspace** and **account**: a workspace directory with its group, and an account on the VM (an
   agent's, or the admin's). An account's lock covers the account, its home, its socket directory and
-  its harness setup.
+  its harness setup; a native tool home the setup is pointed at outside the account's home is locked
+  as a path ([Shared state across entities](#shared-state-across-entities-r5)).
 - **session**: one session, below both its workspace and its account.
 - **grant**: one agent's membership in one workspace's group, below both. Grant and revoke, the
   implicit grant of session create, and grant-all materialization lock it.
@@ -197,6 +198,13 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   on the VM waits on it, and past `lckpwdf`'s 15 seconds fails with a typed error the operator can
   retry; nothing is lost. Holding the vm exclusive instead would refuse access and unrelated
   sessions for the whole removal, against R2 and R4.
+- **Native tool homes shared across accounts.** An operator may point a harness tool's home outside
+  the account's home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`), and two accounts may share
+  that directory. Settings writes there are compare-and-swaps, but plugin and marketplace setup runs
+  the native tool's own CLI, which is not, and today only the VM lock keeps two accounts' setups
+  apart. An agent's setup whose tool home lies outside its account's home therefore locks that
+  directory exclusive as a `path`, found and re-checked on the guest like a workspace tree, so two
+  setups sharing it refuse each other while setups with their own homes run together.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
