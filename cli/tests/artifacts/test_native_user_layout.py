@@ -157,10 +157,9 @@ def test_artifact_discovery_cannot_resample_a_different_native_root(target, monk
 
 
 @pytest.mark.parametrize("tool,class_name", TOOLS[:2])
-@pytest.mark.parametrize("external", [False, True])
-def test_plugin_progress_settings_and_mcp_use_the_same_verified_root(target, monkeypatch, tool, class_name, external):
+def test_plugin_progress_settings_and_mcp_use_the_same_verified_root(target, monkeypatch, tool, class_name):
     module = import_module(f"agentworks.plugins.{tool}.harness_integration")
-    root = (target.root if external else target.home) / "from-profile"
+    root = target.home / "from-profile"
     root.mkdir()
     profile(target, tool, root)
     path = root / ("settings.json" if tool == "claude" else "config.toml")
@@ -196,11 +195,10 @@ def test_plugin_progress_settings_and_mcp_use_the_same_verified_root(target, mon
     assert checkpoints and all(
         claim.destination.startswith(str(root) + "/") or claim.destination == str(root) for claim in checkpoints[-1]
     )
-    assert {entry.input_id for entry in result.deferred} == ({item.identity} if external else set())
+    assert not result.deferred
     mcp_path = root / (".claude.json" if tool == "claude" else "config.toml")
-    document = parse_settings(mcp_path.read_bytes(), format=format) if mcp_path.exists() else {}
     key = "mcpServers" if tool == "claude" else "mcp_servers"
-    assert (key in document) is not external
+    assert key in parse_settings(mcp_path.read_bytes(), format=format)
     assert not (target.home / NATIVE_USER_DIRECTORIES[tool][1]).exists()
 
 

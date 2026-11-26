@@ -32,10 +32,18 @@ a fresh snapshot; session launch does not need the workstation source.
 User roles respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME` in the actual user's login environment,
 including exports from guest startup. The selected native home applies consistently to settings,
 plugins and artifacts; adding or removing MCP does not select another settings destination.
-Overrides must be absolute guest paths without `.` or `..` components. Workspace destinations stay
-under the workspace root regardless of user overrides. These are fixed settings roles, not arbitrary
-guest destinations. Source paths embedded inside the document are copied as values without
-rewriting.
+Overrides must be absolute guest paths without `.` or `..` components, and each native home must
+resolve inside the account's home, with links followed: one that resolves outside it, whether set by
+an override or reached through a link such as `~/.claude -> /srv/shared`, leaves that integration's
+user setup incomplete, naming the home, and writes no settings, plugins, MCP entries or artifacts. A
+link that stays inside the home (`~/.claude -> ~/.dotfiles/claude`) passes this check, though file
+destinations are still never reached through a link (below). Sharing part of a tool home with
+another account, through a link or mount placed inside it, is unsupported. Plugin and marketplace
+records an earlier release kept under a home outside HOME are dropped with a warning naming that
+directory, without being reconciled; remove what they installed there by hand. Workspace
+destinations stay under the workspace root regardless of user overrides. These are fixed settings
+roles, not arbitrary guest destinations. Source paths embedded inside the document are copied as
+values without rewriting.
 
 | Strategy          | Existing destination                                                  |
 | ----------------- | --------------------------------------------------------------------- |
@@ -89,12 +97,13 @@ approval and runtime authentication behavior.
 | Codex       | `mcp_servers` in `~/.codex/config.toml` | `<workspace>/.codex/config.toml` |
 | Grok Build  | `mcp_servers` in `~/.grok/config.toml`  | `<workspace>/.grok/config.toml`  |
 
-These are fixed native roles. User roles follow actual native-home overrides beneath the user's
-home. An explicit `CLAUDE_CONFIG_DIR` selects `<CLAUDE_CONFIG_DIR>/.claude.json`; without that
-override, Claude's role is `~/.claude.json`, not `~/.claude/settings.json`. Codex and Grok use their
-`CODEX_HOME` and `GROK_HOME` config directories. Workspace roles stay within the workspace. Native
-VM facets defer MCP to user; Shell publishes canonical JSON and an index at each scope without
-running clients or servers.
+These are fixed native roles. User roles follow actual native-home overrides, which must resolve
+inside the user's home ([Settings mappings](#settings-mappings)). An explicit `CLAUDE_CONFIG_DIR`
+selects `<CLAUDE_CONFIG_DIR>/.claude.json`; without that override, Claude's role is
+`~/.claude.json`, not `~/.claude/settings.json`. Codex and Grok use their `CODEX_HOME` and
+`GROK_HOME` config directories. Workspace roles stay within the workspace. Native VM facets defer
+MCP to user; Shell publishes canonical JSON and an index at each scope without running clients or
+servers.
 
 An artifact placed at its owning scope uses its declared key. A server named `github` deferred from
 VM scope registers as `vm-github`. The original scope prefix stays the same through later routing.
