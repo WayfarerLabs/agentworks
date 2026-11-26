@@ -14,8 +14,8 @@ from agentworks.native_locks.rows import session_entity_for
 from agentworks.runtime_state import _families as families
 from agentworks.runtime_state import run_session_batch
 from agentworks.runtime_state._models import Outcome, RuntimeResult
-from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
+from tests.runtime_state.runtime_support import REFUSE, seed_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 pytestmark = pytest.mark.windows
 
@@ -252,3 +252,35 @@ def test_vm_reconcile_holds_the_vm_shared_unless_it_stops_the_vm(
     monkeypatch.setattr(_service, "prepare_guest_workloads", under_the_final_sets)
     _reconcile_rows(db, config, monkeypatch, lambda: reconcile_vm(db, config, name="box", interaction=REFUSE))
     assert beside == [workspace_create_proceeds]
+
+
+def test_a_target_whose_agent_row_went_away_fails_alone(db, make_config, runtime, monkeypatch):
+    from agentworks.db import SessionMode
+
+    seed_vm(db, "box")
+    seed_session(db, "kept", "box", target=DesiredRuntimeState.STOPPED)
+    db.insert_agent("gone", "box", "agt-gone")
+    db.insert_session(
+        "orphan",
+        "ws-box",
+        "default",
+        SessionMode.AGENT,
+        agent_name="gone",
+        socket_path="/run/agentworks/agent-tmux-sockets/agt-gone/orphan.sock",
+        desired_runtime_state=DesiredRuntimeState.STOPPED,
+    )
+    from agentworks.runtime_state import _selection
+
+    read = _selection.read_families
+
+    def read_then_the_agent_row_goes(invocation):
+        read(invocation)
+        # Another command removed the agent's row after this one read its targets.
+        db._conn.execute("PRAGMA foreign_keys = OFF")
+        db._conn.execute("DELETE FROM agents WHERE name = 'gone'")
+        db._conn.commit()
+
+    monkeypatch.setattr("agentworks.runtime_state._service.read_families", read_then_the_agent_row_goes)
+    results = _start(db, make_config(), ["orphan", "kept"], monkeypatch)
+    assert results[("session", "orphan")].outcome is Outcome.FAILED
+    assert ("session-start", "kept") in runtime[2]

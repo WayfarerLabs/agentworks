@@ -12,10 +12,11 @@ whole family.
 from __future__ import annotations
 
 import contextlib
+from functools import partial
 from typing import TYPE_CHECKING
 
 from agentworks.db import DesiredRuntimeState
-from agentworks.errors import AgentworksError, StateConflictError, StateError
+from agentworks.errors import StateConflictError, StateError
 from agentworks.native_locks import LockRequest, NativeLockBusyError, native_locks, probe_locks, vm_entity
 from agentworks.native_locks.rows import console_entity_for, session_entity_for
 from agentworks.recheck import require_request_unchanged, session_fields, vm_fields
@@ -30,14 +31,22 @@ if TYPE_CHECKING:
 
 
 def _targets(invocation: RuntimeInvocation, vm_name: str) -> dict[ResourceKey, Entity]:
+    """The family's live targets and their entities; a target whose rows have gone fails alone."""
     routes = dict(invocation.selection.session_routes)
-    targets: dict[ResourceKey, Entity] = {}
+    built: list[tuple[ResourceKey, Callable[[], Entity]]] = []
     for name, session in invocation.sessions.items():
         if routes.get(name) == vm_name and not invocation.unavailable("session", name):
-            targets[("session", name)] = session_entity_for(invocation.db, session)
+            built.append((("session", name), partial(session_entity_for, invocation.db, session)))
     for name, console in invocation.consoles.items():
         if console.vm_name == vm_name and not invocation.unavailable("console", name):
-            targets[("console", name)] = console_entity_for(invocation.db, console)
+            built.append((("console", name), partial(console_entity_for, invocation.db, console)))
+    targets: dict[ResourceKey, Entity] = {}
+    for key, entity in built:
+        try:
+            targets[key] = entity()
+        except StateConflictError as vanished:
+            # A row the target's entity is built from went away: that target fails, the family goes on.
+            invocation.fail(*key, vanished)
     return targets
 
 
@@ -63,11 +72,7 @@ def _needs(target: Entity, refused: NativeLockBusyError) -> bool:
 def _lock[T](invocation: RuntimeInvocation, vm_name: str, acquire: Callable[[LockRequest], T]) -> T | None:
     """Acquire the family's set by the per-target rule; ``None`` when the whole family is refused."""
     while True:
-        try:
-            targets = _targets(invocation, vm_name)
-        except AgentworksError as error:
-            block_family(invocation, vm_name, error)
-            return None
+        targets = _targets(invocation, vm_name)
         if not targets and vm_name not in invocation.selection.explicit_vms:
             return None
         try:
