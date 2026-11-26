@@ -113,3 +113,27 @@ def test_a_restore_whose_pane_plan_changed_before_its_final_set_refuses(
     assert not any("split-window" in command for command in guest.commands)
     rows = model.pane_rows("aw-console-con", "a")
     assert rows is not None and [tag for _pid, _pidx, tag in rows] == [None, 0]
+
+
+def test_a_member_added_as_the_console_is_locked_refuses_the_edit(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks import native_locks
+
+    _seed_vm(db)
+    _seed_sessions(db, ["a", "b"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    lock = native_locks.native_locks
+
+    def another_edit_adds_a_member_then_lock(*args: object, **kwargs: object) -> object:
+        # Between building the console's request and holding it, another edit adds a member.
+        if db.get_console_session("con", "b") is None:
+            db.add_console_session("con", "b", [])
+        return lock(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(native_locks, "native_locks", another_edit_adds_a_member_then_lock)
+
+    with pytest.raises(StateConflictError):
+        mc.add_shell(db, _StubConfig(), console_name="con", session_name="a", cwd="first", interaction=REFUSE)
+
+    assert _shells(db, "a") == []

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -236,28 +235,20 @@ def probe_console(db: Database, name: str, *, shared: Sequence[Entity] = ()) -> 
 
 @contextmanager
 def guarded_console_selection(
-    db: Database,
-    name: str,
-    *,
-    held: NativeLockSet | None = None,
-    shared: Sequence[Entity] = (),
-    prompts: bool = False,
+    db: Database, name: str, *, shared: Sequence[Entity] = ()
 ) -> Iterator[tuple[ConsoleRow, NativeLockSet]]:
-    """Select a console under its exclusive lock (:func:`console_request`), refusing a changed parent.
+    """Select a console under its exclusive lock (:func:`console_request`), refusing a changed parent or membership.
 
-    ``held`` is a caller's set, which must cover the request; ``prompts``
-    marks an acquisition of its own as one sanctioned to prompt.
+    Under the set the console is read again and its request rebuilt, so a
+    member another command added or removed since the console was read
+    refuses rather than being acted on without its lock.
     """
     from agentworks.native_locks import native_locks
+    from agentworks.recheck import require_request_unchanged
 
     selected = _require_console(db, name)
     request = console_request(db, selected, shared=shared)
-    with contextlib.ExitStack() as stack:
-        if held is not None:
-            held.require(request, database_path=db.path)
-            lock_set = held
-        else:
-            lock_set = stack.enter_context(native_locks(db.path, request, prompts=prompts))
+    with native_locks(db.path, request) as lock_set:
         console = _require_console(db, name)
         if console.vm_name != selected.vm_name:
             raise StateError(
@@ -265,4 +256,5 @@ def guarded_console_selection(
                 entity_kind="console",
                 entity_name=name,
             )
+        require_request_unchanged("console", name, request, console_request(db, console, shared=shared))
         yield console, lock_set

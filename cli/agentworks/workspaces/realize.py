@@ -131,7 +131,7 @@ def realize_workspace(
     from agentworks.native_locks import require_or_acquire
     from agentworks.workspaces.locks import workspace_create_request
 
-    with require_or_acquire(db.path, workspace_create_request(db, vm, name)[0], held=held) as guard:
+    with require_or_acquire(db.path, workspace_create_request(db, vm, name), held=held) as guard:
         require_prepared_setup(db, "workspace", name, ("workspace",), () if setup_inputs is None else (setup_inputs,))
         # The log closes exactly once, AFTER any rollback requests have been
         # logged. Closing earlier would write the "Finished" footer before the

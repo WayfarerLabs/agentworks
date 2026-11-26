@@ -522,3 +522,26 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     assert unguarded == ["confirm", "resolve"]
     assert guest.requests == []
     assert db.get_workspace("ws1") is not None
+
+
+def test_delete_refuses_a_grant_added_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    seed(db)
+    db.insert_agent("bot", "box", "agt-bot")
+    reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: db.insert_agent_grant("bot", "ws1", "explicit"))
+
+    with pytest.raises(StateConflictError):
+        workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert db.get_workspace("ws1") is not None
+    assert REMOVE_DIRECTORY not in guest.argvs()

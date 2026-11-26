@@ -19,13 +19,12 @@ from agentworks.execution.requests import Command, FromFile, ToFile
 from agentworks.naming import validate_name
 from agentworks.native_locks import probe_locks
 from agentworks.path_rendering import format_host_path
-from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
+from agentworks.recheck import require_request_unchanged, require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied, stored_workspace_path
 from agentworks.workspaces.locks import (
-    require_grant_all_unchanged,
     require_trees_unchanged,
     walk_trees,
     with_trees,
@@ -125,7 +124,7 @@ def copy_workspace(
             # is a read like the others, and every prompt precedes the guards.
             dest_vm = _resolve_vm(db, vm_name)
             _guard_vm_status(dest_vm)
-            requests, grant_all_agents = _copy_requests(db, src_ws, src_vm, dest_vm, dest_name)
+            requests = _copy_requests(db, src_ws, src_vm, dest_vm, dest_name)
             for locked_vm in sorted(requests):
                 probe_locks(db.path, requests[locked_vm])
             registry = load_request_registry(config, live_database=db)
@@ -180,7 +179,12 @@ def copy_workspace(
                 require_vm_unchanged(db, node.row)
             require_trees_unchanged(src_vm, config, source_tree)
             require_trees_unchanged(dest_vm, config, target_tree)
-            require_grant_all_unchanged(db, dest_vm, grant_all_agents)
+            require_request_unchanged(
+                "vm",
+                dest_vm.name,
+                requests[dest_vm.name],
+                _copy_requests(db, src_ws, src_vm, dest_vm, dest_name)[dest_vm.name],
+            )
             require_unchanged(
                 "workspace", source_name, workspace_fields(src_ws), workspace_fields(db.get_workspace(source_name))
             )
@@ -330,8 +334,8 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
 
 def _copy_requests(
     db: Database, src_ws: WorkspaceRow, src_vm: VMRow, dest_vm: VMRow, dest_name: str
-) -> tuple[dict[str, LockRequest], tuple[str, ...]]:
-    """Copy's lock set per VM, without its trees, and the destination's grant-all agents.
+) -> dict[str, LockRequest]:
+    """Copy's lock set per VM, without its trees.
 
     The destination creates ``dest_name`` as workspace create does; the
     source workspace is held shared, so it cannot be deleted, rehomed or
@@ -341,9 +345,9 @@ def _copy_requests(
     from agentworks.native_locks.rows import workspace_entity_for
     from agentworks.workspaces.locks import workspace_create_request
 
-    destination, grant_all_agents = workspace_create_request(db, dest_vm, dest_name)
+    destination = workspace_create_request(db, dest_vm, dest_name)
     source = workspace_entity_for(src_ws)
     if src_vm.name == dest_vm.name:
         merged = LockRequest(exclusive=destination.exclusive, shared=(*destination.shared, source))
-        return {dest_vm.name: merged}, grant_all_agents
-    return {src_vm.name: LockRequest(shared=(source,)), dest_vm.name: destination}, grant_all_agents
+        return {dest_vm.name: merged}
+    return {src_vm.name: LockRequest(shared=(source,)), dest_vm.name: destination}

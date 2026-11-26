@@ -531,3 +531,34 @@ def test_a_console_refused_after_recording_its_intent_says_how_to_restore_it(
     assert refused.value.restore_intent == restore
     recorded = DesiredRuntimeState.RUNNING if operation == "start" else DesiredRuntimeState.STOPPED
     assert _console(db).desired_runtime_state is recorded
+
+
+def test_a_console_start_refuses_a_member_added_as_its_final_set_is_taken(db: Database, monkeypatch):
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["late"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    node = guarding_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    lock = node.locked
+
+    def another_edit_adds_a_member_then_lock(request, **kwargs):
+        # Between building the console's request and holding it, another edit adds a member.
+        db.add_console_session("con", "late", [])
+        return lock(request, **kwargs)
+
+    node.locked = another_edit_adds_a_member_then_lock
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.runtime.prepare_vm_runtime",
+        lambda *a, **kw: SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None),
+    )
+    with pytest.raises(StateConflictError):
+        mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)

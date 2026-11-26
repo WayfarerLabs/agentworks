@@ -7,6 +7,12 @@ between; after acquiring its set (step 7 of the operation sequence), the
 command reads them again and refuses with ``StateConflictError`` if any
 field it relied on differs.
 
+The lock set itself is re-checked the same way: the command builds its
+request again from what it reads under the set and refuses if any entity
+or mode differs (:func:`require_request_unchanged`), so a grant, session,
+member or workspace that came or went since the command read its rows is
+never acted on without its lock.
+
 Each ``*_fields`` function names those fields for one row and returns
 ``None`` for a missing row, so presence is compared too. Only identity and
 placement are compared, never whole rows: timestamps and recorded pids
@@ -21,6 +27,7 @@ from agentworks.errors import StateConflictError
 
 if TYPE_CHECKING:
     from agentworks.db import AgentRow, ConsoleSessionRow, Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.native_locks import LockRequest
 
 type Fields = tuple[object, ...] | None
 
@@ -34,6 +41,19 @@ def require_unchanged(entity_kind: str, entity_name: str, read: object, current:
             entity_name=entity_name,
             hint="Run the command again.",
         )
+
+
+def require_request_unchanged(entity_kind: str, entity_name: str, read: LockRequest, current: LockRequest) -> None:
+    """Refuse when the lock set the command's rows build now differs from ``read``, the one it holds.
+
+    Compares each entity's key and mode, its ancestors included, so a
+    console whose members changed differs although its own key does not.
+    """
+    require_unchanged(entity_kind, entity_name, _keys(read), _keys(current))
+
+
+def _keys(request: LockRequest) -> tuple[tuple[str, object], ...]:
+    return tuple((entity.key, mode) for entity, mode in request.modes().items())
 
 
 def vm_fields(row: VMRow | None) -> Fields:

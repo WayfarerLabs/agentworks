@@ -75,10 +75,9 @@ def with_trees(request: LockRequest, *trees: TreeLocks) -> LockRequest:
     return LockRequest(exclusive=(*request.exclusive, *exclusive), shared=(*request.shared, *shared))
 
 
-def workspace_create_request(db: Database, vm: VMRow, name: str) -> tuple[LockRequest, tuple[str, ...]]:
+def workspace_create_request(db: Database, vm: VMRow, name: str) -> LockRequest:
     """Creating workspace ``name``: its entity, the admin's grant and one per grant-all agent, with grant-all shared.
 
-    Returns the grant-all agents it was built from, for the step-7 re-check.
     The workspace is locked by name before its row exists, so two creates
     of one name refuse each other.
     """
@@ -90,14 +89,7 @@ def workspace_create_request(db: Database, vm: VMRow, name: str) -> tuple[LockRe
         grant_entity(workspace, admin_account_entity(vm)),
         *(grant_entity(workspace, agent_account_entity(agent)) for agent in agents),
     )
-    request = LockRequest(exclusive=(workspace, *grants), shared=(grant_all_entity(vm.name),))
-    return request, tuple(sorted(agent.name for agent in agents))
-
-
-def require_grant_all_unchanged(db: Database, vm: VMRow, agents: tuple[str, ...]) -> None:
-    """Under the set: the grant-all agents a workspace create will grant are the ones it locked."""
-    current = tuple(sorted(agent.name for agent in db.list_agents_on_vm_with_grant_all(vm.name)))
-    require_unchanged("vm", vm.name, agents, current)
+    return LockRequest(exclusive=(workspace, *grants), shared=(grant_all_entity(vm.name),))
 
 
 def workspace_grants(db: Database, vm: VMRow, workspace: WorkspaceRow) -> tuple[Entity, ...]:

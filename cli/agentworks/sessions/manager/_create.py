@@ -378,7 +378,13 @@ def create_session(
     # gate).
     from dataclasses import replace
 
-    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged, workspace_fields
+    from agentworks.recheck import (
+        agent_fields,
+        require_request_unchanged,
+        require_unchanged,
+        require_vm_unchanged,
+        workspace_fields,
+    )
 
     def require_plan_rows_current() -> None:
         """The workspace and agent the plan names are as the plan read them."""
@@ -436,7 +442,7 @@ def create_session(
     # the boundary resolver so nothing resolves or prompts twice.
     from agentworks.vms.manager import require_vm_ssh_boundary
 
-    request, grant_all_agents = session_create_request(db, plan)
+    request = session_create_request(db, plan)
     probe_locks(db.path, request)
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
@@ -456,7 +462,6 @@ def create_session(
         # node, and what the plan read is read again under it. A new
         # workspace's target tree joins as the guest's lookup walk names it.
         from agentworks.workspaces.locks import (
-            require_grant_all_unchanged,
             require_trees_unchanged,
             walk_trees,
             with_trees,
@@ -470,8 +475,7 @@ def create_session(
         with graph.vm_node.locked(with_trees(request, *trees)):
             require_vm_unchanged(db, graph.vm_node.row)
             require_plan_rows_current()
-            if plan.new_workspace:
-                require_grant_all_unchanged(db, vm, grant_all_agents)
+            require_request_unchanged("session", plan.name, request, session_create_request(db, plan))
             for tree in trees:
                 require_trees_unchanged(vm, config, tree)
             if db.get_session(plan.name) is not None:
@@ -508,8 +512,8 @@ def create_session(
             raise_setup_failures(setup_failures)
 
 
-def session_create_request(db: Database, plan: SessionPlan) -> tuple[LockRequest, tuple[str, ...]]:
-    """Session create's lock set without a new workspace's tree, and the grant-all agents it grants.
+def session_create_request(db: Database, plan: SessionPlan) -> LockRequest:
+    """Session create's lock set, without a new workspace's tree.
 
     The session, and in agent mode its implicit grant, exclusive; a new
     workspace adds what workspace create takes (the workspace, the admin's
@@ -536,9 +540,8 @@ def session_create_request(db: Database, plan: SessionPlan) -> tuple[LockRequest
         exclusive.append(grant_entity(workspace, account))
     if plan.new_agent:
         exclusive.append(account)
-    grant_all_agents: tuple[str, ...] = ()
     if plan.new_workspace:
-        created, grant_all_agents = workspace_create_request(db, vm, plan.workspace_name)
+        created = workspace_create_request(db, vm, plan.workspace_name)
         exclusive.extend(created.exclusive)
         shared.extend(created.shared)
-    return LockRequest(exclusive=tuple(exclusive), shared=tuple(shared)), grant_all_agents
+    return LockRequest(exclusive=tuple(exclusive), shared=tuple(shared))

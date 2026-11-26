@@ -861,3 +861,56 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     assert unguarded == ["confirm", "resolve"]
     assert target.commands == []
     assert db.get_agent("a1") is not None
+
+
+# -- the lock set rebuilt under itself ------------------------------------------
+
+
+def test_grant_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _seed_workspace(db, vm_name="box", name="late"))
+
+    with pytest.raises(StateConflictError):
+        agent_grants.grant_workspaces(
+            db, config, agent_name="a1", workspace_names=[], grant_all=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    row = db.get_agent("a1")
+    assert row is not None and not row.grant_all
+    assert not any(c.startswith("usermod") for c in target.commands)
+
+
+def test_delete_refuses_a_grant_added_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    synced: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: db.insert_agent_grant("a1", "ws1", "explicit"))
+
+    with pytest.raises(StateConflictError):
+        agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert db.get_agent("a1") is not None
+    assert not any("userdel" in c for c in target.commands)

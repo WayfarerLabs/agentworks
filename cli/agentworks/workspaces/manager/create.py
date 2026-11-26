@@ -236,7 +236,7 @@ def create_workspace(
     from agentworks.native_locks import probe_locks
     from agentworks.workspaces.locks import workspace_create_request
 
-    request, grant_all_agents = workspace_create_request(db, vm, ws_name)
+    request = workspace_create_request(db, vm, ws_name)
     probe_locks(db.path, request)
 
     # BUILD: the command names its direct resources (this VM, the
@@ -304,9 +304,13 @@ def create_workspace(
         )
         resolver.resolve()
 
-        from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
+        from agentworks.recheck import (
+            require_request_unchanged,
+            require_unchanged,
+            require_vm_unchanged,
+            workspace_fields,
+        )
         from agentworks.workspaces.locks import (
-            require_grant_all_unchanged,
             require_trees_unchanged,
             walk_trees,
             with_trees,
@@ -317,7 +321,7 @@ def create_workspace(
         held = stack.enter_context(vm_node.locked(with_trees(request, trees)))
         require_vm_unchanged(db, vm_node.row)
         require_unchanged("workspace", ws_name, None, workspace_fields(db.get_workspace(ws_name)))
-        require_grant_all_unchanged(db, vm, grant_all_agents)
+        require_request_unchanged("vm", vm.name, request, workspace_create_request(db, vm, ws_name))
         require_trees_unchanged(vm, config, trees)
 
         setup_failures: list[SetupFailure] = []

@@ -143,3 +143,26 @@ def test_a_status_that_changed_before_the_guard_refuses_the_delete(
 
     assert torn_down == []
     assert db.get_session("s") is not None
+
+
+def test_a_console_taking_the_session_between_the_probe_and_the_lock_refuses_the_delete(
+    db: Database,
+    scripted_guest: _ScriptedGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.sessions import manager as manager_mod
+    from tests.conftest import change_after_probe
+    from tests.console_helpers import create_console_record
+
+    _prep_delete_session(db, monkeypatch)
+    monkeypatch.setattr(manager_mod, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
+    ran = change_after_probe(
+        monkeypatch, lambda: create_console_record(db, name="late", vm_name="vm1", session_specs=["s"])
+    )
+
+    with pytest.raises(StateConflictError):
+        manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert db.get_session("s") is not None

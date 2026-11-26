@@ -18,7 +18,7 @@ from agentworks.db import DesiredRuntimeState
 from agentworks.errors import AgentworksError, StateConflictError, StateError
 from agentworks.native_locks import LockRequest, NativeLockBusyError, native_locks, probe_locks, vm_entity
 from agentworks.native_locks.rows import console_entity_for, session_entity_for
-from agentworks.recheck import session_fields, vm_fields
+from agentworks.recheck import require_request_unchanged, session_fields, vm_fields
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -126,12 +126,13 @@ def acquire_final_sets(invocation: RuntimeInvocation) -> None:
         def hold(request: LockRequest, node: LiveVMNode = node) -> NativeLockSet:
             return invocation.stack.enter_context(node.locked(request, prompts=True))
 
-        if _lock(invocation, vm_name, hold) is not None:
-            _recheck(invocation, vm_name)
+        held = _lock(invocation, vm_name, hold)
+        if held is not None:
+            _recheck(invocation, vm_name, held)
 
 
-def _recheck(invocation: RuntimeInvocation, vm_name: str) -> None:
-    """(g): the VM row, and each target's identity, recorded intent and accepted declaration."""
+def _recheck(invocation: RuntimeInvocation, vm_name: str, held: NativeLockSet) -> None:
+    """(g): the VM row, each target's identity, recorded intent and accepted declaration, and each console's members."""
     db = invocation.db
     routes = dict(invocation.selection.session_routes)
     if vm_fields(db.get_vm(vm_name)) != vm_fields(invocation.vms[vm_name]):
@@ -157,6 +158,16 @@ def _recheck(invocation: RuntimeInvocation, vm_name: str) -> None:
             console.desired_runtime_state,
         ):
             invocation.refuse("console", name, _changed("console", name))
+            continue
+        try:
+            # The members as they are now, against the ones the console was locked with.
+            members_now = console_entity_for(db, current_console)
+            locked = next(entity for entity in held.modes if entity == members_now)
+            require_request_unchanged(
+                "console", name, LockRequest(exclusive=(locked,)), LockRequest(exclusive=(members_now,))
+            )
+        except StateConflictError as error:
+            invocation.refuse("console", name, error)
 
 
 def _changed(kind: str, name: str) -> StateConflictError:

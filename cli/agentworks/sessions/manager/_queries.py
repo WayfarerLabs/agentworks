@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from agentworks.execution.requests import TerminalCommand
     from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject, JsonValue
+    from agentworks.native_locks import LockRequest
     from agentworks.resources.registry import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
@@ -241,6 +242,21 @@ def _delete_session_status(db: Database, session: SessionRow, *, admin: VMAccess
     return status
 
 
+def _session_delete_request(db: Database, session: SessionRow) -> LockRequest:
+    """Session delete's set: the session, in agent mode its implicit grant, and each console holding it, exclusive."""
+    from agentworks.native_locks import LockRequest
+    from agentworks.native_locks.rows import consoles_holding, session_entity_for, session_grant_entity
+
+    grant = session_grant_entity(db, session)
+    return LockRequest(
+        exclusive=(
+            session_entity_for(db, session),
+            *(() if grant is None else (grant,)),
+            *consoles_holding(db, [session]),
+        )
+    )
+
+
 def _delete_session_runtime(
     db: Database,
     config: Config,
@@ -258,22 +274,14 @@ def _delete_session_runtime(
     """
     name = session.name
     selected_session_uuid = session.session_uuid
-    from agentworks.recheck import require_unchanged, require_vm_unchanged, session_fields
+    from agentworks.recheck import require_request_unchanged, require_unchanged, require_vm_unchanged, session_fields
     from agentworks.sessions.manager._lifecycle import _require_selected_session
 
     # Refuse a row the owner rule rejects before any VM work.
     _mgr.resolve_session_tmux_server(db, session)
-    from agentworks.native_locks import LockRequest, probe_locks
-    from agentworks.native_locks.rows import consoles_holding, session_entity_for, session_grant_entity
+    from agentworks.native_locks import probe_locks
 
-    grant = session_grant_entity(db, session)
-    request = LockRequest(
-        exclusive=(
-            session_entity_for(db, session),
-            *(() if grant is None else (grant,)),
-            *consoles_holding(db, [session]),
-        )
-    )
+    request = _session_delete_request(db, session)
     probe_locks(db.path, request)
     with _mgr._prepare_vm(
         db,
@@ -302,13 +310,12 @@ def _delete_session_runtime(
         # Confirm before any destructive action
         if not yes and not output.confirm(f"Delete session '{name}'?"):
             raise UserAbort("delete cancelled")
-        member_consoles = [c.name for c in db.list_consoles_for_session(name)]
-
         with vm_node.locked(request):
             current = _require_selected_session(db, name, selected_session_uuid)
             require_unchanged("session", name, session_fields(session), session_fields(current))
             require_vm_unchanged(db, vm)
-            require_unchanged("session", name, member_consoles, [c.name for c in db.list_consoles_for_session(name)])
+            require_request_unchanged("session", name, request, _session_delete_request(db, current))
+            member_consoles = [c.name for c in db.list_consoles_for_session(name)]
             # Repair writes the row, and can give an old admin row its
             # dedicated socket, so the status is read from the repaired row.
             session = _mgr._ensure_pid(current, admin=admin, db=db)

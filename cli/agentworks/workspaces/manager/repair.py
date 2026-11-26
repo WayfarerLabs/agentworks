@@ -13,7 +13,7 @@ from agentworks import output
 from agentworks.errors import NotFoundError
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, CaptureOutput, Command
 from agentworks.execution.results import Completed
-from agentworks.recheck import require_unchanged, require_vm_unchanged, workspace_fields
+from agentworks.recheck import require_request_unchanged, require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
@@ -139,8 +139,7 @@ def repair_workspace(
     from agentworks.native_locks import probe_locks
     from agentworks.workspaces.locks import workspace_grants, workspace_request
 
-    grants = workspace_grants(db, vm, ws)
-    request = workspace_request(ws, *grants)
+    request = workspace_request(ws, *workspace_grants(db, vm, ws))
     probe_locks(db.path, request)
     with (
         gated_vm_boundary(
@@ -156,7 +155,7 @@ def repair_workspace(
     ):
         require_vm_unchanged(db, vm_node.row)
         require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
-        require_unchanged("workspace", name, grants, workspace_grants(db, vm, ws))
+        require_request_unchanged("workspace", name, request, workspace_request(ws, *workspace_grants(db, vm, ws)))
         admin = admin_access(vm, config, log)
         ws_group = ws.linux_group
         fixes = 0

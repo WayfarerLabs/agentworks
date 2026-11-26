@@ -18,19 +18,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.agents.locks import grant_request
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import AgentworksError, NotFoundError, ValidationError
 from agentworks.execution.requests import Command
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
-from agentworks.native_locks import (
-    LockRequest,
-    grant_all_entity,
-    grant_entity,
-    probe_locks,
-    workspace_entity,
-)
-from agentworks.native_locks.rows import agent_account_entity
-from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
+from agentworks.native_locks import probe_locks
+from agentworks.recheck import agent_fields, require_request_unchanged, require_unchanged, require_vm_unchanged
 from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import ensure_group, remove_group_member
 
@@ -101,7 +95,7 @@ def grant_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    request, every = _grant_request(db, vm, agent, workspace_names, every=grant_all)
+    request = grant_request(db, vm, agent, workspace_names, every=grant_all)
     probe_locks(db.path, request)
 
     from agentworks.bootstrap import load_request_registry
@@ -119,7 +113,9 @@ def grant_workspaces(
         vm_node.locked(request),
     ):
         _require_agent_unchanged(db, vm_node.row, agent)
-        _require_workspaces_unchanged(db, vm, every)
+        require_request_unchanged(
+            "vm", vm.name, request, grant_request(db, vm, agent, workspace_names, every=grant_all)
+        )
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
             # Add to all existing workspace groups on this VM
@@ -177,7 +173,7 @@ def revoke_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
-    request, every = _grant_request(db, vm, agent, workspace_names, every=revoke_all)
+    request = grant_request(db, vm, agent, workspace_names, every=revoke_all)
     probe_locks(db.path, request)
 
     from agentworks.bootstrap import load_request_registry
@@ -196,7 +192,9 @@ def revoke_workspaces(
         operation_log(vm.name, "agent-revoke") as log,
     ):
         _require_agent_unchanged(db, vm_node.row, agent)
-        _require_workspaces_unchanged(db, vm, every)
+        require_request_unchanged(
+            "vm", vm.name, request, grant_request(db, vm, agent, workspace_names, every=revoke_all)
+        )
 
         def remove_membership(ws_name: str) -> None:
             """Remove the agent from ``ws_name``'s group, before its last grant row there goes."""
@@ -444,32 +442,6 @@ def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> Non
 
 
 # -- Helpers ---------------------------------------------------------------
-
-
-def _grant_request(
-    db: Database, vm: VMRow, agent: AgentRow, workspace_names: list[str], *, every: bool
-) -> tuple[LockRequest, tuple[str, ...] | None]:
-    """The lock set of a grant or revoke, and with ``every`` the VM's workspace names it was built from.
-
-    Each named workspace's grant is locked by name, whether or not it
-    exists. ``every`` locks the grant-all set and a grant for every
-    workspace on the VM. The account is held shared either way, even with no
-    workspace, so an agent delete refuses it.
-    """
-    account = agent_account_entity(agent)
-    if every:
-        names = tuple(ws.name for ws in db.list_workspaces(vm_name=vm.name))
-        exclusive = (grant_all_entity(vm.name), *(grant_entity(workspace_entity(vm.name, n), account) for n in names))
-        return LockRequest(exclusive=exclusive, shared=(account,)), names
-    grants = tuple(grant_entity(workspace_entity(vm.name, name), account) for name in workspace_names)
-    return LockRequest(exclusive=grants, shared=(account,)), None
-
-
-def _require_workspaces_unchanged(db: Database, vm: VMRow, every: tuple[str, ...] | None) -> None:
-    """Under the set: the VM's workspaces a grant-all writer locked are still all of them."""
-    if every is not None:
-        current = tuple(ws.name for ws in db.list_workspaces(vm_name=vm.name))
-        require_unchanged("vm", vm.name, sorted(every), sorted(current))
 
 
 def _require_agent_unchanged(db: Database, admitted: VMRow, agent: AgentRow) -> None:

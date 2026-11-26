@@ -764,6 +764,30 @@ def normalize_lf(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n")
 
 
+def change_after_probe(monkeypatch: pytest.MonkeyPatch, change: Callable[[], object]) -> list[object]:
+    """Run ``change`` once, right after the command's first lock probe, as another command between probe and lock would.
+
+    Every module that imported ``probe_locks`` sees the wrapper. Returns a
+    list that records the change once it ran.
+    """
+    import sys
+
+    from agentworks import native_locks
+
+    original = native_locks.probe_locks
+    ran: list[object] = []
+
+    def probe_then_change(*args: object, **kwargs: object) -> None:
+        original(*args, **kwargs)  # type: ignore[arg-type]
+        if not ran:
+            ran.append(change())
+
+    for module in list(sys.modules.values()):
+        if module is not None and getattr(module, "probe_locks", None) is original:
+            monkeypatch.setattr(module, "probe_locks", probe_then_change)
+    return ran
+
+
 def guarding_node(db: Database, vm: VMRow, **attributes: object) -> SimpleNamespace:
     """A stand-in live VM node for ``vm``: its ``row``, and a ``locked`` that takes the real lock set.
 

@@ -64,16 +64,25 @@ def _restore_words(
 def _final_set(
     node: LiveVMNode, db: Database, console: ConsoleRow, *, restore: tuple[str, ...] | None
 ) -> Iterator[NativeLockSet]:
-    """The console's final set; a refusal says how to restore the intent this command recorded, if it changed one."""
-    from agentworks.native_locks import NativeLockBusyError
+    """The console's final set, its members read again under it.
 
+    A refusal says how to restore the intent this command recorded, if it
+    changed one. A member added or removed since ``console`` was read refuses.
+    """
+    from agentworks.native_locks import NativeLockBusyError
+    from agentworks.recheck import require_request_unchanged
+
+    request = console_request(db, console)
     with ExitStack() as stack:
         try:
-            held = stack.enter_context(node.locked(console_request(db, console), prompts=True))
+            held = stack.enter_context(node.locked(request, prompts=True))
         except NativeLockBusyError as busy:
             if restore is not None:
                 busy.intent_stays_recorded(restore)
             raise
+        require_request_unchanged(
+            "console", console.name, request, console_request(db, _require_console(db, console.name))
+        )
         yield held
 
 

@@ -27,16 +27,13 @@ from agentworks.vms.manager import gated_vm_boundary
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from pydantic import BaseModel
 
     from agentworks.agents.template import AgentTemplate
     from agentworks.config import Config
-    from agentworks.db import AgentRow, Database, SessionRow
+    from agentworks.db import Database
     from agentworks.execution.access import VMAccess
     from agentworks.instance_specs import InstanceOverlay
-    from agentworks.native_locks import LockRequest
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
@@ -187,11 +184,11 @@ def create_agent(
         agent=name,
     )
 
-    from agentworks.agents.realize import agent_create_request
+    from agentworks.agents.locks import agent_create_request
     from agentworks.native_locks import probe_locks
     from agentworks.vms.manager import require_vm_ssh_boundary
 
-    request, grant_workspaces = agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
+    request = agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
     probe_locks(db.path, request)
     require_vm_ssh_boundary(db, config, vm)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
@@ -236,12 +233,12 @@ def create_agent(
         setup_failures: list[SetupFailure] = []
         with vm_node.locked(request) as held, output.section("Agent Initialization"):
             from agentworks.agents.realize import realize_agent
-            from agentworks.recheck import require_unchanged, require_vm_unchanged
+            from agentworks.recheck import require_request_unchanged, require_vm_unchanged
 
             require_vm_unchanged(db, vm_node.row)
-            if grant_all_workspaces:
-                current = tuple(ws.name for ws in db.list_workspaces(vm_name=vm.name))
-                require_unchanged("vm", vm.name, sorted(grant_workspaces), sorted(current))
+            require_request_unchanged(
+                "agent", name, request, agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
+            )
 
             # realize_agent emits its own "Agent '<name>' created ..."
             # line (shared with the session-create ephemeral path), so it
@@ -329,9 +326,10 @@ def delete_agent(
             hint="Delete the sessions first, or pass --force to also stop them.",
         )
 
+    from agentworks.agents.locks import agent_delete_request
     from agentworks.native_locks import probe_locks
 
-    request, dependents = _agent_delete_request(db, agent, agent_sessions)
+    request = agent_delete_request(db, agent, agent_sessions)
     if vm_node is None:
         # A conflict refuses before the confirmation; a nested teardown's caller holds the set.
         probe_locks(db.path, request)
@@ -347,7 +345,7 @@ def delete_agent(
 
     import contextlib
 
-    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import agent_fields, require_request_unchanged, require_unchanged, require_vm_unchanged
 
     with contextlib.ExitStack() as held:
         # Refuse a session row the owner rule rejects before any VM work.
@@ -400,10 +398,10 @@ def delete_agent(
             node = vm_node
         held.enter_context(node.locked(request))
         # What the confirmation showed: the agent and the sessions it named,
-        # and the grants and consoles its lock set was built from.
+        # and the lock set as those rows and their grants and consoles build it now.
         require_vm_unchanged(db, node.row)
-        require_unchanged("agent", name, dependents, _agent_dependents(db, agent, agent_sessions))
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
+        require_request_unchanged("agent", name, request, agent_delete_request(db, agent, agent_sessions))
         require_unchanged(
             "agent",
             name,
@@ -484,55 +482,10 @@ def delete_agent(
             log.close()
 
 
-def _agent_dependents(
-    db: Database, agent: AgentRow, sessions: Sequence[SessionRow]
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """The workspaces the agent holds grants on and the consoles holding its sessions, by name."""
-    granted = tuple(sorted(db.list_granted_workspaces(agent.name)))
-    consoles = tuple(sorted({c.name for s in sessions for c in db.list_consoles_for_session(s.name)}))
-    return granted, consoles
-
-
-def _agent_delete_request(
-    db: Database, agent: AgentRow, sessions: Sequence[SessionRow]
-) -> tuple[LockRequest, tuple[tuple[str, ...], tuple[str, ...]]]:
-    """Agent delete's lock set, and the dependents it was built from for the step-7 re-check.
-
-    The account, each of its sessions, its grants and the consoles holding
-    its sessions, all exclusive, and the grant-all set when the agent is a
-    grant-all agent.
-    """
-    from agentworks.native_locks import LockRequest, grant_all_entity, grant_entity, workspace_entity
-    from agentworks.native_locks.rows import agent_account_entity, consoles_holding, session_entity_for
-
-    account = agent_account_entity(agent)
-    dependents = _agent_dependents(db, agent, sessions)
-    exclusive = [
-        account,
-        *(session_entity_for(db, session) for session in sessions),
-        *(grant_entity(workspace_entity(agent.vm_name, ws), account) for ws in dependents[0]),
-        *consoles_holding(db, sessions),
-    ]
-    if agent.grant_all:
-        exclusive.append(grant_all_entity(agent.vm_name))
-    return LockRequest(exclusive=tuple(exclusive)), dependents
-
-
 def _reinit_declaration(db: Database, name: str) -> tuple[object, ...]:
     """What agent reinit saved and prepares its setup from: the template binding and the desired overlay."""
     agent = db.get_agent(name)
     return (None if agent is None else agent.template, db.instance_state.get_desired_overlay("agent", name))
-
-
-def _agent_reinit_request(db: Database, agent: AgentRow) -> tuple[LockRequest, tuple[str, ...]]:
-    """Agent reinit's lock set (its account and a grant per recorded grant it replays), and those workspaces."""
-    from agentworks.native_locks import LockRequest, grant_entity, workspace_entity
-    from agentworks.native_locks.rows import agent_account_entity
-
-    account = agent_account_entity(agent)
-    granted = tuple(sorted(db.list_granted_workspaces(agent.name)))
-    grants = tuple(grant_entity(workspace_entity(agent.vm_name, ws), account) for ws in granted)
-    return LockRequest(exclusive=(account, *grants)), granted
 
 
 def reinit_agent(
@@ -587,11 +540,12 @@ def reinit_agent(
             entity_name=name,
         )
 
+    from agentworks.agents.locks import agent_reinit_request
     from agentworks.native_locks import LockRequest, native_locks, probe_locks
     from agentworks.native_locks.rows import agent_account_entity
-    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import agent_fields, require_request_unchanged, require_unchanged, require_vm_unchanged
 
-    request, granted = _agent_reinit_request(db, agent)
+    request = agent_reinit_request(db, agent)
     probe_locks(db.path, request)
     # The declaration is accepted under a brief account exclusive of its own,
     # before the gate and any secret, so it remains if setup fails; the final
@@ -767,7 +721,7 @@ def reinit_agent(
         require_vm_unchanged(db, vm_node.row)
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
         require_unchanged("agent", name, saved_declaration, _reinit_declaration(db, name))
-        require_unchanged("agent", name, granted, tuple(sorted(db.list_granted_workspaces(name))))
+        require_request_unchanged("agent", name, request, agent_reinit_request(db, agent))
 
         def scoped_ctx(
             secret_names: tuple[str, ...],

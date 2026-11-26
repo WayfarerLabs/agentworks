@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.agents.grants import _grant_request
-from agentworks.agents.realize import agent_create_request
+from agentworks.agents.locks import agent_create_request, grant_request
 from agentworks.native_locks import LockRequest, NativeLockBusyError, native_locks
 from agentworks.native_locks.rows import agent_account_entity
 from agentworks.workspaces.locks import workspace_create_request
@@ -35,9 +34,8 @@ def test_a_workspace_create_and_a_grant_all_agent_create_refuse_each_other(db: D
     _seed(db, "old")
     vm = db.get_vm("box")
     assert vm is not None
-    workspace_create, _agents = workspace_create_request(db, vm, "new")
-    agent_create, workspaces = agent_create_request(db, vm, "grantee", grant_all=True)
-    assert workspaces == ("old",)
+    workspace_create = workspace_create_request(db, vm, "new")
+    agent_create = agent_create_request(db, vm, "grantee", grant_all=True)
     _refuse_each_other(db, workspace_create, agent_create)
 
 
@@ -46,9 +44,8 @@ def test_bulk_revoke_refuses_a_named_grant_of_a_workspace_the_agent_was_not_gran
     db.insert_agent_grant("bot", "granted", "explicit")
     vm, agent = db.get_vm("box"), db.get_agent("bot")
     assert vm is not None and agent is not None
-    revoke_all, names = _grant_request(db, vm, agent, [], every=True)
-    named_grant, _ = _grant_request(db, vm, agent, ["other"], every=False)
-    assert names == ("granted", "other")
+    revoke_all = grant_request(db, vm, agent, [], every=True)
+    named_grant = grant_request(db, vm, agent, ["other"], every=False)
     _refuse_each_other(db, revoke_all, named_grant)
 
 
@@ -56,8 +53,7 @@ def test_bulk_revoke_on_a_vm_with_no_workspace_still_holds_the_account(db: Datab
     _seed(db)
     vm, agent = db.get_vm("box"), db.get_agent("bot")
     assert vm is not None and agent is not None
-    revoke_all, names = _grant_request(db, vm, agent, [], every=True)
-    assert names == ()
+    revoke_all = grant_request(db, vm, agent, [], every=True)
     agent_delete = LockRequest(exclusive=(agent_account_entity(agent),))
     _refuse_each_other(db, revoke_all, agent_delete)
 
@@ -66,7 +62,7 @@ def test_grants_of_different_workspaces_run_together(db: Database) -> None:
     _seed(db, "a", "b")
     vm, agent = db.get_vm("box"), db.get_agent("bot")
     assert vm is not None and agent is not None
-    first, _ = _grant_request(db, vm, agent, ["a"], every=False)
-    second, _ = _grant_request(db, vm, agent, ["b"], every=False)
+    first = grant_request(db, vm, agent, ["a"], every=False)
+    second = grant_request(db, vm, agent, ["b"], every=False)
     with native_locks(db.path, first), native_locks(db.path, second):
         pass
