@@ -1225,7 +1225,7 @@ def _no_network_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
     providers treat as network indeterminacy (warn + continue
     unverified), so unrelated tests keep passing while never leaving
     the process. Verification tests monkeypatch ``_http_probe`` with
-    their own fakes, overriding this lock.
+    their own fakes, overriding this guard.
     """
 
     def _refuse(*_a: object, **_k: object) -> object:

@@ -2,7 +2,7 @@
 model: the parity carries the node layer could not prove on its own.
 
 - restart's required-commands probe fires AT PREFLIGHT, before the
-  kill (matching the imperative pre-kill lock), and a missing binary
+  kill (matching the imperative pre-kill guard), and a missing binary
   aborts with the old session still running;
 - create's ephemeral agent defers the probe at preflight and probes
   right after its realization, through the real command;
@@ -774,7 +774,7 @@ def test_indeterminate_post_launch_cleanup_retains_addressable_runtime(
 
 
 def test_restart_probe_fires_at_preflight_before_the_kill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The pre-kill lock, orchestrated: the required-commands probe
+    """The pre-kill guard, orchestrated: the required-commands probe
     fires at PREFLIGHT, strictly before the kill, not merely once
     somewhere in the command."""
     from agentworks.sessions.manager import restart_session
@@ -1822,7 +1822,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     plugin's is refused at the build phase (the gate added beside the harness integration
     gate in ``_build_session_graph``), before any transport or session-row
     write. Proves the newly-added ``--new-agent`` gate fires live, not just that
-    the call site references it textually (the drift lock's job)."""
+    the call site references it textually (the drift guard's job)."""
     from agentworks.plugins import Plugin
     from agentworks.sessions.manager import create_session
 
