@@ -27,10 +27,10 @@ if TYPE_CHECKING:
 class NativeLockBusyError(StateError):
     """A lock set was refused because another operation holds a conflicting lock.
 
-    ``entity_kind`` and ``entity_name`` name the refused entity, ``mode`` the
-    mode this operation asked for it, and ``holder`` the live holder its
-    record names, or ``None`` when no record names one (an older agw, or a
-    holder that is releasing). Code reads these fields; the message is for
+    ``entity`` is the refused entity (also named by ``entity_kind`` and
+    ``entity_name``), ``mode`` the mode this operation asked for it, and
+    ``holder`` the live holder its record names, or ``None`` when no record
+    names one (an older agw, or a holder that is releasing). Code reads these fields; the message is for
     people.
     """
 
@@ -48,6 +48,7 @@ class NativeLockBusyError(StateError):
             entity_name=refused.name,
             hint="Retry when that operation finishes.",
         )
+        self.entity = refused
         self.mode = mode
         self.holder = holder
 
@@ -145,6 +146,24 @@ def native_locks(database_path: Path, request: LockRequest, *, prompts: bool = F
                 record.retire()
         finally:
             _release(handles)
+
+
+@contextmanager
+def require_or_acquire(
+    database_path: Path, request: LockRequest, *, held: NativeLockSet | None
+) -> Iterator[NativeLockSet]:
+    """Reuse ``held`` for a nested operation's ``request``, or acquire ``request`` when nothing is held.
+
+    For an operation that runs both nested, under its caller's set, and on
+    its own: nested, it requires ``request`` of the caller's set and acquires
+    nothing; on its own, it acquires ``request`` like :func:`native_locks`.
+    """
+    if held is not None:
+        held.require(request, database_path=database_path)
+        yield held
+        return
+    with native_locks(database_path, request) as acquired:
+        yield acquired
 
 
 def probe_locks(database_path: Path, request: LockRequest) -> None:
