@@ -162,11 +162,19 @@ def sync_ssh_config(config: Config, db: Database, *, announce: bool = True) -> N
     adds no output line (e.g. ``vm create``'s post-initialization sync,
     which would otherwise duplicate the line already emitted as the last
     step of the Provisioning phase).
+
+    The database reads and the writes run under one
+    :func:`~agentworks.ssh_config_lock.ssh_config_rebuild_lock`, so the last
+    of several concurrent rebuilds reads the latest committed state; one that
+    waits past the lock's bound raises ``StateError``.
     """
-    if config.operator.ssh_config_dir:
-        _rebuild_config_dir(config, db)
-    else:
-        _legacy_rebuild(config, db)
+    from agentworks.ssh_config_lock import ssh_config_rebuild_lock
+
+    with ssh_config_rebuild_lock():
+        if config.operator.ssh_config_dir:
+            _rebuild_config_dir(config, db)
+        else:
+            _legacy_rebuild(config, db)
     if announce:
         output.info("SSH config synced")
 

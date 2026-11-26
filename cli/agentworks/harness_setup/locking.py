@@ -15,6 +15,7 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+    from typing import BinaryIO
 
 
 class NativeSetupBusyError(StateError):
@@ -53,28 +54,45 @@ def native_mutation_guard(
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     name = hashlib.sha256(vm_name.encode()).hexdigest()
     with (directory / name).open("a+b") as lock_file:
-        # Windows byte-range locking needs a stable byte, including on an empty file.
-        if lock_file.seek(0, os.SEEK_END) == 0:
-            lock_file.write(b"\0")
-            lock_file.flush()
-        lock_file.seek(0)
-        try:
-            _lock(lock_file.fileno())
-        except OSError as error:
-            if error.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                raise
+        if not try_lock_exclusive(lock_file):
             raise NativeSetupBusyError(
                 "another operation is changing native state on this VM",
                 entity_kind="vm",
                 entity_name=vm_name,
                 hint="Retry after the other operation finishes.",
-            ) from error
+            )
         guard = NativeMutationGuard(database_path, vm_name)
         try:
             yield guard
         finally:
             guard._active = False
-            _unlock(lock_file.fileno())
+            unlock(lock_file)
+
+
+def try_lock_exclusive(lock_file: BinaryIO) -> bool:
+    """Take the exclusive lock on ``lock_file``, opened ``a+b``, without waiting; ``False`` while another holds it.
+
+    The lock belongs to this open file, so a second open of the same path, in
+    this process or another, is refused until :func:`unlock` or the file's
+    close. Any other failure raises its ``OSError``.
+    """
+    # Windows byte-range locking needs a stable byte, including on an empty file.
+    if lock_file.seek(0, os.SEEK_END) == 0:
+        lock_file.write(b"\0")
+        lock_file.flush()
+    lock_file.seek(0)
+    try:
+        _lock(lock_file.fileno())
+    except OSError as error:
+        if error.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+            raise
+        return False
+    return True
+
+
+def unlock(lock_file: BinaryIO) -> None:
+    """Release the lock :func:`try_lock_exclusive` took on ``lock_file``."""
+    _unlock(lock_file.fileno())
 
 
 def _lock(fd: int) -> None:

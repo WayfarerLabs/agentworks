@@ -120,6 +120,19 @@ def _isolate_operation_logs(tmp_path_factory: pytest.TempPathFactory) -> Generat
         oplog.LOG_DIR = prior
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_ssh_config_rebuild_lock(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
+    """Keep the SSH config rebuild lock in this worker's temporary directory."""
+    from agentworks import ssh_config_lock
+
+    prior = ssh_config_lock.LOCK_PATH
+    ssh_config_lock.LOCK_PATH = tmp_path_factory.getbasetemp() / "locks" / "ssh-config"
+    try:
+        yield
+    finally:
+        ssh_config_lock.LOCK_PATH = prior
+
+
 @pytest.fixture(scope="session")
 def file_lock_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The guest file program's VM-wide lock for programs this worker runs on this machine."""

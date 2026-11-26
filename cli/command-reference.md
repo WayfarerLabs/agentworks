@@ -1181,7 +1181,9 @@ Entries are rebuilt declaratively from the database by `vm create`, `vm reinit`,
 commands keep the file in sync without manual intervention. Each entry's `IdentityFile` is
 `operator.ssh_private_key`, so after changing that key, `agw vm recover` or `agw vm reinit` (which
 install the new key on the VM) rebuild the file too. Run `agw config sync-ssh-config` to force a
-rebuild.
+rebuild. Rebuilds by commands running at once take turns, each reading the database after the one
+before it wrote; a rebuild that waits more than 10 seconds for its turn fails or warns, as that
+command handles a failed rebuild, and `agw config sync-ssh-config` brings the file up to date.
 
 Every entry also carries `HostKeyAlias`, `StrictHostKeyChecking yes`, `GlobalKnownHostsFile` (the
 VM's store file) and `UserKnownHostsFile` set to the null device, plus `UpdateHostKeys no` and
