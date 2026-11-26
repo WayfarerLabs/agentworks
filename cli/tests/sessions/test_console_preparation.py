@@ -156,15 +156,6 @@ def test_delete_consent_is_asked_unguarded_and_a_member_change_before_the_guard_
     assert db.get_console("con") is not None
 
 
-def test_nested_delete_reuses_its_callers_guard(db: Database, monkeypatch):
-    _seed_vm(db)
-    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
-    monkeypatch.setattr(mc, "_live_access", lambda *a: None)
-    with native_mutation_guard(db.path, "vm1") as guard:
-        mc.delete_console(db, _StubConfig(), name="con", yes=True, held_native_guard=guard)
-    assert db.get_console("con") is None
-
-
 def test_delete_cancellation_propagates_and_retains_definition(db: Database, monkeypatch):
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)

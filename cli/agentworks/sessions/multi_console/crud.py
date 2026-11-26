@@ -496,9 +496,9 @@ def remove_sessions(
     console is removed. If that leaves the console with no configured sessions,
     offer to delete it (interactive) or report-but-keep it (``yes=True``), the
     same "console is now empty" treatment ``session delete`` gives a console
-    its cascade empties (issue #265). That offer is asked before the
-    native mutation guard is taken; under it the console and its members are
-    read again, and a change refuses.
+    its cascade empties (issue #265). Under the native mutation guard the
+    console and its members are read again, and a change refuses; the offer
+    runs once the guard is released.
     """
     from agentworks.recheck import console_fields, require_unchanged
 
@@ -516,8 +516,7 @@ def remove_sessions(
     _require_console(db, console_name)
     require_members()
     read = console_fields(db, console_name)
-    answers = _mc.ask_to_delete_consoles_left_empty(db, [console_name], removing=session_names, yes=yes)
-    with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
+    with guarded_console_selection(db, console_name) as (_selected_console, _guard):
         require_unchanged("console", console_name, read, console_fields(db, console_name))
         console = _require_console(db, console_name)
         live = _mc._live_access(db, config, console.vm_name)
@@ -535,9 +534,11 @@ def remove_sessions(
                 # intercept this call path.
                 _mc.kill_session_windows(admin, pairs=[(console_name, n) for n in session_names])
 
-        # Delete or report AFTER the removal (and its best-effort live sync)
-        # settle, as ``session delete`` does.
-        _mc.settle_consoles_left_empty(db, config, [console_name], answers=answers, held_native_guard=held_native_guard)
+    # Offer/report AFTER the removal (and its best-effort live sync) settle and
+    # the guard is released. Routed through the package object so this shares
+    # the exact offer/report path ``session delete`` uses, and so tests
+    # monkeypatching ``multi_console.delete_console`` intercept the confirmed delete.
+    _mc.offer_delete_if_empty_consoles(db, config, [console_name], yes=yes)
 
 
 def reorder_sessions(

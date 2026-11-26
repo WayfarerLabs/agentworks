@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import SessionMode, SessionStatus
+from agentworks.db import SessionStatus
 from agentworks.execution.errors import CommandFailed
 from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
@@ -88,16 +88,16 @@ def _guard_free(db: Database) -> bool:
 
 
 @pytest.mark.parametrize("answer", [True, False], ids=["accepted", "declined"])
-def test_delete_asks_both_questions_unguarded_and_settles_the_console_it_offered(
+def test_delete_asks_both_questions_with_no_guard_held(
     db: Database,
     scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     answer: bool,
     captured_output: CapturedOutput,
 ) -> None:
-    """The confirmation and the offer for a console the delete will leave
-    empty are asked with no guard held; under it, an accepted console that is
-    empty is deleted and a declined one is kept without a report."""
+    """The confirmation is asked before the guard and the offer for the console
+    the delete left empty after it; an accepted console is deleted and a
+    declined one is kept without a report."""
     from agentworks.sessions import manager as manager_mod
 
     _prep_delete_session(db, monkeypatch)
@@ -121,48 +121,6 @@ def test_delete_asks_both_questions_unguarded_and_settles_the_console_it_offered
     if not answer:
         # Declined, so kept without a report.
         assert not any("only" in warning for warning in captured_output.warnings)
-
-
-def test_a_console_left_empty_without_an_offer_is_kept_and_reported(
-    db: Database,
-    scripted_guest: _ScriptedGuest,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: CapturedOutput,
-) -> None:
-    """The console had another member when the delete asked, so it was offered
-    nothing; that member left before the guard, and the emptied console is kept."""
-    from agentworks.sessions import manager as manager_mod
-
-    _prep_delete_session(db, monkeypatch)
-    db.insert_session(
-        "t", "ws-vm1", "default", SessionMode.ADMIN, socket_path="/run/agentworks/admin-tmux-sockets/admin/t.sock"
-    )
-    db.insert_console("pair", "vm1")
-    db.add_console_session("pair", "s", [])
-    db.add_console_session("pair", "t", [])
-
-    from agentworks import recheck
-
-    def confirm(message: str, default: bool = False) -> bool:
-        assert "pair" not in message
-        return True
-
-    require_vm_unchanged = recheck.require_vm_unchanged
-
-    def the_other_member_left_before_the_guard(*args: Any, **kwargs: Any) -> None:
-        # The first re-check under the guard: the other member has left by now.
-        db.remove_console_session("pair", "t")
-        require_vm_unchanged(*args, **kwargs)
-
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-    monkeypatch.setattr("agentworks.output.confirm", confirm)
-    monkeypatch.setattr(recheck, "require_vm_unchanged", the_other_member_left_before_the_guard)
-
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=TtyInteractionPolicy.REFUSE)
-
-    assert db.get_session("s") is None
-    assert db.get_console("pair") is not None
-    assert any("pair" in warning for warning in captured_output.warnings)
 
 
 def test_a_status_that_changed_before_the_guard_refuses_the_delete(

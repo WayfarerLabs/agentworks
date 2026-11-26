@@ -27,6 +27,7 @@ from agentworks import output
 from agentworks.errors import (
     AgentworksError,
     NotFoundError,
+    StateConflictError,
     StateError,
     UserAbort,
 )
@@ -39,12 +40,11 @@ from ._helpers import _require_console, _shell_summary, tmux_session_name, tmux_
 from ._status import ConsoleStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from agentworks.config import Config
     from agentworks.db import ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
     from agentworks.execution.access import VMAccess
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
@@ -834,12 +834,14 @@ def delete_console(
     *,
     name: str,
     yes: bool = False,
-    held_native_guard: NativeMutationGuard | None = None,
+    only_if_empty: bool = False,
 ) -> None:
     """Delete a console: tear down its tmux session (best-effort), then DB row.
 
     The confirmation is asked before the family guard is taken; under it the
-    console and its members are read again, and a change refuses.
+    console and its members are read again, and a change refuses. With
+    ``only_if_empty`` it also refuses a console that has any configured
+    session, for the offer to delete a console a command left empty.
     """
     from agentworks.recheck import console_fields, require_unchanged
 
@@ -849,9 +851,15 @@ def delete_console(
     read = console_fields(db, name)
     if not yes and not output.confirm(f"Delete console '{name}'?"):
         raise UserAbort("delete cancelled")
-    with guarded_console_selection(db, name, held_native_guard=held_native_guard) as (console, _guard):
+    with guarded_console_selection(db, name) as (console, _guard):
         require_unchanged("console", name, read, console_fields(db, name))
         console = _require_console(db, name)
+        if only_if_empty and db.list_console_sessions(name):
+            raise StateConflictError(
+                f"console '{name}' has configured sessions again",
+                entity_kind="console",
+                entity_name=name,
+            )
 
         # Best-effort tmux teardown. Don't block the DB delete on VM reachability.
         teardown_failed = False
@@ -876,81 +884,53 @@ def delete_console(
             output.result(f"Console '{name}' deleted.")
 
 
-def ask_to_delete_consoles_left_empty(
-    db: Database,
-    console_names: Iterable[str],
-    *,
-    removing: Collection[str],
-    yes: bool,
-) -> dict[str, bool]:
-    """Before a command removes sessions from consoles, ask about each console the removal will leave empty.
-
-    A console will be left empty when every configured session it has is in
-    ``removing``. The offer is asked here, with no native mutation guard
-    held (``cleanup_now_empty_resource``'s policy: interactive only, never
-    under ``--yes``), and the answers are returned by console name for
-    :func:`settle_consoles_left_empty` to act on under the guard. A console
-    asked nothing has no entry.
-    """
-    from agentworks.sessions._resource_cleanup import offer_delete_when_empty
-
-    answers: dict[str, bool] = {}
-    for console_name in console_names:
-        members = {member.session_name for member in db.list_console_sessions(console_name)}
-        if db.get_console(console_name) is None or not members <= set(removing):
-            continue
-        answer = offer_delete_when_empty(
-            kind="console", name=console_name, yes=yes, empty_clause="will have no configured sessions left"
-        )
-        if answer is not None:
-            answers[console_name] = answer
-    return answers
-
-
-def settle_consoles_left_empty(
+def offer_delete_if_empty_consoles(
     db: Database,
     config: Config,
     console_names: Iterable[str],
     *,
-    answers: dict[str, bool],
-    held_native_guard: NativeMutationGuard,
+    yes: bool,
 ) -> None:
-    """Under the guard, after the removal: delete or keep each named console that is now empty.
+    """For each named console now left with no configured sessions, offer to
+    delete it (interactive) or report-but-keep it (--yes / non-interactive).
 
-    An empty console cannot be started. Emptiness is read live, the same
-    predicate ``console describe`` uses for its "Configured sessions" count,
-    so a console that still has members is skipped whatever was answered. A
-    console the operator agreed to delete is deleted; one they declined is
-    kept; one left empty without being asked (``--yes``, no terminal, or a
-    member that left meanwhile) is kept and reported with the command that
-    deletes it. A console is operator-authored and never created by the
-    calling command, so it is never auto-deleted. ``session delete`` and
-    ``console remove-sessions`` both settle their consoles here.
+    An empty console cannot be started. This is the shared "console is now empty"
+    treatment both ``session delete`` (via the FK cascade, issue #248/#261) and
+    ``console remove-sessions`` (issue #265) reach after removing a session's
+    console membership; both route here so the two paths stay byte-identical.
+
+    Callers run it once their own native mutation guard is released, so the
+    offer holds no guard while it waits for an answer. ``console_names`` is
+    the set of candidate consoles (each caller passes the consoles it just
+    touched); a console is only acted on when ``list_console_sessions``
+    reports it empty, the same predicate ``console describe`` uses for its
+    "Configured sessions" count, so callers may pass consoles that still have
+    members and they are skipped. The confirmed delete takes the guard and
+    refuses a console that gained a member meanwhile, which keeps it.
+
+    The offer/auto-delete/report policy (including the TTY gate that keeps a
+    scripted caller at exit 0 instead of EOF-aborting) is owned by
+    ``cleanup_now_empty_resource``; this wrapper only carries the console
+    parametrization. A console is operator-authored and never created by the
+    calling command, so ``created=False``: it is never auto-deleted under
+    ``--yes``.
     """
     from functools import partial
 
-    from agentworks.sessions._resource_cleanup import delete_or_warn, report_left_empty
+    from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 
     for console_name in console_names:
         if db.get_console(console_name) is None or db.list_console_sessions(console_name):
             continue
-        manual_command = f"agw console delete {console_name}"
-        answer = answers.get(console_name)
-        if answer is None:
-            report_left_empty(
-                kind="console",
-                name=console_name,
-                manual_command=manual_command,
-                report_clause="now has no configured sessions",
-            )
-        elif answer:
-            delete_or_warn(
-                kind="console",
-                name=console_name,
-                # Route through the package object so tests that monkeypatch
-                # ``multi_console.delete_console`` intercept the confirmed delete.
-                delete=partial(
-                    _mc.delete_console, db, config, name=console_name, yes=True, held_native_guard=held_native_guard
-                ),
-                manual_command=manual_command,
-            )
+        cleanup_now_empty_resource(
+            kind="console",
+            name=console_name,
+            created=False,
+            # Route through the package object so tests that monkeypatch
+            # ``multi_console.delete_console`` intercept the confirmed delete.
+            delete=partial(_mc.delete_console, db, config, name=console_name, yes=True, only_if_empty=True),
+            manual_command=f"agw console delete {console_name}",
+            yes=yes,
+            empty_clause="has no configured sessions left",
+            report_clause="now has no configured sessions",
+        )

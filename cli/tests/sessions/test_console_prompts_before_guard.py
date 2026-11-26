@@ -40,7 +40,7 @@ def _resolving(db: Database, monkeypatch: pytest.MonkeyPatch, during: list[bool]
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", resolve)
 
 
-def test_remove_sessions_offers_the_empty_console_unguarded_and_deletes_it_under_the_guard(
+def test_remove_sessions_offers_the_empty_console_once_its_guard_is_released(
     db: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_vm(db)
@@ -56,22 +56,23 @@ def test_remove_sessions_offers_the_empty_console_unguarded_and_deletes_it_under
     assert db.get_console("con") is None
 
 
-def test_remove_sessions_refuses_a_member_added_after_its_offer(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_remove_sessions_keeps_a_console_that_gains_a_member_while_its_offer_waits(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
 
     def answer(*args: object, **kwargs: object) -> bool:
         db.add_console_session("con", "b", [])
-        return False
+        return True
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(output, "confirm", answer)
 
-    with pytest.raises(StateConflictError):
-        mc.remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
+    mc.remove_sessions(db, _StubConfig(), console_name="con", session_names=["a"])
 
-    assert [m.session_name for m in db.list_console_sessions("con")] == ["a", "b"]
+    assert [m.session_name for m in db.list_console_sessions("con")] == ["b"]
 
 
 def test_add_shell_resolves_unguarded_and_appends_to_the_list_read_under_the_guard(

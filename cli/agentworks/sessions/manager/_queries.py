@@ -147,17 +147,27 @@ def delete_session(
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN.
 
-    The gate, the secrets, the status and access probes, the confirmation and
-    the offer to delete a console the delete will leave empty all run before
-    the VM's native mutation guard is taken, and the status probe persists
-    nothing. Under the guard the session row, the VM row, the consoles
-    holding the session and the outcome of each probe are read again, and a
-    change refuses before anything is torn down. The workspace and agent
-    follow-on offers run after the guard is released.
+    The gate, the secrets, the status and access probes and the confirmation
+    all run before the VM's native mutation guard is taken, and the status
+    probe persists nothing. Under the guard the session row, the VM row, the
+    consoles holding the session and the outcome of each probe are read
+    again, and a change refuses before anything is torn down. The offers to
+    delete a console, workspace or agent the delete left empty run after the
+    guard is released.
     """
     session = _mgr._require_session(db, name)
     _mgr._require_workspace(db, session.workspace_name)
-    _delete_session_runtime(db, config, session=session, force=force, yes=yes, interaction=interaction)
+    member_consoles = _delete_session_runtime(
+        db, config, session=session, force=force, yes=yes, interaction=interaction
+    )
+    # Any console the FK cascade left with no configured sessions gets the
+    # shared empty-console treatment (offer / report-but-keep, issue
+    # #248/#261/#265): the wrapper owns the console parametrization,
+    # cleanup_now_empty_resource owns the policy, and console remove-sessions
+    # routes through the same wrapper so the two paths stay byte-identical.
+    from agentworks.sessions.multi_console import offer_delete_if_empty_consoles
+
+    offer_delete_if_empty_consoles(db, config, member_consoles, yes=yes)
     # Generalized workspace/agent cleanup (issue #266). The session row is
     # already gone, so the "now has no sessions" checks below reflect the
     # post-delete state. This is the single unified path for both the
@@ -236,8 +246,11 @@ def _delete_session_runtime(
     force: bool,
     yes: bool,
     interaction: TtyInteractionPolicy,
-) -> None:
-    """Delete one selected definition and its runtime, asking first and acting under the family guard."""
+) -> list[str]:
+    """Delete one selected definition and its runtime, asking first and acting under the family guard.
+
+    Returns the consoles the session was a member of.
+    """
     name = session.name
     selected_session_uuid = session.session_uuid
     from agentworks.harness_setup.locking import native_mutation_guard
@@ -264,16 +277,12 @@ def _delete_session_runtime(
         # below elevates.
         _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=log)
 
-        # Confirm before any destructive action, and ask about each console
-        # the delete will leave empty.
+        # Confirm before any destructive action
         if not yes and not output.confirm(f"Delete session '{name}'?"):
             raise UserAbort("delete cancelled")
         member_consoles = [c.name for c in db.list_consoles_for_session(name)]
-        from agentworks.sessions.multi_console import ask_to_delete_consoles_left_empty
 
-        console_answers = ask_to_delete_consoles_left_empty(db, member_consoles, removing=(name,), yes=yes)
-
-        with native_mutation_guard(db.path, vm.name) as held_native_guard:
+        with native_mutation_guard(db.path, vm.name):
             current = _require_selected_session(db, name, selected_session_uuid)
             require_unchanged("session", name, session_fields(session), session_fields(current))
             require_vm_unchanged(db, vm)
@@ -334,19 +343,13 @@ def _delete_session_runtime(
 
             output.info(f"Session '{name}' deleted")
 
-            # Report the consoles that referenced this session, and settle any
-            # the cascade left empty (issue #248): delete one the operator
-            # agreed to delete, keep one they declined, and report one left
-            # empty without being asked. ``console remove-sessions`` settles
-            # its console the same way.
+            # Report the consoles that referenced this session (issue #248):
+            # the cascade used to silently empty a console built around a
+            # single session with no trace.
             if member_consoles:
                 noun = "console" if len(member_consoles) == 1 else "consoles"
                 output.info(f"Removed '{name}' from {noun}: {', '.join(member_consoles)}")
-                from agentworks.sessions.multi_console import settle_consoles_left_empty
-
-                settle_consoles_left_empty(
-                    db, config, member_consoles, answers=console_answers, held_native_guard=held_native_guard
-                )
+    return member_consoles
 
 
 def _cleanup_now_empty_workspace(
