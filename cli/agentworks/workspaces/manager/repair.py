@@ -36,8 +36,11 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.steps import InitLog
 
-INSTALL_DEADLINE = 60
-"""Seconds the ``acl`` package install may take."""
+DPKG_LOCK_TIMEOUT = 120
+"""Seconds the ``acl`` install waits for the dpkg lock: another repair or an unattended upgrade may hold it."""
+
+INSTALL_DEADLINE = DPKG_LOCK_TIMEOUT + 60
+"""Seconds the ``acl`` package install may take, its wait for the dpkg lock included."""
 
 TREE_OUTPUT = CaptureOutput(64 * CAPTURE_LIMIT_BYTES)
 """What a step keeps of a recursive command's output: a line per entry, so a large tree's can pass 1 MiB.
@@ -159,7 +162,7 @@ def repair_workspace(
             if status(admin, Command(("which", "setfacl"), elevated=True)) != 0:
                 admin.run(
                     Command(
-                        ("apt-get", "install", "-y", "-qq", "acl"),
+                        ("apt-get", "-o", f"DPkg::Lock::Timeout={DPKG_LOCK_TIMEOUT}", "install", "-y", "-qq", "acl"),
                         elevated=True,
                         deadline=INSTALL_DEADLINE,
                         env={"DEBIAN_FRONTEND": "noninteractive"},
