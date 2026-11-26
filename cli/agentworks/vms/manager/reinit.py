@@ -60,7 +60,8 @@ def reinit_vm(
     then fails, so a re-run retries them. The guard is taken once the gate
     has opened and every secret has resolved, so no prompt keeps another
     operation on the VM waiting; under it the VM row, its template
-    bindings and its stored layer are read again, and a change refuses.
+    bindings and its stored layer are read again, and any change since the
+    command first read them refuses.
 
     Requires provisioning_status == complete and a valid Tailscale
     connection. Orchestrated: the graph derives from the VM's row and
@@ -111,6 +112,10 @@ def reinit_vm(
     # Resolve the VM's templates and layers so init uses the right values.
     candidate_admin_template = vm.admin_template if admin_template is None else admin_template
     original_overlay = db.instance_state.get_desired_overlay("vm", vm.name)
+    # What every declaration below is resolved from and what the body runs on,
+    # kept for the re-check under the guard: the gate refreshes its node's row,
+    # so a change made before the gate would not show against that row.
+    prepared_inputs = _reinit_inputs(vm, original_overlay)
     supplied_admin = None if admin_spec is None else parse_admin_instance_spec(admin_spec or "{}")
     legacy_conversion = None
     if admin_spec is not None:
@@ -342,7 +347,7 @@ def reinit_vm(
             require_unchanged(
                 "vm",
                 name,
-                _reinit_inputs(vm_node.row, original_overlay),
+                prepared_inputs,
                 _reinit_inputs(db.get_vm(name), db.instance_state.get_desired_overlay("vm", name)),
             )
 
