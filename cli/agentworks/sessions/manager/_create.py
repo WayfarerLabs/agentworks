@@ -107,21 +107,26 @@ def _publish_pending_plan(
 
 
 def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
-    """Reload the VM row under the VM family guard and assert it has an address.
+    """Reload the VM row and require that it still exists and has an address.
 
-    The row read before the guard can be stale: an ``agw vm recover`` or
-    ``vm rekey`` that finished before this command took the guard may have
-    updated ``vms.tailscale_host``, and neither can run while the guard is
-    held. Without the reload the address check below could spuriously
-    raise. Create reads it once more inside the activation gate, whose
-    start records ``last_started_at``. (The pre-create
-    SecretTarget read only ``vm.template``, which a refresh cannot
-    change, so the pre-refresh row was safe to target; the nodes keep
-    their construction row, whose identity fields a refresh cannot change
-    either.)
+    The row the plan read can be stale: an ``agw vm recover`` or
+    ``vm rekey`` that finished since may have updated
+    ``vms.tailscale_host``, and without the reload the address check
+    below could spuriously raise. Create reloads it before building its
+    graph, inside the activation gate, whose start records
+    ``last_started_at``, and once more under the VM's guard, where it is
+    compared with the plan. (The pre-create SecretTarget read only
+    ``vm.template``, which a refresh cannot change, so the pre-refresh row
+    was safe to target; the nodes keep their construction row, whose
+    identity fields a refresh cannot change either.)
     """
     refreshed_vm = db.get_vm(target_vm_name)
-    assert refreshed_vm is not None  # existed above; the gate cannot remove it
+    if refreshed_vm is None:
+        raise StateConflictError(
+            f"VM '{target_vm_name}' was deleted since this command read it",
+            entity_kind="vm",
+            entity_name=target_vm_name,
+        )
     if refreshed_vm.tailscale_host is None:
         raise StateError(
             f"VM '{refreshed_vm.name}' has no Tailscale address",
