@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.nodes import LiveVMNode
 
 
 def set_vm_desired_runtime_state(db: Database, *, name: str, state: str | DesiredRuntimeState) -> None:
@@ -158,7 +159,10 @@ def delete_vm(
     Child-count and confirmation checks run before binding or secret
     resolution, so a refused or declined delete prompts for and resolves
     nothing; ``interaction`` is checked before binding, whose failures are
-    handled below and must not swallow a malformed argument. Once the binding
+    handled below and must not swallow a malformed argument. The binding
+    resolves its secrets before the native mutation guard is taken; under
+    the guard the VM row and the child counts the confirmation showed are
+    read again, and a change refuses. Once the binding
     holds, the node is logged out of the tailnet through the platform's root
     channel, best effort, and the provider delete follows: whoever deletes a
     VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
@@ -214,36 +218,49 @@ def delete_vm(
             raise UserAbort("delete cancelled")
 
     from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import require_unchanged, require_vm_unchanged
+
+    # The binding resolves the site's secrets, so it runs before the guard.
+    vm_node: LiveVMNode | None = None
+    try:
+        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
+    except UserAbort:
+        raise
+    except Exception as e:
+        # Preflight or build failure (unreachable API, missing tool,
+        # stranded site, unset or unresolvable secret): nothing can reach
+        # the backend, which may still run.
+        if not force:
+            refusal = StateError(
+                f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
+                entity_kind="vm",
+                entity_name=name,
+                hint=getattr(e, "hint", None),
+            )
+            refusal.add_hint(_finish_delete_hint(vm, fix="Fix the site", logged_out=False))
+            raise refusal from e
+        bind_failure: Exception | None = e
+    else:
+        bind_failure = None
 
     with native_mutation_guard(db.path, vm.name) as guard:
-        selected = _require_vm(db, name)
-        if selected.vm_uuid != vm.vm_uuid:
-            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
-        vm = selected
+        # What the confirmation showed: the VM and the children it counted.
+        require_vm_unchanged(db, vm)
+        require_unchanged(
+            "vm",
+            name,
+            (ws_count, ag_count, ts_count),
+            (db.count_workspaces_on_vm(name), db.count_agents_on_vm(name), db.count_sessions_on_vm(name)),
+        )
+        vm = _require_vm(db, name)
         backend_left = False
         # Why a row with a tailnet address was not logged out, reported once the
         # row goes; None while nothing kept it from that. A row without one is
         # never logged out.
         not_logged_out: str | None = None
-        try:
-            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction, held_native_guard=guard)
-        except UserAbort:
-            raise
-        except Exception as e:
-            # Preflight or build failure (unreachable API, missing tool,
-            # stranded site, unset or unresolvable secret): nothing can reach
-            # the backend, which may still run.
+        if vm_node is None:
             not_logged_out = f"vm-site '{vm.site}' cannot be bound"
-            if not force:
-                refusal = StateError(
-                    f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
-                    entity_kind="vm",
-                    entity_name=name,
-                    hint=getattr(e, "hint", None),
-                )
-                refusal.add_hint(_finish_delete_hint(vm, fix="Fix the site", logged_out=False))
-                raise refusal from e
-            _warn_backend_left(vm, f"vm-site '{vm.site}' cannot be bound: {e}")
+            _warn_backend_left(vm, f"vm-site '{vm.site}' cannot be bound: {bind_failure}")
             backend_left = True
         else:
             platform = vm_node.site.platform
@@ -257,7 +274,7 @@ def delete_vm(
             if vm.tailscale_host:
                 logout_ran = False
                 try:
-                    with vm_node.hold_active():
+                    with vm_node.hold_active(held_native_guard=guard):
                         not_logged_out = _mgr._tailscale_logout(vm, platform, ops_ctx)
                         logout_ran = True
                 except UserAbort:

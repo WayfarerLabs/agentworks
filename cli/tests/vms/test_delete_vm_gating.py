@@ -948,3 +948,55 @@ def test_delete_removes_the_host_key_record_even_when_the_ssh_config_rebuild_fai
 
     assert db.get_vm("dvm") is None
     assert not trust.has_record("dvm")
+
+
+def test_delete_resolves_its_secrets_with_no_guard_held(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+
+    _seed(db)
+    _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    resolve = Resolver.resolve
+    resolved_unguarded: list[bool] = []
+
+    def resolve_checking_the_guard(self: Resolver) -> None:
+        with native_mutation_guard(db.path, "dvm"):
+            resolved_unguarded.append(True)
+        resolve(self)
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_checking_the_guard)
+
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert resolved_unguarded == [True]
+    assert db.get_vm("dvm") is None
+
+
+def test_a_child_added_after_the_confirmation_refuses_the_delete(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The confirmation counted no children; one created before the guard is not what the operator confirmed."""
+    from agentworks.errors import StateConflictError
+
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+
+    def confirm_then_a_workspace_appears(message: str, default: bool = False) -> bool:
+        db.insert_workspace("late", "/srv/late", "dvm", "ws-late")
+        return True
+
+    monkeypatch.setattr("agentworks.output.confirm", confirm_then_a_workspace_appears)
+
+    with pytest.raises(StateConflictError):
+        vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert counts["delete"] == 0
+    assert db.get_vm("dvm") is not None
+    assert db.get_workspace("late") is not None
