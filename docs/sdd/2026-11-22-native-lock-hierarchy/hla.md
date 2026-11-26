@@ -205,9 +205,11 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   design confines it: a user-level tool writes only inside its user's home, so a tool home that
   resolves outside the account's home, following links, is refused, and that setup reports itself
   incomplete and writes nothing. Two accounts' tool homes then never meet, and the account's own
-  lock covers everything its setup writes. Keeping a tool home outside the home, for example to
-  share it across agents, is what this gives up; the upgrade guide says to move such an override
-  inside the home.
+  lock covers each one. Keeping a tool home outside the home, for example to share it across agents,
+  is what this gives up, and sharing part of one through a link or mount inside it is unsupported.
+  The upgrade guide says to move such an override inside the home, or retire the integration, before
+  upgrading; an agent upgraded without doing so has its old ownership records dropped with a warning
+  naming the directory, and setup carries on with the new home.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
