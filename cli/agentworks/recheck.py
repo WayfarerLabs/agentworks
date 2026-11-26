@@ -36,7 +36,11 @@ def require_unchanged(entity_kind: str, entity_name: str, read: object, current:
 
 
 def vm_fields(row: VMRow | None) -> Fields:
-    """The VM's identity, intent and address, as the activation gate admitted them."""
+    """The VM's identity, intent and address, from the row the command's body runs on.
+
+    That is the row the activation gate admitted, or the one the command read
+    first when it opens no gate or, as ``vm reinit`` does, runs on that read.
+    """
     return None if row is None else (row.vm_uuid, row.desired_runtime_state, row.tailscale_host)
 
 
