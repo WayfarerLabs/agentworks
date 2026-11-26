@@ -153,8 +153,9 @@ def test_restore_resolves_with_nothing_locked(
         lambda db, model: _replace_session(db, "b"),
         lambda db, model: db.update_vm_tailscale("vm1", "100.64.0.250"),
         lambda db, model: model.kill_window(CON, "b"),
+        lambda db, model: db.update_workspace_path("ws-vm1", "/home/me/rehomed"),
     ],
-    ids=["member-shells-changed", "session-replaced", "vm-changed", "window-changed"],
+    ids=["member-shells-changed", "session-replaced", "vm-changed", "window-changed", "workspace-rehomed"],
 )
 def test_restore_refuses_what_changed_before_its_lock(
     db: Database,
@@ -169,3 +170,18 @@ def test_restore_refuses_what_changed_before_its_lock(
 
     with pytest.raises(StateConflictError):
         _restore(db)
+
+
+def test_restore_opens_no_pane_in_a_workspace_rehomed_while_its_secrets_resolved(
+    db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The panes would start in the path read before the rehome; the restore refuses and leaves tmux as it was."""
+    model = _restorable(db, monkeypatch)
+    console_guest_factory(model)
+    _resolving(db, monkeypatch, then=lambda: db.update_workspace_path("ws-vm1", "/home/me/rehomed"))
+    before = model.pane_rows(CON, "b")
+
+    with pytest.raises(StateConflictError):
+        _restore(db)
+
+    assert model.pane_rows(CON, "b") == before
