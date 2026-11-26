@@ -460,7 +460,7 @@ def test_mcp_only_user_application_needs_no_native_cli_probe(db, target, monkeyp
 
 
 def test_unknown_retirement_role_skips_mcp_io_and_retains_claims(target, monkeypatch):
-    from agentworks.artifacts.native.layout import resolve_user_layout
+    from agentworks.artifacts.native.layout import NativeUserLayout
     from agentworks.artifacts.native.mcp import apply_mcp, user_mcp_location
     from tests.native_setup_fixtures import invocation, record
 
@@ -472,8 +472,8 @@ def test_unknown_retirement_role_skips_mcp_io_and_retains_claims(target, monkeyp
     old = checkpoints[-1]
     reported: list[str] = []
     retired = replace(seeded, prior=record(old, "codex"), artifacts=received(), report_incomplete=reported.append)
-    target.environment["CODEX_HOME"] = str(target.root / "outside-home")
-    layout = resolve_user_layout("codex", target.access(), home=retired.home, environment=retired.environment)
+    outside = target.root / "outside-home"
+    layout = NativeUserLayout(str(outside), str(outside / "config.toml"))
     destination, skip, deferred = user_mcp_location(layout, retired, retiring=True)
     assert destination is None and skip and not deferred and reported
 

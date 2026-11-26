@@ -429,7 +429,7 @@ def test_user_setup_binding_uses_native_model_and_config_home(account: LocalFixt
         config={"settings": {"source": str(source), "strategy": "replace"}},
     )
     claims: list[tuple[NativeClaim, ...]] = []
-    root = account.root / "overridden-config"
+    root = account.home / "overridden-config"
     key = "CODEX_HOME" if tool == "codex" else "CLAUDE_CONFIG_DIR"
     bound.user_init(invocation(account, claims, env={key: str(root)}))
     settings = root / ("config.toml" if tool == "codex" else "settings.json")
