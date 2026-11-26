@@ -59,8 +59,10 @@ def _keys(request: LockRequest) -> tuple[tuple[str, object], ...]:
 def vm_fields(row: VMRow | None) -> Fields:
     """The VM's identity, intent and address, from the row the command's body runs on.
 
-    That is the row the activation gate admitted, or the one the command read
-    first when it opens no gate or, as ``vm reinit`` does, runs on that read.
+    That is the row the activation gate admitted; for a command that opens no
+    gate (``vm start`` and ``stop``, ``console stop``), the row its preparation
+    last read; and for one that runs on its first read (``vm reinit``, the
+    batch families), that read.
     """
     return None if row is None else (row.vm_uuid, row.desired_runtime_state, row.tailscale_host)
 

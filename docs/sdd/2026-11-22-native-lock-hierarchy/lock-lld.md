@@ -385,13 +385,15 @@ sanctioned acquisitions below):
    confirmations that render probe results. Nothing is locked.
 6. **Acquire** the request once, with the vm shared.
 7. **Re-check** under the set the fields of [What step 7 compares](#what-step-7-compares), against
-   what step 4 admitted for the VM row (or what step 1 read, for a command that skips step 4 or runs
-   on its step-1 read (`vm reinit`)) and what steps 1 and 5 read for everything else. A `vm stop`,
-   `delete`, `rekey` or `recover` that ran in between shows here. Any difference refuses with
-   `StateConflictError` ("changed since this command read it", hint "Run the command again.").
-8. **Run** the body on the VM row step 4 admitted, the one step 7 compared (`vm reinit`, and the
-   runtime families of [Runtime families](#runtime-families), run on their step-1 read, which their
-   re-check compares instead); nested operations call `held.require`.
+   what step 4 admitted for the VM row (for a command that skips step 4, the row its preparation
+   last read; for one that runs on its step-1 read, `vm reinit`, that read) and what steps 1 and 5
+   read for everything else. A `vm stop`, `delete`, `rekey` or `recover` that ran in between shows
+   here. Any difference refuses with `StateConflictError` ("changed since this command read it",
+   hint "Run the command again.").
+8. **Run** the body on the VM row step 7 compared: the one step 4 admitted, or for a command that
+   skips step 4 the one its preparation last read. `vm reinit` and the batch families of
+   [Runtime families](#runtime-families) run on their step-1 read, which their re-check compares
+   instead. Nested operations call `held.require`.
 
 **Needs the VM running** means every command that opens the activation gate today
 (`gated_vm_boundary`, `vms/manager/boundary.py:192`; `activation_gate`,
@@ -489,9 +491,10 @@ Consequences:
   stopped), `restore_intent` is empty and the result says only that the new intent stays accepted.
   Batches record session intent only. Console start, restart and stop, and `vm start` and `stop`,
   record their intent under their own brief set, so a refusal at their final set, busy or changed
-  (the VM row the gate admitted, the console's members or the recorded intent no longer what was
-  read), carries the same words (`("agw", "console", "set-desired-state", <name>, <previous>)` or
-  `("agw", "vm", "set-desired-state", <name>, <previous>)`) as `restore_intent` on the
+  (the VM row console start's and restart's hold admitted, or that console stop's or `vm start`'s
+  and `stop`'s preparation last read, the console's members or the recorded intent no longer what
+  was read), carries the same words (`("agw", "console", "set-desired-state", <name>, <previous>)`
+  or `("agw", "vm", "set-desired-state", <name>, <previous>)`) as `restore_intent` on the
   `NativeLockBusyError` or `StateConflictError` it raises, set only when the brief write changed the
   intent. A VM's desired state is never NULL, so a VM's words are never empty. One module,
   `agentworks.intent_restore`, builds the words and their rendering for every command.
