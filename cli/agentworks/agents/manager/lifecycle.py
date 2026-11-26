@@ -785,8 +785,8 @@ def reinit_agent(
                         # self-healing from the flag. The gap is fixed at its source
                         # (issue #321), not masked here.
                         #
-                        # add_to_workspace_group is idempotent (getent || groupadd,
-                        # then usermod -aG), so running it unconditionally is a
+                        # add_to_workspace_group is idempotent (groupadd -f, then
+                        # usermod -aG), so running it unconditionally is a
                         # no-op on the already-exists branch and a repair on the
                         # recreate branch. This reconciles ON-VM state only: the
                         # grant rows already exist, so we do NOT re-insert them.
