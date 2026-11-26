@@ -9,6 +9,7 @@ the shared ``error.log`` at the top of the config dir.
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from agentworks.execution.oplog import OperationLogFile
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from datetime import tzinfo
     from typing import Any
 
 
@@ -461,8 +463,16 @@ def test_a_missing_log_directory_has_no_logs(tmp_path: Path, monkeypatch: pytest
 def test_two_logs_for_one_vm_and_stem_opened_in_the_same_second_write_separate_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    class FrozenClock(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> FrozenClock:
+            return cls(2026, 11, 2, 9, 0, 0, tzinfo=tz)
+
     monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.datetime", FrozenClock)
     first, second = OperationLogFile("dev", "session-start"), OperationLogFile("dev", "session-start")
+    assert first.path.name.startswith("dev-20261102T090000Z-")
+    assert second.path.name.startswith("dev-20261102T090000Z-")
     first.output("first's line")
     second.output("second's line")
 
