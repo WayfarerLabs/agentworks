@@ -47,17 +47,7 @@ def prepare_local_workloads(invocation: RuntimeInvocation) -> None:
                 invocation.fail("session", name, "desired state requires adoption", blocked=True)
             elif target is DesiredRuntimeState.RUNNING and name not in invocation.declarations:
                 # A session with a declaration to accept is prepared from it once it is accepted.
-                invocation.definitions[name] = sessions.prepare_session_definition(
-                    invocation.db,
-                    invocation.config,
-                    invocation.registry,
-                    session,
-                    vm_node=invocation.nodes[vm_name],
-                    replace_running=invocation.operation == "restart",
-                    force=invocation.force,
-                    intent=invocation.intent,
-                    running_restart_authorized=name in invocation.authorized_running,
-                )
+                _define(invocation, session, vm_name)
         except UserAbort:
             raise
         except Exception as error:
@@ -146,7 +136,9 @@ def _accept_family(
                         intent=invocation.intent,
                         running_restart_authorized=name in invocation.authorized_running,
                     )
-                previous = session.desired_runtime_state
+                # The intent this records replaces the one stored now, read under the brief set.
+                stored = invocation.db.get_session(name)
+                previous = (stored or session).desired_runtime_state
                 declaration = invocation.declarations.get(name)
                 if declaration is not None:
                     declaration.accept(session, observations.get(name, SessionStatus.UNKNOWN))
@@ -157,24 +149,38 @@ def _accept_family(
                     invocation.accepted_changes.add(name)
                     invocation.replaced_intents[name] = previous
                 if (previous != target or declaration is not None) and target is DesiredRuntimeState.RUNNING:
-                    invocation.definitions[name] = sessions.prepare_session_definition(
-                        invocation.db,
-                        invocation.config,
-                        invocation.registry,
-                        session,
-                        vm_node=invocation.nodes[vm_name],
-                        replace_running=invocation.operation == "restart",
-                        force=invocation.force,
-                        intent=invocation.intent,
-                        running_restart_authorized=name in invocation.authorized_running,
-                    )
-            invocation.accepted_overlays[name] = invocation.db.instance_state.get_desired_overlay("session", name)
+                    _define(invocation, session, vm_name)
+            if name not in invocation.definitions:
+                invocation.accepted_overlays[name] = invocation.db.instance_state.get_desired_overlay("session", name)
             if target is DesiredRuntimeState.RUNNING and vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
                 invocation.fail("session", name, "parent VM has stopped desired state", blocked=True)
         except UserAbort:
             raise
         except Exception as error:
             invocation.fail("session", name, error, blocked=True)
+
+
+def _define(invocation: RuntimeInvocation, session: SessionRow, vm_name: str) -> None:
+    """Build ``session``'s launch definition, recording the desired overlay it is built from for (g).
+
+    The overlay is read before the definition, so a layer another command
+    replaces in between differs at (g) and refuses the target.
+    """
+    import agentworks.sessions.manager as sessions
+
+    name = session.name
+    invocation.accepted_overlays[name] = invocation.db.instance_state.get_desired_overlay("session", name)
+    invocation.definitions[name] = sessions.prepare_session_definition(
+        invocation.db,
+        invocation.config,
+        invocation.registry,
+        session,
+        vm_node=invocation.nodes[vm_name],
+        replace_running=invocation.operation == "restart",
+        force=invocation.force,
+        intent=invocation.intent,
+        running_restart_authorized=name in invocation.authorized_running,
+    )
 
 
 def _needs_running_guest(invocation: RuntimeInvocation, vm_name: str) -> bool:

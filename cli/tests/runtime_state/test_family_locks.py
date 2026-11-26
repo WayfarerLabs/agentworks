@@ -149,3 +149,29 @@ def test_a_target_whose_declaration_changed_after_acceptance_fails_alone(db, mak
     assert results[("session", "changed")].outcome is Outcome.BLOCKED
     assert ("session-start", "changed") not in runtime[2]
     assert ("session-start", "kept") in runtime[2]
+
+
+def test_a_target_whose_layer_was_replaced_after_its_definition_was_built_fails_alone(
+    db, make_config, runtime, monkeypatch
+):
+    # Running intent already recorded, so acceptance records nothing new and does not rebuild the definition.
+    seed_vm(db, "box")
+    seed_session(db, "built", "box", target=DesiredRuntimeState.RUNNING)
+    seed_session(db, "kept", "box", target=DesiredRuntimeState.RUNNING)
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.sessions import manager
+
+    observe = manager.observe_session_statuses
+
+    def observe_while_a_spec_start_lands(*args, **kwargs):
+        # After this start built its definitions and before its intent acceptance, a `--spec` start
+        # of the same session replaces its layer.
+        overlay = parse_instance_spec("session", '{"env":{"LATER":"y"}}')
+        db.instance_state.put_desired_overlay("session", "built", overlay.payload)
+        return observe(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "observe_session_statuses", observe_while_a_spec_start_lands)
+    results = _start(db, make_config(), ["built", "kept"], monkeypatch)
+    assert results[("session", "built")].outcome is Outcome.BLOCKED
+    assert ("session-start", "built") not in runtime[2]
+    assert ("session-start", "kept") in runtime[2]

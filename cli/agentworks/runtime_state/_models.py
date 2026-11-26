@@ -124,7 +124,8 @@ class RuntimeInvocation:
     replaced_intents: dict[str, DesiredRuntimeState | None] = field(default_factory=dict)
     """Per session whose intent this invocation changed, the intent it replaced."""
     accepted_overlays: dict[str, DesiredOverlayRecord | None] = field(default_factory=dict)
-    """Per session, its desired overlay as intent acceptance left it, which the final set compares."""
+    """Per session, the desired overlay its launch definition was built from, or for one with no definition the
+    overlay intent acceptance left; the final set compares it."""
     completed: set[ResourceKey] = field(default_factory=set)
     failed_families: set[str] = field(default_factory=set)
     values: dict[str, str] = field(default_factory=dict)
