@@ -49,7 +49,7 @@ graph TD
 - **vm**: the VM itself: power, provider state, trust records, VM-wide initialization.
 - **workspace** and **account**: a workspace directory with its group, and an account on the VM (an
   agent's, or the admin's). An account's lock covers the account, its home, its socket directory and
-  its harness setup; the native tool home the setup writes is also locked as a path
+  its harness setup, whose native tool home must lie inside that home
   ([Shared state across entities](#shared-state-across-entities-r5)).
 - **session**: one session, below both its workspace and its account.
 - **grant**: one agent's membership in one workspace's group, below both. Grant and revoke, the
@@ -198,18 +198,16 @@ Some writes reach state no single entity owns. Each gets an explicit home:
   on the VM waits on it, and past `lckpwdf`'s 15 seconds fails with a typed error the operator can
   retry; nothing is lost. Holding the vm exclusive instead would refuse access and unrelated
   sessions for the whole removal, against R2 and R4.
-- **Native tool homes shared across accounts.** An operator may point a harness tool's home outside
-  the account's home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`), and two accounts may share
-  that directory. Settings writes there are compare-and-swaps, but plugin and marketplace setup runs
-  the native tool's own CLI, which is not, and today only the VM lock keeps two accounts' setups
-  apart. So every agent's tool home is locked exclusive as a `path`, inside the account's home or
-  not, since a directory inside one account's home can be shared with another. It is what the
-  account's login exports, which may not exist yet or may change during the operation, or what an
-  earlier setup recorded, for an integration being retired. So it is predicted before locking from
-  the declared environment, the recorded setup and, for a reinit, the current login, and before the
-  setup's first write to it (settings, MCP entries or the native tool) the setup checks that the
-  directory it settled on is covered; one that is not is left unwritten and reported incomplete,
-  with `agent reinit` as the repair.
+- **Native tool homes stay in the account's home.** A harness tool's home can be moved by an
+  override (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`), and plugin and marketplace setup runs
+  the native tool's own CLI there, which is not safe to run twice at once on one directory. Today
+  only the VM lock keeps two accounts sharing such a directory apart. Instead of locking it, the
+  design confines it: a user-level tool writes only inside its user's home, so a tool home that
+  resolves outside the account's home, following links, is refused, and that setup reports itself
+  incomplete and writes nothing. Two accounts' tool homes then never meet, and the account's own
+  lock covers everything its setup writes. Keeping a tool home outside the home, for example to
+  share it across agents, is what this gives up; the upgrade guide says to move such an override
+  inside the home.
 - **VM-wide files written at session launch** (`/opt/agentworks/tmux-session.conf`, the socket
   roots). The configuration is written by an atomic replace, and the socket directories end in the
   same state however two setups interleave, so concurrent launches cannot tear them.
