@@ -321,8 +321,10 @@ bytes without preventing the normal deletion. A warning does not certify that sh
 removed.
 
 A VM whose backend cannot be deleted, a site that cannot be bound included, keeps its local state
-unless `--force` is passed, which removes it anyway; see `vm delete` in the command reference. Agent
-and workspace remote cleanup retains its existing best-effort warnings. Files deliberately
+unless `--force` is passed, which removes it anyway; see `vm delete` in the command reference. An
+agent whose Linux user cannot be removed keeps its row, and rerunning `agent delete` retries; see
+`agent delete` in the command reference. Workspace remote cleanup retains its existing best-effort
+warnings. Files deliberately
 configured outside the removed parent remain outside that filesystem cleanup; setup does not
 introduce a new forget command or force option.
 

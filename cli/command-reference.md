@@ -1150,7 +1150,11 @@ grant only once that succeeds. When the removal fails, the command fails with th
 session) still recorded, and rerunning it retries the removal.
 
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
-confirmation prompt.
+confirmation prompt. It signals the agent's processes and waits up to 5 seconds for them to end
+before it removes the Linux user and its home with `userdel -r`. A process that is still running, or
+a removal that fails (a `userdel` hook that vetoes it, or a home that cannot be removed), fails the
+delete with the agent still recorded, so rerunning `agent delete` retries the removal; an account
+already gone from the VM counts as removed.
 
 `agw agent shell` / `agw agent exec` are Agentworks-wrapped entry points; for raw SSH access to an
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under

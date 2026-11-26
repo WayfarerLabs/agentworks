@@ -10,12 +10,15 @@ rc / mise sub-steps, and the user removal.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
+from agentworks.deadline import Deadline
 from agentworks.errors import AgentworksError, StateError
 from agentworks.execution.access import Admin, Agent
+from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.interpolation import runtime_values
@@ -451,6 +454,16 @@ def create_agent_on_vm(
     _ensure_agentworks_files_sourced(agent_files, logger, home=home, shell=agent_shell)
 
 
+ACCOUNT_STOP_SECONDS = 5.0
+"""Seconds account removal waits, after signalling them, for the account's processes to end."""
+
+ACCOUNT_STOP_POLL_SECONDS = 0.25
+"""Seconds between checks for the account's processes while removal waits."""
+
+USERDEL_REMOVED_STATUSES = frozenset({0, 6})
+"""The ``userdel -r`` statuses after which the account is gone: 0, removed; 6, it did not exist."""
+
+
 def delete_agent_on_vm(
     vm: VMRow,
     config: Config,
@@ -459,30 +472,62 @@ def delete_agent_on_vm(
     logger: InitLog | None = None,
 ) -> None:
     """Remove an agent Linux user from a VM, along with related on-VM
-    state: their processes are killed, the user and home directory are
-    removed, and the per-agent tmux socket directory is cleaned up.
+    state: their processes are stopped, the per-agent tmux socket
+    directory is cleaned up, and the user and home directory are removed.
 
-    Runs as root on the admin's access; a step failure warns.
+    Runs as root on the admin's access. Any failure raises its typed error
+    and leaves the account for a rerun: a process still alive
+    :data:`ACCOUNT_STOP_SECONDS` after the signal refuses the removal
+    before ``userdel`` runs, and a ``userdel -r`` status outside
+    :data:`USERDEL_REMOVED_STATUSES` raises ``CommandFailed``. A caller that
+    tracks the account in a row drops it only once this returns.
     """
     from agentworks.sessions.tmux import agent_socket_dir
 
     admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
-    try:
-        # Kill any running processes for the user. This also frees any live
-        # tmux sockets under the per-agent socket dir removed next.
-        admin.run(Command(("pkill", "-u", linux_user), elevated=True)).require_completed(vm.name)
-        # Remove the per-agent tmux socket directory (created by
-        # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
-        # under /run, is owned by the agent uid, and would otherwise linger
-        # until reboot. Done BEFORE userdel and best-effort (its status is
-        # not read) so that a userdel failure (e.g. exit 12, home or
-        # mail-spool cleanup) cannot skip it and re-orphan the dir under the
-        # freed uid. The dir is separate from the home directory userdel
-        # removes, and the sockets are already dead from the pkill above, so
-        # this ordering is safe.
-        admin.run(Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True)).require_completed(vm.name)
-        # Remove the user and their home directory
-        admin.run(Command(("userdel", "-r", linux_user), elevated=True), check=True)
-    except STEP_FAILURES as error:
-        sanitize = logger.sanitize if logger is not None else str
-        output.warn(f"remote cleanup for '{linux_user}' failed: {describe_failure(error, sanitize)}")
+    # Signal any running processes for the user. This also frees any live
+    # tmux sockets under the per-agent socket dir removed next.
+    admin.run(Command(("pkill", "-u", linux_user), elevated=True)).require_completed(vm.name)
+    # Remove the per-agent tmux socket directory (created by
+    # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
+    # under /run, is owned by the agent uid, and would otherwise linger
+    # until reboot. Done BEFORE userdel and best-effort (its status is
+    # not read) so that a userdel failure (e.g. exit 12, home or
+    # mail-spool cleanup) cannot skip it and re-orphan the dir under the
+    # freed uid. The dir is separate from the home directory userdel
+    # removes, and the sockets are already dead from the pkill above, so
+    # this ordering is safe.
+    admin.run(Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True)).require_completed(vm.name)
+    _await_account_stopped(admin, vm.name, linux_user)
+    # Remove the user and their home directory
+    request = Command(("userdel", "-r", linux_user), elevated=True)
+    result = admin.run(request)
+    status = result.require_completed(vm.name)
+    if status not in USERDEL_REMOVED_STATUSES:
+        raise CommandFailed(vm.name, status, result, streams_logged=request.log_streams)
+
+
+def _await_account_stopped(admin: VMAccess, vm_name: str, linux_user: str) -> None:
+    """Wait for ``pkill``'s signal to end the account's processes, raising when one outlives the wait.
+
+    ``pgrep -u`` exits 0 while a process runs, 1 when none does and 2 when
+    the user does not exist (a rerun after the account went); any other
+    status raises ``CommandFailed``.
+    """
+    deadline = Deadline.after(ACCOUNT_STOP_SECONDS)
+    request = Command(("pgrep", "-u", linux_user), elevated=True)
+    while True:
+        result = admin.run(request)
+        status = result.require_completed(vm_name)
+        if status in (1, 2):
+            return
+        if status != 0:
+            raise CommandFailed(vm_name, status, result, streams_logged=request.log_streams)
+        if deadline.expired:
+            raise StateError(
+                f"account '{linux_user}' still has running processes on VM '{vm_name}', so it was not removed",
+                entity_kind="vm",
+                entity_name=vm_name,
+                hint="Stop the account's processes, then run the delete again.",
+            )
+        time.sleep(ACCOUNT_STOP_POLL_SECONDS)

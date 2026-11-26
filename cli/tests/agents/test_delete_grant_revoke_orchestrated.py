@@ -148,7 +148,8 @@ class _FakeAdminGuest:
         if cmd is None or is_command_check(call.request):
             return None
         self.commands.append(cmd)
-        return guest_result(1 if owner_probe_line(cmd).startswith("test -e ") else 0)
+        # A stale-socket presence test finds nothing, and pgrep finds the account's processes gone.
+        return guest_result(1 if owner_probe_line(cmd).startswith(("test -e ", "pgrep ")) else 0)
 
 
 @pytest.fixture
@@ -556,6 +557,8 @@ def test_delete_choreography_end_to_end_standalone(
 
 
 SOCKET_DIR_REMOVAL = Command(("rm", "-rf", "--", "/run/agentworks/agent-tmux-sockets/agt-a1"), elevated=True)
+PKILL = Command(("pkill", "-u", "agt-a1"), elevated=True)
+PGREP = Command(("pgrep", "-u", "agt-a1"), elevated=True)
 USERDEL = Command(("userdel", "-r", "agt-a1"), elevated=True)
 
 
@@ -575,8 +578,12 @@ def _delete_on_recorder(
     assert vm is not None
     recorder = install_access_recorder(monkeypatch)
     recorder.access().respond(failing, outcome)
+    recorder.access().respond(PGREP, Result(Completed(1)))
 
-    agent_initializer.delete_agent_on_vm(vm, config, "agt-a1", logger=OperationLogFile("box", "test-delete-socket-dir"))
+    with contextlib.suppress(CommandFailed):
+        agent_initializer.delete_agent_on_vm(
+            vm, config, "agt-a1", logger=OperationLogFile("box", "test-delete-socket-dir")
+        )
 
     requests = recorder.requests("run")
     assert all(request.elevated for request in requests)
@@ -595,7 +602,7 @@ def test_delete_removes_per_agent_socket_dir_best_effort(
     the removal fails it does not abort the delete."""
     requests = _delete_on_recorder(db, make_config, monkeypatch, SOCKET_DIR_REMOVAL, Result(Completed(1)))
 
-    assert requests == [Command(("pkill", "-u", "agt-a1"), elevated=True), SOCKET_DIR_REMOVAL, USERDEL]
+    assert requests == [PKILL, SOCKET_DIR_REMOVAL, PGREP, USERDEL]
     assert captured_output.warnings == []
 
 
@@ -606,15 +613,12 @@ def test_delete_socket_dir_runs_even_when_userdel_fails(
     captured_output: CapturedOutput,
 ) -> None:
     """Regression (#296): a failing ``userdel`` must not skip the socket-dir
-    removal. ``userdel`` runs checked, so on failure it raises; because the
-    ``rm`` runs BEFORE it, the socket dir is already cleaned and does not
-    re-orphan under the freed uid. The delete still warns rather than aborts."""
-    failed = CommandFailed("box", 12, Result(Completed(12)), streams_logged=True)
-
-    requests = _delete_on_recorder(db, make_config, monkeypatch, USERDEL, failed)
+    removal. Because the ``rm`` runs BEFORE it, the socket dir is already
+    cleaned and does not re-orphan under the freed uid when ``userdel``
+    fails."""
+    requests = _delete_on_recorder(db, make_config, monkeypatch, USERDEL, Result(Completed(12)))
 
     assert requests.index(SOCKET_DIR_REMOVAL) < requests.index(USERDEL)
-    assert captured_output.warnings
 
 
 def test_delete_nested_platform_path_reuses_the_callers_composition(
