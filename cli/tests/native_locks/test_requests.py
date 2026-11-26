@@ -14,6 +14,7 @@ from agentworks.native_locks import (
     LockRequest,
     NativeLockBusyError,
     console_entity,
+    grant_all_entity,
     grant_entity,
     native_locks,
     path_entity,
@@ -49,10 +50,15 @@ def test_path_entities_hold_every_prefix_but_not_the_root() -> None:
     request = LockRequest(exclusive=(path_entity(VM, "/data/b/new"),))
     assert [(entity.key, mode) for entity, mode in request.modes().items()] == [
         (f"vm/{VM}", LockMode.SHARED),
-        ("path//data", LockMode.SHARED),
-        ("path//data/b", LockMode.SHARED),
-        ("path//data/b/new", LockMode.EXCLUSIVE),
+        ("path/data", LockMode.SHARED),
+        ("path/data/b", LockMode.SHARED),
+        ("path/data/b/new", LockMode.EXCLUSIVE),
     ]
+
+
+def test_vm_wide_sets_are_keyed_by_their_vm() -> None:
+    assert grant_all_entity(VM).key == f"grant-all/{VM}"
+    assert grant_all_entity(VM) != grant_all_entity("other")
 
 
 def test_one_key_with_different_parents_is_refused() -> None:

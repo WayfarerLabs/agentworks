@@ -4,9 +4,9 @@ A rebuild reads the database and then writes the operator's SSH config, so
 two rebuilds that interleave could leave the file built from the older
 reads. :func:`ssh_config_rebuild_lock` serializes them for one OS user,
 whatever database each uses, since the SSH config is that user's file. It
-waits for the lock, unlike the native mutation guard, and names no holder:
-it guards a workstation file, not native state, and nothing taken under it
-acquires a native lock.
+takes its lock with the native locks' platform calls but, unlike them, waits
+for it and names no holder: it guards a workstation file, not native state,
+and nothing taken under it acquires a native lock.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from agentworks.config.validation import CONFIG_DIR
 from agentworks.deadline import Deadline
 from agentworks.errors import StateError
-from agentworks.harness_setup.locking import try_lock_exclusive, unlock
+from agentworks.native_locks import LockMode, open_lock_file, try_lock, unlock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -42,8 +42,8 @@ def ssh_config_rebuild_lock() -> Iterator[None]:
     """
     LOCK_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     deadline = Deadline.after(WAIT_SECONDS)
-    with LOCK_PATH.open("a+b") as lock_file:
-        while not try_lock_exclusive(lock_file):
+    with open_lock_file(LOCK_PATH) as lock_file:
+        while not try_lock(lock_file.fileno(), LockMode.EXCLUSIVE):
             if deadline.expired:
                 raise StateError(
                     f"another SSH config rebuild did not finish within {WAIT_SECONDS:g} seconds",
@@ -53,4 +53,4 @@ def ssh_config_rebuild_lock() -> Iterator[None]:
         try:
             yield
         finally:
-            unlock(lock_file)
+            unlock(lock_file.fileno())

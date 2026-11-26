@@ -156,7 +156,7 @@ def test_a_refusal_at_a_path_names_the_resolved_path(database: Path) -> None:
         error = _refusal(database, LockRequest(exclusive=(path_entity(VM, "/data/b/new"),)))
     assert (error.entity_kind, error.entity_name, error.mode) == ("path", "/data/b", LockMode.SHARED)
     assert error.holder is not None
-    assert (error.holder.command, error.holder.entity) == (("agw", "workspace", "rehome"), "path//data/b")
+    assert (error.holder.command, error.holder.entity) == (("agw", "workspace", "rehome"), "path/data/b")
 
 
 def test_a_holder_whose_record_stays_busy_runs_without_one(database: Path, monkeypatch: pytest.MonkeyPatch) -> None:

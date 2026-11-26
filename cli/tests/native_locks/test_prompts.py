@@ -94,7 +94,7 @@ def test_a_prompting_set_shows_its_notice_once_before_its_first_prompt(
     with native_locks(database, RECOVER, prompts=True):
         ask()
         ask()
-    assert handler.events == ["emit:BODY", "prompt", "prompt"]
+    assert handler.events == ["emit:NOTICE", "prompt", "prompt"]
 
 
 def test_each_prompting_set_shows_its_own_notice(database: Path, handler: _RecordingHandler) -> None:
@@ -103,7 +103,7 @@ def test_each_prompting_set_shows_its_own_notice(database: Path, handler: _Recor
         with native_locks(database, LockRequest(exclusive=(vm_entity("other"),)), prompts=True):
             output.confirm("Second?")
             output.confirm("Third?")
-    assert handler.events == ["emit:BODY", "prompt", "emit:BODY", "prompt", "prompt"]
+    assert handler.events == ["emit:NOTICE", "prompt", "emit:NOTICE", "prompt", "prompt"]
 
 
 @pytest.mark.parametrize("ask", PROMPTS, ids=PROMPT_IDS)

@@ -178,7 +178,9 @@ def prompt_notice() -> None:
             lock_set._notice_shown = True
             keys = ", ".join(entity.key for entity in lock_set.modes)
             held_on = f"{keys} on VM '{lock_set.vm}'"
-            output.info(f"Holding {held_on} until you answer; other operations that change them are refused meanwhile.")
+            output.notice(
+                f"Holding {held_on} until you answer; other operations that change them are refused meanwhile."
+            )
 
 
 def _acquire(database_path: Path, request: LockRequest, modes: Mapping[Entity, LockMode]) -> list[BinaryIO]:

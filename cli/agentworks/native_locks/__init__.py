@@ -53,6 +53,7 @@ from ._entities import (
     vm_entity,
     workspace_entity,
 )
+from ._os import open_lock_file, try_lock, unlock
 from ._records import HolderInfo, operation_label
 from ._sets import NativeLockBusyError, NativeLockSet, native_locks, probe_locks, prompt_notice
 
@@ -69,11 +70,14 @@ __all__ = [
     "grant_all_entity",
     "grant_entity",
     "native_locks",
+    "open_lock_file",
     "operation_label",
     "path_entity",
     "probe_locks",
     "prompt_notice",
     "session_entity",
+    "try_lock",
+    "unlock",
     "vm_entity",
     "workspace_entity",
 ]

@@ -63,9 +63,9 @@ class Entity:
 
     @property
     def key(self) -> str:
-        """The display key, such as ``session/build`` or ``grant-all``, unique within one VM."""
-        if self.kind is EntityKind.GRANT_ALL:
-            return str(self.kind)
+        """The display key, such as ``session/build`` or ``path/data/b``, unique within one VM."""
+        if self.kind is EntityKind.PATH:
+            return f"{self.kind}{self.name}"
         return f"{self.kind}/{self.name}"
 
     def ancestors(self) -> Iterable[Entity]:
@@ -96,8 +96,8 @@ def account_entity(vm: str, linux_user: str) -> Entity:
 
 
 def grant_all_entity(vm: str) -> Entity:
-    """The VM's set of agents granted every workspace."""
-    return Entity(vm, EntityKind.GRANT_ALL, "", (vm_entity(vm),))
+    """The VM's set of agents granted every workspace, named by the VM."""
+    return Entity(vm, EntityKind.GRANT_ALL, vm, (vm_entity(vm),))
 
 
 def path_entity(vm: str, resolved_path: str) -> Entity:
@@ -145,7 +145,7 @@ def _fits_tree(entity: Entity) -> bool:
         case EntityKind.VM:
             return not parents and entity.name == entity.vm
         case EntityKind.GRANT_ALL:
-            return kinds == (EntityKind.VM,) and entity.name == ""
+            return kinds == (EntityKind.VM,) and entity.name == entity.vm
         case EntityKind.WORKSPACE | EntityKind.ACCOUNT:
             return kinds == (EntityKind.VM,) and bool(entity.name)
         case EntityKind.PATH:
