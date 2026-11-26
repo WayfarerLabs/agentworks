@@ -536,6 +536,72 @@ def test_recorded_thread_id_wins_over_a_differing_stored_id() -> None:
     command = _harness_integration(state=state).start(_op_ctx(target)).command
     assert state == {"session_id": _OTHER_SID}
     assert f"resume {_OTHER_SID}" in command
+    assert rollout_probe(_SID) not in target.requests()
+    assert target.requests().count(rollout_probe(_OTHER_SID)) == 1
+
+
+@pytest.mark.parametrize("intent", [HarnessLaunchIntent.RESUME_OR_NEW, HarnessLaunchIntent.RESUME_ONLY])
+def test_missing_recorded_rollout_keeps_resumable_stored_binding(intent: HarnessLaunchIntent) -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    target = _target(recorded=_OTHER_SID, rollout=0, discovered=f"{_OTHER_ROLLOUT}\n")
+    target.respond(rollout_probe(_OTHER_SID), Result(Completed(1)))
+    integration = _harness_integration(state=state)
+
+    command = integration.start(_op_ctx(target), intent=intent)
+
+    assert _raw_codex_argv(command)[:2] == ["resume", _SID]
+    assert state == {"session_id": _SID}
+    assert integration._decision == "resumed"
+    assert not integration._dropped_stale
+    assert discovery_probe("/srv/ws1") not in target.requests()
+    assert target.requests().count(rollout_probe(_OTHER_SID)) == 1
+    assert target.requests().count(rollout_probe(_SID)) == 1
+    assert target.requests().index(rollout_probe(_OTHER_SID)) < target.requests().index(rollout_probe(_SID))
+
+
+@pytest.mark.parametrize("rollout", [0, 1])
+def test_identical_recorded_and_stored_ids_are_probed_once(rollout: int) -> None:
+    target = _target(recorded=_SID, rollout=rollout)
+    _harness_integration().start(_op_ctx(target))
+    assert target.requests().count(rollout_probe(_SID)) == 1
+
+
+def test_missing_recorded_and_stored_rollouts_fall_through_to_discovery() -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    target = _target(recorded=_OTHER_SID, rollout=1, discovered=f"{_ROLLOUT}\n")
+    target.respond(rollout_probe(_OTHER_SID), Result(Completed(1)))
+    integration = _harness_integration(state=state)
+
+    command = integration.start(_op_ctx(target))
+
+    assert _raw_codex_argv(command)[:2] == ["resume", _SID]
+    assert state == {"session_id": _SID}
+    assert integration._decision == "adopted"
+    assert integration._dropped_stale
+    assert target.requests().index(rollout_probe(_SID)) < target.requests().index(discovery_probe("/srv/ws1"))
+
+
+@pytest.mark.parametrize("probe_id", [_SID, _OTHER_SID], ids=["stored", "recorded"])
+@pytest.mark.parametrize(
+    ("result", "error_type"),
+    [
+        (Result(Completed(5)), StateError),
+        (Result(Completed(255)), StateError),
+        (Result(Unknown(UnknownReason.CONNECTION)), ExecutionIncomplete),
+    ],
+    ids=["find-failed", "startup-failed", "execution-incomplete"],
+)
+def test_failed_binding_probe_preserves_stored_id(probe_id: str, result: Result, error_type: type[Exception]) -> None:
+    state: dict[str, object] = {"session_id": _SID}
+    target = _target(recorded=_OTHER_SID, rollout=0)
+    target.respond(rollout_probe(_OTHER_SID), Result(Completed(1)))
+    target.responses.insert(0, (rollout_probe(probe_id), result))
+
+    with pytest.raises(error_type):
+        _harness_integration(state=state).start(_op_ctx(target))
+
+    assert state == {"session_id": _SID}
+    assert discovery_probe("/srv/ws1") not in target.requests()
 
 
 def test_recorder_content_that_is_not_a_uuid_is_treated_as_unbound() -> None:
