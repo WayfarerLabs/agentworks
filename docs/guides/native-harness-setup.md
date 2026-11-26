@@ -324,9 +324,8 @@ A VM whose backend cannot be deleted, a site that cannot be bound included, keep
 unless `--force` is passed, which removes it anyway; see `vm delete` in the command reference. An
 agent whose Linux user cannot be removed keeps its row, and rerunning `agent delete` retries; see
 `agent delete` in the command reference. Workspace remote cleanup retains its existing best-effort
-warnings. Files deliberately
-configured outside the removed parent remain outside that filesystem cleanup; setup does not
-introduce a new forget command or force option.
+warnings. Files deliberately configured outside the removed parent remain outside that filesystem
+cleanup; setup does not introduce a new forget command or force option.
 
 Whole-VM deletion logs the node out of Tailscale first, best effort, and does not stop individual
 guest sessions, which deleting the VM ends. When that logout does not run or fails, the tailnet

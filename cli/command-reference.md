@@ -687,9 +687,12 @@ guarantee.
 Dry run performs no activation, repair, workload-secret preview/resolution, PID-evidence write,
 staging change, target write, or mutation-guard creation. Provider observation may need its ordinary
 credentials. Off-guest checks remain conditional on later activation. Mutating operations share a
-VM-family guard: secret prompts and console delete confirmation can keep a family busy, and brief
-hold admission can report busy even for live diagnostic access. A newly acquired admission guard
-does not span the interactive body.
+VM-family guard. Most commands ask their confirmations and resolve their secrets before taking it,
+then read again under it what they showed or used and refuse, asking you to run the command again,
+when it changed. Reconciliation, `session start`/`restart`/`stop`, `vm start`/`stop`, `agent reinit`
+and `console start`/`restart`/`stop` still resolve secrets under the guard, so their prompts can
+keep a family busy. Brief hold admission can report busy even for live diagnostic access. A newly
+acquired admission guard does not span the interactive body.
 
 See [Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption,
 worked recovery and retry, migration, and WSL2 stopped-intent access limits. Migration 39 preserves
@@ -1046,11 +1049,12 @@ for that VM (`trust marker present`).
 
 Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
 `trust marker present`, `conflicts with the stored key`, `no tailnet address`,
-`malformed host key, nothing recorded`, or `busy: another operation is changing native state on this
-VM`. Each VM is imported under its native mutation guard, so a VM another command is changing is
-reported busy and left as it was while the others carry on; run the import again for it once that
-command finishes. The command exits non-zero while any selected VM ends without a record, with
-`--all` as well. Every run then rewrites the managed SSH config entries, whatever it imported.
+`malformed host key, nothing recorded`, or
+`busy: another operation is changing native state on this VM`. Each VM is imported under its native
+mutation guard, so a VM another command is changing is reported busy and left as it was while the
+others carry on; run the import again for it once that command finishes. The command exits non-zero
+while any selected VM ends without a record, with `--all` as well. Every run then rewrites the
+managed SSH config entries, whatever it imported.
 
 For a VM with no matching entry, verify its host key fingerprints against its console or provider,
 gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned
@@ -1146,11 +1150,11 @@ exec variant runs the command from the workspace directory. A workspace on a dif
 rejected with a `ValidationError`; a workspace the agent lacks access to raises `AuthorizationError`
 with a hint to run `agent grant-workspaces`.
 
-An agent's access to a workspace is a grant in the database plus membership in the workspace's
-Linux group. A command that drops the agent's last grant on a workspace (`agent revoke-workspaces`,
-or `session delete` of the agent's last session there) removes the membership first and drops the
-grant only once that succeeds. When the removal fails, the command fails with the grant (and the
-session) still recorded, and rerunning it retries the removal.
+An agent's access to a workspace is a grant in the database plus membership in the workspace's Linux
+group. A command that drops the agent's last grant on a workspace (`agent revoke-workspaces`, or
+`session delete` of the agent's last session there) removes the membership first and drops the grant
+only once that succeeds. When the removal fails, the command fails with the grant (and the session)
+still recorded, and rerunning it retries the removal.
 
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt. It signals the agent's processes and waits up to 5 seconds for them to end

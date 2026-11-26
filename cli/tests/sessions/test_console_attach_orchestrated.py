@@ -353,3 +353,40 @@ def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_vm("box") == before_vm
     assert db.get_console("c1") == before_console
+
+
+def test_named_console_attach_resolves_its_gate_secret_with_no_guard_held(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate secret resolves before the VM's guard; the start that needs it runs under the guard."""
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_named_console(db)
+    events: list[str] = []
+    _stop_the_vm(monkeypatch, events)
+    resolve_gate = Resolver.resolve_gate
+    guarded: list[bool] = []
+
+    def held() -> bool:
+        try:
+            with native_mutation_guard(db.path, "box"):
+                return False
+        except NativeSetupBusyError:
+            return True
+
+    def resolve_checking(self: Resolver, name: str) -> str:
+        guarded.append(held())
+        return resolve_gate(self, name)
+
+    monkeypatch.setattr(Resolver, "resolve_gate", resolve_checking)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: guarded.append(held()))
+
+    assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
+
+    assert guarded == [False, True]

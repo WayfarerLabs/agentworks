@@ -72,9 +72,10 @@ families unless an eligible workload also requires it. Correct the input, inspec
 and retry the intended scope; cancellation does not erase accepted targets or roll back provider
 work.
 
-A busy VM family can be held by reconciliation secret interaction or console deletion consent.
-Finish that operation and retry instead of bypassing the guard. Even diagnostic access to a live VM
-can report busy during hold admission. On WSL2, a live VM with stopped intent has no idle protection
+A busy VM family can be held by reconciliation secret interaction. Finish that operation and retry
+instead of bypassing the guard. A command that refuses because what it read changed since it asked
+can be run again; it asks again about the current state. Even diagnostic access to a live VM can
+report busy during hold admission. On WSL2, a live VM with stopped intent has no idle protection
 during access or management work and can disappear mid-command. If the operator intends normal holds
 and future activation, explicitly select `agw vm set-desired-state NAME on-demand` or `running`;
 otherwise retain stopped intent and report that limitation.
