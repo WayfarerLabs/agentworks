@@ -213,6 +213,38 @@ def test_probe_execution_failure_never_becomes_fresh(status: int) -> None:
         probe_conversation(_answering(status), _SID)
 
 
+@pytest.mark.parametrize("status", [0, 1])
+def test_shell_startup_exit_without_running_probe_is_unknown(target: _LocalTarget, tmp_path: Path, status: int) -> None:
+    _transcript(target.root, [])
+    startup = tmp_path / "startup.sh"
+    startup.write_text(f"exit {status}\n")
+    target.env["ENV"] = str(startup)
+    with pytest.raises(StateError):
+        _probe(target)
+    assert len(target.commands) == 1
+
+
+@pytest.mark.parametrize("status", [0, 1])
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "",
+        "AGW_CLAUDE_TRANSCRIPT=invalid\n",
+        "AGW_CLAUDE_TRANSCRIPT=0\nAGW_CLAUDE_TRANSCRIPT=1\n",
+        'AGW_CLAUDE_CONVERSATION={"candidates":[],"parked_job_ids":[],"background_exists":true}\n',
+    ],
+)
+def test_unanswered_or_malformed_presence_is_unknown(status: int, answer: str) -> None:
+    with pytest.raises(StateError):
+        probe_conversation(_answering(status, answer), _SID)
+
+
+@pytest.mark.parametrize("status", [0, 1])
+def test_presence_answer_must_agree_with_exit_status(status: int) -> None:
+    with pytest.raises(StateError):
+        probe_conversation(_answering(status, f"AGW_CLAUDE_TRANSCRIPT={status}\n"), _SID)
+
+
 def test_a_failed_find_and_a_failed_startup_get_different_hints() -> None:
     hints = []
     for status in (6, 3):
@@ -237,12 +269,15 @@ def test_a_failed_find_and_a_failed_startup_get_different_hints() -> None:
 )
 def test_malformed_probe_output_preserves_only_transcript_existence(status: int, invalid: dict[str, object]) -> None:
     metadata = {"candidates": [_NEXT], "parked_job_ids": ["af0980f9"], "background_exists": True, **invalid}
-    observed = probe_conversation(_answering(status, "AGW_CLAUDE_CONVERSATION=" + json.dumps(metadata)), _SID)
+    stdout = f"AGW_CLAUDE_TRANSCRIPT={int(status == 0)}\nAGW_CLAUDE_CONVERSATION=" + json.dumps(metadata)
+    observed = probe_conversation(_answering(status, stdout), _SID)
     assert observed == ConversationProbe(status == 0)
 
 
-def test_missing_python_keeps_existence_boundary(target: _LocalTarget, tmp_path: Path) -> None:
-    _transcript(target.root, [_link()])
+@pytest.mark.parametrize("present", [False, True])
+def test_missing_python_keeps_existence_boundary(target: _LocalTarget, tmp_path: Path, present: bool) -> None:
+    if present:
+        _transcript(target.root, [_link()])
     tools = tmp_path / "bin"
     tools.mkdir()
     (tools / "find").symlink_to(subprocess.check_output(["which", "find"], text=True).strip())
@@ -250,7 +285,7 @@ def test_missing_python_keeps_existence_boundary(target: _LocalTarget, tmp_path:
     shell.write_text(f'#!/bin/sh\nPATH={shlex.quote(str(tools))}; export PATH\nexec /bin/sh -c "$2"\n')
     shell.chmod(0o700)
     target.env["SHELL"] = str(shell)
-    assert _probe(target) == ConversationProbe(True)
+    assert _probe(target) == ConversationProbe(present)
 
 
 def test_no_claude_invocation_occurs(target: _LocalTarget, tmp_path: Path) -> None:

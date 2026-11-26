@@ -855,6 +855,8 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
 ):
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.errors import ExternalError
+    from agentworks.execution.results import Completed
+    from agentworks.plugins.claude.conversation_probe import conversation_request
 
     warnings: list[str] = []
     monkeypatch.setattr(output, "warn", warnings.append)
@@ -881,15 +883,19 @@ def test_failed_native_probe_is_advisory_only_without_new_carriers(
         artifact_context=prepared,
     )
     monkeypatch.setattr(integration, "_resume_or_launch", lambda *args, **kwargs: "fixture-launch")
+    access = RecordingVMAccess([], Admin())
+    if module == "claude":
+        sid = "00000000-0000-0000-0000-000000000001"
+        integration._state["session_id"] = sid
+        access.respond(
+            conversation_request(sid, environment=prepared.environment),
+            Result(Completed(0), b"AGW_CLAUDE_TRANSCRIPT=1\n"),
+        )
     if own_delivery:
         with pytest.raises(ExternalError):
-            integration.start(
-                RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
-            )
+            integration.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.RESUME_OR_NEW)
     else:
-        result = integration.start(
-            RunContext(admin_access=RecordingVMAccess([], Admin())), intent=HarnessLaunchIntent.RESUME_OR_NEW
-        )
+        result = integration.start(RunContext(admin_access=access), intent=HarnessLaunchIntent.RESUME_OR_NEW)
         assert result.command == "fixture-launch" and warnings
 
 

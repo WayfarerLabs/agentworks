@@ -69,14 +69,15 @@ def _harness_integration(
 
 
 def _launch_target(*, transcript: int | None = None) -> RecordingVMAccess:
-    """The admin's access, answering the stored id's conversation probe with exit ``transcript``.
+    """The admin's access, answering the stored id's probe with a matching result and exit status.
 
     Any other request fails the test.
     """
     access = RecordingVMAccess([], Admin())
     access.default_outcome = AssertionError("an unscripted request reached the launch target")
     if transcript is not None:
-        access.respond(conversation_request(_SID), Result(Completed(transcript)))
+        stdout = f"AGW_CLAUDE_TRANSCRIPT={int(transcript == 0)}\n".encode() if transcript in (0, 1) else b""
+        access.respond(conversation_request(_SID), Result(Completed(transcript), stdout))
     return access
 
 
@@ -260,7 +261,7 @@ def test_repeated_start_uses_the_same_state_based_decision() -> None:
 
 def test_probe_failure_preserves_stored_conversation() -> None:
     state: dict[str, object] = {"session_id": _SID}
-    with pytest.raises(StateError, match="could not probe"):
+    with pytest.raises(StateError):
         _harness_integration(state=state).start(_op_ctx(_launch_target(transcript=6)))
     assert state == {"session_id": _SID}
 
@@ -280,7 +281,7 @@ def test_an_unreadable_projects_dir_raises_rather_than_launching_fresh(
     access = local_vm_access(monkeypatch, home=home, shell=account_shell(tmp_path))
     unreadable.chmod(0)
     try:
-        with pytest.raises(StateError, match="could not probe"):
+        with pytest.raises(StateError):
             _harness_integration().start(_op_ctx(access))
     finally:
         unreadable.chmod(0o755)
@@ -292,7 +293,7 @@ def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
     reserved id and the pane would fail; the op raises a typed error naming
     the target instead."""
     target = _launch_target(transcript=255)
-    with pytest.raises(StateError, match="could not probe") as exc:
+    with pytest.raises(StateError) as exc:
         _harness_integration().start(_op_ctx(target))
     assert "exit 255" in str(exc.value)
     assert exc.value.entity_name == "s1"
@@ -338,7 +339,9 @@ def test_first_start_mints_and_records_the_session_id() -> None:
     harness_integration = _harness_integration(state=state)
     target = _launch_target()
     # Empty state means no id yet: the op mints one and then probes for its transcript.
-    target.answer = lambda call: Result(Completed(1)) if isinstance(call.request, Script) else None
+    target.answer = lambda call: (
+        Result(Completed(1), b"AGW_CLAUDE_TRANSCRIPT=0\n") if isinstance(call.request, Script) else None
+    )
     command = harness_integration.start(_op_ctx(target)).command
 
     minted = state["session_id"]
