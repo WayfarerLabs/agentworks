@@ -379,16 +379,8 @@ def create_session(
 
     from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged, workspace_fields
 
-    def require_plan_current(current_vm: VMRow) -> None:
-        """The VM, and the workspace and agent the plan names, are as the plan read them."""
-        if current_vm.vm_uuid != plan.vm.vm_uuid:
-            raise StateError("session VM changed during preparation", entity_kind="vm", entity_name=plan.target_vm_name)
-        if current_vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
-            raise StateError(
-                "session parent has stopped desired state",
-                entity_kind="vm",
-                entity_name=current_vm.name,
-            )
+    def require_plan_rows_current() -> None:
+        """The workspace and agent the plan names are as the plan read them."""
         require_unchanged(
             "workspace",
             plan.workspace_name,
@@ -402,6 +394,18 @@ def create_session(
                 agent_fields(plan.existing_agent),
                 agent_fields(db.get_agent(plan.agent_name)),
             )
+
+    def require_plan_current(current_vm: VMRow) -> None:
+        """The VM, and the workspace and agent the plan names, are as the plan read them."""
+        if current_vm.vm_uuid != plan.vm.vm_uuid:
+            raise StateError("session VM changed during preparation", entity_kind="vm", entity_name=plan.target_vm_name)
+        if current_vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
+            raise StateError(
+                "session parent has stopped desired state",
+                entity_kind="vm",
+                entity_name=current_vm.name,
+            )
+        require_plan_rows_current()
 
     current_vm = _reload_vm(db, plan.target_vm_name)
     require_plan_current(current_vm)
@@ -445,11 +449,10 @@ def create_session(
 
         # Every prompt is answered: the VM's guard is held from here through
         # the roll-forward and any rollback, which share it through the
-        # graph, and what the plan read is read again under it.
-        with graph.vm_node.mutation_guard() as guard:
-            graph = replace(graph, held_native_guard=guard)
+        # graph's VM node, and what the plan read is read again under it.
+        with graph.vm_node.mutation_guard():
             require_vm_unchanged(db, graph.vm_node.row)
-            require_plan_current(_reload_vm(db, plan.target_vm_name))
+            require_plan_rows_current()
             if db.get_session(plan.name) is not None:
                 raise StateConflictError(
                     f"session '{plan.name}' was created since this command read it",

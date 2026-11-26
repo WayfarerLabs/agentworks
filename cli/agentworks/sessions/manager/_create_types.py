@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.capabilities.base import OperationScope
     from agentworks.db import AgentRow, VMRow, WorkspaceRow
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.orchestration.node import Node
     from agentworks.resources.registry import Registry
@@ -110,4 +109,3 @@ class SessionGraph:
     session_overlay: InstanceOverlay[BaseModel] | None
     workspace_overlay: InstanceOverlay[BaseModel] | None
     agent_overlay: InstanceOverlay[BaseModel] | None
-    held_native_guard: NativeMutationGuard | None = None
