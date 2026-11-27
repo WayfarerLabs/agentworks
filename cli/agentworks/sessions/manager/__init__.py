@@ -260,6 +260,9 @@ from ._runtime import (
     prepare_session_stop as prepare_session_stop,
 )
 from ._runtime import (
+    require_launch_inputs_unchanged as require_launch_inputs_unchanged,
+)
+from ._runtime import (
     validate_session_observed_policy as validate_session_observed_policy,
 )
 from ._runtime import (

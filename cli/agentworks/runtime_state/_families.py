@@ -137,7 +137,9 @@ def acquire_final_sets(invocation: RuntimeInvocation) -> None:
 
 
 def _recheck(invocation: RuntimeInvocation, vm_name: str, held: NativeLockSet) -> None:
-    """(g): the VM row, each target's identity, recorded intent and accepted declaration, and each console's members."""
+    """(g): the VM row; each target's identity, recorded intent, declaration and launch inputs; console members."""
+    import agentworks.sessions.manager as sessions
+
     db = invocation.db
     routes = dict(invocation.selection.session_routes)
     if vm_fields(db.get_vm(vm_name)) != vm_fields(invocation.vms[vm_name]):
@@ -154,6 +156,14 @@ def _recheck(invocation: RuntimeInvocation, vm_name: str, held: NativeLockSet) -
             or db.instance_state.get_desired_overlay("session", name) != invocation.accepted_overlays.get(name)
         ):
             invocation.refuse("session", name, _changed("session", name))
+            continue
+        definition = invocation.definitions.get(name)
+        if definition is not None:
+            # The launch composes from its definition's rows: a rehome, rebinding or new layer since refuses it.
+            try:
+                sessions.require_launch_inputs_unchanged(definition)
+            except StateConflictError as error:
+                invocation.refuse("session", name, error)
     for name, console in invocation.consoles.items():
         if console.vm_name != vm_name or invocation.unavailable("console", name):
             continue

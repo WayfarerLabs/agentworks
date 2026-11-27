@@ -9,6 +9,7 @@ import pytest
 from agentworks.capabilities.harness_integration import HarnessLaunchIntent
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError
+from agentworks.instance_specs import parse_instance_spec
 from agentworks.native_locks import LockRequest, native_locks, vm_entity
 from agentworks.native_locks.rows import session_entity_for
 from agentworks.runtime_state import _families as families
@@ -150,6 +151,62 @@ def test_a_target_whose_intent_another_command_replaced_gives_no_restore_words(d
     assert result.outcome is Outcome.BLOCKED
     assert result.restore_intent is None
     assert ("session-start", "late") not in runtime[2]
+
+
+def test_a_start_whose_workspace_was_rehomed_before_its_final_set_launches_nothing(
+    db, make_config, runtime, monkeypatch
+):
+    """A rehome committed while the start's gate secrets resolve: the target refuses, nothing starts in the old path."""
+    seed_vm(db, "box")
+    seed_session(db, "moved", "box", target=DesiredRuntimeState.STOPPED)
+    import agentworks.vms.manager as vms
+
+    original_prepare = vms.prepare_vm_runtime
+
+    def prepare_then_the_workspace_is_rehomed(*args, **kwargs):
+        # After the launch definitions are built (d), another command moves the workspace.
+        db.update_workspace_path("ws-box", "/data/elsewhere")
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(vms, "prepare_vm_runtime", prepare_then_the_workspace_is_rehomed)
+    results = _start(db, make_config(), ["moved"], monkeypatch)
+    assert results[("session", "moved")].outcome is Outcome.BLOCKED
+    assert ("session-start", "moved") not in runtime[2]
+
+
+def test_an_agent_start_whose_agent_layer_was_replaced_before_its_final_set_launches_nothing(
+    db, make_config, runtime, monkeypatch
+):
+    """An agent reinit --spec committed while the start's gate secrets resolve: the env would compose a new layer."""
+    from agentworks.db import PID_STOPPED, SessionMode
+
+    seed_vm(db, "box")
+    db.insert_agent("worker", "box", "agt-worker")
+    socket = "/run/agentworks/agent-tmux-sockets/agt-worker/s.sock"
+    db.insert_session(
+        "s",
+        "ws-box",
+        "default",
+        SessionMode.AGENT,
+        agent_name="worker",
+        socket_path=socket,
+        desired_runtime_state=DesiredRuntimeState.STOPPED,
+    )
+    db.update_session_runtime("s", socket_path=socket, pid=PID_STOPPED, boot_id=None, tmux_server_start_ticks=None)
+    import agentworks.vms.manager as vms
+
+    original_prepare = vms.prepare_vm_runtime
+
+    def prepare_then_the_agent_changes(*args, **kwargs):
+        db.instance_state.put_desired_overlay(
+            "agent", "worker", parse_instance_spec("agent", '{"env":{"LATER":"y"}}').payload
+        )
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(vms, "prepare_vm_runtime", prepare_then_the_agent_changes)
+    results = _start(db, make_config(), ["s"], monkeypatch)
+    assert results[("session", "s")].outcome is Outcome.BLOCKED
+    assert ("session-start", "s") not in runtime[2]
 
 
 def test_a_target_whose_declaration_changed_after_acceptance_fails_alone(db, make_config, runtime, monkeypatch):
