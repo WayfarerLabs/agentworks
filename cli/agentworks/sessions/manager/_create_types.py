@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from agentworks.agents.nodes import (
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.orchestration.node import Node
     from agentworks.resources.registry import Registry
+    from agentworks.secrets import SecretTarget
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.nodes import PendingSessionNode
     from agentworks.sessions.templates import ResolvedSessionTemplate
@@ -109,3 +112,5 @@ class SessionGraph:
     session_overlay: InstanceOverlay[BaseModel] | None
     workspace_overlay: InstanceOverlay[BaseModel] | None
     agent_overlay: InstanceOverlay[BaseModel] | None
+    session_secret_target: Callable[[VMRow, WorkspaceRow | None, AgentRow | None], SecretTarget]
+    """Builds the session's secret target from the VM row and the existing workspace and agent rows given."""

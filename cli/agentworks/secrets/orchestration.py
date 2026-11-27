@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.env.merge import effective_env
-from agentworks.errors import StateError
+from agentworks.errors import StateConflictError, StateError
 from agentworks.secrets.policy import TtyInteractionPolicy, require_exact_tty_interaction_policy
 
 if TYPE_CHECKING:
@@ -130,6 +130,33 @@ class SecretTarget:
             field=f"{self.label}.env" if self.label else "env",
             legacy_keys=self.session or {},
         )
+
+
+def require_targets_resolved(
+    targets: Sequence[SecretTarget],
+    values: Mapping[str, str],
+    *,
+    entity_kind: str,
+    entity_name: str,
+    message: str,
+) -> None:
+    """Refuse, with ``message``, targets whose env references a secret missing from ``values``.
+
+    A command that resolves its secrets before taking its lock set and
+    composes its environments under it builds its targets again under the
+    set, from the rows the composition reads, and calls this before its
+    first change.
+    A template or overlay rebound in between may reference a secret no prompt
+    asked for, which composing would otherwise meet only after the change
+    began. A rebinding that needs no new secret passes. It reads only
+    ``values`` and never prompts.
+    """
+    for target in targets:
+        for entry in target.effective_env().values():
+            if entry.secret is not None and entry.secret not in values:
+                raise StateConflictError(
+                    message, entity_kind=entity_kind, entity_name=entity_name, hint="Run the command again."
+                )
 
 
 def compute_needed_secrets(

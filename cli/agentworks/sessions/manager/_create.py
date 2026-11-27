@@ -491,6 +491,23 @@ def create_session(
                     entity_name=plan.name,
                     hint="Run the command again with another name.",
                 )
+            # The session's env composes from the rows as they are now; refuse a
+            # binding that needs a secret the resolve above never asked for.
+            from agentworks.secrets import require_targets_resolved
+
+            require_targets_resolved(
+                [
+                    graph.session_secret_target(
+                        vm,
+                        None if plan.new_workspace else db.get_workspace(plan.workspace_name),
+                        None if plan.existing_agent is None else db.get_agent(plan.existing_agent.name),
+                    )
+                ],
+                secret_values,
+                entity_kind="session",
+                entity_name=plan.name,
+                message=f"session '{plan.name}' now needs a secret this command did not resolve",
+            )
 
             # ===== Dependency-ordered roll-forward (S11) ========================
             #

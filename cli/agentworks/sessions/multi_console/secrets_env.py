@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 import agentworks.sessions.multi_console as _mc
-from agentworks.errors import NotFoundError, StateConflictError
+from agentworks.errors import NotFoundError
 
 from .attach import _pane_runs_as_admin, _session_linux_user
 
@@ -236,25 +236,21 @@ def _require_pane_secrets_resolved(
     *,
     console_name: str,
 ) -> None:
-    """Refuse panes whose environment now references a secret the command did not resolve.
+    """Refuse the console's new panes when their environment needs a secret the command did not resolve.
 
-    A console command resolves its pane secrets before taking its lock
-    set, and composes the panes' environments under it from the rows as
-    they are then. Under the set it builds the panes' targets again from
-    those rows and calls this before its first change: a template or overlay rebound in
-    between may reference a secret no prompt asked for, which composing would
-    otherwise meet only after the console changed. A rebinding that needs no
-    new secret passes. It reads only ``values`` and never prompts.
+    ``targets`` are the panes' targets built under the command's lock set
+    from the same VM, session, workspace and agent rows the panes'
+    composition reads; see :func:`agentworks.secrets.require_targets_resolved`.
     """
-    for target in targets:
-        for entry in target.effective_env().values():
-            if entry.secret is not None and entry.secret not in values:
-                raise StateConflictError(
-                    f"console '{console_name}' changed since this command read it",
-                    entity_kind="console",
-                    entity_name=console_name,
-                    hint="Run the command again.",
-                )
+    from agentworks.secrets import require_targets_resolved
+
+    require_targets_resolved(
+        targets,
+        values,
+        entity_kind="console",
+        entity_name=console_name,
+        message=f"the panes of console '{console_name}' now need a secret this command did not resolve",
+    )
 
 
 def _resolve_pane_env(

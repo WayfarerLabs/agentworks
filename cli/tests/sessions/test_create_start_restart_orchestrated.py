@@ -2391,3 +2391,51 @@ def test_a_failed_compound_create_unwinds_through_the_real_deletes_beside_unrela
     assert db.get_agent("s1") is None
     assert db.get_workspace("s1") is None
     db.close()
+
+
+def test_create_refuses_a_rebinding_that_needs_a_secret_its_resolve_never_asked_for(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ``agent reinit --update-template`` committed after the resolve binds an env
+    that references a new secret; the create refuses before it touches the guest."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets import SecretTarget
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import _create, create_session
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    db.insert_agent("a1", "vm1", "agt-a1")
+
+    def target(*args: Any, existing_agent: Any = None, **kwargs: Any) -> SecretTarget:
+        """The agent's env chain: the rebound template references a secret."""
+        rebound = existing_agent is not None and existing_agent.template == "secretive"
+        env = {"TOKEN": EnvEntry.model_validate({"secret": "new-token"})} if rebound else {}
+        return SecretTarget(vm={}, agent=env)
+
+    monkeypatch.setattr(session_manager, "_session_secret_target_pre_create", target)
+    resolve = _create._preflight_and_resolve
+
+    def resolve_then_rebind(*args: Any, **kwargs: Any) -> dict[str, str]:
+        values = resolve(*args, **kwargs)
+        db.update_agent_template("a1", "secretive")
+        return values
+
+    monkeypatch.setattr(_create, "_preflight_and_resolve", resolve_then_rebind)
+
+    with pytest.raises(StateConflictError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_session("s1") is None
+    # Only the read-only probes before the lock reached the guest.
+    assert set(events) <= {"probe"}
+    db.close()
