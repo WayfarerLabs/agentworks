@@ -370,17 +370,11 @@ def add_sessions(
     sync.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.recheck import (
-        console_row_fields,
-        require_session_unchanged,
-        require_unchanged,
-        require_vm_unchanged,
-    )
+    from agentworks.recheck import require_console_row_unchanged, require_session_unchanged, require_vm_unchanged
 
     from ._helpers import locked_console, probe_console
 
     console = _require_console(db, console_name)
-    read = console_row_fields(db, console_name)
     preflight_member_count = len(db.list_console_sessions(console_name))
     preflight_index = preflight_member_count if start_index is None else start_index
     if not 0 <= preflight_index <= preflight_member_count:
@@ -447,7 +441,7 @@ def add_sessions(
     # Every secret is resolved: the console and its VM are read again under its lock,
     # and the transaction below derives positions from the members as they are now.
     with locked_console(db, console_name, shared=added) as (_selected_console, _held):
-        require_unchanged("console", console_name, read, console_row_fields(db, console_name))
+        require_console_row_unchanged(db, console)
         require_vm_unchanged(db, vm_row)
         for session_name, session_read in sessions_read.items():
             require_session_unchanged(db, session_name, session_read)
@@ -738,18 +732,12 @@ def add_shell(
     tmux is probed again for the live sync.
     """
     from agentworks.bootstrap import load_request_registry
-    from agentworks.recheck import (
-        console_row_fields,
-        require_session_unchanged,
-        require_unchanged,
-        require_vm_unchanged,
-    )
+    from agentworks.recheck import require_console_row_unchanged, require_session_unchanged, require_vm_unchanged
 
     from ._helpers import locked_console, probe_console
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
-    read = console_row_fields(db, console_name)
     cs = _require_member(db, console_name, session_name)
 
     registry = load_request_registry(config, live_database=db)
@@ -798,7 +786,7 @@ def add_shell(
 
     # Every secret is resolved: the console, its VM and the member are read again under its lock.
     with locked_console(db, console_name) as (_selected_console, _held):
-        require_unchanged("console", console_name, read, console_row_fields(db, console_name))
+        require_console_row_unchanged(db, console)
         if vm_row is not None:
             require_vm_unchanged(db, vm_row)
         require_session_unchanged(db, session_name, session_row)

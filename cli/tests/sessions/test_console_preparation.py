@@ -615,6 +615,40 @@ def test_a_console_whose_intent_another_command_replaced_gives_no_restore_words(
 
 
 @pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_recreated_under_its_name_before_its_final_set_refuses(db: Database, monkeypatch, operation):
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    recorded = DesiredRuntimeState.RUNNING if operation == "start" else DesiredRuntimeState.STOPPED
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **kw: pytest.fail("acted on the replacement"))
+
+    def prepare_then_the_console_is_recreated(*args, **kwargs):
+        # While the gate prompts, the console is deleted and another created under its name, with the same intent.
+        db.delete_console("con")
+        create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=False)
+        db.set_console_desired_runtime_state("con", recorded)
+        return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+    monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_the_console_is_recreated)
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(StateConflictError) as refused:
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "console"
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
 def test_a_console_runtime_command_runs_on_the_vm_row_its_gate_admitted(db: Database, monkeypatch, operation):
     from contextlib import nullcontext
     from types import SimpleNamespace

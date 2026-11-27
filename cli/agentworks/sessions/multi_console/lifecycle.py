@@ -56,50 +56,52 @@ def preflight_console_vm(
 def _final_set(
     node: LiveVMNode,
     db: Database,
-    console: ConsoleRow,
+    recorded: ConsoleRow,
     *,
-    recorded: DesiredRuntimeState,
     restore: tuple[str, ...] | None,
 ) -> Iterator[tuple[NativeLockSet, ConsoleRow]]:
     """The console's final set, and the console as it reads under it.
 
+    ``recorded`` is the console as the command's brief intent write left it.
     Under the set the node's VM row (the one start's hold admitted, or the
-    one stop's preparation last read), the console's members and the intent
-    this command ``recorded`` are read again, and a change refuses. A
-    refusal, busy or changed, says how to restore the intent the command
-    replaced, while the one it recorded still stands.
+    one stop's preparation last read), the console's members, and the
+    console row and intent of ``recorded`` are read again, and a change
+    refuses. A refusal, busy or changed, says how to restore the intent the
+    command replaced, while the one it recorded still stands.
     """
     from agentworks.intent_restore import refused_after_intent, while_recorded
     from agentworks.native_locks import NativeLockBusyError
     from agentworks.recheck import require_request_unchanged, require_vm_unchanged
 
-    request = console_request(db, console)
+    request = console_request(db, recorded)
     with ExitStack() as stack:
         try:
             held = stack.enter_context(node.locked(request, prompts=True))
             require_vm_unchanged(db, node.row)
             require_request_unchanged(
-                "console", console.name, request, console_request(db, _require_console(db, console.name))
+                "console", recorded.name, request, console_request(db, _require_console(db, recorded.name))
             )
-            current = _require_intent_unchanged(db, console, recorded)
+            current = _require_intent_unchanged(db, recorded)
         except (NativeLockBusyError, StateConflictError) as refused:
-            stored = db.get_console(console.name)
+            stored = db.get_console(recorded.name)
             current_intent = None if stored is None else stored.desired_runtime_state
-            refused_after_intent(refused, while_recorded(restore, recorded=recorded, current=current_intent))
+            refused_after_intent(
+                refused, while_recorded(restore, recorded=recorded.desired_runtime_state, current=current_intent)
+            )
             raise
         yield held, current
 
 
-def _require_intent_unchanged(db: Database, accepted: ConsoleRow, recorded: DesiredRuntimeState) -> ConsoleRow:
-    """Under the final set: the console row as ``accepted`` read it, and the intent the command ``recorded``."""
+def _require_intent_unchanged(db: Database, recorded: ConsoleRow) -> ConsoleRow:
+    """Under the final set: the console row and intent as the command's brief write left them in ``recorded``."""
     from agentworks.recheck import console_row_fields, require_unchanged
 
-    current = _require_console(db, accepted.name)
+    current = _require_console(db, recorded.name)
     require_unchanged(
         "console",
-        accepted.name,
-        (console_row_fields(db, accepted.name), recorded),
-        (console_row_fields(db, current.name), current.desired_runtime_state),
+        recorded.name,
+        (console_row_fields(recorded), recorded.desired_runtime_state),
+        (console_row_fields(current), current.desired_runtime_state),
     )
     return current
 
@@ -144,8 +146,9 @@ def realize_console(
     with locked_console(db, name) as (selected, brief):
         validate_console_definition(db, selected)
         _mc.accept_console_running(db, console=selected, held=brief)
+        # The console as the write left it, under the same set: the one this command recorded its intent on.
+        console = _require_console(db, name)
     restore = replaced_intent("console", name, selected.desired_runtime_state, DesiredRuntimeState.RUNNING)
-    console = _require_console(db, name)
     if vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
         raise StateError("console start is blocked by its stopped parent VM", entity_kind="console", entity_name=name)
     resolver = Resolver(config, registry, interaction=interaction)
@@ -155,7 +158,7 @@ def realize_console(
         context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
         activate_vm_runtime(context)
         with (
-            _final_set(node, db, console, recorded=DesiredRuntimeState.RUNNING, restore=restore) as (held, console),
+            _final_set(node, db, console, restore=restore) as (held, console),
             context.node.hold_active(),
         ):
             # The body runs on the row the hold admitted, the one the final set compared.
@@ -214,16 +217,17 @@ def stop_console_runtime(
     probe_console(db, name)
     registry = load_request_registry(config, live_database=db)
     node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
-    with locked_console(db, name):
-        previous = _require_console(db, name).desired_runtime_state
+    with locked_console(db, name) as (selected, _brief):
+        previous = selected.desired_runtime_state
         db.set_console_desired_runtime_state(name, DesiredRuntimeState.STOPPED)
+        # The console as the write left it, under the same set: the one this command recorded its intent on.
+        console = _require_console(db, name)
     restore = replaced_intent("console", name, previous, DesiredRuntimeState.STOPPED)
-    console = _require_console(db, name)
     resolver = Resolver(config, registry, interaction=interaction)
     context = None
     try:
         context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
-        with _final_set(node, db, console, recorded=DesiredRuntimeState.STOPPED, restore=restore) as (held, console):
+        with _final_set(node, db, console, restore=restore) as (held, console):
             # The body runs on the row the preparation last read, the one the final set compared.
             vm = context.node.row
             status = context.observed_status

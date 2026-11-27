@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateConflictError
 
 if TYPE_CHECKING:
-    from agentworks.db import AgentRow, ConsoleSessionRow, Database, SessionRow, VMRow, WorkspaceRow
+    from agentworks.db import AgentRow, ConsoleRow, ConsoleSessionRow, Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.native_locks import LockRequest
 
 type Fields = tuple[object, ...] | None
@@ -94,18 +94,23 @@ def console_member_fields(row: ConsoleSessionRow | None) -> Fields:
     return None if row is None else (row.position, row.shells)
 
 
-def console_row_fields(db: Database, name: str) -> Fields:
+def console_row_fields(row: ConsoleRow | None) -> Fields:
     """The console's placement and its admin shell, without its members.
 
     For a command that rewrites a member list from what it reads under the
     lock, so a member another command added or removed meanwhile is kept.
+    A console has no identity field, so these fields bind its named slot: a
+    replacement under the same name, VM and admin shell passes.
     """
-    console = db.get_console(name)
-    return None if console is None else (console.vm_name, console.admin_shell)
+    return None if row is None else (row.vm_name, row.admin_shell)
 
 
 def console_fields(db: Database, name: str) -> Fields:
-    """The console's placement, its admin shell and its ordered member sessions."""
+    """The console's placement, its admin shell and its ordered member sessions, as stored now.
+
+    The members live outside the console row, so this reads both by name;
+    a command calls it once before its set and once under it.
+    """
     console = db.get_console(name)
     if console is None:
         return None
@@ -157,6 +162,11 @@ def require_layers_unchanged(
 def require_session_unchanged(db: Database, name: str, read: SessionRow | None) -> None:
     """Refuse when the session row differs from the one the command read before it took its lock set."""
     require_unchanged("session", name, session_fields(read), session_fields(db.get_session(name)))
+
+
+def require_console_row_unchanged(db: Database, read: ConsoleRow) -> None:
+    """Refuse when the console row differs from ``read``, the one the command read before it took its lock set."""
+    require_unchanged("console", read.name, console_row_fields(read), console_row_fields(db.get_console(read.name)))
 
 
 def require_vm_unchanged(db: Database, admitted: VMRow) -> None:
