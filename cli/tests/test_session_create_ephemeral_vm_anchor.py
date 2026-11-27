@@ -184,7 +184,7 @@ def test_session_name_uses_socket_derived_cap(tmp_path: Path) -> None:
 
 
 def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> None:
-    """Existing workspace on vm-A + existing agent on vm-B raises
+    """Existing workspace on vm-a + existing agent on vm-b raises
     ValidationError before any state mutation. The pre-#124 behavior was
     to create the workspace, THEN bail with the mismatch, leaving an
     orphan."""
@@ -198,8 +198,8 @@ def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> 
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace="ws-A",
-            agent="agt-B",
+            workspace="ws-a",
+            agent="agt-b",
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
@@ -209,7 +209,7 @@ def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> 
 
 
 def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) -> None:
-    """--vm vm-B alongside --workspace ws-A (which lives on vm-A)
+    """--vm vm-b alongside --workspace ws-a (which lives on vm-a)
     fails the anchor cross-check before any mutation."""
     from agentworks.sessions.manager import create_session
 
@@ -221,8 +221,8 @@ def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) ->
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace="ws-A",
-            vm_name="vm-B",
+            workspace="ws-a",
+            vm_name="vm-b",
             admin=True,  # mode is now required; admin doesn't affect VM check
             interaction=TtyInteractionPolicy.REFUSE,
         )
@@ -234,7 +234,7 @@ def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) ->
 def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """--vm vm-A + --workspace ws-A agree, so the anchor check passes.
+    """--vm vm-a + --workspace ws-a agree, so the anchor check passes.
     The first downstream call (ensure_active) is what we use as a
     sentinel that we got past validation."""
     from agentworks.sessions import manager as session_manager
@@ -270,9 +270,9 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace="ws-A",
-            agent="agt-A",  # also on vm-A; pins the mode so no mode prompt fires
-            vm_name="vm-A",
+            workspace="ws-a",
+            agent="agt-a",  # also on vm-a; pins the mode so no mode prompt fires
+            vm_name="vm-a",
             interaction=TtyInteractionPolicy.REFUSE,
         )
     assert called == ["build_graph"]
@@ -287,7 +287,7 @@ def test_no_vm_anchor_with_multiple_vms_raises_in_non_interactive(
     ValidationError instead of hanging."""
     from agentworks.sessions.manager import create_session
 
-    db = _seed_two_vms(tmp_path)  # vm-A and vm-B, both fully initialized
+    db = _seed_two_vms(tmp_path)  # vm-a and vm-b, both fully initialized
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="--vm is required in non-interactive mode"):
