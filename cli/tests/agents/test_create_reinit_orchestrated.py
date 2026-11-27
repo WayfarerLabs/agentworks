@@ -1560,7 +1560,7 @@ def test_reinit_refuses_a_vm_layer_replaced_while_its_secrets_resolved(
     mutation: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A ``vm reinit --spec`` finishing during the gate's prompt: the setup was prepared from the old VM env."""
+    """A VM overlay write finishing during the gate's prompt: setup was prepared from the record as it was."""
     from agentworks.errors import StateConflictError
     from agentworks.instance_specs import parse_instance_spec
     from agentworks.secrets.resolver import Resolver
