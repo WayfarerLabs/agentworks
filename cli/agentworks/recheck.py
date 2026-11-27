@@ -95,12 +95,17 @@ def console_member_fields(row: ConsoleSessionRow | None) -> Fields:
 
 
 def console_row_fields(row: ConsoleRow | None) -> Fields:
-    """The console's placement and its admin shell, without its members.
+    """The console row's fields a re-check compares: its VM and its admin shell, without its members or intent.
 
-    For a command that rewrites a member list from what it reads under the
-    lock, so a member another command added or removed meanwhile is kept.
     A console has no identity field, so these fields bind its named slot: a
-    replacement under the same name, VM and admin shell passes.
+    replacement under the same name, VM and admin shell passes. Console
+    start, restart and stop compare them from their first read to their
+    brief intent write, and with the intent they recorded from that write
+    to their final set; ``intent_restore`` compares them, with the intent,
+    before it gives restore words; and a command that rewrites a member
+    list from what it reads under the lock (``add-sessions``,
+    ``add-shell``) compares only them, so a member another command added or
+    removed meanwhile is kept.
     """
     return None if row is None else (row.vm_name, row.admin_shell)
 
