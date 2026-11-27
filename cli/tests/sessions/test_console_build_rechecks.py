@@ -86,8 +86,9 @@ def test_create_resolves_with_no_guard_held(
         lambda db: create_console_record(db, name="con", vm_name="vm1", session_specs=["a"]),
         lambda db: _replace_session(db, "a"),
         lambda db: db.update_vm_tailscale("vm1", "100.64.0.250"),
+        lambda db: db.update_vm_admin_template("vm1", "other"),
     ],
-    ids=["console-created", "member-session-replaced", "vm-changed"],
+    ids=["console-created", "member-session-replaced", "vm-changed", "vm-rebound"],
 )
 def test_create_refuses_what_changed_before_its_guard(
     db: Database,
@@ -160,8 +161,9 @@ def test_restore_resolves_with_no_guard_held(
         lambda db, model: _replace_session(db, "b"),
         lambda db, model: db.update_vm_tailscale("vm1", "100.64.0.250"),
         lambda db, model: model.kill_window(CON, "b"),
+        lambda db, model: db.update_vm_admin_template("vm1", "other"),
     ],
-    ids=["member-shells-changed", "session-replaced", "vm-changed", "window-changed"],
+    ids=["member-shells-changed", "session-replaced", "vm-changed", "window-changed", "vm-rebound"],
 )
 def test_restore_refuses_what_changed_before_its_guard(
     db: Database,

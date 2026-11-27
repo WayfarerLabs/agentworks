@@ -443,12 +443,12 @@ def add_sessions(
         # The console's tmux as it is now: one started or stopped while the secrets resolved is synced accordingly.
         sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
         if sync.access is not None:
-            # The running console's new panes compose from the rows as they are now.
+            # The running console's new panes compose from the access's VM row and the rows read now.
             _require_pane_secrets_resolved(
                 [
                     target
                     for member in new_members
-                    for target in _mc._member_secret_targets(db, registry, vm=vm_row, member=member)
+                    for target in _mc._member_secret_targets(db, registry, vm=sync.access.vm, member=member)
                 ],
                 secret_values,
                 console_name=console_name,
@@ -795,10 +795,18 @@ def add_shell(
         new_shells = [*cs.shells, new_shell]
         # The console's tmux as it is now: one started or stopped while the secret resolved is synced accordingly.
         sync = _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
-        if sync.access is not None and session_row is not None and vm_row is not None:
-            # The running console's new pane composes from the rows as they are now.
+        live_session = None if sync.access is None else db.get_session(session_name)
+        if sync.access is not None and live_session is not None:
+            # The running console's new pane composes from the access's VM row and the session read now.
+            live_vm = sync.access.vm
             pane_now = _mc._pane_secret_target(
-                db, registry, vm=vm_row, session=session_row, is_admin_pane=runs_as_admin
+                db,
+                registry,
+                vm=live_vm,
+                session=live_session,
+                is_admin_pane=_pane_runs_as_admin(
+                    live_vm, _session_linux_user(db, live_session, live_vm), admin_shell=admin
+                ),
             )
             _require_pane_secrets_resolved(
                 [] if pane_now is None else [pane_now], secret_values, console_name=console_name

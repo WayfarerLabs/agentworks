@@ -36,17 +36,22 @@ def require_unchanged(entity_kind: str, entity_name: str, read: object, current:
 
 
 def vm_fields(row: VMRow | None) -> Fields:
-    """The VM's identity, intent and address, from the row the command's body runs on.
+    """The VM's identity, intent, address and template bindings, from the row the command's body runs on.
 
     That is the row the activation gate admitted, or the one the command read
     first when it opens no gate or, as ``vm reinit`` does, runs on that read.
+    The bindings are the templates every environment on the VM composes from,
+    so a command that resolved secrets for one binding refuses another.
     """
-    return None if row is None else (row.vm_uuid, row.desired_runtime_state, row.tailscale_host)
+    if row is None:
+        return None
+    return (row.vm_uuid, row.desired_runtime_state, row.tailscale_host, row.template, row.admin_template)
 
 
 def vm_release_fields(row: VMRow | None) -> Fields:
     """:func:`vm_fields` and the recorded Debian release, for the command that adopts a release."""
-    return None if row is None else (row.vm_uuid, row.desired_runtime_state, row.tailscale_host, row.debian_release)
+    fields = vm_fields(row)
+    return None if row is None or fields is None else (*fields, row.debian_release)
 
 
 def workspace_fields(row: WorkspaceRow | None) -> Fields:

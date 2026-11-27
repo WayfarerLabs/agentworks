@@ -451,8 +451,8 @@ def reinit_vm(
 
 
 def _reinit_inputs(row: VMRow | None, overlay: DesiredOverlayRecord | None) -> tuple[object, ...] | None:
-    """What reinit's declarations are resolved from: the VM's identity and intent, bindings and stored overlay."""
-    return None if row is None else (vm_fields(row), row.template, row.admin_template, overlay)
+    """What reinit's declarations are resolved from: the VM row's compared fields and its stored overlay."""
+    return None if row is None else (vm_fields(row), overlay)
 
 
 def _warn_newly_observed_legacy(vm: VMRow, observed: DebianRelease) -> None:
