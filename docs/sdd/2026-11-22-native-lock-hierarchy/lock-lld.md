@@ -462,11 +462,14 @@ boundary at (h) hold all of them.
 - **(f) Acquire** the family's set, with the vm shared.
 - **(g) Re-check** the existing selection checks (`_selection.py:103-149`), the VM row, that the
   recorded intent still stands, that each target's desired overlay digest is still the one (d)
-  accepted, and that each console's members are still the ones its set locked. A restart prepares
-  its launch definition from that declaration (`runtime_state/_prepare.py:118-128`) and executes it
-  later (`sessions/manager/_execute.py:72`); without this check, two restarts accepting overlays X
-  then Y could leave the later-finishing one launching X while Y is stored. A changed digest refuses
-  that target.
+  accepted, that each console's members are still the ones its set locked, and that each session
+  target's launch definition inputs (its template binding, its workspace's placement and binding,
+  its agent's account and binding, and the VM, workspace and agent layers) still match the rows the
+  definition was built from, so a rehome or reinit during (e) refuses that target rather than
+  launching from a superseded row. A restart prepares its launch definition from that declaration
+  (`runtime_state/_prepare.py:118-128`) and executes it later (`sessions/manager/_execute.py:72`);
+  without this check, two restarts accepting overlays X then Y could leave the later-finishing one
+  launching X while Y is stored. A changed digest refuses that target.
 - **(h) Run**: guest workload preparation, then the workload boundary
   (`runtime_state/_execute.py:45`; the console commands' pane resolve,
   `multi_console/lifecycle.py:117-118` and `:191`), then execution. The boundary comes last because
@@ -793,10 +796,11 @@ cannot be read before the set; it is left undecided there, and the repair and th
 the set. The empty-console, workspace and agent follow-on offers run after the set is released, all
 in one shape: the delete each triggers runs its own sequence, whose re-check refuses if the console,
 workspace or agent is no longer empty. A workspace or agent delete an offer triggers also refuses,
-when it reads its rows at step 1, a workspace whose explicit granters or an agent whose sessions or
-standing grants are no longer what the offer decided on; a change after that read shows in its
-step-7 compare (grants are entities of its request), and the cleanup reports a refused resource as
-kept. `console remove-sessions` offers the same way.
+when it reads its rows at step 1 and again under its set, a workspace whose explicit granters or an
+agent whose sessions or standing grants are no longer what the offer decided on. The step-7 request
+compare alone cannot see this, since a grant's policy can change (a grant-all grant revoked and
+granted again by name) while its grant entity stays the same. The cleanup reports a refused resource
+as kept. `console remove-sessions` offers the same way.
 
 **Workspace repair.** Besides restoring the admin's and each granted agent's membership, repair
 removes guest members of the workspace group who hold no grant (`workspaces/manager/repair.py:329`).
