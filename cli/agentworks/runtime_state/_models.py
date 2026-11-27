@@ -171,14 +171,18 @@ class RuntimeInvocation:
         self.record(kind, name, outcome=Outcome.BLOCKED if blocked else Outcome.FAILED, reason=reason)
 
     def refuse(self, kind: Kind, name: str, error: Exception) -> None:
-        """Block a target whose lock was refused; one whose recorded intent still stands says how to undo it."""
+        """Block a target whose lock was refused; one whose recorded intent still stands says how to undo it.
+
+        ``sessions`` holds each accepted target as its intent write left it,
+        so the words are given only while that session, not a same-name
+        replacement, is stored with that intent.
+        """
         self.fail(kind, name, error, blocked=True)
         if kind == "session" and name in self.replaced_intents:
-            stored = self.db.get_session(name)
             restore = while_recorded(
                 restore_command("session", name, self.replaced_intents[name]),
-                recorded=self.sessions[name].desired_runtime_state,
-                current=None if stored is None else stored.desired_runtime_state,
+                recorded=self.sessions[name],
+                stored=self.db.get_session(name),
             )
             if restore is not None:
                 self.results[(kind, name)] = replace(self.results[(kind, name)], restore_intent=restore)

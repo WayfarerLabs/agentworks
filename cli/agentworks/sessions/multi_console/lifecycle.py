@@ -67,7 +67,8 @@ def _final_set(
     one stop's preparation last read), the console's members, and the
     console row and intent of ``recorded`` are read again, and a change
     refuses. A refusal, busy or changed, says how to restore the intent the
-    command replaced, while the one it recorded still stands.
+    command replaced, while the console stored under its name is still the
+    one it recorded, with that intent.
     """
     from agentworks.intent_restore import refused_after_intent, while_recorded
     from agentworks.native_locks import NativeLockBusyError
@@ -84,10 +85,7 @@ def _final_set(
             current = _require_intent_unchanged(db, recorded)
         except (NativeLockBusyError, StateConflictError) as refused:
             stored = db.get_console(recorded.name)
-            current_intent = None if stored is None else stored.desired_runtime_state
-            refused_after_intent(
-                refused, while_recorded(restore, recorded=recorded.desired_runtime_state, current=current_intent)
-            )
+            refused_after_intent(refused, while_recorded(restore, recorded=recorded, stored=stored))
             raise
         yield held, current
 

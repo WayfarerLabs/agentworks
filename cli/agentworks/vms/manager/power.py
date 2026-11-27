@@ -126,7 +126,8 @@ def _run_power_change(
     runs under the vm exclusive, after the row the preparation last read is
     compared with the database. A refusal of that final set, busy or
     changed, says how to restore the intent the brief write replaced, while
-    the one it recorded still stands.
+    the VM stored under its name is still the one it recorded, with that
+    intent.
     """
     from contextlib import ExitStack
 
@@ -148,8 +149,9 @@ def _run_power_change(
         current = vm_node.reload_row()
         _guard_incomplete_vm(current)
         accept()
+        # The VM as the write left it, under the same set: the one this command recorded its intent on.
+        vm = _require_vm(db, selected.name)
     restore = replaced_intent("vm", selected.name, current.desired_runtime_state, target)
-    vm = _require_vm(db, selected.name)
     resolver = Resolver(config, registry, interaction=interaction)
     context = None
     try:
@@ -159,9 +161,7 @@ def _run_power_change(
                 final.enter_context(vm_node.locked(request))
                 require_vm_unchanged(db, vm_node.row)
             except (NativeLockBusyError, StateConflictError) as refused:
-                stored = db.get_vm(selected.name)
-                intent = None if stored is None else stored.desired_runtime_state
-                refused_after_intent(refused, while_recorded(restore, recorded=target, current=intent))
+                refused_after_intent(refused, while_recorded(restore, recorded=vm, stored=db.get_vm(selected.name)))
                 raise
             return apply(context)
     finally:

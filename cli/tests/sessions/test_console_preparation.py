@@ -615,7 +615,9 @@ def test_a_console_whose_intent_another_command_replaced_gives_no_restore_words(
 
 
 @pytest.mark.parametrize("operation", ["start", "stop"])
-def test_a_console_recreated_under_its_name_before_its_final_set_refuses(db: Database, monkeypatch, operation):
+def test_a_console_recreated_under_its_name_before_its_final_set_refuses_without_restore_words(
+    db: Database, monkeypatch, operation
+):
     from types import SimpleNamespace
 
     import agentworks.sessions.multi_console.lifecycle as lifecycle
@@ -646,6 +648,7 @@ def test_a_console_recreated_under_its_name_before_its_final_set_refuses(db: Dat
     with pytest.raises(StateConflictError) as refused:
         command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
     assert refused.value.entity_kind == "console"
+    assert refused.value.restore_intent is None
 
 
 @pytest.mark.parametrize("operation", ["start", "stop"])

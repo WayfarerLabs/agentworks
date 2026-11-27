@@ -99,3 +99,27 @@ def test_a_power_change_whose_intent_another_command_replaced_gives_no_restore_w
     with pytest.raises(StateConflictError) as refused:
         command(db, make_config(), "box", interaction=REFUSE)
     assert refused.value.restore_intent is None
+
+
+@pytest.mark.parametrize("operation", ["stop", "start"])
+def test_a_power_change_whose_vm_was_replaced_under_its_name_gives_no_restore_words(
+    db, make_config, runtime, monkeypatch: pytest.MonkeyPatch, operation
+) -> None:
+    previous = DesiredRuntimeState.RUNNING if operation == "stop" else DesiredRuntimeState.STOPPED
+    recorded = DesiredRuntimeState.STOPPED if operation == "stop" else DesiredRuntimeState.RUNNING
+    seed_vm(db, "box", target=previous)
+    prepare = vm_runtime.prepare_vm_runtime
+
+    def prepare_then_the_vm_is_replaced(*args, **kwargs):
+        # After the brief write, another VM takes the name, with the intent this command recorded.
+        context = prepare(*args, **kwargs)
+        db.delete_vm("box")
+        seed_vm(db, "box", target=recorded)
+        return context
+
+    monkeypatch.setattr(vm_runtime, "prepare_vm_runtime", prepare_then_the_vm_is_replaced)
+    command = vm_manager.stop_vm if operation == "stop" else vm_manager.start_vm
+    with pytest.raises(StateConflictError) as refused:
+        command(db, make_config(), "box", interaction=REFUSE)
+    assert refused.value.restore_intent is None
+    assert ("vm-stop", "box") not in runtime[2] and ("vm-start", "box") not in runtime[2]

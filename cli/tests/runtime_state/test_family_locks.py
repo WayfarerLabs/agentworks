@@ -153,6 +153,29 @@ def test_a_target_whose_intent_another_command_replaced_gives_no_restore_words(d
     assert ("session-start", "late") not in runtime[2]
 
 
+def test_a_target_replaced_under_its_name_before_its_final_set_gives_no_restore_words(
+    db, make_config, runtime, monkeypatch
+):
+    seed_vm(db, "box")
+    seed_session(db, "late", "box", target=DesiredRuntimeState.STOPPED)
+    import agentworks.vms.manager as vms
+
+    original_prepare = vms.prepare_vm_runtime
+
+    def prepare_then_the_session_is_replaced(*args, **kwargs):
+        # Between intent acceptance (d) and the final set, another session takes the name, with the recorded intent.
+        db.delete_session("late")
+        seed_session(db, "late", "box", target=DesiredRuntimeState.RUNNING)
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(vms, "prepare_vm_runtime", prepare_then_the_session_is_replaced)
+    results = _start(db, make_config(), ["late"], monkeypatch)
+    result = results[("session", "late")]
+    assert result.outcome is Outcome.BLOCKED
+    assert result.restore_intent is None
+    assert ("session-start", "late") not in runtime[2]
+
+
 def test_a_start_whose_workspace_was_rehomed_before_its_final_set_launches_nothing(
     db, make_config, runtime, monkeypatch
 ):
