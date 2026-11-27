@@ -89,12 +89,12 @@ class _CodexGuest:
         rollout_present: bool = False,
         discovered: str | None = None,
         bound: str = _SID,
+        rollouts: dict[str, bool] | None = None,
     ) -> None:
         self._events = events
         self._recorded = recorded
-        self._present = rollout_present
         self._discovered = discovered
-        self._bound = bound
+        self._rollouts = {bound: rollout_present} if rollouts is None else rollouts
 
     def answer(self, call: Call) -> Result | None:
         if is_command_check(call.request):
@@ -113,9 +113,10 @@ class _CodexGuest:
         if call.request == discovery_probe("/home/me/ws1"):
             self._events.append("discover")
             return Result(Completed(0), (self._discovered or "").encode())
-        if call.request == rollout_probe(self._bound):
-            self._events.append("detect")
-            return Result(Completed(0 if self._present else 1))
+        for sid, present in self._rollouts.items():
+            if call.request == rollout_probe(sid):
+                self._events.append("detect")
+                return Result(Completed(0 if present else 1))
         return None
 
 
@@ -326,6 +327,33 @@ def test_restart_resumes_the_stored_id_without_a_recording(tmp_path: Path, monke
     refreshed = db.get_session("s1")
     assert refreshed is not None
     assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # unchanged
+    db.close()
+
+
+def test_restart_keeps_stored_binding_when_recorded_rollout_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    target = _CodexGuest(
+        events,
+        recorded=_OTHER_SID,
+        rollouts={_OTHER_SID: False, _SID: True},
+        discovered=f"{_OTHER_ROLLOUT}\n",
+    )
+    db, captured = _restart_stubs(
+        tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
+    )
+
+    _restart(db)
+
+    pane_argv = shlex.split(shlex.split(captured["command"])[2].split("exec codex ", 1)[1])
+    assert pane_argv[:2] == ["resume", _SID]
+    assert "discover" not in events
+    assert events.count("detect") == 2
+    assert events.index("detect") < events.index("kill") < events.index("tmux_create")
+    refreshed = db.get_session("s1")
+    assert refreshed is not None
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}
     db.close()
 
 
