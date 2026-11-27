@@ -11,6 +11,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import DesiredRuntimeState, VMStatus
 from agentworks.errors import AgentworksError, NotFoundError, StateConflictError, StateError, UserAbort
 from agentworks.intent_restore import replaced_intent
+from agentworks.recheck import require_console_row_unchanged
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
 from ._helpers import _require_console, console_request, locked_console, probe_console
@@ -142,6 +143,8 @@ def realize_console(
     require_vm_ssh_boundary(db, config, vm)
     node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
     with locked_console(db, name) as (selected, brief):
+        # The intent goes on the console the preflight was for, not one that took its name meanwhile.
+        require_console_row_unchanged(db, console)
         validate_console_definition(db, selected)
         _mc.accept_console_running(db, console=selected, held=brief)
         # The console as the write left it, under the same set: the one this command recorded its intent on.
@@ -208,14 +211,16 @@ def stop_console_runtime(
     from agentworks.vms.manager.runtime import observe_vm_runtime, prepare_vm_runtime
 
     require_exact_tty_interaction_policy(interaction)
-    selected = _require_console(db, name)
-    vm = db.get_vm(selected.vm_name)
+    console = _require_console(db, name)
+    vm = db.get_vm(console.vm_name)
     if vm is None:
-        raise NotFoundError(f"VM '{selected.vm_name}' not found", entity_kind="vm", entity_name=selected.vm_name)
+        raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
     probe_console(db, name)
     registry = load_request_registry(config, live_database=db)
     node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
     with locked_console(db, name) as (selected, _brief):
+        # The intent goes on the console the preflight was for, not one that took its name meanwhile.
+        require_console_row_unchanged(db, console)
         previous = selected.desired_runtime_state
         db.set_console_desired_runtime_state(name, DesiredRuntimeState.STOPPED)
         # The console as the write left it, under the same set: the one this command recorded its intent on.

@@ -652,6 +652,41 @@ def test_a_console_recreated_under_its_name_before_its_final_set_refuses_without
 
 
 @pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_recreated_on_another_vm_during_preflight_refuses_before_recording_intent(
+    db: Database, monkeypatch, operation
+):
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_vm(db, "vm2", with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+
+    def preflight_then_the_console_is_recreated_on_vm2(*args, **kwargs):
+        # While the VM's policies are checked, the console is deleted and another created under its name on vm2.
+        db.delete_console("con")
+        create_console_record(db, name="con", vm_name="vm2", session_specs=[], add_admin_shell=True)
+        db.set_console_desired_runtime_state("con", previous)
+        return node
+
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", preflight_then_the_console_is_recreated_on_vm2)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: pytest.fail("prepared the VM")
+    )
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(StateConflictError) as refused:
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "console"
+    assert _console(db).vm_name == "vm2"
+    assert _console(db).desired_runtime_state is previous
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
 def test_a_console_runtime_command_runs_on_the_vm_row_its_gate_admitted(db: Database, monkeypatch, operation):
     from contextlib import nullcontext
     from types import SimpleNamespace
