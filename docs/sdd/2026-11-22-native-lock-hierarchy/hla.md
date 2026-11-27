@@ -309,11 +309,11 @@ Two implementation PRs after the design, stacked and each green on its own:
 
 1. **Under today's single lock:** the shared-state fixes (`groupadd -f`, membership removal through
    `usermod -rG` before the last grant row is deleted, the agent-removal process check before
-   `userdel -r` with the row kept when removal fails, workspace delete's normalized path, the SSH
-   config rebuild mutex, the bounded package-manager wait, unique operation log names), guards on
-   the mutators that take no lock today, and the prompts moved before acquisition. Each is correct
-   with the single lock in place, and the SSH config rebuild mutex and the new guards fix races that
-   exist today.
+   `userdel -r` with the row kept when removal fails, workspace delete's normalized path and its row
+   kept when removal fails, the SSH config rebuild mutex, the bounded package-manager wait, unique
+   operation log names), guards on the mutators that take no lock today, and the prompts moved
+   before acquisition. Each is correct with the single lock in place, and the SSH config rebuild
+   mutex and the new guards fix races that exist today.
 2. **The hierarchy:** the new primitive replacing `native_mutation_guard` and its token in one step
    (no old and new lock paths side by side on `main`), every call site moved to its lock set, and
    every doc that describes the single guard updated: `cli/command-reference.md` (the busy

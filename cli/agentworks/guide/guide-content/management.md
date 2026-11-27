@@ -76,8 +76,8 @@ Batch start/restart collects eligible workload secrets before any deferred runti
 required workload secret failure blocks that complete batch, including deferred VM stops during
 reconciliation. An infrastructure credential failure instead blocks the families that require it; if
 an eligible workload also needs that credential, the shared workload-secret boundary still fails.
-No-op targets contribute no unused workload secrets. Busy families may be waiting on secret
-interaction or console deletion consent; finish the existing operation before retrying.
+No-op targets contribute no unused workload secrets. Busy families may be waiting on a batch's
+secret interaction; finish the existing operation before retrying.
 
 For setup, return to `agw guide show concept-onboarding`. For failures, use
 `agw guide show concept-troubleshooting`. Exceptional conversion from retired configuration belongs

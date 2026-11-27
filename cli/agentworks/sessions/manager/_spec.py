@@ -112,9 +112,16 @@ def launch_with_spec(
     yes: bool,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Own validation, restart consent, and replacement under the launch's family guard."""
+    """Own validation, restart consent, and replacement under the launch's family guard.
+
+    The restart consent probe and its confirmation run before the guard.
+    Under it the session is read again and, for a restart, observed again,
+    and a status other than the one the confirmation was about refuses
+    before the layer is replaced.
+    """
     from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.instance_specs import parse_instance_spec, report_overlay_outcome
+    from agentworks.recheck import require_unchanged
     from agentworks.runtime_state import run_session_batch
     from agentworks.secrets.policy import require_exact_tty_interaction_policy
 
@@ -125,14 +132,21 @@ def launch_with_spec(
     selected = _mgr._require_session(db, name)
     workspace = _mgr._require_workspace(db, selected.workspace_name)
     vm = _mgr._require_vm_for_workspace(db, workspace)
+
+    def observed_running(session: SessionRow) -> bool:
+        status = _mgr.observe_session_statuses([session], db=db, config=config, include_legacy=True)
+        return status.get(name, SessionStatus.UNKNOWN) is SessionStatus.RUNNING
+
+    session = _current_session(db, selected, vm)
+    _validate_candidate(db, config, session, overlay, intent=intent)
+    authorized = False
+    if operation == "restart":
+        authorized = observed_running(session)
+        _confirm_running_restart([name] if authorized else [], yes=yes, interaction=interaction)
     with native_mutation_guard(db.path, vm.name) as guard:
-        session = _current_session(db, selected, vm)
-        _validate_candidate(db, config, session, overlay, intent=intent)
-        authorized = False
+        session = _current_session(db, session, vm)
         if operation == "restart":
-            status = _mgr.observe_session_statuses([session], db=db, config=config, include_legacy=True)
-            authorized = status.get(name, SessionStatus.UNKNOWN) is SessionStatus.RUNNING
-            _confirm_running_restart([name] if authorized else [], yes=yes, interaction=interaction)
+            require_unchanged("session", name, authorized, observed_running(session))
         with db.transaction():
             session = _current_session(db, session, vm)
             outcome = _persist_spec(db, session, overlay)

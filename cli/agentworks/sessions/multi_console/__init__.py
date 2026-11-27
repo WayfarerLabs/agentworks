@@ -80,7 +80,6 @@ from .crud import (
     add_sessions,
     add_shell,
     create_console,
-    delete_console_record,
     remove_sessions,
     reorder_sessions,
 )
@@ -139,7 +138,6 @@ __all__ = [
     "create_console",
     "default_shells",
     "delete_console",
-    "delete_console_record",
     "describe_console",
     "infer_vm_from_session_specs",
     "kill_session_windows",

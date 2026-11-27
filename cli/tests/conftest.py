@@ -28,6 +28,8 @@ from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
+    from types import SimpleNamespace
+
     from agentworks.db import VMRow
     from agentworks.execution.results import Result
     from agentworks.sessions.multi_console import ConsoleAccess
@@ -118,6 +120,19 @@ def _isolate_operation_logs(tmp_path_factory: pytest.TempPathFactory) -> Generat
         yield
     finally:
         oplog.LOG_DIR = prior
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_ssh_config_rebuild_lock(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
+    """Keep the SSH config rebuild lock in this worker's temporary directory."""
+    from agentworks import ssh_config_lock
+
+    prior = ssh_config_lock.LOCK_PATH
+    ssh_config_lock.LOCK_PATH = tmp_path_factory.getbasetemp() / "locks" / "ssh-config"
+    try:
+        yield
+    finally:
+        ssh_config_lock.LOCK_PATH = prior
 
 
 @pytest.fixture(scope="session")
@@ -716,6 +731,31 @@ def normalize_lf(data: bytes) -> bytes:
     the authored expectations are written with LF. The machine (JSON) path is
     unaffected: it writes LF straight to stdout's binary buffer."""
     return data.replace(b"\r\n", b"\n")
+
+
+def guarding_node(db: Database, vm: VMRow, **attributes: object) -> SimpleNamespace:
+    """A stand-in live VM node for ``vm``: its ``row``, and a ``mutation_guard`` that takes the real guard.
+
+    ``attributes`` adds whatever else the command under test reaches through
+    the node (its ``site``, say).
+    """
+    from types import SimpleNamespace
+
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    return SimpleNamespace(row=vm, mutation_guard=lambda: native_mutation_guard(db.path, vm.name), **attributes)
+
+
+def admitting_boundary(
+    db: Database, _config: object, _registry: object, vm: VMRow, **_kwargs: object
+) -> contextlib.AbstractContextManager[tuple[object, None, None]]:
+    """A stand-in for ``gated_vm_boundary`` that opens no gate and admits ``vm`` as it was read.
+
+    It yields the boundary's shape: a node whose ``row`` is the admitted VM
+    row, which a command compares again under its guard, and no resolver or
+    context.
+    """
+    return contextlib.nullcontext((guarding_node(db, vm), None, None))
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:

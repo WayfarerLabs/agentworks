@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.vms.nodes import LiveVMNode
 
 
 def set_vm_desired_runtime_state(db: Database, *, name: str, state: str | DesiredRuntimeState) -> None:
@@ -158,7 +159,10 @@ def delete_vm(
     Child-count and confirmation checks run before binding or secret
     resolution, so a refused or declined delete prompts for and resolves
     nothing; ``interaction`` is checked before binding, whose failures are
-    handled below and must not swallow a malformed argument. Once the binding
+    handled below and must not swallow a malformed argument. The binding
+    resolves its secrets before the native mutation guard is taken; under
+    the guard the VM row and the child counts the confirmation showed are
+    read again, and a change refuses. Once the binding
     holds, the node is logged out of the tailnet through the platform's root
     channel, best effort, and the provider delete follows: whoever deletes a
     VM wants it gone, and ``vm rekey`` rejoins one whose delete then fails.
@@ -214,36 +218,50 @@ def delete_vm(
             raise UserAbort("delete cancelled")
 
     from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import require_unchanged, require_vm_unchanged
 
-    with native_mutation_guard(db.path, vm.name) as guard:
-        selected = _require_vm(db, name)
-        if selected.vm_uuid != vm.vm_uuid:
-            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
-        vm = selected
+    # The binding resolves the site's secrets, so it runs before the guard.
+    vm_node: LiveVMNode | None = None
+    try:
+        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
+    except UserAbort:
+        raise
+    except Exception as e:
+        # Preflight or build failure (unreachable API, missing tool,
+        # stranded site, unset or unresolvable secret): nothing can reach
+        # the backend, which may still run.
+        if not force:
+            refusal = StateError(
+                f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
+                entity_kind="vm",
+                entity_name=name,
+                hint=getattr(e, "hint", None),
+            )
+            refusal.add_hint(_finish_delete_hint(vm, fix="Fix the site", logged_out=False))
+            raise refusal from e
+        bind_failure: Exception | None = e
+    else:
+        bind_failure = None
+
+    # A VM whose site could not be bound (``--force``) has no node to take the guard through.
+    with native_mutation_guard(db.path, vm.name) if vm_node is None else vm_node.mutation_guard():
+        # What the confirmation showed: the VM and the children it counted.
+        require_vm_unchanged(db, vm)
+        require_unchanged(
+            "vm",
+            name,
+            (ws_count, ag_count, ts_count),
+            (db.count_workspaces_on_vm(name), db.count_agents_on_vm(name), db.count_sessions_on_vm(name)),
+        )
+        vm = _require_vm(db, name)
         backend_left = False
         # Why a row with a tailnet address was not logged out, reported once the
         # row goes; None while nothing kept it from that. A row without one is
         # never logged out.
         not_logged_out: str | None = None
-        try:
-            vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction, held_native_guard=guard)
-        except UserAbort:
-            raise
-        except Exception as e:
-            # Preflight or build failure (unreachable API, missing tool,
-            # stranded site, unset or unresolvable secret): nothing can reach
-            # the backend, which may still run.
+        if vm_node is None:
             not_logged_out = f"vm-site '{vm.site}' cannot be bound"
-            if not force:
-                refusal = StateError(
-                    f"VM '{name}' was not deleted: vm-site '{vm.site}' cannot be bound: {e}",
-                    entity_kind="vm",
-                    entity_name=name,
-                    hint=getattr(e, "hint", None),
-                )
-                refusal.add_hint(_finish_delete_hint(vm, fix="Fix the site", logged_out=False))
-                raise refusal from e
-            _warn_backend_left(vm, f"vm-site '{vm.site}' cannot be bound: {e}")
+            _warn_backend_left(vm, f"vm-site '{vm.site}' cannot be bound: {bind_failure}")
             backend_left = True
         else:
             platform = vm_node.site.platform
@@ -311,16 +329,17 @@ def delete_vm(
         # Remove from DB (cascades workspaces and agents), then rebuild SSH config
         db.delete_vm(name)
 
-        from agentworks.ssh_config import sync_ssh_config
+        from agentworks.ssh_config import sync_ssh_config_or_warn
 
-        # The store file goes whenever the VM's row goes, even if the SSH config
-        # rebuild raises. Reaching here means the platform delete succeeded (it
-        # raises, keeping the row and the record, when it cannot remove the
+        # The store file goes whenever the VM's row goes, and the SSH config is
+        # rebuilt even if that removal raises; a failed rebuild only warns, as
+        # the delete is done. Reaching here means the platform delete succeeded
+        # (it raises, keeping the row and the record, when it cannot remove the
         # backend VM) or --force removed a row whose backend was not deleted.
         try:
             trust.remove(name)
         finally:
-            sync_ssh_config(config, db)
+            sync_ssh_config_or_warn(config, db)
         output.result(f"VM '{name}' removed; its backend was not deleted" if backend_left else f"VM '{name}' deleted")
 
 
@@ -388,7 +407,10 @@ def rekey_vm(
 
     ``secret`` selects a declared replacement key for this operation only;
     ``prompt`` forces terminal entry of the template's key instead. Both are
-    checked here, before anything is touched, and applied in the boundary.
+    checked here, before anything is touched, and applied in the boundary,
+    which resolves before the native mutation guard is taken. Only
+    ``--wait-for-share``'s pause asks anything under the guard: it is about
+    the rekey in progress.
     """
     import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
@@ -397,7 +419,7 @@ def rekey_vm(
     from agentworks.execution.access import Admin
     from agentworks.execution.root_script import ChannelUnreachable
     from agentworks.orchestration.activation import activation_gate
-    from agentworks.ssh_config import sync_ssh_config
+    from agentworks.ssh_config import sync_ssh_config_or_warn
     from agentworks.vms import recovery
 
     require_exact_tty_interaction_policy(interaction)
@@ -406,31 +428,33 @@ def rekey_vm(
     if secret is not None:
         validate_name(secret, max_length=MAX_SECRET_NAME_LENGTH)
 
+    from agentworks.recheck import require_vm_unchanged
+
     vm = _require_vm(db, name)
-    from agentworks.harness_setup.locking import native_mutation_guard
+    _guard_incomplete_vm(vm)
+    _warn_legacy_release(vm)
+    # Before the auth key resolves: a rekey with no host-key record would spend
+    # the new key and record the new address before its reconnect check raised.
+    trust.require_record(name)
+    # The settle reads the new address from the VM, but the final wait reaches
+    # it over the tailnet, so a workstation off Tailscale is refused before the
+    # key is spent, as recover refuses it.
+    _mgr.verify_tailscale_available()
+    # The final wait runs through agentworks.execution: an unsupported client
+    # refuses before a secret or the platform is touched.
+    execution.resolve_ssh()
 
-    with native_mutation_guard(db.path, name) as guard, contextlib.ExitStack() as cleanup:
-        selected = _require_vm(db, name)
-        if selected.vm_uuid != vm.vm_uuid:
-            raise StateError("selected VM was replaced", entity_kind="vm", entity_name=name)
-        vm = selected
-        _guard_incomplete_vm(vm)
-        _warn_legacy_release(vm)
-        # Before the auth key resolves: a rekey with no host-key record would spend
-        # the new key and record the new address before its reconnect check raised.
-        trust.require_record(name)
-        # The settle reads the new address from the VM, but the final wait reaches
-        # it over the tailnet, so a workstation off Tailscale is refused before the
-        # key is spent, as recover refuses it.
-        _mgr.verify_tailscale_available()
-        # The final wait runs through agentworks.execution: an unsupported client
-        # refuses before a secret or the platform is touched.
-        execution.resolve_ssh()
-
+    with contextlib.ExitStack() as cleanup:
+        # The auth key and the site's secrets resolve, with ``--prompt``'s entry,
+        # before the VM's guard; under it the VM row is read again.
         vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
-            db, config, vm, secret=secret, prompt=prompt, interaction=interaction, held_native_guard=guard
+            db, config, vm, secret=secret, prompt=prompt, interaction=interaction
         )
         cleanup.callback(resolver.close)
+        cleanup.enter_context(vm_node.mutation_guard())
+        require_vm_unchanged(db, vm)
+        vm = _require_vm(db, name)
+        _guard_incomplete_vm(vm)
         platform = vm_node.site.platform
         status = platform.status(vm, ops_ctx)
         _require_known_power_state(status, name)
@@ -482,7 +506,7 @@ def rekey_vm(
             # Update DB and SSH config with the new IP (correct regardless of
             # reachability: the old IP is definitely dead after logout)
             db.update_vm_tailscale(name, new_ip)
-            sync_ssh_config(config, db)
+            sync_ssh_config_or_warn(config, db)
             db.insert_vm_event(name, "rekey", f"new_ip={new_ip}")
 
             # If the operator needs to share the VM back, pause before connectivity check

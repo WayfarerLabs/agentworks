@@ -10,12 +10,15 @@ rc / mise sub-steps, and the user removal.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 import agentworks.execution as execution
 from agentworks import output
+from agentworks.deadline import Deadline
 from agentworks.errors import AgentworksError, StateError
 from agentworks.execution.access import Admin, Agent
+from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Command, Script, Shell
 from agentworks.git_config import ensure_safe_directory_wildcard
 from agentworks.interpolation import runtime_values
@@ -31,6 +34,7 @@ from agentworks.vms.initializer.shell_env import (
     _write_agentworks_rc,
 )
 from agentworks.vms.initializer.steps import STEP_FAILURES, describe_failure
+from agentworks.workspaces.guest import REQUEST_FAILURES
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -64,15 +68,11 @@ def create_new_agent_user(
     useradd fails exclusively; the caller must not delete anything on that failure.
     Existing DB-owned agents instead use create_agent_on_vm's convergence path.
     """
-    import shlex
-
     admin = execution.vm_access(vm, config, Admin(), log=logger.record)
-    home = managed_home(linux_user)
     account = passwd_lookup(linux_user)
-    home_entry = Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
     if (
         probe_presence(admin, account, absent_status=GETENT_NOT_FOUND_STATUS) is not None
-        or probe_presence(admin, home_entry, absent_status=TEST_FALSE_STATUS) is not None
+        or probe_presence(admin, _home_entry(managed_home(linux_user)), absent_status=TEST_FALSE_STATUS) is not None
     ):
         raise StateError(
             f"cannot create agent: unowned user or home already exists for '{linux_user}'",
@@ -81,6 +81,13 @@ def create_new_agent_user(
             hint="Choose another agent name or remove the unowned native account and home first.",
         )
     admin.run(Command(("useradd", "-m", "-U", "-s", f"/bin/{shell}", linux_user), elevated=True), check=True)
+
+
+def _home_entry(home: str) -> Script:
+    """Exits 0 when anything, a dangling link included, is at the home path ``home``, as root."""
+    import shlex
+
+    return Script(f"test -e {shlex.quote(home)} || test -L {shlex.quote(home)}", Shell.SH, elevated=True)
 
 
 def _require_retained_group(admin: VMAccess, linux_user: str, gid: str) -> None:
@@ -451,38 +458,113 @@ def create_agent_on_vm(
     _ensure_agentworks_files_sourced(agent_files, logger, home=home, shell=agent_shell)
 
 
+ACCOUNT_STOP_SECONDS = 5.0
+"""Seconds account removal waits, after signalling them, for the account's processes to end."""
+
+ACCOUNT_STOP_POLL_SECONDS = 0.25
+"""Seconds between checks for the account's processes while removal waits."""
+
+USERDEL_ACCOUNT_ABSENT_STATUS = 6
+"""The ``userdel -r`` status for an account that does not exist."""
+
+USERDEL_REMOVED_STATUSES = frozenset({0, USERDEL_ACCOUNT_ABSENT_STATUS})
+"""The ``userdel -r`` statuses after which the account is gone: 0, removed; 6, it did not exist."""
+
+
 def delete_agent_on_vm(
     vm: VMRow,
     config: Config,
     linux_user: str,
     *,
+    agent_name: str,
     logger: InitLog | None = None,
 ) -> None:
-    """Remove an agent Linux user from a VM, along with related on-VM
-    state: their processes are killed, the user and home directory are
-    removed, and the per-agent tmux socket directory is cleaned up.
+    """Remove agent ``agent_name``'s Linux user from a VM, along with related on-VM
+    state: their processes are stopped, the per-agent tmux socket
+    directory is cleaned up, and the user and home directory are removed.
 
-    Runs as root on the admin's access; a step failure warns.
+    Runs as root on the admin's access. Any failure raises its typed error,
+    with a hint naming the tool and where its output is, and leaves the
+    account for a rerun: a process still alive :data:`ACCOUNT_STOP_SECONDS`
+    after the signal refuses the removal before ``userdel`` runs, and a
+    ``userdel -r`` status outside :data:`USERDEL_REMOVED_STATUSES` raises
+    ``CommandFailed``. When the account was already gone but its home is
+    not (an earlier ``userdel -r`` that removed the account and failed on
+    the home), it warns and names the home. A caller that tracks the
+    account in a row drops it only once this returns.
     """
     from agentworks.sessions.tmux import agent_socket_dir
 
     admin = execution.vm_access(vm, config, Admin(), log=None if logger is None else logger.record)
+    # Signal any running processes for the user. This also frees any live
+    # tmux sockets under the per-agent socket dir removed next.
+    admin.run(Command(("pkill", "-u", linux_user), elevated=True)).require_completed(vm.name)
+    # Remove the per-agent tmux socket directory (created by
+    # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
+    # under /run, is owned by the agent uid, and would otherwise linger
+    # until reboot. Done BEFORE userdel and best-effort (its status is
+    # not read) so that a userdel failure (e.g. exit 12, home or
+    # mail-spool cleanup) cannot skip it and re-orphan the dir under the
+    # freed uid. The dir is separate from the home directory userdel
+    # removes, and the sockets are already dead from the pkill above, so
+    # this ordering is safe.
+    admin.run(Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True)).require_completed(vm.name)
+    _await_account_stopped(admin, vm.name, linux_user, agent_name=agent_name)
+    # Remove the user and their home directory
+    request = Command(("userdel", "-r", linux_user), elevated=True)
+    result = admin.run(request)
+    status = result.require_completed(vm.name)
+    if status not in USERDEL_REMOVED_STATUSES:
+        error = CommandFailed(vm.name, status, result, streams_logged=request.log_streams)
+        error.add_hint(
+            f"'userdel -r {linux_user}' did not remove the Linux user and its home; "
+            f"run 'agw vm logs {vm.name}' for its output."
+        )
+        raise error
+    if status == USERDEL_ACCOUNT_ABSENT_STATUS:
+        _warn_leftover_home(admin, vm.name, linux_user)
+
+
+def _warn_leftover_home(admin: VMAccess, vm_name: str, linux_user: str) -> None:
+    """Warn when the account was already gone but its home remains, which refuses a new agent of the same name."""
+    home = managed_home(linux_user)
     try:
-        # Kill any running processes for the user. This also frees any live
-        # tmux sockets under the per-agent socket dir removed next.
-        admin.run(Command(("pkill", "-u", linux_user), elevated=True)).require_completed(vm.name)
-        # Remove the per-agent tmux socket directory (created by
-        # ``ensure_agent_socket_dir`` at create time). It lives on tmpfs
-        # under /run, is owned by the agent uid, and would otherwise linger
-        # until reboot. Done BEFORE userdel and best-effort (its status is
-        # not read) so that a userdel failure (e.g. exit 12, home or
-        # mail-spool cleanup) cannot skip it and re-orphan the dir under the
-        # freed uid. The dir is separate from the home directory userdel
-        # removes, and the sockets are already dead from the pkill above, so
-        # this ordering is safe.
-        admin.run(Command(("rm", "-rf", "--", agent_socket_dir(linux_user)), elevated=True)).require_completed(vm.name)
-        # Remove the user and their home directory
-        admin.run(Command(("userdel", "-r", linux_user), elevated=True), check=True)
-    except STEP_FAILURES as error:
-        sanitize = logger.sanitize if logger is not None else str
-        output.warn(f"remote cleanup for '{linux_user}' failed: {describe_failure(error, sanitize)}")
+        present = probe_presence(admin, _home_entry(home), absent_status=TEST_FALSE_STATUS) is not None
+    except REQUEST_FAILURES:
+        output.warn(f"Linux user '{linux_user}' was already gone; could not check whether its home {home} remains.")
+        return
+    if present:
+        output.warn(
+            f"Linux user '{linux_user}' was already gone, but its home {home} remains on VM '{vm_name}'. "
+            "Inspect it and remove it; an agent of the same name cannot be created while it is there."
+        )
+
+
+def _await_account_stopped(admin: VMAccess, vm_name: str, linux_user: str, *, agent_name: str) -> None:
+    """Wait for ``pkill``'s signal to end the account's processes, raising when one outlives the wait.
+
+    ``pgrep -u`` exits 0 while a process runs, 1 when none does and 2 when
+    the user does not exist (a rerun after the account went); any other
+    status raises ``CommandFailed``.
+    """
+    deadline = Deadline.after(ACCOUNT_STOP_SECONDS)
+    request = Command(("pgrep", "-u", linux_user), elevated=True)
+    while True:
+        result = admin.run(request)
+        status = result.require_completed(vm_name)
+        if status in (1, 2):
+            return
+        if status != 0:
+            raise CommandFailed(vm_name, status, result, streams_logged=request.log_streams)
+        if deadline.expired:
+            raise StateError(
+                f"agent '{agent_name}' still has processes running as '{linux_user}' on VM '{vm_name}', "
+                "so its Linux user was not removed",
+                entity_kind="agent",
+                entity_name=agent_name,
+                hint=(
+                    f"Stop the processes 'pgrep -u {linux_user}' lists on the VM "
+                    f"('agw vm logs {vm_name}' has its output)."
+                ),
+            )
+        time.sleep(ACCOUNT_STOP_POLL_SECONDS)

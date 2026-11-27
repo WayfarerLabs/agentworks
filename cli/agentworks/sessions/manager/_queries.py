@@ -26,8 +26,8 @@ from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, InstanceStateInspection, SessionRow
+    from agentworks.execution.access import VMAccess
     from agentworks.execution.requests import TerminalCommand
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.instance_description import InstanceStateDescription
     from agentworks.machine_output import JsonObject, JsonValue
     from agentworks.resources.registry import Registry
@@ -145,19 +145,102 @@ def delete_session(
     yes: bool = False,
     interaction: TtyInteractionPolicy,
 ) -> None:
-    """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
-    from agentworks.harness_setup.locking import native_mutation_guard
-    from agentworks.sessions.manager._lifecycle import _require_selected_session
+    """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN.
 
+    The gate, the secrets, the status and access probes and the confirmation
+    all run before the VM's native mutation guard is taken, and the status
+    probe persists nothing. Under the guard the session row, the VM row, the
+    consoles holding the session and the outcome of each probe are read
+    again, and a change refuses before anything is torn down. The offers to
+    delete a console, workspace or agent the delete left empty run after the
+    guard is released.
+    """
     session = _mgr._require_session(db, name)
-    workspace = _mgr._require_workspace(db, session.workspace_name)
-    with native_mutation_guard(db.path, workspace.vm_name) as guard:
-        session = _require_selected_session(db, name, session.session_uuid)
-        _delete_session_runtime(
-            db, config, session=session, force=force, yes=yes, interaction=interaction, held_native_guard=guard
-        )
+    _mgr._require_workspace(db, session.workspace_name)
+    member_consoles = _delete_session_runtime(
+        db, config, session=session, force=force, yes=yes, interaction=interaction
+    )
+    # Any console the FK cascade left with no configured sessions gets the
+    # shared empty-console treatment (offer / report-but-keep, issue
+    # #248/#261/#265): the wrapper owns the console parametrization,
+    # cleanup_now_empty_resource owns the policy, and console remove-sessions
+    # routes through the same wrapper so the two paths stay byte-identical.
+    from agentworks.sessions.multi_console import offer_delete_if_empty_consoles
+
+    offer_delete_if_empty_consoles(db, config, member_consoles, yes=yes)
+    # Generalized workspace/agent cleanup (issue #266). The session row is
+    # already gone, so the "now has no sessions" checks below reflect the
+    # post-delete state. This is the single unified path for both the
+    # session-created case (the old provenance-only offer) and every other
+    # case where deleting this session happens to empty the resource:
+    #   - interactive (no --yes): if the workspace / agent now has no
+    #     sessions, OFFER to delete it, regardless of provenance.
+    #   - --yes: auto-delete only what THIS session created (the
+    #     created_workspace / created_agent provenance flags); otherwise
+    #     report the resource is now empty and name the manual delete
+    #     command, mirroring the console report-but-keep treatment above.
+    # Workspace first, then agent; the order is load-bearing, not
+    # arbitrary. Deleting the now-unused workspace tears down its grants:
+    # the FK cascade on ``agent_workspace_grants`` removes every agent's
+    # explicit grant rows for that workspace (and ``revoke_workspace_grants``
+    # drops the matching Linux group membership). So if this session's
+    # workspace was the agent's LAST standing grant, deleting it makes the
+    # agent (checked next) a cleanup candidate in the same run. That
+    # cascade is intended and desirable, and it is contingent on the
+    # workspace ACTUALLY being deleted: the operator confirmed the offer,
+    # or it auto-deleted under --yes because this session created it. If
+    # the workspace is kept, the grant remains and the still-granted agent
+    # stays guarded. Both run after the console cleanup so the "Session
+    # deleted" line has already printed, and after the guard is released;
+    # each delete they trigger takes its own guard, reads its rows again, and
+    # refuses a resource that stopped being the candidate it was offered as
+    # (a grant committed meanwhile keeps it).
+    # ``session`` was snapshotted before ``db.delete_session``, so its
+    # workspace_name / agent_name / created_* fields are still readable here.
     _cleanup_now_empty_workspace(db, config, session, yes=yes, interaction=interaction)
     _cleanup_now_empty_agent(db, config, session, yes=yes, interaction=interaction)
+
+
+def _legacy_running_row(session: SessionRow) -> bool:
+    """A row from before tmux sockets were recorded, with a live PID: it counts as running."""
+    return session.socket_path is None and session.pid is not None and session.pid > 0
+
+
+def _delete_status_needs_pid_repair(session: SessionRow) -> bool:
+    """Whether the row's PID evidence must be repaired, which writes it, before its delete can decide its status.
+
+    Repair can also give an old admin row its address, so such a row's
+    status is decided only under the guard.
+    """
+    return not _legacy_running_row(session) and (_mgr._needs_repair(session) or session.socket_path is None)
+
+
+def _delete_session_status(db: Database, session: SessionRow, *, admin: VMAccess, force: bool) -> SessionStatus:
+    """The session's status for its delete, refusing one that is unknown, or broken without ``force``.
+
+    It only observes. A row that :func:`_delete_status_needs_pid_repair`
+    flags is repaired (``_ensure_pid``) by the caller first, under the guard.
+    """
+    name = session.name
+    if _legacy_running_row(session):
+        status = SessionStatus.RUNNING
+    else:
+        status = _mgr.check_session_status(session, admin=admin, server=_mgr.resolve_session_tmux_server(db, session))
+    if status == SessionStatus.UNKNOWN:
+        raise StateError(
+            f"session '{name}' runtime state is unknown",
+            entity_kind="session",
+            entity_name=name,
+            hint="Retry after transport access is reliable; no runtime was changed.",
+        )
+    if status == SessionStatus.BROKEN and not force:
+        raise BrokenStateError(
+            f"session '{name}' is broken (PID alive but tmux unreachable).",
+            entity_kind="session",
+            entity_name=name,
+            hint="Use --force to delete.",
+        )
+    return status
 
 
 def _delete_session_runtime(
@@ -168,11 +251,14 @@ def _delete_session_runtime(
     force: bool,
     yes: bool,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard,
-) -> None:
-    """Delete one selected definition and its runtime under a held family guard."""
+) -> list[str]:
+    """Delete one selected definition and its runtime, asking first and acting under the family guard.
+
+    Returns the consoles the session was a member of.
+    """
     name = session.name
     selected_session_uuid = session.session_uuid
+    from agentworks.recheck import require_unchanged, require_vm_unchanged, session_fields
     from agentworks.sessions.manager._lifecycle import _require_selected_session
 
     # Refuse a row the owner rule rejects before any VM work.
@@ -182,50 +268,43 @@ def _delete_session_runtime(
         config,
         session,
         operation="session-delete",
-        held_native_guard=held_native_guard,
         interaction=interaction,
-    ) as (ws, vm, admin, log):
-        from agentworks.harness_setup.locking import native_mutation_guard
+    ) as (ws, vm_node, admin, log):
+        vm = vm_node.row
+        session = _require_selected_session(db, name, selected_session_uuid)
+        # A row whose PID evidence needs repair is undecided until the guard is held.
+        status = (
+            None
+            if _delete_status_needs_pid_repair(session)
+            else _delete_session_status(db, session, admin=admin, force=force)
+        )
 
-        with native_mutation_guard(db.path, vm.name, held=held_native_guard):
-            session = _require_selected_session(db, name, selected_session_uuid)
-            legacy = session.socket_path is None and session.pid is not None and session.pid > 0
-            if legacy:
-                status = SessionStatus.RUNNING
-            else:
-                session = _mgr._ensure_pid(session, admin=admin, db=db)
-                # Resolved again from the reloaded row: repair can give an old
-                # admin row its dedicated socket.
-                status = _mgr.check_session_status(
-                    session, admin=admin, server=_mgr.resolve_session_tmux_server(db, session)
-                )
+        # Pick the destructive-op access BEFORE prompting the operator.
+        # For agent sessions, ``_verified_session_access`` probes direct agent
+        # SSH; a pre-rollout agent surfaces here as an
+        # actionable error rather than after the operator has already
+        # confirmed the delete. The access is the owner's, so nothing
+        # below elevates.
+        _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=log)
 
-            if status == SessionStatus.UNKNOWN:
-                raise StateError(
-                    f"session '{name}' runtime state is unknown",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Retry after transport access is reliable; no runtime was changed.",
-                )
-            if status == SessionStatus.BROKEN and not force:
-                raise BrokenStateError(
-                    f"session '{name}' is broken (PID alive but tmux unreachable).",
-                    entity_kind="session",
-                    entity_name=name,
-                    hint="Use --force to delete.",
-                )
+        # Confirm before any destructive action
+        if not yes and not output.confirm(f"Delete session '{name}'?"):
+            raise UserAbort("delete cancelled")
+        member_consoles = [c.name for c in db.list_consoles_for_session(name)]
 
-            # Pick the destructive-op access BEFORE prompting the operator.
-            # For agent sessions, ``_verified_session_access`` probes direct agent
-            # SSH; a pre-rollout agent surfaces here as an
-            # actionable error rather than after the operator has already
-            # confirmed the delete. The access is the owner's, so nothing
-            # below elevates.
+        with vm_node.mutation_guard():
+            current = _require_selected_session(db, name, selected_session_uuid)
+            require_unchanged("session", name, session_fields(session), session_fields(current))
+            require_vm_unchanged(db, vm)
+            require_unchanged("session", name, member_consoles, [c.name for c in db.list_consoles_for_session(name)])
+            # Repair writes the row, and can give an old admin row its
+            # dedicated socket, so the status is read from the repaired row.
+            session = _mgr._ensure_pid(current, admin=admin, db=db)
+            observed = _delete_session_status(db, session, admin=admin, force=force)
+            if status is not None:
+                require_unchanged("session", name, status, observed)
+            status = observed
             owner = _mgr._verified_session_access(session, vm=vm, config=config, db=db, admin=admin, logger=log)
-
-            # Confirm before any destructive action
-            if not yes and not output.confirm(f"Delete session '{name}'?"):
-                raise UserAbort("delete cancelled")
 
             session = _require_selected_session(db, name, selected_session_uuid)
             if status != SessionStatus.STOPPED:
@@ -240,26 +319,33 @@ def _delete_session_runtime(
 
             session = _require_selected_session(db, name, selected_session_uuid)
 
-            # Capture console memberships before delete; the FK cascade on
-            # console_sessions zeroes the join table the moment the session row goes.
-            member_consoles = [c.name for c in db.list_consoles_for_session(name)]
-
             from agentworks.artifacts.session import cleanup_session_artifacts
 
             cleanup_session_artifacts(db, session, owner)
             _require_selected_session(db, name, selected_session_uuid)
-            db.delete_session(name)
 
-            # Clean up implicit grant for this session
+            # When the session's implicit grant is the agent's last on the
+            # workspace, the membership goes first: a failed removal raises
+            # with the session and grant rows in place, so a rerun retries it.
+            if session.agent_name:
+                from agentworks.agents.grants import holds_other_grant, remove_from_workspace_group
+
+                agent = db.get_agent(session.agent_name)
+                last_grant = not holds_other_grant(
+                    db, session.agent_name, session.workspace_name, grant_type="implicit", session_name=name
+                )
+                if agent and last_grant:
+                    try:
+                        remove_from_workspace_group(
+                            vm, config, db, agent.linux_user, session.workspace_name, logger=log
+                        )
+                    except AgentworksError as error:
+                        error.add_hint(f"The session and its grant were kept; run 'agw session delete {name}' again.")
+                        raise
+            # The FK cascade on console_sessions removes the memberships with the row.
+            db.delete_session(name)
             if session.agent_name:
                 db.delete_agent_grant(session.agent_name, session.workspace_name, "implicit", session_name=name)
-                # If no grants remain, remove from workspace group
-                if not db.has_any_grant(session.agent_name, session.workspace_name):
-                    from agentworks.agents.grants import remove_from_workspace_group
-
-                    agent = db.get_agent(session.agent_name)
-                    if agent:
-                        remove_from_workspace_group(vm, config, db, agent.linux_user, session.workspace_name)
 
             # Best-effort console cleanup runs after all DB / workspace state has
             # settled. Stale tmux windows are recoverable cosmetic noise; if the
@@ -275,53 +361,13 @@ def _delete_session_runtime(
 
             output.info(f"Session '{name}' deleted")
 
-            # Report the consoles that referenced this session, and handle any
-            # left empty by the FK cascade. ``member_consoles`` was snapshotted
-            # before the delete (the cascade zeroes ``console_sessions``), so a
-            # member whose configured-session count is now zero has been emptied.
-            # This is the operator signal issue #248 asks for: the cascade used to
-            # silently empty a console built around a single session with no trace.
+            # Report the consoles that referenced this session (issue #248):
+            # the cascade used to silently empty a console built around a
+            # single session with no trace.
             if member_consoles:
                 noun = "console" if len(member_consoles) == 1 else "consoles"
                 output.info(f"Removed '{name}' from {noun}: {', '.join(member_consoles)}")
-                # Any member left with no configured sessions gets the shared
-                # empty-console treatment (offer / report-but-keep, issue
-                # #248/#261/#265): the wrapper owns the console parametrization,
-                # cleanup_now_empty_resource owns the policy, and console
-                # remove-sessions routes through the same wrapper so the two
-                # paths stay byte-identical.
-                from agentworks.sessions.multi_console import offer_delete_if_empty_consoles
-
-                offer_delete_if_empty_consoles(
-                    db, config, member_consoles, yes=yes, held_native_guard=held_native_guard
-                )
-
-            # Generalized workspace/agent cleanup (issue #266). The session row is
-            # already gone, so the "now has no sessions" checks below reflect the
-            # post-delete state. This is the single unified path for both the
-            # session-created case (the old provenance-only offer) and every other
-            # case where deleting this session happens to empty the resource:
-            #   - interactive (no --yes): if the workspace / agent now has no
-            #     sessions, OFFER to delete it, regardless of provenance.
-            #   - --yes: auto-delete only what THIS session created (the
-            #     created_workspace / created_agent provenance flags); otherwise
-            #     report the resource is now empty and name the manual delete
-            #     command, mirroring the console report-but-keep treatment above.
-            # Workspace first, then agent; the order is load-bearing, not
-            # arbitrary. Deleting the now-unused workspace tears down its grants:
-            # the FK cascade on ``agent_workspace_grants`` removes every agent's
-            # explicit grant rows for that workspace (and ``revoke_workspace_grants``
-            # drops the matching Linux group membership). So if this session's
-            # workspace was the agent's LAST standing grant, deleting it makes the
-            # agent (checked next) a cleanup candidate in the same run. That
-            # cascade is intended and desirable, and it is contingent on the
-            # workspace ACTUALLY being deleted: the operator confirmed the offer,
-            # or it auto-deleted under --yes because this session created it. If
-            # the workspace is kept, the grant remains and the still-granted agent
-            # stays guarded. Both run after the console cleanup so the "Session
-            # deleted" line has already printed. ``session`` was snapshotted before
-            # ``db.delete_session``, so its workspace_name / agent_name / created_*
-            # fields are still readable here.
+    return member_consoles
 
 
 def _cleanup_now_empty_workspace(
@@ -381,11 +427,13 @@ def _cleanup_now_empty_workspace(
         # (the grant is preserved) while the interactive offer still fires with
         # the disclosing empty_clause above.
         created=session.created_workspace and not granters,
+        # The delete refuses, under its guard, granters other than these.
         delete=lambda: delete_workspace(
             db,
             config,
             name,
             yes=True,
+            only_with_granters=granters,
             interaction=interaction,
         ),
         manual_command=f"agw workspace delete {name}",
@@ -444,11 +492,13 @@ def _cleanup_now_empty_agent(
         kind="agent",
         name=agent_name,
         created=session.created_agent,
+        # The delete refuses, under its guard, an agent that gained a session or a grant.
         delete=lambda: delete_agent(
             db,
             config,
             name=agent_name,
             yes=True,
+            only_if_unused=True,
             interaction=interaction,
         ),
         manual_command=f"agw agent delete {agent_name}",
@@ -941,7 +991,7 @@ def attach_session(
         session,
         operation="session-attach",
         interaction=interaction,
-    ) as (_ws, _vm, admin, _log):
+    ) as (_ws, _vm_node, admin, _log):
         status = _mgr.check_session_status(session, admin=admin, server=server)
 
         if status == SessionStatus.STOPPED:

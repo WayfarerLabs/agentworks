@@ -162,11 +162,19 @@ def sync_ssh_config(config: Config, db: Database, *, announce: bool = True) -> N
     adds no output line (e.g. ``vm create``'s post-initialization sync,
     which would otherwise duplicate the line already emitted as the last
     step of the Provisioning phase).
+
+    The database reads and the writes run under one
+    :func:`~agentworks.ssh_config_lock.ssh_config_rebuild_lock`, so the last
+    of several concurrent rebuilds reads the latest committed state; one that
+    waits past the lock's bound raises ``StateError``.
     """
-    if config.operator.ssh_config_dir:
-        _rebuild_config_dir(config, db)
-    else:
-        _legacy_rebuild(config, db)
+    from agentworks.ssh_config_lock import ssh_config_rebuild_lock
+
+    with ssh_config_rebuild_lock():
+        if config.operator.ssh_config_dir:
+            _rebuild_config_dir(config, db)
+        else:
+            _legacy_rebuild(config, db)
     if announce:
         output.info("SSH config synced")
 
@@ -174,16 +182,17 @@ def sync_ssh_config(config: Config, db: Database, *, announce: bool = True) -> N
 def sync_ssh_config_or_warn(config: Config, db: Database, *, announce: bool = True) -> None:
     """:func:`sync_ssh_config`, warning instead of raising.
 
-    For a command whose VM work already succeeded: a failed write to the
-    local ``~/.ssh/config`` says nothing about the VM's health, so it does not
-    fail the command. The warning carries the error's hint, which is how to
-    fix the write.
+    For a command whose VM and database work already succeeded, a delete
+    included: a failed rebuild of the local ``~/.ssh/config`` (a failed write,
+    or another rebuild that held the lock too long) says nothing about that
+    work, so it does not fail the command. The warning carries the error's
+    hint, which is how to bring the file up to date.
     """
     try:
         sync_ssh_config(config, db, announce=announce)
     except Exception as e:
         output.warn(f"SSH config sync failed: {_with_hint(e)}")
-        output.info("VM is likely still usable.")
+        output.info("Only the local SSH config is out of date; the command's other changes stand.")
 
 
 def _legacy_rebuild(config: Config, db: Database) -> None:

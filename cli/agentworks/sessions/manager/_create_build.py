@@ -32,10 +32,10 @@ if TYPE_CHECKING:
     from agentworks.agents.template import AgentTemplate
     from agentworks.agents.templates import ResolvedAgentTemplate
     from agentworks.config import Config
-    from agentworks.db import Database
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
     from agentworks.instance_specs import InstanceOverlay
     from agentworks.resources.registry import Registry
+    from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.sessions.template import SessionTemplate
     from agentworks.workspaces.nodes import (
@@ -61,7 +61,6 @@ def _build_session_graph(
     workspace_overlay: InstanceOverlay[BaseModel] | None,
     agent_overlay: InstanceOverlay[BaseModel] | None,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard | None = None,
 ) -> SessionGraph:
     """Resolve the template and build the node graph, resolver union, and
     scope into a :class:`SessionGraph` (section S9)."""
@@ -143,7 +142,7 @@ def _build_session_graph(
 
     resolver = Resolver(config, registry, interaction=interaction)
 
-    vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
+    vm_node = live_vm_node(db, config, registry, vm)
 
     workspace_node: LiveWorkspaceNode | PendingWorkspaceNode
     pending_workspace: PendingWorkspaceNode | None = None
@@ -321,24 +320,29 @@ def _build_session_graph(
     # and what rides the shells' own composition roots still does.
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
+
+    def session_secret_target(
+        current_vm: VMRow, current_ws: WorkspaceRow | None, current_agent: AgentRow | None
+    ) -> SecretTarget:
+        """The session's env chain as these rows bind it; the create's guard builds it again from fresh rows."""
+        return _mgr._session_secret_target_pre_create(
+            db,
+            registry,
+            name=name,
+            context=template_values,
+            vm=current_vm,
+            session_template=template,
+            new_workspace=new_workspace,
+            resolved_workspace_template=workspace_tmpl,
+            existing_workspace=current_ws,
+            new_agent=new_agent,
+            resolved_agent_template=agent_tmpl,
+            existing_agent=current_agent,
+            is_admin_mode=plan.is_admin_mode,
+        )
+
     resolver.register_targets(
-        [
-            _mgr._session_secret_target_pre_create(
-                db,
-                registry,
-                name=name,
-                context=template_values,
-                vm=vm,
-                session_template=template,
-                new_workspace=new_workspace,
-                resolved_workspace_template=workspace_tmpl,
-                existing_workspace=existing_ws,
-                new_agent=new_agent,
-                resolved_agent_template=agent_tmpl,
-                existing_agent=existing_agent,
-                is_admin_mode=plan.is_admin_mode,
-            ),
-        ],
+        [session_secret_target(vm, existing_ws, existing_agent)],
         allow_transient_auto_declare=True,
     )
 
@@ -379,7 +383,6 @@ def _build_session_graph(
     )
 
     return SessionGraph(
-        held_native_guard=held_native_guard,
         vm_node=vm_node,
         agent_node=agent_node,
         session_node=session_node,
@@ -396,4 +399,5 @@ def _build_session_graph(
         session_overlay=session_overlay,
         workspace_overlay=workspace_overlay,
         agent_overlay=agent_overlay,
+        session_secret_target=session_secret_target,
     )

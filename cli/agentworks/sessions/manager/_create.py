@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import DesiredRuntimeState
-from agentworks.errors import StateError
+from agentworks.errors import StateConflictError, StateError
 from agentworks.harness_setup.outcomes import SetupFailure, raise_setup_failures
 
 from ._create_build import _build_session_graph
@@ -107,21 +107,26 @@ def _publish_pending_plan(
 
 
 def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
-    """Reload the VM row under the VM family guard and assert it has an address.
+    """Reload the VM row and require that it still exists and has an address.
 
-    The row read before the guard can be stale: an ``agw vm recover`` or
-    ``vm rekey`` that finished before this command took the guard may have
-    updated ``vms.tailscale_host``, and neither can run while the guard is
-    held. Without the reload the address check below could spuriously
-    raise. Create reads it once more inside the activation gate, whose
-    start records ``last_started_at``. (The pre-create
-    SecretTarget read only ``vm.template``, which a refresh cannot
-    change, so the pre-refresh row was safe to target; the nodes keep
-    their construction row, whose identity fields a refresh cannot change
-    either.)
+    The row the plan read can be stale: an ``agw vm recover`` or
+    ``vm rekey`` that finished since may have updated
+    ``vms.tailscale_host``, and without the reload the address check
+    below could spuriously raise. Create reloads it before building its
+    graph, inside the activation gate, whose start records
+    ``last_started_at``, and once more under the VM's guard, where it is
+    compared with the plan. (The pre-create SecretTarget read only
+    ``vm.template``, which a refresh cannot change, so the pre-refresh row
+    was safe to target; the nodes keep their construction row, whose
+    identity fields a refresh cannot change either.)
     """
     refreshed_vm = db.get_vm(target_vm_name)
-    assert refreshed_vm is not None  # existed above; the gate cannot remove it
+    if refreshed_vm is None:
+        raise StateConflictError(
+            f"VM '{target_vm_name}' was deleted since this command read it",
+            entity_kind="vm",
+            entity_name=target_vm_name,
+        )
     if refreshed_vm.tailscale_host is None:
         raise StateError(
             f"VM '{refreshed_vm.name}' has no Tailscale address",
@@ -372,10 +377,26 @@ def create_session(
     # gate).
     from dataclasses import replace
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged, workspace_fields
 
-    with native_mutation_guard(db.path, plan.target_vm_name) as guard:
-        current_vm = _reload_vm(db, plan.target_vm_name)
+    def require_plan_rows_current() -> None:
+        """The workspace and agent the plan names are as the plan read them."""
+        require_unchanged(
+            "workspace",
+            plan.workspace_name,
+            workspace_fields(plan.existing_ws),
+            workspace_fields(db.get_workspace(plan.workspace_name)),
+        )
+        if plan.agent_name is not None:
+            require_unchanged(
+                "agent",
+                plan.agent_name,
+                agent_fields(plan.existing_agent),
+                agent_fields(db.get_agent(plan.agent_name)),
+            )
+
+    def require_plan_current(current_vm: VMRow) -> None:
+        """The VM, and the workspace and agent the plan names, are as the plan read them."""
         if current_vm.vm_uuid != plan.vm.vm_uuid:
             raise StateError("session VM changed during preparation", entity_kind="vm", entity_name=plan.target_vm_name)
         if current_vm.desired_runtime_state is DesiredRuntimeState.STOPPED:
@@ -384,43 +405,77 @@ def create_session(
                 entity_kind="vm",
                 entity_name=current_vm.name,
             )
-        plan = replace(plan, vm=current_vm)
-        graph = _build_session_graph(
+        require_plan_rows_current()
+
+    current_vm = _reload_vm(db, plan.target_vm_name)
+    require_plan_current(current_vm)
+    plan = replace(plan, vm=current_vm)
+    graph = _build_session_graph(
+        db,
+        config,
+        registry=registry,
+        plan=plan,
+        template_name=template_name,
+        session_overlay=session_overlay,
+        workspace_overlay=workspace_overlay,
+        agent_overlay=agent_overlay,
+        interaction=interaction,
+    )
+
+    from agentworks.orchestration.activation import (
+        activation_gate,
+        gate_secret_resolver,
+    )
+
+    # The activation gate replaces this command's imperative
+    # ensure_active + vm_active holds: opened once, before the
+    # preflight sweep (so every probe reaches a live target), held
+    # through the whole command, with its just-in-time values seeding
+    # the boundary resolver so nothing resolves or prompts twice.
+    from agentworks.vms.manager import require_vm_ssh_boundary
+
+    require_vm_ssh_boundary(db, config, graph.vm_node.row)
+    with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
+        vm = _reload_vm(db, plan.target_vm_name)
+        # Preflight precedes secret resolution and carries no workload values.
+        secret_values = _preflight_and_resolve(
             db,
             config,
-            registry=registry,
             plan=plan,
-            template_name=template_name,
-            session_overlay=session_overlay,
-            workspace_overlay=workspace_overlay,
-            agent_overlay=agent_overlay,
+            graph=graph,
+            vm=vm,
             interaction=interaction,
-            held_native_guard=guard,
         )
 
-        from agentworks.orchestration.activation import (
-            activation_gate,
-            gate_secret_resolver,
-        )
+        # Every prompt is answered: the VM's guard is held from here through
+        # the roll-forward and any rollback, which share it through the
+        # graph's VM node, and what the plan read is read again under it.
+        with graph.vm_node.mutation_guard():
+            require_vm_unchanged(db, graph.vm_node.row)
+            require_plan_rows_current()
+            if db.get_session(plan.name) is not None:
+                raise StateConflictError(
+                    f"session '{plan.name}' was created since this command read it",
+                    entity_kind="session",
+                    entity_name=plan.name,
+                    hint="Run the command again with another name.",
+                )
+            # The session's env composes from the rows as they are now; refuse a
+            # binding that needs a secret the resolve above never asked for.
+            from agentworks.secrets import require_targets_resolved
 
-        # The activation gate replaces this command's imperative
-        # ensure_active + vm_active holds: opened once, before the
-        # preflight sweep (so every probe reaches a live target), held
-        # through the whole command, with its just-in-time values seeding
-        # the boundary resolver so nothing resolves or prompts twice.
-        from agentworks.vms.manager import require_vm_ssh_boundary
-
-        require_vm_ssh_boundary(db, config, graph.vm_node.row)
-        with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
-            vm = _reload_vm(db, plan.target_vm_name)
-            # Preflight precedes secret resolution and carries no workload values.
-            secret_values = _preflight_and_resolve(
-                db,
-                config,
-                plan=plan,
-                graph=graph,
-                vm=vm,
-                interaction=interaction,
+            require_targets_resolved(
+                [
+                    graph.session_secret_target(
+                        vm,
+                        None if plan.new_workspace else db.get_workspace(plan.workspace_name),
+                        None if plan.existing_agent is None else db.get_agent(plan.existing_agent.name),
+                    )
+                ],
+                secret_values,
+                entity_kind="session",
+                entity_name=plan.name,
+                message=f"session '{plan.name}' now needs a secret this command did not resolve",
             )
 
             # ===== Dependency-ordered roll-forward (S11) ========================

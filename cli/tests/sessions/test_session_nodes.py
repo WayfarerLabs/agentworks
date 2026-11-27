@@ -610,6 +610,44 @@ def test_pending_session_teardown_keeps_group_with_other_grants(db: Database, mo
     assert removed == []
 
 
+def test_pending_session_teardown_keeps_its_rows_when_the_membership_removal_fails(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """The membership goes before the rows: a removal that fails keeps the
+    session and its implicit grant, and a rerun removes the membership and
+    then both rows."""
+    from agentworks.agents import grants as agents_grants
+    from agentworks.execution.errors import CommandFailed
+    from agentworks.execution.results import Completed, Result
+
+    failures = [CommandFailed("box", 10, Result(Completed(10)), streams_logged=True)]
+    removed: list[str] = []
+
+    def remove(vm: object, config: object, db_: object, linux_user: str, ws: str, **k: object) -> None:
+        if failures:
+            raise failures.pop()
+        removed.append(ws)
+
+    monkeypatch.setattr(agents_grants, "remove_from_workspace_group", remove)
+    vm = _vm_node(db)
+    agent = _pending_agent(db, vm)
+    session = _session(db, agent=agent, vm=vm)
+    _seed_session_partial_state(db)
+
+    session.teardown()
+
+    assert db.get_session("s1") is not None
+    assert db.has_any_grant("dev", "ws1")
+    assert removed == []
+    assert len(captured_output.warnings) == 1
+
+    session.teardown()
+
+    assert db.get_session("s1") is None
+    assert not db.has_any_grant("dev", "ws1")
+    assert removed == ["ws1"]
+
+
 def test_pending_session_teardown_admin_mode_deletes_only_the_row(
     db: Database,
 ) -> None:

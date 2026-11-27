@@ -60,9 +60,9 @@ def test_group_writes_and_copy_grants_keep_the_destination_guard(
             # operation. A competing operation must still fail at this point.
             with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm_name):
                 pass
-            if vm_name != "box":
-                with native_mutation_guard(db.path, "box"):
-                    pass
+            # A cross-VM copy holds its source VM's guard across the unpack too.
+            with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+                pass
             guarded_writes.append(call.request)
         if operation == "repair" and getattr(call.request, "argv", ()) == ("getent", "group", group):
             from agentworks.execution.results import Completed, Result
@@ -102,9 +102,13 @@ def test_contended_guard_refuses_before_guest_or_grant_state_changes(
     assert db.list_agent_grants("dev") == []
 
 
-@pytest.mark.parametrize("vm_name", ["box", "box2"])
-def test_copy_contention_after_admission_refuses_before_destination_writes(
-    db: Database, make_config: Any, monkeypatch: pytest.MonkeyPatch, vm_name: str
+@pytest.mark.parametrize(
+    ("vm_name", "contended"),
+    [("box", "box"), ("box2", "box2"), ("box2", "box")],
+    ids=["same-vm", "destination", "source"],
+)
+def test_copy_contention_after_admission_refuses_before_the_pack(
+    db: Database, make_config: Any, monkeypatch: pytest.MonkeyPatch, vm_name: str, contended: str
 ) -> None:
     config = make_config()
     seed(db)
@@ -119,8 +123,8 @@ def test_copy_contention_after_admission_refuses_before_destination_writes(
     @contextlib.contextmanager
     def competing_after_admission(*args: Any, **kwargs: Any):  # noqa: ANN202
         with boundary(*args, **kwargs) as admitted:
-            if args[3].name == vm_name:
-                with native_mutation_guard(db.path, vm_name):
+            if args[3].name == contended:
+                with native_mutation_guard(db.path, contended):
                     yield admitted
             else:
                 yield admitted
@@ -130,5 +134,38 @@ def test_copy_contention_after_admission_refuses_before_destination_writes(
         _run("copy", db, config, vm_name)
 
     assert db.get_workspace("ws2") is None
-    assert not any(getattr(request, "elevated", False) for request in guest.requests)
-    assert any(getattr(request, "argv", ())[:2] == ("tar", "czf") for request in guest.requests)
+    assert guest.requests == []
+
+
+@pytest.mark.parametrize("revoke_all", [False, True], ids=["named", "all"])
+def test_revoke_contention_after_admission_refuses_before_guest_or_grant_state_changes(
+    db: Database, make_config: Any, monkeypatch: pytest.MonkeyPatch, revoke_all: bool
+) -> None:
+    config = make_config()
+    seed(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default", grant_all=revoke_all)
+    db.insert_agent_grant("dev", "ws1", "explicit")
+    reachable(monkeypatch, True)
+    recorder = install_access_recorder(monkeypatch)
+    boundary = gated_vm_boundary
+
+    @contextlib.contextmanager
+    def competing_after_admission(*args: Any, **kwargs: Any):  # noqa: ANN202
+        with boundary(*args, **kwargs) as admitted, native_mutation_guard(db.path, "box"):
+            yield admitted
+
+    monkeypatch.setattr("agentworks.agents.grants.gated_vm_boundary", competing_after_admission)
+    with pytest.raises(NativeSetupBusyError):
+        grants.revoke_workspaces(
+            db,
+            config,
+            agent_name="dev",
+            workspace_names=[] if revoke_all else ["ws1"],
+            revoke_all=revoke_all,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert recorder.calls == []
+    agent = db.get_agent("dev")
+    assert agent is not None and agent.grant_all == revoke_all
+    assert db.has_any_grant("dev", "ws1")

@@ -21,16 +21,16 @@ is left undisposed, and #949 is merged.
 
 ## Implementation, PR 1: under today's single lock
 
-- [ ] Shared state: `groupadd -f` in the workspace-group helper, membership removal through
+- [x] Shared state: `groupadd -f` in the workspace-group helper, membership removal through
       `usermod -rG` with its status checked, the membership removed before the last grant row is
-      deleted, workspace delete removing its normalized path, agent deletion stopping processes
-      before `userdel -r` and keeping the agent's row when the removal fails, the per-user rebuild
-      mutex for the SSH config, the bounded package-manager wait in workspace repair, and unique
-      operation log names created exclusively.
-- [ ] The mutators still unguarded at HEAD (revoke, workspace copy's source, `vm import-host-keys`,
+      deleted, workspace delete removing its normalized path and keeping its row when the removal
+      fails, agent deletion stopping processes before `userdel -r` and keeping the agent's row when
+      the removal fails, the per-user rebuild mutex for the SSH config, the bounded package-manager
+      wait in workspace repair, and unique operation log names created exclusively.
+- [x] The mutators still unguarded at HEAD (revoke, workspace copy's source, `vm import-host-keys`,
       `vm confirm-release`) take the single lock; grant, repair and copy's destination already do.
-- [ ] Prompts moved before acquisition per the LLD's rules and appendix, with re-checks after
-      acquiring.
+- [x] Prompts moved before acquisition per the LLD's rules and Appendix A.1, with re-checks after
+      acquiring, except the rows A.1 moves to PR 2.
 - [ ] Tests for each, collateral where behavior changes, private review loop, integration test, and
       published feedback addressed.
 
@@ -46,6 +46,9 @@ precedes its lock and each newly guarded mutator refuses while another operation
       brief vm exclusive only when the provider reports the VM stopped, prepare, acquire with the vm
       shared, re-check, run), with admission-only shared locks for access commands and runtime
       families recording intent under a brief acquisition of their own set before the gate.
+- [ ] The prompt moves Appendix A.1 defers to PR 2 (vm start and stop, agent reinit's early save,
+      the runtime families, console start, restart and stop), with `session start --spec`'s overlay
+      hand-off to the batch and the removal of `run_session_batch(held=)`.
 - [ ] Every call site in the LLD's lock-set table moved to its set, each re-check comparing the
       fields the LLD names, and the three sanctioned acquisitions marked as prompting with any other
       prompt under a held set raising.

@@ -348,7 +348,7 @@ def test_session_attach_does_not_eager_resolve(
     stub_vm_gates(monkeypatch)
 
     # _prepare_vm is a gate-span context manager; the stub yields its
-    # (workspace, vm, admin access, log) inside a trivial span.
+    # (workspace, vm node, admin access, log) inside a trivial span.
     @contextlib.contextmanager
     def _fake_prepare_vm(*a: object, **k: object):  # noqa: ANN202
         yield (ws_row, vm_row, admin, SimpleNamespace(record=lambda *a: None))

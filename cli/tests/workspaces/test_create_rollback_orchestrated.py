@@ -7,6 +7,7 @@ during the clone still lands that cleanup and keeps the original interrupt.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -87,14 +88,14 @@ def test_create_rollback_removes_the_fresh_workspace_group(
     assert db.get_workspace("ws1") is None
 
 
-def test_create_rollback_tolerates_a_group_removal_failure(
+def test_create_rollback_warns_on_a_group_removal_failure_without_masking_the_create_error(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
     """A group removal that fails during create rollback does not mask the
-    original create error, nor turn the rollback itself into a warning."""
+    original create error; the rollback reports what it could not remove."""
     fake = Guest(fails=(is_occupancy_probe, REMOVE_GROUP))
     route(monkeypatch, fake)
     seed_vm_only(db)
@@ -106,7 +107,44 @@ def test_create_rollback_tolerates_a_group_removal_failure(
 
     assert REMOVE_GROUP in fake.argvs()
     assert db.get_workspace("ws1") is None
-    assert not any("rollback during workspace create" in w for w in captured_output.warnings)
+    assert captured_output.warnings
+
+
+def test_create_rollback_removes_the_vscode_stub_when_the_group_removal_fails(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """A create that fails after its VS Code stub is written still removes the
+    stub when the rollback's on-VM removal fails, so no stub outlives the row."""
+    fake = Guest(fails=(is_occupancy_probe, REMOVE_GROUP))
+    route(monkeypatch, fake)
+    seed_vm_only(db)
+    reachable(monkeypatch, True)
+    written: list[Path] = []
+
+    from agentworks.workspaces.backends import vm as vm_backend
+
+    real_generate = vm_backend.generate_vscode_workspace
+
+    def _generate(*args: object, **kwargs: object) -> Path:
+        path = real_generate(*args, **kwargs)  # type: ignore[arg-type]
+        written.append(path)
+        return path
+
+    def _refuse(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("row insert exploded")
+
+    monkeypatch.setattr(vm_backend, "generate_vscode_workspace", _generate)
+    monkeypatch.setattr(db, "insert_workspace", _refuse)
+
+    with pytest.raises(ExternalError, match="row insert exploded"):
+        _create(db, make_config())
+
+    assert REMOVE_GROUP in fake.argvs()
+    assert len(written) == 1 and not written[0].exists()
+    assert captured_output.warnings
 
 
 def test_create_rollback_on_clone_failure_leaves_no_residue(

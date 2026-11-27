@@ -6,7 +6,6 @@ import os
 import shlex
 import shutil
 import sys
-from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -24,6 +23,7 @@ from agentworks.workspaces.guest import open_parent_traversal
 from agentworks.workspaces.manager import delete_workspace, rehome_workspace
 from tests.artifacts.test_git_excludes import Guest, apply, file, git
 from tests.capabilities.test_native_setup_deletion import deletion as deletion
+from tests.conftest import admitting_boundary
 from tests.vm_access_support import Call
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
@@ -76,7 +76,7 @@ def move_case(db, deletion, tmp_path, monkeypatch):
     db._conn.execute("UPDATE workspaces SET linux_group = ? WHERE name = 'project'", (group,))
     db._conn.commit()
     monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **k: target.access())
-    monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", lambda *a, **k: nullcontext())
+    monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", admitting_boundary)
     monkeypatch.setattr("agentworks.workspaces.acls.apply_workspace_acls", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.generate_vscode_workspace", lambda *a, **k: tmp_path / "x")
     monkeypatch.setattr(

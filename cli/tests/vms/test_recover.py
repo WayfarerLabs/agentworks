@@ -198,7 +198,9 @@ def test_a_vm_replaced_before_the_guard_is_refused(
     resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A VM deleted and recreated under the same name before the guard is not the VM recover selected."""
+    """A VM deleted and recreated under the same name before the guard is not the VM recover selected.
+
+    The secrets resolved before the guard; nothing reaches the guest."""
     from agentworks.harness_setup import locking
 
     _seed(db)
@@ -220,7 +222,7 @@ def test_a_vm_replaced_before_the_guard_is_refused(
         _recover(db, make_config())
 
     assert raised.value.entity_name == "box"
-    assert resolve_counter == []
+    assert len(resolve_counter) == 1
     assert guest.payloads == []
     assert db.get_vm("box") == replacements[0]
 

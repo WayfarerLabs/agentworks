@@ -183,9 +183,14 @@ def test_session_replacement_during_consent_preserves_replacement_spec(db, make_
     assert runtime[2] == []
 
 
-def test_session_replacement_before_guard_acquisition_refuses_before_observation(db, make_config, runtime, monkeypatch):
+def test_session_replacement_before_guard_acquisition_refuses_before_the_layer_is_replaced(
+    db, make_config, runtime, monkeypatch
+):
+    """The consent is asked before the guard; a session replaced before the
+    guard is not the one it was about, so the launch refuses under it."""
     _seed(db)
     before = db.get_session("work")
+    asked = []
 
     @contextmanager
     def replace_at_guard_entry(*args, **kwargs):
@@ -196,12 +201,15 @@ def test_session_replacement_before_guard_acquisition_refuses_before_observation
             yield guard
 
     monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", replace_at_guard_entry)
-    monkeypatch.setattr(manager, "observe_session_statuses", lambda *a, **k: pytest.fail("observed stale runtime"))
-    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: pytest.fail("requested stale consent"))
+    monkeypatch.setattr(
+        manager, "observe_session_statuses", lambda sessions, **k: {s.name: SessionStatus.RUNNING for s in sessions}
+    )
+    monkeypatch.setattr("agentworks.output.confirm", lambda *a, **k: asked.append(True) or True)
     with pytest.raises(StateError):
         manager.restart_session(
             db, make_config(), name="work", spec='{"env":{"NEW":"after"}}', interaction=TtyInteractionPolicy.ALLOW
         )
+    assert asked == [True]
     assert db.get_session("work").session_uuid != before.session_uuid
     assert _value(db) == {"env": {"OTHER": {"value": "owner"}}}
     assert runtime[2] == []
@@ -309,4 +317,32 @@ def test_force_new_conflict_preserves_overlay_runtime_and_target(
         )
     assert db.get_session("work") == before
     assert db.instance_state.get_desired_overlay("session", "work") == prior
+    assert runtime[2] == []
+
+
+def test_restart_consent_is_asked_unguarded_and_a_status_change_before_the_guard_refuses(
+    db, make_config, runtime, monkeypatch
+):
+    from agentworks.errors import StateConflictError
+
+    _seed(db)
+    before = _value(db)
+    statuses = iter([SessionStatus.RUNNING, SessionStatus.STOPPED])
+    monkeypatch.setattr(
+        manager, "observe_session_statuses", lambda sessions, **k: {s.name: next(statuses) for s in sessions}
+    )
+    asked = []
+
+    def confirm(*args, **kwargs):
+        with native_mutation_guard(db.path, "box"):
+            asked.append(True)
+        return True
+
+    monkeypatch.setattr("agentworks.output.confirm", confirm)
+    with pytest.raises(StateConflictError):
+        manager.restart_session(
+            db, make_config(), name="work", spec='{"env":{"NEW":"after"}}', interaction=TtyInteractionPolicy.ALLOW
+        )
+    assert asked == [True]
+    assert _value(db) == before
     assert runtime[2] == []

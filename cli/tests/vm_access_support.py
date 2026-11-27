@@ -284,6 +284,21 @@ def command_line(request: object) -> str | None:
     return None
 
 
+def account_processes_stopped(call: Call) -> Result | None:
+    """Answer an account-removal ``pgrep -u`` as a guest whose ``pkill`` ended every process: exit 1.
+
+    Any other request is left to the access's other outcomes, so a test whose
+    guest otherwise answers 0 to everything sets this as its recorder's
+    ``answer`` to let an agent's removal proceed.
+    """
+    from agentworks.execution.requests import Command
+
+    request = call.request
+    if isinstance(request, Command) and request.argv[:2] == ("pgrep", "-u"):
+        return Result(Completed(1))
+    return None
+
+
 def guest_result(returncode: int = 0, stdout: str = "", stderr: str = "") -> Result:
     """What a guest command that exited ``returncode`` with these streams completes as."""
     return Result(Completed(returncode), stdout.encode(), stderr.encode())

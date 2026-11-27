@@ -153,6 +153,28 @@ class LiveVMNode:
         """The explicit operation token shared with nested lifecycle cleanup."""
         return self._held_native_guard
 
+    @contextmanager
+    def mutation_guard(self) -> Iterator[NativeMutationGuard]:
+        """Take this VM's native mutation guard for the rest of the operation, once its prompts are done.
+
+        The one rule: a command holding a live VM node takes the guard
+        through this, never through ``native_mutation_guard`` directly.
+        A command opens the gate and resolves its secrets with no guard
+        held, then enters this; until it leaves, the node's later
+        admissions and starts, and the nested cleanup handed the node,
+        share the held guard instead of contending for it. A node built
+        with a held guard yields that one.
+        """
+        from agentworks.harness_setup.locking import native_mutation_guard
+
+        previous = self._held_native_guard
+        with native_mutation_guard(self._db.path, self._row.name, held=previous) as guard:
+            self._held_native_guard = guard
+            try:
+                yield guard
+            finally:
+                self._held_native_guard = previous
+
     @property
     def site(self) -> VMSiteNode:
         """The vm-site node this VM's row points at; dependents reach

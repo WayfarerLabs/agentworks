@@ -687,9 +687,12 @@ guarantee.
 Dry run performs no activation, repair, workload-secret preview/resolution, PID-evidence write,
 staging change, target write, or mutation-guard creation. Provider observation may need its ordinary
 credentials. Off-guest checks remain conditional on later activation. Mutating operations share a
-VM-family guard: secret prompts and console delete confirmation can keep a family busy, and brief
-hold admission can report busy even for live diagnostic access. A newly acquired admission guard
-does not span the interactive body.
+VM-family guard. Most commands ask their confirmations and resolve their secrets before taking it,
+then read again under it what they showed or used and refuse, asking you to run the command again,
+when it changed. Reconciliation, `session start`/`restart`/`stop`, `vm start`/`stop`, `agent reinit`
+and `console start`/`restart`/`stop` still resolve secrets under the guard, so their prompts can
+keep a family busy. Brief hold admission can report busy even for live diagnostic access. A newly
+acquired admission guard does not span the interactive body.
 
 See [Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption,
 worked recovery and retry, migration, and WSL2 stopped-intent access limits. Migration 39 preserves
@@ -1045,9 +1048,13 @@ already has a record is never changed; the report says `already current` or
 for that VM (`trust marker present`).
 
 Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
-`trust marker present`, `conflicts with the stored key`, or `no tailnet address`. The command exits
-non-zero while any selected VM ends without a record, with `--all` as well. Every run then rewrites
-the managed SSH config entries, whatever it imported.
+`trust marker present`, `conflicts with the stored key`, `no tailnet address`,
+`malformed host key, nothing recorded`, or
+`busy: another operation is changing native state on this VM`. Each VM is imported under its native
+mutation guard, so a VM another command is changing is reported busy and left as it was while the
+others carry on; run the import again for it once that command finishes. The command exits non-zero
+while any selected VM ends without a record, with `--all` as well. Every run then rewrites the
+managed SSH config entries, whatever it imported.
 
 For a VM with no matching entry, verify its host key fingerprints against its console or provider,
 gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned
@@ -1094,7 +1101,10 @@ the filter is an error, not an empty result.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Its confirmation warns that workspace files, uncommitted changes, stashes and
-commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt.
+commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt. When the
+workspace's directory or its Linux group cannot be removed from the VM (a group already gone counts
+as removed), the delete fails with the workspace still recorded, so rerunning `workspace delete`
+retries the removal; `agw vm logs <vm>` has the failed command's output.
 
 There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
 shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
@@ -1143,8 +1153,20 @@ exec variant runs the command from the workspace directory. A workspace on a dif
 rejected with a `ValidationError`; a workspace the agent lacks access to raises `AuthorizationError`
 with a hint to run `agent grant-workspaces`.
 
+An agent's access to a workspace is a grant in the database plus membership in the workspace's Linux
+group. A command that drops the agent's last grant on a workspace (`agent revoke-workspaces`, or
+`session delete` of the agent's last session there) removes the membership first and drops the grant
+only once that succeeds. When the removal fails, the command fails with the grant (and the session)
+still recorded, and rerunning it retries the removal.
+
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
-confirmation prompt.
+confirmation prompt. It signals the agent's processes and waits up to 5 seconds for them to end
+before it removes the Linux user and its home with `userdel -r`. A process that is still running, or
+a removal that fails (a `userdel` hook that vetoes it, or a home that cannot be removed), fails the
+delete with the agent still recorded, so rerunning `agent delete` retries the removal; the error
+names the tool, and `agw vm logs <vm>` has its output. An account already gone from the VM counts as
+removed. When its home is still there (an earlier removal that failed on the home), the delete warns
+and names it: an agent of the same name cannot be created until you remove it.
 
 `agw agent shell` / `agw agent exec` are Agentworks-wrapped entry points; for raw SSH access to an
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
@@ -1171,7 +1193,11 @@ Entries are rebuilt declaratively from the database by `vm create`, `vm reinit`,
 commands keep the file in sync without manual intervention. Each entry's `IdentityFile` is
 `operator.ssh_private_key`, so after changing that key, `agw vm recover` or `agw vm reinit` (which
 install the new key on the VM) rebuild the file too. Run `agw config sync-ssh-config` to force a
-rebuild.
+rebuild. Rebuilds by commands running at once take turns, each reading the database after the one
+before it wrote. A rebuild that fails, one that waited more than 10 seconds for its turn included,
+only warns once the command's own changes are recorded; `agent create`, `agent reinit`,
+`session create` when it creates an agent, and `config sync-ssh-config` itself fail instead. Either
+way `agw config sync-ssh-config` brings the file up to date.
 
 Every entry also carries `HostKeyAlias`, `StrictHostKeyChecking yes`, `GlobalKnownHostsFile` (the
 VM's store file) and `UserKnownHostsFile` set to the null device, plus `UpdateHostKeys no` and

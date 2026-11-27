@@ -10,7 +10,7 @@ import agentworks.bootstrap as bootstrap
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
@@ -136,21 +136,24 @@ def test_intent_is_local_kind_strict_and_preserves_members(db: Database):
     assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
-def test_delete_consent_holds_family_guard_and_nested_reuses_it(db: Database, monkeypatch):
+def test_delete_consent_is_asked_unguarded_and_a_member_change_before_the_guard_refuses(db: Database, monkeypatch):
+    from agentworks.errors import StateConflictError
+
     _seed_vm(db)
+    _seed_sessions(db, ["alpha"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     from agentworks import output
 
     def confirm(_prompt):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "vm1"):
-            pass
+        with native_mutation_guard(db.path, "vm1"):
+            db.add_console_session("con", "alpha", [])
         return True
 
     monkeypatch.setattr(output, "confirm", confirm)
     monkeypatch.setattr(mc, "_live_access", lambda *a: None)
-    with native_mutation_guard(db.path, "vm1") as guard:
-        mc.delete_console(db, _StubConfig(), name="con", held_native_guard=guard)
-    assert db.get_console("con") is None
+    with pytest.raises(StateConflictError):
+        mc.delete_console(db, _StubConfig(), name="con")
+    assert db.get_console("con") is not None
 
 
 def test_delete_cancellation_propagates_and_retains_definition(db: Database, monkeypatch):

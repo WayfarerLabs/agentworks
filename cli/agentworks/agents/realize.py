@@ -105,7 +105,7 @@ def realize_agent(
         # exception. Surface them as a warning and let the original error
         # continue to propagate.
         try:
-            delete_agent_on_vm(vm, config, linux_user, logger=log)
+            delete_agent_on_vm(vm, config, linux_user, agent_name=name, logger=log)
         except Exception as cleanup_err:
             output.warn(
                 f"rollback during agent create failed: {cleanup_err}. "

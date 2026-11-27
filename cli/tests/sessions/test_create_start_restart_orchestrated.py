@@ -1137,11 +1137,11 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
 
     cleanup = [e for e in events if e not in ("probe", "realize_agent")]
     assert cleanup == [
-        "delete_session_row",
         "remove_group",
+        "delete_session_row",
         "delete_agent",
         "delete_workspace",
-    ], f"session slice cleans first, then agent, then workspace; got {events}"
+    ], f"session slice cleans first (membership before rows), then agent, then workspace; got {events}"
     assert db.get_session("s1") is None
     assert db.instance_state.get_desired_overlay("session", "s1") is None
     assert not db.has_any_grant("s1", "s1")
@@ -2282,3 +2282,93 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     assert db.get_agent("fresh-agent") is None
     assert db.get_workspace("fresh-ws") is None
     assert events == []
+
+
+def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guard(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate and the boundary resolve run with no guard held; an agent
+    replaced in between is not the one the plan read, so nothing is created."""
+    from agentworks.errors import StateConflictError
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.sessions.manager import _create, create_session
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    db.insert_agent("a1", "vm1", "agt-a1")
+    resolve = _create._preflight_and_resolve
+    unguarded: list[bool] = []
+
+    def resolve_then_replace_the_agent(*args: Any, **kwargs: Any) -> dict[str, str]:
+        with native_mutation_guard(db.path, "vm1"):
+            unguarded.append(True)
+        values = resolve(*args, **kwargs)
+        db.delete_agent("a1")
+        db.insert_agent("a1", "vm1", "agt-a1-other")
+        return values
+
+    monkeypatch.setattr(_create, "_preflight_and_resolve", resolve_then_replace_the_agent)
+
+    with pytest.raises(StateConflictError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert unguarded == [True]
+    assert db.get_session("s1") is None
+    assert not any("new-session" in event for event in events)
+    db.close()
+
+
+def test_create_refuses_a_rebinding_that_needs_a_secret_its_resolve_never_asked_for(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ``agent reinit --update-template`` committed after the resolve binds an env
+    that references a new secret; the create refuses before it touches the guest."""
+    from agentworks.env.entry import EnvEntry
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets import SecretTarget
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import _create, create_session
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    db.insert_agent("a1", "vm1", "agt-a1")
+
+    def target(*args: Any, existing_agent: Any = None, **kwargs: Any) -> SecretTarget:
+        """The agent's env chain: the rebound template references a secret."""
+        rebound = existing_agent is not None and existing_agent.template == "secretive"
+        env = {"TOKEN": EnvEntry.model_validate({"secret": "new-token"})} if rebound else {}
+        return SecretTarget(vm={}, agent=env)
+
+    monkeypatch.setattr(session_manager, "_session_secret_target_pre_create", target)
+    resolve = _create._preflight_and_resolve
+
+    def resolve_then_rebind(*args: Any, **kwargs: Any) -> dict[str, str]:
+        values = resolve(*args, **kwargs)
+        db.update_agent_template("a1", "secretive")
+        return values
+
+    monkeypatch.setattr(_create, "_preflight_and_resolve", resolve_then_rebind)
+
+    with pytest.raises(StateConflictError):
+        create_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_session("s1") is None
+    # Only the read-only probes before the guard reached the guest.
+    assert set(events) <= {"probe"}
+    db.close()

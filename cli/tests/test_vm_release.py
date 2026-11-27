@@ -20,7 +20,7 @@ from agentworks.execution.results import Completed, Result
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager.reinit import _warn_newly_observed_legacy
 from agentworks.vms.manager.release import confirm_vm_release, reconcile_release
-from tests.conftest import CapturedOutput
+from tests.conftest import CapturedOutput, guarding_node
 from tests.vm_access_support import AccessRecorder
 
 if TYPE_CHECKING:
@@ -101,11 +101,14 @@ def answer_release(
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         "agentworks.vms.manager.boundary.gated_vm_boundary",
-        lambda *_args, **_kwargs: contextlib.nullcontext((object(), object(), object())),
+        lambda db, _config, _registry, vm, **_kwargs: contextlib.nullcontext(
+            (guarding_node(db, vm), object(), object())
+        ),
     )
 
-    def answer(release: DebianRelease) -> AccessRecorder:
-        vm_access_recorder.access(vm_name="box").run_outcomes = [os_release(release)]
+    def answer(release: DebianRelease, *, again: DebianRelease | None = None) -> AccessRecorder:
+        """The release the confirmation shows and, read again under the guard, ``again`` or the same."""
+        vm_access_recorder.access(vm_name="box").run_outcomes = [os_release(release), os_release(again or release)]
         return vm_access_recorder
 
     return answer
@@ -121,9 +124,9 @@ def test_confirm_release_runs_only_the_release_request(
 
     confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    (request,) = recorder.requests("run")
-    assert isinstance(request, Command)
-    assert request.argv == ("cat", "/etc/os-release")
+    requests = recorder.requests("run")
+    assert requests
+    assert all(isinstance(request, Command) and request.argv == ("cat", "/etc/os-release") for request in requests)
 
 
 def test_confirm_release_adopts_live_change_and_requires_reinit(
@@ -326,3 +329,78 @@ def test_confirm_release_reaches_a_vm_whose_initialization_failed(
     assert confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE) is (
         DebianRelease.TRIXIE
     )
+
+
+def test_confirm_release_asks_with_no_guard_held(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    answer_release: Callable[..., AccessRecorder],
+) -> None:
+    from agentworks.harness_setup.locking import native_mutation_guard
+
+    insert_complete_vm(db)
+    db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
+    answer_release(DebianRelease.TRIXIE)
+    asked: list[bool] = []
+
+    def confirm(*_args: object, **_kwargs: object) -> bool:
+        with native_mutation_guard(db.path, "box"):
+            asked.append(True)
+        return True
+
+    monkeypatch.setattr("agentworks.vms.manager.release.output.confirm", confirm)
+
+    confirm_vm_release(db, make_config(), "box", yes=False, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert asked == [True]
+
+
+@pytest.mark.parametrize("what", ["recorded", "live"])
+def test_confirm_release_refuses_when_what_it_showed_changed_before_the_guard(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    answer_release: Callable[..., AccessRecorder],
+    what: str,
+) -> None:
+    from agentworks.errors import StateConflictError
+
+    insert_complete_vm(db)
+    db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    answer_release(DebianRelease.TRIXIE, again=DebianRelease.BOOKWORM if what == "live" else None)
+
+    def confirm(*_args: object, **_kwargs: object) -> bool:
+        if what == "recorded":
+            db.update_vm_debian_release("box", DebianRelease.TRIXIE)
+        return True
+
+    monkeypatch.setattr("agentworks.vms.manager.release.output.confirm", confirm)
+
+    with pytest.raises(StateConflictError):
+        confirm_vm_release(db, make_config(), "box", yes=False, interaction=TtyInteractionPolicy.REFUSE)
+
+    vm = db.get_vm("box")
+    assert vm is not None
+    assert vm.init_status == InitStatus.COMPLETE.value
+
+
+def test_confirm_release_refuses_while_the_vms_guard_is_held(
+    db: Database,
+    make_config,  # noqa: ANN001
+    answer_release: Callable[..., AccessRecorder],
+) -> None:
+    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+
+    insert_complete_vm(db)
+    db.update_vm_debian_release("box", DebianRelease.BOOKWORM)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    answer_release(DebianRelease.TRIXIE)
+
+    with native_mutation_guard(db.path, "box"), pytest.raises(NativeSetupBusyError):
+        confirm_vm_release(db, make_config(), "box", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    vm = db.get_vm("box")
+    assert vm is not None
+    assert vm.debian_release is DebianRelease.BOOKWORM

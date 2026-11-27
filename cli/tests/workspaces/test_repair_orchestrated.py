@@ -623,3 +623,50 @@ def test_repair_hardens_other_bits_on_a_pre254_workspace(
     assert "OK: parent traversal" in captured_output.detail
     assert "\nRepaired 1 issue(s)" in captured_output.info
     assert all(command in fake.requests for command in workspace_acl_commands("/srv/ws1"))
+
+
+class _StaleMemberGuest(RepairProbeGuest):
+    """The workspace's group lists an agent with no grant, and removing it exits ``usermod_status``."""
+
+    def __init__(self, usermod_status: int) -> None:
+        super().__init__()
+        self._usermod_status = usermod_status
+
+    def respond(self, request: object) -> Result | None:
+        command = argv(request)
+        if command == ("getent", "group", "ws-ws1"):
+            return Result(Completed(0), b"ws-ws1:x:1001:admin,agt-stale\n")
+        if command[:3] == ("usermod", "-r", "-G"):
+            return Result(Completed(self._usermod_status))
+        return super().respond(request)
+
+
+@pytest.mark.parametrize("status", [1, 10], ids=["cannot-lock", "cannot-update-group-file"])
+def test_repair_warns_and_finishes_when_a_stale_member_cannot_be_removed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+    status: int,
+) -> None:
+    fake = _StaleMemberGuest(status)
+
+    _repair(db, make_config(), fake, monkeypatch)
+
+    assert ("usermod", "-r", "-G", "ws-ws1", "agt-stale") in fake.argvs()
+    assert len(captured_output.warnings) == 1
+
+
+def test_repair_counts_a_stale_member_already_gone_as_removed(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """``usermod`` exits 6 when the user or group no longer exists: the membership is gone either way."""
+    fake = _StaleMemberGuest(6)
+
+    _repair(db, make_config(), fake, monkeypatch)
+
+    assert ("usermod", "-r", "-G", "ws-ws1", "agt-stale") in fake.argvs()
+    assert captured_output.warnings == []

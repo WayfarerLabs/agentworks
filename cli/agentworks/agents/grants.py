@@ -19,16 +19,16 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.manager import agent_scope
-from agentworks.errors import NotFoundError, ValidationError
+from agentworks.errors import AgentworksError, NotFoundError, ValidationError
 from agentworks.execution.requests import Command
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
-from agentworks.vms.manager import gated_vm_boundary
-from agentworks.workspaces.guest import ensure_group
+from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
+from agentworks.vms.manager import gated_vm_boundary, operation_log
+from agentworks.workspaces.guest import ensure_group, remove_group_member
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import AgentRow, Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.phase_a import OperationLog
 
@@ -71,7 +71,9 @@ def grant_workspaces(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the group-membership SSH work. The
     empty-request and unknown-agent validations stay pre-gate: they
-    fail with zero prompts and zero VM starts.
+    fail with zero prompts and zero VM starts. The native mutation
+    guard is taken after the gate and its secrets, and the agent row
+    is read again under it.
     """
     if not grant_all and not workspace_names:
         raise ValidationError(
@@ -94,7 +96,6 @@ def grant_workspaces(
 
     registry = load_request_registry(config, live_database=db)
     with (
-        native_mutation_guard(db.path, vm.name) as guard,
         gated_vm_boundary(
             db,
             config,
@@ -102,9 +103,12 @@ def grant_workspaces(
             vm,
             scope=agent_scope(db, vm.name, agent_name),
             interaction=interaction,
-            held_native_guard=guard,
-        ),
+        ) as (vm_node, _resolver, _ctx),
+        vm_node.mutation_guard(),
     ):
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        _require_agent_unchanged(db, vm, agent)
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
             # Add to all existing workspace groups on this VM
@@ -141,8 +145,9 @@ def revoke_workspaces(
     Orchestrated (``vms.manager.gated_vm_boundary``), mirroring
     :func:`grant_workspaces`: live-VM graph, no env-chain targets, the
     gate open before the preflight sweep, the held-active span
-    covering the group-membership SSH work, and the empty-request /
-    unknown-agent validations pre-gate.
+    covering the group-membership SSH work, the empty-request /
+    unknown-agent validations pre-gate, and the native mutation guard
+    taken after the gate.
     """
     if not revoke_all and not workspace_names:
         raise ValidationError(
@@ -164,14 +169,32 @@ def revoke_workspaces(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config, live_database=db)
-    with gated_vm_boundary(
-        db,
-        config,
-        registry,
-        vm,
-        scope=agent_scope(db, vm.name, agent_name),
-        interaction=interaction,
+    with (
+        gated_vm_boundary(
+            db,
+            config,
+            registry,
+            vm,
+            scope=agent_scope(db, vm.name, agent_name),
+            interaction=interaction,
+        ) as (vm_node, _resolver, _ctx),
+        vm_node.mutation_guard(),
+        operation_log(vm.name, "agent-revoke") as log,
     ):
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        _require_agent_unchanged(db, vm, agent)
+
+        def remove_membership(ws_name: str) -> None:
+            """Remove the agent from ``ws_name``'s group, before its last grant row there goes."""
+            try:
+                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=log)
+            except AgentworksError as error:
+                error.add_hint(
+                    f"The grant on '{ws_name}' was kept; run the same 'agw agent revoke-workspaces' command again."
+                )
+                raise
+
         if revoke_all:
             # Snapshot the granted workspaces BEFORE deleting any rows.
             # Taking it afterwards missed explicitly-granted-only
@@ -180,26 +203,28 @@ def revoke_workspaces(
             # membership survived the revoke; issue #189).
             granted = db.list_granted_workspaces(agent_name)
             db.update_agent_grant_all(agent_name, False)
-            db.delete_explicit_grants(agent_name)
-            # Remove from groups where no grant (implicit or grant-all) remains
+            # Where the explicit grant is the last one, the membership goes
+            # before the row, so a failed removal keeps the row to retry from.
             remaining_implicit: list[str] = []
             for ws_name in granted:
-                if db.has_any_grant(agent_name, ws_name):
+                if holds_other_grant(db, agent_name, ws_name, grant_type="explicit"):
                     remaining_implicit.append(ws_name)
                 else:
-                    remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
+                    remove_membership(ws_name)
+                db.delete_agent_grant(agent_name, ws_name, "explicit")
             output.result(f"All explicit grants revoked for agent '{agent_name}'")
             if remaining_implicit:
                 output.warn(f"agent still has implicit access via sessions to: {', '.join(remaining_implicit)}")
             return
 
         for ws_name in workspace_names:
-            db.delete_agent_grant(agent_name, ws_name, "explicit")
-            if not db.has_any_grant(agent_name, ws_name):
-                remove_from_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=None)
-                output.info(f"Revoked: {ws_name}")
-            else:
+            if holds_other_grant(db, agent_name, ws_name, grant_type="explicit"):
+                db.delete_agent_grant(agent_name, ws_name, "explicit")
                 output.info(f"Revoked: {ws_name} (still has implicit access via sessions)")
+            else:
+                remove_membership(ws_name)
+                db.delete_agent_grant(agent_name, ws_name, "explicit")
+                output.info(f"Revoked: {ws_name}")
         output.result(f"Revoked {output.count(len(workspace_names), 'workspace grant')} from agent '{agent_name}'")
 
 
@@ -216,8 +241,6 @@ def revoke_workspace_grants(
     """
     # Find agents that have grants for this workspace
     # We need to remove group membership for each
-    from agentworks.vms.manager import operation_log
-
     with operation_log(vm.name, "workspace-delete-grants") as log:
         for agent in db.list_agents(vm_name=vm.name):
             if db.has_any_grant(agent.name, ws_name):
@@ -273,14 +296,34 @@ def remove_from_workspace_group(
 ) -> None:
     """Remove an agent user from a workspace's Linux group, as root on the admin's access.
 
-    The status is not read: the user may not be a member. An outcome that is
-    not a completion raises its typed error.
+    A user who is not a member, or whose account or group is gone, counts as
+    removed; any other failure raises its typed error
+    (:func:`~agentworks.workspaces.guest.remove_group_member`). A caller that
+    drops the agent's last grant on the workspace calls this first and deletes
+    the grant row only once it returns, so a failure leaves the row for a
+    rerun to retry from.
     """
     from agentworks.workspaces.backends.vm import admin_access
 
     admin = admin_access(vm, config, logger)
-    ws_grp = _resolve_ws_group(db, workspace_name)
-    admin.run(Command(("gpasswd", "-d", linux_user, ws_grp), elevated=True)).require_completed(vm.name)
+    remove_group_member(admin, linux_user, _resolve_ws_group(db, workspace_name))
+
+
+def holds_other_grant(
+    db: Database, agent_name: str, workspace_name: str, *, grant_type: str, session_name: str | None = None
+) -> bool:
+    """Whether the agent keeps a grant on the workspace besides the named one.
+
+    The named grant is the ``(grant_type, session_name)`` row a caller is about
+    to delete; whether it exists does not matter. ``False`` means deleting it
+    drops the agent's last grant there, so the caller removes the membership
+    first.
+    """
+    return any(
+        (grant.grant_type, grant.session_name) != (grant_type, session_name)
+        for grant in db.list_agent_grants(agent_name)
+        if grant.workspace_name == workspace_name
+    )
 
 
 # -- Grant-all materialization ---------------------------------------------
@@ -388,6 +431,12 @@ def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> Non
 
 
 # -- Helpers ---------------------------------------------------------------
+
+
+def _require_agent_unchanged(db: Database, admitted: VMRow, agent: AgentRow) -> None:
+    """Under the guard: the VM the gate admitted and the agent read before it are still the same."""
+    require_vm_unchanged(db, admitted)
+    require_unchanged("agent", agent.name, agent_fields(agent), agent_fields(db.get_agent(agent.name)))
 
 
 def _require_vm(db: Database, vm_name: str) -> VMRow:

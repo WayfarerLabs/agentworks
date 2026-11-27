@@ -1459,3 +1459,63 @@ def test_an_unsupported_client_refuses_reinit_before_any_gate_secret_or_platform
 
     with pytest.raises(ClientUnsupported):
         vm_manager.reinit_vm(db, make_config(), "rvm", interaction=TtyInteractionPolicy.REFUSE)
+
+
+def test_reinit_resolves_its_secrets_with_no_guard_held_and_refuses_a_change_before_the_guard(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    _contract_passes: AccessRecorder,
+) -> None:
+    """Every secret resolves before the VM's guard is taken; a binding that
+    changed in between is not what reinit resolved, so it refuses before the
+    VM is touched."""
+    from agentworks.errors import StateConflictError
+    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.secrets.resolver import Resolver
+
+    _seed_provisioned_vm(db)
+    resolve = Resolver.resolve
+    unguarded: list[bool] = []
+
+    def resolve_then_rebind(self: Resolver) -> None:
+        with native_mutation_guard(db.path, "rvm"):
+            unguarded.append(True)
+        resolve(self)
+        db.update_vm_admin_template("rvm", "other")
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_rebind)
+    ran: list[bool] = []
+
+    with pytest.raises(StateConflictError):
+        _reinit_with_faked_initializer(
+            make_config, db, monkeypatch, _contract_passes, outcomes=_contract_outcomes(), initialized=ran
+        )
+
+    assert unguarded == [True]
+    assert ran == []
+    assert _contract_passes.requests("run") == []
+
+
+def test_reinit_refuses_a_binding_saved_before_its_gate_refreshed_the_row(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    _contract_passes: AccessRecorder,
+) -> None:
+    """Another reinit saves a binding after this one resolved its templates but
+    before its gate reloads the VM row; this reinit still holds what it
+    resolved from the old binding, so it refuses before the VM is touched."""
+    from agentworks.errors import StateConflictError
+
+    _seed_provisioned_vm(db)
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: db.update_vm_admin_template("rvm", "other"))
+    ran: list[bool] = []
+
+    with pytest.raises(StateConflictError):
+        _reinit_with_faked_initializer(
+            make_config, db, monkeypatch, _contract_passes, outcomes=_contract_outcomes(), initialized=ran
+        )
+
+    assert ran == []
+    assert _contract_passes.requests("run") == []

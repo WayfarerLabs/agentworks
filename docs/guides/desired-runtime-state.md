@@ -159,10 +159,12 @@ claim to have inspected an unreachable workload. Unknown attempted observations 
 ## Busy families and WSL2 access
 
 Mutating operations serialize within a VM family. Reconciliation may keep a family busy while
-collecting secrets; console deletion may keep it busy during confirmation. Wait for that operation
-to finish and retry the intended command. Admission to a power hold is also guarded, so even
-ordinary diagnostic access to an already-live VM can report busy. A newly acquired admission guard
-is released before the interactive shell, attach, or forwarding body runs.
+collecting secrets. Wait for that operation to finish and retry the intended command. Confirmations
+and most other commands' secrets are asked before the family is taken; a command whose rows changed
+between its question and the guard refuses, and running it again asks again about the current state.
+Admission to a power hold is also guarded, so even ordinary diagnostic access to an already-live VM
+can report busy. A newly acquired admission guard is released before the interactive shell, attach,
+or forwarding body runs.
 
 On WSL2, a live VM with stopped intent receives no idle-shutdown protection during access **or
 management commands**. A long shell, workspace creation, or agent reinitialization may lose the
