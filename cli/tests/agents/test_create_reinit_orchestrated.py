@@ -1552,3 +1552,60 @@ def test_reinit_refuses_a_grant_added_between_its_probe_and_its_lock(
 
     assert ran
     assert mutation == {}
+
+
+def test_reinit_refuses_a_vm_layer_replaced_while_its_secrets_resolved(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``vm reinit --spec`` finishing during the gate's prompt: the setup was prepared from the old VM env."""
+    from agentworks.errors import StateConflictError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, [])
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_vm_layer_is_replaced(self: Resolver) -> None:
+        resolve(self)
+        db.instance_state.put_desired_overlay("vm", "box", parse_instance_spec("vm", '{"env":{"LATER":"y"}}').payload)
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_vm_layer_is_replaced)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert mutation == {}
+
+
+def test_create_refuses_a_vm_layer_replaced_while_its_secrets_resolved(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_vm_layer_is_replaced(self: Resolver) -> None:
+        resolve(self)
+        db.instance_state.put_desired_overlay("vm", "box", parse_instance_spec("vm", '{"env":{"LATER":"y"}}').payload)
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_vm_layer_is_replaced)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_agent("dev") is None
+    assert mutation == {}

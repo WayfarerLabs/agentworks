@@ -60,3 +60,42 @@ def test_a_new_workspace_session_refuses_a_grant_all_agent_created_between_its_p
     assert ran
     assert realized == []
     assert db.get_workspace("ws2") is None
+
+
+def test_a_session_for_an_existing_agent_refuses_its_layer_replaced_while_its_secrets_resolved(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ``agent reinit --spec`` finishing during the create's prompt: the graph was built from the old agent layer."""
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    seed(db)
+    db.insert_agent("a1", "box", "agt-a1", template="default")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_agent_layer_is_replaced(self: Resolver) -> None:
+        resolve(self)
+        db.instance_state.put_desired_overlay(
+            "agent", "a1", parse_instance_spec("agent", '{"env":{"LATER":"y"}}').payload
+        )
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_agent_layer_is_replaced)
+    realized: list[object] = []
+    monkeypatch.setattr("agentworks.sessions.manager._create._roll_forward", lambda *a, **k: realized.append(k))
+
+    with pytest.raises(StateConflictError):
+        session_manager.create_session(
+            db,
+            make_config(),
+            name="s1",
+            workspace="ws1",
+            agent="a1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert realized == []
+    assert db.get_session("s1") is None

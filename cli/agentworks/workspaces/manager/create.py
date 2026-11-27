@@ -275,7 +275,10 @@ def create_workspace(
         resolver.register_name(secret_name)
 
     from agentworks.harness_setup.lifecycle import prepare_workspace_setup
+    from agentworks.recheck import layer_inputs
 
+    # The VM's layers the setup is prepared from, compared again under the set.
+    layers = layer_inputs(db, vm)
     setup_inputs = prepare_workspace_setup(
         db, registry, vm=vm, name=ws_name, template=template, root=pending_workspace.workspace_path
     )
@@ -305,6 +308,7 @@ def create_workspace(
         resolver.resolve()
 
         from agentworks.recheck import (
+            require_layers_unchanged,
             require_request_unchanged,
             require_unchanged,
             require_vm_unchanged,
@@ -322,6 +326,7 @@ def create_workspace(
         trees = walk_trees(vm, config, [pending_workspace.workspace_path])
         held = stack.enter_context(vm_node.locked(with_trees(request, trees)))
         require_vm_unchanged(db, vm)
+        require_layers_unchanged(db, "workspace", ws_name, layers, vm_name=vm.name)
         require_unchanged("workspace", ws_name, None, workspace_fields(db.get_workspace(ws_name)))
         require_request_unchanged("vm", vm.name, request, workspace_create_request(db, vm, ws_name))
         require_trees_unchanged(vm, config, trees)

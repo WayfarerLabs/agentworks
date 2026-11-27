@@ -113,6 +113,47 @@ def console_fields(db: Database, name: str) -> Fields:
     return (console.vm_name, console.admin_shell, members)
 
 
+def layer_inputs(
+    db: Database, vm: VMRow | None, workspace: WorkspaceRow | None = None, agent: AgentRow | None = None
+) -> Fields:
+    """The template bindings and desired layers setup or a launch is prepared from.
+
+    For the VM, and the workspace and agent where given: the template
+    binding (the VM's admin binding too) and the desired overlay record,
+    which for the VM carries its vm and admin layers. Every environment
+    composed for those entities reads them, so a command that prepared its
+    setup inputs, graph or launch from them before its final set records
+    them then and refuses under the set if any differs
+    (:func:`require_layers_unchanged`).
+    """
+    overlay = db.instance_state.get_desired_overlay
+    return (
+        None if vm is None else (vm.template, vm.admin_template, overlay("vm", vm.name)),
+        None if workspace is None else (workspace.template, overlay("workspace", workspace.name)),
+        None if agent is None else (agent.template, overlay("agent", agent.name)),
+    )
+
+
+def require_layers_unchanged(
+    db: Database,
+    entity_kind: str,
+    entity_name: str,
+    read: Fields,
+    *,
+    vm_name: str,
+    workspace_name: str | None = None,
+    agent_name: str | None = None,
+) -> None:
+    """Refuse when :func:`layer_inputs` for these entities, as they are now, differs from ``read``."""
+    current = layer_inputs(
+        db,
+        db.get_vm(vm_name),
+        None if workspace_name is None else db.get_workspace(workspace_name),
+        None if agent_name is None else db.get_agent(agent_name),
+    )
+    require_unchanged(entity_kind, entity_name, read, current)
+
+
 def require_session_unchanged(db: Database, name: str, read: SessionRow | None) -> None:
     """Refuse when the session row differs from the one the command read before it took its lock set."""
     require_unchanged("session", name, session_fields(read), session_fields(db.get_session(name)))

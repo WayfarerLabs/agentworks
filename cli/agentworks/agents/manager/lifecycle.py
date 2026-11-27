@@ -173,7 +173,10 @@ def create_agent(
         resolver.register_name(secret_name)
 
     from agentworks.harness_setup.lifecycle import prepare_agent_setup
+    from agentworks.recheck import layer_inputs
 
+    # The VM's layers the setup is prepared from, compared again under the set.
+    layers = layer_inputs(db, vm)
     setup_inputs = prepare_agent_setup(db, registry, vm=vm, name=name, template=agent_tmpl)
     if setup_inputs is not None:
         setup_inputs.register(resolver, registry)
@@ -234,11 +237,12 @@ def create_agent(
         setup_failures: list[SetupFailure] = []
         with vm_node.locked(request) as held, output.section("Agent Initialization"):
             from agentworks.agents.realize import realize_agent
-            from agentworks.recheck import require_request_unchanged, require_vm_unchanged
+            from agentworks.recheck import require_layers_unchanged, require_request_unchanged, require_vm_unchanged
 
             # The body runs on the row the gate admitted, the one compared here.
             vm = vm_node.row
             require_vm_unchanged(db, vm)
+            require_layers_unchanged(db, "agent", name, layers, vm_name=vm.name)
             require_request_unchanged(
                 "agent", name, request, agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
             )
@@ -570,7 +574,13 @@ def reinit_agent(
     from agentworks.agents.locks import agent_reinit_request
     from agentworks.native_locks import LockRequest, native_locks, probe_locks
     from agentworks.native_locks.rows import agent_account_entity
-    from agentworks.recheck import agent_fields, require_request_unchanged, require_unchanged, require_vm_unchanged
+    from agentworks.recheck import (
+        agent_fields,
+        require_layers_unchanged,
+        require_request_unchanged,
+        require_unchanged,
+        require_vm_unchanged,
+    )
 
     request = agent_reinit_request(db, agent)
     probe_locks(db.path, request)
@@ -698,7 +708,10 @@ def reinit_agent(
             resolver.register_name(secret_name)
 
         from agentworks.harness_setup.lifecycle import prepare_agent_setup
+        from agentworks.recheck import layer_inputs
 
+        # The VM's and agent's layers the setup is prepared from, compared again under the set.
+        layers = layer_inputs(db, vm, agent=db.get_agent(name))
         setup_inputs = prepare_agent_setup(db, registry, vm=vm, name=name, template=agent_tmpl)
         if setup_inputs is not None:
             setup_inputs.register(resolver, registry)
@@ -750,6 +763,7 @@ def reinit_agent(
         require_vm_unchanged(db, vm)
         require_unchanged("agent", name, agent_fields(agent), agent_fields(db.get_agent(name)))
         require_unchanged("agent", name, saved_declaration, _reinit_declaration(db, name))
+        require_layers_unchanged(db, "agent", name, layers, vm_name=vm.name, agent_name=name)
         require_request_unchanged("agent", name, request, agent_reinit_request(db, agent))
 
         def scoped_ctx(

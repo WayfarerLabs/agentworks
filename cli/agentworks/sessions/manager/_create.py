@@ -383,6 +383,8 @@ def create_session(
 
     from agentworks.recheck import (
         agent_fields,
+        layer_inputs,
+        require_layers_unchanged,
         require_request_unchanged,
         require_unchanged,
         require_vm_unchanged,
@@ -420,6 +422,9 @@ def create_session(
     current_vm = _reload_vm(db, plan.target_vm_name)
     require_plan_current(current_vm)
     plan = replace(plan, vm=current_vm)
+    # The layers the graph, the pending owners' setup and the session's env target are built from: the
+    # VM's, and an existing workspace's and agent's; compared again under the set.
+    layers = layer_inputs(db, plan.vm, plan.existing_ws, plan.existing_agent)
     graph = _build_session_graph(
         db,
         config,
@@ -481,6 +486,15 @@ def create_session(
         with graph.vm_node.locked(with_trees(request, *trees)) as held:
             require_vm_unchanged(db, vm)
             require_plan_rows_current()
+            require_layers_unchanged(
+                db,
+                "session",
+                plan.name,
+                layers,
+                vm_name=vm.name,
+                workspace_name=None if plan.existing_ws is None else plan.existing_ws.name,
+                agent_name=None if plan.existing_agent is None else plan.existing_agent.name,
+            )
             require_request_unchanged("session", plan.name, request, session_create_request(db, plan))
             for tree in trees:
                 require_trees_unchanged(vm, config, tree)
