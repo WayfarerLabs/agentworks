@@ -238,3 +238,68 @@ def test_add_shell_syncs_the_console_as_it_is_under_the_guard(
     )
 
     assert synced == (["a"] if after is ProbeStatus.PRESENT else [])
+
+
+def _rebinding_while_resolving(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve the panes' real targets, then save what ``vm reinit --admin-spec`` saves: an env needing a new secret."""
+    from agentworks.instance_specs import parse_admin_instance_spec, replace_vm_admin_overlay
+
+    def resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        replace_vm_admin_overlay(db, "vm1", parse_admin_instance_spec('{"env": {"TOKEN": {"secret": "new-token"}}}'))
+        return {}
+
+    monkeypatch.setattr("agentworks.secrets.resolve_for_command", resolve)
+
+
+@pytest.mark.parametrize("running", [True, False], ids=["running", "not-running"])
+def test_add_sessions_refuses_new_panes_of_a_running_console_that_now_need_a_new_secret(
+    db: Database, monkeypatch: pytest.MonkeyPatch, running: bool
+) -> None:
+    """A running console would compose the new panes now, so the edit refuses; otherwise it only records them."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a", "b"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    synced = _live_console(db, monkeypatch, [ProbeStatus.PRESENT if running else ProbeStatus.ABSENT])
+    _rebinding_while_resolving(db, monkeypatch)
+
+    def add() -> None:
+        mc.add_sessions(
+            db, _StubConfig(), console_name="con", session_specs=["b+1"], interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    if running:
+        with pytest.raises(StateConflictError):
+            add()
+    else:
+        add()
+
+    assert [m.session_name for m in db.list_console_sessions("con")] == (["a"] if running else ["a", "b"])
+    assert synced == []
+
+
+@pytest.mark.parametrize("running", [True, False], ids=["running", "not-running"])
+def test_add_shell_refuses_a_new_pane_of_a_running_console_that_now_needs_a_new_secret(
+    db: Database, monkeypatch: pytest.MonkeyPatch, running: bool
+) -> None:
+    """A running console would compose the new pane now, so the edit refuses; otherwise it only records it."""
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["a"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=["a"])
+    synced = _live_console(db, monkeypatch, [ProbeStatus.PRESENT if running else ProbeStatus.ABSENT])
+    _rebinding_while_resolving(db, monkeypatch)
+
+    def add() -> None:
+        mc.add_shell(
+            db, _StubConfig(), console_name="con", session_name="a", cwd="src", interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    if running:
+        with pytest.raises(StateConflictError):
+            add()
+    else:
+        add()
+
+    member = db.get_console_session("con", "a")
+    assert member is not None
+    assert member.shells == ([] if running else [{"cwd": "src", "admin": False}])
+    assert synced == []
