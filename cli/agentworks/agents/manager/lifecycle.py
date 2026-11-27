@@ -274,6 +274,16 @@ def create_agent(
         raise_setup_failures(setup_failures)
 
 
+def _require_still_unused(db: Database, name: str, only_if_unused: bool) -> None:
+    """Refuse, for a cleanup offer, an agent that gained a session or a standing grant since it was offered."""
+    if only_if_unused and not agent_is_unused(db, name):
+        raise StateConflictError(
+            f"agent '{name}' gained a session or a standing grant since it was offered for deletion",
+            entity_kind="agent",
+            entity_name=name,
+        )
+
+
 def delete_agent(
     db: Database,
     config: Config,
@@ -288,11 +298,10 @@ def delete_agent(
     """Delete an agent from a VM.
 
     With ``only_if_unused`` it refuses an agent that is no longer unused
-    (``agent_is_unused``: no session and no standing grant) when it reads its
-    rows, for the offer to delete an agent a session delete left unused. A
-    session, grant or grant-all flag that changes after that read refuses
-    under the lock set like any other change: the sessions and the agent row
-    are compared, and every grant is an entity of the request.
+    (``agent_is_unused``: no session and no standing grant), for the offer
+    to delete an agent a session delete left unused. It checks when it reads
+    its rows and again under its lock set, since a grant's policy can change
+    under an unchanged grant entity.
 
     Orchestrated on the standalone path (``vm_node=None``, the command
     root and ``delete_session``'s agent-cleanup call):
@@ -323,12 +332,7 @@ def delete_agent(
             entity_name=name,
         )
 
-    if only_if_unused and not agent_is_unused(db, name):
-        raise StateConflictError(
-            f"agent '{name}' gained a session or a standing grant since it was offered for deletion",
-            entity_kind="agent",
-            entity_name=name,
-        )
+    _require_still_unused(db, name, only_if_unused)
 
     # Check for sessions using this agent
     all_sessions = db.list_sessions()
@@ -428,6 +432,7 @@ def delete_agent(
             [s.name for s in agent_sessions],
             [s.name for s in db.list_sessions() if s.agent_name == name],
         )
+        _require_still_unused(db, name, only_if_unused)
         # The sessions torn down below, as their rows are now; their names are the ones confirmed.
         agent_sessions = [s for s in db.list_sessions() if s.agent_name == name]
 

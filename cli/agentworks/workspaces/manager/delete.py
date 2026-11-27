@@ -45,11 +45,11 @@ def delete_workspace(
 
     With ``only_with_granters`` it refuses a workspace whose explicit
     granters (:func:`workspace_external_explicit_granters`) are not exactly
-    those when it reads its rows, for the offer to delete a workspace a
-    session delete left empty: the offer named the grants the delete
-    revokes. A grant that comes or goes after that read refuses under the
-    lock set like any other change, since every grant is an entity of the
-    request.
+    those, for the offer to delete a workspace a session delete left empty:
+    the offer named the grants the delete revokes. It checks when it reads
+    its rows and again under its lock set. The request compare alone cannot
+    see the second: a grant-all agent's materialized grant turned into a
+    standing explicit one keeps the same grant entity.
 
     Orchestrated on the standalone path (``vm_node=None``, the command
     root and ``delete_session``'s workspace-cleanup call):
@@ -92,12 +92,7 @@ def delete_workspace(
         stored_path = None
     path_known = stored_path is not None
 
-    if only_with_granters is not None and list(only_with_granters) != workspace_external_explicit_granters(db, name):
-        raise StateConflictError(
-            f"the agents holding explicit grants on workspace '{name}' changed since it was offered for deletion",
-            entity_kind="workspace",
-            entity_name=name,
-        )
+    _require_offered_granters(db, name, only_with_granters)
 
     # Check for sessions
     session_names = [s.name for s in db.list_sessions(workspace_name=name)]
@@ -214,6 +209,7 @@ def delete_workspace(
         require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
         require_unchanged("workspace", name, session_names, [s.name for s in db.list_sessions(workspace_name=name)])
         require_request_unchanged("workspace", name, request, _workspace_delete_request(db, ws))
+        _require_offered_granters(db, name, only_with_granters)
         if vm is not None and trees is not None:
             require_trees_unchanged(vm, config, trees)
         log = _keepalive_stack.enter_context(operation_log(ws.vm_name, "workspace-delete"))
@@ -319,6 +315,16 @@ def delete_workspace(
 
         db.delete_workspace(name)
         output.info(f"Workspace '{name}' deleted")
+
+
+def _require_offered_granters(db: Database, name: str, offered: Sequence[str] | None) -> None:
+    """Refuse, for a cleanup offer, a workspace whose explicit granters are no longer the ``offered`` ones."""
+    if offered is not None and list(offered) != workspace_external_explicit_granters(db, name):
+        raise StateConflictError(
+            f"the agents holding explicit grants on workspace '{name}' changed since it was offered for deletion",
+            entity_kind="workspace",
+            entity_name=name,
+        )
 
 
 def _workspace_delete_request(db: Database, ws: WorkspaceRow) -> LockRequest:

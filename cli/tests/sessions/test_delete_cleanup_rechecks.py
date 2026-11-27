@@ -128,6 +128,67 @@ def test_an_auto_deleted_agent_keeps_a_grant_committed_before_its_lock(
     assert guest.requests == []
 
 
+def test_an_auto_deleted_workspace_keeps_a_grant_all_grant_turned_explicit_before_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``revoke-workspaces --all`` then ``grant-workspaces`` while the delete resolves: one grant key, new policy.
+
+    The grant-all agent's materialized grant is blanket policy, so cleanup
+    offered the workspace with no granters. Another command then made that
+    grant a standing explicit one under the same grant entity, which only
+    the granters compare under the lock set can see.
+    """
+    seed(db)
+    db.insert_agent("granter", "box", "agt-granter", template="default", grant_all=True)
+    db.insert_agent_grant("granter", "ws1", "explicit")
+    reachable(monkeypatch, True)
+
+    def revoke_all_then_grant() -> None:
+        db.update_agent_grant_all("granter", False)
+        db.delete_agent_grant("granter", "ws1", "explicit")
+        db.insert_agent_grant("granter", "ws1", "explicit")
+
+    _commit_while_resolving(monkeypatch, revoke_all_then_grant)
+
+    _cleanup_now_empty_workspace(
+        db, make_config(), _deleted_session(), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_workspace("ws1") is not None
+    assert db.list_workspace_explicit_granters("ws1") == ["granter"]
+    assert guest.requests == []
+
+
+def test_an_auto_deleted_agent_keeps_an_explicit_grant_added_under_a_lingering_implicit_one_before_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An implicit grant left by a session that is gone is no standing grant, but it holds the grant entity.
+
+    A ``grant-workspaces`` while the delete resolves adds a standing grant
+    under that same entity, which only the unused check under the lock set
+    can see.
+    """
+    seed(db)
+    db.insert_agent("a1", "box", "agt-a1", template="default")
+    db.insert_agent_grant("a1", "ws1", "implicit", session_name="gone")
+    reachable(monkeypatch, True)
+    _commit_while_resolving(monkeypatch, lambda: db.insert_agent_grant("a1", "ws1", "explicit"))
+
+    _cleanup_now_empty_agent(
+        db, make_config(), _deleted_session(agent_name="a1"), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_agent("a1") is not None
+    assert db.list_workspace_explicit_granters("ws1") == ["a1"]
+    assert guest.requests == []
+
+
 def _commit_while_offering(monkeypatch: pytest.MonkeyPatch, change: Callable[[], None]) -> None:
     """Commit ``change`` while the operator answers the offer: after it chose, before the delete reads its rows."""
 
