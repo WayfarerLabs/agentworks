@@ -21,8 +21,8 @@ from agentworks.sessions import manager
 from agentworks.sessions.manager import _queries, _status
 from agentworks.sessions.manager._tmux_server import resolve_session_tmux_server
 from agentworks.workspaces import manager as workspaces
-from tests.runtime_state.test_composition import BOOT, REFUSE, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
+from tests.runtime_state.runtime_support import BOOT, REFUSE, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 from tests.vm_access_support import AccessRecorder, install_access_recorder
 
 if TYPE_CHECKING:

@@ -96,7 +96,7 @@ def rehome_workspace(
 def _refuse_unstopped_sessions(db: Database, config: Config, ws_name: str, sessions: list[SessionRow]) -> None:
     """Refuse a rehome while any of ``sessions``, the workspace's, is not stopped.
 
-    It only observes, persisting nothing. Before the guard the caller passes
+    It only observes, persisting nothing. Before the lock set the caller passes
     only the sessions whose status can be decided without repairing their PID
     evidence; under it, every session once ``ensure_pids_batch`` has repaired
     that evidence.
@@ -165,14 +165,15 @@ def _rehome_vm(
     the graph is the live VM alone, the activation gate replaces this
     command's ``keep_active``, and the whole move runs inside the
     held-active span. The not-found check and the VM-status guard stay
-    pre-boundary. Inside the span and before the native mutation guard,
-    the command only observes: the sessions check persists nothing and
-    leaves a session whose PID evidence needs repair undecided, the
-    source / target directory checks need SSH, and the confirm renders
-    the stored and new paths. Under the guard the workspace row is read
-    again, PID evidence is repaired, and the sessions check and the
-    directory checks run again, since a session can start or a path can
-    change between the confirmation and the guard.
+    pre-boundary. Inside the span and before the lock set, the command
+    only observes: the sessions check persists nothing and leaves a
+    session whose PID evidence needs repair undecided, the source / target
+    directory checks need SSH, and the confirm renders the stored and new
+    paths. The set holds the workspace and both trees exclusive, named by
+    the guest's lookup walk. Under it the workspace row is read again, the
+    walk runs again, PID evidence is repaired, and the sessions check and
+    the directory checks run again, since a session can start or a path
+    can change between the confirmation and the lock.
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.sessions.manager import _needs_repair, ensure_pids_batch
@@ -193,6 +194,11 @@ def _rehome_vm(
         )
 
     _guard_vm_status(vm)
+    from agentworks.native_locks import probe_locks
+    from agentworks.workspaces.locks import require_trees_unchanged, walk_trees, with_trees, workspace_request
+
+    request = workspace_request(ws)
+    probe_locks(db.path, request)
     registry = load_request_registry(config, live_database=db)
     with gated_vm_boundary(
         db,
@@ -204,7 +210,7 @@ def _rehome_vm(
     ) as (vm_node, _resolver, _ctx):
         vm = vm_node.row
         probe = admin_access(vm, config, None)
-        # A session whose PID evidence needs repair is undecided until the guard is held.
+        # A session whose PID evidence needs repair is undecided until the set is held.
         decidable = [s for s in db.list_sessions(workspace_name=ws_name) if not _needs_repair(s)]
         _refuse_unstopped_sessions(db, config, ws_name, decidable)
         _refuse_unusable_paths(probe, old_path, new_path, ws_name=ws_name)
@@ -220,9 +226,13 @@ def _rehome_vm(
             if not output.confirm("Proceed?"):
                 raise UserAbort("rehome cancelled")
 
-        # The log closes exactly once, however the move ends.
-        with vm_node.mutation_guard(), operation_log(vm.name, "workspace-rehome") as log:
+        # The source is read whole and the target filled, so both trees are locked
+        # exclusive, as the guest resolves them; the log closes exactly once,
+        # however the move ends.
+        trees = walk_trees(vm, config, [stored_workspace_path(old_path), new_path])
+        with vm_node.locked(with_trees(request, trees)), operation_log(vm.name, "workspace-rehome") as log:
             require_vm_unchanged(db, vm)
+            require_trees_unchanged(vm, config, trees)
             require_unchanged("workspace", ws_name, workspace_fields(ws), workspace_fields(db.get_workspace(ws_name)))
             sessions = ensure_pids_batch(db.list_sessions(workspace_name=ws_name), db=db, config=config)
             _refuse_unstopped_sessions(db, config, ws_name, sessions)

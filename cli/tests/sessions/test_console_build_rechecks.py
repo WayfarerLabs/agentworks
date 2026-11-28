@@ -1,4 +1,4 @@
-"""``console create`` and ``restore-session`` resolve with no guard held, then refuse what changed before the guard."""
+"""``console create`` and ``restore-session`` resolve with nothing locked, then refuse what changed before the lock."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from uuid import uuid4
 import pytest
 
 from agentworks.errors import StateConflictError
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.secrets import SecretTarget
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
@@ -27,21 +28,21 @@ CON = "aw-console-con"
 PANE = SecretTarget(vm={}, label="console-pane:pin")
 
 
-def _guard_free(db: Database) -> bool:
+def _vm_unlocked(db: Database) -> bool:
     try:
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             return True
-    except NativeSetupBusyError:
+    except NativeLockBusyError:
         return False
 
 
 def _resolving(db: Database, monkeypatch: pytest.MonkeyPatch, then: Callable[[], None] | None = None) -> list[bool]:
-    """Record, at each boundary resolve, whether the guard was free; ``then`` runs after the first."""
+    """Record, at each boundary resolve, whether the lock was free; ``then`` runs after the first."""
     during: list[bool] = []
     resolve = Resolver.resolve
 
     def resolving(resolver: Resolver) -> None:
-        during.append(_guard_free(db))
+        during.append(_vm_unlocked(db))
         resolve(resolver)
         if then is not None and len(during) == 1:
             then()
@@ -65,7 +66,7 @@ def _create(db: Database) -> None:
     )
 
 
-def test_create_resolves_with_no_guard_held(
+def test_create_resolves_with_nothing_locked(
     db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_vm(db, with_tailscale=True)
@@ -90,7 +91,7 @@ def test_create_resolves_with_no_guard_held(
     ],
     ids=["console-created", "member-session-replaced", "vm-changed", "vm-rebound"],
 )
-def test_create_refuses_what_changed_before_its_guard(
+def test_create_refuses_what_changed_before_its_lock(
     db: Database,
     console_guest_factory: Callable[..., _ScriptedGuest],
     monkeypatch: pytest.MonkeyPatch,
@@ -141,7 +142,7 @@ def _restore(db: Database) -> None:
     mc.restore_session(db, _StubConfig(), console_name="con", session_name="b", interaction=TtyInteractionPolicy.REFUSE)
 
 
-def test_restore_resolves_with_no_guard_held(
+def test_restore_resolves_with_nothing_locked(
     db: Database, console_guest_factory: Callable[..., _ScriptedGuest], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     model = _restorable(db, monkeypatch)
@@ -165,7 +166,7 @@ def test_restore_resolves_with_no_guard_held(
     ],
     ids=["member-shells-changed", "session-replaced", "vm-changed", "window-changed", "vm-rebound"],
 )
-def test_restore_refuses_what_changed_before_its_guard(
+def test_restore_refuses_what_changed_before_its_lock(
     db: Database,
     console_guest_factory: Callable[..., _ScriptedGuest],
     monkeypatch: pytest.MonkeyPatch,

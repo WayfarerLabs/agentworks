@@ -17,9 +17,8 @@ are driven for real.
 
 from __future__ import annotations
 
-import contextlib
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -440,8 +439,11 @@ def test_restart_refuses_a_recreated_session_before_preparation(
     selected = db.get_session("s1")
     assert selected is not None
 
-    @contextlib.contextmanager
-    def _replace_at_guard(*args: object, **kwargs: object) -> Iterator[None]:
+    import agentworks.runtime_state._families as families
+    from agentworks.native_locks import probe_locks as original_probe
+
+    def _replace_at_probe(*args: object, **kwargs: object) -> None:
+        original_probe(*args, **kwargs)  # type: ignore[arg-type]
         db.delete_session("s1")
         db.insert_session(
             "s1",
@@ -451,9 +453,8 @@ def test_restart_refuses_a_recreated_session_before_preparation(
             agent_name="a1",
             socket_path="/tmp/replacement.sock",
         )
-        yield
 
-    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", _replace_at_guard)
+    monkeypatch.setattr(families, "probe_locks", _replace_at_probe)
     monkeypatch.setattr(
         "agentworks.sessions.manager._ensure_pid",
         lambda *args, **kwargs: pytest.fail("identity refusal must precede PID repair"),
@@ -2284,25 +2285,26 @@ def test_create_command_preflight_uses_planned_identity_and_workspace_before_row
     assert events == []
 
 
-def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guard(
+def test_create_resolves_unlocked_then_refuses_an_agent_changed_before_the_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The gate and the boundary resolve run with no guard held; an agent
+    """The gate and the boundary resolve run with nothing locked; an agent
     replaced in between is not the one the plan read, so nothing is created."""
     from agentworks.errors import StateConflictError
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.sessions.manager import _create, create_session
 
     events: list[str] = []
     db = _create_stubs(tmp_path, monkeypatch, events)
     db.insert_agent("a1", "vm1", "agt-a1")
     resolve = _create._preflight_and_resolve
-    unguarded: list[bool] = []
+    unlocked: list[bool] = []
 
     def resolve_then_replace_the_agent(*args: Any, **kwargs: Any) -> dict[str, str]:
-        with native_mutation_guard(db.path, "vm1"):
-            unguarded.append(True)
+        with native_locks(db.path, vm_exclusive("vm1")):
+            unlocked.append(True)
         values = resolve(*args, **kwargs)
         db.delete_agent("a1")
         db.insert_agent("a1", "vm1", "agt-a1-other")
@@ -2320,9 +2322,74 @@ def test_create_resolves_unguarded_then_refuses_an_agent_changed_before_the_guar
             interaction=TtyInteractionPolicy.REFUSE,
         )
 
-    assert unguarded == [True]
+    assert unlocked == [True]
     assert db.get_session("s1") is None
     assert not any("new-session" in event for event in events)
+    db.close()
+
+
+def test_a_failed_compound_create_unwinds_through_the_real_deletes_beside_unrelated_holders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unwind's nested workspace and agent deletes reuse the create's set: unrelated holders on the VM
+    (another workspace, its session and another agent) refuse none of them."""
+    from agentworks.native_locks import LockRequest, account_entity, native_locks, session_entity, workspace_entity
+    from agentworks.sessions import tmux as tmux_mod
+    from agentworks.sessions.manager import create_session
+    from tests.vm_access_support import account_processes_stopped
+
+    events: list[str] = []
+    db = _create_stubs(tmp_path, monkeypatch, events)
+    guest = _Target(events)
+    _route_guests(
+        monkeypatch,
+        _Target(events),
+        guest,
+    ).answer = lambda call: account_processes_stopped(call) or guest.answer(call)
+
+    def _realize_workspace(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        # At the path the create planned and locked.
+        db_._conn.execute(
+            "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
+            (kwargs["name"], kwargs["vm"].name, f"/srv/{kwargs['name']}", f"ws-{kwargs['name']}"),
+        )
+        db_._conn.commit()
+
+    def _realize_agent(db_: Any, config: Any, registry: Any, **kwargs: Any) -> None:
+        db_.insert_agent(kwargs["name"], kwargs["vm"].name, f"agt-{kwargs['name']}")
+
+    monkeypatch.setattr("agentworks.workspaces.realize.realize_workspace", _realize_workspace)
+    monkeypatch.setattr("agentworks.agents.realize.realize_agent", _realize_agent)
+    monkeypatch.setattr("agentworks.agents.grants.remove_from_workspace_group", lambda *a, **k: None)
+
+    def _explode(*a: object, **k: object) -> None:
+        raise RuntimeError("tmux exploded")
+
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", _explode)
+    elsewhere = workspace_entity("vm1", "ws1")
+    bystander = account_entity("vm1", "agt-bystander")
+    unrelated = LockRequest(
+        exclusive=(elsewhere, bystander, session_entity("busy", workspace=elsewhere, account=bystander))
+    )
+
+    with native_locks(db.path, unrelated), pytest.raises(RuntimeError, match="tmux exploded"):
+        create_session(
+            db,
+            SimpleNamespace(  # type: ignore[arg-type]
+                session=SimpleNamespace(history_limit=1),
+                paths=SimpleNamespace(vm_workspaces="/srv", vscode_workspaces=tmp_path / "vscode"),
+            ),
+            name="s1",
+            new_workspace=True,
+            new_agent=True,
+            vm_name="vm1",
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+
+    assert db.get_session("s1") is None
+    assert db.get_agent("s1") is None
+    assert db.get_workspace("s1") is None
     db.close()
 
 
@@ -2369,6 +2436,6 @@ def test_create_refuses_a_rebinding_that_needs_a_secret_its_resolve_never_asked_
         )
 
     assert db.get_session("s1") is None
-    # Only the read-only probes before the guard reached the guest.
+    # Only the read-only probes before the lock reached the guest.
     assert set(events) <= {"probe"}
     db.close()

@@ -24,7 +24,6 @@ from agentworks.artifacts.publication import validate_application
 from agentworks.artifacts.routing import RoutingResult
 from agentworks.capabilities.harness_integration.setup import WorkspaceSetupInvocation
 from agentworks.errors import StateError
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim
 from agentworks.harness_setup.outcomes import Redactor, SetupFailure
@@ -33,6 +32,7 @@ from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.artifacts._fixtures import received
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import run_setup_held
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 
@@ -160,7 +160,7 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
 
     with seated_plugin(Plugin(name="shared-mcp-plugin", capabilities={"harness-integration": (SharedMCP,)})):
         failures: list[SetupFailure] = []
-        state = run_setup(db, Mock(), inputs, invocation, operation="workspace-create", failures=failures)
+        state = run_setup_held(db, Mock(), inputs, invocation, operation="workspace-create", failures=failures)
         assert failures == []
         (record,) = state.records
         assert record.complete and record.artifact_files == ()
@@ -171,9 +171,9 @@ def test_dispatch_excludes_shared_mcp_document_without_owning_or_changing_it(
             assert captured_output.warnings
             assert git("-C", workspace, "ls-files", "--error-unmatch", "--", ".mcp.json").stdout
         settled = exclude.read_bytes()
-        run_setup(db, Mock(), inputs, invocation, operation="workspace-create", failures=failures)
+        run_setup_held(db, Mock(), inputs, invocation, operation="workspace-create", failures=failures)
         assert exclude.read_bytes() == settled
-        retired = run_setup(
+        retired = run_setup_held(
             db, Mock(), replace(inputs, activations={}), invocation, operation="workspace-delete", failures=failures
         )
         assert failures == [] and retired.records == ()

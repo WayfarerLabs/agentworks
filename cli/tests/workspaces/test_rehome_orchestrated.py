@@ -448,21 +448,22 @@ def test_first_repair_after_rehome_is_a_noop(
     assert "\nNo issues found" in captured_output.info
 
 
-# -- observation before the guard, the re-check under it ------
+# -- observation before the lock, the re-check under it ------
 
 
-def test_rehome_observes_without_writing_then_refuses_a_session_started_before_the_guard(
+def test_rehome_observes_without_writing_then_refuses_a_session_started_before_the_lock(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Before the confirmation the sessions check only observes: nothing is
-    repaired or written, and no guard is held. Under the guard PID evidence
+    repaired or written, and nothing is locked. Under the lock set PID evidence
     is repaired and the check runs again, so a session that started after
     the confirmation refuses the rehome before the target is reserved."""
     from agentworks import output as output_mod
     from agentworks.db import SessionStatus
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.sessions import manager as sessions_manager
 
     config = make_config()
@@ -473,24 +474,24 @@ def test_rehome_observes_without_writing_then_refuses_a_session_started_before_t
     route(monkeypatch, fake)
     events: list[tuple[str, bool]] = []
 
-    def guarded() -> bool:
+    def locked() -> bool:
         try:
-            with native_mutation_guard(db.path, "box"):
+            with native_locks(db.path, vm_exclusive("box")):
                 return False
-        except NativeSetupBusyError:
+        except NativeLockBusyError:
             return True
 
     def observe(sessions: list[object], **_kwargs: object) -> dict[str, SessionStatus]:
-        events.append(("observe", guarded()))
+        events.append(("observe", locked()))
         started = sum(name == "observe" for name, _ in events) > 1
         return {session.name: SessionStatus.RUNNING if started else SessionStatus.STOPPED for session in sessions}  # type: ignore[attr-defined]
 
     def repair(sessions: list[object], **_kwargs: object) -> list[object]:
-        events.append(("repair", guarded()))
+        events.append(("repair", locked()))
         return sessions
 
     def confirm(message: str, default: bool = False) -> bool:
-        events.append(("confirm", guarded()))
+        events.append(("confirm", locked()))
         return True
 
     monkeypatch.setattr(sessions_manager, "observe_session_statuses", observe)
@@ -506,13 +507,13 @@ def test_rehome_observes_without_writing_then_refuses_a_session_started_before_t
     assert ws is not None and ws.workspace_path == "/srv/ws1"
 
 
-def test_rehome_leaves_a_session_needing_pid_repair_for_the_guard_to_decide(
+def test_rehome_leaves_a_session_needing_pid_repair_for_the_lock_to_decide(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A session without PID evidence is not observed before the confirmation;
-    under the guard it is repaired and observed, and a running one refuses."""
+    under the lock it is repaired and observed, and a running one refuses."""
     from agentworks import output as output_mod
     from agentworks.db import SessionMode, SessionStatus
     from agentworks.sessions import manager as sessions_manager
@@ -549,7 +550,7 @@ def test_rehome_leaves_a_session_needing_pid_repair_for_the_guard_to_decide(
     assert not any(starts("mkdir")(request) for request in fake.requests)
 
 
-def test_rehome_refuses_when_the_workspace_changed_before_the_guard(
+def test_rehome_refuses_when_the_workspace_changed_before_the_lock(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,

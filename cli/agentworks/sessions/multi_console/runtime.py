@@ -9,12 +9,11 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.multi_console as _mc
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import NotFoundError, StateError, ValidationError
-from agentworks.harness_setup.locking import native_mutation_guard
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.tmux import ProbeStatus
 
 from ._access import console_access
-from ._helpers import _require_console, _verify_session_on_vm, guarded_console_selection
+from ._helpers import _require_console, _verify_session_on_vm, console_request, locked_console
 from ._status import ConsoleStatus, classify_console_status
 
 if TYPE_CHECKING:
@@ -23,7 +22,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import ConsoleRow, ConsoleSessionRow, Database, VMRow
     from agentworks.execution.access import VMAccess
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
 
@@ -40,7 +39,7 @@ class ConsoleAction(Enum):
 
 @dataclass(frozen=True)
 class PreparedConsoleReconcile:
-    """A definition and exact runtime observation retained under a family guard.
+    """A definition and exact runtime observation retained under the console's lock.
 
     ``access`` holds the admin's access and, for a build, those of the agents
     whose shell panes it parks, already checked.
@@ -51,7 +50,7 @@ class PreparedConsoleReconcile:
     console: ConsoleRow
     vm: VMRow
     access: ConsoleAccess
-    held_native_guard: NativeMutationGuard
+    held: NativeLockSet
     members: tuple[ConsoleSessionRow, ...]
     layout: str
     canonical: ProbeStatus
@@ -67,13 +66,13 @@ class PreparedConsoleReconcile:
 
 @dataclass(frozen=True)
 class PreparedConsoleStop:
-    """A teardown prepared under a family guard; ``admin`` is ``None`` for a VM the provider reports off."""
+    """A teardown prepared under the console's lock; ``admin`` is ``None`` for a VM the provider reports off."""
 
     db: Database
     console: ConsoleRow
     vm: VMRow
     admin: VMAccess | None
-    held_native_guard: NativeMutationGuard
+    held: NativeLockSet
     members: tuple[ConsoleSessionRow, ...]
     canonical: ProbeStatus
     staging: ProbeStatus
@@ -129,7 +128,7 @@ def set_console_desired_runtime_state(
         raise ValidationError("invalid console runtime target", entity_kind="console", entity_name=name) from None
     if target is DesiredRuntimeState.ON_DEMAND:
         raise ValidationError("consoles require a running or stopped target", entity_kind="console", entity_name=name)
-    with guarded_console_selection(db, name):
+    with locked_console(db, name):
         db.set_console_desired_runtime_state(name, target)
 
 
@@ -137,14 +136,19 @@ def accept_console_running(
     db: Database,
     *,
     console: ConsoleRow,
-    held_native_guard: NativeMutationGuard,
+    held: NativeLockSet,
 ) -> None:
-    """Record running intent for ``console``, whose definition the caller validated under the same guard."""
-    with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
-        current = _require_console(db, console.name)
-        if current != console:
-            raise StateError("console definition changed before start acceptance")
-        db.set_console_desired_runtime_state(console.name, DesiredRuntimeState.RUNNING)
+    """Record running intent for ``console``, whose definition the caller validated under the same set."""
+    _require_held_console(db, console, held)
+    current = _require_console(db, console.name)
+    if current != console:
+        raise StateError("console definition changed before start acceptance")
+    db.set_console_desired_runtime_state(console.name, DesiredRuntimeState.RUNNING)
+
+
+def _require_held_console(db: Database, console: ConsoleRow, held: NativeLockSet) -> None:
+    """Refuse unless the caller's set holds ``console`` exclusive."""
+    held.require(console_request(db, console), database_path=db.path)
 
 
 def _presence(admin: VMAccess | None, name: str) -> tuple[ProbeStatus, ProbeStatus]:
@@ -164,49 +168,49 @@ def prepare_console_reconcile(
     console: ConsoleRow,
     vm: VMRow,
     admin: VMAccess,
-    held_native_guard: NativeMutationGuard,
+    held: NativeLockSet,
     replace_running: bool = False,
 ) -> PreparedConsoleReconcile:
     """Observe and collect build requirements without changing tmux state.
 
-    The caller validated the console's definition under the same guard,
+    The caller validated the console's definition under the same set,
     before accepting running intent. A build also checks the direct SSH of
     every agent whose shell panes it will park for, so an agent that
     predates the rollout is refused here.
     """
-    with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
-        current = _require_console(db, console.name)
-        if current != console or vm.name != console.vm_name:
-            raise StateError("console definition changed before runtime preparation")
-        members = tuple(db.list_console_sessions(console.name))
-        canonical, staging = _presence(admin, console.name)
-        if replace_running:
-            action = ConsoleAction.REPLACE
-        elif canonical is ProbeStatus.PRESENT:
-            action = ConsoleAction.CLEANUP_STAGING if staging is ProbeStatus.PRESENT else ConsoleAction.UNCHANGED
-        else:
-            action = ConsoleAction.BUILD
-        builds = action in {ConsoleAction.BUILD, ConsoleAction.REPLACE}
-        targets = (
-            tuple(_mc._console_build_secret_targets(db, registry, console=console, vm=vm, members=members))
-            if builds
-            else ()
-        )
-        access = console_access(db, config, vm, admin, members if builds else ())
-        return PreparedConsoleReconcile(
-            db,
-            registry,
-            console,
-            vm,
-            access,
-            held_native_guard,
-            members,
-            named_console_template(registry).tmux_layout,
-            canonical,
-            staging,
-            action,
-            targets,
-        )
+    _require_held_console(db, console, held)
+    current = _require_console(db, console.name)
+    if current != console or vm.name != console.vm_name:
+        raise StateError("console definition changed before runtime preparation")
+    members = tuple(db.list_console_sessions(console.name))
+    canonical, staging = _presence(admin, console.name)
+    if replace_running:
+        action = ConsoleAction.REPLACE
+    elif canonical is ProbeStatus.PRESENT:
+        action = ConsoleAction.CLEANUP_STAGING if staging is ProbeStatus.PRESENT else ConsoleAction.UNCHANGED
+    else:
+        action = ConsoleAction.BUILD
+    builds = action in {ConsoleAction.BUILD, ConsoleAction.REPLACE}
+    targets = (
+        tuple(_mc._console_build_secret_targets(db, registry, console=console, vm=vm, members=members))
+        if builds
+        else ()
+    )
+    access = console_access(db, config, vm, admin, members if builds else ())
+    return PreparedConsoleReconcile(
+        db,
+        registry,
+        console,
+        vm,
+        access,
+        held,
+        members,
+        named_console_template(registry).tmux_layout,
+        canonical,
+        staging,
+        action,
+        targets,
+    )
 
 
 def prepare_console_stop(
@@ -215,25 +219,25 @@ def prepare_console_stop(
     console: ConsoleRow,
     vm: VMRow,
     admin: VMAccess | None,
-    held_native_guard: NativeMutationGuard,
+    held: NativeLockSet,
 ) -> PreparedConsoleStop:
     """Prepare exact teardown; a provider-off VM is represented by no access."""
-    with native_mutation_guard(db.path, console.vm_name, held=held_native_guard):
-        if _require_console(db, console.name) != console or vm.name != console.vm_name:
-            raise StateError("console definition changed before stop preparation")
-        canonical, staging = _presence(admin, console.name)
-        action = ConsoleAction.STOP if ProbeStatus.PRESENT in {canonical, staging} else ConsoleAction.UNCHANGED
-        return PreparedConsoleStop(
-            db,
-            console,
-            vm,
-            admin,
-            held_native_guard,
-            tuple(db.list_console_sessions(console.name)),
-            canonical,
-            staging,
-            action,
-        )
+    _require_held_console(db, console, held)
+    if _require_console(db, console.name) != console or vm.name != console.vm_name:
+        raise StateError("console definition changed before stop preparation")
+    canonical, staging = _presence(admin, console.name)
+    action = ConsoleAction.STOP if ProbeStatus.PRESENT in {canonical, staging} else ConsoleAction.UNCHANGED
+    return PreparedConsoleStop(
+        db,
+        console,
+        vm,
+        admin,
+        held,
+        tuple(db.list_console_sessions(console.name)),
+        canonical,
+        staging,
+        action,
+    )
 
 
 def _verify_prepared(prepared: PreparedConsoleReconcile | PreparedConsoleStop) -> None:
@@ -267,55 +271,55 @@ def execute_console_reconcile(prepared: PreparedConsoleReconcile, *, values: Map
     """Apply a prepared console action using only supplied workload values."""
     from .attach import _teardown_console_staging
 
-    with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
-        _verify_prepared(prepared)
-        admin = prepared.admin
-        canonical, staging = _presence(admin, prepared.console.name)
-        if prepared.action is ConsoleAction.UNCHANGED:
-            if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
-                raise StateError("console runtime changed after preparation")
-            return False
-        if prepared.action is ConsoleAction.CLEANUP_STAGING:
-            if canonical is not ProbeStatus.PRESENT:
-                raise StateError("console canonical runtime disappeared after preparation")
+    _require_held_console(prepared.db, prepared.console, prepared.held)
+    _verify_prepared(prepared)
+    admin = prepared.admin
+    canonical, staging = _presence(admin, prepared.console.name)
+    if prepared.action is ConsoleAction.UNCHANGED:
+        if canonical is not ProbeStatus.PRESENT or staging is not ProbeStatus.ABSENT:
+            raise StateError("console runtime changed after preparation")
+        return False
+    if prepared.action is ConsoleAction.CLEANUP_STAGING:
+        if canonical is not ProbeStatus.PRESENT:
+            raise StateError("console canonical runtime disappeared after preparation")
+        _teardown_console_staging(admin, prepared.console.name)
+        return staging is ProbeStatus.PRESENT
+    if canonical is ProbeStatus.PRESENT and prepared.action is ConsoleAction.BUILD:
+        if staging is ProbeStatus.PRESENT:
             _teardown_console_staging(admin, prepared.console.name)
-            return staging is ProbeStatus.PRESENT
-        if canonical is ProbeStatus.PRESENT and prepared.action is ConsoleAction.BUILD:
-            if staging is ProbeStatus.PRESENT:
-                _teardown_console_staging(admin, prepared.console.name)
-                return True
-            return False
-        if prepared.action is ConsoleAction.REPLACE:
-            _mc._teardown_console_tmux(admin, prepared.console.name)
-        _mc._build_console_tmux(
-            prepared.access,
-            prepared.db,
-            prepared.registry,
-            prepared.console,
-            values=values,
-            layout=prepared.layout,
-            members=prepared.members,
-        )
-        return True
+            return True
+        return False
+    if prepared.action is ConsoleAction.REPLACE:
+        _mc._teardown_console_tmux(admin, prepared.console.name)
+    _mc._build_console_tmux(
+        prepared.access,
+        prepared.db,
+        prepared.registry,
+        prepared.console,
+        values=values,
+        layout=prepared.layout,
+        members=prepared.members,
+    )
+    return True
 
 
 def execute_console_stop(prepared: PreparedConsoleStop) -> bool:
     """Execute prepared teardown without resolving secrets or starting a VM."""
-    with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
-        _verify_prepared(prepared)
-        if prepared.admin is None:
-            return False
-        canonical, staging = _presence(prepared.admin, prepared.console.name)
-        _mc._teardown_console_tmux(prepared.admin, prepared.console.name)
-        return ProbeStatus.PRESENT in {canonical, staging}
+    _require_held_console(prepared.db, prepared.console, prepared.held)
+    _verify_prepared(prepared)
+    if prepared.admin is None:
+        return False
+    canonical, staging = _presence(prepared.admin, prepared.console.name)
+    _mc._teardown_console_tmux(prepared.admin, prepared.console.name)
+    return ProbeStatus.PRESENT in {canonical, staging}
 
 
 def observe_prepared_console(prepared: PreparedConsoleReconcile | PreparedConsoleStop) -> ConsoleStatus:
     """Observe the retained exact names without resolving sources or activating."""
-    with native_mutation_guard(prepared.db.path, prepared.vm.name, held=prepared.held_native_guard):
-        _verify_prepared(prepared)
-        canonical, staging = _presence(prepared.admin, prepared.console.name)
-        return classify_console_status(
-            canonical_present=canonical is ProbeStatus.PRESENT,
-            staging_present=staging is ProbeStatus.PRESENT,
-        )
+    _require_held_console(prepared.db, prepared.console, prepared.held)
+    _verify_prepared(prepared)
+    canonical, staging = _presence(prepared.admin, prepared.console.name)
+    return classify_console_status(
+        canonical_present=canonical is ProbeStatus.PRESENT,
+        staging_present=staging is ProbeStatus.PRESENT,
+    )

@@ -153,9 +153,16 @@ def _gated_vm_boundary(
     ordering (gate, then preflight, then resolve, all inside the span)
     changes the composition's shape rather than adding a flag to it.
 
+    Every command through here holds at least the vm shared, so the vm's
+    admission is probed before the gate: an access command, whose admission
+    is its whole lock, refuses a VM-wide operation before anything resolves.
+    The admission itself is the gate's keepalive hold
+    (``LiveVMNode.hold_active``), under a brief vm shared.
     """
     _warn_legacy_release(vm)
 
+    from agentworks.native_locks import probe_locks
+    from agentworks.native_locks.rows import admission
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -166,6 +173,7 @@ def _gated_vm_boundary(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
+    probe_locks(db.path, admission(vm.name))
     resolver = Resolver(config, registry, interaction=interaction)
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
@@ -306,8 +314,8 @@ def _auth_key_boundary(
     this call only (the persisted template is untouched); ``prompt`` routes the
     key alone to terminal entry, bypassing its configured sources, while every
     other secret resolves normally. The caller rejects the two together.
-    Every prompt here runs unguarded; the caller takes the VM family guard
-    afterwards through ``vm_node.mutation_guard()``. Returns the live
+    Every prompt here runs unlocked; the caller takes its lock set
+    afterwards through ``vm_node.locked``. Returns the live
     node, the resolver (whose cache a later gate serves, and which the caller
     closes), the op-start context and the line-safe auth key; a failure here
     closes the resolver itself.

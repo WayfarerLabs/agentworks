@@ -125,7 +125,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
 # -- validation stays pre-gate ------------------------------------------------
 
 
-def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
+def test_delete_sessions_lock_refuses_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -369,7 +369,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
 ) -> None:
     """A teardown must hand ``delete_workspace`` the workspace's OWN vm node.
     A node for a different VM would hold that VM active while the delete
-    body works against the workspace's real VM; the guard raises a typed
+    body works against the workspace's real VM; the lock raises a typed
     ``StateError`` before the hold is ever entered."""
     config = make_config()
     seed(db)  # ws1 on 'box'
@@ -483,7 +483,7 @@ def test_delete_of_a_stored_trailing_slash_removes_the_link_not_its_target(
     assert db.get_workspace("ws1") is None
 
 
-def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_added_since(
+def test_delete_asks_and_resolves_with_nothing_locked_then_refuses_a_session_added_since(
     db: Database,
     make_config,  # noqa: ANN001
     guest: Guest,
@@ -491,24 +491,25 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
 ) -> None:
     from agentworks import output as output_mod
     from agentworks.errors import StateConflictError
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
 
     config = make_config()
     seed(db)
     reachable(monkeypatch, True)
-    unguarded: list[str] = []
+    unlocked: list[str] = []
 
     def confirm(message: str, default: bool = False) -> bool:
-        with native_mutation_guard(db.path, "box"):
-            unguarded.append("confirm")
+        with native_locks(db.path, vm_exclusive("box")):
+            unlocked.append("confirm")
         return True
 
     resolve = Resolver.resolve
 
     def resolve_then_a_session_appears(self: Resolver) -> None:
-        with native_mutation_guard(db.path, "box"):
-            unguarded.append("resolve")
+        with native_locks(db.path, vm_exclusive("box")):
+            unlocked.append("resolve")
         resolve(self)
         seed_live_session(db, name="late", ws="ws1")
 
@@ -518,6 +519,29 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     with pytest.raises(StateConflictError):
         workspace_manager.delete_workspace(db, config, "ws1", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert unguarded == ["confirm", "resolve"]
+    assert unlocked == ["confirm", "resolve"]
     assert guest.requests == []
     assert db.get_workspace("ws1") is not None
+
+
+def test_delete_refuses_a_grant_added_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    seed(db)
+    db.insert_agent("bot", "box", "agt-bot")
+    reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: db.insert_agent_grant("bot", "ws1", "explicit"))
+
+    with pytest.raises(StateConflictError):
+        workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert db.get_workspace("ws1") is not None
+    assert REMOVE_DIRECTORY not in guest.argvs()

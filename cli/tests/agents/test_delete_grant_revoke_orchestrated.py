@@ -384,7 +384,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
 # -- validation stays pre-gate ------------------------------------------------
 
 
-def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
+def test_delete_sessions_lock_refuses_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -676,7 +676,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
     """Enforce-invariants pin: a teardown must hand ``delete_agent`` the
     agent's OWN vm node. A node for a different VM would hold that VM
     active while the delete body issues SSH + DB work against the agent's
-    real VM, a silent footgun; the guard raises a typed ``StateError``
+    real VM, a silent footgun; the lock raises a typed ``StateError``
     before the hold is ever entered."""
     config = make_config()
     _seed(db)  # a1 on 'box'
@@ -819,7 +819,7 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     assert "agent still has implicit access via sessions to: ws1" in captured_output.warnings
 
 
-def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_added_since(
+def test_delete_asks_and_resolves_with_nothing_locked_then_refuses_a_session_added_since(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeAdminGuest,
@@ -829,25 +829,26 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     the operator confirmed, so the delete refuses before any VM work."""
     from agentworks import output as output_mod
     from agentworks.errors import StateConflictError
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
 
     config = make_config()
     _seed(db)
     _seed_workspace(db, vm_name="box", name="ws1")
     _reachable(monkeypatch, True)
-    unguarded: list[str] = []
+    unlocked: list[str] = []
 
     def confirm(message: str, default: bool = False) -> bool:
-        with native_mutation_guard(db.path, "box"):
-            unguarded.append("confirm")
+        with native_locks(db.path, vm_exclusive("box")):
+            unlocked.append("confirm")
         return True
 
     resolve = Resolver.resolve
 
     def resolve_then_a_session_appears(self: Resolver) -> None:
-        with native_mutation_guard(db.path, "box"):
-            unguarded.append("resolve")
+        with native_locks(db.path, vm_exclusive("box")):
+            unlocked.append("resolve")
         resolve(self)
         _seed_live_session(db, name="late", ws="ws1", agent="a1")
 
@@ -857,12 +858,92 @@ def test_delete_asks_and_resolves_with_no_guard_held_then_refuses_a_session_adde
     with pytest.raises(StateConflictError):
         agent_manager.delete_agent(db, config, name="a1", force=True, interaction=TtyInteractionPolicy.REFUSE)
 
-    assert unguarded == ["confirm", "resolve"]
+    assert unlocked == ["confirm", "resolve"]
     assert target.commands == []
     assert db.get_agent("a1") is not None
 
 
-def test_delete_tears_down_the_session_rows_as_they_are_under_the_guard(
+# -- the lock set rebuilt under itself ------------------------------------------
+
+
+def test_grant_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _seed_workspace(db, vm_name="box", name="late"))
+
+    with pytest.raises(StateConflictError):
+        agent_grants.grant_workspaces(
+            db, config, agent_name="a1", workspace_names=[], grant_all=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    row = db.get_agent("a1")
+    assert row is not None and not row.grant_all
+    assert not any(c.startswith("usermod") for c in target.commands)
+
+
+def test_revoke_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A named revoke locks the grants it names whatever the rows say; ``--all`` locks every workspace it reads."""
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    db.insert_agent_grant("a1", "ws1", "explicit")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _seed_workspace(db, vm_name="box", name="late"))
+
+    with pytest.raises(StateConflictError):
+        agent_grants.revoke_workspaces(
+            db, config, agent_name="a1", workspace_names=[], revoke_all=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    assert db.has_any_grant("a1", "ws1")
+    assert not any(c.startswith("usermod") for c in target.commands)
+
+
+def test_delete_refuses_a_grant_added_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    synced: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: db.insert_agent_grant("a1", "ws1", "explicit"))
+
+    with pytest.raises(StateConflictError):
+        agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert db.get_agent("a1") is not None
+    assert not any("userdel" in c for c in target.commands)
+
+
+def test_delete_tears_down_the_session_rows_as_they_are_under_its_lock(
     db: Database,
     make_config,  # noqa: ANN001
     target: _FakeAdminGuest,

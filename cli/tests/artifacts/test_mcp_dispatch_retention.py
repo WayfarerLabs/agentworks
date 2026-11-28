@@ -22,7 +22,6 @@ from agentworks.artifacts.routing import RoutingResult
 from agentworks.artifacts.state import CapturedArtifacts, read_captures, write_capture
 from agentworks.capabilities.harness_integration.settings import parse_settings
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure
@@ -32,6 +31,7 @@ from agentworks.schema import CapabilityConfig
 from agentworks.secrets.orchestration import SecretTarget
 from tests.artifacts._fixtures import group, received
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import run_setup_held
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest native files")
@@ -106,7 +106,7 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
 
     with seated_plugin(Plugin(name="mcp-retention-plugin", capabilities={"harness-integration": (RetentionMCP,)})):
         failures: list[SetupFailure] = []
-        state = run_setup(
+        state = run_setup_held(
             db,
             Mock(),
             inputs,
@@ -127,7 +127,7 @@ def test_ancestor_claim_sources_are_retained_without_retaining_removed_local_def
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity} | set(expected)
         assert read_captures(db, "agent", "fixture")["agent"].inputs == new_capture.inputs
         routing = replace(routing, routing_unknown=False, unresolved_routes=frozenset())
-        state = run_setup(db, Mock(), inputs, invocation, operation="agent-reinit", failures=failures)
+        state = run_setup_held(db, Mock(), inputs, invocation, operation="agent-reinit", failures=failures)
         assert observed[-1] == frozenset() and failures == []
         assert {claim.source for claim in state.records[0].claims} == {current.origin_identity}
         remaining = parse_settings(path.read_bytes(), format="toml")["mcp_servers"]
@@ -205,7 +205,7 @@ def test_shared_name_keeps_ancestor_source_across_dispatch_retries_local_changes
             artifact_snapshot=capture,
         )
         failures: list[SetupFailure] = []
-        state = run_setup(db, Mock(), inputs, invocation, operation="agent-reinit", failures=failures)
+        state = run_setup_held(db, Mock(), inputs, invocation, operation="agent-reinit", failures=failures)
         assert failures == []
         assert observed[-1] == (frozenset() if known else frozenset({ancestor.origin_identity}))
         assert read_captures(db, "agent", "fixture")["agent"].inputs == capture.inputs

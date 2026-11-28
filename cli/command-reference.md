@@ -51,9 +51,10 @@ On named `session start` and `session restart`, omitted `--spec` retains the sto
 JSON replaces the complete layer, and `{}` clears it. An empty or whitespace-only argument is
 invalid JSON. Inspect `agw session describe NAME --output json` and preserve any desired fields in
 the replacement. Candidate validation precedes runtime observation and restart consent. Accepted
-desired state is saved under the VM-family guard and remains if subsequent runtime work fails;
-invalid input or cancelled consent leaves the old layer unchanged. `start` on a running session can
-save a replacement without replacing its runtime; use `restart` to apply it immediately.
+desired state is saved with the session's intent, under a brief lock of the session, and remains if
+subsequent runtime work fails; invalid input or cancelled consent leaves the old layer unchanged.
+`start` on a running session can save a replacement without replacing its runtime; use `restart` to
+apply it immediately.
 
 For compound `session create`, `--spec` applies to the new session. `--workspace-spec` is accepted
 only with `--new-workspace`, and `--agent-spec` only with `--new-agent`; each applies to that
@@ -685,14 +686,30 @@ targets produce a nonzero exit. Bounded final observations are not an uptime or 
 guarantee.
 
 Dry run performs no activation, repair, workload-secret preview/resolution, PID-evidence write,
-staging change, target write, or mutation-guard creation. Provider observation may need its ordinary
-credentials. Off-guest checks remain conditional on later activation. Mutating operations share a
-VM-family guard. Most commands ask their confirmations and resolve their secrets before taking it,
-then read again under it what they showed or used and refuse, asking you to run the command again,
-when it changed. Reconciliation, `session start`/`restart`/`stop`, `vm start`/`stop`, `agent reinit`
-and `console start`/`restart`/`stop` still resolve secrets under the guard, so their prompts can
-keep a family busy. Brief hold admission can report busy even for live diagnostic access. A newly
-acquired admission guard does not span the interactive body.
+staging change, target write, or native lock. Provider observation may need its ordinary
+credentials. Off-guest checks remain conditional on later activation.
+
+Mutating operations lock what they change, at four levels: the VM, each workspace and account (an
+agent's or the admin's), and each session below its workspace and account, with consoles, grants and
+workspace directory trees locked too. An operation holds exclusive what it changes and shared
+everything above it, so it is refused by an operation that changes something it depends on (above,
+at or below it), while operations in unrelated workspaces, agents and sessions on one VM run
+together. A refused command fails at once, naming the operation that holds the lock, the entity it
+holds and for how long, for example
+``Error: session/build on VM 'dev' is blocked: `agw workspace rehome` has held workspace/api for 3m12s``;
+retry when that operation finishes. An older `agw` still running during an upgrade locks the whole
+VM and is reported without a name.
+
+Commands ask their confirmations and resolve their secrets before locking, then read again under the
+lock what they showed or used and refuse, asking you to run the command again, when it changed.
+Three keep a question under their lock, because it is about what the locked operation is doing:
+`vm recover`'s host-key confirmation, `vm rekey --wait-for-share`, and the workload and pane secrets
+of the runtime commands (the `reconcile` commands and `session` and `console` `start`, `restart` and
+`stop`), which hold only their targets. Each prints one line naming what it holds before it asks.
+Access commands (`vm shell`, `vm exec`, `agent shell`, `session attach`, `session logs`,
+`vm port-forward` and the like) take the VM shared only to admit their hold, never for their
+interactive body, so only a VM-wide operation (`vm stop`, `delete`, `rekey`, `recover`, `reinit`)
+refuses them; starting a stopped VM first still needs the VM briefly to itself.
 
 See [Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption,
 worked recovery and retry, migration, and WSL2 stopped-intent access limits. Migration 39 preserves
@@ -1049,12 +1066,11 @@ for that VM (`trust marker present`).
 
 Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
 `trust marker present`, `conflicts with the stored key`, `no tailnet address`,
-`malformed host key, nothing recorded`, or
-`busy: another operation is changing native state on this VM`. Each VM is imported under its native
-mutation guard, so a VM another command is changing is reported busy and left as it was while the
-others carry on; run the import again for it once that command finishes. The command exits non-zero
-while any selected VM ends without a record, with `--all` as well. Every run then rewrites the
-managed SSH config entries, whatever it imported.
+`malformed host key, nothing recorded`, or `busy` with the refusal naming what holds the VM. Each VM
+is imported under its exclusive lock, so a VM another command holds is reported busy and left as it
+was while the others carry on; run the import again for it once that command finishes. The command
+exits non-zero while any selected VM ends without a record, with `--all` as well. Every run then
+rewrites the managed SSH config entries, whatever it imported.
 
 For a VM with no matching entry, verify its host key fingerprints against its console or provider,
 gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned

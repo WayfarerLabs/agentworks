@@ -142,9 +142,10 @@ def require_targets_resolved(
 ) -> None:
     """Refuse, with ``message``, targets whose env references a secret missing from ``values``.
 
-    A command that resolves its secrets before taking its guard and composes
-    its environments under it builds its targets again under the guard, from
-    the rows the composition reads, and calls this before its first change.
+    A command that resolves its secrets before taking its lock set and
+    composes its environments under it builds its targets again under the
+    set, from the rows the composition reads, and calls this before its
+    first change.
     A template or overlay rebound in between may reference a secret no prompt
     asked for, which composing would otherwise meet only after the change
     began. A rebinding that needs no new secret passes. It reads only

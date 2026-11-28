@@ -107,18 +107,17 @@ def _publish_pending_plan(
 
 
 def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
-    """Reload the VM row and require that it still exists and has an address.
+    """Reload the VM row the plan read, before create builds its graph, and require that it still exists.
 
-    The row the plan read can be stale: an ``agw vm recover`` or
-    ``vm rekey`` that finished since may have updated
-    ``vms.tailscale_host``, and without the reload the address check
-    below could spuriously raise. Create reloads it before building its
-    graph, inside the activation gate, whose start records
-    ``last_started_at``, and once more under the VM's guard, where it is
-    compared with the plan. (The pre-create SecretTarget read only
-    ``vm.template``, which a refresh cannot change, so the pre-refresh row
-    was safe to target; the nodes keep their construction row, whose
-    identity fields a refresh cannot change either.)
+    The plan's row can be stale: an ``agw vm recover`` or ``vm rekey`` that
+    finished since may have updated ``vms.tailscale_host``, and without the
+    reload the address check could spuriously raise. Inside the activation
+    gate create runs on the row the gate admitted instead
+    (:func:`_require_addressed`), which its lock set compares with the
+    database. (The pre-create SecretTarget read only ``vm.template``, which
+    a refresh cannot change, so the pre-refresh row was safe to target; the
+    nodes keep their construction row, whose identity fields a refresh
+    cannot change either.)
     """
     refreshed_vm = db.get_vm(target_vm_name)
     if refreshed_vm is None:
@@ -127,13 +126,18 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
             entity_kind="vm",
             entity_name=target_vm_name,
         )
-    if refreshed_vm.tailscale_host is None:
+    return _require_addressed(refreshed_vm)
+
+
+def _require_addressed(vm: VMRow) -> VMRow:
+    """``vm``, which must have a Tailscale address for create to reach it."""
+    if vm.tailscale_host is None:
         raise StateError(
-            f"VM '{refreshed_vm.name}' has no Tailscale address",
+            f"VM '{vm.name}' has no Tailscale address",
             entity_kind="vm",
-            entity_name=refreshed_vm.name,
+            entity_name=vm.name,
         )
-    return refreshed_vm
+    return vm
 
 
 def _preflight_and_resolve(
@@ -377,7 +381,15 @@ def create_session(
     # gate).
     from dataclasses import replace
 
-    from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged, workspace_fields
+    from agentworks.recheck import (
+        agent_fields,
+        layer_inputs,
+        require_layers_unchanged,
+        require_request_unchanged,
+        require_unchanged,
+        require_vm_unchanged,
+        workspace_fields,
+    )
 
     def require_plan_rows_current() -> None:
         """The workspace and agent the plan names are as the plan read them."""
@@ -410,6 +422,9 @@ def create_session(
     current_vm = _reload_vm(db, plan.target_vm_name)
     require_plan_current(current_vm)
     plan = replace(plan, vm=current_vm)
+    # The layers the graph, the pending owners' setup and the session's env target are built from: the
+    # VM's, and an existing workspace's and agent's; compared again under the set.
+    layers = layer_inputs(db, plan.vm, plan.existing_ws, plan.existing_agent)
     graph = _build_session_graph(
         db,
         config,
@@ -422,6 +437,7 @@ def create_session(
         interaction=interaction,
     )
 
+    from agentworks.native_locks import probe_locks
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -434,9 +450,14 @@ def create_session(
     # the boundary resolver so nothing resolves or prompts twice.
     from agentworks.vms.manager import require_vm_ssh_boundary
 
+    from ._intent import session_create_request
+
+    request = session_create_request(db, plan)
+    probe_locks(db.path, request)
     require_vm_ssh_boundary(db, config, graph.vm_node.row)
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
-        vm = _reload_vm(db, plan.target_vm_name)
+        # The row the gate admitted, which refused a deleted or replaced VM, and the one the set compares.
+        vm = _require_addressed(graph.vm_node.row)
         # Preflight precedes secret resolution and carries no workload values.
         secret_values = _preflight_and_resolve(
             db,
@@ -447,12 +468,36 @@ def create_session(
             interaction=interaction,
         )
 
-        # Every prompt is answered: the VM's guard is held from here through
-        # the roll-forward and any rollback, which share it through the
-        # graph's VM node, and what the plan read is read again under it.
-        with graph.vm_node.mutation_guard():
-            require_vm_unchanged(db, graph.vm_node.row)
+        # Every prompt is answered: the set is held from here through the
+        # roll-forward and any rollback, which reuse it through the graph's VM
+        # node, and what the plan read is read again under it. A new
+        # workspace's target tree joins as the guest's lookup walk names it.
+        from agentworks.workspaces.locks import (
+            require_trees_unchanged,
+            walk_trees,
+            with_trees,
+        )
+
+        trees = (
+            ()
+            if graph.pending_workspace is None
+            else (walk_trees(vm, config, [graph.pending_workspace.workspace_path]),)
+        )
+        with graph.vm_node.locked(with_trees(request, *trees)) as held:
+            require_vm_unchanged(db, vm)
             require_plan_rows_current()
+            require_layers_unchanged(
+                db,
+                "session",
+                plan.name,
+                layers,
+                vm_name=vm.name,
+                workspace_name=None if plan.existing_ws is None else plan.existing_ws.name,
+                agent_name=None if plan.existing_agent is None else plan.existing_agent.name,
+            )
+            require_request_unchanged("session", plan.name, request, session_create_request(db, plan))
+            for tree in trees:
+                require_trees_unchanged(vm, config, tree)
             if db.get_session(plan.name) is not None:
                 raise StateConflictError(
                     f"session '{plan.name}' was created since this command read it",
@@ -500,5 +545,6 @@ def create_session(
                     logger=logger,
                     secret_values=secret_values,
                     setup_failures=setup_failures,
+                    held=held,
                 )
             raise_setup_failures(setup_failures)

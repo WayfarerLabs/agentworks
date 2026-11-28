@@ -21,7 +21,6 @@ from agentworks.artifacts.routing import inspect_owner_artifacts, session_artifa
 from agentworks.artifacts.state import read_captures, write_capture
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
 from agentworks.errors import ExternalError, StateError
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.inputs import SetupInputs
 from agentworks.harness_setup.lifecycle import prepare_agent_setup, prepare_vm_setup, prepare_workspace_setup
 from agentworks.harness_setup.state import read_native_setup
@@ -33,6 +32,7 @@ from agentworks.workspaces.realize import realize_workspace
 from agentworks.workspaces.templates import ResolvedTemplate
 from tests.conftest import _StubRegistry
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import holding_vm, run_setup_held
 from tests.vm_access_support import RecordingVMAccess
 
 # Every access a command builds is the recording fake: these tests run no ssh.
@@ -98,7 +98,7 @@ def test_common_capture_without_activation_and_vm_admin_separation(owner):
             else user_call(owner)
         )
         invocations.append(invocation)
-        run_setup(owner.db, owner.registry, inputs, invocation, failures=[], operation="vm-init")
+        run_setup_held(owner.db, owner.registry, inputs, invocation, failures=[], operation="vm-init")
     captured = read_captures(owner.db, "vm", "vm")
     assert set(captured) == {"vm", "admin"}
     vm_item = tuple(captured["vm"].inputs.items())[0]
@@ -222,6 +222,7 @@ def test_buffered_capture_commits_atomically_with_realized_owner(owner, monkeypa
                 credential_requests=(),
                 credential_redactions=(),
                 setup_inputs=inputs,
+                held=held,
             )
     else:
         workspace_template = ResolvedTemplate("default", artifacts=owner.artifacts)
@@ -237,18 +238,20 @@ def test_buffered_capture_commits_atomically_with_realized_owner(owner, monkeypa
                 vm=owner.vm,
                 template=workspace_template,
                 setup_inputs=inputs,
+                held=held,
             )
 
     assert inputs is not None and inputs.artifact_snapshot is not None
     assert not read_captures(owner.db, component, "new")
     if fail_commit:
-        with pytest.raises((StateError, ExternalError)):
+        with holding_vm(owner.db, owner.vm.name) as held, pytest.raises((StateError, ExternalError)):
             realize()
         assert not read_captures(owner.db, component, "new")
         assert not read_native_setup(owner.db, component, "new").records
         assert (owner.db.get_agent("new") if component == "agent" else owner.db.get_workspace("new")) is None
     else:
-        realize()
+        with holding_vm(owner.db, owner.vm.name) as held:
+            realize()
         snapshot = read_captures(owner.db, component, "new")[component]
         assert snapshot == inputs.artifact_snapshot
         assert not read_native_setup(owner.db, component, "new").records
@@ -260,13 +263,13 @@ def test_reinit_refreshes_source_and_failed_capture_cannot_publish_old_success(o
     template = ResolvedAgentTemplate("default", artifacts=owner.artifacts)
     first = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert first is not None
-    run_setup(owner.db, owner.registry, first, user_call(owner), failures=[], operation="agent-init")
+    run_setup_held(owner.db, owner.registry, first, user_call(owner), failures=[], operation="agent-init")
     old = read_captures(owner.db, "agent", "agent")["agent"]
     owner.source.write_text("changed source\n")
     second = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert second is not None
     assert read_captures(owner.db, "agent", "agent")["agent"] == old
-    run_setup(owner.db, owner.registry, second, user_call(owner), failures=[], operation="agent-reinit")
+    run_setup_held(owner.db, owner.registry, second, user_call(owner), failures=[], operation="agent-reinit")
     current = read_captures(owner.db, "agent", "agent")["agent"]
     assert tuple(current.inputs.items())[0].content.text == "changed source\n"
     assert tuple(current.inputs.items())[0].identity != tuple(old.inputs.items())[0].identity
@@ -292,7 +295,7 @@ def test_owned_effect_removal_retains_pending_cleanup_without_blocking_descendan
     )
     inputs = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert inputs is not None
-    run_setup(owner.db, owner.registry, inputs, user_call(owner), failures=[], operation="agent-init")
+    run_setup_held(owner.db, owner.registry, inputs, user_call(owner), failures=[], operation="agent-init")
     previous = read_native_setup(owner.db, "agent", "agent").records[0]
     assert previous.complete and len(previous.artifact_files) == 2
     managed = Path(previous.artifact_files[0].path)
@@ -308,7 +311,7 @@ def test_owned_effect_removal_retains_pending_cleanup_without_blocking_descendan
     )
     removal = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=updated)
     assert removal is not None
-    run_setup(owner.db, owner.registry, removal, user_call(owner), failures=[], operation="agent-reinit")
+    run_setup_held(owner.db, owner.registry, removal, user_call(owner), failures=[], operation="agent-reinit")
     state = read_native_setup(owner.db, "agent", "agent")
     view = inspect_owner_artifacts(owner.db, owner.registry, replace(removal, artifact_snapshot=None), "shell")
     if modified:
@@ -350,7 +353,7 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
     )
     first = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert first is not None
-    run_setup(owner.db, owner.registry, first, user_call(owner), failures=[], operation="agent-init")
+    run_setup_held(owner.db, owner.registry, first, user_call(owner), failures=[], operation="agent-init")
     previous = read_native_setup(owner.db, "agent", "agent").records[0]
 
     def unexpected_write(*args, **kwargs):
@@ -359,7 +362,7 @@ def test_repeated_owner_setup_does_not_rewrite_unchanged_native_files(owner, mon
     monkeypatch.setattr(Files, "write_if", unexpected_write)
     second = prepare_agent_setup(owner.db, owner.registry, vm=owner.vm, name="agent", template=template)
     assert second is not None
-    run_setup(owner.db, owner.registry, second, user_call(owner), failures=[], operation="agent-reinit")
+    run_setup_held(owner.db, owner.registry, second, user_call(owner), failures=[], operation="agent-reinit")
     current = read_native_setup(owner.db, "agent", "agent").records[0]
     assert current.complete and current.artifact_files == previous.artifact_files
     assert current.artifact_inputs == previous.artifact_inputs
@@ -441,7 +444,7 @@ def test_same_declaration_reinit_migrates_recorded_guidance_packages(owner, monk
 
     def reinit() -> SetupRecord:
         failures: list[SetupFailure] = []
-        state = run_setup(owner.db, owner.registry, inputs, call, failures=failures, operation="agent-reinit")
+        state = run_setup_held(owner.db, owner.registry, inputs, call, failures=failures, operation="agent-reinit")
         assert not failures
         return state.records[0]
 
@@ -506,7 +509,7 @@ def test_user_setup_publishes_vm_inputs_without_vm_activation(db, tmp_path):
         username="worker",
         home=str(target.home),
     )
-    run_setup(db, fixture.registry, fixture.owners["agent"], invocation, failures=[], operation="agent-init")
+    run_setup_held(db, fixture.registry, fixture.owners["agent"], invocation, failures=[], operation="agent-init")
     record = read_native_setup(db, "agent", "agent").records[0]
     expected = (*fixture.captures["vm"].inputs.items(), *fixture.captures["agent"].inputs.items())
     assert record.complete

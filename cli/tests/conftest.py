@@ -7,7 +7,7 @@ import io
 import os
 import sqlite3
 import tempfile
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,8 +28,6 @@ from agentworks.schema import CapabilityBlock
 from tests.ssh_fixtures import write_test_ssh_keypair
 
 if TYPE_CHECKING:
-    from types import SimpleNamespace
-
     from agentworks.db import VMRow
     from agentworks.execution.results import Result
     from agentworks.sessions.multi_console import ConsoleAccess
@@ -276,6 +274,37 @@ def write_cfg(
     if manifests:
         write_manifests(config_dir, *manifests)
     return path
+
+
+@pytest.fixture(autouse=True)
+def _lexical_path_walk(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Name workspace path locks from each stored path's spelling in every non-integration test.
+
+    The lookup walk is a guest program the scripted guests do not run, and
+    its resolution is proved by its own tests (``tests/native_locks``), which
+    call it directly. Here a path with no links is assumed: its directories
+    are its proper prefixes and its final path is itself. Integration tests
+    walk the real VM.
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return
+    import posixpath
+
+    from agentworks.native_locks import path_walk
+    from agentworks.workspaces import locks
+
+    def lexical(
+        vm: object, config: object, paths: Sequence[str], *, unlink_only: bool
+    ) -> tuple[path_walk.PathWalk, ...]:
+        walks = []
+        for path in paths:
+            final = posixpath.normpath(path)
+            parts = final.strip("/").split("/")
+            directories = tuple("/" + "/".join(parts[:index]) for index in range(1, len(parts)))
+            walks.append(path_walk.PathWalk(path, directories, (), final))
+        return tuple(walks)
+
+    monkeypatch.setattr(locks, "_walk", lexical)
 
 
 @pytest.fixture(autouse=True)
@@ -733,17 +762,53 @@ def normalize_lf(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n")
 
 
-def guarding_node(db: Database, vm: VMRow, **attributes: object) -> SimpleNamespace:
-    """A stand-in live VM node for ``vm``: its ``row``, and a ``mutation_guard`` that takes the real guard.
+def change_after_probe(monkeypatch: pytest.MonkeyPatch, change: Callable[[], object]) -> list[object]:
+    """Run ``change`` once, right after the command's first lock probe, as another command between probe and lock would.
 
-    ``attributes`` adds whatever else the command under test reaches through
-    the node (its ``site``, say).
+    Every module that imported ``probe_locks`` sees the wrapper. Returns a
+    list that records the change once it ran.
     """
-    from types import SimpleNamespace
+    import sys
 
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks import native_locks
 
-    return SimpleNamespace(row=vm, mutation_guard=lambda: native_mutation_guard(db.path, vm.name), **attributes)
+    original = native_locks.probe_locks
+    ran: list[object] = []
+
+    def probe_then_change(*args: object, **kwargs: object) -> None:
+        original(*args, **kwargs)  # type: ignore[arg-type]
+        if not ran:
+            ran.append(change())
+
+    for module in list(sys.modules.values()):
+        if module is not None and getattr(module, "probe_locks", None) is original:
+            monkeypatch.setattr(module, "probe_locks", probe_then_change)
+    return ran
+
+
+class LockingNode:
+    """A stand-in live VM node for a VM row: its ``row``, and :class:`LiveVMNode`'s own ``locked`` and ``held``.
+
+    Attributes given at construction add whatever else the command under
+    test reaches through the node (its ``site``, say).
+    """
+
+    from agentworks.vms.nodes import LiveVMNode as _LiveVMNode
+
+    locked = _LiveVMNode.locked
+    held = _LiveVMNode.held
+
+    def __init__(self, db: Database, vm: VMRow, **attributes: object) -> None:
+        self._db = db
+        self._held = None
+        self.row = vm
+        for name, value in attributes.items():
+            setattr(self, name, value)
+
+
+def locking_node(db: Database, vm: VMRow, **attributes: object) -> LockingNode:
+    """A :class:`LockingNode` for ``vm``, taking the real lock sets ``locked`` asks for."""
+    return LockingNode(db, vm, **attributes)
 
 
 def admitting_boundary(
@@ -752,10 +817,10 @@ def admitting_boundary(
     """A stand-in for ``gated_vm_boundary`` that opens no gate and admits ``vm`` as it was read.
 
     It yields the boundary's shape: a node whose ``row`` is the admitted VM
-    row, which a command compares again under its guard, and no resolver or
+    row, which a command compares again under its lock set, and no resolver or
     context.
     """
-    return contextlib.nullcontext((guarding_node(db, vm), None, None))
+    return contextlib.nullcontext((locking_node(db, vm), None, None))
 
 
 def stub_vm_gates(monkeypatch: pytest.MonkeyPatch) -> _StubPlatform:

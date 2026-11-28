@@ -55,9 +55,9 @@ def reinit_vm(
     supersedes a stored admin layer this release can no longer use
     (``ExplicitReplacementRequired``), which a retain refuses. Every input is
     validated and the effective declaration resolved before either is
-    persisted, and both persist in one transaction under the VM's native
-    mutation guard; as with ``agent reinit``, they remain if initialization
-    then fails, so a re-run retries them. The guard is taken once the gate
+    persisted, and both persist in one transaction under the VM's
+    exclusive lock; as with ``agent reinit``, they remain if initialization
+    then fails, so a re-run retries them. The lock is taken once the gate
     has opened and every secret has resolved, so no prompt keeps another
     operation on the VM waiting; under it the VM row, its template
     bindings and its stored layer are read again, and any change since the
@@ -75,6 +75,8 @@ def reinit_vm(
     """
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
+    from agentworks.native_locks import probe_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     # The declarations come first so framework miss-policies surface before
     # any template / DB / VM business logic. A supplied admin spec must be able
@@ -83,6 +85,7 @@ def reinit_vm(
     registry = load_request_registry(config, include_live_resources=False)
 
     vm = _require_vm(db, name)
+    probe_locks(db.path, vm_exclusive(name))
     if vm.debian_release is not None:
         _warn_legacy_release(vm)
 
@@ -113,7 +116,7 @@ def reinit_vm(
     candidate_admin_template = vm.admin_template if admin_template is None else admin_template
     original_overlay = db.instance_state.get_desired_overlay("vm", vm.name)
     # What every declaration below is resolved from and what the body runs on,
-    # kept for the re-check under the guard: the gate refreshes its node's row,
+    # kept for the re-check under the lock: the gate refreshes its node's row,
     # so a change made before the gate would not show against that row.
     prepared_inputs = _reinit_inputs(vm, original_overlay)
     supplied_admin = None if admin_spec is None else parse_admin_instance_spec(admin_spec or "{}")
@@ -321,7 +324,7 @@ def reinit_vm(
 
     try:
         with (
-            contextlib.ExitStack() as guarded,
+            contextlib.ExitStack() as locked,
             activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)),
         ):
             # Credentials and active setup env/config secrets share one eager
@@ -341,9 +344,9 @@ def reinit_vm(
             with output.section("Resolving Secrets"):
                 resolver.resolve()
 
-            # Every prompt is answered: the VM's guard is held from here to the
+            # Every prompt is answered: the vm exclusive is held from here to the
             # end, and what the declarations were resolved from is read again.
-            guard = guarded.enter_context(vm_node.mutation_guard())
+            vm_lock = locked.enter_context(vm_node.locked(vm_exclusive(name)))
             require_unchanged(
                 "vm",
                 name,
@@ -411,7 +414,7 @@ def reinit_vm(
                         legacy_conversion=legacy_conversion,
                         setup_inputs=setup_inputs,
                         setup_values=resolver.values,
-                        setup_guard=guard,
+                        held=vm_lock,
                     )
                 except KeyboardInterrupt:
                     output.warn(

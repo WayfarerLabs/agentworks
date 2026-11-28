@@ -402,8 +402,8 @@ def test_validation_failure_does_not_trigger_rollback(tmp_path: Path, monkeypatc
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace="ws-A",
-            agent="agt-B",
+            workspace="ws-a",
+            agent="agt-b",
             interaction=TtyInteractionPolicy.REFUSE,
         )
 

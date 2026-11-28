@@ -411,19 +411,19 @@ def _active_console_vm(
     resolver: Resolver,
     targets: Callable[[VMRow], Sequence[SecretTarget]] | None,
 ) -> Iterator[tuple[LiveVMNode, VMAccess]]:
-    """Activate the console's VM and yield its live node and the admin's access, held active, with no guard held.
+    """Activate the console's VM and yield its live node and the admin's access, held active, with nothing locked.
 
     The missing-VM and missing-address refusals come first, with nothing
     resolved. ``targets``, when the operation knows its panes before it
     observes anything (``console create``), gives their secret targets from
     the VM's row; they register on ``resolver`` before the activation gate,
     so a refused target leaves a stopped VM stopped. Activation resolves
-    only its own gate secrets, through ``resolver``, before the VM's native
-    mutation guard; the guard is held only while the VM is started, if it
-    needs starting, and the hold admitted. The caller then observes
+    only its own gate secrets, through ``resolver``, with nothing locked; a
+    start, if the VM needs one, takes a brief vm exclusive, and the hold's
+    admission a brief vm shared. The caller then observes
     read-only, decides what it will change, calls
     :func:`_console_pane_access` for exactly the panes it will open, and
-    takes the guard itself before its first change. The node's row is the
+    takes its lock set itself before its first change. The node's row is the
     one the hold admitted, with any address a start recorded.
     """
     import agentworks.execution as execution
@@ -446,9 +446,9 @@ def _active_console_vm(
             if targets is not None:
                 resolver.register_targets(targets(vm), allow_transient_auto_declare=True)
             context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
-            with node.mutation_guard():
-                activate_vm_runtime(context)
-                holds.enter_context(context.node.hold_active())
+            # A boot takes a brief vm exclusive, and the hold's admission a brief vm shared.
+            activate_vm_runtime(context)
+            holds.enter_context(context.node.hold_active())
             yield context.node, execution.vm_access(context.node.row, config, Admin())
     finally:
         if context is not None:
@@ -838,20 +838,21 @@ def delete_console(
 ) -> None:
     """Delete a console: tear down its tmux session (best-effort), then DB row.
 
-    The confirmation is asked before the family guard is taken; under it the
+    The confirmation is asked before the console's lock is taken; under it the
     console and its members are read again, and a change refuses. With
     ``only_if_empty`` it also refuses a console that has any configured
     session, for the offer to delete a console a command left empty.
     """
     from agentworks.recheck import console_fields, require_unchanged
 
-    from ._helpers import guarded_console_selection
+    from ._helpers import locked_console, probe_console
 
     _require_console(db, name)
     read = console_fields(db, name)
+    probe_console(db, name)
     if not yes and not output.confirm(f"Delete console '{name}'?"):
         raise UserAbort("delete cancelled")
-    with guarded_console_selection(db, name) as (console, _guard):
+    with locked_console(db, name) as (console, _held):
         require_unchanged("console", name, read, console_fields(db, name))
         console = _require_console(db, name)
         if only_if_empty and db.list_console_sessions(name):
@@ -899,14 +900,14 @@ def offer_delete_if_empty_consoles(
     ``console remove-sessions`` (issue #265) reach after removing a session's
     console membership; both route here so the two paths stay byte-identical.
 
-    Callers run it once their own native mutation guard is released, so the
-    offer holds no guard while it waits for an answer. ``console_names`` is
+    Callers run it once their own lock set is released, so the offer holds
+    no lock while it waits for an answer. ``console_names`` is
     the set of candidate consoles (each caller passes the consoles it just
     touched); a console is only acted on when ``list_console_sessions``
     reports it empty, the same predicate ``console describe`` uses for its
     "Configured sessions" count, so callers may pass consoles that still have
-    members and they are skipped. The confirmed delete takes the guard and
-    refuses a console that gained a member meanwhile, which keeps it.
+    members and they are skipped. The confirmed delete takes the console's
+    lock and refuses a console that gained a member meanwhile, which keeps it.
 
     The offer/auto-delete/report policy (including the TTY gate that keeps a
     scripted caller at exit 0 instead of EOF-aborting) is owned by

@@ -151,20 +151,26 @@ uptime, useful harness progress, or restored conversation state.
 ## What preview does
 
 `--dry-run` does not write targets, activate VMs, repair process evidence, create or remove tmux
-staging, preview or resolve workload secrets, or create mutation-guard files. Provider status may
-still need its ordinary observation credentials and their configured authentication behavior. When
-the VM is off, the preview identifies guest checks as conditional on later activation; it does not
-claim to have inspected an unreachable workload. Unknown attempted observations remain blockers.
+staging, preview or resolve workload secrets, or take a native lock. Provider status may still need
+its ordinary observation credentials and their configured authentication behavior. When the VM is
+off, the preview identifies guest checks as conditional on later activation; it does not claim to
+have inspected an unreachable workload. Unknown attempted observations remain blockers.
 
 ## Busy families and WSL2 access
 
-Mutating operations serialize within a VM family. Reconciliation may keep a family busy while
-collecting secrets. Wait for that operation to finish and retry the intended command. Confirmations
-and most other commands' secrets are asked before the family is taken; a command whose rows changed
-between its question and the guard refuses, and running it again asks again about the current state.
-Admission to a power hold is also guarded, so even ordinary diagnostic access to an already-live VM
-can report busy. A newly acquired admission guard is released before the interactive shell, attach,
-or forwarding body runs.
+Mutating operations lock what they change: a runtime command locks its selected sessions and
+consoles, with their VM shared, so runtime work on unrelated sessions of one VM runs together. A
+refused command fails at once, naming the operation, entity and time that hold it; wait for that
+operation to finish and retry. A runtime command records its intent under a brief lock, prepares its
+infrastructure (gate secrets, provider observation, a boot) with nothing locked, and only then takes
+its targets for the rest of the run; a target refused at that point keeps the intent already
+recorded, and its result (or, for `vm start` and `stop` and `console start`, `restart` and `stop`,
+the refusal) shows the `set-desired-state` command that restores the previous one. Workload and pane
+secrets are still asked under the targets' lock, after a line naming what is held. Confirmations and
+other commands' secrets are asked before locking; a command whose rows changed between its question
+and its lock refuses, and running it again asks again about the current state. Admission to a power
+hold takes the VM shared only briefly and is released before the interactive shell, attach, or
+forwarding body runs, so diagnostic access is refused only while a VM-wide operation holds the VM.
 
 On WSL2, a live VM with stopped intent receives no idle-shutdown protection during access **or
 management commands**. A long shell, workspace creation, or agent reinitialization may lose the

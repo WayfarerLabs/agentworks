@@ -8,9 +8,10 @@ from typing import Annotated
 import typer
 
 from agentworks import output
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 
 database_app = typer.Typer(
+    cls=CommandPathGroup,
     name="database",
     help="Back up or restore the Agentworks state database.",
     no_args_is_help=True,

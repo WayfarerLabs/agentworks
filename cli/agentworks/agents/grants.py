@@ -18,11 +18,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.agents.locks import grant_request
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import AgentworksError, NotFoundError, ValidationError
 from agentworks.execution.requests import Command
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
-from agentworks.recheck import agent_fields, require_unchanged, require_vm_unchanged
+from agentworks.native_locks import probe_locks
+from agentworks.recheck import agent_fields, require_request_unchanged, require_unchanged, require_vm_unchanged
 from agentworks.vms.manager import gated_vm_boundary, operation_log
 from agentworks.workspaces.guest import ensure_group, remove_group_member
 
@@ -71,9 +73,11 @@ def grant_workspaces(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the group-membership SSH work. The
     empty-request and unknown-agent validations stay pre-gate: they
-    fail with zero prompts and zero VM starts. The native mutation
-    guard is taken after the gate and its secrets, and the agent row
-    is read again under it.
+    fail with zero prompts and zero VM starts. The lock set (a grant per
+    named workspace, or with ``grant_all`` the grant-all set and a grant
+    for every workspace on the VM, with the account shared) is probed
+    before the gate and taken after it and its secrets; the agent row, and
+    with ``grant_all`` the VM's workspaces, are read again under it.
     """
     if not grant_all and not workspace_names:
         raise ValidationError(
@@ -91,6 +95,8 @@ def grant_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
+    request = grant_request(db, vm, agent, workspace_names, every=grant_all)
+    probe_locks(db.path, request)
 
     from agentworks.bootstrap import load_request_registry
 
@@ -104,11 +110,14 @@ def grant_workspaces(
             scope=agent_scope(db, vm.name, agent_name),
             interaction=interaction,
         ) as (vm_node, _resolver, _ctx),
-        vm_node.mutation_guard(),
+        vm_node.locked(request),
     ):
         # The body runs on the row the gate admitted, the one compared here.
         vm = vm_node.row
         _require_agent_unchanged(db, vm, agent)
+        require_request_unchanged(
+            "vm", vm.name, request, grant_request(db, vm, agent, workspace_names, every=grant_all)
+        )
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
             # Add to all existing workspace groups on this VM
@@ -146,8 +155,9 @@ def revoke_workspaces(
     :func:`grant_workspaces`: live-VM graph, no env-chain targets, the
     gate open before the preflight sweep, the held-active span
     covering the group-membership SSH work, the empty-request /
-    unknown-agent validations pre-gate, and the native mutation guard
-    taken after the gate.
+    unknown-agent validations pre-gate, and the same lock set, taken
+    after the gate: ``revoke_all`` locks a grant for every workspace on the
+    VM, not only the granted ones, since its row delete is account-wide.
     """
     if not revoke_all and not workspace_names:
         raise ValidationError(
@@ -165,6 +175,8 @@ def revoke_workspaces(
         )
 
     vm = _require_vm(db, agent.vm_name)
+    request = grant_request(db, vm, agent, workspace_names, every=revoke_all)
+    probe_locks(db.path, request)
 
     from agentworks.bootstrap import load_request_registry
 
@@ -178,12 +190,15 @@ def revoke_workspaces(
             scope=agent_scope(db, vm.name, agent_name),
             interaction=interaction,
         ) as (vm_node, _resolver, _ctx),
-        vm_node.mutation_guard(),
+        vm_node.locked(request),
         operation_log(vm.name, "agent-revoke") as log,
     ):
         # The body runs on the row the gate admitted, the one compared here.
         vm = vm_node.row
         _require_agent_unchanged(db, vm, agent)
+        require_request_unchanged(
+            "vm", vm.name, request, grant_request(db, vm, agent, workspace_names, every=revoke_all)
+        )
 
         def remove_membership(ws_name: str) -> None:
             """Remove the agent from ``ws_name``'s group, before its last grant row there goes."""
@@ -434,7 +449,7 @@ def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> Non
 
 
 def _require_agent_unchanged(db: Database, admitted: VMRow, agent: AgentRow) -> None:
-    """Under the guard: the VM the gate admitted and the agent read before it are still the same."""
+    """Under the set: the VM the gate admitted and the agent read before it are still the same."""
     require_vm_unchanged(db, admitted)
     require_unchanged("agent", agent.name, agent_fields(agent), agent_fields(db.get_agent(agent.name)))
 

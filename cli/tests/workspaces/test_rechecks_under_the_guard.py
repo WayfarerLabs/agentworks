@@ -16,7 +16,7 @@ from agentworks.agents import grants as agent_grants
 from agentworks.errors import StateConflictError
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces import manager as workspace_manager
-from tests.conftest import guarding_node
+from tests.conftest import locking_node
 from tests.workspaces._lifecycle_support import Guest, route, seed, seed_workspace
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ def _changing_gate(change: Callable[[Database], object]) -> Callable[..., contex
 
     @contextlib.contextmanager
     def gate(db: Database, _config: object, _registry: object, vm: VMRow, **_kwargs: object) -> Iterator[object]:
-        node = guarding_node(db, vm)
+        node = locking_node(db, vm)
         if not changed:
             changed.append(True)
             change(db)
@@ -87,8 +87,12 @@ def test_revoke_refuses_what_changed_before_its_guard(
 
 @pytest.mark.parametrize(
     "change",
-    [VM_CHANGED[1], lambda db: db.update_workspace_path("ws1", "/elsewhere/ws1")],
-    ids=[VM_CHANGED[0], "workspace-changed"],
+    [
+        VM_CHANGED[1],
+        lambda db: db.update_workspace_path("ws1", "/elsewhere/ws1"),
+        lambda db: db.insert_agent_grant("a1", "ws1", "explicit"),
+    ],
+    ids=[VM_CHANGED[0], "workspace-changed", "grant-added"],
 )
 def test_repair_refuses_what_changed_before_its_guard(
     db: Database, guest: Guest, make_config, monkeypatch: pytest.MonkeyPatch, change: Callable[[Database], object]
@@ -106,8 +110,9 @@ def test_repair_refuses_what_changed_before_its_guard(
     [
         lambda db: db.update_workspace_path("ws1", "/elsewhere/ws1"),
         lambda db: seed_workspace(db, vm_name="box", name="ws2"),
+        lambda db: db.insert_agent("late", "box", "agt-late", template="default", grant_all=True),
     ],
-    ids=["source-changed", "destination-appeared"],
+    ids=["source-changed", "destination-appeared", "grant-all-agent-appeared"],
 )
 def test_copy_refuses_what_changed_before_its_guards(
     db: Database, guest: Guest, make_config, monkeypatch: pytest.MonkeyPatch, change: Callable[[Database], object]

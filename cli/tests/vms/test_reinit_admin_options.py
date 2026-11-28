@@ -449,11 +449,12 @@ def test_a_whitespace_admin_spec_is_refused_before_anything_persists(
 def test_a_concurrent_native_operation_refuses_reinit_before_anything_persists(
     db: Database, config: object, initialized: list[AdminConfig]
 ) -> None:
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     stored = _store(db, vm=STORED_VM, admin={"shell": "bash"})
 
-    with native_mutation_guard(db.path, "rvm"), pytest.raises(NativeSetupBusyError):
+    with native_locks(db.path, vm_exclusive("rvm")), pytest.raises(NativeLockBusyError):
         _reinit(db, config, admin_template="work", admin_spec="{}")
 
     vm = db.get_vm("rvm")

@@ -38,6 +38,8 @@ from agentworks.execution import trust
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+    from pathlib import Path
 
     from agentworks.capabilities.base import RunContext, SecretReader
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -45,7 +47,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.debian import DebianRelease
     from agentworks.git_credentials.nodes import GitCredentialNode
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.native_locks import LockRequest, NativeLockSet
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
@@ -129,14 +131,14 @@ class LiveVMNode:
         row: VMRow,
         site: VMSiteNode,
         *,
-        held_native_guard: NativeMutationGuard | None = None,
+        held: NativeLockSet | None = None,
     ) -> None:
         self._db = db
         self._config = config
         self._registry = registry
         self._row = row
         self._site = site
-        self._held_native_guard = held_native_guard
+        self._held = held
         self._observed: VMStatus | None = None
 
     @property
@@ -149,31 +151,34 @@ class LiveVMNode:
         return self._row
 
     @property
-    def held_native_guard(self) -> NativeMutationGuard | None:
-        """The explicit operation token shared with nested lifecycle cleanup."""
-        return self._held_native_guard
+    def held(self) -> NativeLockSet | None:
+        """The lock set this node's operation holds, which nested operations handed the node reuse."""
+        return self._held
 
     @contextmanager
-    def mutation_guard(self) -> Iterator[NativeMutationGuard]:
-        """Take this VM's native mutation guard for the rest of the operation, once its prompts are done.
+    def locked(self, request: LockRequest, *, prompts: bool = False) -> Iterator[NativeLockSet]:
+        """Acquire ``request`` for the rest of the operation (step 6), once its prompts are done.
 
-        The one rule: a command holding a live VM node takes the guard
-        through this, never through ``native_mutation_guard`` directly.
-        A command opens the gate and resolves its secrets with no guard
-        held, then enters this; until it leaves, the node's later
-        admissions and starts, and the nested cleanup handed the node,
-        share the held guard instead of contending for it. A node built
-        with a held guard yields that one.
+        The one rule: a command holding a live VM node takes its lock set
+        through this. Until it leaves, the node's later admissions and
+        starts, and the nested operations handed the node, reuse the held
+        set instead of contending for it. A node that already holds a set
+        (one built with ``held``, or inside an outer ``locked``) requires
+        ``request`` of it and acquires nothing. ``prompts`` marks one of the
+        acquisitions sanctioned to prompt while held.
         """
-        from agentworks.harness_setup.locking import native_mutation_guard
+        from agentworks.native_locks import native_locks
 
-        previous = self._held_native_guard
-        with native_mutation_guard(self._db.path, self._row.name, held=previous) as guard:
-            self._held_native_guard = guard
+        if self._held is not None:
+            self._held.require(request, database_path=self._db.path)
+            yield self._held
+            return
+        with native_locks(self._db.path, request, prompts=prompts) as held:
+            self._held = held
             try:
-                yield guard
+                yield held
             finally:
-                self._held_native_guard = previous
+                self._held = None
 
     @property
     def site(self) -> VMSiteNode:
@@ -256,51 +261,83 @@ class LiveVMNode:
         self._row = current
         return current
 
+    @contextmanager
+    def booting(self) -> Iterator[bool]:
+        """Hold the vm exclusive for a boot: a brief lock of its own, or the held set's.
+
+        Yields whether the lock is the brief one, taken just now, so a caller
+        can re-observe what it saw unlocked. A held set that holds the vm only
+        shared cannot boot it, since no lock upgrades: the VM went down after
+        the command checked it, so the command refuses and the operator runs
+        it again.
+        """
+        from agentworks.native_locks import LockMode, LockRequest, vm_entity
+
+        vm = vm_entity(self._row.name)
+        brief = self._held is None
+        if self._held is not None and not self._held.covers(vm, LockMode.EXCLUSIVE):
+            raise StateError(
+                f"VM '{self._row.name}' stopped after this command checked it",
+                entity_kind="vm",
+                entity_name=self._row.name,
+                hint="Run the command again.",
+            )
+        with self.locked(LockRequest(exclusive=(vm,))):
+            yield brief
+
     def auto_start(self, gate_secrets: SecretReader) -> None:
+        """Start the VM under its exclusive lock (:meth:`booting`), re-reading its row and status there."""
+        with self.booting():
+            self._start_under_lock(gate_secrets)
+
+    def _start_under_lock(self, gate_secrets: SecretReader) -> None:
         from agentworks import output
-        from agentworks.harness_setup.locking import native_mutation_guard
         from agentworks.vms.manager import _await_tailnet
 
-        with native_mutation_guard(self._db.path, self._row.name, held=self._held_native_guard):
-            row = self.reload_row()
-            if row.desired_runtime_state is DesiredRuntimeState.STOPPED:
-                raise StateError(
-                    f"VM '{row.name}' has stopped intent so it will not be auto-started",
-                    entity_kind="vm",
-                    entity_name=row.name,
-                    hint=f"start it with: agw vm start {row.name}",
-                )
-            # The commands that open this gate refuse a VM with no host-key record
-            # earlier, through require_vm_ssh_boundary, before any secret resolves.
-            # This is the last check ahead of the start for a gate opened without
-            # that precondition, and persisted trust may have changed since the
-            # command's preflight: the start is the first thing that spends
-            # anything, and with no record the wait after it could only fail.
-            trust.require_record(row.name)
-            platform = self._site.platform
-            ctx = self._gate_ops_ctx(gate_secrets)
-            observed = platform.status(row, ctx)
-            self._observed = observed
-            # Another completed activation may have won the admission race.
-            # An indeterminate provider observation never authorizes power-on.
-            if observed not in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-                return
-            output.info(f"VM '{row.name}' is {observed.value}. Starting...")
-            platform.start(row, ctx)
-            self._db.record_vm_started(row.name)
-            # A VM that does not answer fails naming 'agw vm recover'.
-            with platform.vm_active(row, config=self._config):
-                _await_tailnet(self._db, self._config, row, already_running=False)
+        row = self.reload_row()
+        if row.desired_runtime_state is DesiredRuntimeState.STOPPED:
+            raise StateError(
+                f"VM '{row.name}' has stopped intent so it will not be auto-started",
+                entity_kind="vm",
+                entity_name=row.name,
+                hint=f"start it with: agw vm start {row.name}",
+            )
+        # The commands that open this gate refuse a VM with no host-key record
+        # earlier, through require_vm_ssh_boundary, before any secret resolves.
+        # This is the last check ahead of the start for a gate opened without
+        # that precondition, and persisted trust may have changed since the
+        # command's preflight: the start is the first thing that spends
+        # anything, and with no record the wait after it could only fail.
+        trust.require_record(row.name)
+        platform = self._site.platform
+        ctx = self._gate_ops_ctx(gate_secrets)
+        observed = platform.status(row, ctx)
+        self._observed = observed
+        # Another completed activation may have won the admission race.
+        # An indeterminate provider observation never authorizes power-on.
+        if observed not in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+            return
+        output.info(f"VM '{row.name}' is {observed.value}. Starting...")
+        platform.start(row, ctx)
+        self._db.record_vm_started(row.name)
+        # A VM that does not answer fails naming 'agw vm recover'.
+        with platform.vm_active(row, config=self._config):
+            _await_tailnet(self._db, self._config, row, already_running=False)
 
     @contextmanager
-    def hold_active(self, *, held_native_guard: NativeMutationGuard | None = None) -> Iterator[None]:
-        """Admit a possibly booting hold atomically, then release admission locking."""
-        from agentworks.harness_setup.locking import native_mutation_guard
+    def hold_active(self) -> Iterator[None]:
+        """Admit the keepalive hold under the vm shared, then release the admission lock.
 
+        The admission is brief, as an access command's whole lock is: the
+        body runs under the hold (a keepalive, not a lock), so only a
+        VM-wide operation, which holds the vm exclusive, refuses it. A node
+        whose operation already holds a set admits under that.
+        """
+        from agentworks.native_locks import LockRequest, vm_entity
+
+        admission = LockRequest(shared=(vm_entity(self._row.name),))
         with ExitStack() as holds:
-            with native_mutation_guard(
-                self._db.path, self._row.name, held=held_native_guard or self._held_native_guard
-            ):
+            with self.locked(admission):
                 row = self.reload_row()
                 if row.desired_runtime_state is not DesiredRuntimeState.STOPPED:
                     holds.enter_context(self._site.platform.vm_active(row, config=self._config))
@@ -487,7 +524,7 @@ def live_vm_node(
     row: VMRow,
     *,
     site_nodes: dict[str, VMSiteNode] | None = None,
-    held_native_guard: NativeMutationGuard | None = None,
+    held: NativeLockSet | None = None,
 ) -> LiveVMNode:
     """Build the ``vm/<name>`` node from its DB row. The row's ``site``
     field translates to the live edge (row fields become edges): the
@@ -512,7 +549,7 @@ def live_vm_node(
             memoized = vm_site_node(registry, row.site)
             site_nodes[row.site] = memoized
         site = memoized
-    return LiveVMNode(db, config, registry, row, site, held_native_guard=held_native_guard)
+    return LiveVMNode(db, config, registry, row, site, held=held)
 
 
 def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:
@@ -537,3 +574,14 @@ def pending_vm_node(
     declared credentials), and every edge holder shares those same
     objects (one object per node)."""
     return PendingVMNode(db, name, debian_release, hostname, template, site, credentials)
+
+
+def lock_through(node: LiveVMNode | None, database_path: Path, request: LockRequest) -> AbstractContextManager[object]:
+    """Take ``request`` through ``node`` (:meth:`LiveVMNode.locked`), or directly when there is no node.
+
+    A command whose VM has no node (its site could not be bound, or its row
+    is gone) still locks; with a node, nested operations handed it reuse the set.
+    """
+    from agentworks.native_locks import native_locks
+
+    return native_locks(database_path, request) if node is None else node.locked(request)

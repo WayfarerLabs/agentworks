@@ -1,10 +1,12 @@
-"""Session delete's follow-on cleanup keeps a workspace or agent that stopped being a candidate before its guard.
+"""Session delete's follow-on cleanup keeps a workspace or agent that stopped being the candidate it chose.
 
 The cleanup decides a workspace or agent is disposable after session
-delete's guard is released, and the delete it triggers resolves its boundary
-before taking its own guard. A grant committed in between is not one the
-cleanup saw, so the delete refuses under its guard and the grant survives.
-These run the real deleters against the shared workspace lifecycle guest.
+delete's lock set is released, and the delete it triggers reads its rows,
+resolves its boundary and only then takes its own set. A grant committed
+before that read is refused at the read; one committed after it is a new
+entity of the delete's request, refused under its set. Either way the grant
+survives. These run the real deleters against the shared workspace
+lifecycle guest.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.secrets.resolver import Resolver
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
-from agentworks.sessions.manager._queries import _cleanup_now_empty_agent, _cleanup_now_empty_workspace
+from agentworks.sessions.manager._delete import _cleanup_now_empty_agent, _cleanup_now_empty_workspace
 from tests.workspaces._lifecycle_support import Guest, argv, reachable, route, seed
 from tests.workspaces._lifecycle_support import guest as guest
 from tests.workspaces._lifecycle_support import make_config as make_config
@@ -51,7 +53,7 @@ def _deleted_session(*, agent_name: str | None = None) -> SessionRow:
 
 
 def _commit_while_resolving(monkeypatch: pytest.MonkeyPatch, change: Callable[[], None]) -> None:
-    """Commit ``change`` as another command would while the delete resolves its boundary, before its guard."""
+    """Commit ``change`` as another command would while the delete resolves its boundary, before its lock set."""
     resolve = Resolver.resolve
 
     def resolve_then_change(self: Resolver) -> None:
@@ -61,7 +63,7 @@ def _commit_while_resolving(monkeypatch: pytest.MonkeyPatch, change: Callable[[]
     monkeypatch.setattr(Resolver, "resolve", resolve_then_change)
 
 
-def test_an_auto_deleted_workspace_keeps_a_grant_committed_before_its_guard(
+def test_an_auto_deleted_workspace_keeps_a_grant_committed_before_its_lock(
     db: Database,
     make_config,  # noqa: ANN001
     guest: Guest,
@@ -106,7 +108,7 @@ def test_an_offered_workspace_keeps_a_grant_its_offer_did_not_name(
     assert guest.requests == []
 
 
-def test_an_auto_deleted_agent_keeps_a_grant_committed_before_its_guard(
+def test_an_auto_deleted_agent_keeps_a_grant_committed_before_its_lock(
     db: Database,
     make_config,  # noqa: ANN001
     guest: Guest,
@@ -124,6 +126,145 @@ def test_an_auto_deleted_agent_keeps_a_grant_committed_before_its_guard(
     assert db.get_agent("a1") is not None
     assert db.list_workspace_explicit_granters("ws1") == ["a1"]
     assert guest.requests == []
+
+
+def test_an_auto_deleted_workspace_keeps_a_grant_all_grant_turned_explicit_before_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``revoke-workspaces --all`` then ``grant-workspaces`` while the delete resolves: one grant key, new policy.
+
+    The grant-all agent's materialized grant is blanket policy, so cleanup
+    offered the workspace with no granters. Another command then made that
+    grant a standing explicit one under the same grant entity, which only
+    the granters compare under the lock set can see.
+    """
+    seed(db)
+    db.insert_agent("granter", "box", "agt-granter", template="default", grant_all=True)
+    db.insert_agent_grant("granter", "ws1", "explicit")
+    reachable(monkeypatch, True)
+
+    def revoke_all_then_grant() -> None:
+        db.update_agent_grant_all("granter", False)
+        db.delete_agent_grant("granter", "ws1", "explicit")
+        db.insert_agent_grant("granter", "ws1", "explicit")
+
+    _commit_while_resolving(monkeypatch, revoke_all_then_grant)
+
+    _cleanup_now_empty_workspace(
+        db, make_config(), _deleted_session(), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_workspace("ws1") is not None
+    assert db.list_workspace_explicit_granters("ws1") == ["granter"]
+    assert guest.requests == []
+
+
+def test_an_auto_deleted_agent_keeps_an_explicit_grant_added_under_a_lingering_implicit_one_before_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An implicit grant left by a session that is gone is no standing grant, but it holds the grant entity.
+
+    A ``grant-workspaces`` while the delete resolves adds a standing grant
+    under that same entity, which only the unused check under the lock set
+    can see.
+    """
+    seed(db)
+    db.insert_agent("a1", "box", "agt-a1", template="default")
+    db.insert_agent_grant("a1", "ws1", "implicit", session_name="gone")
+    reachable(monkeypatch, True)
+    _commit_while_resolving(monkeypatch, lambda: db.insert_agent_grant("a1", "ws1", "explicit"))
+
+    _cleanup_now_empty_agent(
+        db, make_config(), _deleted_session(agent_name="a1"), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_agent("a1") is not None
+    assert db.list_workspace_explicit_granters("ws1") == ["a1"]
+    assert guest.requests == []
+
+
+def _commit_while_offering(monkeypatch: pytest.MonkeyPatch, change: Callable[[], None]) -> None:
+    """Commit ``change`` while the operator answers the offer: after it chose, before the delete reads its rows."""
+
+    def confirm_then_change(*args: object, **kwargs: object) -> bool:
+        change()
+        return True
+
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr(output, "confirm", confirm_then_change)
+
+
+def test_an_offered_workspace_keeps_a_grant_committed_while_the_offer_was_answered(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed(db)
+    db.insert_agent("a1", "box", "agt-a1", template="default")
+    reachable(monkeypatch, True)
+    _commit_while_offering(monkeypatch, lambda: db.insert_agent_grant("a1", "ws1", "explicit"))
+
+    _cleanup_now_empty_workspace(
+        db, make_config(), _deleted_session(), yes=False, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_workspace("ws1") is not None
+    assert db.list_workspace_explicit_granters("ws1") == ["a1"]
+    assert guest.requests == []
+
+
+def test_an_offered_agent_keeps_a_grant_committed_while_the_offer_was_answered(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed(db)
+    db.insert_agent("a1", "box", "agt-a1", template="default")
+    reachable(monkeypatch, True)
+    _commit_while_offering(monkeypatch, lambda: db.insert_agent_grant("a1", "ws1", "explicit"))
+
+    _cleanup_now_empty_agent(
+        db, make_config(), _deleted_session(agent_name="a1"), yes=False, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_agent("a1") is not None
+    assert db.list_workspace_explicit_granters("ws1") == ["a1"]
+    assert guest.requests == []
+
+
+def test_a_workspace_whose_path_resolves_to_the_root_is_reported_as_a_failed_delete_not_as_kept(
+    db: Database,
+    make_config,  # noqa: ANN001
+    guest: Guest,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Nothing changed since cleanup chose it, so it warns and names the manual delete."""
+    from agentworks.native_locks.path_walk import PathWalk
+
+    seed(db)
+    reachable(monkeypatch, True)
+    # The guest resolves the stored path to '/', a link to the root, say.
+    monkeypatch.setattr(
+        "agentworks.workspaces.locks._walk",
+        lambda vm, config, paths, **kwargs: tuple(PathWalk(path, (), (), "/") for path in paths),
+    )
+
+    _cleanup_now_empty_workspace(
+        db, make_config(), _deleted_session(), yes=True, interaction=TtyInteractionPolicy.REFUSE
+    )
+
+    assert db.get_workspace("ws1") is not None
+    warnings = [message for role, _level, message in captured_output.lines if role is Role.WARNING]
+    assert any("agw workspace delete ws1" in message for message in warnings)
 
 
 class _AccountsStopGuest(Guest):

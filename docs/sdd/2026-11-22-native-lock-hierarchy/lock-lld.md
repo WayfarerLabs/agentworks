@@ -19,13 +19,16 @@ A new package `native_locks/` replaces `harness_setup/locking.py` (`native_mutat
 `NativeMutationGuard`, `NativeSetupBusyError`) in one step. The lock serves every native mutation,
 not harness setup, so it moves out of `harness_setup` and its names stop saying "setup".
 
-| Module         | Holds                                                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`  | `LockMode`, `EntityKind`, `Entity`, `LockRequest`, `NativeLockSet`, `native_locks`, `probe_locks`, `NativeLockBusyError`, `operation_label` |
-| `_entities.py` | entity constructors and ancestor closure                                                                                                    |
-| `_os.py`       | the platform calls: open, try-lock shared or exclusive, unlock                                                                              |
-| `_records.py`  | holder records and the holder lookup a refusal uses                                                                                         |
-| `rows.py`      | entity builders from database rows (`session_entity_for(db, row)` and the like)                                                             |
+| Module         | Holds                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`  | the package docstring with the durable rules, and re-exports of the public API: `LockMode`, `EntityKind`, `Entity` and its constructors, `LockRequest`, `NativeLockSet`, `native_locks`, `probe_locks`, `NativeLockBusyError`, `HolderInfo`, `operation_label`, `prompt_notice`, and the platform calls other workstation locks use (`open_lock_file`, `try_lock`, `unlock`)            |
+| `_entities.py` | `LockMode`, `EntityKind`, `Entity`, the entity constructors, ancestor closure and `LockRequest`                                                                                                                                                                                                                                                                                         |
+| `_sets.py`     | `NativeLockSet`, `native_locks`, `probe_locks`, `NativeLockBusyError` and the prompt check                                                                                                                                                                                                                                                                                              |
+| `_files.py`    | lock-file and record paths for a database and VM                                                                                                                                                                                                                                                                                                                                        |
+| `_os.py`       | the platform calls: open, try-lock shared or exclusive, unlock                                                                                                                                                                                                                                                                                                                          |
+| `_records.py`  | holder records, `operation_label` and the holder lookup a refusal uses                                                                                                                                                                                                                                                                                                                  |
+| `path_walk.py` | the guest lookup walk: a plain-stdlib program and `walk_paths`, returning each stored path's directories, followed links and final path                                                                                                                                                                                                                                                 |
+| `rows.py`      | entity builders from database rows (`session_entity_for(db, row)` and the like) and the VM-level requests (`vm_exclusive`, `admission`); each owner's request builders live with its domain (`agents/locks.py`, `workspaces/locks.py`, `sessions/manager/_intent.py`, `console_request` in `sessions/multi_console/_helpers.py`), so a command and its step-7 rebuild build one request |
 
 ### Entities
 
@@ -56,16 +59,16 @@ for a top-level directory; a session's parents are exactly one workspace and one
 are one workspace and one account; a console's are the vm and its member sessions; every parent
 belongs to the same vm.
 
-| Constructor                                  | Display key                     | Notes                                              |
-| -------------------------------------------- | ------------------------------- | -------------------------------------------------- |
-| `vm_entity(vm)`                              | `vm/<vm>`                       | the existing vm file                               |
-| `workspace_entity(vm, name)`                 | `workspace/<name>`              |                                                    |
-| `account_entity(vm, linux_user)`             | `account/<linux user>`          | `AgentRow.linux_user` or `VMRow.admin_username`    |
-| `grant_all_entity(vm)`                       | `grant-all`                     | the VM's set of grant-all agents                   |
-| `path_entity(vm, resolved_path)`             | `path/<resolved absolute path>` | one directory tree on the VM, by its resolved path |
-| `grant_entity(workspace, account)`           | `grant/<workspace>+<account>`   | one account's membership in one workspace group    |
-| `session_entity(name, workspace=, account=)` | `session/<name>`                |                                                    |
-| `console_entity(vm, name, members=)`         | `console/<name>`                | members are session entities                       |
+| Constructor                                  | Display key                                                                      | Notes                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `vm_entity(vm)`                              | `vm/<vm>`                                                                        | the existing vm file                               |
+| `workspace_entity(vm, name)`                 | `workspace/<name>`                                                               |                                                    |
+| `account_entity(vm, linux_user)`             | `account/<linux user>`                                                           | `AgentRow.linux_user` or `VMRow.admin_username`    |
+| `grant_all_entity(vm)`                       | `grant-all/<vm>`                                                                 | the VM's set of grant-all agents                   |
+| `path_entity(vm, resolved_path)`             | `path/<resolved absolute path without its leading slash>`, such as `path/data/b` | one directory tree on the VM, by its resolved path |
+| `grant_entity(workspace, account)`           | `grant/<workspace>+<account>`                                                    | one account's membership in one workspace group    |
+| `session_entity(name, workspace=, account=)` | `session/<name>`                                                                 |                                                    |
+| `console_entity(vm, name, members=)`         | `console/<name>`                                                                 | members are session entities                       |
 
 Accounts are keyed by Linux user rather than agent name because the account is the thing on the VM
 (`agents/manager/_common.py:109` derives `agt-<name>` at create; legacy rows keep their stored
@@ -191,8 +194,10 @@ class NativeLockSet:
   (`orchestration/README.md:188-193`) read it without coordination. Only the owning thread releases.
 
 `NativeLockBusyError(StateError)` carries `entity_kind` and `entity_name` of the refused entity, the
-refused mode, and `holder: HolderInfo | None` (the record it named). Tests and machine output read
-those fields; the message is for people.
+refused mode, `holder: HolderInfo | None` (from the record it named: the holder's command, the
+entity it holds and in which mode, and for how long) and `restore_intent`
+([Runtime families](#runtime-families)). Tests and machine output read those fields; the message is
+for people.
 
 ### Files
 
@@ -359,7 +364,10 @@ sanctioned acquisitions below):
    belong here (session create's plan prompts, `sessions/manager/_create_plan.py:175`, `:349`,
    `:404`; copy's destination chooser, `workspaces/manager/_common.py:117`).
 2. **Probe** the request (`probe_locks`), without its `path` entities, which join at step 6: a
-   conflict fails here, naming its holder, before any prompt or boot.
+   conflict fails here, naming its holder, before any prompt or boot. A command whose first
+   acquisition follows its read with no prompt or boot in between (`vm start` and `stop`, whose
+   brief intent set comes first, and `console remove-sessions`) has nothing to protect and skips the
+   probe.
 3. **Confirm early**: the confirmations that today precede the gate (`workspace delete`,
    `workspaces/manager/delete.py:101`; `agent delete`, `agents/manager/lifecycle.py:324`;
    `vm delete`, `vms/manager/power.py:213`).
@@ -377,11 +385,15 @@ sanctioned acquisitions below):
    confirmations that render probe results. Nothing is locked.
 6. **Acquire** the request once, with the vm shared.
 7. **Re-check** under the set the fields of [What step 7 compares](#what-step-7-compares), against
-   what step 4 admitted for the VM row (or what step 1 read, for a command that skips step 4 or runs
-   on its step-1 read (`vm reinit`)) and what steps 1 and 5 read for everything else. A `vm stop`,
-   `delete`, `rekey` or `recover` that ran in between shows here. Any difference refuses with
-   `StateConflictError` ("changed since this command read it", hint "Run the command again.").
-8. **Run** the body; nested operations call `held.require`.
+   what step 4 admitted for the VM row (for a command that skips step 4, the row its preparation
+   last read; for one that runs on its step-1 read, `vm reinit`, that read) and what steps 1 and 5
+   read for everything else. A `vm stop`, `delete`, `rekey` or `recover` that ran in between shows
+   here. Any difference refuses with `StateConflictError` ("changed since this command read it",
+   hint "Run the command again.").
+8. **Run** the body on the VM row step 7 compared: the one step 4 admitted, or for a command that
+   skips step 4 the one its preparation last read. `vm reinit` and the batch families of
+   [Runtime families](#runtime-families) run on their step-1 read, which their re-check compares
+   instead. Nested operations call `held.require`.
 
 **Needs the VM running** means every command that opens the activation gate today
 (`gated_vm_boundary`, `vms/manager/boundary.py:192`; `activation_gate`,
@@ -398,10 +410,10 @@ boundary before locking.
 **Access and observe commands** (`vm shell`, `vm exec`, `vm port-forward`, `vm backup`,
 `agent shell`, `agent exec`, `session attach`, `session logs`, `console attach`) run steps 1, 2, 4
 and 5 with the admission request. Step 4's brief shared admission is their whole lock: they acquire
-nothing more and run their body unlocked under the `vm_active` hold, as today
-(`cli/command-reference.md:690-691`). One edge of R4 stays as it is today: an access command that
-must cold-boot the VM needs the vm exclusive for the boot, so an operation holding anything below
-the VM refuses that boot; once the VM is up, nothing below the VM refuses access.
+nothing more and run their body unlocked under the `vm_active` hold, as today, on the row it
+admitted (`cli/command-reference.md:690-691`). One edge of R4 stays as it is today: an access
+command that must cold-boot the VM needs the vm exclusive for the boot, so an operation holding
+anything below the VM refuses that boot; once the VM is up, nothing below the VM refuses access.
 
 **VM-wide commands** run the same sequence and take `{vm: exclusive}` at step 6. `vm reinit` gates
 at step 4 like any other command; `vm rekey` resolves its boundary before its gate, which serves the
@@ -420,7 +432,8 @@ VM name order, and every surviving family finishes (e) before any family takes i
 that barrier keeps every infrastructure prompt outside the final sets, and lets the one workload
 boundary at (h) hold all of them.
 
-- **(a) Read** the selection (`runtime_state/_selection.py:28-76`).
+- **(a) Read** the selection (`runtime_state/_selection.py:28-76`). Its rows are read here, so a
+  target whose family is refused at (b) is reported as a known, blocked target.
 - **(b) Probe** each family's set; a refusal drops targets as the per-target rule below says.
 - **(c) Confirm early**: restart consent, after its status observation, as today
   (`sessions/manager/_lifecycle.py:404-411`). Console start and restart run their known-policy
@@ -433,21 +446,27 @@ boundary at (h) hold all of them.
   unauthorized-running-restart refusal, and the stopped-parent refusal (`_prepare.py:113`,
   `:130-131`). Console runtime commands record their intent (`multi_console/lifecycle.py:86`) the
   same way, after their parent and member checks under that brief set: start and restart re-read the
-  selected console and its VM (`guarded_console_selection`, `multi_console/_helpers.py:221-240`),
-  and stop keeps its current parent check before it records stopped. The accepted declaration is
-  noted: each target's desired overlay digest (`db.instance_state.get_desired_overlay`) as (d) left
-  it.
+  selected console and its VM (`locked_console`, which replaces `guarded_console_selection`,
+  `multi_console/_helpers.py:221-240`), and stop keeps its current parent check before it records
+  stopped. The accepted declaration is noted: each target's desired overlay digest
+  (`db.instance_state.get_desired_overlay`), read just before the target's launch definition is
+  built from it, or as (d) left it for a target that builds none.
 - **(e) Infrastructure**, unlocked, in the runtime path's order: the infrastructure preflight per
   node, a second pass distinct from (c)'s known-policy preflight, whose failure keeps the intent (d)
   recorded (`vms/manager/runtime.py:68-69`); gate secrets just in time through
   `invocation.gate_value` and `resolver.resolve_gate` (`runtime_state/_models.py:100-104`); the
   provider observation (`runtime.py:74-79`), with no `confirmed_active` fast path on this path; and
   the boot, under a brief `{vm: exclusive}` when the family needs its VM running and the provider
-  reports it stopped (`_prepare.py:247`).
+  reports it stopped (`_prepare.py:247`). The boot observes the VM once more under that set before
+  it starts it, since another command may have started it after the unlocked observation.
 - **(f) Acquire** the family's set, with the vm shared.
 - **(g) Re-check** the existing selection checks (`_selection.py:103-149`), the VM row, that the
-  recorded intent still stands, and that each target's desired overlay digest is still the one (d)
-  accepted. A restart prepares its launch definition from that declaration
+  recorded intent still stands, that each target's desired overlay digest is still the one (d)
+  accepted, that each console's members are still the ones its set locked, and that each session
+  target's launch definition inputs (its template binding, its workspace's placement and binding,
+  its agent's account and binding, and the VM, workspace and agent layers) still match the rows the
+  definition was built from, so a rehome or reinit during (e) refuses that target rather than
+  launching from a superseded row. A restart prepares its launch definition from that declaration
   (`runtime_state/_prepare.py:118-128`) and executes it later (`sessions/manager/_execute.py:72`);
   without this check, two restarts accepting overlays X then Y could leave the later-finishing one
   launching X while Y is stored. A changed digest refuses that target.
@@ -464,16 +483,30 @@ Consequences:
   `test_start_acceptance_survives_infrastructure_failure`
   (`tests/sessions/test_console_preparation.py:306-322`) and the stopped-parent contract
   (`:325-341`).
-- **Refusal after recorded intent is acceptable, and says so.** A family whose acquisition at (f) is
-  refused keeps the intent it recorded at (d). That is the same contract as a failed activation
-  today: intent is the desired state, and the next start or reconcile converges it. The refusal
-  tells the operator: each blocked target's `RuntimeResult` gains `restore_intent`, the command
-  words that put back the intent it replaced (for example
-  `("agw", "session", "set-desired-state", <name>, <previous>)`, or the console's), and the rendered
-  result says the intent was recorded and shows that command. When the replaced value has no public
-  form (a legacy NULL desired state, which `set-desired-state` cannot write since it accepts only
-  running and stopped), `restore_intent` is empty and the result says only that the new intent stays
-  accepted.
+- **Refusal after recorded intent is acceptable, and says so.** A target refused at its final set,
+  busy at (f) or changed at (g), keeps the intent its family recorded at (d). That is the same
+  contract as a failed activation today: intent is the desired state, and the next start or
+  reconcile converges it. The refusal tells the operator: each blocked target's `RuntimeResult`
+  gains `restore_intent`, the command words that put back the intent it replaced (for example
+  `("agw", "session", "set-desired-state", <name>, <previous>)`), and the rendered result says the
+  intent was recorded and shows that command. When the replaced value has no public form (a legacy
+  NULL desired state, which `set-desired-state` cannot write since it accepts only running and
+  stopped), `restore_intent` is empty and the result says only that the new intent stays accepted.
+  Batches record session intent only. Console start, restart and stop, and `vm start` and `stop`,
+  record their intent under their own brief set, so a refusal at their final set, busy or changed
+  (the VM row console start's and restart's hold admitted, or that console stop's or `vm start`'s
+  and `stop`'s preparation last read, the console's members or the recorded intent no longer what
+  was read), carries the same words (`("agw", "console", "set-desired-state", <name>, <previous>)`
+  or `("agw", "vm", "set-desired-state", <name>, <previous>)`) as `restore_intent` on the
+  `NativeLockBusyError` or `StateConflictError` it raises, set only when the brief write changed the
+  intent. Every one of these refusals, a batch target's included, carries restore words only while
+  the row stored under the name is the one the command recorded its intent on, with that intent
+  (`intent_restore.while_recorded`, against the row the brief write left): the same `vm_uuid` or
+  `session_uuid`, and for a console, which has no identity field, the same named slot, its `vm_name`
+  and `admin_shell`. Once another command replaced the intent, "the new intent stays recorded" is no
+  longer true, and once another entity took the name the words would address it, so the refusal
+  carries none. A VM's desired state is never NULL, so a VM's words, when given, are never empty.
+  One module, `agentworks.intent_restore`, builds the words and their rendering for every command.
 - **Per-target and per-family failure.** One rule covers every acquisition of the sequence: when an
   acquisition at (b), (d) or (f) is refused at an entity other than the vm, the family drops every
   target whose request needs that entity in the refused mode (so two targets that need one refused
@@ -484,9 +517,9 @@ Consequences:
   holds M shared, drops M (the exclusive contributor) and reconciles C, which needs M only shared. A
   refused vm, or a failed provider observation, gate secret or boot, fails the family, as
   `_selection.py:122-128` does for a busy family today. A target whose declaration changed at (g)
-  fails alone. So today's selection and bulk-stop paths keep a successful sibling on the same VM.
-  Each result is recorded on its target; none is raised through `run_selected` to the whole
-  invocation.
+  fails alone, and so does a target whose rows are gone when its family builds its request. So
+  today's selection and bulk-stop paths keep a successful sibling on the same VM. Each result is
+  recorded on its target; none is raised through `run_selected` to the whole invocation.
 - **No boot under shared.** A power action found necessary under a family's shared vm (the VM went
   down after (e)) refuses with
   `StateError("VM '<name>' stopped after this command checked it", hint="Run the command again.")`;
@@ -508,9 +541,19 @@ refreshed: a binding another reinit saved meanwhile refuses it.
 
 `session start --spec` (`sessions/manager/_spec.py:103`) acquires nothing itself. It runs its
 consent probe and confirmation unlocked (step 5; today under its guard, `:133-135`), then passes the
-overlay and `running_restart_authorized` into the batch, which persists the overlay at its own (d)
-alongside the intent and runs the normal family sequence. `run_session_batch(held=)` (`:149`) goes
-away.
+batch a session declaration (`runtime_state._models.SessionDeclaration`) and
+`running_restart_authorized`. The declaration carries two parts:
+
+- **The pending live resource.** The batch publishes it through its existing pending publishers
+  before it loads the request registry. The registry therefore reads the new layer rather than the
+  stored one, which this release may be unable to read: an overlay with unsupported fields or
+  version would otherwise fail the registry load, so `--spec '{}'` could not clear it.
+- **An acceptance step.** The batch calls it at its own (d), with its own status observation,
+  persisting the overlay alongside the intent.
+
+The batch then runs the normal family sequence. A status that changed since spec's consent refuses
+at (d) as that target's blocked `StateError`, naming the session's entity, rather than before the
+batch runs. `run_session_batch(held=)` (`:149`) goes away.
 
 ### Prompts under a set
 
@@ -536,10 +579,11 @@ The notice is structural. `native_locks` keeps the sets the current invocation h
 each other's sets), and the prompt helpers (`output.confirm`, `choose`, `pause`, `prompt`,
 `prompt_secret`, `output.py:618-640`, which the resolver's terminal entry uses) call
 `native_locks.prompt_notice()` before they prompt. For each held set marked `prompts=True` that has
-not yet shown it, it prints one `output.info` line naming the set's entities and saying they stay
-locked until the answer is given, then marks the set, so each notice appears once, before that set's
-first prompt. Under any held set not marked `prompts=True` it raises `StateError`: a prompt there is
-a programming error, which the test suite catches.
+not yet shown it, it prints one `output.notice` line, which presentation suppression does not
+silence, naming the set's entities and saying they stay locked until the answer is given, then marks
+the set, so each notice appears once, before that set's first prompt. Under any held set not marked
+`prompts=True` it raises `StateError`: a prompt there is a programming error, which the test suite
+catches.
 
 ## 3. Holder records
 
@@ -563,7 +607,8 @@ One JSON file per held set, `<sha256(vm)>.d/holders/<16 hex>.json`, mode 0600, i
 `("agw",)`. The CLI layer sets it, never the service layer: one group class shared by the Typer apps
 (`cli/_app.py:17` and the apps in `cli/commands/`) overrides Click's `resolve_command` to append
 each resolved command name, so the label is the command path and contains no argument or option
-values. `acquired` is wall-clock acquisition time; `pid` is for diagnosis only.
+values. `acquired` is wall-clock acquisition time; `pid` is for diagnosis by hand only, and no
+refusal reads it, so `HolderInfo` does not carry it.
 
 ### Write and remove
 
@@ -584,8 +629,12 @@ values. `acquired` is wall-clock acquisition time; `pid` is for diagnosis only.
 
 A record is live exactly while its own lock is held, which the OS releases when the holder dies. A
 reader tests liveness by trying a shared lock on the record without waiting (same offset on
-Windows). A record that is locked but does not parse (a reader raced the holder's write) is skipped.
-If the reader gets the lock, the holder is gone, or has created the file and not yet locked it:
+Windows). Records are input from another process, so a reader reads at most `RECORD_MAX_BYTES` (1
+MiB) of one and skips a locked record that is larger or does not parse: a reader raced the holder's
+write, or the content is not a record this release wrote (nesting past the parser's recursion limit
+and an `acquired` that is not a finite number included). A record the platform will not open, lock
+or read (`ENOLCK`, say) counts as no record and is left in place. If the reader gets the lock, the
+holder is gone, or has created the file and not yet locked it:
 
 - On POSIX the reader unlinks the record while still holding its shared lock, then unlocks and
   closes. A holder waiting to lock that file gets the lock only after the unlink, so its link check
@@ -604,8 +653,9 @@ and malformed records, keeps those listing `e` in a mode that conflicts with `m`
 acquired earliest. The record is advisory: the OS lock already decided, so a missing record only
 falls back to the generic message.
 
-The R3 error and hint, with the subject the first exclusive entity of the refused request (or
-`vm/<name>` for an admission request):
+The R3 error and hint, with the subject the first exclusive entity of the refused request in lock
+order, or, for a request with no exclusive entity, its first explicitly named shared entity (which
+is `vm/<name>` for an admission request):
 
 ```text
 Error: session/build-42 on VM 'dev' is blocked: `agw workspace rehome` has held workspace/api for 3m12s
@@ -638,26 +688,33 @@ paths. The only fields are the ones above.
   or console by its name (and a workspace by its path); step 7 compares the fields of the next
   section, so a replacement under the same name and path with the same group passes. That is the
   intended binding: the operator confirmed the named slot, and no new identity field is introduced
-  for workspaces or agents, which have none today.
+  for workspaces, agents or consoles, which have none today.
 - **Read, lock, re-check.** Each acquisition takes its whole request, built from a step-1 read (a
   runtime family's retry may drop targets, never add one): the dependents an operation will change
   (an agent's sessions, grants and consoles; a workspace's; the grant-all agents a workspace create
   will grant) are all in it, and all of it is read before any native change. After acquiring, the
-  operation re-reads; if the rows, memberships or sets it read changed, or no longer match what a
-  confirmation showed (the session count of an agent or workspace delete), it refuses with
-  `StateConflictError` before any native change.
+  operation re-reads its rows and rebuilds its request from them; if a row it read changed, or the
+  rebuilt request names any other entity or mode than the one it holds (a dependent, grant or member
+  that came or went, and with it the session count an agent or workspace delete confirmed), it
+  refuses with `StateConflictError` before any native change.
 - **Lists are rewritten from what the final set shows.** A command that changes a console's lists
   (its members, their order, a member's shells) resolves only the secrets of what it adds at step 5,
   then reads the lists, derives positions and indexes, and writes them at step 8 under the console
   exclusive. `console add-shell` (`sessions/multi_console/crud.py:648-704`) therefore appends to the
   shell list it reads under the final lock, not to one read before it, and two concurrent appends
-  cannot lose one. `console restore-session` likewise rebuilds its pane plan (`restore.py:315-353`)
-  from the console, its members and their shells read under the final set, and refuses if that plan
-  needs a secret step 5 did not resolve.
-- **Nested operations require.** `realize_workspace`, `realize_agent`, harness setup
-  (`harness_setup/dispatch.py:116`, `harness_setup/lifecycle.py:262`, `:312`, `:365`), teardown
-  deletes and the empty-console delete call `held.require` with their own request, which their
-  caller's request covers.
+  cannot lose one. `console restore-session` reads the console, the member and its window again
+  under the final set, and refuses with `StateConflictError`, making no tmux change, if any of them
+  changed since step 5 planned its panes. That is stricter than rebuilding the plan, and simpler:
+  the plan it runs is always the one whose secrets step 5 resolved.
+- **Nested operations require.** `realize_workspace`, `realize_agent`, harness setup's `run_setup`
+  (`harness_setup/dispatch.py:116`, reached from `harness_setup/lifecycle.py:262`, `:312`, `:365`),
+  `run_initialization` (`vms/initializer/driver.py:187`) and a runtime family's session and console
+  acceptance take their caller's held set as a required argument and call `held.require` with their
+  own request, which their caller's request covers; none acquires. A command holding a live VM node
+  takes its set through `LiveVMNode.locked`, the one spelling of "reuse the held set or acquire": a
+  node that already holds a set requires the request of it, so teardown deletes handed the node (a
+  create's rollback) acquire nothing, and `vms.nodes.lock_through` does the same for a command whose
+  VM has no node.
 - Dry runs take no lock, as today.
 
 ### What step 7 compares
@@ -665,16 +722,23 @@ paths. The only fields are the ones above.
 A command compares only what it read, and only these fields, never whole rows (timestamps and
 recorded pids change under ordinary use):
 
-| Read at step 1 or 5               | Fields compared                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| VM row                            | `vm_uuid`, `desired_runtime_state`, `tailscale_host`, `template`, `admin_template`; `confirm-release` adds `debian_release`; `vm reinit` adds the stored overlay, and compares these fields with its step-1 read, which it runs on                                                                                                                                                                                              |
-| workspace row                     | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                                                                                                                                                                                            |
-| agent row                         | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                                                                                                                                                                                            |
-| session row                       | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded and the desired overlay digest (`db.instance_state.get_desired_overlay`) they accepted; session create also refuses a session env secret step 5 did not resolve                                                                                                                           |
-| console row and membership        | presence, `vm_name`, `admin_shell`, the ordered member session names; a command that rewrites the list from the read under the set (`add-sessions`, `add-shell`) compares only the console row, and compares each session it adds by its session row's fields; `restore-session` adds the workspace its panes start in, by the workspace row's fields; each also refuses a pane secret step 5 did not resolve                   |
-| the sets a request was built from | the session names of a deleted agent or workspace (and the count its confirmation showed), its grant pairs and the consoles holding its sessions; the grant-all agent names a workspace create grants; the workspaces a grant-all writer grants or revokes                                                                                                                                                                      |
-| path entities                     | the lookup walk's recorded directories and final path for each stored path, walked again on the guest                                                                                                                                                                                                                                                                                                                           |
-| guest probes                      | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status. `console add-sessions` and `add-shell` instead re-observe the console's tmux presence under the lock and sync to what they find, since nothing prepared before the lock (secrets, members, positions) depends on it |
+| Read at step 1 or 5        | Fields compared                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VM row                     | `vm_uuid`, `desired_runtime_state`, `tailscale_host`, `template`, `admin_template`; `confirm-release` adds `debian_release`; `vm reinit` adds the stored overlay, and compares these fields with its step-1 read, which it runs on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| workspace row              | presence, `vm_name`, `workspace_path`, `linux_group`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| agent row                  | presence, `vm_name`, `linux_user`, `grant_all`; agent reinit adds `template` and the desired overlay digest it saved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| session row                | `session_uuid`, `workspace_name`, `agent_name`, `mode`; runtime families add `desired_runtime_state` against the intent they recorded, the desired overlay digest (`db.instance_state.get_desired_overlay`) they built from, and each launch definition's inputs (the session's template binding, its workspace's placement, its agent's account and their layer inputs); session create also refuses a session env secret step 5 did not resolve                                                                                                                                                                                                                                                                                                 |
+| console row and membership | presence, `vm_name`, `admin_shell`, the ordered member session names; a command that rewrites the list from the read under the set (`add-sessions`, `add-shell`) compares only the console row, and compares each session it adds by its session row's fields; console start, restart and stop compare the console row with their first read under their brief intent set before writing, then the console row and intent their brief intent write left, not a read under the final set, and their members through the lock request; `restore-session` adds the workspace its panes start in, by the workspace row's fields; `console create`, `add-sessions`, `add-shell` and `restore-session` also refuse a pane secret step 5 did not resolve |
+| the lock request           | every entity and mode of the request, ancestors included, against the request rebuilt from what the command reads under the set (`recheck.require_request_unchanged`), so any dependent the request was built from that came or went refuses: a deleted agent's or workspace's sessions, grants and the consoles holding its sessions; the grant-all agents a workspace create grants; the workspaces a grant-all writer grants or revokes; a console's members, which are its parents. `add-sessions` and `add-shell` build their request as they acquire, so for them it refuses only a membership change between building and holding it                                                                                                       |
+| layer inputs               | the template bindings and desired overlay record of the VM, and of the workspace and agent where given (`recheck.layer_inputs`; the VM's record carries its vm and admin layers), recorded when a command prepares from them before its final set: agent create and reinit and workspace create for their setup inputs, session create for its graph, its pending owners' setup and its existing workspace and agent, and the runtime families for each launch definition                                                                                                                                                                                                                                                                         |
+| path entities              | the lookup walk's recorded directories and final path for each stored path, walked again on the guest                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| guest probes               | the outcome of each probe the command re-runs: rehome's not-stopped sessions, source directory, unoccupied target and overlap; session delete's status and access checks; a runtime family's target status. `console add-sessions` and `add-shell` instead re-observe the console's tmux presence under the lock and sync to what they find, since nothing prepared before the lock (secrets, members, positions) depends on it                                                                                                                                                                                                                                                                                                                   |
+
+The runtime families refuse a target on any change to its launch definition's inputs because the
+definition's cached nodes, template and env target are what (h) preflights and resolves; console
+builds instead build their panes' secret targets again under the set from the rows they compose
+from, so they refuse only a secret step 5 did not resolve, and session create does both, since its
+graph and setup inputs are cached while its session env composes from the rows under the set.
 
 ### Lock sets
 
@@ -735,13 +799,18 @@ repaired mid-copy; sessions in it keep running. Copy's destination chooser (`_re
 concurrent `session create` for the same pair and a `revoke-workspaces` of it. When that grant is
 the agent's last on the workspace, the membership is removed before the session and grant rows are
 deleted ([Account files](#account-files)). Removing a console member changes the console, so it
-holds each console holding the session exclusive, with the console's other members shared. Its
-confirmation (`_queries.py:227`) is step 5, after its status and access probes. A status that needs
-a PID repair cannot be read before the set; it is left undecided there, and the repair and the
-decision run under the set. The empty-console, workspace and agent follow-on offers run after the
-set is released, all in one shape: the delete each triggers runs its own sequence, whose re-check
-refuses if the console, workspace or agent is no longer empty. `console remove-sessions` offers the
-same way.
+holds each console holding the session exclusive, with the console's other members shared, and its
+step-7 rebuild refuses when a console gained or lost the session meanwhile. Its confirmation
+(`_queries.py:227`) is step 5, after its status and access probes. A status that needs a PID repair
+cannot be read before the set; it is left undecided there, and the repair and the decision run under
+the set. The empty-console, workspace and agent follow-on offers run after the set is released, all
+in one shape: the delete each triggers runs its own sequence, whose re-check refuses if the console,
+workspace or agent is no longer empty. A workspace or agent delete an offer triggers also refuses,
+when it reads its rows at step 1 and again under its set, a workspace whose explicit granters or an
+agent whose sessions or standing grants are no longer what the offer decided on. The step-7 request
+compare alone cannot see this, since a grant's policy can change (a grant-all grant revoked and
+granted again by name) while its grant entity stays the same. The cleanup reports a refused resource
+as kept. `console remove-sessions` offers the same way.
 
 **Workspace repair.** Besides restoring the admin's and each granted agent's membership, repair
 removes guest members of the workspace group who hold no grant (`workspaces/manager/repair.py:329`).
@@ -761,8 +830,9 @@ still runs.
 **Session create.** Plan prompts and graph build are step 1; `require_vm_ssh_boundary` and the gate
 (`sessions/manager/_create.py:413-414`) are step 4; `_preflight_and_resolve` (`:417`) is step 5; one
 acquisition covers the session, grants and any new workspace or account; the existing VM reload
-(`_create.py:378-386`) joins step 7. The held set is attached to the graph so `realize_workspace`,
-`realize_agent` and the session slice `require` it. Rollback runs inside the set:
+(`_create.py:378-386`) joins step 7. The held set is passed down the create's roll
+(`sessions/manager/_create_roll.py`) to `realize_workspace` and `realize_agent`, which `require` it;
+the session slice runs under it and takes no lock of its own. Rollback runs inside the set:
 `PendingAgentNode.teardown` and `PendingWorkspaceNode.teardown` call `delete_agent` and
 `delete_workspace` (`agents/nodes.py:219`, `workspaces/nodes.py:151`), whose requests name only this
 create's own account or workspace, session and grants, all already in the set, so a rollback is
@@ -800,8 +870,11 @@ restarts from `/`; a missing name ends the physical part, and the remaining name
 lexically, so a target not yet created or a directory already gone still resolves. Past 40 link
 expansions (the kernel's limit) it refuses with `StateError`, as the kernel would with `ELOOP`. For
 each path it emits, NUL-separated, every directory and followed link it recorded, then the final
-path. The walk runs at step 5, its names join the request at step 6, and it runs again at step 7;
-any difference in either list refuses with `StateConflictError`.
+path. Its output is an external process's, so agw accepts it only when every name is UTF-8, absolute
+and in normal form (no empty, `.` or `..` component), and each list ends in a final path, one per
+stored path asked; anything else refuses with `StateError`. The walk runs at step 5, its names join
+the request at step 6, and it runs again at step 7; any difference in either list refuses with
+`StateConflictError`.
 
 The walk only names the locks; each body keeps operating on the spellings it uses today, with one
 exception. Workspace delete removes the path as `stored_workspace_path` normalizes it rather than
@@ -979,15 +1052,16 @@ still the old one, so `vm delete` and `vm logs` find logs written before the cha
 ### SSH config rebuild
 
 `agentworks/ssh_config_lock.py` holds `ssh_config_rebuild_lock()`, a per-OS-user exclusive file lock
-at `CONFIG_DIR / ".locks" / "ssh-config"` (`config/validation.py:26`), taken with `native_locks`'
-platform calls by polling the non-blocking try every 50 ms for at most 10 s. It lives outside
-`native_locks` because it is not a native entity lock: it waits, it names no holder, and it guards a
-workstation file. It is per OS user because the SSH config is that user's file whatever the
-database. `sync_ssh_config` (`ssh_config.py:157`) holds it around its whole body, so its database
-reads (`:436`, `:460`) and its writes (`:247`, `:363-381`) are one critical section and the last
-rebuild always reads the latest committed state. A timeout raises `StateError` with the hint
-`agw config sync-ssh-config`; callers keep their current failure handling, and
-`sync_ssh_config_or_warn` turns it into its warning. Nothing inside it acquires a native lock.
+at `CONFIG_DIR / ".locks" / "ssh-config"` (`config/validation.py:26`), taken with the platform calls
+`native_locks` exports (`open_lock_file`, `try_lock`, `unlock`) by polling the non-blocking try
+every 50 ms for at most 10 s. It lives outside `native_locks` because it is not a native entity
+lock: it waits, it names no holder, and it guards a workstation file. It is per OS user because the
+SSH config is that user's file whatever the database. `sync_ssh_config` (`ssh_config.py:157`) holds
+it around its whole body, so its database reads (`:436`, `:460`) and its writes (`:247`, `:363-381`)
+are one critical section and the last rebuild always reads the latest committed state. A timeout
+raises `StateError` with the hint `agw config sync-ssh-config`; callers keep their current failure
+handling, and `sync_ssh_config_or_warn` turns it into its warning. Nothing inside it acquires a
+native lock.
 
 ## 6. Tests
 
@@ -1010,7 +1084,7 @@ read fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_
 | formerly unguarded  | revoke, copy's source VM, `import-host-keys` (a per-VM `BUSY` outcome) and `confirm-release` each refuse while the VM's guard is held, as grant, repair and copy's destination already do                                                                                                                                      |
 | prompts before lock | each moved prompt (the rows of Appendix A.1) is answered with no guard held, and its re-check refuses when the state it showed changed before acquisition                                                                                                                                                                      |
 | rehome re-check     | rehome's step 5 persists nothing; a session started between its confirmation and its acquisition refuses the rehome                                                                                                                                                                                                            |
-| spec start          | `session start --spec` asks its restart consent with no guard held, and refuses at step 7 when the session's status changed meanwhile                                                                                                                                                                                          |
+| spec start          | `session start --spec` asks its restart consent with no guard held; a status changed meanwhile blocks that target at the batch's (d) with a `StateError` naming the session                                                                                                                                                    |
 
 ### PR 2, the hierarchy
 
@@ -1028,26 +1102,29 @@ read fields (`entity_kind`, `entity_name`, mode, `holder.command`, `holder.held_
 | prompt notice            | under a set acquired with `prompts=True`, every prompt helper and a resolver prompt show its notice exactly once, before the first prompt; under any other held set they raise `StateError`; with no set held they show nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | activation               | a cold VM boots under a transient vm exclusive and the body holds the vm shared; no boot on a Tailscale miss when the provider reports the VM running; `auto_start` under a shared set refuses; step 7 refuses each compared field's change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | recorded intent          | a family's or console's recorded intent survives a failure in its gate secrets, its provider observation and its boot; a start below a stopped-intent parent records intent and never prepares the VM                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| intent restore           | a family refused at (f) after recording intent reports blocked targets whose `restore_intent` is the `set-desired-state` command with the previous state, and an empty `restore_intent` when the previous state was a legacy NULL                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| intent restore           | a family refused at (f) after recording intent reports blocked targets whose `restore_intent` is the `set-desired-state` command with the previous state, and an empty `restore_intent` when the previous state was a legacy NULL; a console or `vm start` or `stop` refused at its final set, busy or changed, carries the restore command on its `NativeLockBusyError` or `StateConflictError` only when its brief write changed the intent; a target whose recorded intent another command replaced before the refusal, or whose name another entity took, carries no restore words                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | family failure           | a refusal at (b), (d) or (f) at a session, console, workspace or account drops the targets that need it in the refused mode, the rest proceed, and a retry never adds a target: with session M held shared under console D's operation, a reconcile selecting M and stopped-intent console C, which contains M, drops M and reconciles C; a changed declaration fails its target alone; a busy vm, a failed provider observation, gate secret or boot fails the family; the invocation reports the others normally                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | account edit timeout     | against a scripted guest whose `userdel -r` holds shadow's lock past 15 s, a grant of another agent on that VM fails with its typed error carrying the tool's status, and a second agent delete fails the same way and keeps its row; each rerun after the removal succeeds; meanwhile a session attach and a session start of another agent on that VM are admitted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | vm reconcile             | a `vm reconcile` whose VM target is running holds the vm shared, so an unrelated workspace create on that VM proceeds; with a stopped target it holds the vm exclusive                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | grant-all                | a workspace create and a grant-all agent create on one VM: one is refused before native work, and after a retry every grant-all agent has a grant for every workspace                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | bulk grant and revoke    | during `revoke-workspaces --all`, a named grant of a workspace the agent was not granted is refused; with no workspace on the VM, `--all` still holds the account shared, so an agent delete refuses it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | workspace paths          | a rehome into `/data/B/new` and a rehome of `/data/B` refuse one another; a rehome of `/tree` without `--remove-old` and a child rehome inside it refuse one another; the walk records `/front`, `/middle` and `/physical` and the followed links `/front/link` and `/middle/bridge` for `/front/link/a` through `/front/link -> /middle/bridge -> /physical`, `/c`, `/e`, `/e/d` and `/f` and the followed links `/c/l1` and `/e/d/l2` for two links, and `/data`, `/p` and `/p/q` and the followed link `/data/x` for `/data/x/../y`, and a rehome of any recorded directory is refused meanwhile; a historical `/home/admin/../srv/ws1` walks and locks `/home`, `/home/admin` and `/home/srv`; more than 40 link expansions refuse; two creates of disjoint paths proceed together; a delete of a workspace whose directory is gone still deletes; a delete of a path whose final component is a dangling link or a cyclic one (`/w/loop -> /w/loop`) locks the entry `/w/loop` exclusive and `/w` shared, does not refuse, and removes only the link, while a rehome from that cyclic path refuses; a walk that changes by step 7 refuses; a rehome of `/front/link/child` through `/front/link -> /physical` and a delete of the workspace stored at `/front/link` refuse one another |
-| native-home roots        | for Claude, Codex and Grok, a root outside HOME (an override to `/srv/shared`, or `~/.claude` linked to `/srv/shared`) leaves the user setup incomplete naming it and writes no settings, MCP entry, artifact file or native CLI change; a link that stays inside HOME (`~/.claude -> ~/.dotfiles/claude`) is accepted; a HOME that is itself a link is compared by its physical path; claims recorded under a root outside HOME are dropped with a warning naming it, without reconciling it, and the next setup proceeds with the current root                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| console lists            | two concurrent `console add-shell` calls on one member keep both shells; a restore whose pane plan changed under the final set and needs an unresolved secret refuses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| native-home roots        | for Claude, Codex and Grok, a root outside HOME (an override to `/srv/shared`, or `~/.claude` linked to `/srv/shared`) leaves the user setup incomplete naming it and writes no settings, MCP entry, artifact file or native CLI change; a link that stays inside HOME (`~/.claude -> ~/.dotfiles/claude`) passes the HOME check; a HOME that is itself a link is compared by its physical path; claims recorded under a root outside HOME are dropped with a warning naming it, without reconciling it, and the next setup proceeds with the current root                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| console lists            | two concurrent `console add-shell` calls on one member keep both shells; a restore whose console, member or window changed before its final set refuses and makes no tmux change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | restart declaration      | two restarts accepting overlays X then Y: the one whose accepted overlay was replaced refuses that target at (g)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | agent reinit declaration | a template or overlay changed after reinit's early save refuses it at step 7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | family barrier           | no family takes its final set before every surviving family has finished (e)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | request validation       | two entities with one key and different parents, given as tuples, are refused before any keyed deduplication                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | prompt ownership         | two invocations in one process: a set one holds neither prints a notice for nor refuses a prompt of the other                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | rollback                 | a failing `session create --new-workspace --new-agent` unwinds without a refusal while unrelated holders exist on the VM                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| spec hand-off            | `session start --spec` hands the overlay to the batch, which persists it with the intent; spec takes no guard of its own and `run_session_batch(held=)` is gone                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| spec hand-off            | `session start --spec` hands the batch a session declaration; the batch's registry reads the pending layer, so clearing an unreadable stored overlay succeeds, and the overlay persists with the intent at (d); spec takes no guard of its own and `run_session_batch(held=)` is gone                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 One concurrent pair per FRD story, plus the session-delete pairs, driven through the real manager
-functions with the scripted guest: the first operation is paused at a known guest command (an event
-the fake guest waits on) while the second runs on another thread.
+functions with the scripted guest: the first operation is paused at a known guest command or stubbed
+boundary while it holds its final set, and the second runs to completion at that pause on its own
+database connection, in a fresh context and under its own operation label. Each lock is its own open
+file description, so the two refuse each other as two processes would, and the inline run keeps the
+interleaving deterministic.
 
 | Story                                         | Pair                                                                                    | Expect                                |
 | --------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------- |
@@ -1091,9 +1168,10 @@ Every harness integration's setup writes inside its owner entity, read at HEAD:
   `plugins/claude/artifacts.py:68-77`), and the native CLI's mutations are not compare-and-swaps, so
   two accounts sharing a root would need a common lock. Instead, a user-level tool writes only
   inside its user's home (operator ruling, 2026-11-26): `resolve_user_layout` resolves the root's
-  physical path on the guest, following links, and refuses one that does not lie inside the physical
-  HOME (compared on a component boundary, as `artifacts/native/mcp.py:111-112` does) with
-  `ConfigError`. `user_layout` (`:91-99`) then reports the setup incomplete, naming the root and
+  physical path on the guest, following links, and refuses one that does not lie strictly beneath
+  the physical HOME (compared on a component boundary, as `artifacts/native/mcp.py:111-112` does),
+  HOME itself included, with `NativeRootNotBeneathHomeError`, a `ConfigError` saying which of the
+  two the root is. `user_layout` (`:91-99`) then reports the setup incomplete, naming the root and
   that the override must move inside HOME, and returns `None`, which every integration (Claude,
   Codex and Grok, at `plugins/grok/harness_integration.py:207`) turns into a setup that writes
   nothing (`unavailable_user_artifacts`, `:107-112`). Two accounts' roots then cannot meet, each
@@ -1105,11 +1183,15 @@ Every harness integration's setup writes inside its owner entity, read at HEAD:
   (`native.py:322-323`) and the only cleanup, retiring the integration, reconciles against the
   recorded root (`:310-314`). So a recorded root outside HOME is never reconciled: its plugin and
   marketplace claims are dropped with a warning naming the directory, which the operator cleans by
-  hand, and setup carries on with the current root. The upgrade guide says to move such an override
-  inside the home, or retire the integration, on the earlier release before upgrading, where the VM
-  guard still makes it safe. A link that stays inside HOME (`~/.claude -> ~/.dotfiles/claude`) is
-  accepted. The admin's setup follows the same rule under the vm exclusive. Today the VM guard keeps
-  a root outside HOME safe, so the rule lands in PR 2.
+  hand, and setup carries on with the current root. The upgrade guide says to retire the
+  integration, move the override inside the home and set it up again, on the earlier release before
+  upgrading, where the VM guard still makes it safe; an account with no plugin or marketplace claims
+  needs only the move, since the earlier release refuses a new root that differs from recorded
+  claims (`native.py:322-323`). A link that stays inside HOME (`~/.claude -> ~/.dotfiles/claude`)
+  passes this check; setup still writes nothing through a link, by the guest file program's existing
+  rule (`execution/files.py:7`), so such a layout reports incomplete for that reason, as it does
+  today. The admin's setup follows the same rule under the vm exclusive. Today the VM guard keeps a
+  root outside HOME safe, so the rule lands in PR 2.
 - The workspace facet publishes under the workspace root alone (`dispatch.py:318`): Claude's
   `.claude` and `.mcp.json` (`plugins/claude/harness_integration.py:341`,
   `plugins/_harness_native/native.py:200-214`), Codex's `.agents/skills` and `.codex/agents`
@@ -1138,6 +1220,7 @@ launch writer inside these rules crosses owners, so no request gains another own
 | 2   | `tests/test_session_ephemeral_guard_unwind.py`, `tests/sessions/test_create_start_restart_orchestrated.py`, `tests/agents/test_create_reinit_orchestrated.py`, `tests/vms/test_lifecycle_orchestrated.py`                                                                                                                                               | held set instead of the guard token; acquisition after the gate                                                       |
 | 2   | `tests/capabilities/test_native_setup_lifecycle.py`, `test_native_setup_deletion.py`, `test_native_setup_state.py`                                                                                                                                                                                                                                      | `held=` becomes `held.require` with the owner's request                                                               |
 | 2   | `tests/sessions/test_prepared_runtime.py`, `test_console_value_barrier.py`, `test_console_attach_orchestrated.py`, `tests/artifacts/test_session_lifecycle.py`, `tests/test_wsl2_keepalive.py`, `tests/vms/test_reinit_admin_options.py`, `tests/vms/test_delete_vm_gating.py`, `tests/test_legacy_claude.py`, `tests/orchestration/test_activation.py` | construct or patch the old guard; mechanical port                                                                     |
+| 2   | `tests/artifacts/test_native_user_layout.py`, `test_mcp_session_native_checks.py`, `test_resolved_secret_diagnostics.py`, `tests/test_native_harness_setup.py`                                                                                                                                                                                          | their layouts relied on a native root outside HOME, which is now refused                                              |
 
 ## 7. Collateral
 
@@ -1154,9 +1237,9 @@ delivery list names the same set.
     spanning a body.
   - `cli/agentworks/orchestration/README.md:166-170`: held sets replace the family guard and token;
     the operation sequence.
-  - the upgrade guide of the release PR 2 ships in (0.20.0 ships before it): operations below the VM
-    now run concurrently, a refusal names its holder, and an older agw still running during the
-    upgrade interlocks safely but reports busy without naming holders.
+  - `docs/guides/upgrading-to-0.20.md` (the hierarchy ships in 0.20.0, operator, 2026-11-26):
+    operations below the VM now run concurrently, a refusal names its holder, and an older agw still
+    running during the upgrade interlocks safely but reports busy without naming holders.
   - `docs/guides/desired-runtime-state.md:154`, `:163-165`.
   - `docs/guides/native-harness-setup.md:336-340`, `docs/guides/harness-facets.md:400`,
     `docs/guides/idempotency.md:298`, `cli/agentworks/db/README.md:138`,
@@ -1164,8 +1247,8 @@ delivery list names the same set.
     becomes the owner's lock.
   - `docs/guides/native-harness-setup.md:32`, `:93-95`: a `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or
     `GROK_HOME` must resolve inside the account's home, and sharing part of one through a link or
-    mount is unsupported; the upgrade guide says to move an override that does not, or retire the
-    integration, before upgrading.
+    mount is unsupported; the upgrade guide says to retire, move and set up again on the earlier
+    release, or only move when no plugin or marketplace claims exist.
   - `cli/agentworks/guide/guide-content/troubleshooting.md:55-77`, a guide topic: busy causes and
     the holder message.
   - The `native_locks` package docstring carries the durable rules (tree, modes, order, no upgrade,
@@ -1246,17 +1329,17 @@ batch and the removal of `run_session_batch(held=)` depend on the batch row and 
 
 ### A.2 PR 2: acquisition sites
 
-| Command                                                                         | Acquires today                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vm create`                                                                     | `vms/manager/lifecycle.py:383` (by name)                                                                                                                                                                                                                 |
-| `vm reinit`, `start`, `stop`, `delete`, `rekey`, `recover`, `set-desired-state` | `reinit.py:71`; `power.py:73`, `:117`, `:218`, `:412`, `:36`; `recover.py:84`                                                                                                                                                                            |
-| `vm reconcile`, session batch, `console reconcile`                              | `runtime_state/_selection.py:101`, families in VM name order                                                                                                                                                                                             |
-| `vm import-host-keys`, `vm confirm-release`                                     | PR 1's new guards (`vms/manager/host_keys.py:126-149`, `vms/manager/release.py:86-89`)                                                                                                                                                                   |
-| access commands                                                                 | admission only: `vms/manager/exec.py:121`, `:193`, `:278`; `port_forward.py:80`; `vms/backup.py:81`; `agents/manager/access.py:143`, `:244`; `sessions/manager/_queries.py:938`; `_logs.py:44`; `sessions/multi_console/lifecycle.py:257` (until `:303`) |
-| `agent create`, `reinit`, `delete`                                              | `agents/realize.py:119`; `agents/manager/lifecycle.py:504`, `:331`                                                                                                                                                                                       |
-| `agent grant-workspaces`, `revoke`                                              | grant's guard from #956 (`agents/grants.py:97`); PR 1's new guard on revoke (`:130`)                                                                                                                                                                     |
-| `workspace create`, `delete`, `rehome`                                          | `workspaces/realize.py:124`; `workspaces/manager/delete.py:106`; `rehome.py:96`                                                                                                                                                                          |
-| `workspace repair`, `copy`                                                      | the guards #956 added on repair and copy's destination (`workspaces/manager/repair.py:133`, `copy.py:169`); PR 1's new guard on copy's source                                                                                                            |
-| `session create`, `set-desired-state`, `delete`                                 | `sessions/manager/_create.py:377` (and the slice `_create_roll.py:248`); `_intent.py:59`; `_queries.py:154`                                                                                                                                              |
-| consoles                                                                        | `multi_console/crud.py:163`; `guarded_console_selection` (`multi_console/_helpers.py:221-240`) at `lifecycle.py:69`, `:149`, `:257`, `attach.py:854`, `runtime.py:132`, `crud.py:325`, `:466`, `:525`, `:648`, `restore.py:293`                          |
-| nested                                                                          | `harness_setup/dispatch.py:116`; `harness_setup/lifecycle.py:262`, `:312`, `:365`; `vms/initializer/driver.py:187`; `vms/nodes.py:242`, `:279`                                                                                                           |
+| Command                                                                         | Acquires today                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vm create`                                                                     | `vms/manager/lifecycle.py:383` (by name)                                                                                                                                                                                                                   |
+| `vm reinit`, `start`, `stop`, `delete`, `rekey`, `recover`, `set-desired-state` | `reinit.py:71`; `power.py:73`, `:117`, `:218`, `:412`, `:36`; `recover.py:84`                                                                                                                                                                              |
+| `vm reconcile`, session batch, `console reconcile`                              | `runtime_state/_selection.py:101`, families in VM name order                                                                                                                                                                                               |
+| `vm import-host-keys`, `vm confirm-release`                                     | PR 1's new guards (`vms/manager/host_keys.py:126-149`, `vms/manager/release.py:86-89`)                                                                                                                                                                     |
+| access commands                                                                 | admission only: `vms/manager/exec.py:121`, `:193`, `:278`; `port_forward.py:80`; `vms/backup.py:81`; `agents/manager/access.py:143`, `:244`; `sessions/manager/_queries.py:938`; `_logs.py:44`; `sessions/multi_console/lifecycle.py:257` (until `:303`)   |
+| `agent create`, `reinit`, `delete`                                              | `agents/realize.py:119`; `agents/manager/lifecycle.py:504`, `:331`                                                                                                                                                                                         |
+| `agent grant-workspaces`, `revoke`                                              | grant's guard from #956 (`agents/grants.py:97`); PR 1's new guard on revoke (`:130`)                                                                                                                                                                       |
+| `workspace create`, `delete`, `rehome`                                          | `workspaces/realize.py:124`; `workspaces/manager/delete.py:106`; `rehome.py:96`                                                                                                                                                                            |
+| `workspace repair`, `copy`                                                      | the guards #956 added on repair and copy's destination (`workspaces/manager/repair.py:133`, `copy.py:169`); PR 1's new guard on copy's source                                                                                                              |
+| `session create`, `set-desired-state`, `delete`                                 | `sessions/manager/_create.py:377` (the slice's own guard, `_create_roll.py:248`, goes away); `_intent.py:59`; `_queries.py:154`                                                                                                                            |
+| consoles                                                                        | `multi_console/crud.py:163`; `guarded_console_selection` (`multi_console/_helpers.py:221-240`, becoming `locked_console`) at `lifecycle.py:69`, `:149`, `:257`, `attach.py:854`, `runtime.py:132`, `crud.py:325`, `:466`, `:525`, `:648`, `restore.py:293` |
+| nested                                                                          | `harness_setup/dispatch.py:116`; `harness_setup/lifecycle.py:262`, `:312`, `:365`; `vms/initializer/driver.py:187`; `vms/nodes.py:242`, `:279`                                                                                                             |

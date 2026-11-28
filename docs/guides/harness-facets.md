@@ -398,13 +398,14 @@ Parent deletion follows the existing VM, agent, or workspace lifecycle. It remov
 native files with their parent and clears setup records through the existing database deletion. It
 does not first uninstall plugins or require readable applied-state records.
 
-Setup, deletion, and workspace rehome share a VM-family mutation guard. A competing mutation refuses
-with retry guidance. Rehome moves project settings with the workspace. Existing applied-state
-records do not block the move. After a verified copy, every readable workspace record updates owner
-identity and known file, package, skipped-path and MCP destination metadata, preserving fingerprints
-and unresolved status. MCP server names stay stable; unknown native claims remain unchanged. A
-deliberately retained old copy is unmanaged. Rehome does not rerun facets or rewrite literal
-absolute paths inside copied files or native values, which can remain path-dependent.
+Setup, deletion, and workspace rehome take their owner's exclusive lock (the VM, the account or the
+workspace). A competing mutation of the same owner refuses with retry guidance naming its holder.
+Rehome moves project settings with the workspace. Existing applied-state records do not block the
+move. After a verified copy, every readable workspace record updates owner identity and known file,
+package, skipped-path and MCP destination metadata, preserving fingerprints and unresolved status.
+MCP server names stay stable; unknown native claims remain unchanged. A deliberately retained old
+copy is unmanaged. Rehome does not rerun facets or rewrite literal absolute paths inside copied
+files or native values, which can remain path-dependent.
 [Idempotency](idempotency.md#harness-setup-reconciliation) describes retry guarantees and limits.
 
 Before changing setup, confirm authorization for the owning operation and inspect its effects.

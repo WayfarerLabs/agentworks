@@ -238,9 +238,9 @@ def _require_pane_secrets_resolved(
 ) -> None:
     """Refuse the console's new panes when their environment needs a secret the command did not resolve.
 
-    ``targets`` are the panes' targets built under the guard from the same
-    VM, session, workspace and agent rows the panes' composition reads; see
-    :func:`agentworks.secrets.require_targets_resolved`.
+    ``targets`` are the panes' targets built under the command's lock set
+    from the same VM, session, workspace and agent rows the panes'
+    composition reads; see :func:`agentworks.secrets.require_targets_resolved`.
     """
     from agentworks.secrets import require_targets_resolved
 

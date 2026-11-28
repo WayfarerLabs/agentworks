@@ -288,9 +288,9 @@ def restore_session(
     checks the agents of only the panes it will open and resolves only their
     secrets, in one pass, before its first tmux change; a window with nothing
     missing prompts for nothing. Each pane it opens parks a fresh handover.
-    All of that runs before the console's family guard is taken; under it
-    the console, the member and the window are read and observed again (and,
-    for a restore that opens panes or rebuilds the window, its session and the
+    All of that runs before the console's lock is taken; under it the
+    console, the member and the window are read and observed again (and, for
+    a restore that opens panes or rebuilds the window, its session and the
     workspace it starts in), and a change refuses before the first tmux change.
     """
     from agentworks.bootstrap import load_request_registry
@@ -303,9 +303,10 @@ def restore_session(
         workspace_fields,
     )
 
-    from ._helpers import guarded_console_selection
+    from ._helpers import locked_console, probe_console
 
     console = _require_console(db, console_name)
+    probe_console(db, console_name)
     registry = load_request_registry(config, live_database=db)
     member = db.get_console_session(console_name, session_name)
     if member is None:
@@ -317,9 +318,9 @@ def restore_session(
     read = console_fields(db, console_name)
 
     @contextmanager
-    def guarded(run: RunCommand, admin: VMAccess, vm: VMRow, observed: _WindowObservation) -> Iterator[None]:
-        """The console's guard, with the console, the member and the window observed again under it."""
-        with guarded_console_selection(db, console_name):
+    def under_lock(run: RunCommand, admin: VMAccess, vm: VMRow, observed: _WindowObservation) -> Iterator[None]:
+        """The console's exclusive lock, with the console, the member and the window observed again under it."""
+        with locked_console(db, console_name):
             require_unchanged("console", console_name, read, console_fields(db, console_name))
             require_unchanged(
                 "console",
@@ -359,7 +360,7 @@ def restore_session(
         q_win = shlex.quote(session_name)
 
         if observed.base_pidx is not None and not observed.missing:
-            with guarded(run, admin, vm, observed):
+            with under_lock(run, admin, vm, observed):
                 window_order_changed = _reconcile_configured_window_order(db, run, console_name)
                 if window_order_changed:
                     output.result(f"Restored configured window order in console '{console_name}'.")
@@ -391,8 +392,8 @@ def restore_session(
         )
         values = resolver.values
         try:
-            with guarded(run, admin, vm, observed):
-                # The session the panes are opened for and the workspace they start in, as read before the guard.
+            with under_lock(run, admin, vm, observed):
+                # The session the panes are opened for and the workspace they start in, as read before the lock.
                 require_session_unchanged(db, session_name, session)
                 require_unchanged(
                     "workspace",

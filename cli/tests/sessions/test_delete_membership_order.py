@@ -1,4 +1,4 @@
-"""Session delete: its questions come before the guard, its re-checks under it, and the last membership goes first."""
+"""Session delete: its questions come before the lock, its re-checks under it, and the last membership goes first."""
 
 from __future__ import annotations
 
@@ -77,25 +77,26 @@ def test_a_failed_membership_removal_keeps_the_session_and_grant_rows_for_a_reru
     assert not db.has_any_grant("bot", "ws-vm1")
 
 
-def _guard_free(db: Database) -> bool:
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+def _vm_unlocked(db: Database) -> bool:
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     try:
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             return True
-    except NativeSetupBusyError:
+    except NativeLockBusyError:
         return False
 
 
 @pytest.mark.parametrize("answer", [True, False], ids=["accepted", "declined"])
-def test_delete_asks_both_questions_with_no_guard_held(
+def test_delete_asks_both_questions_with_nothing_locked(
     db: Database,
     scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
     answer: bool,
     captured_output: CapturedOutput,
 ) -> None:
-    """The confirmation is asked before the guard and the offer for the console
+    """The confirmation is asked before the lock and the offer for the console
     the delete left empty after it; an accepted console is deleted and a
     declined one is kept without a report."""
     from agentworks.sessions import manager as manager_mod
@@ -106,7 +107,7 @@ def test_delete_asks_both_questions_with_no_guard_held(
     asked: list[tuple[str, bool]] = []
 
     def confirm(message: str, default: bool = False) -> bool:
-        asked.append(("console" if "only" in message else "session", _guard_free(db)))
+        asked.append(("console" if "only" in message else "session", _vm_unlocked(db)))
         return answer if "only" in message else True
 
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
@@ -123,7 +124,7 @@ def test_delete_asks_both_questions_with_no_guard_held(
         assert not any("only" in warning for warning in captured_output.warnings)
 
 
-def test_a_status_that_changed_before_the_guard_refuses_the_delete(
+def test_a_status_that_changed_before_the_lock_refuses_the_delete(
     db: Database,
     scripted_guest: _ScriptedGuest,
     monkeypatch: pytest.MonkeyPatch,
@@ -141,4 +142,27 @@ def test_a_status_that_changed_before_the_guard_refuses_the_delete(
         manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert torn_down == []
+    assert db.get_session("s") is not None
+
+
+def test_a_console_taking_the_session_between_the_probe_and_the_lock_refuses_the_delete(
+    db: Database,
+    scripted_guest: _ScriptedGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.sessions import manager as manager_mod
+    from tests.conftest import change_after_probe
+    from tests.console_helpers import create_console_record
+
+    _prep_delete_session(db, monkeypatch)
+    monkeypatch.setattr(manager_mod, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
+    ran = change_after_probe(
+        monkeypatch, lambda: create_console_record(db, name="late", vm_name="vm1", session_specs=["s"])
+    )
+
+    with pytest.raises(StateConflictError):
+        manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
     assert db.get_session("s") is not None

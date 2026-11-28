@@ -86,7 +86,7 @@ def cleanup_now_empty_resource(
         except UserAbort:
             raise
         except StateConflictError as exc:
-            # The delete refused under its guard: what was chosen changed, so it stays.
+            # The delete refused because what cleanup chose changed, so it stays.
             output.info(f"{noun} '{name}' was kept: it changed since cleanup chose it ({exc}).")
         except AgentworksError as exc:
             output.warn(f"Could not delete empty {kind} '{name}': {exc}. Remove it with '{manual_command}'.")

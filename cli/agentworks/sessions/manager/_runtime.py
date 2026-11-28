@@ -60,6 +60,40 @@ class SessionLaunchDefinition:
     running_restart_authorized: bool
     force: bool
     intent: HarnessLaunchIntent
+    inputs: tuple[object, ...]
+    """What the definition was built from besides its session and VM rows: see :func:`launch_inputs`."""
+
+
+def launch_inputs(
+    db: Database, session: SessionRow, vm: VMRow | None, workspace: WorkspaceRow | None, agent: AgentRow | None
+) -> tuple[object, ...]:
+    """The rows and layers a launch composes from, beyond the session and VM rows its family compares.
+
+    The session's template binding, its workspace's placement, its agent's
+    account, and the layers of its VM, workspace and agent
+    (:func:`agentworks.recheck.layer_inputs`). A runtime family builds its
+    launch definitions before its final set, so it compares these again
+    under the set (step (g)) and launches only from rows that still match.
+    """
+    from agentworks.recheck import agent_fields, layer_inputs, workspace_fields
+
+    return (
+        session.template,
+        workspace_fields(workspace),
+        agent_fields(agent),
+        layer_inputs(db, vm, workspace, agent),
+    )
+
+
+def require_launch_inputs_unchanged(definition: SessionLaunchDefinition) -> None:
+    """Under the final set: refuse a definition whose workspace, agent or layers changed since it was built."""
+    from agentworks.recheck import require_unchanged
+
+    db, session = definition.db, definition.session
+    workspace = db.get_workspace(session.workspace_name)
+    vm = None if workspace is None else db.get_vm(workspace.vm_name)
+    agent = None if session.agent_name is None else db.get_agent(session.agent_name)
+    require_unchanged("session", session.name, definition.inputs, launch_inputs(db, session, vm, workspace, agent))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -134,7 +168,9 @@ def prepare_session_definition(
     from agentworks.workspaces.nodes import live_workspace_node
 
     workspace = _mgr._require_workspace(db, session.workspace_name)
+    agent = db.get_agent(session.agent_name) if session.agent_name is not None else None
     vm = _mgr._require_vm_for_workspace(db, workspace)
+    inputs = launch_inputs(db, session, vm, workspace, agent)
     if vm.vm_uuid != vm_node.row.vm_uuid:
         raise StateError("session parent changed during selection", entity_kind="session", entity_name=session.name)
     from agentworks.vms.manager import require_vm_ssh_boundary
@@ -166,7 +202,6 @@ def prepare_session_definition(
     )
     ensure_recipe_enabled(registry, "session-template", template.name)
     workspace_node = live_workspace_node(workspace, vm_node)
-    agent = db.get_agent(session.agent_name) if session.agent_name is not None else None
     if session.agent_name is not None and agent is None:
         raise NotFoundError("session agent not found", entity_kind="agent", entity_name=session.agent_name)
     agent_node = live_agent_node(agent, vm_node) if agent is not None else None
@@ -204,6 +239,7 @@ def prepare_session_definition(
         running_restart_authorized=running_restart_authorized,
         force=force,
         intent=intent,
+        inputs=inputs,
     )
 
 

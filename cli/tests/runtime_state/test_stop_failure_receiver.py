@@ -15,9 +15,8 @@ from agentworks.errors import ExternalError, UserAbort
 from agentworks.runtime_state._models import Outcome, RuntimeInvocation
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _teardown
-from tests.runtime_state.test_composition import HANG_GUARD_SECONDS, REFUSE, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.runtime_state.test_public_stop import _running
+from tests.runtime_state.runtime_support import HANG_GUARD_SECONDS, REFUSE, running_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 
 @pytest.mark.parametrize("failure_stage", ["native", "cas"])
@@ -28,7 +27,7 @@ def test_failure_receiver_error_drains_and_propagates_without_replaying_known_fa
     powers, statuses, _ = runtime
     seed_vm(db, "box")
     for name in ["bad", "good", "queued"]:
-        _running(db, statuses, name, "box")
+        running_session(db, statuses, name, "box")
     before = {row.name: row for row in db.list_sessions()}
     caller = threading.get_ident()
     ready = threading.Barrier(2)

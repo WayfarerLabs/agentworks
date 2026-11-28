@@ -164,13 +164,25 @@ provider stops. PID repair, artifact staging, teardown, and staging cleanup also
 boundary. Executors and final observers receive supplied values, never a resolution callback.
 
 Public lifecycle acceptance records intent separately from these runtime helpers; reconciliation
-does not rewrite it. VM-family guards serialize mutations and hold definition snapshots stable.
-Nested compositions pass the actual held token rather than acquiring another handle. VM node
-auto-start and hold admission use that same guard; a potentially booting hold is skipped under
-stopped intent. Hold admission releases an admission-only guard before interactive access.
+does not rewrite it. Each VM family holds a lock set (`native_locks`) naming its targets: the
+selected sessions and consoles exclusive and the VM shared, or the VM exclusive when the family
+stops the VM. A family reads its selection, probes its set, records any intent under a brief hold of
+that set, then prepares infrastructure with nothing locked: gate secrets, provider observation, and
+a boot under a brief VM exclusive. Only once every family has finished that does each take its final
+set, held to the end and re-checked against what was read, including each target's recorded intent
+and accepted desired overlay. A refusal at an entity below the VM drops the targets that need it in
+the refused mode and the family retries with the rest; a refused VM blocks the family. A target
+refused after its intent was recorded reports the command that restores the previous intent. The
+final sets are the ones sanctioned to prompt, for the workload and pane secrets resolved under them.
+
+Nested compositions receive the held set and `require` what they change of it rather than acquiring
+another handle. VM node auto-start reuses the held set's VM exclusive, or takes a brief one of its
+own, and refuses under a set that holds the VM only shared; a potentially booting hold is skipped
+under stopped intent. Hold admission takes a brief VM shared and releases it before interactive
+access.
 
 Cancellation propagates after reporting completed infrastructure effects. Every exit disposes
-provider and workload value copies, closes the Resolver, and releases holds and guards. `close()`
+provider and workload value copies, closes the Resolver, and releases holds and lock sets. `close()`
 clears owned values and refuses later reads or source calls, including when preparation never
 reached the workload boundary. Final observations are bounded checks of the current domain states,
 not an automatic retry loop or an uptime guarantee. A result whose observation comes from parent
@@ -190,7 +202,7 @@ It conditionally persists stopped evidence before notifying the invocation of a 
 and also notifies each native, persistence or completion-recording failure. Established receipts
 stay pending until caller-thread notification finishes, so interrupted notification retries preserve
 both success and failure without repeating native work or a completed persistence attempt. Family
-guards and the writable database remain owned until all submitted work drains. Stop-only paths do
+lock sets and the writable database remain owned until all submitted work drains. Stop-only paths do
 not acquire a hold that could boot an off VM.
 
 If a failure notification itself fails, the coordinator cancels queued work, drains submitted

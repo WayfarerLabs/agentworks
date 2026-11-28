@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.db import DesiredRuntimeState, VMStatus
-from agentworks.errors import AgentworksError, StateError, UserAbort, ValidationError
+from agentworks.errors import AgentworksError, StateConflictError, StateError, UserAbort, ValidationError
 from agentworks.execution import trust
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, NAME_RE, validate_name
 from agentworks.secrets.policy import require_exact_tty_interaction_policy
@@ -18,23 +18,28 @@ from .boundary import _auth_key_boundary, _live_vm_boundary, _warn_legacy_releas
 from .tailscale import VMNotAnswering
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
+    from .runtime import VMRuntimeContext
+
 
 def set_vm_desired_runtime_state(db: Database, *, name: str, state: str | DesiredRuntimeState) -> None:
     """Record VM intent without registry, credentials, or runtime work."""
     from agentworks.errors import ValidationError
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     try:
         target = DesiredRuntimeState(state)
     except (ValueError, TypeError):
         raise ValidationError("invalid VM desired runtime state", entity_kind="vm", entity_name=name) from None
     selected = _require_vm(db, name)
-    with native_mutation_guard(db.path, name):
+    with native_locks(db.path, vm_exclusive(name)):
         db.set_vm_desired_runtime_state(name, target, expected_vm_uuid=selected.vm_uuid)
 
 
@@ -57,12 +62,8 @@ def start_vm(
     """
     import agentworks.execution as execution
     import agentworks.vms.manager as _mgr
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.harness_setup.locking import native_mutation_guard
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.nodes import live_vm_node
 
-    from .runtime import prepare_vm_runtime, start_vm_runtime
+    from .runtime import start_vm_runtime
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
@@ -71,31 +72,14 @@ def start_vm(
     # client refuses before anything is resolved or started.
     _mgr.verify_tailscale_available()
     execution.resolve_ssh()
-    with native_mutation_guard(db.path, name) as guard:
-        registry = load_request_registry(config, live_database=db)
-        vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
-        # Before the intent write; prepared runtime's own check comes after it.
-        _guard_incomplete_vm(vm_node.reload_row())
+
+    def accept() -> None:
         trust.require_record(name)
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.RUNNING, expected_vm_uuid=selected.vm_uuid)
-        vm = _require_vm(db, name)
-        resolver = Resolver(config, registry, interaction=interaction)
-        context = None
-        try:
-            context = prepare_vm_runtime(
-                db,
-                config,
-                registry,
-                vm,
-                resolve_secret=resolver.resolve_gate,
-                held_native_guard=guard,
-                vm_node=vm_node,
-            )
-            start_vm_runtime(context)
-        finally:
-            if context is not None:
-                context.clear_values()
-            resolver.close()
+
+    _run_power_change(
+        db, config, selected, DesiredRuntimeState.RUNNING, accept, start_vm_runtime, interaction=interaction
+    )
 
 
 def stop_vm(
@@ -106,43 +90,84 @@ def stop_vm(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Accept stopped intent before provider work, preserving it on failure."""
-    from agentworks.bootstrap import load_request_registry
-    from agentworks.harness_setup.locking import native_mutation_guard
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.vms.nodes import live_vm_node
-
-    from .runtime import prepare_vm_runtime, stop_vm_runtime
+    from .runtime import stop_vm_runtime
 
     require_exact_tty_interaction_policy(interaction)
     selected = _require_vm(db, name)
-    with native_mutation_guard(db.path, name) as guard:
-        registry = load_request_registry(config, live_database=db)
-        vm_node = live_vm_node(db, config, registry, selected, held_native_guard=guard)
-        # Before the intent write; prepared runtime's own check comes after it.
-        _guard_incomplete_vm(vm_node.reload_row())
+
+    def accept() -> None:
         db.set_vm_desired_runtime_state(name, DesiredRuntimeState.STOPPED, expected_vm_uuid=selected.vm_uuid)
-        vm = _require_vm(db, name)
-        resolver = Resolver(config, registry, interaction=interaction)
-        context = None
-        try:
-            context = prepare_vm_runtime(
-                db,
-                config,
-                registry,
-                vm,
-                resolve_secret=resolver.resolve_gate,
-                held_native_guard=guard,
-                vm_node=vm_node,
-            )
-            changed = stop_vm_runtime(context)
-        finally:
-            if context is not None:
-                context.clear_values()
-            resolver.close()
-        if changed:
-            output.result(f"VM '{name}' stopped")
-        else:
-            output.info(f"VM '{name}' is already stopped")
+
+    changed = _run_power_change(
+        db, config, selected, DesiredRuntimeState.STOPPED, accept, stop_vm_runtime, interaction=interaction
+    )
+    if changed:
+        output.result(f"VM '{name}' stopped")
+    else:
+        output.info(f"VM '{name}' is already stopped")
+
+
+def _run_power_change(
+    db: Database,
+    config: Config,
+    selected: VMRow,
+    target: DesiredRuntimeState,
+    accept: Callable[[], None],
+    apply: Callable[[VMRuntimeContext], bool],
+    *,
+    interaction: TtyInteractionPolicy,
+) -> bool:
+    """Run a power change: record its ``target`` intent briefly, prepare unlocked, then apply under the vm exclusive.
+
+    The intent is recorded under a brief vm exclusive of its own before any
+    secret resolves, so it survives a failure in the preparation, as it did
+    when the whole command ran under one lock. The gate secrets resolve and
+    the provider is observed with nothing locked (step 5); the change itself
+    runs under the vm exclusive, after the row the preparation last read is
+    compared with the database. A refusal of that final set, busy or
+    changed, says how to restore the intent the brief write replaced, while
+    the VM stored under its name is still the one it recorded, with that
+    intent.
+    """
+    from contextlib import ExitStack
+
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.intent_restore import refused_after_intent, replaced_intent, while_recorded
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
+    from agentworks.recheck import require_vm_unchanged
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
+
+    from .runtime import prepare_vm_runtime
+
+    request = vm_exclusive(selected.name)
+    registry = load_request_registry(config, live_database=db)
+    vm_node = live_vm_node(db, config, registry, selected)
+    with native_locks(db.path, request):
+        # Before the intent write; prepared runtime's own check comes after it.
+        current = vm_node.reload_row()
+        _guard_incomplete_vm(current)
+        accept()
+        # The VM as the write left it, under the same set: the one this command recorded its intent on.
+        vm = _require_vm(db, selected.name)
+    restore = replaced_intent("vm", selected.name, current.desired_runtime_state, target)
+    resolver = Resolver(config, registry, interaction=interaction)
+    context = None
+    try:
+        context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=vm_node)
+        with ExitStack() as final:
+            try:
+                final.enter_context(vm_node.locked(request))
+                require_vm_unchanged(db, vm_node.row)
+            except (NativeLockBusyError, StateConflictError) as refused:
+                refused_after_intent(refused, while_recorded(restore, recorded=vm, stored=db.get_vm(selected.name)))
+                raise
+            return apply(context)
+    finally:
+        if context is not None:
+            context.clear_values()
+        resolver.close()
 
 
 def delete_vm(
@@ -160,8 +185,8 @@ def delete_vm(
     resolution, so a refused or declined delete prompts for and resolves
     nothing; ``interaction`` is checked before binding, whose failures are
     handled below and must not swallow a malformed argument. The binding
-    resolves its secrets before the native mutation guard is taken; under
-    the guard the VM row and the child counts the confirmation showed are
+    resolves its secrets before the VM is locked; under
+    the lock the VM row and the child counts the confirmation showed are
     read again, and a change refuses. Once the binding
     holds, the node is logged out of the tailnet through the platform's root
     channel, best effort, and the provider delete follows: whoever deletes a
@@ -182,9 +207,15 @@ def delete_vm(
     identifiers. ``UserAbort`` always propagates and keeps the row.
     """
     import agentworks.vms.manager as _mgr
+    from agentworks.native_locks import probe_locks
+    from agentworks.native_locks.rows import vm_exclusive
+    from agentworks.vms.nodes import lock_through
 
     require_exact_tty_interaction_policy(interaction)
     vm = _require_vm(db, name)
+    request = vm_exclusive(name)
+    # A conflict refuses before the confirmation.
+    probe_locks(db.path, request)
 
     # Check for workspaces (which contain agents and sessions)
     ws_count = db.count_workspaces_on_vm(name)
@@ -217,10 +248,9 @@ def delete_vm(
         if not output.confirm(msg):
             raise UserAbort("delete cancelled")
 
-    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.recheck import require_unchanged, require_vm_unchanged
 
-    # The binding resolves the site's secrets, so it runs before the guard.
+    # The binding resolves the site's secrets, so it runs before the lock.
     vm_node: LiveVMNode | None = None
     try:
         vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
@@ -243,8 +273,8 @@ def delete_vm(
     else:
         bind_failure = None
 
-    # A VM whose site could not be bound (``--force``) has no node to take the guard through.
-    with native_mutation_guard(db.path, vm.name) if vm_node is None else vm_node.mutation_guard():
+    # A VM whose site could not be bound (``--force``) has no node to lock through.
+    with lock_through(vm_node, db.path, request):
         # What the confirmation showed: the VM and the children it counted.
         require_vm_unchanged(db, vm)
         require_unchanged(
@@ -408,8 +438,8 @@ def rekey_vm(
     ``secret`` selects a declared replacement key for this operation only;
     ``prompt`` forces terminal entry of the template's key instead. Both are
     checked here, before anything is touched, and applied in the boundary,
-    which resolves before the native mutation guard is taken. Only
-    ``--wait-for-share``'s pause asks anything under the guard: it is about
+    which resolves before the VM is locked. Only
+    ``--wait-for-share``'s pause asks anything under the lock: it is about
     the rekey in progress.
     """
     import agentworks.execution as execution
@@ -428,9 +458,12 @@ def rekey_vm(
     if secret is not None:
         validate_name(secret, max_length=MAX_SECRET_NAME_LENGTH)
 
+    from agentworks.native_locks import probe_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.recheck import require_vm_unchanged
 
     vm = _require_vm(db, name)
+    probe_locks(db.path, vm_exclusive(name))
     _guard_incomplete_vm(vm)
     _warn_legacy_release(vm)
     # Before the auth key resolves: a rekey with no host-key record would spend
@@ -446,12 +479,13 @@ def rekey_vm(
 
     with contextlib.ExitStack() as cleanup:
         # The auth key and the site's secrets resolve, with ``--prompt``'s entry,
-        # before the VM's guard; under it the VM row is read again.
+        # before the VM is locked; under the lock the VM row is read again.
         vm_node, resolver, ops_ctx, auth_key = _auth_key_boundary(
             db, config, vm, secret=secret, prompt=prompt, interaction=interaction
         )
         cleanup.callback(resolver.close)
-        cleanup.enter_context(vm_node.mutation_guard())
+        # Sanctioned to prompt: --wait-for-share pauses about the rekey in progress.
+        cleanup.enter_context(vm_node.locked(vm_exclusive(name), prompts=True))
         require_vm_unchanged(db, vm)
         vm = _require_vm(db, name)
         _guard_incomplete_vm(vm)

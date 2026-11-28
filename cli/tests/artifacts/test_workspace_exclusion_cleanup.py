@@ -19,7 +19,7 @@ from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.workspaces.manager import delete_workspace
 from tests.artifacts.test_git_excludes import Guest, apply, file, git
 from tests.capabilities.test_native_setup_deletion import deletion as deletion
-from tests.conftest import guarding_node
+from tests.conftest import locking_node
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux guest filesystem operations")
 
@@ -220,7 +220,7 @@ def test_vm_deletion_does_not_require_child_workspace_git_cleanup(db, deletion, 
     monkeypatch.setattr(
         "agentworks.vms.manager.power._live_vm_boundary",
         lambda db, _config, vm, **kwargs: (
-            guarding_node(
+            locking_node(
                 db, vm, site=SimpleNamespace(platform=SimpleNamespace(delete=lambda vm, ctx: removed.append(vm.name)))
             ),
             Mock(),

@@ -39,23 +39,23 @@ precedes its lock and each newly guarded mutator refuses while another operation
 
 ## Implementation, PR 2: the hierarchy
 
-- [ ] The primitive: the `native_locks` package (entities, modes, a probe, ordered fail-fast
+- [x] The primitive: the `native_locks` package (entities, modes, a probe, ordered fail-fast
       acquisition, nested reuse), POSIX `flock` and Windows `LockFileEx`, holder records and the
       busy error naming its holder, replacing `harness_setup/locking.py`.
-- [ ] Activation: the eight-step sequence (read, probe, confirm early, gate with a boot under a
+- [x] Activation: the eight-step sequence (read, probe, confirm early, gate with a boot under a
       brief vm exclusive only when the provider reports the VM stopped, prepare, acquire with the vm
       shared, re-check, run), with admission-only shared locks for access commands and runtime
       families recording intent under a brief acquisition of their own set before the gate.
-- [ ] The prompt moves Appendix A.1 defers to PR 2 (vm start and stop, agent reinit's early save,
+- [x] The prompt moves Appendix A.1 defers to PR 2 (vm start and stop, agent reinit's early save,
       the runtime families, console start, restart and stop), with `session start --spec`'s overlay
       hand-off to the batch and the removal of `run_session_batch(held=)`.
-- [ ] Every call site in the LLD's lock-set table moved to its set, each re-check comparing the
+- [x] Every call site in the LLD's lock-set table moved to its set, each re-check comparing the
       fields the LLD names, and the three sanctioned acquisitions marked as prompting with any other
       prompt under a held set raising.
-- [ ] Tests: the conflict matrix at the primitive on POSIX and Windows, a crashed holder, the
+- [x] Tests: the conflict matrix at the primitive on POSIX and Windows, a crashed holder, the
       older-version interlock, holder naming, the probe, nested reuse, the prompt-notice check, and
       one concurrent pair per FRD story through real services; existing lock tests updated.
-- [ ] Collateral: every doc the HLA's Delivery section lists, and the upgrade guide entry.
+- [x] Collateral: every doc the HLA's Delivery section lists, and the upgrade guide entry.
 - [ ] Private review loop, integration test on Linux, macOS and Windows workstations against at
       least one VM including concurrent account edits on a trixie guest, and published feedback
       addressed.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import stat
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +24,7 @@ from agentworks.instance_specs import parse_vm_instance_specs
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import backup as vm_backup
 from agentworks.vms.manager import boundary
-from tests.conftest import seed_vm_trust
+from tests.conftest import admitting_boundary, seed_vm_trust
 from tests.vm_access_support import install_access_recorder
 
 if TYPE_CHECKING:
@@ -123,7 +123,7 @@ def test_backup_json_refuses_existing_and_symlink_paths(tmp_path: Path) -> None:
 
 
 def _install_metadata_only_backup_fakes(monkeypatch: pytest.MonkeyPatch) -> AccessRecorder:
-    monkeypatch.setattr(vm_backup, "gated_vm_boundary", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(vm_backup, "gated_vm_boundary", admitting_boundary)
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config, **_kwargs: object())
     return install_access_recorder(monkeypatch)
 
@@ -346,7 +346,7 @@ def test_vm_backup_uses_post_activation_start_observation(
     @contextmanager
     def _activating_boundary(*args: object, **kwargs: object):  # noqa: ANN202
         db.record_vm_started("bvm")
-        yield
+        yield SimpleNamespace(row=db.get_vm("bvm")), None, None
 
     monkeypatch.setattr(vm_backup, "gated_vm_boundary", _activating_boundary)
     config = SimpleNamespace(paths=SimpleNamespace(backups=tmp_path))

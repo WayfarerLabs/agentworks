@@ -21,9 +21,8 @@ from agentworks.runtime_state import reconcile_session
 from agentworks.runtime_state._models import Outcome
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _teardown
-from tests.runtime_state.test_composition import REFUSE, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
-from tests.runtime_state.test_public_stop import _running
+from tests.runtime_state.runtime_support import REFUSE, running_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 
 @pytest.mark.parametrize("failure_stage", ["native", "cas", "observer"])
@@ -33,7 +32,7 @@ def test_parent_shutdown_preserves_bulk_failure_and_successful_sibling(
     powers, statuses, _ = runtime
     seed_vm(db, "box")
     for name in ["bad", "good"]:
-        _running(db, statuses, name, "box")
+        running_session(db, statuses, name, "box")
     before = db.get_session("bad")
 
     def execute(plan):
@@ -81,10 +80,10 @@ def test_parent_shutdown_does_not_hide_named_or_serial_execution_failure(
 ):
     powers, statuses, _ = runtime
     seed_vm(db, "box")
-    _running(db, statuses, "bad", "box")
+    running_session(db, statuses, "bad", "box")
     if operation == "serial-bulk":
         seed_vm(db, "other")
-        _running(db, statuses, "good", "other")
+        running_session(db, statuses, "good", "other")
         # Historical dedicated rows without ticks use the serial compatibility lane.
         db._conn.execute("UPDATE sessions SET tmux_server_start_ticks = NULL")
         db._conn.commit()
@@ -140,9 +139,9 @@ def test_off_parent_execution_revalidates_original_identity_without_writing_runt
 ):
     powers, statuses, _ = runtime
     seed_vm(db, "box", target=DesiredRuntimeState.STOPPED)
-    _running(db, statuses, "bad", "box")
+    running_session(db, statuses, "bad", "box")
     if operation == "bulk":
-        _running(db, statuses, "good", "box")
+        running_session(db, statuses, "good", "box")
     if operation == "reconcile":
         manager.set_session_desired_runtime_state(db, name="bad", state=DesiredRuntimeState.STOPPED)
     powers["box"] = VMStatus.STOPPED

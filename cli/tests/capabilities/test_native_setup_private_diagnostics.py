@@ -10,10 +10,10 @@ import pytest
 from agentworks.capabilities.harness_integration import harness_integration_for
 from agentworks.errors import ExternalError
 from agentworks.execution.oplog import OperationLogFile
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.outcomes import Redactor, SetupFailure, describe_setup_failures
 from agentworks.harness_setup.state import read_native_setup
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
+from tests.nested_locks_support import run_setup_held
 
 
 def _secret(label: str, representation: str) -> tuple[str, str, str]:
@@ -70,7 +70,7 @@ def test_dispatch_redacts_canonicalized_invocation_and_logger_patterns_before_bo
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    state = run_setup(
+    state = run_setup_held(
         db,
         Mock(),
         inputs,

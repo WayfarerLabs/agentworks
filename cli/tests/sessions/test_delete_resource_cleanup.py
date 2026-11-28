@@ -32,7 +32,7 @@ from agentworks.db import PID_STOPPED, Database, SessionMode, SessionRow, Sessio
 from agentworks.errors import ConnectivityError
 from agentworks.output import Role
 from agentworks.secrets.policy import TtyInteractionPolicy
-from agentworks.sessions.manager._queries import (
+from agentworks.sessions.manager._delete import (
     _cleanup_now_empty_agent,
     _cleanup_now_empty_workspace,
 )

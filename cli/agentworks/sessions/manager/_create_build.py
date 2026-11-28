@@ -324,7 +324,7 @@ def _build_session_graph(
     def session_secret_target(
         current_vm: VMRow, current_ws: WorkspaceRow | None, current_agent: AgentRow | None
     ) -> SecretTarget:
-        """The session's env chain as these rows bind it; the create's guard builds it again from fresh rows."""
+        """The session's env chain as these rows bind it; the create's lock set builds it again from fresh rows."""
         return _mgr._session_secret_target_pre_create(
             db,
             registry,

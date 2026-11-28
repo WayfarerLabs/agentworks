@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import grants
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces import manager
@@ -40,7 +41,7 @@ def _run(operation: str, db: Database, config: Any, vm_name: str) -> None:
 
 
 @pytest.mark.parametrize("operation,vm_name", [("repair", "box"), ("grant", "box"), ("copy", "box"), ("copy", "box2")])
-def test_group_writes_and_copy_grants_keep_the_destination_guard(
+def test_group_writes_and_copy_grants_keep_the_destination_lock(
     db: Database, make_config: Any, monkeypatch: pytest.MonkeyPatch, operation: str, vm_name: str
 ) -> None:
     config = make_config()
@@ -51,19 +52,19 @@ def test_group_writes_and_copy_grants_keep_the_destination_guard(
     reachable(monkeypatch, True)
     guest = CopyGuest([])
     recorder = install_access_recorder(monkeypatch)
-    guarded_writes: list[object] = []
+    locked_writes: list[object] = []
     group = "ws-ws2" if operation == "copy" else "ws-ws1"
 
     def answer(call: Call) -> Result:
         if call.request == ensure_group(group):
             # This is the native writer itself, after activation admitted the
             # operation. A competing operation must still fail at this point.
-            with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, vm_name):
+            with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive(vm_name)):
                 pass
-            # A cross-VM copy holds its source VM's guard across the unpack too.
-            with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+            # A cross-VM copy holds its source VM shared across the unpack too.
+            with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
                 pass
-            guarded_writes.append(call.request)
+            locked_writes.append(call.request)
         if operation == "repair" and getattr(call.request, "argv", ()) == ("getent", "group", group):
             from agentworks.execution.results import Completed, Result
 
@@ -74,17 +75,17 @@ def test_group_writes_and_copy_grants_keep_the_destination_guard(
     _run(operation, db, config, vm_name)
 
     # Copy creates its group and materializes grant-all membership under the
-    # same body guard. A nested acquisition would instead abort the copy.
-    assert len(guarded_writes) == (2 if operation == "copy" else 1)
+    # same body lock. A nested acquisition would instead abort the copy.
+    assert len(locked_writes) == (2 if operation == "copy" else 1)
     if operation == "copy":
         assert db.get_workspace("ws2") is not None
         assert db.list_agent_grants("dev")
-    with native_mutation_guard(db.path, vm_name):
+    with native_locks(db.path, vm_exclusive(vm_name)):
         pass
 
 
 @pytest.mark.parametrize("operation", ["repair", "grant"])
-def test_contended_guard_refuses_before_guest_or_grant_state_changes(
+def test_contended_lock_refuses_before_guest_or_grant_state_changes(
     db: Database, make_config: Any, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     config = make_config()
@@ -93,7 +94,7 @@ def test_contended_guard_refuses_before_guest_or_grant_state_changes(
     reachable(monkeypatch, True)
     recorder = install_access_recorder(monkeypatch)
 
-    with native_mutation_guard(db.path, "box"), pytest.raises(NativeSetupBusyError):
+    with native_locks(db.path, vm_exclusive("box")), pytest.raises(NativeLockBusyError):
         _run(operation, db, config, "box")
 
     assert recorder.calls == []
@@ -124,13 +125,13 @@ def test_copy_contention_after_admission_refuses_before_the_pack(
     def competing_after_admission(*args: Any, **kwargs: Any):  # noqa: ANN202
         with boundary(*args, **kwargs) as admitted:
             if args[3].name == contended:
-                with native_mutation_guard(db.path, contended):
+                with native_locks(db.path, vm_exclusive(contended)):
                     yield admitted
             else:
                 yield admitted
 
     monkeypatch.setattr("agentworks.workspaces.manager.copy.gated_vm_boundary", competing_after_admission)
-    with pytest.raises(NativeSetupBusyError):
+    with pytest.raises(NativeLockBusyError):
         _run("copy", db, config, vm_name)
 
     assert db.get_workspace("ws2") is None
@@ -151,11 +152,11 @@ def test_revoke_contention_after_admission_refuses_before_guest_or_grant_state_c
 
     @contextlib.contextmanager
     def competing_after_admission(*args: Any, **kwargs: Any):  # noqa: ANN202
-        with boundary(*args, **kwargs) as admitted, native_mutation_guard(db.path, "box"):
+        with boundary(*args, **kwargs) as admitted, native_locks(db.path, vm_exclusive("box")):
             yield admitted
 
     monkeypatch.setattr("agentworks.agents.grants.gated_vm_boundary", competing_after_admission)
-    with pytest.raises(NativeSetupBusyError):
+    with pytest.raises(NativeLockBusyError):
         grants.revoke_workspaces(
             db,
             config,
