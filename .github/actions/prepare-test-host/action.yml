@@ -1,0 +1,19 @@
+name: Prepare the test host
+description: >-
+  Install what the Linux pytest suite needs beyond the Python environment, so every workflow that runs
+  the suite prepares the same host.
+
+# The execution conformance lanes need zsh and dash (a missing shell fails there), an sshd for the S
+# lane, and a 3.11 interpreter for the L lane's second run, because ast.parse cannot catch 3.12-only
+# standard library calls. The native runtime tests need tmux, and the default-ACL tests need setfacl
+# (acl), without which they skip. Expects astral-sh/setup-uv to have run first.
+runs:
+  using: composite
+  steps:
+    - name: Install system packages and the conformance interpreter
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends openssh-server zsh dash tmux acl
+        uv python install 3.11
+        echo "AGW_CONFORMANCE_PYTHON311=$(uv python find 3.11)" >> "$GITHUB_ENV"

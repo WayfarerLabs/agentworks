@@ -96,6 +96,10 @@ jobs:
       - name: Mypy
         run: uv run mypy agentworks/
 
+      # Shared with ci.yml's test job, so a tag runs the suite on the same host.
+      - name: Prepare the test host
+        uses: ./.github/actions/prepare-test-host
+
       - name: Pytest
         run: uv run pytest tests/ -m 'not integration'
 
