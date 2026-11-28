@@ -1,6 +1,6 @@
 # Native lock hierarchy: plan
 
-Status: locked; PR 2's last box did not run. See [locked.md](./locked.md).
+Status: implemented and merged for 0.20.0, not yet locked. PR 2's last box did not run (#981).
 
 Three PRs: the design PR (#949) carrying the FRD, HLA, LLD and this plan, then two stacked
 implementation PRs, each green on its own. The first makes the shared-state fixes, guards and prompt
@@ -67,4 +67,4 @@ single guard.
 
 ## Closeout
 
-- [x] Write `locked.md`.
+- [ ] Write `locked.md`.
