@@ -434,6 +434,53 @@ and resolves only the missing panes' secrets), the operator answered:]
 
 > I accept your recommendation here. Thanks!
 
+### 2026-11-22
+
+[Told at closeout that the evidence matrix had 96 live-evidence items (33 covered, 31 partial, 32
+gaps), and offered one last tester pass at `main` over every cell the existing beds can reach with
+the rest recorded as gaps in `locked.md`, locking now with every gap recorded, or standing up
+missing beds first, the operator chose:]
+
+> One last tester pass
+
+[Asked whether Windows Server 2025, which several PR C reports called the authorized substitute for
+Windows 11 although no artifact recorded it, stands in for the Windows 11 cells, the operator
+answered:]
+
+> Yes, record it
+
+[Asked whether macOS and Windows driving Azure and GCP are in scope, given that tester charters had
+marked them out of scope while the 2026-11-04 ruling carried a cloud driven from Windows forward to
+closeout, and offered one cloud from each, out of scope, or every pairing, the operator chose:]
+
+> One cloud from each
+
+[The operator added:]
+
+> And note that my personal Win 11 workspace is now running this. I'll feed back any issues I run
+> into.
+
+[Told that the last tester pass found an underscore hostname misbehaving off WSL2 (local Lima stored
+`p948m_local` while the guest carried `p948mlocal`; Azure refused it after validation), which the
+plan's condition says moves the underscore refusal into core for every platform, and offered a small
+PR before the lock or filing it and locking now, the operator chose:]
+
+> Small PR before lock (Recommended)
+
+### 2026-11-23
+
+[Told that the closeout report said its testing session had skipped signal, interruption, outage,
+identity-mismatch, privilege-boundary, decoy and fault-injection experiments under an operator stop
+direction that no artifact of this effort records, and asked whether the operator had given it, the
+operator answered:]
+
+> No
+
+[Asked whether the roughly 21 rows those experiments would reach on the existing beds should be
+recorded as open gaps at the lock or run first, the operator chose:]
+
+> Run them first
+
 ### Rulings carried forward
 
 These predecessor rulings still hold, quoted from the transport-improv FRD.

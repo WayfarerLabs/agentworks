@@ -1,8 +1,8 @@
 # Implementation Plan: Transport Take 2
 
-- Status: Slices 1 and 2 implemented in PR A (#863, merged), slices 3 and 4 in PR B (#866), and
-  slices 5 and 6 in PR C, with the live evidence cells listed below still open; slices 7 and 8 not
-  started
+- Status: Complete and locked on 2026-11-23 ([locked.md](./locked.md)): PR A (#863) shipped slices 1
+  and 2, PR B (#866) slices 3 and 4, and PR C (#876) slices 5 to 8. The live evidence still open is
+  recorded in the lockfile
 - Date: 2026-10-31
 - Requirements: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
@@ -35,11 +35,11 @@
 - [x] Write the HLA and this plan.
 - [x] Run the private project review and complexity pass on the design, and resolve material
       findings.
-- [ ] Publish the design PR and address published feedback.
+- [x] Publish the design PR and address published feedback.
 - [x] Record the operator's answers to the HLA's open questions.
 - [x] Record the operator's rulings on the HLA's "Awaiting the operator" items, and amend R3 if the
       operator accepts the proposed wording.
-- [ ] Record the operator's answers on the auth key's handling in provisioning (amending R1 if the
+- [x] Record the operator's answers on the auth key's handling in provisioning (amending R1 if the
       operator accepts) and on python3 at init.
 - [x] Revise the design for the operator's 2026-10-31 decisions (stdin delivery, agw-launch in
       Python, python3 at provisioning, the terminal handover, three PRs), and run the private review
@@ -101,6 +101,7 @@ answer.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
       ruling: an encrypted key served by the agent on the remaining cells. Windows cannot be covered
       this way, because its agent refuses from a key-authenticated session.
+  - At lock: open (Azure and GCP from Linux or macOS); see the matrix row 101 and `locked.md`.
 
 Definition of done: every core connection to a VM verifies against the store, the only acceptance of
 a new key is create's enrollment, and nothing in Agentworks writes the operator's `known_hosts` for
@@ -215,6 +216,7 @@ release on every platform (ADR 0025), so no live run can reach one.
       in place of a real 8.5 client.
 - [ ] Live evidence still open, carried forward to before closeout by the operator's 2026-11-04
       ruling: local Lima from Linux (the Linux bed has no `/dev/kvm`).
+  - At lock: open; see the matrix row 216 and `locked.md`.
 
 Definition of done: the migrated commands reach VMs only through `agentworks.execution`, their files
 pass the static check, and the package's tests pass with the legacy modules blocked.
@@ -293,7 +295,7 @@ pass the static check, and the package's tests pass with the legacy modules bloc
       issues and fix history); rows I22 to I28 are in the HLA inventory.
 - [x] Collateral: platform author documentation for `tailnet_address` and contract version 2, and
       the command reference for create and reinit diagnoses.
-- [ ] Live evidence: create and reinit on every platform from at least one workstation each.
+- [x] Live evidence: create and reinit on every platform from at least one workstation each.
 
 Slice 3 does not merge without slice 4: between them a VM without python3 cannot be reinitialized
 and the `VMNotReady` hint is circular, and no stopgap wording is added in between.
@@ -412,6 +414,7 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
     instead (measured), which reads as an empty listing;
   - recovery of a lost store record on one cloud and on Remote Lima;
   - the V cells of vectors W1 and W3 to W9.
+  - At lock: open; see the matrix rows 389a to u and `locked.md`.
 - [ ] Live evidence for round 3's output and signal fixes:
   - a create, and its rollback, whose output pipe loses its reader, on each platform, on Linux and
     on Windows (where a closed pipe reports `EINVAL`): the rollback finishes and the exit status is
@@ -420,17 +423,21 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
     propagates, and a termination during a Ctrl-C rollback, which does not cut it short;
   - on WSL2, Ctrl-C during the base package install; also measure the untested candidate of starting
     `wsl.exe` without a console (`CREATE_NO_WINDOW`).
+  - At lock: open; see the matrix rows 415a to c and `locked.md`.
 - [ ] Live evidence for round 3's Proxmox identity checks, with the setup script's pool token: a
       gone VM deleted, a reissued VMID left untouched by delete and refused by the other commands, a
       create that lost the `next_id` race rolled back without touching the winner, and a VMID held
       by a guest the token cannot audit refused.
+  - At lock: open; see the matrix row 423a to d and `locked.md`.
 - [ ] Live evidence for `vm delete` under the operator's [2026-11-08 ruling](./frd.md#2026-11-08): a
       VM whose site cannot be bound refused, then removed with `--force` and the backend's
       identifiers warned; the logout before the provider delete; and a delete that fails after it,
       whose hint leads with finishing the delete and names `vm rekey` only as the way back onto
       Tailscale.
+  - At lock: open; see the matrix rows 427a to c and `locked.md`.
 - [ ] Live evidence on Windows: current-directory decoys for `op`, `git`, `code`, `taskkill` and the
       legacy `ssh` and `scp` are never started.
+  - At lock: open; see the matrix row 432 and `locked.md`.
 - [ ] Live evidence for round 5:
   - on local Lima from macOS, a VM created by this round keeps an operator's edit to the admin's
     `.bashrc` and init's source lines across `vm stop` then `vm start`, and across a `vm recover` of
@@ -448,10 +455,12 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
   - after a local Lima `vm create` with `AW_SECRET_TAILSCALE_AUTH_KEY` set, no `limactl` process
     left running on the workstation has an `AW_SECRET_` variable in its environment;
   - a frozen install on Windows with Python 3.15 resolves cffi 2.1.1 from its cp315 wheel.
+  - At lock: open; see the matrix rows 434a to h and `locked.md`.
 - [ ] Live evidence for round 6: on Proxmox, behind a proxy that delays each API answer, the
       missing-host-key `vm recover` path's root script stops within its deadline, each identity read
       and guest-agent request given at most what remains of it, and refuses with nothing dispatched
       when the identity check spends it.
+  - At lock: open; see the matrix row 451 and `locked.md`.
 - [x] Round 7 (the round 6 integration report): the platform hands the guest agent the identity
       check's own expiry rather than the time remaining, so a delay at the handoff cannot extend the
       deadline, and a rekey refused before dispatch suggests rerunning it with its own `--secret`,
@@ -460,6 +469,7 @@ Line numbers in this slice are at `60d347220`, the platform LLD's baseline.
 - [ ] Live evidence for rounds 7 and 8: on Proxmox, a rekey refused before dispatch (the guest agent
       not answering) asks for the same `agw vm rekey NAME` command again, with every option given,
       and a guest agent reached near the deadline sends nothing past it.
+  - At lock: open; see the matrix rows 460a and 460b and `locked.md`.
 - [x] Round 8 (the round 7 integration report): a rekey refused before dispatch asks for the same
       command again, with every option given, rather than rebuilding one that could drop a global
       option such as `--non-interactive`. The `run_as_root` contract, the guest agent and the
@@ -518,6 +528,7 @@ no platform's private access imports a legacy module.
       accessors.
 - [ ] Live evidence: harness setup and a session start with artifacts, on Remote Lima from macOS and
       on one cloud from Windows.
+  - At lock: open; see the matrix row 519 and `locked.md`.
 
 Definition of done: `native_files.py` and `harness_setup/runner.py` are deleted, and no capability
 reads a legacy transport.
@@ -562,7 +573,7 @@ reads a legacy transport.
 - [x] `dotfiles_destination` is checked at use, in `sync_dotfiles`, as rendered for the account,
       since main's interpolation made it a template (lead ruling, merge of main into PR C). This
       supersedes the template validation named in the Migrate box above.
-- [ ] Live evidence: create and reinit on every platform from at least one workstation each.
+- [x] Live evidence: create and reinit on every platform from at least one workstation each.
 
 Definition of done: create and reinit run entirely on the new transport.
 
@@ -619,6 +630,7 @@ Definition of done: create and reinit run entirely on the new transport.
       batch B. Batch C, once `delete_workspace` has no legacy target left. Split the file by command
       while moving it: at about 2,440 lines it is well past the repository's 1,000-line ceiling.
 - [ ] Re-prove incident rows I6a and I8.
+  - At lock: open; see the matrix rows I6a and I8 and `locked.md`.
 - [x] Supersede ADR 0017.
 - [x] Audit the entry points this slice moves for incident-derived behavior (their ADRs, linked
       issues and fix history), and add incident inventory rows before deleting anything. The audit
@@ -639,6 +651,7 @@ Definition of done: create and reinit run entirely on the new transport.
   - session and console create, attach, detach and restore on Remote Lima from all three
     workstations and on WSL2;
   - backup with a forced disconnect and with an interrupt, on WSL2 (idle shutdown) and Remote Lima.
+  - At lock: open; see the matrix row 638 and `locked.md`.
 
 Definition of done: no workspace, session, backup or desired runtime state module imports a legacy
 module, and `remote_exec.py` is deleted.
@@ -767,7 +780,7 @@ module, and `remote_exec.py` is deleted.
       value, and the mise setup test carries its own `file` marker.
 - [x] Confirm by search that no core code builds its own `ssh` or `scp` command line outside
       `agentworks.execution` and platforms' private access.
-- [ ] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
+- [x] Take the optional items from the delta review of PR B's round 5, which had no rounds left:
   - hold interrupts inside each cloud's `remove_ssh_allow` instead of at its call sites, keeping
     create's rollback on its two-Ctrl-C protocol (done for AWS and Azure; GCP has no such function,
     platform-lld);
@@ -781,12 +794,28 @@ module, and `remote_exec.py` is deleted.
     platform-lld, for the tester);
   - make the bootstrap's swap step recover from an interruption between `fallocate` and the fstab
     line (done).
-- [ ] Complete the evidence matrix, sending any gap to the operator.
-- [ ] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
+  - The underscore item is settled by #953 (merged 2026-11-24). The closeout pass found an
+    underscore hostname misbehaving off WSL2 (the matrix's Closeout findings), and with #953
+    `vm create` refuses one on every platform (operator ruling 2026-11-22).
+- [x] Complete the evidence matrix, sending any gap to the operator.
+  - The [evidence matrix](./evidence-matrix.md) is compiled from every tester report at `main`
+    `2b1d69dac`, and its gaps went to the operator, who ruled one last tester pass over every cell
+    the existing beds reach, with one cloud driven from Windows and one from macOS, and Windows
+    Server 2025 standing in for Windows 11 ([2026-11-22](./frd.md#2026-11-22)).
+- [x] Run that last tester pass and fold its results into the matrix, recording each cell it cannot
+      reach as a gap.
+- [ ] Run the experiments the last pass skipped, on the existing beds, under the operator's
+      [2026-11-23 ruling](./frd.md#2026-11-23), and fold their results into the matrix and
+      `locked.md`: the rows in `locked.md`'s first open-evidence group, plus the forced-fault
+      remainders of S2, S6, S7, S8 and I8, and 638's backup interruption.
+- [x] Confirm that the permanent docs (the `agentworks.execution` README, platform author guidance
       and the operator guides) describe the end state, then write `locked.md`.
   - The docs half is done (`d84924c12`, `f138a6cdc`, `3741269b0`, `c328bd1f5`, `bfa173d2d`): the
     permanent docs describe the end state, no permanent artifact cites this SDD, and ADR 0027
-    carries the design's load-bearing decisions. `locked.md` waits for the evidence matrix.
+    carries the design's load-bearing decisions. Rechecked at the closeout, with `main` past #916,
+    before [`locked.md`](./locked.md) was written. The closeout report then found the built-in
+    migration topic silent on reinit retiring the tmuxinator projects; #961 fixed it, and #961 and
+    #953 merged on 2026-11-24.
 
 Definition of done: R10's end state holds, every matrix cell has evidence or an operator
 disposition, and the SDD is locked.

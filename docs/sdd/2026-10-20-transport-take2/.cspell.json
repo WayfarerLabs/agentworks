@@ -2,15 +2,19 @@
   "version": "0.2",
   "import": ["../../../.cspell.json"],
   "words": [
-    "HMAC",
-    "MSYS",
     "autouse",
     "fileno",
+    "HMAC",
     "improv",
     "memfd",
+    "MSYS",
     "recalibrations",
     "redactions",
+    "setsid",
+    "taskkill",
     "tcsh",
+    "unauditable",
+    "unbindable",
     "worktrees",
     "zstd"
   ]
